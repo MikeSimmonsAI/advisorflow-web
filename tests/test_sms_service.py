@@ -57,6 +57,32 @@ def test_send_sms_blocks_dnc_leads(db_session, sample_org, sample_advisor):
         send_sms(db_session, sample_advisor, dnc_lead, "Hi {first_name}")
 
 
+def test_send_sms_blocks_suppressed_numbers_even_when_status_is_not_dnc(db_session, sample_org, sample_advisor):
+    """
+    REAL ENFORCEMENT GAP FIXED: confirmed by testing that send_sms
+    previously only checked Lead.status == "dnc", never the actual
+    SuppressionEntry table. A number sitting in the suppression list
+    with a lead whose status was still "new" (e.g. because the
+    phone-format mismatch in compliance_router.py prevented the status
+    update from ever matching) would have sailed straight through.
+    """
+    from app.models.models import SuppressionEntry
+    lead = Lead(
+        organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+        first_name="Suppressed", last_name="NotMarkedDNC", phone="12145559876", status=LeadStatus.NEW,
+    )
+    db_session.add(lead)
+    db_session.commit()
+    assert lead.status == LeadStatus.NEW  # confirms this is exactly the gap scenario
+
+    suppression = SuppressionEntry(organization_id=sample_org.id, phone="12145559876", reason="Manually suppressed")
+    db_session.add(suppression)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="suppression"):
+        send_sms(db_session, sample_advisor, lead, "Hi {first_name}")
+
+
 @patch("app.services.sms_service.get_twilio_client")
 def test_send_sms_creates_message_record_on_success(mock_get_client, db_session, sample_lead, sample_advisor):
     mock_twilio_message = MagicMock(sid="SM123", status="queued")

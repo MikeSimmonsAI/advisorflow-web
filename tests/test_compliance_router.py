@@ -58,13 +58,22 @@ def test_duplicate_phone_number_returns_existing_without_creating_duplicate(clie
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["id"] == second.json()["id"]
-    assert first.json()["phone"] == "+12145550101"
+    assert first.json()["phone"] == "12145550101"
 
-    rows = db_session.query(SuppressionEntry).filter_by(organization_id=sample_org.id, phone="+12145550101").all()
+    rows = db_session.query(SuppressionEntry).filter_by(organization_id=sample_org.id, phone="12145550101").all()
     assert len(rows) == 1
 
 
 def test_permanent_dnc_updates_matching_lead_in_same_org_only(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    """
+    REAL BUG REGRESSION TEST: this used to use phone="+12145550101" for
+    the test Lead, which is NOT the actual format real imported leads
+    use (dedup_service.normalize_phone produces digits-only, e.g.
+    "12145550101", no plus sign). That meant this test was checking
+    against the same wrong assumption the buggy code made, so it never
+    caught the real mismatch. Now uses the real format every actual
+    imported Lead.phone value has.
+    """
     other_org = Organization(name="Other Org 2", slug="other-org-compliance-2", plan="trial")
     db_session.add(other_org)
     db_session.commit()
@@ -74,9 +83,9 @@ def test_permanent_dnc_updates_matching_lead_in_same_org_only(client, admin_auth
     db_session.commit()
 
     same_org_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
-                          first_name="Same", last_name="Org", phone="+12145550101", status="new")
+                          first_name="Same", last_name="Org", phone="12145550101", status="new")
     other_org_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,
-                           first_name="Other", last_name="Org", phone="+12145550101", status="new")
+                           first_name="Other", last_name="Org", phone="12145550101", status="new")
     db_session.add_all([same_org_lead, other_org_lead])
     db_session.commit()
 
@@ -85,7 +94,7 @@ def test_permanent_dnc_updates_matching_lead_in_same_org_only(client, admin_auth
     }, headers=admin_auth_headers)
 
     assert response.status_code == 201
-    assert response.json()["phone"] == "+12145550101"
+    assert response.json()["phone"] == "12145550101"  # digits-only, matching the real Lead.phone format
     assert response.json()["source"] == "manual"
 
     db_session.refresh(same_org_lead)
@@ -121,3 +130,46 @@ def test_delete_suppression_entry_succeeds_for_own_org(client, admin_auth_header
 
     remaining = db_session.query(SuppressionEntry).filter(SuppressionEntry.id == entry_id).first()
     assert remaining is None
+
+
+# ---------------------------------------------------------------------------
+# Enforcement regression tests - confirms the real, more serious gap is
+# fixed: a number could previously sit in the suppression list while
+# still being fully sendable, because neither the preview endpoint nor
+# send_sms ever checked SuppressionEntry directly, only Lead.status.
+# ---------------------------------------------------------------------------
+
+def test_is_phone_suppressed_detects_suppressed_number(db_session, sample_org):
+    from app.services.compliance_service import is_phone_suppressed
+    entry = SuppressionEntry(organization_id=sample_org.id, phone="12145550101", reason="test")
+    db_session.add(entry)
+    db_session.commit()
+
+    assert is_phone_suppressed(db_session, sample_org.id, "12145550101") is True
+    assert is_phone_suppressed(db_session, sample_org.id, "(214) 555-0101") is True  # format-tolerant
+    assert is_phone_suppressed(db_session, sample_org.id, "19995551234") is False
+
+
+def test_preview_messages_flags_suppressed_lead_even_when_status_not_dnc(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    """
+    THE EXACT GAP CHATGPT PROVED WITH A FAILING TEST: a lead whose
+    phone is in the suppression list, but whose Lead.status was never
+    updated to DNC, must still be blocked from the preview/send flow.
+    Before this fix, skip_reason came back None for this exact case.
+    """
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Suppressed", last_name="ButNotDNC", phone="12145557777", status="new")
+    db_session.add(lead)
+    db_session.commit()
+    assert lead.status.value != "dnc"  # confirms the setup matches the exact bug scenario
+
+    suppression = SuppressionEntry(organization_id=sample_org.id, phone="12145557777", reason="Manually suppressed")
+    db_session.add(suppression)
+    db_session.commit()
+
+    response = client.post("/leads/preview-messages", json={"lead_ids": [lead.id]}, headers=admin_auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["skip_reason"] is not None
+    assert "suppress" in data[0]["skip_reason"].lower()
+    assert data[0]["draft_message"] == ""

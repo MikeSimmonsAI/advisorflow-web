@@ -14,6 +14,8 @@ export default function Users() {
   const [justCreated, setJustCreated] = useState(null) // { email, temp_password }
   const currentUser = getCurrentUser()
   const isSuperAdmin = currentUser?.role === 'super_admin'
+  const [sampleDataBusy, setSampleDataBusy] = useState(false)
+  const [sampleDataMessage, setSampleDataMessage] = useState('')
 
   function load() {
     setLoading(true)
@@ -68,6 +70,33 @@ export default function Users() {
       setJustCreated({ email: result.email, temp_password: result.temp_password, isReset: true })
     } catch (err) {
       alert(`Failed: ${err.message}`)
+    }
+  }
+
+  async function handleGenerateSampleData() {
+    setSampleDataBusy(true)
+    setSampleDataMessage('')
+    try {
+      const result = await api.post('/sample-data/generate', {})
+      setSampleDataMessage(result.message)
+    } catch (err) {
+      alert(`Failed to generate sample data: ${err.message}`)
+    } finally {
+      setSampleDataBusy(false)
+    }
+  }
+
+  async function handleClearSampleData() {
+    if (!confirm('Clear all sample data? This only removes leads tagged as sample data — your real imported leads are never touched.')) return
+    setSampleDataBusy(true)
+    setSampleDataMessage('')
+    try {
+      const result = await api.delete('/sample-data/clear')
+      setSampleDataMessage(result.message)
+    } catch (err) {
+      alert(`Failed to clear sample data: ${err.message}`)
+    } finally {
+      setSampleDataBusy(false)
     }
   }
 
@@ -181,6 +210,31 @@ export default function Users() {
           </table>
         )}
       </section>
+
+      {isSuperAdmin && (
+        <section className="panel" style={{ marginTop: 16 }}>
+          <div className="panel-header">
+            <h2 className="panel-title">Sample data</h2>
+          </div>
+          <p className="ai-quality-text">
+            Generate realistic demo leads across every tier and status so you can see what the
+            dashboard looks like in real use, then clear it all out when you're ready to start with
+            real data. Sample leads are tagged internally and clearing them never touches anything
+            you've actually imported.
+          </p>
+          {sampleDataMessage && (
+            <p className="ai-quality-text" style={{ color: 'var(--signal-green)' }}>{sampleDataMessage}</p>
+          )}
+          <div className="settings-actions" style={{ marginTop: 10 }}>
+            <button className="btn btn--primary" onClick={handleGenerateSampleData} disabled={sampleDataBusy}>
+              {sampleDataBusy ? 'Working…' : 'Generate sample data'}
+            </button>
+            <button className="btn btn--danger" onClick={handleClearSampleData} disabled={sampleDataBusy}>
+              {sampleDataBusy ? 'Working…' : 'Clear all sample data'}
+            </button>
+          </div>
+        </section>
+      )}
     </div>
   )
 }

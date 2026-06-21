@@ -69,7 +69,7 @@ def test_inbound_webhook_stop_reply_creates_suppression_entry(client, db_session
 
     entry = (
         db_session.query(SuppressionEntry)
-        .filter(SuppressionEntry.organization_id == sample_org.id, SuppressionEntry.phone == "+12145556666")
+        .filter(SuppressionEntry.organization_id == sample_org.id, SuppressionEntry.phone == "12145556666")
         .first()
     )
     assert entry is not None

@@ -14,6 +14,12 @@ from app.services.dedup_service import bulk_dedup_check
 router = APIRouter(prefix="/leads", tags=["leads"])
 
 
+def _is_suppressed(db: Session, lead: Lead) -> bool:
+    """Lazy import to avoid a circular import (compliance_service -> compliance_router -> ... )."""
+    from app.services.compliance_service import is_phone_suppressed
+    return is_phone_suppressed(db, lead.organization_id, lead.phone)
+
+
 @router.post("/upload/preview")
 def preview_upload(
     file: UploadFile = File(...),
@@ -306,6 +312,13 @@ def preview_messages_for_leads(
             skip_reason = "Email-only lead - not part of the SMS preview"
         elif not lead.phone:
             skip_reason = "No phone number on file"
+        elif _is_suppressed(db, lead):
+            # REAL GAP CLOSED HERE: this preview previously only checked
+            # Lead.status/is_duplicate, never the actual suppression
+            # list - confirmed by testing that a manually suppressed
+            # number still came back with skip_reason=None and a full
+            # draft message ready to send.
+            skip_reason = "Phone number is on the suppression list"
         else:
             # Booking link URL isn't actually created yet at preview time
             # (that only happens on real send, to avoid generating dead

@@ -31,16 +31,22 @@ router = APIRouter(prefix="/compliance", tags=["compliance"])
 
 def normalize_phone(phone: str) -> str:
     """
-    Normalize phone values to +1XXXXXXXXXX for US numbers - keeps the
-    org-level unique constraint reliable even if someone types
-    (214) 555-1212, 2145551212, +12145551212, or 1-214-555-1212.
+    REAL BUG FIXED HERE: this used to produce a +1XXXXXXXXXX format,
+    which never matched the actual format every imported Lead.phone
+    value uses (digits-only, e.g. "12145550101", produced by
+    dedup_service.normalize_phone). That mismatch meant the Compliance
+    Center's "Add Permanent DNC" action could create a suppression
+    entry but silently fail to ever flip the matching real Lead's
+    status to DNC, since the SQL equality check never matched. Now
+    delegates to the same shared normalization function the rest of
+    the app already uses, so suppression entries and real lead phone
+    numbers are always in the same format.
     """
-    digits = re.sub(r"\D+", "", phone or "")
-    if len(digits) == 11 and digits.startswith("1"):
-        digits = digits[1:]
-    if len(digits) != 10:
+    from app.services.dedup_service import normalize_phone as shared_normalize_phone
+    normalized = shared_normalize_phone(phone)
+    if len(normalized) != 11 or not normalized.startswith("1"):
         raise HTTPException(status_code=422, detail="Phone must be a valid 10-digit US number.")
-    return f"+1{digits}"
+    return normalized
 
 
 class SuppressionCreate(BaseModel):

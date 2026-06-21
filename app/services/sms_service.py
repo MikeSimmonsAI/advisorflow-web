@@ -64,6 +64,18 @@ def send_sms(
     if lead.status.value == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
+    # Independent suppression-list check, not a substitute for the
+    # Lead.status check above but an additional, direct guard. REAL GAP
+    # THIS CLOSES: a number could exist in the Compliance Center's
+    # suppression list while its matching Lead.status was never updated
+    # to DNC (confirmed via testing - this was especially likely before
+    # the phone-format bug in compliance_router.py was also fixed,
+    # since the two systems' normalized phone formats didn't even match
+    # each other). Every real send path must check this directly.
+    from app.services.compliance_service import is_phone_suppressed
+    if is_phone_suppressed(db, lead.organization_id, lead.phone):
+        raise ValueError(f"Lead {lead.id}'s phone number is on the suppression list - blocked from sending.")
+
     booking_url = ""
     booking_link = None
     if include_booking_link:
