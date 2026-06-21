@@ -3,6 +3,7 @@ import shutil
 import tempfile
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from typing import Optional
 
 from app.deps import get_db, get_current_user
@@ -242,3 +243,130 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
         "ai_quality": ai_note,
         "booking": booking_info,
     }
+
+
+# ---------------------------------------------------------------------------
+# Message review/confirm flow - the "AI drafts, I confirm, then it sends"
+# workflow Mike specifically asked for. Reuses the EXACT SAME template
+# resolution logic the real cadence engine uses (render_cadence_message),
+# so what's shown in this preview is genuinely what would be sent, not an
+# approximation that could drift out of sync with the real send path.
+# ---------------------------------------------------------------------------
+
+class MessagePreviewRequest(BaseModel):
+    lead_ids: list[str]
+
+
+class MessagePreviewItem(BaseModel):
+    lead_id: str
+    lead_name: str
+    phone: str | None
+    tier: str | None
+    message_track: str | None
+    draft_message: str
+    skip_reason: str | None = None  # set if this lead can't actually be sent to (DNC, no phone, etc.)
+
+
+@router.post("/preview-messages", response_model=list[MessagePreviewItem])
+def preview_messages_for_leads(
+    req: MessagePreviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Given a batch of lead IDs (e.g. everything just created by an
+    import), returns the actual AI/template-drafted first message for
+    each one - WITHOUT sending anything. This is the review step: the
+    advisor sees exactly what would go out, per lead, and can edit or
+    skip individual ones before calling /leads/confirm-send-batch below.
+    """
+    from app.services.cadence_service import render_cadence_message
+    from app.services.sms_service import BOOKING_BASE_URL
+
+    leads = db.query(Lead).filter(
+        Lead.id.in_(req.lead_ids), Lead.organization_id == current_user.organization_id
+    ).all()
+    found_by_id = {l.id: l for l in leads}
+
+    results = []
+    for lead_id in req.lead_ids:
+        lead = found_by_id.get(lead_id)
+        if not lead:
+            continue  # silently skip IDs that don't belong to this org - same pattern as reassign_leads
+
+        lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "(no name)"
+        skip_reason = None
+        draft = ""
+
+        if lead.status == LeadStatus.DNC:
+            skip_reason = "DNC - excluded from outreach"
+        elif lead.is_duplicate:
+            skip_reason = "Duplicate - already owned by another lead record"
+        elif lead.contact_channel == "email_only":
+            skip_reason = "Email-only lead - not part of the SMS preview"
+        elif not lead.phone:
+            skip_reason = "No phone number on file"
+        else:
+            # Booking link URL isn't actually created yet at preview time
+            # (that only happens on real send, to avoid generating dead
+            # links for messages that get edited or skipped) - use a
+            # placeholder so the draft still reads naturally.
+            placeholder_booking_url = f"{BOOKING_BASE_URL}/book/preview"
+            draft = render_cadence_message(db, lead, current_user, touch_number=1, booking_url=placeholder_booking_url)
+
+        results.append(MessagePreviewItem(
+            lead_id=lead.id, lead_name=lead_name, phone=lead.phone,
+            tier=lead.tier.value if lead.tier else None,
+            message_track=lead.message_track.value if lead.message_track else None,
+            draft_message=draft, skip_reason=skip_reason,
+        ))
+
+    return results
+
+
+class ConfirmSendItem(BaseModel):
+    lead_id: str
+    message: str  # the (possibly edited) final message text for this lead
+
+
+class ConfirmSendBatchRequest(BaseModel):
+    items: list[ConfirmSendItem]
+    include_booking_link: bool = True
+
+
+@router.post("/confirm-send-batch")
+def confirm_send_batch(
+    req: ConfirmSendBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    The actual send step, AFTER the advisor has reviewed (and possibly
+    edited) the drafted messages from /preview-messages. Each item
+    carries its own final message text, since the advisor may have
+    edited individual ones rather than accepting every AI draft as-is.
+    """
+    from app.services.sms_service import send_sms
+
+    sent_ids = []
+    skipped = []
+    for item in req.items:
+        lead = db.query(Lead).filter(
+            Lead.id == item.lead_id, Lead.organization_id == current_user.organization_id
+        ).first()
+        if not lead:
+            skipped.append({"lead_id": item.lead_id, "reason": "not_found"})
+            continue
+        try:
+            msg = send_sms(db, current_user, lead, item.message, include_booking_link=req.include_booking_link)
+            sent_ids.append(msg.id)
+            # Start the cadence now that touch 1 has actually gone out -
+            # this is what the import flow was missing: leads sat at
+            # status=NEW with no cadence ever started unless something
+            # else explicitly called start_cadence.
+            from app.services.cadence_service import start_cadence
+            start_cadence(db, lead)
+        except Exception as e:
+            skipped.append({"lead_id": item.lead_id, "reason": str(e)})
+
+    return {"sent_count": len(sent_ids), "skipped_count": len(skipped), "sent_ids": sent_ids, "skipped": skipped}

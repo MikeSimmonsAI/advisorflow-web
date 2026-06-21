@@ -17,7 +17,7 @@ export default function Overview() {
   useEffect(() => {
     Promise.all([
       api.get('/leads/').catch(() => []),
-      api.get('/sms/replies?hot_only=true').catch(() => []),
+      api.get('/sms/replies?needs_attention=true').catch(() => []),
       api.get('/cadence/summary').catch(() => ({})),
     ]).then(([leadsData, repliesData, cadenceData]) => {
       setLeads(leadsData)
@@ -50,7 +50,7 @@ export default function Overview() {
         <button className="stat-card-link" onClick={() => navigate('/leads')}>
           <StatCard label="Sent" value={loading ? '—' : sentCount} accent="neutral" sublabel="Awaiting reply" />
         </button>
-        <button className="stat-card-link" onClick={() => navigate('/replies?hot_only=true')}>
+        <button className="stat-card-link" onClick={() => navigate('/replies?needs_attention=true')}>
           <StatCard label="Hot replies" value={loading ? '—' : hotCount} accent="red" sublabel="Needs your attention" />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/leads')}>

@@ -11,10 +11,15 @@ export default function Admin() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [allLeads, setAllLeads] = useState([])
+  const [unassignedLeads, setUnassignedLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [leadsLoading, setLeadsLoading] = useState(true)
-  const [view, setView] = useState('advisors') // 'advisors' | 'leads'
+  const [unassignedLoading, setUnassignedLoading] = useState(true)
+  const [view, setView] = useState('advisors') // 'advisors' | 'leads' | 'unassigned'
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedPoolIds, setSelectedPoolIds] = useState([])
+  const [assignTarget, setAssignTarget] = useState('')
+  const [reassigning, setReassigning] = useState(false)
 
   useEffect(() => {
     api.get('/admin/dashboard').then(setData).finally(() => setLoading(false))
@@ -25,7 +30,37 @@ export default function Admin() {
       setLeadsLoading(true)
       api.get('/admin/leads').then(setAllLeads).finally(() => setLeadsLoading(false))
     }
+    if (view === 'unassigned') {
+      loadUnassigned()
+    }
   }, [view])
+
+  function loadUnassigned() {
+    setUnassignedLoading(true)
+    api.get('/admin/leads/unassigned').then(setUnassignedLeads).finally(() => setUnassignedLoading(false))
+  }
+
+  function togglePoolSelect(id) {
+    setSelectedPoolIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
+
+  async function handleReassign() {
+    if (!assignTarget || selectedPoolIds.length === 0) return
+    setReassigning(true)
+    try {
+      const result = await api.post('/admin/leads/reassign', {
+        lead_ids: selectedPoolIds, new_assigned_to_id: assignTarget,
+      })
+      setSelectedPoolIds([])
+      setAssignTarget('')
+      loadUnassigned()
+      alert(`Assigned ${result.reassigned_count} lead(s).`)
+    } catch (err) {
+      alert(`Failed: ${err.message}`)
+    } finally {
+      setReassigning(false)
+    }
+  }
 
   const filteredLeads = useMemo(() => {
     if (!searchQuery.trim()) return allLeads
@@ -66,9 +101,12 @@ export default function Admin() {
         <button className={`tab ${view === 'leads' ? 'tab--active' : ''}`} onClick={() => setView('leads')}>
           All leads <span className="mono">{allLeads.length || ''}</span>
         </button>
+        <button className={`tab ${view === 'unassigned' ? 'tab--active' : ''}`} onClick={() => setView('unassigned')}>
+          Unassigned pool <span className="mono">{unassignedLeads.length || ''}</span>
+        </button>
       </div>
 
-      {view === 'advisors' ? (
+      {view === 'advisors' && (
         <section className="panel">
           {loading ? (
             <div className="empty-state">Loading…</div>
@@ -97,7 +135,9 @@ export default function Admin() {
             </table>
           )}
         </section>
-      ) : (
+      )}
+
+      {view === 'leads' && (
         <>
           <div className="filter-bar">
             <input
@@ -133,6 +173,68 @@ export default function Admin() {
                       <td><TierBadge tier={lead.tier} /></td>
                       <td><StatusBadge status={lead.status} /></td>
                       <td className="mono" style={{ fontSize: 12 }}>{lead.assigned_to_name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
+      )}
+
+      {view === 'unassigned' && (
+        <>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
+            Leads land here when imported without a specific advisor assignment — the pool you route
+            out manually, by lead type, judgment, or whatever the situation calls for.
+          </p>
+
+          {selectedPoolIds.length > 0 && (
+            <div className="bulk-bar">
+              <span className="bulk-bar-count">{selectedPoolIds.length} selected</span>
+              <select
+                className="filter-select"
+                value={assignTarget}
+                onChange={(e) => setAssignTarget(e.target.value)}
+              >
+                <option value="">Assign to advisor…</option>
+                {data?.advisors?.map((a) => (
+                  <option key={a.advisor_id} value={a.advisor_id}>{a.advisor_name}</option>
+                ))}
+              </select>
+              <button className="btn btn--primary" onClick={handleReassign} disabled={!assignTarget || reassigning}>
+                {reassigning ? 'Assigning…' : 'Assign selected'}
+              </button>
+              <button className="btn btn--secondary" onClick={() => setSelectedPoolIds([])}>Clear</button>
+            </div>
+          )}
+
+          <section className="panel">
+            {unassignedLoading ? (
+              <div className="empty-state">Loading unassigned leads…</div>
+            ) : unassignedLeads.length === 0 ? (
+              <div className="empty-state">No leads waiting in the pool right now.</div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" disabled /></th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Tier</th>
+                    <th>Engagement</th>
+                    <th>Added</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unassignedLeads.map((lead) => (
+                    <tr key={lead.id} style={{ cursor: 'pointer' }} onClick={() => togglePoolSelect(lead.id)}>
+                      <td><input type="checkbox" checked={selectedPoolIds.includes(lead.id)} onChange={() => togglePoolSelect(lead.id)} /></td>
+                      <td>{lead.first_name} {lead.last_name}</td>
+                      <td className="mono">{lead.phone || '—'}</td>
+                      <td><TierBadge tier={lead.tier} /></td>
+                      <td className="mono" style={{ textTransform: 'capitalize', fontSize: 12 }}>{lead.engagement_temperature || 'unknown'}</td>
+                      <td className="mono" style={{ fontSize: 11 }}>{new Date(lead.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -6,7 +6,7 @@ This is the real replacement for running seed.py by hand - Mike
 specifically asked for an in-app way to create advisor accounts.
 """
 
-from app.models.models import User, Organization
+from app.models.models import User, Organization, Lead
 from app.services.auth_service import hash_password, verify_password, create_access_token
 
 
@@ -133,3 +133,162 @@ def test_reactivate_user_restores_login(client, admin_auth_headers, db_session, 
         "username": sample_advisor.email, "password": "TestPass123!",
     })
     assert login_response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Password reset - super_admin only. This is the security boundary Mike
+# explicitly asked for: an org_admin should NOT be able to reset anyone's
+# password, even within their own organization.
+# ---------------------------------------------------------------------------
+
+def test_reset_password_blocked_for_org_admin(client, admin_auth_headers, sample_advisor):
+    """
+    admin_auth_headers fixture creates an org_admin (not super_admin) -
+    this must be rejected with 403, confirming the stricter
+    require_super_admin layer actually works and isn't just an alias
+    for require_admin.
+    """
+    response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=admin_auth_headers)
+    assert response.status_code == 403
+
+
+def test_reset_password_blocked_for_advisor(client, auth_headers, sample_advisor):
+    response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=auth_headers)
+    assert response.status_code == 403
+
+
+def test_reset_password_works_for_super_admin(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == sample_advisor.email
+    assert data["temp_password"] is not None
+
+    # the new temp password should actually work for login
+    login_response = client.post("/auth/login", data={
+        "username": sample_advisor.email, "password": data["temp_password"],
+    })
+    assert login_response.status_code == 200
+    assert login_response.json()["must_change_password"] is True
+
+
+def test_reset_password_invalidates_old_password(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super2@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
+
+    old_password_login = client.post("/auth/login", data={
+        "username": sample_advisor.email, "password": "TestPass123!",
+    })
+    assert old_password_login.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Lead reassignment - manual routing across the org's lead pool.
+# ---------------------------------------------------------------------------
+
+def test_reassign_leads_moves_to_new_advisor(client, admin_auth_headers, db_session, sample_org, sample_advisor, second_advisor):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Reassign", last_name="Me", phone="12145559001")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.post("/admin/leads/reassign", json={
+        "lead_ids": [lead.id], "new_assigned_to_id": second_advisor.id,
+    }, headers=admin_auth_headers)
+    assert response.status_code == 200
+    assert response.json()["reassigned_count"] == 1
+
+    db_session.refresh(lead)
+    assert lead.assigned_to_id == second_advisor.id
+
+
+def test_reassign_leads_can_unassign_back_to_pool(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Pool", last_name="Bound", phone="12145559002")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.post("/admin/leads/reassign", json={
+        "lead_ids": [lead.id], "new_assigned_to_id": None,
+    }, headers=admin_auth_headers)
+    assert response.status_code == 200
+
+    db_session.refresh(lead)
+    assert lead.assigned_to_id is None
+
+
+def test_reassign_leads_rejects_cross_org_target_advisor(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    """An admin must not be able to assign a lead to an advisor in a different organization."""
+    other_org = Organization(name="Other Org", slug="other-org-5", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other5@test.com",
+                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Stay", last_name="Put", phone="12145559003")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.post("/admin/leads/reassign", json={
+        "lead_ids": [lead.id], "new_assigned_to_id": other_advisor.id,
+    }, headers=admin_auth_headers)
+    assert response.status_code == 404
+
+    db_session.refresh(lead)
+    assert lead.assigned_to_id == sample_advisor.id  # untouched
+
+
+def test_reassign_leads_skips_leads_from_other_orgs(client, admin_auth_headers, db_session, sample_advisor):
+    """A lead belonging to a different org should be silently skipped, not reassigned."""
+    other_org = Organization(name="Other Org", slug="other-org-6", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other6@test.com",
+                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+    foreign_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,
+                         first_name="Foreign", last_name="Lead", phone="12145559004")
+    db_session.add(foreign_lead)
+    db_session.commit()
+
+    response = client.post("/admin/leads/reassign", json={
+        "lead_ids": [foreign_lead.id], "new_assigned_to_id": sample_advisor.id,
+    }, headers=admin_auth_headers)
+    assert response.status_code == 200
+    assert response.json()["reassigned_count"] == 0
+    assert response.json()["skipped_count"] == 1
+
+    db_session.refresh(foreign_lead)
+    assert foreign_lead.assigned_to_id == other_advisor.id  # untouched
+
+
+def test_list_unassigned_leads_returns_only_pool_leads(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    assigned_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                          first_name="Has", last_name="Owner", phone="12145559005")
+    unassigned_lead = Lead(organization_id=sample_org.id, assigned_to_id=None,
+                            first_name="No", last_name="Owner", phone="12145559006")
+    db_session.add_all([assigned_lead, unassigned_lead])
+    db_session.commit()
+
+    response = client.get("/admin/leads/unassigned", headers=admin_auth_headers)
+    assert response.status_code == 200
+    ids = [l["id"] for l in response.json()]
+    assert unassigned_lead.id in ids
+    assert assigned_lead.id not in ids

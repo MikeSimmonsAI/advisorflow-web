@@ -1,0 +1,88 @@
+.message-review-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 4, 11, 0.78);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.message-review-modal {
+  background: linear-gradient(150deg, rgba(11, 23, 50, 0.95), rgba(4, 9, 22, 0.95));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--panel-shadow);
+  width: 100%;
+  max-width: 720px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.message-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.message-review-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 6px 0 0;
+  line-height: 1.5;
+  max-width: 520px;
+}
+
+.message-review-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message-review-card {
+  background: rgba(8, 17, 39, 0.5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  transition: opacity 0.16s ease;
+}
+
+.message-review-card--excluded {
+  opacity: 0.5;
+}
+
+.message-review-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.message-review-skip-reason {
+  font-size: 12px;
+  color: var(--signal-amber);
+  margin: 0;
+}
+
+.message-review-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.message-review-result {
+  padding: 40px 24px;
+  text-align: center;
+}

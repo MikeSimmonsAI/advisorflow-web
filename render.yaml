@@ -42,6 +42,8 @@ services:
         value: https://advisorflow-frontend.onrender.com
       - key: GOOGLE_REDIRECT_URI
         value: https://advisorflow-backend.onrender.com/calendar/oauth/callback
+      - key: MICROSOFT_REDIRECT_URI
+        value: https://advisorflow-backend.onrender.com/microsoft/oauth/callback
       - key: OPENAI_API_KEY
         sync: false
       - key: SENDGRID_API_KEY
@@ -51,6 +53,10 @@ services:
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
         sync: false
 
   - type: web

@@ -146,7 +146,17 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     track = lead.message_track or MessageTrack.EMAIL_ONLY_NURTURE
     rendered = render_email(db, track, lead, advisor, booking_url)
 
-    result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"])
+    # Provider selection: send through the advisor's real Microsoft 365
+    # mailbox if they've connected it (per Mike's explicit request - real
+    # company email, not a generic SendGrid sender), falling back to the
+    # shared SendGrid sender for advisors who haven't connected Microsoft
+    # 365 yet. This is what actually makes the Microsoft integration
+    # usable - the OAuth flow alone does nothing if nothing ever calls it.
+    if advisor.microsoft_365_connected:
+        from app.services.microsoft_email_service import send_email_via_microsoft_graph
+        result = send_email_via_microsoft_graph(advisor, lead.email, rendered["subject"], rendered["body_html"])
+    else:
+        result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"])
 
     email_msg = EmailMessage(
         lead_id=lead.id,

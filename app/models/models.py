@@ -41,6 +41,34 @@ class LeadTier(str, enum.Enum):
     PARTIAL = "partial"
 
 
+class ReplyClassification(str, enum.Enum):
+    """
+    Richer reply categorization than the old binary is_hot flag - matches
+    the desktop app's Interested/Callback/DNC/Neutral reply tagging,
+    which the web app never had. Populated by
+    reply_classification_service.classify_reply().
+    """
+    INTERESTED = "interested"
+    CALLBACK = "callback"
+    DNC = "dnc"
+    NEUTRAL = "neutral"
+
+
+class EngagementTemperature(str, enum.Enum):
+    """
+    Hot/warm/cold engagement classification - separate from LeadTier
+    (which describes the lead's source/type like Pre-Need vs Contract
+    Sold). This was a real gap flagged from the desktop app's
+    Re-Engagement screen, which filters leads by HOT/WARM/COLD tabs -
+    an axis the web version never had. Driven by reply recency and
+    sentiment, not by lead source.
+    """
+    HOT = "hot"        # replied with interest, or imminent/urgent tier
+    WARM = "warm"       # active in cadence, no reply yet but recently touched
+    COLD = "cold"       # no engagement in a long stretch, or low-priority track
+    UNKNOWN = "unknown"  # not yet classified (e.g. brand new import)
+
+
 class LeadStatus(str, enum.Enum):
     NEW = "new"
     QUEUED = "queued"
@@ -130,6 +158,16 @@ class User(Base):
     google_calendar_id = Column(String, nullable=True)  # usually "primary" or a specific calendar ID
     google_calendar_connected = Column(Boolean, default=False)
 
+    # Microsoft 365 OAuth - EMAIL ONLY, deliberately separate from Google
+    # Calendar above. Per Mike's explicit instruction: the calendar stays
+    # Google, but real outgoing email should send AS the advisor's real
+    # Restland Outlook/Microsoft 365 address, not a generic SendGrid
+    # sender. Both connections coexist independently per advisor - one
+    # isn't a replacement for the other.
+    microsoft_oauth_refresh_token_encrypted = Column(String, nullable=True)
+    microsoft_email_address = Column(String, nullable=True)  # the real Outlook address mail gets sent FROM
+    microsoft_365_connected = Column(Boolean, default=False)
+
     # Notification preferences
     notification_email = Column(String, nullable=True)  # where HOT reply alerts go
     notify_on_hot_reply = Column(Boolean, default=True)
@@ -186,6 +224,7 @@ class Lead(Base):
     email = Column(String, nullable=True)
 
     tier = Column(SAEnum(LeadTier), default=LeadTier.PRE_NEED)
+    engagement_temperature = Column(SAEnum(EngagementTemperature), default=EngagementTemperature.UNKNOWN)
     message_track = Column(SAEnum(MessageTrack), nullable=True)  # which offer/template track applies
     contact_channel = Column(String, default="sms")  # "sms" or "email_only" - drives queue routing
     status = Column(SAEnum(LeadStatus), default=LeadStatus.NEW)
@@ -255,6 +294,9 @@ class Reply(Base):
     twilio_sid = Column(String, nullable=True)
     is_hot = Column(Boolean, default=False)  # flagged by keyword/sentiment detection
     hot_reason = Column(String, nullable=True)  # e.g. "interested keyword: 'yes'"
+    classification = Column(SAEnum(ReplyClassification), nullable=True, default=ReplyClassification.NEUTRAL)
+    classification_confidence = Column(String, nullable=True)  # "high" | "medium" | "low"
+    classification_reasoning = Column(Text, nullable=True)
 
     received_at = Column(DateTime, server_default=func.now())
     reviewed_at = Column(DateTime, nullable=True)  # when advisor marked as seen
@@ -280,6 +322,93 @@ class BookingLink(Base):
 
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# LeadOutcome - the "what does this family actually have/not have" tracker
+# Mike specifically asked for, recorded after a completed file
+# review/appointment. Real business value: knowing a family has no
+# marker means the NEXT follow-up message can specifically reference
+# markers instead of being generic - this data feeds directly back into
+# future message drafting and into the sales-outcome analytics
+# (engagement rate -> booking rate -> show rate -> close rate, broken
+# down by what was actually sold).
+#
+# One row per appointment/visit, not one row per lead - a lead may have
+# multiple appointments over time (e.g. a follow-up visit after buying
+# a plot, to later discuss a marker), and each visit's outcome should be
+# preserved as its own historical record rather than overwritten.
+# ---------------------------------------------------------------------------
+class LeadOutcome(Base):
+    __tablename__ = "lead_outcomes"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    recorded_by_id = Column(String, ForeignKey("users.id"), nullable=False)
+    booking_link_id = Column(String, ForeignKey("booking_links.id"), nullable=True)  # which appointment this outcome is from, if any
+
+    appointment_date = Column(DateTime, nullable=True)
+
+    # The actual checklist Mike described: what does this family have,
+    # what don't they have. Each is nullable=True (not just boolean
+    # default False) so "unknown/not asked" is distinguishable from
+    # "confirmed they don't have one" - a real distinction Mike needs,
+    # since "we never asked" shouldn't be treated the same as "we
+    # confirmed they have none."
+    has_funeral_arrangement = Column(Boolean, nullable=True)
+    has_cemetery_property = Column(Boolean, nullable=True)
+    has_marker = Column(Boolean, nullable=True)
+    has_memorial = Column(Boolean, nullable=True)
+    has_open_closed_status = Column(String, nullable=True)  # "open", "closed", or None if not applicable/unknown
+
+    # Sales outcome - did this specific appointment result in a sale,
+    # and what was sold. Feeds the Master Control Board revenue
+    # reporting (step 6 of the build plan).
+    resulted_in_sale = Column(Boolean, default=False)
+    sale_items = Column(Text, nullable=True)  # free-text or comma-separated list of what was sold this visit
+    sale_amount = Column(String, nullable=True)  # stored as string deliberately - this is a sales note field for the advisor, not a billing/accounting ledger; real currency math belongs in Restland's actual accounting system, not here
+
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    lead = relationship("Lead", backref="outcomes")
+    recorded_by = relationship("User")
+
+
+# ---------------------------------------------------------------------------
+# SuppressionEntry - the Compliance Center's permanent do-not-contact list,
+# separate from (but feeding into) Lead.status == DNC. A number can be
+# suppressed here even before any matching Lead exists, and the
+# suppression check at send-time should consult this table directly,
+# not just rely on individual Lead.status flags getting set correctly.
+#
+# NOTE ON ORIGIN: the core logic here (phone normalization to +1XXXXXXXXXX,
+# source tracking, unique-per-org constraint) was drafted by ChatGPT in a
+# separate compliance-center build task, then reviewed and corrected here
+# before merging - the original draft used Integer primary keys/foreign
+# keys, which do not match this codebase's String/UUID convention used
+# everywhere else (Organization.id, Lead.id, User.id are all
+# String/gen_uuid). Ported the logic, fixed the ID types.
+# ---------------------------------------------------------------------------
+class SuppressionSource(str, enum.Enum):
+    MANUAL = "manual"
+    REPLY_STOP = "reply_stop"
+
+
+class SuppressionEntry(Base):
+    __tablename__ = "suppression_entries"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    phone = Column(String, nullable=False)  # normalized to +1XXXXXXXXXX
+    reason = Column(Text, nullable=False)
+    source = Column(SAEnum(SuppressionSource), nullable=False, default=SuppressionSource.MANUAL)
+    added_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "phone", name="uq_suppression_org_phone"),
+    )
 
 
 # ---------------------------------------------------------------------------

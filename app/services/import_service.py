@@ -298,4 +298,18 @@ def import_leads_from_excel(
         "skipped_no_contact_info": skipped_no_contact_info,
         "skipped_internal_records": skipped_internal_records,
         "tier_breakdown": tier_counts,
+        # IDs of every lead actually created in this batch - needed so a
+        # caller can immediately build the "review AI-drafted messages
+        # before sending" screen for exactly this import, not the org's
+        # entire lead history. Real gap fixed here: this didn't exist
+        # before, meaning there was no way to look back at "what did THIS
+        # import just create" once the response left the import call.
+        #
+        # IMPORTANT: for dry_run, the leads were rolled back and never
+        # actually persisted, even though each Lead object already has a
+        # client-side-generated UUID (gen_uuid is a Python default, not a
+        # database default) - returning those IDs would look valid but
+        # silently resolve to nothing if a caller tried to fetch them
+        # afterward. Explicitly empty for dry runs to avoid that trap.
+        "created_lead_ids": [] if dry_run else [lead.id for lead in created_leads],
     }

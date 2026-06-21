@@ -16,7 +16,8 @@ from app.models.models import Base
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
-    settings_router, templates_router, ai_router,
+    settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
+    compliance_router,
 )
 
 app = FastAPI(title="AdvisorFlow Web", version="0.1.0-phase1")
@@ -43,6 +44,9 @@ app.include_router(notification_router.router)
 app.include_router(settings_router.router)
 app.include_router(templates_router.router)
 app.include_router(ai_router.router)
+app.include_router(outcomes_router.router)
+app.include_router(microsoft_router.router)
+app.include_router(compliance_router.router)
 
 
 @app.on_event("startup")

@@ -106,6 +106,16 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
     )
     db.add(state)
     db.commit()
+
+    # A lead actively entering the cadence is WARM by definition (alive,
+    # being worked, no hot signal yet) - classify immediately rather than
+    # waiting for the next periodic recompute job.
+    from app.services.engagement_service import recompute_and_save
+    try:
+        recompute_and_save(db, lead)
+    except Exception:
+        pass
+
     return state
 
 
@@ -123,12 +133,19 @@ def stop_cadence_for_lead(db: Session, lead_id: str, reason: CadenceStatus) -> N
     db.commit()
 
 
-def _render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number: int, booking_url: str) -> str:
+def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number: int, booking_url: str) -> str:
     """
     Checks for an org-customized template first (see template_service.py);
     falls back to the hardcoded default if the org hasn't customized this
     track. This is what makes the template editor in Settings actually
     take effect on real sends, not just store text nobody reads.
+
+    Exported (no longer a private _-prefixed helper) since the import
+    review screen (admin_router.py's preview-message endpoint) needs the
+    exact same resolution logic for touch 1 - reusing this function
+    instead of duplicating the override/fallback logic guarantees the
+    preview a user sees before confirming an import batch is genuinely
+    the same text that would actually go out, not an approximation.
     """
     from app.services.template_service import get_sms_template
     custom_template = get_sms_template(db, lead.organization_id, lead.message_track)
@@ -192,7 +209,7 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             booking = create_booking_link(db, lead, advisor)
             import os
             booking_url = f"{os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
-            body = _render_cadence_message(db, lead, advisor, touch_number, booking_url)
+            body = render_cadence_message(db, lead, advisor, touch_number, booking_url)
 
             from app.services.sms_service import get_twilio_client
             client = get_twilio_client(advisor)

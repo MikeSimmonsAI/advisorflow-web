@@ -91,3 +91,43 @@ def test_send_email_batch_skips_leads_without_email(mock_send, db_session, sampl
     result = send_email_batch(db_session, sample_advisor, [has_email, no_email])
     assert result["sent_count"] == 1
     assert result["skipped_count"] == 1
+
+
+@patch("app.services.microsoft_email_service.send_email_via_microsoft_graph")
+@patch("app.services.email_service.send_email_via_provider")
+def test_send_email_to_lead_uses_microsoft_365_when_connected(mock_sendgrid, mock_graph, db_session, sample_org, sample_advisor):
+    """
+    Confirms the real wiring: an advisor with Microsoft 365 connected
+    should send through Graph (their real Outlook mailbox), NOT through
+    the shared SendGrid sender - the whole point of the integration
+    Mike asked for.
+    """
+    mock_graph.return_value = {"success": True, "provider_message_id": None, "error": None}
+    sample_advisor.microsoft_365_connected = True
+    sample_advisor.microsoft_email_address = "mike@restland.com"
+    db_session.commit()
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Test", last_name="Lead", email="lead@example.com", contact_channel="email_only")
+    db_session.add(lead)
+    db_session.commit()
+
+    send_email_to_lead(db_session, sample_advisor, lead)
+
+    mock_graph.assert_called_once()
+    mock_sendgrid.assert_not_called()
+
+
+@patch("app.services.email_service.send_email_via_provider")
+def test_send_email_to_lead_uses_sendgrid_when_microsoft_not_connected(mock_sendgrid, db_session, sample_org, sample_advisor):
+    """The default/fallback path for advisors who haven't connected Microsoft 365 yet."""
+    mock_sendgrid.return_value = {"success": True, "provider_message_id": "sg1", "error": None}
+    assert sample_advisor.microsoft_365_connected is False
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Test", last_name="Lead", email="lead2@example.com", contact_channel="email_only")
+    db_session.add(lead)
+    db_session.commit()
+
+    send_email_to_lead(db_session, sample_advisor, lead)
+    mock_sendgrid.assert_called_once()

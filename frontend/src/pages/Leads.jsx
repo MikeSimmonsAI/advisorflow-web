@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
+import MessageReview from '../components/MessageReview'
 import '../styles/shared.css'
 import './Leads.css'
 
@@ -42,6 +43,7 @@ export default function Leads() {
   const [confirming, setConfirming] = useState(false)
   const [sourceYear, setSourceYear] = useState('')
   const [view, setView] = useState('all') // 'all' | 'review'
+  const [reviewLeadIds, setReviewLeadIds] = useState(null) // set right after a successful import
   const fileInputRef = useRef(null)
   const pendingFile = useRef(null)
 
@@ -98,11 +100,20 @@ export default function Leads() {
       const formData = new FormData()
       formData.append('file', pendingFile.current)
       if (sourceYear) formData.append('source_year', sourceYear)
-      await api.upload('/leads/upload/confirm', formData)
+      const result = await api.upload('/leads/upload/confirm', formData)
       setPreview(null)
       pendingFile.current = null
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadLeads()
+
+      // The real fix: leads used to sit silently at status=NEW after
+      // import, with nothing telling the advisor a message was about to
+      // go out automatically. Now the import hands off straight into the
+      // review screen - drafted messages shown per lead, nothing sends
+      // until explicitly confirmed there.
+      if (result.created_lead_ids && result.created_lead_ids.length > 0) {
+        setReviewLeadIds(result.created_lead_ids)
+      }
     } catch (err) {
       alert(`Import failed: ${err.message}`)
     } finally {
@@ -394,6 +405,14 @@ export default function Leads() {
           </table>
         )}
       </section>
+
+      {reviewLeadIds && (
+        <MessageReview
+          leadIds={reviewLeadIds}
+          onClose={() => { setReviewLeadIds(null); loadLeads() }}
+          onSent={() => loadLeads()}
+        />
+      )}
     </div>
   )
 }

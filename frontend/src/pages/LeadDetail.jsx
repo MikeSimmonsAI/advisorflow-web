@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
+import OutcomeTracker from '../components/OutcomeTracker'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
@@ -178,6 +179,8 @@ export default function LeadDetail() {
               )}
             </section>
           )}
+
+          <OutcomeTracker leadId={leadId} />
 
           <section className="panel" style={{ marginBottom: 16 }}>
             <div className="panel-header">

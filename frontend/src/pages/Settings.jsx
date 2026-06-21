@@ -42,7 +42,15 @@ export default function Settings() {
     } else if (params.get('calendar_error')) {
       setCalendarMessage({ type: 'error', text: `Calendar connection failed: ${params.get('calendar_error')}` })
     }
-    if (params.has('calendar_connected') || params.has('calendar_error')) {
+    // Same pattern for the separate Microsoft 365 email connection -
+    // independent of the Google Calendar flow above, per Mike's
+    // explicit instruction that these are two separate integrations.
+    if (params.get('microsoft_connected') === 'true') {
+      setMicrosoftMessage({ type: 'success', text: 'Microsoft 365 connected successfully.' })
+    } else if (params.get('microsoft_error')) {
+      setMicrosoftMessage({ type: 'error', text: `Microsoft 365 connection failed: ${params.get('microsoft_error')}` })
+    }
+    if (params.has('calendar_connected') || params.has('calendar_error') || params.has('microsoft_connected') || params.has('microsoft_error')) {
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])

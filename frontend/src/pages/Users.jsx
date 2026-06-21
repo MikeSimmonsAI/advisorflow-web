@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './Users.css'
 
@@ -12,6 +12,8 @@ export default function Users() {
   const [newRole, setNewRole] = useState('advisor')
   const [creating, setCreating] = useState(false)
   const [justCreated, setJustCreated] = useState(null) // { email, temp_password }
+  const currentUser = getCurrentUser()
+  const isSuperAdmin = currentUser?.role === 'super_admin'
 
   function load() {
     setLoading(true)
@@ -59,6 +61,16 @@ export default function Users() {
     }
   }
 
+  async function handleResetPassword(userId, userName) {
+    if (!confirm(`Reset ${userName}'s password? They will need to set a new one on their next login.`)) return
+    try {
+      const result = await api.post(`/admin/users/${userId}/reset-password`, {})
+      setJustCreated({ email: result.email, temp_password: result.temp_password, isReset: true })
+    } catch (err) {
+      alert(`Failed: ${err.message}`)
+    }
+  }
+
   return (
     <div>
       <header className="page-header">
@@ -74,12 +86,12 @@ export default function Users() {
       {justCreated && (
         <section className="panel users-created-banner">
           <div className="panel-header">
-            <h2 className="panel-title">Account created</h2>
+            <h2 className="panel-title">{justCreated.isReset ? 'Password reset' : 'Account created'}</h2>
             <button className="back-link" onClick={() => setJustCreated(null)}>Dismiss</button>
           </div>
           <p className="users-temp-password-warning">
-            This temporary password is shown <strong>once</strong> — copy it now and send it to the advisor.
-            They'll be required to set their own password on first login.
+            This temporary password is shown <strong>once</strong> — copy it now and send it to {justCreated.isReset ? 'them' : 'the advisor'}.
+            They'll be required to set their own password on next login.
           </p>
           <div className="users-temp-credentials">
             <div><span className="mono">{justCreated.email}</span></div>
@@ -150,11 +162,18 @@ export default function Users() {
                     )}
                   </td>
                   <td>
-                    {u.is_active ? (
-                      <button className="btn btn--danger" onClick={() => handleDeactivate(u.id)}>Deactivate</button>
-                    ) : (
-                      <button className="btn btn--secondary" onClick={() => handleReactivate(u.id)}>Reactivate</button>
-                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {u.is_active ? (
+                        <button className="btn btn--danger" onClick={() => handleDeactivate(u.id)}>Deactivate</button>
+                      ) : (
+                        <button className="btn btn--secondary" onClick={() => handleReactivate(u.id)}>Reactivate</button>
+                      )}
+                      {isSuperAdmin && (
+                        <button className="btn btn--secondary" onClick={() => handleResetPassword(u.id, u.full_name)}>
+                          Reset password
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

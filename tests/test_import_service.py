@@ -75,13 +75,31 @@ def test_dry_run_leaves_database_completely_untouched(db_session, sample_org, sa
 
 
 def test_dry_run_and_real_run_produce_identical_numbers(db_session, sample_org, sample_advisor, real_restland_file):
+    """
+    Compares every COUNT/STAT field between a dry run and the real run -
+    these must match exactly, since that's the whole point of dry_run
+    (preview the exact numbers before committing).
+
+    created_lead_ids is deliberately excluded from this comparison: a
+    dry run rolls back and never actually persists any leads, so it
+    always returns an empty list for that field by design (see
+    import_service.py) - that's correct, intentional behavior, not a
+    discrepancy between the two runs' underlying logic.
+    """
     dry_result = import_leads_from_excel(
         db_session, real_restland_file, sample_org.id, sample_advisor.id, 2012, "test.xlsx", dry_run=True,
     )
     real_result = import_leads_from_excel(
         db_session, real_restland_file, sample_org.id, sample_advisor.id, 2012, "test.xlsx", dry_run=False,
     )
-    assert dry_result == real_result
+
+    dry_stats = {k: v for k, v in dry_result.items() if k != "created_lead_ids"}
+    real_stats = {k: v for k, v in real_result.items() if k != "created_lead_ids"}
+    assert dry_stats == real_stats
+
+    # And confirm the created_lead_ids behavior itself is correct:
+    assert dry_result["created_lead_ids"] == []
+    assert len(real_result["created_lead_ids"]) == real_result["imported"]
 
 
 def test_internal_nsmg_distribution_lists_are_filtered(db_session, sample_org, sample_advisor, real_restland_file):

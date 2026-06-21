@@ -225,3 +225,141 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     target.is_active = True
     db.commit()
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Password reset - SUPER ADMIN ONLY, by Mike's explicit instruction.
+# Org admins can deactivate/reactivate accounts (above) but must NOT be
+# able to reset passwords - that's a more sensitive action reserved for
+# the super_admin role alone.
+# ---------------------------------------------------------------------------
+
+class ResetPasswordResponse(BaseModel):
+    email: str
+    temp_password: str
+
+
+def require_super_admin(current_user: User = Depends(require_admin)) -> User:
+    """
+    Stricter than require_admin - only super_admin passes. Layered on
+    top of require_admin (not a replacement) so org_admins still get a
+    clean 403 rather than this function needing its own duplicate auth
+    plumbing.
+    """
+    from fastapi import HTTPException
+    if current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Only the super admin can perform this action.")
+    return current_user
+
+
+@router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
+def reset_user_password(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    Resets any user's password to a new temp password, forcing them to
+    set a real one on next login. Deliberately restricted to super_admin
+    only (see require_super_admin above) - an org_admin should never be
+    able to take over another advisor's account by resetting their
+    password, even within the same organization.
+    """
+    from fastapi import HTTPException
+    target = db.query(User).filter(
+        User.id == user_id, User.organization_id == current_user.organization_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    temp_password = _generate_temp_password()
+    target.password_hash = hash_password(temp_password)
+    target.must_change_password = True
+    db.commit()
+
+    return ResetPasswordResponse(email=target.email, temp_password=temp_password)
+
+
+# ---------------------------------------------------------------------------
+# Lead reassignment - the manual routing capability Mike specifically
+# asked for: look at the full pool of leads and direct specific ones to
+# specific advisors (e.g. "memorial-interested leads go to this person").
+# ---------------------------------------------------------------------------
+
+class ReassignLeadRequest(BaseModel):
+    lead_ids: list[str]
+    new_assigned_to_id: str | None = None  # None = unassign, leave in the pool
+
+
+class ReassignResultResponse(BaseModel):
+    reassigned_count: int
+    skipped_count: int
+    skipped_ids: list[str]
+
+
+@router.post("/leads/reassign", response_model=ReassignResultResponse)
+def reassign_leads(
+    req: ReassignLeadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Reassigns one or more leads to a different advisor (or unassigns them
+    back to the pool if new_assigned_to_id is None). Both the leads and
+    the target advisor must belong to the current admin's organization -
+    enforced explicitly below rather than trusted from the request body.
+    """
+    from fastapi import HTTPException
+
+    if req.new_assigned_to_id:
+        target_advisor = db.query(User).filter(
+            User.id == req.new_assigned_to_id,
+            User.organization_id == current_user.organization_id,
+            User.is_active == True,
+        ).first()
+        if not target_advisor:
+            raise HTTPException(status_code=404, detail="Target advisor not found or inactive in this organization.")
+
+    leads = db.query(Lead).filter(
+        Lead.id.in_(req.lead_ids), Lead.organization_id == current_user.organization_id
+    ).all()
+    found_ids = {l.id for l in leads}
+    skipped_ids = [lid for lid in req.lead_ids if lid not in found_ids]
+
+    for lead in leads:
+        lead.assigned_to_id = req.new_assigned_to_id
+
+    db.commit()
+
+    return ReassignResultResponse(
+        reassigned_count=len(leads),
+        skipped_count=len(skipped_ids),
+        skipped_ids=skipped_ids,
+    )
+
+
+@router.get("/leads/unassigned")
+def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Returns every lead in the org's pool that has no advisor assigned yet -
+    the queue an admin works through when manually routing leads out to
+    the team, rather than every lead defaulting to whoever happened to
+    import it.
+    """
+    leads = (
+        db.query(Lead)
+        .filter(Lead.organization_id == current_user.organization_id, Lead.assigned_to_id.is_(None))
+        .order_by(Lead.created_at.desc())
+        .limit(500)
+        .all()
+    )
+    return [
+        {
+            "id": l.id, "first_name": l.first_name, "last_name": l.last_name,
+            "phone": l.phone, "email": l.email,
+            "tier": l.tier.value if l.tier else None,
+            "engagement_temperature": l.engagement_temperature.value if l.engagement_temperature else None,
+            "created_at": l.created_at,
+        }
+        for l in leads
+    ]

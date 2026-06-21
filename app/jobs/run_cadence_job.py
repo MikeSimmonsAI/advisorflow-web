@@ -74,6 +74,18 @@ def run_for_all_organizations():
                 overall_summary["per_org"][org.slug] = {"error": str(e)}
                 overall_summary["total_errors"] += 1
 
+            # Engagement temperature recompute - catches the time-based
+            # COLD transition (30+ days no reply) that no single event
+            # would otherwise trigger. Isolated in its own try/except so
+            # a failure here never counts against the cadence run above
+            # or blocks other organizations.
+            try:
+                from app.services.engagement_service import recompute_for_organization
+                temp_counts = recompute_for_organization(db, org.id)
+                overall_summary["per_org"][org.slug]["engagement_temperature"] = temp_counts
+            except Exception as e:
+                overall_summary["per_org"].setdefault(org.slug, {})["engagement_temperature_error"] = str(e)
+
         finished_at = datetime.now(timezone.utc)
         overall_summary["finished_at"] = finished_at.isoformat()
         overall_summary["duration_seconds"] = (finished_at - started_at).total_seconds()
