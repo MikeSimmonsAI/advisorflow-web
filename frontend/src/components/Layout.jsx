@@ -42,7 +42,7 @@ export default function Layout({ children }) {
 
   function handleLogout() {
     logout()
-    navigate('/login')
+    window.location.href = '/login'
   }
 
   return (
