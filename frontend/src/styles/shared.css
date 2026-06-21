@@ -1,0 +1,183 @@
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0 0 6px;
+  color: var(--text-primary);
+}
+
+.page-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 0;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.panel {
+  position: relative;
+  background: linear-gradient(150deg, rgba(11, 23, 50, 0.82), rgba(4, 9, 22, 0.78)), var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(16px) saturate(130%);
+  overflow: hidden;
+}
+
+.panel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  border-top: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+  border-radius: 0 var(--radius-lg) 0 0;
+  pointer-events: none;
+  opacity: 0.42;
+}
+
+.panel-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.panel-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.panel-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--signal-blue);
+  background: var(--signal-blue-dim);
+  border: 1px solid rgba(47, 182, 255, 0.28);
+  padding: 3px 10px;
+  border-radius: 100px;
+}
+
+.empty-state {
+  position: relative;
+  z-index: 1;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  padding: 26px 10px;
+  text-align: center;
+  line-height: 1.55;
+}
+
+.btn {
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.btn:hover { transform: translateY(-1px); }
+
+.btn--primary {
+  background: linear-gradient(120deg, var(--signal-blue), var(--signal-purple));
+  color: #061018;
+  box-shadow: var(--glow-blue-sm);
+}
+.btn--primary:hover { box-shadow: var(--glow-blue-md); }
+.btn--primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.btn--secondary {
+  background: rgba(8, 17, 39, 0.7);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.btn--secondary:hover { border-color: var(--signal-blue); color: var(--signal-blue); }
+
+.btn--danger {
+  background: var(--signal-red-dim);
+  color: var(--signal-red);
+  border-color: rgba(255, 77, 126, 0.32);
+}
+.btn--danger:hover { box-shadow: var(--glow-red-sm); }
+
+table.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  font-size: 13px;
+  position: relative;
+  z-index: 1;
+}
+
+table.data-table th {
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  font-weight: 700;
+  padding: 0 14px 8px;
+}
+
+table.data-table td {
+  padding: 13px 14px;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  background: rgba(8, 16, 36, 0.46);
+}
+
+table.data-table td:first-child {
+  border-left: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+table.data-table td:last-child {
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+table.data-table tr:hover td {
+  background: rgba(20, 40, 84, 0.6);
+  border-color: rgba(47, 182, 255, 0.32);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.run-result {
+  display: flex;
+  gap: 24px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.run-result strong {
+  color: var(--signal-blue);
+  font-weight: 700;
+}

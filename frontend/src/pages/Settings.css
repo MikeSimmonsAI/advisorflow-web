@@ -1,0 +1,82 @@
+.settings-help {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.settings-optional {
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.settings-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.settings-input:focus {
+  border-color: var(--signal-blue);
+}
+
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.settings-saved {
+  font-size: 12px;
+  color: var(--signal-green);
+  font-family: var(--font-mono);
+}
+
+.settings-banner {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.settings-banner--success {
+  background: var(--signal-green-dim);
+  color: var(--signal-green);
+}
+
+.settings-banner--error {
+  background: var(--signal-red-dim);
+  color: var(--signal-red);
+}

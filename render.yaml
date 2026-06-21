@@ -1,0 +1,81 @@
+# render.yaml — Render Blueprint
+#
+# This file lets Mike deploy the entire backend + database in one step
+# instead of manually clicking through Render's UI for each piece.
+#
+# Usage:
+#   1. Push this repo to GitHub.
+#   2. In Render: New > Blueprint, connect the repo.
+#   3. Render reads this file and provisions everything below automatically.
+#   4. Render will prompt for the secret env vars marked "sync: false"
+#      below (Twilio, SendGrid, Google, etc.) - it can't generate those
+#      for you since they come from your own accounts.
+#
+# Everything else (DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY) is generated
+# automatically by Render - no manual key generation needed.
+
+databases:
+  - name: advisorflow-db
+    plan: starter
+    databaseName: advisorflow
+    user: advisorflow
+
+services:
+  - type: web
+    name: advisorflow-backend
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: advisorflow-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: BOOKING_BASE_URL
+        value: https://advisorflow-booking.vercel.app
+      - key: FRONTEND_URL
+        value: https://advisorflow-frontend.onrender.com
+      - key: GOOGLE_REDIRECT_URI
+        value: https://advisorflow-backend.onrender.com/calendar/oauth/callback
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+  - type: web
+    name: advisorflow-frontend
+    runtime: static
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://advisorflow-backend.onrender.com
+
+  - type: cron
+    name: advisorflow-cadence-job
+    runtime: python
+    schedule: "0 14 * * *"  # Daily at 2pm UTC (~9am Eastern) - adjust for your timezone
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app/jobs/run_cadence_job.py"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: advisorflow-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false  # use the SAME value generated for advisorflow-backend, copy it over
+      - key: ENCRYPTION_KEY
+        sync: false  # use the SAME value generated for advisorflow-backend, copy it over
+      - key: BOOKING_BASE_URL
+        value: https://advisorflow-booking.vercel.app

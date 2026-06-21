@@ -1,0 +1,20 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 10px;
+  border-radius: 100px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+
+.badge--blue { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.badge--green { background: var(--signal-green-dim); color: var(--signal-green); }
+.badge--red { background: var(--signal-red-dim); color: var(--signal-red); }
+.badge--amber { background: var(--signal-amber-dim); color: var(--signal-amber); }
+.badge--neutral { background: rgba(159, 176, 207, 0.10); color: var(--text-secondary); border-color: var(--border-strong); }
+.badge--neutral-dim { background: rgba(8, 17, 39, 0.6); color: var(--text-tertiary); border-color: var(--border-subtle); }

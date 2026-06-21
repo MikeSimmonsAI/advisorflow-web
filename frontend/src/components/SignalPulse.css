@@ -1,0 +1,46 @@
+.signal-pulse-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.signal-pulse {
+  position: relative;
+  display: inline-block;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.signal-pulse--green { background: var(--signal-green); }
+.signal-pulse--blue { background: var(--signal-blue); }
+.signal-pulse--red { background: var(--signal-red); }
+.signal-pulse--amber { background: var(--signal-amber); }
+
+.signal-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  animation: signal-ping 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+.signal-pulse--green .signal-pulse-ring { background: var(--signal-green); }
+.signal-pulse--blue .signal-pulse-ring { background: var(--signal-blue); }
+.signal-pulse--red .signal-pulse-ring { background: var(--signal-red); }
+.signal-pulse--amber .signal-pulse-ring { background: var(--signal-amber); }
+
+@keyframes signal-ping {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+.signal-pulse-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal-pulse-ring { animation: none; }
+}
