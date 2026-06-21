@@ -9,6 +9,7 @@ import Replies from './pages/Replies'
 import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
 import Admin from './pages/Admin'
+import Users from './pages/Users'
 import Settings from './pages/Settings'
 import Templates from './pages/Templates'
 import { getCurrentUser } from './api/client'
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/cadence" element={<ProtectedRoute><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute><EmailQueue /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+        <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute><Templates /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

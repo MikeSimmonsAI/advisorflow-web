@@ -1,0 +1,33 @@
+.users-created-banner {
+  margin-bottom: 16px;
+  border-color: var(--signal-green);
+}
+
+.users-temp-password-warning {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+
+.users-temp-credentials {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(8, 17, 39, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.users-temp-password {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--signal-green);
+  letter-spacing: 0.02em;
+}
+
+.users-create-panel {
+  margin-bottom: 16px;
+}
