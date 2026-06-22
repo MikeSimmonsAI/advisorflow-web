@@ -1,5 +1,10 @@
 # AdvisorFlow Web — Where Every File Goes
 
+**See SESSION_LOG_BUGFIXES_AND_FEATURES.md for the latest session's full
+changelog** (New Inquiry lead tier, reply reclassification expansion, AI
+Suggest Reply name fix, User Management edit + detail page, sitewide
+dropdown styling fix, System Health rebuild, Overview scroll reduction).
+
 You've been collecting files in the order I gave them to you, which is exactly
 right. This doc tells you the FINAL folder each file belongs in. If a file
 name repeats, the most recently downloaded copy is the correct one — let it
@@ -36,15 +41,23 @@ advisorflow-web/
 │   │   ├── __init__.py
 │   │   ├── admin_router.py
 │   │   ├── ai_router.py
+│   │   ├── audit_log_router.py
 │   │   ├── auth_router.py
 │   │   ├── cadence_router.py
 │   │   ├── calendar_router.py
+│   │   ├── campaign_router.py
+│   │   ├── compliance_router.py
 │   │   ├── email_router.py
+│   │   ├── health_router.py
 │   │   ├── leads_router.py
+│   │   ├── microsoft_router.py
 │   │   ├── notification_router.py
+│   │   ├── outcomes_router.py
+│   │   ├── sample_data_router.py
 │   │   ├── settings_router.py
 │   │   ├── sms_router.py
-│   │   └── templates_router.py
+│   │   ├── templates_router.py        ← now also has /templates/ai/generate and /templates/ai/rewrite
+│   │   └── workqueue_router.py
 │   │
 │   ├── jobs/                          ← scheduled background jobs (cron)
 │   │   ├── __init__.py
@@ -57,10 +70,12 @@ advisorflow-web/
 │   │   ├── cadence_service.py
 │   │   ├── calendar_service.py
 │   │   ├── dedup_service.py
+│   │   ├── draft_reply_service.py
 │   │   ├── email_service.py
 │   │   ├── import_service.py
 │   │   ├── notification_service.py
 │   │   ├── sms_service.py
+│   │   ├── template_ai_service.py     ← NEW: AI template generate/rewrite
 │   │   └── template_service.py
 │   │
 │   └── utils/

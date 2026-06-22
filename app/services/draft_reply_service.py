@@ -29,11 +29,14 @@ def _get_client() -> OpenAI:
 
 DRAFT_REPLY_PROMPT = """You are drafting a short SMS reply from a cemetery/funeral-home sales advisor to a lead.
 
+Advisor sending this message: {advisor_name}
+
 Rules:
 - Respond with ONLY JSON, no markdown and no preamble.
 - JSON shape: {{"suggested_reply": "..."}}
 - Keep it under 320 characters when possible.
 - Sound human, respectful, and appointment-focused.
+- Sign as {advisor_name} if the message includes a closing/sign-off - don't invent a different name or leave a placeholder.
 - Do not claim anything not shown in the conversation.
 - Include this booking link exactly once if it is relevant and not already in your draft: {booking_url}
 
@@ -89,18 +92,19 @@ def _conversation_history(db: Session, lead: Lead) -> tuple[list[dict[str, Any]]
     return events, latest_reply
 
 
-def _fallback_reply(lead: Lead, booking_url: str) -> str:
+def _fallback_reply(lead: Lead, advisor: User, booking_url: str) -> str:
     name = lead.first_name or "there"
+    advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
     return (
         f"Hi {name}, thanks for your reply. I can help with that. "
-        f"When works for a quick call or file review? You can also pick a time here: {booking_url}"
+        f"When works for a quick call or file review? You can also pick a time here: {booking_url} - {advisor_name}"
     )
 
 
-def _ensure_booking_link_in_text(text: str, booking_url: str) -> str:
+def _ensure_booking_link_in_text(text: str, lead: Lead, advisor: User, booking_url: str) -> str:
     cleaned = (text or "").strip()
     if not cleaned:
-        return _fallback_reply(Lead(first_name=None), booking_url)
+        return _fallback_reply(lead, advisor, booking_url)
     if booking_url in cleaned:
         return cleaned
     return f"{cleaned}\n\nYou can also pick a time here: {booking_url}"
@@ -126,7 +130,10 @@ def draft_reply(db: Session, lead: Lead, advisor: User) -> dict[str, Any]:
     ) or "No prior conversation."
     latest_reply_text = latest_reply.body if latest_reply else "No inbound reply yet."
 
+    advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
+
     prompt = DRAFT_REPLY_PROMPT.format(
+        advisor_name=advisor_name,
         booking_url=booking_url,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
@@ -144,10 +151,10 @@ def draft_reply(db: Session, lead: Lead, advisor: User) -> dict[str, Any]:
         )
         raw = response.choices[0].message.content
         parsed = _safe_parse_json(raw)
-        suggested = _ensure_booking_link_in_text(parsed.get("suggested_reply", ""), booking_url)
+        suggested = _ensure_booking_link_in_text(parsed.get("suggested_reply", ""), lead, advisor, booking_url)
         source = "ai"
     except Exception:
-        suggested = _fallback_reply(lead, booking_url)
+        suggested = _fallback_reply(lead, advisor, booking_url)
         source = "fallback"
 
     return {

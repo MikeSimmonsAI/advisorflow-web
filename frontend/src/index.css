@@ -99,6 +99,27 @@ a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 
+/*
+ * Site-wide fix: native <option> elements do NOT inherit a parent
+ * <select>'s background/color - every select on the dark theme (tier
+ * assignment, filters, role pickers, bulk-assign dropdowns, etc.) was
+ * rendering its open dropdown menu using the browser/OS default styling
+ * (typically white background, inconsistent text color), making options
+ * unreadable - text only became visible by accident once a hover
+ * highlight provided contrast. This is a real, global CSS gap: no page
+ * ever styled <option> directly, only the parent <select>. Fixing once,
+ * here, covers every select sitewide rather than patching each page's
+ * own .tier-select/.filter-select/etc. individually.
+ */
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
 ::selection {
   background: var(--signal-blue-dim);
   color: var(--text-primary);

@@ -32,6 +32,27 @@
   margin-bottom: 16px;
 }
 
+.users-inline-input {
+  min-width: 140px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.user-name-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.user-name-link:hover {
+  color: var(--signal-blue);
+  text-decoration: underline;
+}
+
 @media (max-width: 768px) {
   .users-actions,
   .users-form,

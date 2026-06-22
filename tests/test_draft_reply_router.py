@@ -85,3 +85,75 @@ def test_draft_reply_is_org_scoped(client, db_session, sample_org, auth_headers)
 
     assert response.status_code == 404
     assert db_session.query(BookingLink).filter(BookingLink.lead_id == other_lead.id).count() == 0
+
+
+def test_draft_reply_fallback_includes_advisor_name_not_blank(
+    client,
+    db_session,
+    sample_lead,
+    sample_advisor,
+    auth_headers,
+    monkeypatch,
+):
+    """
+    Regression test: the fallback reply used to never reference the advisor
+    at all, leaving Mike to manually type his own name into a message he's
+    about to send under his own login. sample_advisor.full_name is
+    "Advisor One" - it must show up in the fallback text.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    draft_reply_service._client = None
+
+    reply = Reply(lead_id=sample_lead.id, body="Can you call me?")
+    db_session.add(reply)
+    db_session.commit()
+
+    response = client.post(f"/sms/draft-reply/{sample_lead.id}", headers=auth_headers, json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert sample_advisor.full_name in body["suggested_reply"]
+
+
+def test_draft_reply_prompt_includes_advisor_name_for_ai_path(
+    client,
+    db_session,
+    sample_lead,
+    sample_advisor,
+    auth_headers,
+    monkeypatch,
+):
+    """Confirms the AI prompt itself is built with the logged-in advisor's name, not blank."""
+    captured_prompts = []
+
+    class _CapturingChatCompletions:
+        def create(self, **kwargs):
+            captured_prompts.append(kwargs["messages"][0]["content"])
+            from types import SimpleNamespace
+            import json
+            message = SimpleNamespace(content=json.dumps({"suggested_reply": "Hi there, talk soon."}))
+            choice = SimpleNamespace(message=message)
+            return SimpleNamespace(choices=[choice])
+
+    class _CapturingChat:
+        def __init__(self):
+            self.completions = _CapturingChatCompletions()
+
+    class _CapturingClient:
+        def __init__(self):
+            self.chat = _CapturingChat()
+
+    draft_reply_service._client = _CapturingClient()
+    monkeypatch.setattr(draft_reply_service, "_get_client", lambda: draft_reply_service._client)
+
+    reply = Reply(lead_id=sample_lead.id, body="Can you call me?")
+    db_session.add(reply)
+    db_session.commit()
+
+    response = client.post(f"/sms/draft-reply/{sample_lead.id}", headers=auth_headers, json={})
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "ai"
+    assert len(captured_prompts) == 1
+    assert sample_advisor.full_name in captured_prompts[0]

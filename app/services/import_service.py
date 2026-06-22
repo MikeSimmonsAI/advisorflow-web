@@ -54,7 +54,16 @@ HEADER_MAP = {
     "allow_calls": ["allow phone calls?", "allow phone calls", "do not call"],
     "last_action": ["last action"],
     "last_contact_date": ["last activity/note", "last activity", "last contact date", "open activity date"],
+    "source": ["source", "lead source", "campaign", "referral source"],
 }
+
+# Values in a "source" column that indicate a brand-new web/lead-gen
+# contact with no prior relationship to Restland - these auto-tag the row
+# as NEW_INQUIRY regardless of whatever (if anything) is in the tier
+# column, since a cold web lead was never a Restland file in the first
+# place. Substring-matched, lowercase, so "Web Form", "web-lead", etc. all
+# match "web".
+NEW_INQUIRY_SOURCE_MARKERS = ["web", "lead gen", "leadgen", "online", "internet", "google", "facebook", "final expense"]
 
 # Internal NSMG/Restland distribution-list and system entries to exclude -
 # these are not real prospects (e.g. "NSMG-DL-All Home Office").
@@ -70,6 +79,7 @@ TIER_TO_TRACK = {
     LeadTier.EMAIL_ONLY: MessageTrack.EMAIL_ONLY_NURTURE,
     LeadTier.PARTIAL: MessageTrack.NEEDS_REVIEW,
     LeadTier.ADDR_ONLY: MessageTrack.NEEDS_REVIEW,
+    LeadTier.NEW_INQUIRY: MessageTrack.NEW_INQUIRY_INTRO,
 }
 
 
@@ -84,16 +94,34 @@ def _build_column_lookup(columns) -> dict:
     return lookup
 
 
-def _infer_tier(raw_value: str, status_reason: str) -> LeadTier:
+def _is_new_inquiry_source(source_raw: str) -> bool:
+    """True if the source column value indicates a cold web/lead-gen contact, not an existing Restland relationship."""
+    if not source_raw:
+        return False
+    low = source_raw.strip().lower()
+    return any(marker in low for marker in NEW_INQUIRY_SOURCE_MARKERS)
+
+
+def _infer_tier(raw_value: str, status_reason: str, source_raw: str = "") -> LeadTier:
     """
     Determines lead tier. Status Reason "Contract Sold" takes priority over
     Lead Type, since a sold contract is the more important signal for
     which message track applies (upsell vs. acquisition pitch).
+
+    A "source" column indicating a web/lead-gen origin (see
+    NEW_INQUIRY_SOURCE_MARKERS) is checked next, ahead of the Lead Type
+    column - if the source says this came from a web form, that's a
+    stronger signal than a possibly-stale or irrelevant Lead Type value,
+    since this contact never had a Restland file in the first place.
+
     Blank/unrecognized Lead Type -> PARTIAL (needs manual review), never
     silently assumed to be Pre-Need.
     """
     if status_reason and status_reason.strip().lower() == "contract sold":
         return LeadTier.CONTRACT_SOLD
+
+    if _is_new_inquiry_source(source_raw):
+        return LeadTier.NEW_INQUIRY
 
     if not raw_value:
         return LeadTier.PARTIAL
@@ -105,6 +133,8 @@ def _infer_tier(raw_value: str, status_reason: str) -> LeadTier:
         return LeadTier.AT_NEED
     if "pre" in val and "need" in val:
         return LeadTier.PRE_NEED
+    if "new inquiry" in val or "web lead" in val or "cold lead" in val:
+        return LeadTier.NEW_INQUIRY
     return LeadTier.PARTIAL
 
 
@@ -160,6 +190,7 @@ def parse_excel_file(file_path: str) -> list[dict]:
             "allow_calls_raw": row.get(lookup.get("allow_calls", ""), "").strip(),
             "last_action_raw": row.get(lookup.get("last_action", ""), "").strip(),
             "last_contact_date_raw": row.get(lookup.get("last_contact_date", ""), "").strip(),
+            "source_raw": row.get(lookup.get("source", ""), "").strip(),
         })
     return rows
 
@@ -172,12 +203,20 @@ def import_leads_from_excel(
     source_year: int = None,
     source_filename: str = None,
     dry_run: bool = False,
+    force_new_inquiry: bool = False,
 ) -> dict:
     """
     Full import pipeline: parse -> route by tier/channel -> dedup check
     (phone-based leads only) -> insert. Everyone gets imported; nothing
     gets silently discarded except internal CRM system records and
     explicit compliance opt-outs.
+
+    force_new_inquiry: when True, every row in this batch is tagged
+    LeadTier.NEW_INQUIRY regardless of what auto-detection from the
+    source/tier columns would have produced. This is the manual override
+    Mike asked for alongside auto-detection - for files where every single
+    row is a cold web/lead-gen batch and there's no point relying on a
+    source column that may not even exist in that export.
 
     dry_run=True: builds and dedup-checks everything the same way, but
     rolls back at the end instead of committing, so the advisor can preview
@@ -208,7 +247,9 @@ def import_leads_from_excel(
             skipped_internal_records += 1
             continue
 
-        tier = _infer_tier(row["tier_raw"], row["status_reason_raw"])
+        tier = _infer_tier(row["tier_raw"], row["status_reason_raw"], row["source_raw"])
+        if force_new_inquiry:
+            tier = LeadTier.NEW_INQUIRY
         call_restricted = _is_call_restricted(row["allow_calls_raw"])
 
         # Route: phone present -> SMS channel. No phone but email present -> email-only channel.
@@ -216,8 +257,16 @@ def import_leads_from_excel(
             contact_channel = "sms"
         else:
             contact_channel = "email_only"
-            tier = LeadTier.EMAIL_ONLY  # channel overrides tier classification for routing purposes
             email_only_count += 1
+            # Every other tier collapses to LeadTier.EMAIL_ONLY here since
+            # the generic email-only nurture copy is appropriate regardless
+            # of what tier they would've been on SMS. NEW_INQUIRY is the
+            # one exception: Mike was explicit that brand-new web/cold
+            # leads need their own track on BOTH channels, not the same
+            # "you have no phone on file" framing as an existing Restland
+            # relationship that just happens to lack a phone number.
+            if tier != LeadTier.NEW_INQUIRY:
+                tier = LeadTier.EMAIL_ONLY
 
         message_track = TIER_TO_TRACK.get(tier, MessageTrack.NEEDS_REVIEW)
         if tier == LeadTier.PARTIAL:

@@ -22,6 +22,9 @@ export default function Settings() {
   const [connectingCalendar, setConnectingCalendar] = useState(false)
   const [calendarMessage, setCalendarMessage] = useState(null) // { type: 'success'|'error', text }
 
+  const [connectingMicrosoft, setConnectingMicrosoft] = useState(false)
+  const [microsoftMessage, setMicrosoftMessage] = useState(null) // { type: 'success'|'error', text }
+
   useEffect(() => {
     api.get('/settings/profile').then((p) => {
       setProfile(p)
@@ -103,6 +106,17 @@ export default function Settings() {
     }
   }
 
+  async function handleConnectMicrosoft() {
+    setConnectingMicrosoft(true)
+    try {
+      const result = await api.get('/microsoft/connect')
+      window.location.href = result.authorization_url
+    } catch (err) {
+      setMicrosoftMessage({ type: 'error', text: err.message })
+      setConnectingMicrosoft(false)
+    }
+  }
+
   if (loading) return <div className="empty-state">Loading settings…</div>
 
   return (
@@ -120,7 +134,7 @@ export default function Settings() {
         </div>
       )}
 
-      <section className="panel" style={{ marginBottom: 16 }}>
+      <section id="twilio" className="panel" style={{ marginBottom: 16 }}>
         <div className="panel-header">
           <h2 className="panel-title">Twilio</h2>
           {profile.twilio_configured && <span className="badge badge--green">Connected</span>}
@@ -162,7 +176,7 @@ export default function Settings() {
         </form>
       </section>
 
-      <section className="panel" style={{ marginBottom: 16 }}>
+      <section id="google" className="panel" style={{ marginBottom: 16 }}>
         <div className="panel-header">
           <h2 className="panel-title">Google Calendar</h2>
           {profile.google_calendar_connected && <span className="badge badge--green">Connected</span>}
@@ -174,6 +188,32 @@ export default function Settings() {
         <div className="settings-actions" style={{ justifyContent: 'flex-start' }}>
           <button className="btn btn--primary" onClick={handleConnectCalendar} disabled={connectingCalendar}>
             {connectingCalendar ? 'Redirecting…' : profile.google_calendar_connected ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}
+          </button>
+        </div>
+      </section>
+
+      {microsoftMessage && (
+        <div className={microsoftMessage.type === 'success' ? 'settings-banner settings-banner--success' : 'settings-banner settings-banner--error'}>
+          {microsoftMessage.text}
+        </div>
+      )}
+
+      <section id="microsoft" className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">Microsoft 365 Email</h2>
+          {profile.microsoft_365_connected && <span className="badge badge--green">Connected</span>}
+        </div>
+        <p className="settings-help">
+          Connect your Microsoft 365 mailbox so outbound email sends from your real Restland
+          Outlook address instead of a generic sender. This is separate from Google Calendar above -
+          you can connect either, both, or neither independently.
+        </p>
+        {profile.microsoft_365_connected && profile.microsoft_email_address && (
+          <p className="settings-help mono">Connected as {profile.microsoft_email_address}</p>
+        )}
+        <div className="settings-actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="btn btn--primary" onClick={handleConnectMicrosoft} disabled={connectingMicrosoft}>
+            {connectingMicrosoft ? 'Redirecting…' : profile.microsoft_365_connected ? 'Reconnect Microsoft 365' : 'Connect Microsoft 365'}
           </button>
         </div>
       </section>

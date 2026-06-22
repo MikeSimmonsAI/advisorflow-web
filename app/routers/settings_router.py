@@ -21,6 +21,8 @@ class ProfileResponse(BaseModel):
     notification_email: Optional[str] = None
     notify_on_hot_reply: bool = True
     google_calendar_connected: bool = False
+    microsoft_365_connected: bool = False
+    microsoft_email_address: Optional[str] = None
 
 
 class TwilioConfigRequest(BaseModel):
@@ -53,6 +55,8 @@ def get_profile(current_user: User = Depends(get_current_user)):
         notification_email=current_user.notification_email,
         notify_on_hot_reply=current_user.notify_on_hot_reply,
         google_calendar_connected=current_user.google_calendar_connected,
+        microsoft_365_connected=current_user.microsoft_365_connected,
+        microsoft_email_address=current_user.microsoft_email_address,
     )
 
 

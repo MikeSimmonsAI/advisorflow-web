@@ -17,6 +17,7 @@ const TIER_CONFIG = {
   at_need: { label: 'At-Need', color: 'amber' },
   imminent: { label: 'Imminent', color: 'red' },
   contract_sold: { label: 'Contract Sold', color: 'green' },
+  new_inquiry: { label: 'New Inquiry', color: 'purple' },
   email_only: { label: 'Email Only', color: 'neutral' },
   addr_only: { label: 'Address Only', color: 'neutral-dim' },
   partial: { label: 'Needs Review', color: 'amber' },

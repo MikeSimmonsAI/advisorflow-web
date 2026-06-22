@@ -39,6 +39,7 @@ class LeadTier(str, enum.Enum):
     EMAIL_ONLY = "email_only"
     ADDR_ONLY = "addr_only"
     PARTIAL = "partial"
+    NEW_INQUIRY = "new_inquiry"  # brand-new web/cold lead, no prior relationship with Restland
 
 
 class ReplyClassification(str, enum.Enum):
@@ -47,11 +48,20 @@ class ReplyClassification(str, enum.Enum):
     the desktop app's Interested/Callback/DNC/Neutral reply tagging,
     which the web app never had. Populated by
     reply_classification_service.classify_reply().
+
+    NOT_INTERESTED, WRONG_NUMBER, and QUESTION were added per Mike's
+    explicit request for a fuller reclassification set - the original
+    four (interested/callback/dnc/neutral) didn't distinguish "actively
+    doesn't want this" from a wrong-number bounce or an open question
+    that doesn't fit hot/cold/dnc.
     """
-    INTERESTED = "interested"
+    INTERESTED = "interested"  # shown to advisors as "Hot Lead" - drives is_hot=True
     CALLBACK = "callback"
     DNC = "dnc"
     NEUTRAL = "neutral"
+    NOT_INTERESTED = "not_interested"
+    WRONG_NUMBER = "wrong_number"
+    QUESTION = "question"
 
 
 class EngagementTemperature(str, enum.Enum):
@@ -88,6 +98,7 @@ class MessageTrack(str, enum.Enum):
     UPSELL_EXISTING_CUSTOMER = "upsell_existing"
     EMAIL_ONLY_NURTURE = "email_only_nurture"
     NEEDS_REVIEW = "needs_review"
+    NEW_INQUIRY_INTRO = "new_inquiry_intro"  # cold web/lead-gen lead, no prior file-review relationship
 
 
 class MessageDirection(str, enum.Enum):

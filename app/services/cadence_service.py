@@ -60,6 +60,12 @@ TRACK_BASE_TEMPLATES = {
         "We have options for memorials, markers, and additional services for your family. "
         "Let's chat: {booking_link}"
     ),
+    MessageTrack.NEW_INQUIRY_INTRO: (
+        "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
+        "I help families with cemetery and funeral planning in the area - happy to "
+        "answer any questions, no pressure at all. You can reach me at {advisor_cell} "
+        "or grab a time here: {booking_link}"
+    ),
 }
 
 # Light tone rotation per touch number so the message doesn't read identical

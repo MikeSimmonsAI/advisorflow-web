@@ -6,16 +6,22 @@ import '../styles/shared.css'
 import './Replies.css'
 
 const CLASSIFICATION_CONFIG = {
-  interested: { label: 'Interested', color: 'green' },
-  callback: { label: 'Callback', color: 'blue' },
+  interested: { label: 'Hot Lead', color: 'green' },
+  callback: { label: 'Callback Requested', color: 'blue' },
+  question: { label: 'Question', color: 'purple' },
+  not_interested: { label: 'Not Interested', color: 'amber' },
+  wrong_number: { label: 'Wrong Number', color: 'neutral-dim' },
   dnc: { label: 'DNC', color: 'red' },
   neutral: { label: 'Neutral', color: 'neutral' },
 }
 
 const CLASSIFICATION_OPTIONS = [
-  { value: 'interested', label: 'Interested' },
-  { value: 'callback', label: 'Callback' },
+  { value: 'interested', label: 'Hot Lead' },
+  { value: 'callback', label: 'Callback Requested' },
+  { value: 'question', label: 'Question' },
   { value: 'neutral', label: 'Neutral' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'wrong_number', label: 'Wrong Number' },
   { value: 'dnc', label: 'DNC' },
 ]
 
@@ -99,7 +105,7 @@ export default function Replies() {
         ) : replies.length === 0 ? (
           <div className="empty-state">
             {needsAttentionOnly
-              ? "Nothing needs your attention right now — interested and callback replies will show up here."
+              ? "Nothing needs your attention right now — hot leads and callback requests will show up here."
               : "No replies yet. Once a lead responds, it'll land here."}
           </div>
         ) : (

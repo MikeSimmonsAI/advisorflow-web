@@ -190,9 +190,11 @@ def inbound_webhook(
         lead.status = "hot"
         stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_REPLIED)
     else:
-        # CALLBACK and NEUTRAL both count as "replied" at the lead-status
-        # level - the richer classification distinction lives on the
-        # Reply record itself for the filtered inbox to use.
+        # CALLBACK, NOT_INTERESTED, WRONG_NUMBER, QUESTION, and NEUTRAL all
+        # count as "replied" at the lead-status level - none of these are
+        # a legal opt-out (that's DNC above) or a hot signal (that's
+        # INTERESTED above). The richer classification distinction lives
+        # on the Reply record itself for the filtered inbox to use.
         lead.status = "replied"
         stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_REPLIED)
 

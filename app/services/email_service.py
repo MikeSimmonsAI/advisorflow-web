@@ -81,6 +81,19 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
+    MessageTrack.NEW_INQUIRY_INTRO: {
+        "subject": "Hi {first_name}, a note from Restland",
+        "body_html": """
+            <p>Hi {first_name},</p>
+            <p>My name is {advisor_name} with Restland Cemetery & Funeral Home here in the Dallas
+            area. I noticed you'd shown some interest in learning more, so I wanted to reach out
+            directly and introduce myself.</p>
+            <p>There's no obligation here - I'm just available if and when you'd like to talk
+            through options or have any questions, whenever that might be.</p>
+            <p>You're welcome to reach out anytime: <a href="{booking_link}">{booking_link}</a></p>
+            <p>Best,<br>{advisor_name}</p>
+        """,
+    },
 }
 
 

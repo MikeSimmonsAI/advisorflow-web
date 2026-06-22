@@ -20,6 +20,12 @@ export default function Templates() {
   const [draftSubject, setDraftSubject] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // AI writer — both a one-click "Generate" from scratch and a free-text
+  // instruction box to rewrite whatever's currently in the editor.
+  const [aiInstruction, setAiInstruction] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState('')
+
   function load() {
     setLoading(true)
     api.get('/templates/').then(setTemplates).finally(() => setLoading(false))
@@ -31,6 +37,8 @@ export default function Templates() {
     setEditing({ message_track: t.message_track, channel: t.channel })
     setDraftBody(t.body_template)
     setDraftSubject(t.email_subject_template || '')
+    setAiInstruction('')
+    setAiError('')
   }
 
   async function handleSave() {
@@ -58,6 +66,48 @@ export default function Templates() {
       load()
     } catch (err) {
       alert(`Failed to reset: ${err.message}`)
+    }
+  }
+
+  async function handleAiGenerate() {
+    setAiBusy(true)
+    setAiError('')
+    try {
+      const result = await api.post('/templates/ai/generate', {
+        message_track: editing.message_track,
+        channel: editing.channel,
+        instruction: aiInstruction.trim() || null,
+      })
+      setDraftBody(result.body_template)
+      if (editing.channel === 'email') setDraftSubject(result.subject_template)
+    } catch (err) {
+      setAiError(err.message || 'AI generation failed.')
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
+  async function handleAiRewrite() {
+    if (!aiInstruction.trim()) {
+      setAiError('Type an instruction first (e.g. "make this warmer" or "shorter").')
+      return
+    }
+    setAiBusy(true)
+    setAiError('')
+    try {
+      const result = await api.post('/templates/ai/rewrite', {
+        message_track: editing.message_track,
+        channel: editing.channel,
+        current_body: draftBody,
+        current_subject: editing.channel === 'email' ? draftSubject : null,
+        instruction: aiInstruction.trim(),
+      })
+      setDraftBody(result.body_template)
+      if (editing.channel === 'email') setDraftSubject(result.subject_template)
+    } catch (err) {
+      setAiError(err.message || 'AI rewrite failed.')
+    } finally {
+      setAiBusy(false)
     }
   }
 
@@ -114,6 +164,36 @@ export default function Templates() {
                             value={draftBody}
                             onChange={(e) => setDraftBody(e.target.value)}
                           />
+
+                          <div className="template-ai-bar">
+                            <input
+                              className="settings-input template-ai-instruction"
+                              placeholder='Optional: "make this warmer", "shorter", "add urgency"…'
+                              value={aiInstruction}
+                              onChange={(e) => setAiInstruction(e.target.value)}
+                              disabled={aiBusy}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn--secondary"
+                              onClick={handleAiGenerate}
+                              disabled={aiBusy}
+                              title="Generate a fresh draft from scratch for this track and channel"
+                            >
+                              {aiBusy ? 'Working…' : 'Generate with AI'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--secondary"
+                              onClick={handleAiRewrite}
+                              disabled={aiBusy || !draftBody.trim()}
+                              title="Rewrite the current draft above per your instruction"
+                            >
+                              {aiBusy ? 'Working…' : 'Rewrite with AI'}
+                            </button>
+                          </div>
+                          {aiError && <div className="compose-error">{aiError}</div>}
+
                           <div className="template-edit-actions">
                             <button className="btn btn--secondary" onClick={() => setEditing(null)}>Cancel</button>
                             <button className="btn btn--primary" onClick={handleSave} disabled={saving}>

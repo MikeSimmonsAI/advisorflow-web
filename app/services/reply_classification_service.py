@@ -16,10 +16,21 @@ easily contain one of these eight words as part of an unrelated sentence.
 
 CLASSIFICATION CATEGORIES (matches the desktop app's reply tagging,
 which the web app never had until now):
-  - interested: clear positive signal, wants to move forward
+  - interested: clear positive signal, wants to move forward (shown to
+    advisors in the UI as "Hot Lead")
   - callback: wants to be called or rescheduled, not a flat "yes"
-  - dnc: wants to stop receiving messages (legal opt-out signal)
-  - neutral: anything else - questions, confusion, ambiguous responses
+  - dnc: invokes an actual legal opt-out (stop/unsubscribe/remove me from
+    your list) - this is the regulatory hard-stop category, see
+    HARD_STOP_KEYWORDS below
+  - not_interested: declines, but didn't invoke an opt-out right - "no
+    thanks", "we already have a plan", etc. Distinct from dnc on purpose:
+    Mike's explicit request was that a polite decline shouldn't be
+    conflated with a legal do-not-contact signal, since they may warrant
+    different follow-up handling.
+  - wrong_number: this isn't the right person ("wrong number", "who is
+    this", "I don't know what this is about")
+  - question: asks something rather than stating a clear yes/no/decline
+  - neutral: anything else - confusion, ambiguous, doesn't fit the above
 
 The keyword-based STOP detection is intentionally KEPT as an always-on
 safety net underneath the AI classification, not replaced - a regulatory
@@ -45,14 +56,19 @@ def _get_client() -> OpenAI:
 
 # Kept as the hard-override safety net for legal opt-out language - see
 # module docstring above for why this is never fully replaced by the AI
-# classification alone.
-HARD_STOP_KEYWORDS = ["stop", "unsubscribe"]
+# classification alone. Deliberately narrow: "stop"/"unsubscribe"/"remove
+# me" are unambiguous legal opt-out phrasing. A plain "not interested" is
+# NOT in this list on purpose - that's its own not_interested category,
+# not an automatic DNC trigger (see module docstring).
+HARD_STOP_KEYWORDS = ["stop", "unsubscribe", "remove me"]
+
+VALID_CLASSIFICATIONS = ("interested", "callback", "dnc", "not_interested", "wrong_number", "question", "neutral")
 
 CLASSIFICATION_PROMPT = """You are classifying a text message reply from a sales lead at a cemetery/funeral home, replying to outreach about pre-need planning or property services. Classify the INTENT of their reply.
 
 Respond with ONLY a JSON object (no markdown, no preamble):
 {{
-  "classification": "interested" | "callback" | "dnc" | "neutral",
+  "classification": "interested" | "callback" | "dnc" | "not_interested" | "wrong_number" | "question" | "neutral",
   "confidence": "high" | "medium" | "low",
   "reasoning": "<one short sentence>"
 }}
@@ -60,10 +76,13 @@ Respond with ONLY a JSON object (no markdown, no preamble):
 Categories:
 - "interested": clear positive signal, wants to move forward, says yes/sure/sounds good with genuine intent
 - "callback": wants to be called, wants to reschedule, asks "can you call me" - engaged but not a flat yes
-- "dnc": wants to stop receiving messages, says remove me / not interested / stop texting me
-- "neutral": anything else - questions, confusion, "who is this", ambiguous or unrelated replies
+- "dnc": invokes an actual opt-out - says stop, unsubscribe, or explicitly asks to be removed from the contact list
+- "not_interested": politely or flatly declines without invoking an opt-out - "no thanks", "not right now", "we already have something in place" - distinct from dnc
+- "wrong_number": indicates this isn't the right person - "wrong number", "who is this", "I don't know what this is about"
+- "question": asks a genuine question rather than giving a clear yes/no/decline
+- "neutral": anything else - confusion, ambiguous, or doesn't clearly fit the above
 
-IMPORTANT: a reply containing words like "sure" or "remove" does NOT automatically mean interested or dnc - judge the actual sentence meaning. For example "I'm not sure yet" is neutral, not interested. "Please remove my old address from file" is neutral, not dnc.
+IMPORTANT: a reply containing words like "sure" or "remove" does NOT automatically mean interested or dnc - judge the actual sentence meaning. For example "I'm not sure yet" is neutral, not interested. "Please remove my old address from file" is neutral, not dnc. A flat "not interested" or "no thanks" with no opt-out language is not_interested, not dnc.
 
 Reply text: {body}
 """
@@ -88,7 +107,7 @@ def classify_reply(body: str) -> dict:
         if raw.startswith("```"):
             raw = raw.strip("`").lstrip("json").strip()
         parsed = json.loads(raw)
-        if parsed.get("classification") not in ("interested", "callback", "dnc", "neutral"):
+        if parsed.get("classification") not in VALID_CLASSIFICATIONS:
             raise ValueError(f"Unexpected classification value: {parsed.get('classification')}")
         return parsed
     except Exception as e:
@@ -101,14 +120,28 @@ def _fallback_keyword_classify(body: str, error: str = None) -> dict:
     keyword lists that were the ONLY classification mechanism before
     this service existed, so behavior never gets worse than the
     pre-AI baseline, only better when the API call succeeds.
+
+    not_interested and wrong_number/question keyword buckets were added
+    alongside the AI prompt expansion above so the fallback path can
+    still distinguish them even without the AI call - previously
+    "not interested" fell into the same stop_keywords bucket as an
+    actual legal opt-out, which is the conflation Mike specifically
+    flagged as wrong.
     """
     body_lower = body.lower()
     hot_keywords = ["yes", "interested", "book", "schedule", "ok let's", "when can"]
     callback_keywords = ["call me", "call back"]
-    stop_keywords = ["stop", "unsubscribe", "remove", "no thanks", "not interested"]
+    hard_stop_keywords = ["stop", "unsubscribe", "remove me"]
+    not_interested_keywords = ["not interested", "no thanks", "no thank you", "not right now"]
+    wrong_number_keywords = ["wrong number", "who is this", "don't know what this is"]
+    question_marker = "?"
 
-    if any(kw in body_lower for kw in stop_keywords):
+    if any(kw in body_lower for kw in hard_stop_keywords):
         classification = "dnc"
+    elif any(kw in body_lower for kw in wrong_number_keywords):
+        classification = "wrong_number"
+    elif any(kw in body_lower for kw in not_interested_keywords):
+        classification = "not_interested"
     elif any(kw in body_lower for kw in hot_keywords):
         # Checked before callback_keywords: a message like "yes I'm
         # interested, please call me" contains both signals, and the
@@ -119,6 +152,8 @@ def _fallback_keyword_classify(body: str, error: str = None) -> dict:
         classification = "interested"
     elif any(kw in body_lower for kw in callback_keywords):
         classification = "callback"
+    elif question_marker in body_lower:
+        classification = "question"
     else:
         classification = "neutral"
 
@@ -132,8 +167,11 @@ def _fallback_keyword_classify(body: str, error: str = None) -> dict:
 def contains_hard_stop_language(body: str) -> bool:
     """
     The non-negotiable legal opt-out check - always runs regardless of
-    what the AI classifier returns. If someone says STOP or UNSUBSCRIBE,
-    that lead goes to DNC, full stop, no exceptions, no AI judgment call.
+    what the AI classifier returns. If someone says STOP, UNSUBSCRIBE, or
+    explicitly asks to be removed, that lead goes to DNC, full stop, no
+    exceptions, no AI judgment call. A plain "not interested" does NOT
+    trigger this - see module docstring for why that's now its own
+    not_interested category instead of an automatic DNC trigger.
     """
     body_lower = body.lower()
     return any(kw in body_lower for kw in HARD_STOP_KEYWORDS)

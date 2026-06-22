@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import MessageReview from '../components/MessageReview'
 import '../styles/shared.css'
@@ -11,6 +11,7 @@ const TIER_OPTIONS = [
   { value: 'at_need', label: 'At-Need' },
   { value: 'imminent', label: 'Imminent' },
   { value: 'contract_sold', label: 'Contract Sold' },
+  { value: 'new_inquiry', label: 'New Inquiry' },
 ]
 
 const TIER_FILTER_OPTIONS = [
@@ -19,6 +20,7 @@ const TIER_FILTER_OPTIONS = [
   { value: 'at_need', label: 'At-Need' },
   { value: 'imminent', label: 'Imminent' },
   { value: 'contract_sold', label: 'Contract Sold' },
+  { value: 'new_inquiry', label: 'New Inquiry' },
   { value: 'email_only', label: 'Email Only' },
   { value: 'partial', label: 'Needs Review' },
 ]
@@ -42,6 +44,7 @@ export default function Leads() {
   const [previewing, setPreviewing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [sourceYear, setSourceYear] = useState('')
+  const [forceNewInquiry, setForceNewInquiry] = useState(false)
   const [view, setView] = useState('all') // 'all' | 'review'
   const [reviewLeadIds, setReviewLeadIds] = useState(null) // set right after a successful import
   const fileInputRef = useRef(null)
@@ -59,6 +62,16 @@ export default function Leads() {
   const [bulkSending, setBulkSending] = useState(false)
   const [bulkResult, setBulkResult] = useState(null)
   const [showBulkCompose, setShowBulkCompose] = useState(false)
+
+  // Bulk assign (admin-only — checked via canBulkAssign below)
+  const currentUser = getCurrentUser()
+  const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const [assignableUsers, setAssignableUsers] = useState([])
+  const [showBulkAssign, setShowBulkAssign] = useState(false)
+  const [bulkAssignTarget, setBulkAssignTarget] = useState('')
+  const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [bulkAssignResult, setBulkAssignResult] = useState(null)
+  const [bulkAssignError, setBulkAssignError] = useState('')
 
   function loadLeads() {
     setLoading(true)
@@ -84,6 +97,7 @@ export default function Leads() {
       const formData = new FormData()
       formData.append('file', file)
       if (sourceYear) formData.append('source_year', sourceYear)
+      if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/preview', formData)
       setPreview(result)
     } catch (err) {
@@ -100,9 +114,11 @@ export default function Leads() {
       const formData = new FormData()
       formData.append('file', pendingFile.current)
       if (sourceYear) formData.append('source_year', sourceYear)
+      if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/confirm', formData)
       setPreview(null)
       pendingFile.current = null
+      setForceNewInquiry(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadLeads()
 
@@ -164,8 +180,10 @@ export default function Leads() {
     return result
   }, [baseLeads, tierFilter, statusFilter, searchQuery])
 
-  // Only leads with a phone, not DNC, not duplicate are eligible for bulk SMS send.
+  // Leads eligible for bulk SMS send specifically (phone, not DNC, not duplicate).
+  // Bulk *assign* has no such restriction — any lead can be reassigned.
   const sendableLeads = filteredLeads.filter((l) => l.phone && l.status !== 'dnc' && !l.is_duplicate)
+  const sendableSelectedIds = Array.from(selected).filter((id) => sendableLeads.some((l) => l.id === id))
 
   function toggleSelect(id) {
     const next = new Set(selected)
@@ -174,6 +192,9 @@ export default function Leads() {
   }
 
   function toggleSelectAll() {
+    // "Select all" intentionally only grabs sendable leads, since the most
+    // common bulk action is still SMS send. Leads excluded here (DNC, no
+    // phone, duplicates) can still be checked individually for bulk-assign.
     const sendableIds = sendableLeads.map((l) => l.id)
     const allSelected = sendableIds.length > 0 && sendableIds.every((id) => selected.has(id))
     if (allSelected) {
@@ -186,12 +207,12 @@ export default function Leads() {
   }
 
   async function handleBulkSend() {
-    if (!bulkMessage.trim() || selected.size === 0) return
+    if (!bulkMessage.trim() || sendableSelectedIds.length === 0) return
     setBulkSending(true)
     setBulkResult(null)
     try {
       const result = await api.post('/sms/send-batch', {
-        lead_ids: Array.from(selected),
+        lead_ids: sendableSelectedIds,
         template: bulkMessage,
         include_booking_link: bulkIncludeBooking,
       })
@@ -206,7 +227,36 @@ export default function Leads() {
     }
   }
 
+  async function handleBulkAssign() {
+    if (selected.size === 0) return
+    setBulkAssigning(true)
+    setBulkAssignError('')
+    setBulkAssignResult(null)
+    try {
+      const result = await api.post('/admin/leads/reassign', {
+        lead_ids: Array.from(selected),
+        new_assigned_to_id: bulkAssignTarget || null,
+      })
+      setBulkAssignResult(result)
+      setSelected(new Set())
+      setShowBulkAssign(false)
+      setBulkAssignTarget('')
+      loadLeads()
+    } catch (err) {
+      setBulkAssignError(err.message || 'Bulk assign failed.')
+    } finally {
+      setBulkAssigning(false)
+    }
+  }
+
   const selectedCount = selected.size
+
+  useEffect(() => {
+    if (!canBulkAssign) return
+    api.get('/admin/users')
+      .then((users) => setAssignableUsers(users.filter((u) => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))))
+      .catch(() => {})
+  }, [canBulkAssign])
 
   return (
     <div>
@@ -229,6 +279,14 @@ export default function Leads() {
             onChange={(e) => setSourceYear(e.target.value)}
             className="year-input"
           />
+          <label className="compose-checkbox upload-new-inquiry-toggle">
+            <input
+              type="checkbox"
+              checked={forceNewInquiry}
+              onChange={(e) => setForceNewInquiry(e.target.checked)}
+            />
+            This whole file is New Inquiry leads (web/cold, no prior relationship)
+          </label>
           <input
             ref={fileInputRef}
             type="file"
@@ -237,6 +295,9 @@ export default function Leads() {
             className="file-input"
           />
         </div>
+        <p className="settings-help">
+          Leads are also auto-tagged as New Inquiry if the file has a "Source" column with a value like Web, Online, or Lead Gen — check the box above to tag the whole file regardless, e.g. for an export that has no source column at all.
+        </p>
 
         {previewing && <div className="empty-state">Checking for duplicates and routing tiers…</div>}
 
@@ -297,16 +358,65 @@ export default function Leads() {
         <div className="bulk-bar">
           <span className="bulk-bar-count">{selectedCount} selected</span>
           <button className="btn btn--secondary" onClick={() => setSelected(new Set())}>Clear</button>
-          <button className="btn btn--primary" onClick={() => setShowBulkCompose(true)}>Send to selected</button>
+          {canBulkAssign && (
+            <button className="btn btn--secondary" onClick={() => setShowBulkAssign(true)}>Assign to…</button>
+          )}
+          <button
+            className="btn btn--primary"
+            onClick={() => setShowBulkCompose(true)}
+            disabled={sendableSelectedIds.length === 0}
+            title={sendableSelectedIds.length === 0 ? 'None of the selected leads can receive SMS (no phone, DNC, or duplicate)' : undefined}
+          >
+            Send to selected
+          </button>
+        </div>
+      )}
+
+      {showBulkAssign && (
+        <section className="panel bulk-assign-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Assign {selectedCount} lead{selectedCount === 1 ? '' : 's'} to…</h2>
+            <button className="back-link" onClick={() => { setShowBulkAssign(false); setBulkAssignError('') }}>Cancel</button>
+          </div>
+          <div className="bulk-assign-row">
+            <select
+              className="filter-select"
+              value={bulkAssignTarget}
+              onChange={(e) => setBulkAssignTarget(e.target.value)}
+            >
+              <option value="">Unassigned (back to pool)</option>
+              {assignableUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.full_name} {user.role !== 'advisor' ? `(${user.role.replace('_', ' ')})` : ''}
+                </option>
+              ))}
+            </select>
+            <button className="btn btn--primary" onClick={handleBulkAssign} disabled={bulkAssigning}>
+              {bulkAssigning ? 'Assigning…' : `Assign ${selectedCount} lead${selectedCount === 1 ? '' : 's'}`}
+            </button>
+          </div>
+          {bulkAssignError && <div className="compose-error">{bulkAssignError}</div>}
+        </section>
+      )}
+
+      {bulkAssignResult && (
+        <div className="bulk-result mono" style={{ marginBottom: 12 }}>
+          Reassigned: {bulkAssignResult.reassigned_count}
+          {bulkAssignResult.skipped_count > 0 && ` · Skipped: ${bulkAssignResult.skipped_count}`}
         </div>
       )}
 
       {showBulkCompose && (
         <section className="panel bulk-compose-panel">
           <div className="panel-header">
-            <h2 className="panel-title">Send to {selectedCount} leads</h2>
+            <h2 className="panel-title">Send to {sendableSelectedIds.length} lead{sendableSelectedIds.length === 1 ? '' : 's'}</h2>
             <button className="back-link" onClick={() => setShowBulkCompose(false)}>Cancel</button>
           </div>
+          {sendableSelectedIds.length < selectedCount && (
+            <p className="settings-help">
+              {selectedCount - sendableSelectedIds.length} of your {selectedCount} selected lead{selectedCount === 1 ? '' : 's'} can't receive SMS (no phone, DNC, or duplicate) and will be skipped.
+            </p>
+          )}
           <textarea
             className="compose-textarea"
             placeholder="Hi {first_name}, this is..."
@@ -322,8 +432,8 @@ export default function Leads() {
               <input type="checkbox" checked={bulkIncludeBooking} onChange={(e) => setBulkIncludeBooking(e.target.checked)} />
               Include booking link
             </label>
-            <button className="btn btn--primary" onClick={handleBulkSend} disabled={bulkSending || !bulkMessage.trim()}>
-              {bulkSending ? 'Sending…' : `Send to ${selectedCount} leads`}
+            <button className="btn btn--primary" onClick={handleBulkSend} disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}>
+              {bulkSending ? 'Sending…' : `Send to ${sendableSelectedIds.length} lead${sendableSelectedIds.length === 1 ? '' : 's'}`}
             </button>
           </div>
           {bulkResult && (
@@ -364,7 +474,6 @@ export default function Leads() {
             </thead>
             <tbody>
               {filteredLeads.slice(0, 200).map((lead) => {
-                const sendable = lead.phone && lead.status !== 'dnc' && !lead.is_duplicate
                 return (
                   <tr
                     key={lead.id}
@@ -373,9 +482,7 @@ export default function Leads() {
                   >
                     {view !== 'review' && (
                       <td onClick={(e) => e.stopPropagation()}>
-                        {sendable && (
-                          <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} />
-                        )}
+                        <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} />
                       </td>
                     )}
                     <td>{lead.first_name} {lead.last_name}</td>

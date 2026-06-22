@@ -111,6 +111,23 @@
   font-size: 17px;
 }
 
+.cleanup-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cleanup-assign-select {
+  max-width: 220px;
+}
+
+.cleanup-group-assign-result {
+  margin: -4px 0 0;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
 .cleanup-match-pill,
 .cleanup-status-pill,
 .cleanup-keep-label {
@@ -234,6 +251,15 @@
   .cleanup-group-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .cleanup-group-actions {
+    width: 100%;
+  }
+
+  .cleanup-assign-select {
+    max-width: none;
+    flex: 1;
   }
 }
 

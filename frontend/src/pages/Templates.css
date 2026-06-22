@@ -69,6 +69,21 @@
   gap: 8px;
 }
 
+.template-ai-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border-subtle);
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.template-ai-instruction {
+  flex: 1;
+  min-width: 180px;
+}
+
 .compose-textarea {
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);

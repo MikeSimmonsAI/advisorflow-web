@@ -4,6 +4,7 @@ from sqlalchemy import func, distinct
 from pydantic import BaseModel, EmailStr
 import secrets
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from app.deps import get_db, require_admin
@@ -457,6 +458,163 @@ def reset_user_password(
     db.commit()
 
     return ResetPasswordResponse(email=target.email, temp_password=temp_password)
+
+
+# ---------------------------------------------------------------------------
+# Edit user details - SUPER ADMIN ONLY, same reasoning as password reset
+# above: a typo'd name or wrong email on an existing account is something
+# the org owner needs to be able to fix directly, without it being
+# delegated to every org_admin. Does NOT touch password or allow promoting
+# to super_admin (role changes here are limited to advisor/org_admin, same
+# restriction as create_user above).
+# ---------------------------------------------------------------------------
+
+class UpdateUserRequest(BaseModel):
+    full_name: str | None = None
+    email: EmailStr | None = None
+    role: str | None = None  # 'advisor' or 'org_admin' only - see validation below
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: str,
+    req: UpdateUserRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    Edits an existing user's name, email, and/or role. Fields omitted from
+    the request are left unchanged - this is a partial update, not a
+    full replace, so the frontend doesn't have to resend everything.
+    """
+    from fastapi import HTTPException
+
+    target = db.query(User).filter(
+        User.id == user_id, User.organization_id == current_user.organization_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if req.email is not None and req.email != target.email:
+        existing = db.query(User).filter(User.email == req.email, User.id != target.id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="A user with this email already exists.")
+        target.email = req.email
+
+    if req.full_name is not None:
+        cleaned_name = req.full_name.strip()
+        if not cleaned_name:
+            raise HTTPException(status_code=400, detail="full_name cannot be blank.")
+        target.full_name = cleaned_name
+
+    if req.role is not None:
+        if target.role == "super_admin":
+            raise HTTPException(status_code=400, detail="Cannot change the super_admin account's role.")
+        if req.role not in ("advisor", "org_admin"):
+            raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
+        target.role = req.role
+
+    db.commit()
+    db.refresh(target)
+
+    return UserResponse(
+        id=target.id, email=target.email, full_name=target.full_name, role=target.role,
+        is_active=target.is_active, must_change_password=target.must_change_password,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-user detail page - this didn't exist before. Clicking a name in User
+# Management went nowhere; there was no way to see what a user had actually
+# done (lead counts, performance, recent activity) without going through
+# the org-wide Master Dashboard and manually finding their row. Reuses
+# _advisor_metrics (already computes leads_owned/messages_sent/replies/
+# booking_rate/etc. for the Master Dashboard) rather than recomputing those
+# numbers a second way.
+# ---------------------------------------------------------------------------
+
+def _recent_activity_for_advisor(db: Session, organization_id: str, advisor_id: str, limit: int = 12) -> list[dict]:
+    """
+    Merges the advisor's most recent sent messages and the replies received
+    on leads they own into one chronological feed. Two separate queries
+    (not a SQL UNION) since Message and Reply have different columns and
+    different join paths to Lead - simpler and clearer to merge in Python
+    for a feed this small (limit defaults to 12) than to fight an ORM
+    UNION across mismatched column sets.
+    """
+    messages = (
+        db.query(Message, Lead.first_name, Lead.last_name, Lead.id)
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(Lead.organization_id == organization_id, Message.sender_id == advisor_id)
+        .order_by(Message.sent_at.desc())
+        .limit(limit)
+        .all()
+    )
+    replies = (
+        db.query(Reply, Lead.first_name, Lead.last_name, Lead.id)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(Lead.organization_id == organization_id, Lead.assigned_to_id == advisor_id)
+        .order_by(Reply.received_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    feed = []
+    for message, first_name, last_name, lead_id in messages:
+        feed.append({
+            "type": "sent",
+            "timestamp": message.sent_at,
+            "lead_id": lead_id,
+            "lead_name": f"{first_name or ''} {last_name or ''}".strip() or "Unknown lead",
+            "body": message.body,
+        })
+    for reply, first_name, last_name, lead_id in replies:
+        feed.append({
+            "type": "reply",
+            "timestamp": reply.received_at,
+            "lead_id": lead_id,
+            "lead_name": f"{first_name or ''} {last_name or ''}".strip() or "Unknown lead",
+            "body": reply.body,
+            "classification": reply.classification.value if reply.classification else None,
+        })
+
+    feed.sort(key=lambda item: item["timestamp"] or datetime.min, reverse=True)
+    return feed[:limit]
+
+
+@router.get("/users/{user_id}/detail")
+def get_user_detail(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Full detail view for one user: profile fields, performance metrics
+    (same numbers as the Master Dashboard, scoped to just this person),
+    and a recent activity feed. org_admin and super_admin can view any
+    user in their org; this is read-only regardless of role - editing
+    still goes through PATCH /users/{user_id} (super_admin only) above.
+    """
+    target = db.query(User).filter(
+        User.id == user_id, User.organization_id == current_user.organization_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    metrics = _advisor_metrics(db, current_user.organization_id, target)
+    activity = _recent_activity_for_advisor(db, current_user.organization_id, target.id)
+
+    return {
+        "id": target.id,
+        "email": target.email,
+        "full_name": target.full_name,
+        "role": target.role,
+        "is_active": target.is_active,
+        "must_change_password": target.must_change_password,
+        "last_login_at": target.last_login_at,
+        "metrics": metrics,
+        "recent_activity": activity,
+    }
 
 
 # ---------------------------------------------------------------------------

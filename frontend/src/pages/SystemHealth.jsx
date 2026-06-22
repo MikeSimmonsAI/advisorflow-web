@@ -1,32 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import '../styles/shared.css'
 import './SystemHealth.css'
-
-const statusCards = [
-  {
-    key: 'twilio_connected',
-    title: 'Twilio SMS',
-    description: 'Advisor SMS account SID is configured.',
-    connected: 'Ready to send advisor-owned SMS.',
-    disconnected: 'Twilio account SID is not configured.',
-  },
-  {
-    key: 'google_calendar_connected',
-    title: 'Google Calendar',
-    description: 'Bookings can sync onto the advisor calendar.',
-    connected: 'Calendar OAuth connection is active.',
-    disconnected: 'Google Calendar is not connected.',
-  },
-  {
-    key: 'microsoft_365_connected',
-    title: 'Microsoft 365 Email',
-    description: 'Outbound email can send from the advisor mailbox.',
-    connected: 'Microsoft 365 mailbox is connected.',
-    disconnected: 'Microsoft 365 is not connected.',
-  },
-]
 
 function formatDate(value) {
   if (!value) return 'Not tracked yet'
@@ -37,7 +14,8 @@ function formatDate(value) {
   }
 }
 
-function StatusCard({ card, connected }) {
+function IntegrationCard({ integration, onFix }) {
+  const connected = integration.connected
   return (
     <article className={`panel health-card ${connected ? 'health-card--online' : 'health-card--offline'}`}>
       <div className="health-card-topline">
@@ -45,25 +23,35 @@ function StatusCard({ card, connected }) {
           {connected ? '✓' : '×'}
         </div>
         <span className={`health-status-pill ${connected ? 'health-status-pill--online' : 'health-status-pill--offline'}`}>
-          {connected ? 'Connected' : 'Disconnected'}
+          {connected ? 'Connected' : 'Needs attention'}
         </span>
       </div>
-      <h2>{card.title}</h2>
-      <p>{card.description}</p>
-      <small>{connected ? card.connected : card.disconnected}</small>
+      <h2>{integration.title}</h2>
+      {connected ? (
+        <p>Working normally.</p>
+      ) : (
+        <p className="health-card-reason">{integration.reason}</p>
+      )}
+      {!connected && integration.settings_path && (
+        <button className="btn btn--secondary health-card-fix-btn" onClick={() => onFix(integration.settings_path)}>
+          {integration.key === 'ai_features' ? 'More info' : 'Fix this'}
+        </button>
+      )}
     </article>
   )
 }
 
 export default function SystemHealth() {
+  const navigate = useNavigate()
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const connectedCount = useMemo(() => {
-    if (!status) return 0
-    return statusCards.reduce((count, card) => count + (status[card.key] ? 1 : 0), 0)
-  }, [status])
+  const integrations = status?.integrations || []
+  const connectedCount = useMemo(
+    () => integrations.filter((i) => i.connected).length,
+    [integrations]
+  )
 
   async function loadStatus() {
     setLoading(true)
@@ -82,17 +70,21 @@ export default function SystemHealth() {
     loadStatus()
   }, [])
 
+  function handleFix(settingsPath) {
+    navigate(settingsPath)
+  }
+
   return (
     <div className="system-health-page">
       <header className="page-header system-health-header">
         <div>
           <p className="system-health-eyebrow">Advisor System Monitor</p>
           <h1 className="page-title">System Health</h1>
-          <p className="page-subtitle">Read-only connection status for this advisor account.</p>
+          <p className="page-subtitle">What's connected, what isn't, and how to fix it.</p>
         </div>
         <div className="panel system-health-summary">
-          <SignalPulse color={connectedCount === statusCards.length ? 'green' : 'red'} label={connectedCount === statusCards.length ? 'All systems connected' : 'Needs setup'} />
-          <strong>{loading ? '—' : `${connectedCount}/${statusCards.length}`}</strong>
+          <SignalPulse color={connectedCount === integrations.length && integrations.length > 0 ? 'green' : 'red'} label={connectedCount === integrations.length && integrations.length > 0 ? 'All systems connected' : 'Needs setup'} />
+          <strong>{loading ? '—' : `${connectedCount}/${integrations.length}`}</strong>
           <span>integrations connected</span>
         </div>
       </header>
@@ -100,8 +92,8 @@ export default function SystemHealth() {
       {error ? <div className="system-health-alert">{error}</div> : null}
 
       <section className="system-health-grid">
-        {statusCards.map((card) => (
-          <StatusCard key={card.key} card={card} connected={Boolean(status?.[card.key])} />
+        {integrations.map((integration) => (
+          <IntegrationCard key={integration.key} integration={integration} onFix={handleFix} />
         ))}
       </section>
 

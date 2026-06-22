@@ -61,6 +61,18 @@ SAMPLE_REPLY_BODIES = {
         "Please stop texting me.",
         "Remove me from this list, not interested.",
     ],
+    ReplyClassification.NOT_INTERESTED: [
+        "No thanks, we already have something in place.",
+        "Not interested at this time.",
+    ],
+    ReplyClassification.WRONG_NUMBER: [
+        "Wrong number, you have the wrong person.",
+        "I don't know what this is about.",
+    ],
+    ReplyClassification.QUESTION: [
+        "What's the price difference between the two options?",
+        "Is this something my whole family needs to be there for?",
+    ],
 }
 
 

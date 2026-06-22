@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './LeadCleanup.css'
 
@@ -24,6 +24,23 @@ export default function LeadCleanup() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  // Per-group assignment — lets an admin route an entire duplicate cluster
+  // to one advisor in a single action, same /admin/leads/reassign endpoint
+  // the main Leads page and Lead Detail page already use.
+  const currentUser = getCurrentUser()
+  const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const [assignableUsers, setAssignableUsers] = useState([])
+  const [assignTargetByGroup, setAssignTargetByGroup] = useState({})
+  const [assigningGroupKey, setAssigningGroupKey] = useState('')
+  const [assignResult, setAssignResult] = useState(null)
+
+  useEffect(() => {
+    if (!canBulkAssign) return
+    api.get('/admin/users')
+      .then((users) => setAssignableUsers(users.filter((u) => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))))
+      .catch(() => {})
+  }, [canBulkAssign])
 
   const totalPotentialLeads = useMemo(() => {
     const ids = new Set()
@@ -90,6 +107,27 @@ export default function LeadCleanup() {
       setError(err.message || 'Merge failed.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function assignGroup(group, index) {
+    const key = groupKey(group, index)
+    const targetId = assignTargetByGroup[key] || ''
+    const leadIds = group.leads.map((lead) => lead.id)
+
+    setAssigningGroupKey(key)
+    setError('')
+    setAssignResult(null)
+    try {
+      const result = await api.post('/admin/leads/reassign', {
+        lead_ids: leadIds,
+        new_assigned_to_id: targetId || null,
+      })
+      setAssignResult({ ...result, groupKey: key })
+    } catch (err) {
+      setError(err.message || 'Assignment failed.')
+    } finally {
+      setAssigningGroupKey('')
     }
   }
 
@@ -171,10 +209,43 @@ export default function LeadCleanup() {
                       <span className={`cleanup-match-pill cleanup-match-pill--${group.match_type}`}>{group.match_type.replace('_', ' ')}</span>
                       <h3>{group.match_key}</h3>
                     </div>
-                    <button className="btn btn--danger" type="button" onClick={() => mergeGroup(group, index)} disabled={busy || group.leads.length < 2}>
-                      Merge Selected
-                    </button>
+                    <div className="cleanup-group-actions">
+                      {canBulkAssign && (
+                        <>
+                          <select
+                            className="filter-select cleanup-assign-select"
+                            value={assignTargetByGroup[key] || ''}
+                            onChange={(e) => setAssignTargetByGroup((current) => ({ ...current, [key]: e.target.value }))}
+                          >
+                            <option value="">Unassigned</option>
+                            {assignableUsers.map((user) => (
+                              <option key={user.id} value={user.id}>
+                                {user.full_name} {user.role !== 'advisor' ? `(${user.role.replace('_', ' ')})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            onClick={() => assignGroup(group, index)}
+                            disabled={assigningGroupKey === key}
+                          >
+                            {assigningGroupKey === key ? 'Assigning…' : 'Assign group'}
+                          </button>
+                        </>
+                      )}
+                      <button className="btn btn--danger" type="button" onClick={() => mergeGroup(group, index)} disabled={busy || group.leads.length < 2}>
+                        Merge Selected
+                      </button>
+                    </div>
                   </div>
+
+                  {assignResult?.groupKey === key && (
+                    <div className="cleanup-alert cleanup-alert--success cleanup-group-assign-result">
+                      Assigned {assignResult.reassigned_count} lead{assignResult.reassigned_count === 1 ? '' : 's'} in this group.
+                      {assignResult.skipped_count > 0 && ` Skipped ${assignResult.skipped_count}.`}
+                    </div>
+                  )}
 
                   <div className="cleanup-lead-list">
                     {group.leads.map((lead) => (

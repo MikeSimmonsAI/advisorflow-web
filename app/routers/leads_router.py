@@ -1,7 +1,7 @@
 import os
 import shutil
 import tempfile
-from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from pydantic import BaseModel
@@ -25,7 +25,8 @@ def _is_suppressed(db: Session, lead: Lead) -> bool:
 @router.post("/upload/preview")
 def preview_upload(
     file: UploadFile = File(...),
-    source_year: Optional[int] = None,
+    source_year: Optional[int] = Form(None),
+    force_new_inquiry: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -33,6 +34,18 @@ def preview_upload(
     Step 1: advisor uploads an Excel file, we run the REAL import logic
     (tier routing, dedup, compliance flags) in dry_run mode so the preview
     numbers always match what confirm_upload will actually do.
+
+    source_year and force_new_inquiry are explicitly marked as Form(...)
+    fields, not bare params - without that marker FastAPI treats them as
+    query parameters when mixed with a File(...) upload, which silently
+    ignored the frontend's multipart form value for source_year (a real,
+    pre-existing bug found and fixed while wiring up force_new_inquiry,
+    which would have had the exact same problem).
+
+    force_new_inquiry: manual override for batches of brand-new web/cold
+    leads - tags every row as New Inquiry regardless of auto-detection
+    from a source column. See import_service.import_leads_from_excel for
+    the full reasoning.
     """
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         shutil.copyfileobj(file.file, tmp)
@@ -47,6 +60,7 @@ def preview_upload(
             source_year=source_year,
             source_filename=file.filename,
             dry_run=True,
+            force_new_inquiry=force_new_inquiry,
         )
     finally:
         os.unlink(tmp_path)
@@ -57,11 +71,12 @@ def preview_upload(
 @router.post("/upload/confirm")
 def confirm_upload(
     file: UploadFile = File(...),
-    source_year: Optional[int] = None,
+    source_year: Optional[int] = Form(None),
+    force_new_inquiry: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Step 2: advisor confirms - actually import and persist the leads."""
+    """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
@@ -74,6 +89,7 @@ def confirm_upload(
             uploading_user_id=current_user.id,
             source_year=source_year,
             source_filename=file.filename,
+            force_new_inquiry=force_new_inquiry,
         )
     finally:
         os.unlink(tmp_path)

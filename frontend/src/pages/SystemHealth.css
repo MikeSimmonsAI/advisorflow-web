@@ -54,8 +54,19 @@
 
 .system-health-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 18px;
+}
+
+.health-card-reason {
+  color: var(--signal-amber);
+}
+
+.health-card-fix-btn {
+  margin-top: auto;
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 7px 14px;
 }
 
 .health-card {

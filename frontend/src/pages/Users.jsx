@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './Users.css'
 
 export default function Users() {
+  const navigate = useNavigate()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -16,6 +18,15 @@ export default function Users() {
   const isSuperAdmin = currentUser?.role === 'super_admin'
   const [sampleDataBusy, setSampleDataBusy] = useState(false)
   const [sampleDataMessage, setSampleDataMessage] = useState('')
+
+  // Edit user (name/email/role) — super_admin only, fixes the gap where
+  // a typo'd name or wrong email had no in-app fix.
+  const [editingUserId, setEditingUserId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editRole, setEditRole] = useState('advisor')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
   function load() {
     setLoading(true)
@@ -70,6 +81,35 @@ export default function Users() {
       setJustCreated({ email: result.email, temp_password: result.temp_password, isReset: true })
     } catch (err) {
       alert(`Failed: ${err.message}`)
+    }
+  }
+
+  function startEditingUser(u) {
+    setEditingUserId(u.id)
+    setEditName(u.full_name)
+    setEditEmail(u.email)
+    setEditRole(u.role)
+    setEditError('')
+  }
+
+  async function handleSaveUserEdit(userId) {
+    setEditSaving(true)
+    setEditError('')
+    try {
+      await api.patch(`/admin/users/${userId}`, {
+        full_name: editName,
+        email: editEmail,
+        // role is only editable for advisor/org_admin accounts - the row
+        // is rendered without a role selector for super_admin (see below),
+        // so editRole will already equal the unchanged role in that case.
+        role: editRole,
+      })
+      setEditingUserId(null)
+      load()
+    } catch (err) {
+      setEditError(err.message || 'Failed to save changes.')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -175,37 +215,101 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.full_name}</td>
-                  <td className="mono">{u.email}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{u.role.replace('_', ' ')}</td>
-                  <td>
-                    {u.is_active ? (
-                      <span className="badge badge--green">Active</span>
+              {users.map((u) => {
+                const isEditingRow = editingUserId === u.id
+                return (
+                  <tr key={u.id}>
+                    {isEditingRow ? (
+                      <>
+                        <td>
+                          <input
+                            className="settings-input users-inline-input"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="settings-input users-inline-input mono"
+                            type="email"
+                            value={editEmail}
+                            onChange={(e) => setEditEmail(e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          {u.role === 'super_admin' ? (
+                            <span style={{ textTransform: 'capitalize' }}>{u.role.replace('_', ' ')}</span>
+                          ) : (
+                            <select
+                              className="settings-input users-inline-input"
+                              value={editRole}
+                              onChange={(e) => setEditRole(e.target.value)}
+                            >
+                              <option value="advisor">Advisor</option>
+                              <option value="org_admin">Org Admin</option>
+                            </select>
+                          )}
+                        </td>
+                        <td>
+                          {u.is_active ? (
+                            <span className="badge badge--green">Active</span>
+                          ) : (
+                            <span className="badge badge--neutral-dim">Deactivated</span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, flexDirection: 'column', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button className="btn btn--secondary" onClick={() => setEditingUserId(null)} disabled={editSaving}>Cancel</button>
+                              <button className="btn btn--primary" onClick={() => handleSaveUserEdit(u.id)} disabled={editSaving}>
+                                {editSaving ? 'Saving…' : 'Save'}
+                              </button>
+                            </div>
+                            {editError && <div className="compose-error">{editError}</div>}
+                          </div>
+                        </td>
+                      </>
                     ) : (
-                      <span className="badge badge--neutral-dim">Deactivated</span>
+                      <>
+                        <td>
+                          <button className="user-name-link" onClick={() => navigate(`/users/${u.id}`)}>
+                            {u.full_name}
+                          </button>
+                        </td>
+                        <td className="mono">{u.email}</td>
+                        <td style={{ textTransform: 'capitalize' }}>{u.role.replace('_', ' ')}</td>
+                        <td>
+                          {u.is_active ? (
+                            <span className="badge badge--green">Active</span>
+                          ) : (
+                            <span className="badge badge--neutral-dim">Deactivated</span>
+                          )}
+                          {u.must_change_password && u.is_active && (
+                            <span className="badge badge--amber" style={{ marginLeft: 6 }}>Pending setup</span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {isSuperAdmin && (
+                              <button className="btn btn--secondary" onClick={() => startEditingUser(u)}>Edit</button>
+                            )}
+                            {u.is_active ? (
+                              <button className="btn btn--danger" onClick={() => handleDeactivate(u.id)}>Deactivate</button>
+                            ) : (
+                              <button className="btn btn--secondary" onClick={() => handleReactivate(u.id)}>Reactivate</button>
+                            )}
+                            {isSuperAdmin && (
+                              <button className="btn btn--secondary" onClick={() => handleResetPassword(u.id, u.full_name)}>
+                                Reset password
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </>
                     )}
-                    {u.must_change_password && u.is_active && (
-                      <span className="badge badge--amber" style={{ marginLeft: 6 }}>Pending setup</span>
-                    )}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {u.is_active ? (
-                        <button className="btn btn--danger" onClick={() => handleDeactivate(u.id)}>Deactivate</button>
-                      ) : (
-                        <button className="btn btn--secondary" onClick={() => handleReactivate(u.id)}>Reactivate</button>
-                      )}
-                      {isSuperAdmin && (
-                        <button className="btn btn--secondary" onClick={() => handleResetPassword(u.id, u.full_name)}>
-                          Reset password
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

@@ -8,6 +8,9 @@ from app.models.models import User, MessageTrack
 from app.services.template_service import (
     list_all_templates_with_defaults, upsert_template, reset_template_to_default,
 )
+from app.services.template_ai_service import (
+    TemplateAIError, generate_template, rewrite_template,
+)
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -17,6 +20,30 @@ class TemplateUpdateRequest(BaseModel):
     channel: str  # "sms" or "email"
     body_template: str
     email_subject_template: Optional[str] = None
+
+
+class TemplateAIGenerateRequest(BaseModel):
+    message_track: str
+    channel: str  # "sms" or "email"
+    instruction: Optional[str] = None  # optional extra guidance for a from-scratch generation
+
+
+class TemplateAIRewriteRequest(BaseModel):
+    message_track: str
+    channel: str  # "sms" or "email"
+    current_body: str
+    current_subject: Optional[str] = None
+    instruction: str  # required - this is what makes it a rewrite, not a generate
+
+
+def _validate_track_and_channel(message_track: str, channel: str) -> MessageTrack:
+    try:
+        track_enum = MessageTrack(message_track)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid message_track: {message_track}")
+    if channel not in ("sms", "email"):
+        raise HTTPException(status_code=400, detail="channel must be 'sms' or 'email'")
+    return track_enum
 
 
 @router.get("/")
@@ -69,3 +96,42 @@ def reset_template(
 
     deleted = reset_template_to_default(db, current_user.organization_id, track_enum, channel)
     return {"reset": deleted}
+
+
+@router.post("/ai/generate")
+def ai_generate_template(
+    req: TemplateAIGenerateRequest,
+    current_user: User = Depends(require_admin),
+):
+    """
+    Generates a fresh template draft from scratch for a track+channel. The
+    admin still reviews and explicitly saves via PUT /templates/ - this only
+    fills the editor box, it never writes to the database itself.
+    """
+    track_enum = _validate_track_and_channel(req.message_track, req.channel)
+    try:
+        return generate_template(track_enum, req.channel, req.instruction)
+    except TemplateAIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.post("/ai/rewrite")
+def ai_rewrite_template(
+    req: TemplateAIRewriteRequest,
+    current_user: User = Depends(require_admin),
+):
+    """
+    Rewrites the admin's current in-progress draft per a free-text
+    instruction (e.g. "make this warmer", "shorter", "add urgency"). Like
+    generate, this only returns a new draft for the editor - it does not
+    save anything until the admin clicks Save.
+    """
+    track_enum = _validate_track_and_channel(req.message_track, req.channel)
+    if req.channel == "email" and not req.current_subject:
+        raise HTTPException(status_code=400, detail="current_subject is required when rewriting an email template")
+    try:
+        return rewrite_template(
+            track_enum, req.channel, req.current_body, req.current_subject, req.instruction,
+        )
+    except TemplateAIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))

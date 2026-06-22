@@ -144,3 +144,92 @@ def test_classify_reply_falls_back_on_malformed_json(mock_get_client):
 
     result = classify_reply("yes please")
     assert result["classification"] == "interested"  # fallback correctly catches this one too
+
+
+# --- New categories added per Mike's explicit request for a fuller
+# reclassification set: not_interested, wrong_number, question ---
+
+def test_fallback_classifies_plain_decline_as_not_interested_not_dnc():
+    """
+    Regression test for the conflation Mike specifically flagged: a plain
+    "not interested" used to fall into the same stop_keywords bucket as a
+    real legal opt-out (stop/unsubscribe). It must now be its own
+    not_interested category, distinct from dnc.
+    """
+    result = _fallback_keyword_classify("Not interested, thanks")
+    assert result["classification"] == "not_interested"
+
+
+def test_fallback_classifies_no_thanks_as_not_interested():
+    result = _fallback_keyword_classify("No thanks, we already have a plan")
+    assert result["classification"] == "not_interested"
+
+
+def test_fallback_still_classifies_actual_stop_as_dnc():
+    """The real legal opt-out language must still hit dnc, unaffected by the not_interested split."""
+    result = _fallback_keyword_classify("STOP")
+    assert result["classification"] == "dnc"
+
+
+def test_fallback_classifies_remove_me_as_dnc():
+    result = _fallback_keyword_classify("Please remove me from your list")
+    assert result["classification"] == "dnc"
+
+
+def test_contains_hard_stop_language_does_not_trigger_on_plain_not_interested():
+    """
+    The hard-override DNC check must NOT fire just because someone says
+    "not interested" - that's a decline, not a legal opt-out request.
+    """
+    assert contains_hard_stop_language("Not interested, please don't contact me again") is False
+
+
+def test_fallback_classifies_wrong_number():
+    result = _fallback_keyword_classify("Wrong number, you have the wrong person")
+    assert result["classification"] == "wrong_number"
+
+
+def test_fallback_classifies_who_is_this_as_wrong_number():
+    result = _fallback_keyword_classify("Who is this? I don't know you")
+    assert result["classification"] == "wrong_number"
+
+
+def test_fallback_classifies_genuine_question_as_question():
+    result = _fallback_keyword_classify("What's the price difference between the two options?")
+    assert result["classification"] == "question"
+
+
+@patch("app.services.reply_classification_service._get_client")
+def test_classify_reply_accepts_not_interested_from_ai(mock_get_client):
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = json.dumps({
+        "classification": "not_interested", "confidence": "high", "reasoning": "Polite decline, no opt-out language.",
+    })
+    mock_get_client.return_value.chat.completions.create.return_value = mock_response
+
+    result = classify_reply("No thanks, we're all set.")
+    assert result["classification"] == "not_interested"
+
+
+@patch("app.services.reply_classification_service._get_client")
+def test_classify_reply_accepts_wrong_number_from_ai(mock_get_client):
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = json.dumps({
+        "classification": "wrong_number", "confidence": "high", "reasoning": "Recipient says this isn't them.",
+    })
+    mock_get_client.return_value.chat.completions.create.return_value = mock_response
+
+    result = classify_reply("Sorry, wrong number")
+    assert result["classification"] == "wrong_number"
+
+
+@patch("app.services.reply_classification_service._get_client")
+def test_classify_reply_accepts_question_from_ai(mock_get_client):
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = json.dumps({
+        "classification": "question", "confidence": "medium", "reasoning": "Lead is asking about pricing.",
+    })
+    mock_get_client.return_value.chat.completions.create.return_value = mock_response
+
+    result = classify_reply("How much does this cost?")
+    assert result["classification"] == "question"

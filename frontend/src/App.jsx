@@ -10,6 +10,7 @@ import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
 import Admin from './pages/Admin'
 import Users from './pages/Users'
+import UserDetail from './pages/UserDetail'
 import Compliance from './pages/Compliance'
 import AuditLog from './pages/AuditLog'
 import SystemHealth from './pages/SystemHealth'
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/email-queue" element={<ProtectedRoute><EmailQueue /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
+        <Route path="/users/:userId" element={<ProtectedRoute><UserDetail /></ProtectedRoute>} />
         <Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
         <Route path="/audit-log" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
         <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
