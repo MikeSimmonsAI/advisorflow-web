@@ -80,3 +80,11 @@
   background: var(--signal-red-dim);
   color: var(--signal-red);
 }
+
+@media (max-width: 768px) {
+  .settings-grid,
+  .settings-row,
+  .settings-actions {
+    grid-template-columns: 1fr;
+  }
+}

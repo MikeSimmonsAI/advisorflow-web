@@ -11,6 +11,10 @@ import EmailQueue from './pages/EmailQueue'
 import Admin from './pages/Admin'
 import Users from './pages/Users'
 import Compliance from './pages/Compliance'
+import AuditLog from './pages/AuditLog'
+import SystemHealth from './pages/SystemHealth'
+import Campaigns from './pages/Campaigns'
+import LeadCleanup from './pages/LeadCleanup'
 import Settings from './pages/Settings'
 import Templates from './pages/Templates'
 import { getCurrentUser } from './api/client'
@@ -48,6 +52,10 @@ export default function App() {
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
         <Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
+        <Route path="/audit-log" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
+        <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
+        <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
+        <Route path="/lead-cleanup" element={<ProtectedRoute><LeadCleanup /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute><Templates /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

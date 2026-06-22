@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Form
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Form, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, Reply, Message
+from app.models.models import User, Lead, Reply, Message, ReplyClassification, BookingLink
 from app.services.sms_service import send_sms, send_batch
 
 router = APIRouter(prefix="/sms", tags=["sms"])
@@ -25,6 +27,71 @@ class BatchSendRequest(BaseModel):
     lead_ids: list[str]
     template: str
     include_booking_link: bool = True
+
+
+class ReclassifyReplyRequest(BaseModel):
+    classification: ReplyClassification
+
+
+class DraftReplyResponse(BaseModel):
+    suggested_reply: str
+    booking_url: Optional[str] = None
+    booking_link_id: Optional[str] = None
+    source: str
+
+
+def _get_org_reply_or_404(db: Session, reply_id: str, current_user: User) -> Reply:
+    """
+    Fetch a reply only if the parent lead belongs to the current user's organization.
+
+    Deliberately checks organization scope here instead of trusting a reply id alone;
+    reply ids are opaque UUIDs, but tenant boundaries still need to be enforced on
+    every mutation endpoint.
+    """
+    reply = (
+        db.query(Reply)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(Reply.id == reply_id)
+        .filter(Lead.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not reply:
+        raise HTTPException(status_code=404, detail="Reply not found")
+    return reply
+
+
+
+def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: User) -> Lead:
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
+
+
+@router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
+def draft_reply_for_lead(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AI-assisted one-on-one reply drafting for Lead Detail only.
+
+    This endpoint is deliberately non-blocking from the user's point of view:
+    missing OpenAI key, API errors, malformed model output, or any other AI
+    failure all fall back to a safe, editable reply instead of surfacing a 500.
+    It also reuses the real booking-link helper from sms_service.py and only
+    creates a new link when the lead does not already have one.
+    """
+    lead = _get_lead_for_current_org_or_404(db, lead_id, current_user)
+
+    from app.services.draft_reply_service import draft_reply
+
+    result = draft_reply(db, lead, current_user)
+    return result
 
 
 @router.post("/send")
@@ -148,6 +215,80 @@ def inbound_webhook(
             pass  # never let a notification failure break the Twilio webhook response
 
     return {"status": "received", "is_hot": is_hot, "classification": classification.value}
+
+
+@router.patch("/replies/{reply_id}/mark-reviewed")
+def mark_reply_reviewed(
+    reply_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    reply = _get_org_reply_or_404(db, reply_id, current_user)
+    reply.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(reply)
+    return reply
+
+
+@router.patch("/replies/{reply_id}/reclassify")
+def reclassify_reply(
+    reply_id: str,
+    req: ReclassifyReplyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    reply = _get_org_reply_or_404(db, reply_id, current_user)
+    reply.classification = req.classification
+    reply.is_hot = req.classification == ReplyClassification.INTERESTED
+    reply.classification_confidence = "manual"
+    reply.classification_reasoning = f"Manually reclassified by {current_user.full_name}"
+    db.commit()
+    db.refresh(reply)
+    return reply
+
+
+@router.get("/replies/activity-by-day")
+def reply_activity_by_day(
+    days: int = Query(14, ge=1, le=60),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Real reply-activity series for the Overview chart.
+
+    Counts inbound Reply rows grouped by received date for leads owned by the
+    logged-in advisor. Empty days are returned with count=0 so the chart never
+    has to invent data client-side.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_date = (now.date() - timedelta(days=days - 1))
+    start_at = datetime.combine(start_date, datetime.min.time())
+
+    replies = (
+        db.query(Reply.received_at)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+            Reply.received_at.isnot(None),
+            Reply.received_at >= start_at,
+        )
+        .all()
+    )
+
+    counts_by_date = {
+        (start_date + timedelta(days=offset)).isoformat(): 0
+        for offset in range(days)
+    }
+    for (received_at,) in replies:
+        key = received_at.date().isoformat()
+        if key in counts_by_date:
+            counts_by_date[key] += 1
+
+    return [
+        {"date": date_key, "count": counts_by_date[date_key]}
+        for date_key in sorted(counts_by_date.keys())
+    ]
 
 
 @router.get("/replies")

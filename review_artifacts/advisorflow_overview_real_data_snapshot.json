@@ -1,0 +1,125 @@
+{
+  "source": "running local AdvisorFlow FastAPI endpoints",
+  "captured_at": "2026-06-22T01:25:04.354327Z",
+  "endpoints": {
+    "/leads/": "used for top stat cards",
+    "/sms/replies?needs_attention=true": "used for hot/attention stat",
+    "/leads/daily-briefing": "used for Today briefing",
+    "/sms/replies/activity-by-day?days=14": "used for Reply activity chart",
+    "/leads/engagement-breakdown": "used for Engagement chart",
+    "/cadence/health-summary": "used for Cadence health gauge",
+    "/leads/status-funnel": "used for Status funnel"
+  },
+  "daily_briefing": {
+    "replies_needing_attention": 24,
+    "cadence_touches_due_today": 2,
+    "leads_imported_last_24h": 8,
+    "bookings_last_7_days": 3
+  },
+  "reply_activity_by_day": [
+    {
+      "date": "2026-06-09",
+      "count": 1
+    },
+    {
+      "date": "2026-06-10",
+      "count": 2
+    },
+    {
+      "date": "2026-06-11",
+      "count": 4
+    },
+    {
+      "date": "2026-06-12",
+      "count": 4
+    },
+    {
+      "date": "2026-06-13",
+      "count": 1
+    },
+    {
+      "date": "2026-06-14",
+      "count": 2
+    },
+    {
+      "date": "2026-06-15",
+      "count": 4
+    },
+    {
+      "date": "2026-06-16",
+      "count": 3
+    },
+    {
+      "date": "2026-06-17",
+      "count": 1
+    },
+    {
+      "date": "2026-06-18",
+      "count": 1
+    },
+    {
+      "date": "2026-06-19",
+      "count": 3
+    },
+    {
+      "date": "2026-06-20",
+      "count": 3
+    },
+    {
+      "date": "2026-06-21",
+      "count": 2
+    },
+    {
+      "date": "2026-06-22",
+      "count": 1
+    }
+  ],
+  "engagement_breakdown": {
+    "hot": 7,
+    "warm": 6,
+    "cold": 3,
+    "unknown": 4
+  },
+  "cadence_health": {
+    "counts": {
+      "active": 5,
+      "paused": 1,
+      "completed": 1,
+      "stopped_replied": 1,
+      "stopped_booked": 0,
+      "stopped_dnc": 0
+    },
+    "active_count": 5,
+    "healthy_active_count": 3,
+    "overdue_active_count": 2,
+    "health_score": 60.0,
+    "formula": "healthy_active_count / active_count * 100; active cadence is healthy when next_touch_due_at is not overdue"
+  },
+  "status_funnel": [
+    {
+      "status": "new",
+      "label": "New",
+      "count": 4
+    },
+    {
+      "status": "sent",
+      "label": "Sent",
+      "count": 5
+    },
+    {
+      "status": "replied",
+      "label": "Replied",
+      "count": 2
+    },
+    {
+      "status": "hot",
+      "label": "Hot",
+      "count": 4
+    },
+    {
+      "status": "booked",
+      "label": "Booked",
+      "count": 3
+    }
+  ]
+}

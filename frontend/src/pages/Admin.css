@@ -36,7 +36,7 @@
 
 .search-input {
   flex: 1;
-  background: rgba(7, 14, 31, 0.7);
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 9px 12px;
@@ -51,4 +51,140 @@
   font-size: 12px;
   color: var(--text-tertiary);
   white-space: nowrap;
+}
+
+.metrics-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  background: linear-gradient(150deg, rgba(11, 23, 50, 0.86), rgba(4, 9, 22, 0.78));
+  box-shadow: var(--panel-shadow);
+}
+
+.metric-card::after {
+  content: '';
+  position: absolute;
+  inset: auto 16px 0 16px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--signal-blue), transparent);
+  opacity: 0.65;
+}
+
+.metric-card--hot::after { background: linear-gradient(90deg, var(--signal-red), transparent); }
+.metric-card--booked::after { background: linear-gradient(90deg, var(--signal-green), transparent); }
+.metric-card--dnc::after { background: linear-gradient(90deg, var(--signal-amber), transparent); }
+
+.metric-card span,
+.metric-card small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.metric-card strong {
+  display: block;
+  margin: 7px 0 5px;
+  font-family: var(--font-display);
+  font-size: 26px;
+  color: var(--text-primary);
+  letter-spacing: -0.04em;
+}
+
+.metrics-panel {
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.metrics-table {
+  min-width: 920px;
+}
+
+.funnel-panel {
+  margin-bottom: 20px;
+}
+
+.funnel-bars {
+  display: grid;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.funnel-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+
+.funnel-row-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.funnel-track {
+  height: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 100px;
+  background: var(--bg-field);
+  overflow: hidden;
+}
+
+.funnel-fill {
+  height: 100%;
+  border-radius: 100px;
+  background: linear-gradient(90deg, var(--signal-blue), var(--signal-green));
+  box-shadow: var(--glow-blue-sm);
+  transition: width 0.24s ease;
+}
+
+@media (max-width: 720px) {
+  .funnel-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-tabs,
+  .filter-bar,
+  .bulk-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tab {
+    justify-content: center;
+  }
+
+  .metrics-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics-panel,
+  .data-table-wrap,
+  .table-wrap {
+    overflow-x: visible;
+  }
+
+  .metrics-table {
+    min-width: 0;
+  }
+
+  .funnel-row {
+    grid-template-columns: 1fr;
+  }
 }

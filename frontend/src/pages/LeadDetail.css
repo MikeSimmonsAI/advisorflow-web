@@ -46,7 +46,7 @@
 }
 
 .timeline-bubble--inbound {
-  background: rgba(8, 17, 39, 0.6);
+  background: var(--bg-field-soft);
   align-self: flex-start;
 }
 
@@ -70,7 +70,7 @@
 }
 
 .compose-textarea {
-  background: rgba(7, 14, 31, 0.7);
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 12px;
@@ -134,3 +134,113 @@
 }
 
 .detail-table tr:last-child td { border-bottom: none; }
+
+
+
+.lead-detail-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lead-assignment-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-field-soft);
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.lead-assignment-control span {
+  color: var(--text-tertiary);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lead-assignment-control select {
+  min-width: 170px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text-primary);
+  padding: 7px 9px;
+  font-family: var(--font-body);
+  font-size: 12px;
+}
+
+.lead-assignment-control select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.lead-assignment-error {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .lead-detail-grid,
+  .lead-detail-header,
+  .lead-detail-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-table,
+  .detail-table tbody,
+  .detail-table tr,
+  .detail-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .lead-detail-header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .lead-assignment-control {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .lead-assignment-control select {
+    width: 100%;
+  }
+
+}
+
+.compose-suggestion-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-field-soft);
+  padding: 10px;
+}
+
+.compose-suggestion-hint {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .compose-suggestion-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .compose-suggestion-hint {
+    text-align: left;
+  }
+}

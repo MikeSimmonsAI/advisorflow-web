@@ -26,6 +26,14 @@
   --text-secondary: #9fb0cf;
   --text-tertiary: #5e6f8f;
 
+  --text-inverse: #061018;
+  --text-danger-soft: #ffdce6;
+  --bg-field: rgba(7, 14, 31, 0.7);
+  --bg-field-soft: rgba(8, 17, 39, 0.6);
+  --bg-row: rgba(8, 16, 36, 0.52);
+  --bg-row-hover: rgba(16, 32, 68, 0.72);
+  --border-danger: rgba(255, 77, 126, 0.34);
+
   --font-display: 'Space Grotesk', 'Inter', sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
@@ -37,11 +45,18 @@
 
   --glow-blue-sm: 0 0 14px rgba(47, 182, 255, 0.28);
   --glow-blue-md: 0 0 24px rgba(47, 182, 255, 0.30);
+  --glow-blue-lg: 0 0 52px rgba(47, 182, 255, 0.34);
   --glow-purple-md: 0 0 26px rgba(157, 109, 255, 0.26);
   --glow-green-sm: 0 0 14px rgba(30, 240, 168, 0.26);
+  --glow-green-md: 0 0 30px rgba(30, 240, 168, 0.30);
   --glow-red-sm: 0 0 14px rgba(255, 77, 126, 0.26);
+  --glow-red-md: 0 0 30px rgba(255, 77, 126, 0.30);
+  --glow-amber-md: 0 0 30px rgba(255, 178, 56, 0.28);
   --panel-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --panel-shadow-strong: 0 34px 110px rgba(0, 0, 0, 0.58), 0 0 42px rgba(47, 182, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --corner-bracket-size: 34px;
 }
+
 
 * {
   box-sizing: border-box;
@@ -55,7 +70,7 @@ html, body {
     radial-gradient(circle at 14% 0%, rgba(47, 182, 255, 0.16), transparent 30%),
     radial-gradient(circle at 100% 14%, rgba(157, 109, 255, 0.14), transparent 28%),
     radial-gradient(circle at 50% 100%, rgba(30, 240, 168, 0.06), transparent 36%),
-    linear-gradient(150deg, #02040b 0%, #050e22 48%, #03060f 100%);
+    linear-gradient(150deg, var(--bg-base) 0%, var(--bg-panel) 48%, var(--bg-base) 100%);
   color: var(--text-primary);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;

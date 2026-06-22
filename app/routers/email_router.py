@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -37,12 +38,33 @@ def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_
 
 
 @router.get("/queue")
-def email_only_queue(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Leads with no phone, queued for email outreach, not yet emailed."""
-    leads = db.query(Lead).filter(
+def email_only_queue(
+    search: str | None = Query(default=None, description="Optional partial name or email lookup."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Leads routed to email outreach for the logged-in advisor.
+
+    Email-only leads can still have a phone number on file from the raw CRM
+    import, so keep `phone` in the response and let the UI display it when
+    present. Search is intentionally scoped after org/advisor/channel filters.
+    """
+    query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
         Lead.contact_channel == "email_only",
         Lead.status == "new",
-    ).all()
-    return leads
+    )
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                Lead.first_name.ilike(term),
+                Lead.last_name.ilike(term),
+                Lead.email.ilike(term),
+            )
+        )
+
+    return query.order_by(Lead.created_at.desc(), Lead.last_name.asc(), Lead.first_name.asc()).all()

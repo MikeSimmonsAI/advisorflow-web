@@ -292,3 +292,56 @@ def test_list_unassigned_leads_returns_only_pool_leads(client, admin_auth_header
     ids = [l["id"] for l in response.json()]
     assert unassigned_lead.id in ids
     assert assigned_lead.id not in ids
+
+
+def test_lead_detail_reassign_uses_existing_single_lead_endpoint(client, admin_auth_headers, db_session, sample_org, sample_advisor, second_advisor):
+    """
+    The Lead Detail page posts a single lead ID to the same /admin/leads/reassign
+    endpoint used by the Master Dashboard unassigned-pool flow. This confirms the
+    existing endpoint cleanly supports that second entry point without a wrapper.
+    """
+    lead = Lead(
+        organization_id=sample_org.id,
+        assigned_to_id=sample_advisor.id,
+        first_name="Detail",
+        last_name="Reassign",
+        phone="12145559009",
+    )
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.post("/admin/leads/reassign", json={
+        "lead_ids": [lead.id],
+        "new_assigned_to_id": second_advisor.id,
+    }, headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "reassigned_count": 1,
+        "skipped_count": 0,
+        "skipped_ids": [],
+    }
+    db_session.refresh(lead)
+    assert lead.assigned_to_id == second_advisor.id
+
+
+def test_plain_advisor_cannot_call_lead_detail_reassign_endpoint_directly(client, auth_headers, db_session, sample_org, sample_advisor, second_advisor):
+    """Even if a non-admin manually calls the endpoint used by Lead Detail, require_admin blocks it."""
+    lead = Lead(
+        organization_id=sample_org.id,
+        assigned_to_id=sample_advisor.id,
+        first_name="Advisor",
+        last_name="Blocked",
+        phone="12145559010",
+    )
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.post("/admin/leads/reassign", json={
+        "lead_ids": [lead.id],
+        "new_assigned_to_id": second_advisor.id,
+    }, headers=auth_headers)
+
+    assert response.status_code == 403
+    db_session.refresh(lead)
+    assert lead.assigned_to_id == sample_advisor.id

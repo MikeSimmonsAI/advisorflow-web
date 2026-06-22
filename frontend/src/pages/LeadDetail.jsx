@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
 import OutcomeTracker from '../components/OutcomeTracker'
@@ -17,10 +17,16 @@ export default function LeadDetail() {
   const [messageText, setMessageText] = useState('')
   const [includeBookingLink, setIncludeBookingLink] = useState(true)
   const [sending, setSending] = useState(false)
+  const [suggestingReply, setSuggestingReply] = useState(false)
   const [sendError, setSendError] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const currentUser = getCurrentUser()
+  const canReassignLead = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const [assignableUsers, setAssignableUsers] = useState([])
+  const [assignmentSaving, setAssignmentSaving] = useState(false)
+  const [assignmentError, setAssignmentError] = useState('')
 
   function load() {
     setLoading(true)
@@ -31,6 +37,27 @@ export default function LeadDetail() {
   }
 
   useEffect(() => { load() }, [leadId])
+
+  useEffect(() => {
+    if (!canReassignLead) return
+    api.get('/admin/users')
+      .then((users) => setAssignableUsers(users.filter((u) => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))))
+      .catch((err) => setAssignmentError(err.message))
+  }, [canReassignLead])
+
+  async function handleSuggestReply() {
+    setSuggestingReply(true)
+    setSendError('')
+    try {
+      const draft = await api.post(`/sms/draft-reply/${leadId}`, {})
+      setMessageText(draft.suggested_reply || '')
+      if (draft.booking_url) setIncludeBookingLink(false)
+    } catch (err) {
+      setSendError(err.message)
+    } finally {
+      setSuggestingReply(false)
+    }
+  }
 
   async function handleSend() {
     if (!messageText.trim()) return
@@ -77,6 +104,23 @@ export default function LeadDetail() {
     }
   }
 
+  async function handleAssignmentChange(event) {
+    const newAssignedToId = event.target.value || null
+    setAssignmentSaving(true)
+    setAssignmentError('')
+    try {
+      await api.post('/admin/leads/reassign', {
+        lead_ids: [leadId],
+        new_assigned_to_id: newAssignedToId,
+      })
+      load()
+    } catch (err) {
+      setAssignmentError(err.message)
+    } finally {
+      setAssignmentSaving(false)
+    }
+  }
+
   if (loading) return <div className="empty-state">Loading lead…</div>
   if (!data) return <div className="empty-state">Couldn't load this lead.</div>
 
@@ -94,11 +138,30 @@ export default function LeadDetail() {
           <h1 className="page-title">{lead.first_name} {lead.last_name}</h1>
           <p className="page-subtitle mono">{lead.phone || lead.email || 'No contact info'}</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="lead-detail-header-actions">
           <TierBadge tier={lead.tier} />
           <StatusBadge status={lead.status} />
+          {canReassignLead && (
+            <label className="lead-assignment-control">
+              <span>Assigned to</span>
+              <select
+                value={lead.assigned_to_id || ''}
+                onChange={handleAssignmentChange}
+                disabled={assignmentSaving}
+              >
+                <option value="">Unassigned</option>
+                {assignableUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.full_name} {user.role !== 'advisor' ? `(${user.role.replace('_', ' ')})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </header>
+
+      {assignmentError && <div className="compose-error lead-assignment-error">{assignmentError}</div>}
 
       <div className="detail-grid">
         <div>
@@ -129,6 +192,17 @@ export default function LeadDetail() {
               </div>
             ) : (
               <div className="compose-box">
+                <div className="compose-suggestion-row">
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleSuggestReply}
+                    disabled={suggestingReply}
+                  >
+                    {suggestingReply ? 'Drafting…' : 'Suggest reply'}
+                  </button>
+                  <span className="compose-suggestion-hint">AI fills the box. You still edit and send manually.</span>
+                </div>
                 <textarea
                   className="compose-textarea"
                   placeholder={`Hi ${lead.first_name || 'there'}, this is...`}

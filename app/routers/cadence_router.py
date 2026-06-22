@@ -1,8 +1,9 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin
-from app.models.models import User, Lead, CadenceState
+from app.models.models import User, Lead, CadenceState, CadenceStatus
 from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
 )
@@ -51,6 +52,57 @@ def run_due(db: Session = Depends(get_db), current_user: User = Depends(require_
 @router.get("/summary")
 def cadence_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return get_cadence_summary(db, current_user.organization_id)
+
+
+@router.get("/health-summary")
+def cadence_health_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped cadence health for the Overview gauge.
+
+    Formula: health_score = healthy_active_count / active_count * 100.
+    An active cadence is considered healthy when next_touch_due_at is not set
+    (nothing scheduled yet, so nothing can be overdue) OR is not yet due at
+    request time. If there are no active cadences, the score is 0 rather than
+    a fictional perfect score.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    states = (
+        db.query(CadenceState)
+        .join(Lead, CadenceState.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+        )
+        .all()
+    )
+
+    counts = {status.value: 0 for status in CadenceStatus}
+    active_count = 0
+    healthy_active_count = 0
+    overdue_active_count = 0
+
+    for state in states:
+        status_key = state.status.value if state.status else "unknown"
+        if status_key in counts:
+            counts[status_key] += 1
+        if state.status == CadenceStatus.ACTIVE:
+            active_count += 1
+            if state.next_touch_due_at is None or state.next_touch_due_at >= now:
+                healthy_active_count += 1
+            else:
+                overdue_active_count += 1
+
+    health_score = round((healthy_active_count / active_count) * 100, 2) if active_count else 0
+
+    return {
+        "counts": counts,
+        "active_count": active_count,
+        "healthy_active_count": healthy_active_count,
+        "overdue_active_count": overdue_active_count,
+        "health_score": health_score,
+        "formula": "healthy_active_count / active_count * 100; active cadence is healthy when next_touch_due_at is unset or not yet due",
+    }
 
 
 @router.get("/active")

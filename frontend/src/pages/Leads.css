@@ -3,7 +3,7 @@
 .upload-row { display: flex; gap: 12px; margin-bottom: 6px; }
 
 .year-input, .file-input, .search-input, .filter-select, .tier-select {
-  background: rgba(7, 14, 31, 0.7);
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 9px 12px;
@@ -73,7 +73,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(8, 17, 39, 0.6);
+  background: var(--bg-field-soft);
   border: 1px solid var(--border-subtle);
   border-radius: 100px;
   padding: 4px 10px 4px 4px;
@@ -165,7 +165,7 @@
 }
 
 .compose-textarea {
-  background: rgba(7, 14, 31, 0.7);
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 12px;
@@ -202,7 +202,7 @@
 }
 
 .settings-help code {
-  background: rgba(7, 14, 31, 0.8);
+  background: var(--bg-field);
   padding: 1px 5px;
   border-radius: 4px;
   font-family: var(--font-mono);
@@ -221,3 +221,32 @@
 }
 
 .back-link:hover { color: var(--text-primary); }
+
+@media (max-width: 768px) {
+  .upload-row,
+  .preview-actions,
+  .leads-tabs,
+  .filter-bar,
+  .bulk-bar,
+  .compose-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .year-input,
+  .file-input,
+  .search-input,
+  .filter-select,
+  .tier-select {
+    width: 100%;
+  }
+
+  .preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap,
+  .leads-table-wrap {
+    overflow-x: visible;
+  }
+}

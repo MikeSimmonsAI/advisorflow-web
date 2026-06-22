@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { getCurrentUser, logout } from '../api/client'
 import SignalPulse from './SignalPulse'
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/replies', label: 'Replies', icon: 'message' },
   { to: '/cadence', label: 'Cadence', icon: 'repeat' },
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
+  { to: '/system-health', label: 'System Health', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -17,7 +19,10 @@ const ADMIN_NAV_ITEMS = [
   { to: '/admin', label: 'Master Dashboard', icon: 'shield' },
   { to: '/users', label: 'Users', icon: 'user-plus' },
   { to: '/templates', label: 'Templates', icon: 'file-text' },
+  { to: '/campaigns', label: 'Campaigns', icon: 'target' },
+  { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
   { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
+  { to: '/audit-log', label: 'Audit Log', icon: 'activity' },
 ]
 
 function Icon({ name }) {
@@ -31,7 +36,9 @@ function Icon({ name }) {
     shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
     'shield-check': <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></>,
     'file-text': <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8" />,
-    'user-plus': <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6" />
+    'user-plus': <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6" />,
+    target: <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></>,
+    activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -43,6 +50,11 @@ function Icon({ name }) {
 export default function Layout({ children }) {
   const user = getCurrentUser()
   const navigate = useNavigate()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  function closeSidebar() {
+    setSidebarOpen(false)
+  }
 
   function handleLogout() {
     logout()
@@ -50,11 +62,29 @@ export default function Layout({ children }) {
   }
 
   return (
-    <div className="layout">
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
+      <button
+        type="button"
+        className="mobile-menu-btn"
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Open navigation menu"
+      >
+        <span />
+        <span />
+        <span />
+      </button>
+      <button
+        type="button"
+        className="sidebar-backdrop"
+        onClick={closeSidebar}
+        aria-label="Close navigation menu"
+      />
+
       <aside className="sidebar">
         <div className="sidebar-brand">
           <SignalPulse color="blue" size={9} />
           <span className="brand-mark">Advisor<span className="brand-accent">Flow</span></span>
+          <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close navigation menu">×</button>
         </div>
 
         <nav className="sidebar-nav">
@@ -63,6 +93,7 @@ export default function Layout({ children }) {
               key={item.to}
               to={item.to}
               className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+              onClick={closeSidebar}
             >
               <Icon name={item.icon} />
               {item.label}
@@ -77,6 +108,7 @@ export default function Layout({ children }) {
                   key={item.to}
                   to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                  onClick={closeSidebar}
                 >
                   <Icon name={item.icon} />
                   {item.label}

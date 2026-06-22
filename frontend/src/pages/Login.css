@@ -79,7 +79,7 @@
 
 .login-submit {
   background: var(--signal-blue);
-  color: #0a0e14;
+  color: var(--text-inverse);
   font-weight: 600;
   font-size: 14px;
   border: none;
@@ -96,4 +96,15 @@
 .login-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .login-page {
+    padding: 18px;
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 100%;
+  }
 }

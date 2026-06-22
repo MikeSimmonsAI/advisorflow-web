@@ -411,6 +411,56 @@ class SuppressionEntry(Base):
     )
 
 
+
+
+# ---------------------------------------------------------------------------
+# AuditLogEntry - immutable admin/security activity ledger.
+# Records who did what, to what object, inside which organization.
+# This is intentionally generic so routers/services can log sensitive
+# actions without creating a new table for every event type.
+# ---------------------------------------------------------------------------
+class AuditLogEntry(Base):
+    __tablename__ = "audit_log_entries"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    actor_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    action = Column(String, nullable=False)  # e.g. "lead_reassigned", "password_reset"
+    target_type = Column(String, nullable=False)  # e.g. "lead", "user", "suppression_entry"
+    target_id = Column(String, nullable=False)
+    details = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_audit_log_org_created_at", "organization_id", "created_at"),
+        Index("ix_audit_log_org_action", "organization_id", "action"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Campaign - saved admin lead filter plus optional message-track assignment.
+# Used by the Campaign Builder to preview and apply cohort-level track/cadence
+# changes without adding new Lead fields or rewriting the import pipeline.
+# Filter criteria is stored as JSON text for portability with the current
+# SQLite test/dev setup and Postgres production target.
+# ---------------------------------------------------------------------------
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    name = Column(String, nullable=False)
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=False)
+    filter_criteria = Column(Text, nullable=False)
+    message_track = Column(SAEnum(MessageTrack), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_campaigns_org_created_at", "organization_id", "created_at"),
+    )
+
 # ---------------------------------------------------------------------------
 # CadenceState - tracks a lead's position in the 9-touch re-engagement
 # cadence over 60 days. One row per lead (1:1). The scheduler job reads

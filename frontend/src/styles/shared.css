@@ -29,13 +29,28 @@
 
 .panel {
   position: relative;
-  background: linear-gradient(150deg, rgba(11, 23, 50, 0.82), rgba(4, 9, 22, 0.78)), var(--bg-panel);
+  background:
+    linear-gradient(150deg, rgba(11, 23, 50, 0.88), rgba(4, 9, 22, 0.80)),
+    var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: 22px;
-  box-shadow: var(--panel-shadow);
-  backdrop-filter: blur(16px) saturate(130%);
+  box-shadow: var(--panel-shadow-strong);
+  backdrop-filter: blur(18px) saturate(145%);
   overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 0%, var(--signal-blue-dim), transparent 34%),
+    radial-gradient(circle at 100% 100%, var(--signal-green-dim), transparent 30%);
+  opacity: 0.38;
 }
 
 .panel::after {
@@ -43,13 +58,24 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 36px;
-  height: 36px;
+  width: var(--corner-bracket-size);
+  height: var(--corner-bracket-size);
   border-top: 1px solid var(--border-strong);
   border-right: 1px solid var(--border-strong);
   border-radius: 0 var(--radius-lg) 0 0;
   pointer-events: none;
-  opacity: 0.42;
+  opacity: 0.64;
+  box-shadow: 8px -8px 22px rgba(47, 182, 255, 0.12);
+}
+
+.panel:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--panel-shadow-strong), var(--glow-blue-md);
+}
+
+.panel > * {
+  position: relative;
+  z-index: 1;
 }
 
 .panel-header {
@@ -74,9 +100,10 @@
   font-size: 12px;
   color: var(--signal-blue);
   background: var(--signal-blue-dim);
-  border: 1px solid rgba(47, 182, 255, 0.28);
+  border: 1px solid var(--border-strong);
   padding: 3px 10px;
   border-radius: 100px;
+  box-shadow: var(--glow-blue-sm);
 }
 
 .empty-state {
@@ -102,14 +129,14 @@
 
 .btn--primary {
   background: linear-gradient(120deg, var(--signal-blue), var(--signal-purple));
-  color: #061018;
+  color: var(--text-inverse);
   box-shadow: var(--glow-blue-sm);
 }
 .btn--primary:hover { box-shadow: var(--glow-blue-md); }
 .btn--primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
 
 .btn--secondary {
-  background: rgba(8, 17, 39, 0.7);
+  background: var(--bg-field);
   color: var(--text-primary);
   border-color: var(--border-strong);
 }
@@ -146,7 +173,7 @@ table.data-table td {
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  background: rgba(8, 16, 36, 0.46);
+  background: var(--bg-row);
 }
 
 table.data-table td:first-child {
@@ -160,8 +187,8 @@ table.data-table td:last-child {
 }
 
 table.data-table tr:hover td {
-  background: rgba(20, 40, 84, 0.6);
-  border-color: rgba(47, 182, 255, 0.32);
+  background: var(--bg-row-hover);
+  border-color: var(--border-strong);
 }
 
 .mono {
@@ -180,4 +207,144 @@ table.data-table tr:hover td {
 .run-result strong {
   color: var(--signal-blue);
   font-weight: 700;
+}
+
+/* Shared page shell - intentionally not wired into existing pages yet.
+   Usage:
+   <PageShell
+     eyebrow="Command Center"
+     title="Today's Work"
+     subtitle="Priority actions for the active advisor."
+     action={<button className="btn btn--primary">Refresh</button>}
+   >
+     ...page content...
+   </PageShell>
+*/
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-shell__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.page-shell__eyebrow {
+  margin: 0 0 8px;
+  color: var(--signal-blue);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.page-shell__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.page-shell__subtitle {
+  max-width: 720px;
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.page-shell__action {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .page-header,
+  .panel-header,
+  .page-shell__header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .page-title,
+  .page-shell__title {
+    font-size: 26px;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .run-result {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  table.data-table {
+    min-width: 0;
+    border-spacing: 0 10px;
+  }
+
+  table.data-table thead {
+    display: none;
+  }
+
+  table.data-table,
+  table.data-table tbody,
+  table.data-table tr,
+  table.data-table td {
+    display: block;
+    width: 100%;
+  }
+
+  table.data-table tr {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-row);
+    overflow: hidden;
+  }
+
+  table.data-table td,
+  table.data-table td:first-child,
+  table.data-table td:last-child {
+    border: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  table.data-table td:last-child {
+    border-bottom: 0;
+  }
+
+  table.data-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  table.data-table td:not([data-label])::before {
+    content: '';
+    display: none;
+  }
 }

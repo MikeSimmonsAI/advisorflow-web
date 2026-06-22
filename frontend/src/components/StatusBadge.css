@@ -17,4 +17,4 @@
 .badge--red { background: var(--signal-red-dim); color: var(--signal-red); }
 .badge--amber { background: var(--signal-amber-dim); color: var(--signal-amber); }
 .badge--neutral { background: rgba(159, 176, 207, 0.10); color: var(--text-secondary); border-color: var(--border-strong); }
-.badge--neutral-dim { background: rgba(8, 17, 39, 0.6); color: var(--text-tertiary); border-color: var(--border-subtle); }
+.badge--neutral-dim { background: var(--bg-field-soft); color: var(--text-tertiary); border-color: var(--border-subtle); }

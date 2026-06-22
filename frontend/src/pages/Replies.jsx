@@ -12,6 +12,13 @@ const CLASSIFICATION_CONFIG = {
   neutral: { label: 'Neutral', color: 'neutral' },
 }
 
+const CLASSIFICATION_OPTIONS = [
+  { value: 'interested', label: 'Interested' },
+  { value: 'callback', label: 'Callback' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'dnc', label: 'DNC' },
+]
+
 export default function Replies() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -23,13 +30,53 @@ export default function Replies() {
     searchParams.get('needs_attention') === 'true' || searchParams.get('hot_only') === 'true'
   )
   const [loading, setLoading] = useState(true)
+  const [actionBusyId, setActionBusyId] = useState(null)
+  const [error, setError] = useState('')
 
-  useEffect(() => {
+  function loadReplies() {
     setLoading(true)
+    setError('')
     api.get(`/sms/replies${needsAttentionOnly ? '?needs_attention=true' : ''}`)
       .then(setReplies)
+      .catch((err) => setError(err.message || 'Could not load replies.'))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadReplies()
   }, [needsAttentionOnly])
+
+  function updateReplyInState(updatedReply) {
+    setReplies((current) =>
+      current.map((reply) => (reply.id === updatedReply.id ? { ...reply, ...updatedReply } : reply))
+    )
+  }
+
+  async function markReviewed(replyId) {
+    setActionBusyId(replyId)
+    setError('')
+    try {
+      const updatedReply = await api.patch(`/sms/replies/${replyId}/mark-reviewed`, {})
+      updateReplyInState(updatedReply)
+    } catch (err) {
+      setError(err.message || 'Could not mark reply reviewed.')
+    } finally {
+      setActionBusyId(null)
+    }
+  }
+
+  async function reclassify(replyId, classification) {
+    setActionBusyId(replyId)
+    setError('')
+    try {
+      const updatedReply = await api.patch(`/sms/replies/${replyId}/reclassify`, { classification })
+      updateReplyInState(updatedReply)
+    } catch (err) {
+      setError(err.message || 'Could not reclassify reply.')
+    } finally {
+      setActionBusyId(null)
+    }
+  }
 
   return (
     <div>
@@ -44,6 +91,8 @@ export default function Replies() {
         </label>
       </header>
 
+      {error && <div className="panel reply-error">{error}</div>}
+
       <section className="panel">
         {loading ? (
           <div className="empty-state">Loading replies…</div>
@@ -57,6 +106,9 @@ export default function Replies() {
           <ul className="reply-feed">
             {replies.map((r) => {
               const config = CLASSIFICATION_CONFIG[r.classification] || CLASSIFICATION_CONFIG.neutral
+              const isBusy = actionBusyId === r.id
+              const reviewed = Boolean(r.reviewed_at)
+
               return (
                 <li
                   key={r.id}
@@ -69,6 +121,30 @@ export default function Replies() {
                     <span className="reply-time mono">{new Date(r.received_at).toLocaleString()}</span>
                   </div>
                   <p className="reply-card-body">{r.body}</p>
+
+                  <div className="reply-actions" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="reply-action-button"
+                      disabled={isBusy || reviewed}
+                      onClick={() => markReviewed(r.id)}
+                    >
+                      {reviewed ? 'Reviewed' : 'Mark reviewed'}
+                    </button>
+
+                    <label className="reply-reclassify">
+                      <span>Reclassify</span>
+                      <select
+                        value={r.classification || 'neutral'}
+                        disabled={isBusy}
+                        onChange={(event) => reclassify(r.id, event.target.value)}
+                      >
+                        {CLASSIFICATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </li>
               )
             })}

@@ -3,11 +3,13 @@ import shutil
 import tempfile
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime, timedelta, time, timezone
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, LeadStatus
+from app.models.models import User, Lead, LeadStatus, Reply, ReplyClassification, CadenceState, CadenceStatus, BookingLink, EngagementTemperature
 from app.services.import_service import import_leads_from_excel, parse_excel_file
 from app.services.dedup_service import bulk_dedup_check
 
@@ -153,6 +155,136 @@ def set_lead_tier(
     db.commit()
     return lead
 
+
+
+@router.get("/daily-briefing")
+def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped daily briefing data for the Overview page.
+
+    This deliberately mirrors the existing needs_attention behavior from
+    GET /sms/replies?needs_attention=true: Interested + Callback replies on
+    leads owned by the logged-in advisor. It does not introduce a separate
+    definition that could drift from the Replies inbox.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_24h = now - timedelta(hours=24)
+    end_of_today = datetime.combine(now.date(), time.max)
+    start_7d = now - timedelta(days=7)
+
+    base_lead_filters = (
+        Lead.organization_id == current_user.organization_id,
+        Lead.assigned_to_id == current_user.id,
+    )
+
+    replies_needing_attention = (
+        db.query(func.count(Reply.id))
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
+        )
+        .scalar()
+        or 0
+    )
+
+    cadence_touches_due_today = (
+        db.query(func.count(CadenceState.id))
+        .join(Lead, CadenceState.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            CadenceState.status == CadenceStatus.ACTIVE,
+            CadenceState.next_touch_due_at.isnot(None),
+            CadenceState.next_touch_due_at <= end_of_today,
+        )
+        .scalar()
+        or 0
+    )
+
+    leads_imported_last_24h = (
+        db.query(func.count(Lead.id))
+        .filter(
+            *base_lead_filters,
+            Lead.created_at >= start_24h,
+        )
+        .scalar()
+        or 0
+    )
+
+    bookings_last_7_days = (
+        db.query(func.count(distinct(BookingLink.lead_id)))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            BookingLink.status == "booked",
+            BookingLink.booked_time.isnot(None),
+            BookingLink.booked_time >= start_7d,
+        )
+        .scalar()
+        or 0
+    )
+
+    return {
+        "replies_needing_attention": replies_needing_attention,
+        "cadence_touches_due_today": cadence_touches_due_today,
+        "leads_imported_last_24h": leads_imported_last_24h,
+        "bookings_last_7_days": bookings_last_7_days,
+    }
+
+
+@router.get("/engagement-breakdown")
+def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped engagement temperature counts for the Overview chart.
+    Uses the real Lead.engagement_temperature field; no client-side guesses.
+    """
+    rows = (
+        db.query(Lead.engagement_temperature, func.count(Lead.id))
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+        )
+        .group_by(Lead.engagement_temperature)
+        .all()
+    )
+    counts = {temperature.value: 0 for temperature in EngagementTemperature}
+    for temperature, count in rows:
+        key = temperature.value if temperature else EngagementTemperature.UNKNOWN.value
+        counts[key] = int(count or 0)
+    return counts
+
+
+@router.get("/status-funnel")
+def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped real lead status funnel for Overview.
+    Only returns the stages displayed in the dashboard funnel.
+    """
+    stages = [
+        LeadStatus.NEW,
+        LeadStatus.SENT,
+        LeadStatus.REPLIED,
+        LeadStatus.HOT,
+        LeadStatus.BOOKED,
+    ]
+    rows = (
+        db.query(Lead.status, func.count(Lead.id))
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+            Lead.status.in_(stages),
+        )
+        .group_by(Lead.status)
+        .all()
+    )
+    counts = {stage.value: 0 for stage in stages}
+    for status, count in rows:
+        if status:
+            counts[status.value] = int(count or 0)
+    return [
+        {"status": stage.value, "label": stage.value.replace("_", " ").title(), "count": counts[stage.value]}
+        for stage in stages
+    ]
 
 @router.get("/{lead_id}")
 def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

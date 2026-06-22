@@ -93,3 +93,11 @@
   font-size: 13px;
   color: var(--text-primary);
 }
+
+@media (max-width: 768px) {
+  .template-grid,
+  .template-form-row,
+  .template-actions {
+    grid-template-columns: 1fr;
+  }
+}

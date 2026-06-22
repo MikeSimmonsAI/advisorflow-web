@@ -1,16 +1,30 @@
 .stat-card {
   position: relative;
-  background: linear-gradient(150deg, rgba(12, 26, 58, 0.84), rgba(4, 9, 22, 0.78)), var(--bg-card);
+  background:
+    linear-gradient(150deg, rgba(12, 26, 58, 0.90), rgba(4, 9, 22, 0.82)),
+    var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 20px 22px;
+  padding: 22px 24px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   min-width: 160px;
-  box-shadow: var(--panel-shadow);
+  min-height: 142px;
+  box-shadow: var(--panel-shadow-strong);
   overflow: hidden;
-  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 0%, var(--signal-blue-dim), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%);
+  opacity: 0.72;
 }
 
 .stat-card::after {
@@ -18,46 +32,89 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 26px;
-  height: 26px;
+  width: var(--corner-bracket-size);
+  height: var(--corner-bracket-size);
   border-top: 1px solid var(--border-strong);
   border-right: 1px solid var(--border-strong);
   border-radius: 0 var(--radius-lg) 0 0;
   pointer-events: none;
-  opacity: 0.40;
+  opacity: 0.66;
+  box-shadow: 8px -8px 24px rgba(47, 182, 255, 0.16);
+}
+
+.stat-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(47, 182, 255, 0.42);
-  box-shadow: var(--glow-blue-sm), 0 20px 60px rgba(0, 0, 0, 0.4);
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  box-shadow: var(--panel-shadow-strong), var(--glow-blue-lg);
+}
+
+.stat-card--green::before {
+  background:
+    radial-gradient(circle at 18% 0%, var(--signal-green-dim), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%);
+}
+
+.stat-card--green:hover {
+  box-shadow: var(--panel-shadow-strong), var(--glow-green-md);
+}
+
+.stat-card--red::before {
+  background:
+    radial-gradient(circle at 18% 0%, var(--signal-red-dim), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%);
+}
+
+.stat-card--red:hover {
+  box-shadow: var(--panel-shadow-strong), var(--glow-red-md);
+}
+
+.stat-card--amber::before {
+  background:
+    radial-gradient(circle at 18% 0%, var(--signal-amber-dim), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%);
+}
+
+.stat-card--amber:hover {
+  box-shadow: var(--panel-shadow-strong), var(--glow-amber-md);
+}
+
+.stat-card--neutral::before {
+  opacity: 0.44;
 }
 
 .stat-card-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.10em;
 }
 
 .stat-card-value {
   font-family: var(--font-display);
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: clamp(34px, 4.4vw, 48px);
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
   font-variant-numeric: tabular-nums;
 }
 
-.stat-card-value--blue { color: var(--signal-blue); text-shadow: var(--glow-blue-sm); }
-.stat-card-value--green { color: var(--signal-green); text-shadow: var(--glow-green-sm); }
-.stat-card-value--red { color: var(--signal-red); text-shadow: var(--glow-red-sm); }
-.stat-card-value--amber { color: var(--signal-amber); }
-.stat-card-value--neutral { color: var(--text-primary); }
+.stat-card-value--blue { color: var(--signal-blue); text-shadow: var(--glow-blue-md); }
+.stat-card-value--green { color: var(--signal-green); text-shadow: var(--glow-green-md); }
+.stat-card-value--red { color: var(--signal-red); text-shadow: var(--glow-red-md); }
+.stat-card-value--amber { color: var(--signal-amber); text-shadow: var(--glow-amber-md); }
+.stat-card-value--neutral { color: var(--text-primary); text-shadow: 0 0 22px rgba(238, 245, 255, 0.18); }
 
 .stat-card-sublabel {
   font-size: 13px;
   color: var(--text-tertiary);
+  line-height: 1.35;
 }
 
 .stat-card-trend {
@@ -68,3 +125,10 @@
 
 .stat-card-trend--up { color: var(--signal-green); }
 .stat-card-trend--down { color: var(--signal-red); }
+
+@media (max-width: 768px) {
+  .stat-card {
+    min-height: 122px;
+    padding: 18px 20px;
+  }
+}

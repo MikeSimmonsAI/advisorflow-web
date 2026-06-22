@@ -1,0 +1,39 @@
+.email-queue-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.email-queue-search-input {
+  flex: 1;
+  background: var(--bg-field);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.email-queue-search-input:focus {
+  border-color: var(--signal-blue);
+  outline: none;
+  background: rgba(11, 24, 54, 0.8);
+}
+
+.email-queue-table td:first-child,
+.email-queue-table th:first-child {
+  width: 36px;
+}
+
+@media (max-width: 768px) {
+  .email-queue-filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .email-queue-search-input {
+    width: 100%;
+  }
+}
