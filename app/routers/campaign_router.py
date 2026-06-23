@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, require_admin
 from app.models.models import Campaign, Lead, LeadStatus, LeadTier, MessageTrack, User
 from app.services.cadence_service import start_cadence
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -226,6 +227,19 @@ def apply_campaign(
                 cadence_started_count += 1
 
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="campaign.apply", target_type="campaign", target_id=campaign.id,
+        details={
+            "campaign_name": campaign.name,
+            "matched_count": matched_count,
+            "updated_count": updated_count,
+            "skipped_dnc_count": skipped_dnc_count,
+            "cadence_started_count": cadence_started_count,
+            "start_cadence": payload.start_cadence,
+        },
+    )
 
     return {
         "campaign_id": campaign.id,

@@ -4,6 +4,19 @@
   margin-bottom: 12px;
 }
 
+.revenue-note {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  border-color: var(--signal-amber-dim);
+}
+
+.revenue-note strong {
+  color: var(--signal-amber);
+}
+
 .tab {
   background: rgba(7, 14, 31, 0.45);
   border: 1px solid var(--border-subtle);

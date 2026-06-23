@@ -11,6 +11,7 @@ from app.services.template_service import (
 from app.services.template_ai_service import (
     TemplateAIError, generate_template, rewrite_template,
 )
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -78,6 +79,13 @@ def update_template(
         db, current_user.organization_id, track_enum, req.channel,
         req.body_template, current_user.id, req.email_subject_template,
     )
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="template.update", target_type="template", target_id=f"{req.message_track}:{req.channel}",
+        details={"message_track": req.message_track, "channel": req.channel},
+    )
+
     return {"success": True}
 
 
@@ -95,6 +103,14 @@ def reset_template(
         raise HTTPException(status_code=400, detail=f"Invalid message_track: {message_track}")
 
     deleted = reset_template_to_default(db, current_user.organization_id, track_enum, channel)
+
+    if deleted:
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="template.reset_to_default", target_type="template", target_id=f"{message_track}:{channel}",
+            details={"message_track": message_track, "channel": channel},
+        )
+
     return {"reset": deleted}
 
 

@@ -12,6 +12,7 @@ from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, LeadStatus, Reply, ReplyClassification, CadenceState, CadenceStatus, BookingLink, EngagementTemperature
 from app.services.import_service import import_leads_from_excel, parse_excel_file
 from app.services.dedup_service import bulk_dedup_check
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -150,7 +151,19 @@ def set_lead_tier(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Manually assign a tier to a needs-review lead, which also sets its message_track and unlocks it for the SMS queue."""
+    """
+    Manually assign a tier to a needs-review lead, which also sets its
+    message_track and unlocks it for the SMS queue.
+
+    Scope note: intentionally org-wide rather than restricted to leads
+    assigned to current_user, unlike GET /needs-review above which only
+    lists the calling advisor's own needs-review leads. Re-tiering is a
+    reversible data-correction action (similar to the Lead Cleanup
+    contact-info fixes), and any advisor noticing a teammate's
+    obviously-mistagged lead should be able to fix it rather than waiting
+    on that specific advisor. Logged below so there's still a clear trail
+    of who changed what.
+    """
     from app.models.models import LeadTier
     from app.services.import_service import TIER_TO_TRACK
 
@@ -165,10 +178,19 @@ def set_lead_tier(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid tier: {new_tier}")
 
+    previous_tier = lead.tier.value if lead.tier else None
+
     lead.tier = tier_enum
     lead.message_track = TIER_TO_TRACK.get(tier_enum)
     lead.status = LeadStatus.NEW
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="lead.set_tier", target_type="lead", target_id=lead.id,
+        details={"from": previous_tier, "to": tier_enum.value, "lead_assigned_to_id": lead.assigned_to_id},
+    )
+
     return lead
 
 

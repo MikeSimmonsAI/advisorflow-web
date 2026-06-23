@@ -104,3 +104,27 @@ def test_log_action_helper_persists_entry(db_session, sample_org, sample_advisor
     assert persisted.target_id == "suppression-123"
     assert '"phone": "12145550101"' in persisted.details
     assert persisted.created_at is not None
+
+
+def test_audit_log_list_includes_resolved_actor_name(client, admin_auth_headers, db_session, sample_org):
+    """
+    Regression coverage: actor_user_id alone is a raw UUID, which doesn't
+    tell an admin who actually performed the action. The list endpoint
+    must resolve and include the actor's full_name.
+    """
+    admin = _admin_user(db_session)
+    entry = AuditLogEntry(
+        organization_id=sample_org.id,
+        actor_user_id=admin.id,
+        action="lead.reassign",
+        target_type="lead",
+        target_id="lead-name-test",
+        details="test",
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    response = client.get("/audit-log", headers=admin_auth_headers)
+    assert response.status_code == 200
+    matching = next(e for e in response.json()["entries"] if e["id"] == entry.id)
+    assert matching["actor_name"] == admin.full_name

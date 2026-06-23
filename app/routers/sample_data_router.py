@@ -30,6 +30,7 @@ from app.models.models import (
     Reply, ReplyClassification, CadenceState, CadenceStatus, Message,
 )
 from app.routers.admin_router import require_super_admin
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/sample-data", tags=["sample-data"])
 
@@ -205,5 +206,11 @@ def clear_sample_data(
     db.query(CadenceState).filter(CadenceState.lead_id.in_(sample_lead_ids)).delete(synchronize_session=False)
     db.query(Lead).filter(Lead.id.in_(sample_lead_ids)).delete(synchronize_session=False)
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="sample_data.clear", target_type="organization", target_id=current_user.organization_id,
+        details={"deleted_leads": len(sample_lead_ids)},
+    )
 
     return {"deleted_leads": len(sample_lead_ids), "message": f"Cleared {len(sample_lead_ids)} sample leads and their associated data."}

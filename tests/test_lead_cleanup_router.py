@@ -242,3 +242,149 @@ def test_fix_contact_info_normalizes_phone_updates_email_and_respects_org_isolat
     assert other_response.status_code == 404
     db_session.refresh(other_lead)
     assert other_lead.phone == "12145550502"
+
+
+# ---------------------------------------------------------------------------
+# Name correction - added per Mike's explicit feedback that clicking into a
+# lead from the Cleanup Center didn't actually let him "clean up anything"
+# about that person. A misspelled name matters specifically here because
+# duplicate-group matching keys on normalized last_name.
+# ---------------------------------------------------------------------------
+
+def test_fix_contact_info_corrects_first_and_last_name(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    lead = _lead(db_session, sample_org, sample_advisor, first_name="Jhon", last_name="Smyth", phone="12145550701")
+    db_session.commit()
+
+    response = client.patch(
+        f"/admin/leads/{lead.id}/fix-contact-info",
+        headers=admin_auth_headers,
+        json={"first_name": "John", "last_name": "Smith"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["first_name"] == "John"
+    assert response.json()["last_name"] == "Smith"
+    db_session.refresh(lead)
+    assert lead.first_name == "John"
+    assert lead.last_name == "Smith"
+
+
+def test_fix_contact_info_rejects_blank_last_name(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145550702")
+    db_session.commit()
+
+    response = client.patch(
+        f"/admin/leads/{lead.id}/fix-contact-info",
+        headers=admin_auth_headers,
+        json={"last_name": "   "},
+    )
+
+    assert response.status_code == 400
+
+
+def test_fix_contact_info_allows_blanking_first_name(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    """first_name is optional on a lead, unlike last_name - blanking it out should be allowed."""
+    lead = _lead(db_session, sample_org, sample_advisor, first_name="Temp", phone="12145550703")
+    db_session.commit()
+
+    response = client.patch(
+        f"/admin/leads/{lead.id}/fix-contact-info",
+        headers=admin_auth_headers,
+        json={"first_name": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["first_name"] is None
+
+
+def test_fix_contact_info_requires_at_least_one_field(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145550704")
+    db_session.commit()
+
+    response = client.patch(f"/admin/leads/{lead.id}/fix-contact-info", headers=admin_auth_headers, json={})
+
+    assert response.status_code == 400
+
+
+def test_fix_contact_info_resyncs_registry_when_only_last_name_changes(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    """
+    Regression test for the registry-staleness bug: previously the
+    contact registry was only re-synced when phone changed. If ONLY the
+    last name was corrected (phone unchanged), the registry entry kept
+    pointing at the old, misspelled normalized last name - meaning a real
+    future duplicate (correctly spelled) would never get caught against
+    this lead, and this lead's own entry would silently go stale.
+    """
+    from app.models.models import ContactRegistry
+
+    lead = _lead(db_session, sample_org, sample_advisor, last_name="Smyth", phone="12145550705")
+    db_session.commit()
+
+    registry_entry = ContactRegistry(
+        organization_id=sample_org.id,
+        normalized_phone="12145550705",
+        normalized_last_name="smyth",
+        first_seen_lead_id=lead.id,
+        owning_user_id=sample_advisor.id,
+    )
+    db_session.add(registry_entry)
+    db_session.commit()
+
+    response = client.patch(
+        f"/admin/leads/{lead.id}/fix-contact-info",
+        headers=admin_auth_headers,
+        json={"last_name": "Smith"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(registry_entry)
+    assert registry_entry.normalized_last_name == "smith"
+
+
+def test_fix_contact_info_name_change_can_surface_a_real_duplicate(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    """
+    If correcting a typo'd last name now matches an existing registry
+    entry under a DIFFERENT lead, this lead should get flagged as a
+    duplicate of that original - same behavior the phone-correction path
+    already had, now also triggered by a name-only correction.
+    """
+    from app.models.models import ContactRegistry
+
+    original_lead = _lead(db_session, sample_org, sample_advisor, first_name="Original", last_name="Johnson", phone="12145550706")
+    db_session.add(ContactRegistry(
+        organization_id=sample_org.id,
+        normalized_phone="12145550706",
+        normalized_last_name="johnson",
+        first_seen_lead_id=original_lead.id,
+        owning_user_id=sample_advisor.id,
+    ))
+    typo_lead = _lead(db_session, sample_org, sample_advisor, first_name="Typo", last_name="Jonson", phone="12145550706")
+    db_session.commit()
+
+    response = client.patch(
+        f"/admin/leads/{typo_lead.id}/fix-contact-info",
+        headers=admin_auth_headers,
+        json={"last_name": "Johnson"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(typo_lead)
+    assert typo_lead.is_duplicate is True
+    assert typo_lead.duplicate_of_lead_id == original_lead.id
+
+
+def test_fix_contact_info_name_and_phone_together(client, admin_auth_headers, db_session, sample_org, sample_advisor):
+    lead = _lead(db_session, sample_org, sample_advisor, first_name="Jhon", last_name="Smyth", phone="12145550707")
+    db_session.commit()
+
+    response = client.patch(
+        f"/admin/leads/{lead.id}/fix-contact-info",
+        headers=admin_auth_headers,
+        json={"first_name": "John", "last_name": "Smith", "phone": "2145550799"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_name"] == "John"
+    assert body["last_name"] == "Smith"
+    assert body["phone"] == "12145550799"

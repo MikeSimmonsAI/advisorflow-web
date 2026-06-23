@@ -11,6 +11,7 @@ from app.deps import get_db, require_admin
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry
 from app.services.auth_service import hash_password
 from app.services.dedup_service import normalize_phone, normalize_last_name
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -275,6 +276,103 @@ def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends
     }
 
 
+@router.get("/dashboard/revenue")
+def dashboard_revenue(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Master Control Board / revenue analytics - step 6 of the original
+    8-step build plan, never started until now.
+
+    IMPORTANT DESIGN CONSTRAINT, matching LeadOutcome.sale_amount's own
+    column comment: sale_amount is a free-text sales note field an
+    advisor types in (e.g. "$3,200" or "approx 2800 plus marker"), NOT a
+    structured currency column. This endpoint deliberately reports SALE
+    COUNTS, not dollar totals - summing or parsing sale_amount strings as
+    real currency would produce a number that looks precise and
+    authoritative but isn't reliable financial data. Real revenue
+    accounting belongs in Restland's actual accounting system, not here.
+    What this CAN do reliably: how many sales, by whom, of what kind, and
+    when - all of which come from structured boolean/date fields.
+    """
+    org_id = current_user.organization_id
+
+    sale_outcomes = (
+        db.query(LeadOutcome)
+        .join(Lead, LeadOutcome.lead_id == Lead.id)
+        .filter(Lead.organization_id == org_id, LeadOutcome.resulted_in_sale == True)
+        .all()
+    )
+
+    total_sales = len(sale_outcomes)
+
+    # Per-advisor sale counts - the actual gap _advisor_metrics didn't cover.
+    sales_by_advisor: dict[str, int] = defaultdict(int)
+    for outcome in sale_outcomes:
+        sales_by_advisor[outcome.recorded_by_id] += 1
+
+    advisor_ids = list(sales_by_advisor.keys())
+    advisors_by_id = {}
+    if advisor_ids:
+        advisors_by_id = {
+            a.id: a.full_name
+            for a in db.query(User).filter(User.id.in_(advisor_ids)).all()
+        }
+
+    by_advisor = sorted(
+        [
+            {"advisor_id": advisor_id, "advisor_name": advisors_by_id.get(advisor_id, "Unknown"), "sale_count": count}
+            for advisor_id, count in sales_by_advisor.items()
+        ],
+        key=lambda row: row["sale_count"],
+        reverse=True,
+    )
+
+    # What's being sold - the structured checklist fields are reliable
+    # counts; sale_items is free text and only shown as a recent-notes
+    # list, never aggregated, since advisors don't write it in any
+    # consistent structured format.
+    product_mix = {
+        "funeral_arrangement": sum(1 for o in sale_outcomes if o.has_funeral_arrangement),
+        "cemetery_property": sum(1 for o in sale_outcomes if o.has_cemetery_property),
+        "marker": sum(1 for o in sale_outcomes if o.has_marker),
+        "memorial": sum(1 for o in sale_outcomes if o.has_memorial),
+    }
+
+    # Monthly trend, grouped in Python rather than via a DB-specific
+    # date-trunc function, since this app runs on SQLite in tests/dev and
+    # Postgres in production - a portable approach beats a function that
+    # only works on one of the two.
+    monthly_counts: dict[str, int] = defaultdict(int)
+    for outcome in sale_outcomes:
+        when = outcome.appointment_date or outcome.created_at
+        if when:
+            monthly_counts[when.strftime("%Y-%m")] += 1
+    monthly_trend = [
+        {"month": month, "sale_count": count}
+        for month, count in sorted(monthly_counts.items())
+    ]
+
+    recent_sale_notes = [
+        {
+            "lead_id": outcome.lead_id,
+            "advisor_name": advisors_by_id.get(outcome.recorded_by_id) or (
+                db.query(User.full_name).filter(User.id == outcome.recorded_by_id).scalar()
+            ),
+            "sale_items": outcome.sale_items,
+            "sale_amount": outcome.sale_amount,  # shown verbatim as the advisor's own note text, never parsed/summed
+            "date": outcome.appointment_date or outcome.created_at,
+        }
+        for outcome in sorted(sale_outcomes, key=lambda o: o.created_at or datetime.min, reverse=True)[:20]
+    ]
+
+    return {
+        "total_sales": total_sales,
+        "by_advisor": by_advisor,
+        "product_mix": product_mix,
+        "monthly_trend": monthly_trend,
+        "recent_sale_notes": recent_sale_notes,
+    }
+
+
 # ---------------------------------------------------------------------------
 # User management - lets an org_admin/super_admin create and manage advisor
 # accounts directly from the app, instead of running the seed.py script by
@@ -360,6 +458,12 @@ def create_user(
     db.add(new_user)
     db.commit()
 
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="user.create", target_type="user", target_id=new_user.id,
+        details={"email": new_user.email, "role": new_user.role, "created_by": current_user.full_name},
+    )
+
     return UserResponse(
         id=new_user.id, email=new_user.email, full_name=new_user.full_name,
         role=new_user.role, is_active=new_user.is_active,
@@ -389,6 +493,13 @@ def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
 
     target.is_active = False
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="user.deactivate", target_type="user", target_id=target.id,
+        details={"email": target.email},
+    )
+
     return {"success": True}
 
 
@@ -404,6 +515,13 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
 
     target.is_active = True
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="user.reactivate", target_type="user", target_id=target.id,
+        details={"email": target.email},
+    )
+
     return {"success": True}
 
 
@@ -457,6 +575,15 @@ def reset_user_password(
     target.must_change_password = True
     db.commit()
 
+    # CRITICAL: never include temp_password in the audit details - the
+    # audit log is the one thing that should outlive this response, and a
+    # password (even temporary) has no business living in a log table.
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="user.reset_password", target_type="user", target_id=target.id,
+        details={"email": target.email},
+    )
+
     return ResetPasswordResponse(email=target.email, temp_password=temp_password)
 
 
@@ -495,6 +622,8 @@ def update_user(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
+    before = {"full_name": target.full_name, "email": target.email, "role": target.role}
+
     if req.email is not None and req.email != target.email:
         existing = db.query(User).filter(User.email == req.email, User.id != target.id).first()
         if existing:
@@ -516,6 +645,15 @@ def update_user(
 
     db.commit()
     db.refresh(target)
+
+    after = {"full_name": target.full_name, "email": target.email, "role": target.role}
+    changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
+    if changed:
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="user.update", target_type="user", target_id=target.id,
+            details=changed,
+        )
 
     return UserResponse(
         id=target.id, email=target.email, full_name=target.full_name, role=target.role,
@@ -668,6 +806,17 @@ def reassign_leads(
 
     db.commit()
 
+    if leads:
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="lead.reassign", target_type="lead_batch", target_id=",".join(found_ids) if len(found_ids) <= 20 else f"{len(found_ids)}_leads",
+            details={
+                "lead_ids": sorted(found_ids),
+                "new_assigned_to_id": req.new_assigned_to_id,
+                "count": len(leads),
+            },
+        )
+
     return ReassignResultResponse(
         reassigned_count=len(leads),
         skipped_count=len(skipped_ids),
@@ -741,6 +890,8 @@ class MergeLeadsResponse(BaseModel):
 class FixContactInfoRequest(BaseModel):
     phone: str | None = None
     email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
 
 
 def _lead_summary(lead: Lead) -> dict[str, Any]:
@@ -948,6 +1099,19 @@ def merge_leads(
         db.flush()
         db.commit()
 
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="lead.merge", target_type="lead", target_id=keep_lead.id,
+            details={
+                "kept_lead_id": keep_lead.id,
+                "merged_lead_ids": merge_ids,
+                "moved_messages": moved_messages,
+                "moved_replies": moved_replies,
+                "moved_outcomes": moved_outcomes,
+                "moved_cadence_states": moved_cadence_states,
+            },
+        )
+
         return MergeLeadsResponse(
             keep_lead_id=keep_lead.id,
             merged_count=len(merge_leads),
@@ -972,9 +1136,20 @@ def fix_lead_contact_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Correct a lead's phone/email while respecting org isolation and dedup normalization."""
-    if req.phone is None and req.email is None:
-        raise HTTPException(status_code=400, detail="Provide phone and/or email to update.")
+    """
+    Correct a lead's phone/email/name while respecting org isolation and
+    dedup normalization.
+
+    Name fields were added alongside phone/email per Mike's explicit
+    feedback that Lead Cleanup didn't actually let him "clean up anything"
+    about a lead - a misspelled name matters here specifically, since
+    duplicate-group matching (see /admin/leads/potential-duplicates) keys
+    on normalized last_name. A typo'd last name could both cause a false
+    duplicate match against an unrelated lead, AND prevent a real
+    duplicate from being caught in the first place.
+    """
+    if req.phone is None and req.email is None and req.first_name is None and req.last_name is None:
+        raise HTTPException(status_code=400, detail="Provide at least one field to update.")
 
     lead = (
         db.query(Lead)
@@ -984,17 +1159,50 @@ def fix_lead_contact_info(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found in this organization.")
 
+    before = {"first_name": lead.first_name, "last_name": lead.last_name, "phone": lead.phone, "email": lead.email}
+
+    # Track whether the registry needs re-syncing - true if EITHER phone
+    # or last_name changes, since the registry's match key is built from
+    # both together. Re-syncing only on phone change (the original
+    # behavior) left a stale registry entry any time just the name was
+    # corrected.
+    registry_needs_resync = False
+
     if req.phone is not None:
         normalized = normalize_phone(req.phone)
         if not normalized:
             raise HTTPException(status_code=400, detail="Phone could not be normalized.")
         lead.phone_raw = req.phone
         lead.phone = normalized
-        _apply_contact_registry_after_contact_fix(db, lead)
+        registry_needs_resync = True
 
     if req.email is not None:
         lead.email = req.email.strip() or None
 
+    if req.first_name is not None:
+        cleaned_first = req.first_name.strip()
+        lead.first_name = cleaned_first or None
+
+    if req.last_name is not None:
+        cleaned_last = req.last_name.strip()
+        if not cleaned_last:
+            raise HTTPException(status_code=400, detail="last_name cannot be blank.")
+        lead.last_name = cleaned_last
+        registry_needs_resync = True
+
+    if registry_needs_resync:
+        _apply_contact_registry_after_contact_fix(db, lead)
+
     db.commit()
     db.refresh(lead)
+
+    after = {"first_name": lead.first_name, "last_name": lead.last_name, "phone": lead.phone, "email": lead.email}
+    changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
+    if changed:
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="lead.fix_contact_info", target_type="lead", target_id=lead.id,
+            details=changed,
+        )
+
     return _lead_summary(lead)

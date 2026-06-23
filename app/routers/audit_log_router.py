@@ -66,6 +66,7 @@ class AuditLogEntryOut(BaseModel):
     id: str
     organization_id: str
     actor_user_id: str
+    actor_name: str | None = None  # resolved separately, see list_audit_log - a raw UUID fragment alone doesn't tell an admin who actually did this
     action: str
     target_type: str
     target_id: str
@@ -111,4 +112,28 @@ def list_audit_log(
         .all()
     )
 
-    return AuditLogListResponse(total=total, limit=limit, offset=offset, entries=entries)
+    # Resolve actor names in one batch query rather than one query per
+    # entry - a raw actor_user_id alone doesn't tell an admin who actually
+    # did something, which defeats much of the point of an audit log.
+    actor_ids = {entry.actor_user_id for entry in entries}
+    actors_by_id = {}
+    if actor_ids:
+        actors = db.query(User).filter(User.id.in_(actor_ids)).all()
+        actors_by_id = {actor.id: actor.full_name for actor in actors}
+
+    entries_out = [
+        AuditLogEntryOut(
+            id=entry.id,
+            organization_id=entry.organization_id,
+            actor_user_id=entry.actor_user_id,
+            actor_name=actors_by_id.get(entry.actor_user_id),
+            action=entry.action,
+            target_type=entry.target_type,
+            target_id=entry.target_id,
+            details=entry.details,
+            created_at=entry.created_at,
+        )
+        for entry in entries
+    ]
+
+    return AuditLogListResponse(total=total, limit=limit, offset=offset, entries=entries_out)

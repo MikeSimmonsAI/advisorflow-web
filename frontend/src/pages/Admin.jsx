@@ -12,18 +12,46 @@ function formatPercent(value) {
   return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 2)}%`
 }
 
+function formatMonth(monthKey) {
+  if (!monthKey) return '—'
+  const [year, month] = monthKey.split('-')
+  try {
+    return new Intl.DateTimeFormat(undefined, { month: 'short', year: 'numeric' }).format(new Date(Number(year), Number(month) - 1))
+  } catch {
+    return monthKey
+  }
+}
+
+function formatSaleDate(value) {
+  if (!value) return '—'
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
+const PRODUCT_MIX_LABELS = {
+  funeral_arrangement: 'Funeral arrangement',
+  cemetery_property: 'Cemetery property',
+  marker: 'Marker',
+  memorial: 'Memorial',
+}
+
 export default function Admin() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [metrics, setMetrics] = useState(null)
   const [funnel, setFunnel] = useState(null)
+  const [revenue, setRevenue] = useState(null)
+  const [revenueLoading, setRevenueLoading] = useState(false)
   const [allLeads, setAllLeads] = useState([])
   const [unassignedLeads, setUnassignedLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [leadsLoading, setLeadsLoading] = useState(true)
   const [unassignedLoading, setUnassignedLoading] = useState(true)
-  const [view, setView] = useState('advisors') // 'advisors' | 'leads' | 'unassigned' | 'metrics'
+  const [view, setView] = useState('advisors') // 'advisors' | 'leads' | 'unassigned' | 'metrics' | 'revenue'
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedPoolIds, setSelectedPoolIds] = useState([])
   const [assignTarget, setAssignTarget] = useState('')
@@ -44,11 +72,24 @@ export default function Admin() {
     if (view === 'metrics' && (!metrics || !funnel)) {
       loadMetrics()
     }
+    if (view === 'revenue' && !revenue) {
+      loadRevenue()
+    }
   }, [view])
 
   function loadUnassigned() {
     setUnassignedLoading(true)
     api.get('/admin/leads/unassigned').then(setUnassignedLeads).finally(() => setUnassignedLoading(false))
+  }
+
+  async function loadRevenue() {
+    setRevenueLoading(true)
+    try {
+      const data = await api.get('/admin/dashboard/revenue')
+      setRevenue(data)
+    } finally {
+      setRevenueLoading(false)
+    }
   }
 
   async function loadMetrics() {
@@ -136,6 +177,9 @@ export default function Admin() {
         </button>
         <button className={`tab ${view === 'metrics' ? 'tab--active' : ''}`} onClick={() => setView('metrics')}>
           Metrics
+        </button>
+        <button className={`tab ${view === 'revenue' ? 'tab--active' : ''}`} onClick={() => setView('revenue')}>
+          Revenue
         </button>
       </div>
 
@@ -257,6 +301,124 @@ export default function Admin() {
                     </div>
                   ))}
                 </div>
+              </section>
+            </>
+          )}
+        </>
+      )}
+
+      {view === 'revenue' && (
+        <>
+          {revenueLoading ? (
+            <section className="panel"><div className="empty-state">Loading revenue data…</div></section>
+          ) : (
+            <>
+              <div className="revenue-note panel">
+                <strong>A note on these numbers:</strong> this shows sale <em>counts</em>, by advisor and by
+                product type — not dollar totals. The sale-amount field is a free-text note an advisor types
+                in at the time of the sale, not a structured currency field, so it's shown verbatim per-sale
+                below rather than summed into a "total revenue" figure that would look precise but wouldn't
+                actually be reliable. For real revenue accounting, use Restland's actual accounting system.
+              </div>
+
+              <div className="metrics-summary-grid">
+                <div className="metric-card metric-card--booked">
+                  <span>Total sales</span>
+                  <strong>{revenue?.total_sales ?? 0}</strong>
+                  <small>Across all advisors, all time</small>
+                </div>
+                {Object.entries(revenue?.product_mix || {}).map(([key, count]) => (
+                  <div className="metric-card" key={key}>
+                    <span>{PRODUCT_MIX_LABELS[key] || key}</span>
+                    <strong>{count}</strong>
+                    <small>Sales including this</small>
+                  </div>
+                ))}
+              </div>
+
+              <section className="panel metrics-panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">Sales by advisor</h2>
+                  <span className="panel-count">{revenue?.by_advisor?.length || 0} advisors with sales</span>
+                </div>
+                {(revenue?.by_advisor || []).length === 0 ? (
+                  <div className="empty-state">No recorded sales yet. Outcomes get logged from the Lead Detail page.</div>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Advisor</th>
+                        <th>Sales</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {revenue.by_advisor.map((row) => (
+                        <tr key={row.advisor_id}>
+                          <td>{row.advisor_name}</td>
+                          <td className="mono">{row.sale_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </section>
+
+              <section className="panel funnel-panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">Monthly trend</h2>
+                  <span className="panel-count">Sale count by month</span>
+                </div>
+                {(revenue?.monthly_trend || []).length === 0 ? (
+                  <div className="empty-state">Not enough data yet for a trend.</div>
+                ) : (
+                  <div className="funnel-bars">
+                    {(() => {
+                      const max = Math.max(...revenue.monthly_trend.map((row) => row.sale_count), 1)
+                      return revenue.monthly_trend.map((row) => (
+                        <div className="funnel-row" key={row.month}>
+                          <div className="funnel-row-label">
+                            <span>{formatMonth(row.month)}</span>
+                            <strong className="mono">{row.sale_count}</strong>
+                          </div>
+                          <div className="funnel-track">
+                            <div className="funnel-fill" style={{ width: `${Math.max((row.sale_count / max) * 100, row.sale_count > 0 ? 6 : 0)}%` }} />
+                          </div>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">Recent sale notes</h2>
+                  <span className="panel-count">Most recent {revenue?.recent_sale_notes?.length || 0}</span>
+                </div>
+                {(revenue?.recent_sale_notes || []).length === 0 ? (
+                  <div className="empty-state">No sale notes yet.</div>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Advisor</th>
+                        <th>Items</th>
+                        <th>Amount (advisor's note)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {revenue.recent_sale_notes.map((note, idx) => (
+                        <tr key={`${note.lead_id}-${idx}`} style={{ cursor: 'pointer' }} onClick={() => navigate(`/leads/${note.lead_id}`)}>
+                          <td className="mono" style={{ fontSize: 12 }}>{formatSaleDate(note.date)}</td>
+                          <td>{note.advisor_name || '—'}</td>
+                          <td>{note.sale_items || '—'}</td>
+                          <td className="mono">{note.sale_amount || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </section>
             </>
           )}

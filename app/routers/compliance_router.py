@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_admin
 from app.models.models import User, Lead, SuppressionEntry, SuppressionSource
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -139,6 +140,13 @@ def add_suppression_entry(
     )
     db.add(entry)
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="compliance.suppress", target_type="suppression_entry", target_id=entry.id,
+        details={"phone": normalized_phone, "reason": entry.reason, "source": entry.source.value if hasattr(entry.source, "value") else entry.source},
+    )
+
     return entry
 
 
@@ -174,6 +182,17 @@ def add_permanent_dnc(
         lead.status = "dnc"
 
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="compliance.permanent_dnc", target_type="suppression_entry", target_id=entry.id,
+        details={
+            "phone": normalized_phone,
+            "reason": entry.reason,
+            "matched_lead_id": lead.id if lead else None,
+        },
+    )
+
     return entry
 
 
@@ -191,6 +210,21 @@ def delete_suppression_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Suppression entry not found.")
 
+    # Capture details before delete - the row (and entry.id) won't exist
+    # to reference after db.delete(). This is the highest-stakes compliance
+    # action in this router: removing a number from suppression means it
+    # becomes contactable again, so this absolutely needs a paper trail.
+    deleted_phone = entry.phone
+    deleted_reason = entry.reason
+    deleted_id = entry.id
+
     db.delete(entry)
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="compliance.unsuppress", target_type="suppression_entry", target_id=deleted_id,
+        details={"phone": deleted_phone, "original_reason": deleted_reason},
+    )
+
     return None

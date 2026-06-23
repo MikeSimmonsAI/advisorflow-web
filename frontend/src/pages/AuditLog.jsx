@@ -16,7 +16,7 @@ function formatDate(value) {
 
 function formatAction(action) {
   if (!action) return '—'
-  return action.replaceAll('_', ' ')
+  return action.replaceAll('.', ' ').replaceAll('_', ' ')
 }
 
 function shortId(value) {
@@ -104,7 +104,7 @@ export default function AuditLog() {
             <input
               value={pendingAction}
               onChange={(event) => setPendingAction(event.target.value)}
-              placeholder="lead_reassigned, password_reset, suppression_entry_deleted"
+              placeholder="lead.reassign, user.reset_password, compliance.unsuppress"
             />
           </label>
           <button className="btn btn--primary" type="submit" disabled={loading}>Apply</button>
@@ -149,7 +149,7 @@ export default function AuditLog() {
                         <span className="mono">{shortId(entry.target_id)}</span>
                       </div>
                     </td>
-                    <td className="mono">{shortId(entry.actor_user_id)}</td>
+                    <td className="mono">{entry.actor_name || shortId(entry.actor_user_id)}</td>
                     <td className="audit-details">{entry.details || '—'}</td>
                   </tr>
                 ))
