@@ -1,13 +1,12 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**See SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md for the latest session's full
-changelog** (Lead Cleanup contact editing actually fixed, audit logging
-wired into every sensitive action, admin route protection fixed on the
-frontend, Master Control Board / revenue analytics built). Prior session:
-SESSION_LOG_BUGFIXES_AND_FEATURES.md (New Inquiry lead tier, reply
-reclassification expansion, AI Suggest Reply name fix, User Management
-edit + detail page, sitewide dropdown styling fix, System Health rebuild,
-Overview scroll reduction).
+**See SESSION_LOG_LEAD_CLEANUP_EMAIL_DNC_REPORTS.md for the latest
+session's full changelog** (Lead Cleanup duplicate-matching fix, Needs
+Review navigation fix, Email Queue rebuild with review-before-send and
+sent history, DNC quick-action button plus a real reclassify-to-DNC bug
+fix, new Reports page with date-range filtering). Prior sessions:
+SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md and
+SESSION_LOG_BUGFIXES_AND_FEATURES.md.
 
 You've been collecting files in the order I gave them to you, which is exactly
 right. This doc tells you the FINAL folder each file belongs in. If a file

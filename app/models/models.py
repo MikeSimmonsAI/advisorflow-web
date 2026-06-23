@@ -403,8 +403,9 @@ class LeadOutcome(Base):
 # String/gen_uuid). Ported the logic, fixed the ID types.
 # ---------------------------------------------------------------------------
 class SuppressionSource(str, enum.Enum):
-    MANUAL = "manual"
-    REPLY_STOP = "reply_stop"
+    MANUAL = "manual"  # entered directly in Compliance Center by an admin, by raw phone number
+    REPLY_STOP = "reply_stop"  # automatic - hard-stop keyword match (stop/unsubscribe/remove me) in the webhook
+    ADVISOR_FLAGGED = "advisor_flagged"  # manual quick-action from a specific lead/reply - an advisor caught what the automatic keyword check missed
 
 
 class SuppressionEntry(Base):

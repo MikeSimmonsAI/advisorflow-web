@@ -49,6 +49,29 @@ def normalize_last_name(raw_name: str) -> str:
     return cleaned.lower().strip()
 
 
+def normalize_first_name(raw_name: str) -> str:
+    """
+    Same normalization as normalize_last_name, but kept as a distinct
+    function (not just calling normalize_last_name with a different
+    argument name) since first-name matching is used differently - see
+    admin_router.py's potential_duplicate_leads, where it's a required
+    CORROBORATING signal alongside last name, not a standalone match key.
+    A first name on its own (like a last name on its own) is too common
+    to mean anything by itself.
+    """
+    if not raw_name:
+        return ""
+    cleaned = re.sub(r"[^a-zA-Z]", "", raw_name)
+    return cleaned.lower().strip()
+
+
+def normalize_email(raw_email: str) -> str:
+    """Lowercase and strip whitespace for stable email matching."""
+    if not raw_email:
+        return ""
+    return raw_email.strip().lower()
+
+
 def check_and_register(
     db: Session,
     organization_id: str,

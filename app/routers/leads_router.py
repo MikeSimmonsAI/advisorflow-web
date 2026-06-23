@@ -194,6 +194,81 @@ def set_lead_tier(
     return lead
 
 
+class MarkDNCRequest(BaseModel):
+    reason: str | None = None  # optional - e.g. a snippet of the reply that prompted this
+
+
+@router.patch("/{lead_id}/mark-dnc")
+def mark_lead_dnc(
+    lead_id: str,
+    req: MarkDNCRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Quick-action DNC flag for when an advisor reads a reply themselves
+    and spots STOP/do-not-contact language the automatic keyword/AI
+    classification missed. Per Mike's explicit request: any advisor
+    should be able to act on this immediately, not just an admin, since
+    a missed STOP only gets worse the longer it sits unactioned.
+
+    Deliberately mirrors the automatic DNC path in sms_router.py's
+    inbound webhook exactly - same three things happen, in the same
+    order, for the same reason: a manually-flagged DNC must behave
+    IDENTICALLY to an automatically-detected one, or this lead would
+    still get cadence touches sent after being marked DNC, which would
+    defeat the entire point of this button.
+      1. lead.status = "dnc"
+      2. stop_cadence_for_lead(..., CadenceStatus.STOPPED_DNC) - so no
+         further scheduled touches go out
+      3. added to the org-wide suppression list (source=ADVISOR_FLAGGED,
+         distinguishable from an admin's manual Compliance Center entry
+         and from the automatic keyword match) - so this phone number is
+         blocked from ANY future send, not just this one lead's cadence
+
+    Restricted to leads that HAVE a phone - a lead with no phone can't
+    be added to a phone-keyed suppression list; still flips lead.status
+    to "dnc" in that case, just skips the suppression-list step.
+    """
+    from app.services.cadence_service import stop_cadence_for_lead
+    from app.models.models import CadenceStatus
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    already_dnc = lead.status == LeadStatus.DNC
+
+    lead.status = LeadStatus.DNC
+    stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
+
+    suppression_entry_id = None
+    if lead.phone:
+        from app.services.compliance_service import add_suppression_entry_from_reply
+        from app.models.models import SuppressionSource
+        reason = req.reason.strip() if req and req.reason and req.reason.strip() else f"Flagged DNC by {current_user.full_name} from lead detail"
+        entry = add_suppression_entry_from_reply(
+            db, lead.organization_id, lead.phone, reason=reason, source=SuppressionSource.ADVISOR_FLAGGED,
+        )
+        suppression_entry_id = entry.id
+
+    db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="lead.mark_dnc", target_type="lead", target_id=lead.id,
+        details={
+            "was_already_dnc": already_dnc,
+            "phone": lead.phone,
+            "reason": req.reason if req else None,
+            "suppression_entry_id": suppression_entry_id,
+        },
+    )
+
+    return lead
+
 
 @router.get("/daily-briefing")
 def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

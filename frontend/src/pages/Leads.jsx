@@ -477,8 +477,8 @@ export default function Leads() {
                 return (
                   <tr
                     key={lead.id}
-                    onClick={() => view !== 'review' && navigate(`/leads/${lead.id}`)}
-                    style={{ cursor: view !== 'review' ? 'pointer' : 'default' }}
+                    onClick={() => navigate(`/leads/${lead.id}`)}
+                    style={{ cursor: 'pointer' }}
                   >
                     {view !== 'review' && (
                       <td onClick={(e) => e.stopPropagation()}>

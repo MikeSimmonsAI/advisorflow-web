@@ -9,6 +9,14 @@ import './LeadDetail.css'
 
 const QUALITY_COLOR = { hot: 'red', warm: 'amber', cold: 'blue', dead: 'neutral-dim', unknown: 'neutral' }
 
+const TIER_OPTIONS = [
+  { value: 'pre_need', label: 'Pre-Need' },
+  { value: 'at_need', label: 'At-Need' },
+  { value: 'imminent', label: 'Imminent' },
+  { value: 'contract_sold', label: 'Contract Sold' },
+  { value: 'new_inquiry', label: 'New Inquiry' },
+]
+
 export default function LeadDetail() {
   const { leadId } = useParams()
   const navigate = useNavigate()
@@ -27,6 +35,10 @@ export default function LeadDetail() {
   const [assignableUsers, setAssignableUsers] = useState([])
   const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [assignmentError, setAssignmentError] = useState('')
+  const [tierSaving, setTierSaving] = useState(false)
+  const [tierError, setTierError] = useState('')
+  const [markingDnc, setMarkingDnc] = useState(false)
+  const [dncError, setDncError] = useState('')
 
   function load() {
     setLoading(true)
@@ -121,6 +133,39 @@ export default function LeadDetail() {
     }
   }
 
+  async function handleTierChange(event) {
+    const newTier = event.target.value
+    if (!newTier) return
+    setTierSaving(true)
+    setTierError('')
+    try {
+      await api.patch(`/leads/${leadId}/tier?new_tier=${newTier}`, {})
+      load()
+    } catch (err) {
+      setTierError(err.message || 'Could not update tier.')
+    } finally {
+      setTierSaving(false)
+    }
+  }
+
+  async function handleMarkDnc() {
+    const confirmed = window.confirm(
+      "Mark this lead as Do Not Contact? This stops any active cadence and blocks this phone number from all future sends across the org. This can't be casually undone."
+    )
+    if (!confirmed) return
+
+    setMarkingDnc(true)
+    setDncError('')
+    try {
+      await api.patch(`/leads/${leadId}/mark-dnc`, {})
+      load()
+    } catch (err) {
+      setDncError(err.message || 'Could not mark this lead DNC.')
+    } finally {
+      setMarkingDnc(false)
+    }
+  }
+
   if (loading) return <div className="empty-state">Loading lead…</div>
   if (!data) return <div className="empty-state">Couldn't load this lead.</div>
 
@@ -140,7 +185,31 @@ export default function LeadDetail() {
         </div>
         <div className="lead-detail-header-actions">
           <TierBadge tier={lead.tier} />
+          <label className="lead-tier-control">
+            <span>{lead.status === 'needs_tier_review' ? 'Assign tier' : 'Change tier'}</span>
+            <select
+              value=""
+              onChange={handleTierChange}
+              disabled={tierSaving}
+            >
+              <option value="" disabled>{lead.tier ? 'Reassign…' : 'Assign…'}</option>
+              {TIER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </label>
           <StatusBadge status={lead.status} />
+          {lead.status !== 'dnc' && (
+            <button
+              type="button"
+              className="btn btn--danger lead-mark-dnc-btn"
+              onClick={handleMarkDnc}
+              disabled={markingDnc}
+              title="Flag this lead as Do Not Contact - for when you spot a stop/opt-out request the system missed"
+            >
+              {markingDnc ? 'Marking…' : 'Mark DNC'}
+            </button>
+          )}
           {canReassignLead && (
             <label className="lead-assignment-control">
               <span>Assigned to</span>
@@ -162,6 +231,8 @@ export default function LeadDetail() {
       </header>
 
       {assignmentError && <div className="compose-error lead-assignment-error">{assignmentError}</div>}
+      {tierError && <div className="compose-error lead-assignment-error">{tierError}</div>}
+      {dncError && <div className="compose-error lead-assignment-error">{dncError}</div>}
 
       <div className="detail-grid">
         <div>

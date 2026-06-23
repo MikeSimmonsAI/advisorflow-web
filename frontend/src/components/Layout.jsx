@@ -17,6 +17,7 @@ const NAV_ITEMS = [
 
 const ADMIN_NAV_ITEMS = [
   { to: '/admin', label: 'Master Dashboard', icon: 'shield' },
+  { to: '/reports', label: 'Reports', icon: 'activity' },
   { to: '/users', label: 'Users', icon: 'user-plus' },
   { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/campaigns', label: 'Campaigns', icon: 'target' },

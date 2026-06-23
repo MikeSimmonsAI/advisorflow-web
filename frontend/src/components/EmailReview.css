@@ -1,0 +1,23 @@
+.email-review-modal {
+  max-width: 760px;
+}
+
+.email-review-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.email-review-subject-input {
+  font-weight: 700;
+}
+
+.email-review-body-textarea {
+  font-family: var(--font-body);
+}
+
+.email-review-html-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}

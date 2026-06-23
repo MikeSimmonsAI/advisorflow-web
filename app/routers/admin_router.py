@@ -10,7 +10,7 @@ from typing import Any
 from app.deps import get_db, require_admin
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry
 from app.services.auth_service import hash_password
-from app.services.dedup_service import normalize_phone, normalize_last_name
+from app.services.dedup_service import normalize_phone, normalize_last_name, normalize_first_name, normalize_email
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -983,9 +983,32 @@ def potential_duplicate_leads(
     """
     Find likely messy duplicate leads that were not caught by the import dedup flow.
 
-    A group appears when two or more non-duplicate leads in the same org share
-    the same normalized phone OR normalized last name. Existing import-caught
-    duplicates (Lead.is_duplicate=True) are intentionally excluded.
+    REWORKED per Mike's explicit, justified complaint: the original version
+    grouped any two leads sharing a normalized LAST NAME ALONE into a
+    "potential duplicate" - so every unrelated "Johnson" or "Cooper" in the
+    org got bundled together with no other corroborating signal at all.
+    A shared surname among strangers is common and means nothing by
+    itself; it was turning a quick cleanup task into a slog through
+    unrelated people who happen to share a common name.
+
+    Matching now works like this:
+    - "phone": two or more leads share the same normalized phone number.
+      Kept as a standalone signal - a shared phone is still meaningful
+      even without a name match (could be a shared household line, which
+      is itself worth a human glance, not a false positive).
+    - "name_and_email": leads share BOTH normalized last name AND
+      normalized email. Last name alone is no longer sufficient; this
+      requires a second, independent signal.
+    - "name_and_first_name": leads share BOTH normalized last name AND
+      normalized first name (exact match after normalization - not fuzzy,
+      to avoid trading one kind of false positive for another). This is
+      what actually catches the realistic case (a genuine duplicate import
+      of "John Smith" twice) without catching "John Smith" and "Mary Smith"
+      who just happen to share a surname.
+
+    Bare last-name-only matching is intentionally NOT a category anymore.
+    Existing import-caught duplicates (Lead.is_duplicate=True) are still
+    excluded, same as before.
     """
     leads = (
         db.query(Lead)
@@ -1002,10 +1025,20 @@ def potential_duplicate_leads(
     for lead in leads:
         phone_key = normalize_phone(lead.phone or lead.phone_raw or "")
         last_key = normalize_last_name(lead.last_name or "")
+        first_key = normalize_first_name(lead.first_name or "")
+        email_key = normalize_email(lead.email or "")
+
         if phone_key:
             grouped[("phone", phone_key)].append(lead)
-        if last_key:
-            grouped[("last_name", last_key)].append(lead)
+
+        # Last name is required but never sufficient alone - it must be
+        # combined with a second signal (email or first name) to form a
+        # group key at all. A bare last_key with no email/first_key never
+        # produces a grouping key below, which is the actual fix.
+        if last_key and email_key:
+            grouped[("name_and_email", f"{last_key}:{email_key}")].append(lead)
+        if last_key and first_key:
+            grouped[("name_and_first_name", f"{first_key} {last_key}")].append(lead)
 
     results = []
     seen_exact_group_keys: set[tuple[str, str]] = set()
@@ -1013,8 +1046,10 @@ def potential_duplicate_leads(
         if len(group_leads) < 2:
             continue
         group_ids = tuple(sorted(lead.id for lead in group_leads))
-        # Keep both phone and last-name groups when they identify different clusters,
-        # but avoid returning the exact same group twice if phone and last name both match.
+        # Keep distinct match types for the same cluster of leads (e.g. a
+        # phone match AND a name_and_email match might both legitimately
+        # fire for the same pair), but avoid returning the exact same
+        # group twice under the same match type.
         dedupe_key = (match_type, "|".join(group_ids))
         if dedupe_key in seen_exact_group_keys:
             continue

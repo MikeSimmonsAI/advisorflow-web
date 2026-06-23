@@ -73,8 +73,22 @@ def test_mark_reviewed_cannot_touch_reply_from_another_org(client, auth_headers,
     assert foreign_reply.reviewed_at is None
 
 
-def test_reclassify_updates_reply_but_dnc_does_not_change_lead_status(client, auth_headers, db_session, sample_lead):
+def test_reclassify_to_dnc_actually_flips_lead_status_stops_cadence_and_suppresses(client, auth_headers, db_session, sample_org, sample_advisor, sample_lead):
+    """
+    Regression test for a real, silent gap: reclassifying a reply to DNC
+    used to only relabel the Reply row, with ZERO actual effect on
+    whether the lead kept getting contacted - the lead's status never
+    changed, the cadence never stopped, and the phone never got
+    suppressed. An advisor selecting "DNC" from the dropdown believing
+    it stopped outreach was wrong; cadence touches would have kept going
+    out. Now mirrors the same full treatment as the automatic webhook
+    path and the quick-DNC button (POST /leads/{lead_id}/mark-dnc).
+    """
+    from app.models.models import CadenceState, CadenceStatus, SuppressionEntry, SuppressionSource
+
     sample_lead.status = LeadStatus.REPLIED
+    cadence = CadenceState(lead_id=sample_lead.id, status=CadenceStatus.ACTIVE)
+    db_session.add(cadence)
     reply = Reply(
         lead_id=sample_lead.id,
         body="Actually don't contact me",
@@ -94,8 +108,37 @@ def test_reclassify_updates_reply_but_dnc_does_not_change_lead_status(client, au
 
     db_session.refresh(reply)
     db_session.refresh(sample_lead)
+    db_session.refresh(cadence)
     assert reply.classification == ReplyClassification.DNC
-    assert sample_lead.status == LeadStatus.REPLIED
+    assert sample_lead.status == LeadStatus.DNC
+    assert cadence.status == CadenceStatus.STOPPED_DNC
+
+    entry = db_session.query(SuppressionEntry).filter(SuppressionEntry.phone == sample_lead.phone).first()
+    assert entry is not None
+    assert entry.source == SuppressionSource.ADVISOR_FLAGGED
+
+
+def test_reclassify_to_dnc_with_no_phone_still_flips_status_but_skips_suppression(client, auth_headers, db_session, sample_org, sample_advisor):
+    no_phone_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                          first_name="NoPhone", last_name="Reclassify", phone=None, email="nophonereclassify@example.com")
+    db_session.add(no_phone_lead)
+    db_session.flush()
+    reply = Reply(lead_id=no_phone_lead.id, body="stop", classification=ReplyClassification.NEUTRAL)
+    db_session.add(reply)
+    db_session.commit()
+
+    response = client.patch(
+        f"/sms/replies/{reply.id}/reclassify",
+        headers=auth_headers,
+        json={"classification": "dnc"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(no_phone_lead)
+    assert no_phone_lead.status == "dnc"
+
+    from app.models.models import SuppressionEntry
+    assert db_session.query(SuppressionEntry).count() == 0
 
 
 def test_reclassify_cannot_touch_reply_from_another_org(client, auth_headers, db_session):

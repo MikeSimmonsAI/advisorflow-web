@@ -84,6 +84,17 @@
   opacity: 0.55;
 }
 
+.reply-action-button--danger {
+  background: var(--signal-red-dim);
+  color: var(--signal-red);
+  border-color: rgba(255, 77, 126, 0.26);
+}
+
+.reply-action-button--danger:hover:not(:disabled) {
+  border-color: var(--signal-red);
+  background: rgba(255, 77, 126, 0.18);
+}
+
 .reply-reclassify {
   display: flex;
   align-items: center;

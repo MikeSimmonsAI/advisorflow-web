@@ -190,3 +190,175 @@ def test_set_lead_tier_logs_audit_action_with_before_and_after(client, db_sessio
     details = json.loads(entry.details)
     assert details["from"] == "partial"
     assert details["to"] == "imminent"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /{lead_id}/mark-dnc - the quick-DNC button Mike asked for, for when
+# an advisor reads a reply themselves and spots STOP language the
+# automatic classification missed. Any advisor can use this (not just
+# admins) since a missed STOP gets worse the longer it sits unactioned.
+# Deliberately mirrors the automatic DNC path in the SMS webhook exactly.
+# ---------------------------------------------------------------------------
+
+def test_mark_dnc_sets_lead_status(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import LeadStatus
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Quick", last_name="DNC", phone="12145550960")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 200
+    db_session.refresh(lead)
+    assert lead.status == LeadStatus.DNC
+
+
+def test_mark_dnc_stops_active_cadence(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import CadenceState, CadenceStatus
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Cadence", last_name="Stop", phone="12145550961")
+    db_session.add(lead)
+    db_session.flush()
+    cadence = CadenceState(lead_id=lead.id, status=CadenceStatus.ACTIVE)
+    db_session.add(cadence)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 200
+    db_session.refresh(cadence)
+    assert cadence.status == CadenceStatus.STOPPED_DNC
+
+
+def test_mark_dnc_adds_to_suppression_list_with_advisor_flagged_source(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import SuppressionEntry, SuppressionSource
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Suppress", last_name="Test", phone="12145550962")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={"reason": "Said don't text me again"}, headers=auth_headers)
+
+    assert response.status_code == 200
+    entry = db_session.query(SuppressionEntry).filter(
+        SuppressionEntry.organization_id == sample_org.id, SuppressionEntry.phone == "12145550962"
+    ).first()
+    assert entry is not None
+    assert entry.source == SuppressionSource.ADVISOR_FLAGGED
+    assert entry.reason == "Said don't text me again"
+
+
+def test_mark_dnc_works_without_a_reason(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="NoReason", last_name="Test", phone="12145550963")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 200
+    from app.models.models import SuppressionEntry
+    entry = db_session.query(SuppressionEntry).filter(SuppressionEntry.phone == "12145550963").first()
+    assert entry is not None
+    assert "Quick" not in entry.reason  # sanity: just confirms a default reason string was generated, not blank
+    assert sample_advisor.full_name in entry.reason
+
+
+def test_mark_dnc_with_no_phone_still_sets_status_but_skips_suppression(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import LeadStatus, SuppressionEntry
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="NoPhone", last_name="Test", phone=None, email="nophone@example.com")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 200
+    db_session.refresh(lead)
+    assert lead.status == LeadStatus.DNC
+    assert db_session.query(SuppressionEntry).count() == 0
+
+
+def test_mark_dnc_is_idempotent_does_not_duplicate_suppression_entry(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import SuppressionEntry
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Idempotent", last_name="Test", phone="12145550964")
+    db_session.add(lead)
+    db_session.commit()
+
+    client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+    response2 = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response2.status_code == 200
+    count = db_session.query(SuppressionEntry).filter(SuppressionEntry.phone == "12145550964").count()
+    assert count == 1
+
+
+def test_mark_dnc_does_not_overwrite_existing_suppression_source(client, db_session, sample_org, sample_advisor, auth_headers):
+    """
+    If a number was already suppressed automatically (REPLY_STOP) before
+    an advisor clicks the quick-DNC button on that same lead, the
+    original source attribution must NOT get silently overwritten to
+    ADVISOR_FLAGGED - the existing record stands as-is.
+    """
+    from app.models.models import SuppressionEntry, SuppressionSource
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="AlreadySuppressed", last_name="Test", phone="12145550965")
+    db_session.add(lead)
+    db_session.flush()
+    existing_entry = SuppressionEntry(
+        organization_id=sample_org.id, phone="12145550965", reason="Original auto STOP", source=SuppressionSource.REPLY_STOP,
+    )
+    db_session.add(existing_entry)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 200
+    db_session.refresh(existing_entry)
+    assert existing_entry.source == SuppressionSource.REPLY_STOP
+    assert existing_entry.reason == "Original auto STOP"
+
+
+def test_mark_dnc_404s_for_lead_in_different_org(client, db_session, sample_org, auth_headers):
+    other_org = Organization(name="Other DNC Org", slug="other-dnc-org", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other-dnc-advisor@example.com",
+                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+    other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id, first_name="Other", last_name="OrgLead", phone="12145550966")
+    db_session.add(other_lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{other_lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 404
+
+
+def test_mark_dnc_logs_audit_action(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import AuditLogEntry
+    import json
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Audit", last_name="DNC", phone="12145550967")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={"reason": "Test reason"}, headers=auth_headers)
+    assert response.status_code == 200
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "lead.mark_dnc", AuditLogEntry.target_id == lead.id)
+        .first()
+    )
+    assert entry is not None
+    details = json.loads(entry.details)
+    assert details["reason"] == "Test reason"
+    assert details["was_already_dnc"] is False
+
+
+def test_mark_dnc_allowed_for_plain_advisor_not_just_admin(client, db_session, sample_org, sample_advisor, auth_headers):
+    """Explicit confirmation of Mike's requirement: any advisor, not just admins, can use this."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="AnyAdvisor", last_name="Test", phone="12145550968")
+    db_session.add(lead)
+    db_session.commit()
+
+    # auth_headers fixture is a plain advisor, not org_admin/super_admin
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    assert response.status_code == 200

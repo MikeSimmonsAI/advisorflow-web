@@ -21,20 +21,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Informational only, never blocks anything - OneDrive actively syncs
-REM and can briefly lock files deep inside .git\objects, which is the
-REM most likely cause of any "Deletion of directory .git/objects/XX
-REM failed" prompts. If that ever happens again, the fix is: pause
-REM OneDrive syncing for a minute, then re-run this script.
-echo %CD% | findstr /I "OneDrive" >nul
-if not errorlevel 1 (
-    echo NOTE: This repo is inside a OneDrive-synced folder.
-    echo If Git ever gets stuck asking to delete .git\objects\ folders,
-    echo pause OneDrive syncing for a minute and try again - it's a
-    echo OneDrive file lock, not a real Git problem.
-    echo.
-)
-
 echo Current changes:
 echo -----------------------------------
 git status --short > "%TEMP%\advisorflow_status.txt"
@@ -71,20 +57,6 @@ if errorlevel 1 (
     echo Nothing was committed - there may be nothing new to commit.
     pause
     exit /b 0
-)
-
-echo.
-echo Checking for updates from GitHub first...
-git fetch origin >nul 2>&1
-git status -uno | findstr /C:"Your branch is behind" >nul
-if not errorlevel 1 (
-    echo.
-    echo WARNING: Your local branch is behind origin/main.
-    echo Someone or something else pushed changes you don't have yet.
-    echo Run "git pull" first, then re-run this script.
-    echo.
-    pause
-    exit /b 1
 )
 
 echo.

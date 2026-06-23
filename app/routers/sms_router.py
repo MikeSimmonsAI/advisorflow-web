@@ -239,11 +239,39 @@ def reclassify_reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Manually reclassify a reply. IMPORTANT: reclassifying TO dnc must
+    trigger the full DNC treatment, not just relabel the Reply row - this
+    was a real, silent gap before this fix. An advisor selecting "DNC"
+    from this dropdown would see the badge change, but the lead's status
+    never flipped to dnc, the cadence never stopped, and the phone never
+    got suppressed - meaning cadence touches would keep going out to a
+    lead an advisor had explicitly flagged as do-not-contact. Now mirrors
+    the same treatment as the automatic webhook path and the quick-DNC
+    button on Lead Detail (see /leads/{lead_id}/mark-dnc).
+    """
     reply = _get_org_reply_or_404(db, reply_id, current_user)
     reply.classification = req.classification
     reply.is_hot = req.classification == ReplyClassification.INTERESTED
     reply.classification_confidence = "manual"
     reply.classification_reasoning = f"Manually reclassified by {current_user.full_name}"
+
+    if req.classification == ReplyClassification.DNC:
+        from app.services.cadence_service import stop_cadence_for_lead
+        from app.services.compliance_service import add_suppression_entry_from_reply
+        from app.models.models import CadenceStatus, SuppressionSource
+
+        lead = db.query(Lead).filter(Lead.id == reply.lead_id).first()
+        if lead:
+            lead.status = "dnc"
+            stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
+            if lead.phone:
+                add_suppression_entry_from_reply(
+                    db, lead.organization_id, lead.phone,
+                    reason=f"Reply reclassified to DNC by {current_user.full_name}",
+                    source=SuppressionSource.ADVISOR_FLAGGED,
+                )
+
     db.commit()
     db.refresh(reply)
     return reply

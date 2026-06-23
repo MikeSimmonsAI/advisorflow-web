@@ -35,14 +35,28 @@ def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
     )
 
 
-def add_suppression_entry_from_reply(db: Session, organization_id: str, phone: str, reason: str) -> SuppressionEntry:
+def add_suppression_entry_from_reply(
+    db: Session,
+    organization_id: str,
+    phone: str,
+    reason: str,
+    source: SuppressionSource = SuppressionSource.REPLY_STOP,
+) -> SuppressionEntry:
     """
-    Adds a number to the suppression list with source=REPLY_STOP,
-    distinguishing it from numbers an admin added manually via the
-    Compliance Center. Idempotent - if the number is already
-    suppressed (e.g. an admin already added it manually, or they
-    replied STOP twice), returns the existing entry rather than
-    erroring or creating a duplicate.
+    Adds a number to the suppression list, distinguishing WHO/WHAT
+    flagged it via the source parameter (defaults to REPLY_STOP, the
+    original caller - the automatic webhook keyword/AI detection path in
+    sms_router.py). leads_router.py's manual quick-DNC action passes
+    source=ADVISOR_FLAGGED instead.
+
+    Idempotent - if the number is already suppressed (e.g. an admin
+    already added it manually, or they replied STOP twice), returns the
+    EXISTING entry rather than erroring or creating a duplicate.
+    Specifically does NOT overwrite an existing entry's source on a
+    repeat call - if it was already suppressed for one reason, a second
+    flagging attempt shouldn't silently rewrite the original
+    attribution; the existing record stands as the source of truth for
+    "who/what suppressed this first."
     """
     normalized = normalize_phone(phone)
     existing = (
@@ -57,7 +71,7 @@ def add_suppression_entry_from_reply(db: Session, organization_id: str, phone: s
         organization_id=organization_id,
         phone=normalized,
         reason=reason,
-        source=SuppressionSource.REPLY_STOP,
+        source=source,
     )
     db.add(entry)
     db.commit()

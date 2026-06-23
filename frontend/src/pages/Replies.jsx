@@ -84,6 +84,14 @@ export default function Replies() {
     }
   }
 
+  function handleQuickDnc(replyId) {
+    const confirmed = window.confirm(
+      "Flag this as DNC? This stops any active cadence and blocks this lead's phone number from all future sends across the org."
+    )
+    if (!confirmed) return
+    reclassify(replyId, 'dnc')
+  }
+
   return (
     <div>
       <header className="page-header">
@@ -137,6 +145,18 @@ export default function Replies() {
                     >
                       {reviewed ? 'Reviewed' : 'Mark reviewed'}
                     </button>
+
+                    {r.classification !== 'dnc' && (
+                      <button
+                        type="button"
+                        className="reply-action-button reply-action-button--danger"
+                        disabled={isBusy}
+                        onClick={() => handleQuickDnc(r.id)}
+                        title="One click if this is a stop/do-not-contact request the system missed"
+                      >
+                        Mark DNC
+                      </button>
+                    )}
 
                     <label className="reply-reclassify">
                       <span>Reclassify</span>
