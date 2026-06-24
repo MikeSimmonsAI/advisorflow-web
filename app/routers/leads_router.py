@@ -23,6 +23,22 @@ def _is_suppressed(db: Session, lead: Lead) -> bool:
     return is_phone_suppressed(db, lead.organization_id, lead.phone)
 
 
+def _require_import_access(current_user: User) -> None:
+    """
+    Lead import (Excel upload) is admin-only by default per Mike's
+    explicit request, but with a per-advisor override
+    (User.can_import_leads) an admin can grant individually - not
+    all-or-nothing. Checked first, before any file is even written to
+    disk, so a rejected request doesn't waste effort on temp-file I/O.
+    """
+    is_admin = current_user.role in ("org_admin", "super_admin")
+    if not is_admin and not current_user.can_import_leads:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to import leads. Ask an admin to grant you access in Users.",
+        )
+
+
 @router.post("/upload/preview")
 def preview_upload(
     file: UploadFile = File(...),
@@ -36,6 +52,9 @@ def preview_upload(
     (tier routing, dedup, compliance flags) in dry_run mode so the preview
     numbers always match what confirm_upload will actually do.
 
+    Admin-only by default, with a per-advisor override - see
+    _require_import_access above.
+
     source_year and force_new_inquiry are explicitly marked as Form(...)
     fields, not bare params - without that marker FastAPI treats them as
     query parameters when mixed with a File(...) upload, which silently
@@ -48,6 +67,8 @@ def preview_upload(
     from a source column. See import_service.import_leads_from_excel for
     the full reasoning.
     """
+    _require_import_access(current_user)
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
@@ -77,7 +98,14 @@ def confirm_upload(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
+    """
+    Step 2: advisor confirms - actually import and persist the leads.
+    Admin-only by default, with a per-advisor override - see
+    _require_import_access above. See preview_upload above for why
+    source_year/force_new_inquiry use Form(...).
+    """
+    _require_import_access(current_user)
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name

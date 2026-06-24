@@ -1,10 +1,11 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**See SESSION_LOG_CLOCK_AND_REALTIME_ALERTS.md for the latest session's
-full changelog** (live date/time clock in the top bar, real-time alerts
-expanded to every reply classification not just hot ones, SMS-to-advisor
-opt-in fast channel, silent email-failure tracking, two new database
-migrations that MUST run before this is live). Prior sessions:
+**See SESSION_LOG_ACCOUNT_MANAGEMENT_AND_IMPORT_ACCESS.md for the latest
+session's full changelog** (fixed the confusing forced-password-change
+screen, admin-specified passwords on create/reset, Excel import now
+admin-only with a per-advisor override toggle — ONE NEW MIGRATION
+COLUMN, must run before this is live). Prior sessions:
+SESSION_LOG_CLOCK_AND_REALTIME_ALERTS.md,
 SESSION_LOG_LEAD_CLEANUP_EMAIL_DNC_REPORTS.md,
 SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md, and
 SESSION_LOG_BUGFIXES_AND_FEATURES.md.

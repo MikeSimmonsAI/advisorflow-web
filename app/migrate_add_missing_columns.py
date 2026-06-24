@@ -36,6 +36,7 @@ COLUMNS_TO_ADD = [
     ("users", "microsoft_365_connected", "BOOLEAN DEFAULT FALSE"),
     ("users", "notification_phone", "VARCHAR"),
     ("users", "notify_via_sms", "BOOLEAN DEFAULT FALSE"),
+    ("users", "can_import_leads", "BOOLEAN DEFAULT FALSE"),
     ("leads", "engagement_temperature", "VARCHAR"),
     ("replies", "classification", "VARCHAR"),
     ("replies", "classification_confidence", "VARCHAR"),

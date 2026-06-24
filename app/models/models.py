@@ -186,6 +186,14 @@ class User(Base):
     notify_on_hot_reply = Column(Boolean, default=True)  # despite the name (kept for backward compatibility), this now gates ALL reply alerts, not just hot ones - see notification_service.py's notify_reply
     notify_via_sms = Column(Boolean, default=False)  # off by default - requires notification_phone to be set, and is an extra cost/traffic decision an advisor should opt into, not get by surprise
 
+    # Per-advisor permission override - lead import (Excel upload) is
+    # admin-only by default per Mike's explicit request, but he also
+    # wanted the ability to grant specific advisors that right
+    # individually rather than it being all-or-nothing. False by
+    # default so existing/new advisor accounts don't silently gain
+    # import access; an admin has to deliberately flip this per person.
+    can_import_leads = Column(Boolean, default=False)
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 

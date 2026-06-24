@@ -12,6 +12,8 @@ export default function Users() {
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
   const [newRole, setNewRole] = useState('advisor')
+  const [newPasswordMode, setNewPasswordMode] = useState('generate') // 'generate' | 'specify'
+  const [newPassword, setNewPassword] = useState('')
   const [creating, setCreating] = useState(false)
   const [justCreated, setJustCreated] = useState(null) // { email, temp_password }
   const currentUser = getCurrentUser()
@@ -19,12 +21,21 @@ export default function Users() {
   const [sampleDataBusy, setSampleDataBusy] = useState(false)
   const [sampleDataMessage, setSampleDataMessage] = useState('')
 
+  // Reset password — same generate-or-specify choice as create, since
+  // Mike explicitly asked for both options on both flows, not just one.
+  const [resettingUserId, setResettingUserId] = useState(null)
+  const [resetPasswordMode, setResetPasswordMode] = useState('generate')
+  const [resetPasswordValue, setResetPasswordValue] = useState('')
+  const [resetSaving, setResetSaving] = useState(false)
+  const [resetError, setResetError] = useState('')
+
   // Edit user (name/email/role) — super_admin only, fixes the gap where
   // a typo'd name or wrong email had no in-app fix.
   const [editingUserId, setEditingUserId] = useState(null)
   const [editName, setEditName] = useState('')
   const [editEmail, setEditEmail] = useState('')
   const [editRole, setEditRole] = useState('advisor')
+  const [editCanImportLeads, setEditCanImportLeads] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
@@ -37,15 +48,22 @@ export default function Users() {
 
   async function handleCreate(e) {
     e.preventDefault()
+    if (newPasswordMode === 'specify' && newPassword.trim().length < 8) {
+      alert('Password must be at least 8 characters.')
+      return
+    }
     setCreating(true)
     try {
       const result = await api.post('/admin/users', {
         email: newEmail, full_name: newName, role: newRole,
+        password: newPasswordMode === 'specify' ? newPassword.trim() : null,
       })
       setJustCreated({ email: result.email, temp_password: result.temp_password })
       setNewEmail('')
       setNewName('')
       setNewRole('advisor')
+      setNewPasswordMode('generate')
+      setNewPassword('')
       setShowCreate(false)
       load()
     } catch (err) {
@@ -74,13 +92,33 @@ export default function Users() {
     }
   }
 
-  async function handleResetPassword(userId, userName) {
-    if (!confirm(`Reset ${userName}'s password? They will need to set a new one on their next login.`)) return
+  function startResettingPassword(userId) {
+    setResettingUserId(userId)
+    setResetPasswordMode('generate')
+    setResetPasswordValue('')
+    setResetError('')
+  }
+
+  async function handleResetPasswordSubmit(userId, userName) {
+    if (resetPasswordMode === 'specify' && resetPasswordValue.trim().length < 8) {
+      setResetError('Password must be at least 8 characters.')
+      return
+    }
+    if (!confirm(`Reset ${userName}'s password? They will need to confirm/change it on their next login.`)) return
+
+    setResetSaving(true)
+    setResetError('')
     try {
-      const result = await api.post(`/admin/users/${userId}/reset-password`, {})
+      const result = await api.post(`/admin/users/${userId}/reset-password`, {
+        password: resetPasswordMode === 'specify' ? resetPasswordValue.trim() : null,
+      })
       setJustCreated({ email: result.email, temp_password: result.temp_password, isReset: true })
+      setResettingUserId(null)
+      setResetPasswordValue('')
     } catch (err) {
-      alert(`Failed: ${err.message}`)
+      setResetError(err.message || 'Failed to reset password.')
+    } finally {
+      setResetSaving(false)
     }
   }
 
@@ -89,6 +127,7 @@ export default function Users() {
     setEditName(u.full_name)
     setEditEmail(u.email)
     setEditRole(u.role)
+    setEditCanImportLeads(u.can_import_leads || false)
     setEditError('')
   }
 
@@ -103,6 +142,7 @@ export default function Users() {
         // is rendered without a role selector for super_admin (see below),
         // so editRole will already equal the unchanged role in that case.
         role: editRole,
+        can_import_leads: editCanImportLeads,
       })
       setEditingUserId(null)
       load()
@@ -191,6 +231,29 @@ export default function Users() {
                 <option value="org_admin">Org Admin</option>
               </select>
             </label>
+            <div className="users-password-choice">
+              <label className="users-radio-label">
+                <input type="radio" checked={newPasswordMode === 'generate'} onChange={() => setNewPasswordMode('generate')} />
+                Generate a temporary password for me
+              </label>
+              <label className="users-radio-label">
+                <input type="radio" checked={newPasswordMode === 'specify'} onChange={() => setNewPasswordMode('specify')} />
+                Set their password myself
+              </label>
+              {newPasswordMode === 'specify' && (
+                <input
+                  className="settings-input"
+                  type="text"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  required
+                />
+              )}
+            </div>
+            <p className="settings-help">
+              Either way, they'll be required to confirm/change this password the first time they log in.
+            </p>
             <div className="settings-actions">
               <button className="btn btn--primary" type="submit" disabled={creating}>
                 {creating ? 'Creating…' : 'Create account'}
@@ -211,6 +274,7 @@ export default function Users() {
                 <th>Email</th>
                 <th>Role</th>
                 <th>Status</th>
+                <th>Import access</th>
                 <th></th>
               </tr>
             </thead>
@@ -258,6 +322,20 @@ export default function Users() {
                           )}
                         </td>
                         <td>
+                          {u.role === 'org_admin' || u.role === 'super_admin' ? (
+                            <span className="users-import-always-on" title="Admins always have import access">Always on</span>
+                          ) : (
+                            <label className="compose-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={editCanImportLeads}
+                                onChange={(e) => setEditCanImportLeads(e.target.checked)}
+                              />
+                              Allowed
+                            </label>
+                          )}
+                        </td>
+                        <td>
                           <div style={{ display: 'flex', gap: 6, flexDirection: 'column', alignItems: 'flex-start' }}>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="btn btn--secondary" onClick={() => setEditingUserId(null)} disabled={editSaving}>Cancel</button>
@@ -289,6 +367,15 @@ export default function Users() {
                           )}
                         </td>
                         <td>
+                          {u.role === 'org_admin' || u.role === 'super_admin' ? (
+                            <span className="users-import-always-on">Always on</span>
+                          ) : u.can_import_leads ? (
+                            <span className="badge badge--green">Allowed</span>
+                          ) : (
+                            <span className="badge badge--neutral-dim">Admin only</span>
+                          )}
+                        </td>
+                        <td>
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             {isSuperAdmin && (
                               <button className="btn btn--secondary" onClick={() => startEditingUser(u)}>Edit</button>
@@ -299,11 +386,39 @@ export default function Users() {
                               <button className="btn btn--secondary" onClick={() => handleReactivate(u.id)}>Reactivate</button>
                             )}
                             {isSuperAdmin && (
-                              <button className="btn btn--secondary" onClick={() => handleResetPassword(u.id, u.full_name)}>
+                              <button className="btn btn--secondary" onClick={() => startResettingPassword(u.id)}>
                                 Reset password
                               </button>
                             )}
                           </div>
+                          {resettingUserId === u.id && (
+                            <div className="users-reset-panel">
+                              <label className="users-radio-label">
+                                <input type="radio" checked={resetPasswordMode === 'generate'} onChange={() => setResetPasswordMode('generate')} />
+                                Generate a temporary password
+                              </label>
+                              <label className="users-radio-label">
+                                <input type="radio" checked={resetPasswordMode === 'specify'} onChange={() => setResetPasswordMode('specify')} />
+                                Set their password myself
+                              </label>
+                              {resetPasswordMode === 'specify' && (
+                                <input
+                                  className="settings-input"
+                                  type="text"
+                                  value={resetPasswordValue}
+                                  onChange={(e) => setResetPasswordValue(e.target.value)}
+                                  placeholder="At least 8 characters"
+                                />
+                              )}
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button className="btn btn--secondary" onClick={() => setResettingUserId(null)} disabled={resetSaving}>Cancel</button>
+                                <button className="btn btn--primary" onClick={() => handleResetPasswordSubmit(u.id, u.full_name)} disabled={resetSaving}>
+                                  {resetSaving ? 'Resetting…' : 'Reset password'}
+                                </button>
+                              </div>
+                              {resetError && <div className="compose-error">{resetError}</div>}
+                            </div>
+                          )}
                         </td>
                       </>
                     )}

@@ -449,6 +449,7 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     full_name: str
     role: str = "advisor"  # advisor, org_admin (super_admin is reserved, not creatable here)
+    password: str | None = None  # if provided, used as-is instead of auto-generating - per Mike's explicit request for both options
 
 
 class UserResponse(BaseModel):
@@ -459,6 +460,7 @@ class UserResponse(BaseModel):
     is_active: bool
     must_change_password: bool
     temp_password: str | None = None  # only populated once, right after creation
+    can_import_leads: bool = False
 
 
 def _generate_temp_password() -> str:
@@ -484,6 +486,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
         UserResponse(
             id=u.id, email=u.email, full_name=u.full_name, role=u.role,
             is_active=u.is_active, must_change_password=u.must_change_password,
+            can_import_leads=u.can_import_leads,
         )
         for u in users
     ]
@@ -497,10 +500,15 @@ def create_user(
 ):
     """
     Creates a new advisor (or org_admin) account in the current admin's
-    organization. Generates a temporary password, returned ONCE in this
-    response only - never retrievable again afterward, same security
-    pattern as how Twilio/OpenAI show API keys only at creation time.
-    The new account is forced to change that password on first login.
+    organization. If req.password is provided, it's used directly (still
+    must be 8+ characters); otherwise a temporary password is generated.
+    Either way, the resulting password/temp_password is returned ONCE in
+    this response only - never retrievable again afterward, same
+    security pattern as how Twilio/OpenAI show API keys only at creation
+    time. The new account is forced to change that password on first
+    login regardless of which path was used, so an admin-set password is
+    never the account's permanent one without the advisor explicitly
+    confirming/changing it themselves.
     """
     existing = db.query(User).filter(User.email == req.email).first()
     if existing:
@@ -511,7 +519,14 @@ def create_user(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
 
-    temp_password = _generate_temp_password()
+    if req.password is not None:
+        if len(req.password) < 8:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+        temp_password = req.password
+    else:
+        temp_password = _generate_temp_password()
+
     new_user = User(
         organization_id=current_user.organization_id,
         email=req.email,
@@ -534,6 +549,7 @@ def create_user(
         role=new_user.role, is_active=new_user.is_active,
         must_change_password=new_user.must_change_password,
         temp_password=temp_password,
+        can_import_leads=new_user.can_import_leads,
     )
 
 
@@ -597,6 +613,10 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
 # the super_admin role alone.
 # ---------------------------------------------------------------------------
 
+class ResetPasswordRequest(BaseModel):
+    password: str | None = None  # if provided, used as-is instead of auto-generating
+
+
 class ResetPasswordResponse(BaseModel):
     email: str
     temp_password: str
@@ -618,15 +638,22 @@ def require_super_admin(current_user: User = Depends(require_admin)) -> User:
 @router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
 def reset_user_password(
     user_id: str,
+    req: ResetPasswordRequest = ResetPasswordRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Resets any user's password to a new temp password, forcing them to
-    set a real one on next login. Deliberately restricted to super_admin
+    Resets any user's password - to an admin-provided password if given
+    (req.password, still must be 8+ characters), otherwise to a
+    generated temp password. Either way, forces them to set/confirm a
+    real password on next login. Deliberately restricted to super_admin
     only (see require_super_admin above) - an org_admin should never be
     able to take over another advisor's account by resetting their
     password, even within the same organization.
+
+    req defaults to an empty ResetPasswordRequest() so existing callers
+    that send no body at all (the original behavior) still work
+    unchanged - this stays backward compatible.
     """
     from fastapi import HTTPException
     target = db.query(User).filter(
@@ -635,7 +662,13 @@ def reset_user_password(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    temp_password = _generate_temp_password()
+    if req.password is not None:
+        if len(req.password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+        temp_password = req.password
+    else:
+        temp_password = _generate_temp_password()
+
     target.password_hash = hash_password(temp_password)
     target.must_change_password = True
     db.commit()
@@ -665,6 +698,7 @@ class UpdateUserRequest(BaseModel):
     full_name: str | None = None
     email: EmailStr | None = None
     role: str | None = None  # 'advisor' or 'org_admin' only - see validation below
+    can_import_leads: bool | None = None  # per-advisor override for the admin-only-by-default Excel import restriction
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
@@ -675,9 +709,10 @@ def update_user(
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Edits an existing user's name, email, and/or role. Fields omitted from
-    the request are left unchanged - this is a partial update, not a
-    full replace, so the frontend doesn't have to resend everything.
+    Edits an existing user's name, email, role, and/or lead-import
+    access. Fields omitted from the request are left unchanged - this
+    is a partial update, not a full replace, so the frontend doesn't
+    have to resend everything.
     """
     from fastapi import HTTPException
 
@@ -687,7 +722,10 @@ def update_user(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    before = {"full_name": target.full_name, "email": target.email, "role": target.role}
+    before = {
+        "full_name": target.full_name, "email": target.email, "role": target.role,
+        "can_import_leads": target.can_import_leads,
+    }
 
     if req.email is not None and req.email != target.email:
         existing = db.query(User).filter(User.email == req.email, User.id != target.id).first()
@@ -708,10 +746,16 @@ def update_user(
             raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
         target.role = req.role
 
+    if req.can_import_leads is not None:
+        target.can_import_leads = req.can_import_leads
+
     db.commit()
     db.refresh(target)
 
-    after = {"full_name": target.full_name, "email": target.email, "role": target.role}
+    after = {
+        "full_name": target.full_name, "email": target.email, "role": target.role,
+        "can_import_leads": target.can_import_leads,
+    }
     changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
     if changed:
         log_action(
@@ -723,6 +767,7 @@ def update_user(
     return UserResponse(
         id=target.id, email=target.email, full_name=target.full_name, role=target.role,
         is_active=target.is_active, must_change_password=target.must_change_password,
+        can_import_leads=target.can_import_leads,
     )
 
 

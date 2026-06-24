@@ -600,3 +600,173 @@ def test_get_user_detail_includes_last_login(client, db_session, sample_org, sam
 
     assert response.status_code == 200
     assert response.json()["last_login_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Admin-specified passwords on create/reset - per Mike's explicit request
+# for BOTH options: a generated password (existing behavior) OR a
+# specific password he types in himself.
+# ---------------------------------------------------------------------------
+
+def test_create_user_with_specific_password_uses_it_not_a_generated_one(client, admin_auth_headers, db_session):
+    response = client.post("/admin/users", json={
+        "email": "specificpw@restland.com", "full_name": "Specific PW", "password": "WelcomeOne123",
+    }, headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["temp_password"] == "WelcomeOne123"
+
+    login_response = client.post("/auth/login", data={
+        "username": "specificpw@restland.com", "password": "WelcomeOne123",
+    })
+    assert login_response.status_code == 200
+    assert login_response.json()["must_change_password"] is True  # still forced to change it, even though admin chose it
+
+
+def test_create_user_rejects_specific_password_under_8_chars(client, admin_auth_headers):
+    response = client.post("/admin/users", json={
+        "email": "shortpw@restland.com", "full_name": "Short PW", "password": "short",
+    }, headers=admin_auth_headers)
+
+    assert response.status_code == 400
+    assert "8 characters" in response.json()["detail"]
+
+
+def test_create_user_without_password_still_auto_generates(client, admin_auth_headers):
+    """Confirms the original behavior (generate one) still works when password is omitted entirely."""
+    response = client.post("/admin/users", json={
+        "email": "autogen@restland.com", "full_name": "Auto Gen",
+    }, headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["temp_password"] is not None
+    assert response.json()["temp_password"] != "WelcomeOne123"  # not coincidentally reusing the other test's password
+
+
+def test_reset_password_with_specific_password_uses_it(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-pw@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", json={
+        "password": "NewChosenPassword1",
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["temp_password"] == "NewChosenPassword1"
+
+    login_response = client.post("/auth/login", data={
+        "username": sample_advisor.email, "password": "NewChosenPassword1",
+    })
+    assert login_response.status_code == 200
+
+
+def test_reset_password_rejects_specific_password_under_8_chars(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-pw2@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", json={
+        "password": "abc",
+    }, headers=super_headers)
+
+    assert response.status_code == 400
+
+
+def test_reset_password_with_no_body_still_auto_generates(client, db_session, sample_org, sample_advisor):
+    """Confirms existing callers sending no body at all (the original behavior) still work unchanged."""
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-pw3@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["temp_password"] is not None
+
+
+# ---------------------------------------------------------------------------
+# can_import_leads per-advisor override toggle, via PATCH /admin/users/{id}
+# ---------------------------------------------------------------------------
+
+def test_update_user_can_grant_import_access(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-import@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    assert sample_advisor.can_import_leads is False
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "can_import_leads": True,
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["can_import_leads"] is True
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.can_import_leads is True
+
+
+def test_update_user_can_revoke_import_access(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    sample_advisor.can_import_leads = True
+    db_session.commit()
+    super_admin = User(organization_id=sample_org.id, email="super-import2@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "can_import_leads": False,
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["can_import_leads"] is False
+
+
+def test_update_user_import_access_logs_audit_action(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    from app.models.models import AuditLogEntry
+    import json
+    super_admin = User(organization_id=sample_org.id, email="super-import3@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    client.patch(f"/admin/users/{sample_advisor.id}", json={"can_import_leads": True}, headers=super_headers)
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "user.update", AuditLogEntry.target_id == sample_advisor.id)
+        .order_by(AuditLogEntry.created_at.desc())
+        .first()
+    )
+    assert entry is not None
+    details = json.loads(entry.details)
+    assert details["can_import_leads"]["from"] is False
+    assert details["can_import_leads"]["to"] is True
+
+
+def test_list_users_includes_can_import_leads_field(client, db_session, sample_org, sample_advisor, admin_auth_headers):
+    """Regression check: the user-list endpoint must actually populate this from the real record, not silently default to False."""
+    sample_advisor.can_import_leads = True
+    db_session.commit()
+
+    response = client.get("/admin/users", headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    row = next(u for u in response.json() if u["id"] == sample_advisor.id)
+    assert row["can_import_leads"] is True
