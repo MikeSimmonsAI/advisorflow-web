@@ -135,11 +135,8 @@ def inbound_webhook(
     reply_classification_service.py, which replaced the old naive
     substring keyword matcher after testing surfaced real false
     positives), stops the re-engagement cadence (any reply means the
-    lead is engaged - no more touches needed), and fires an immediate
-    reply notification to the owning advisor for EVERY reply (not just
-    hot ones - see notification_service.py's notify_reply, expanded per
-    Mike's explicit request that any reply, not just a hot lead, is
-    something he wants to know about the moment it happens).
+    lead is engaged - no more touches needed), and fires a HOT reply
+    email notification to the owning advisor.
     """
     from app.services.dedup_service import normalize_phone
     from app.services.cadence_service import stop_cadence_for_lead
@@ -212,10 +209,10 @@ def inbound_webhook(
     except Exception:
         pass  # never let a classification failure break the Twilio webhook response
 
-    if lead.assigned_to:
-        from app.services.notification_service import notify_reply
+    if is_hot and lead.assigned_to:
+        from app.services.notification_service import notify_hot_reply
         try:
-            notify_reply(db, lead.assigned_to, lead, reply)
+            notify_hot_reply(db, lead.assigned_to, lead, reply)
         except Exception:
             pass  # never let a notification failure break the Twilio webhook response
 

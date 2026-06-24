@@ -10,7 +10,7 @@ require real credentials and would actually send messages.
 from unittest.mock import patch, MagicMock
 import pytest
 
-from app.services.sms_service import render_template, create_booking_link, send_sms, send_batch, send_plain_sms
+from app.services.sms_service import render_template, create_booking_link, send_sms, send_batch
 from app.models.models import Lead, LeadStatus, BookingLink
 
 
@@ -158,88 +158,3 @@ def test_get_twilio_client_raises_clear_error_when_unconfigured(db_session, samp
 
     with pytest.raises(ValueError, match="no Twilio credentials"):
         get_twilio_client(unconfigured_advisor)
-
-
-# ---------------------------------------------------------------------------
-# send_plain_sms - new primitive for self-alerts (texting the advisor's
-# own phone), deliberately separate from send_sms which is built for
-# advisor-to-LEAD outreach and always creates a Message/Lead-tied record.
-# ---------------------------------------------------------------------------
-
-@patch("app.services.sms_service.get_twilio_client")
-def test_send_plain_sms_success_returns_sid_no_error(mock_get_client, sample_advisor):
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(sid="SM999")
-    mock_get_client.return_value = mock_client
-
-    result = send_plain_sms(sample_advisor, "+12145559999", "Test alert")
-
-    assert result["success"] is True
-    assert result["twilio_sid"] == "SM999"
-    assert result["error"] is None
-    mock_client.messages.create.assert_called_once_with(body="Test alert", from_=sample_advisor.twilio_phone_number, to="+12145559999")
-
-
-@patch("app.services.sms_service.get_twilio_client")
-def test_send_plain_sms_creates_no_message_or_lead_record(mock_get_client, db_session, sample_advisor):
-    """Confirms this never touches the Message table - it's a bare send, no Lead/Message pairing."""
-    from app.models.models import Message
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(sid="SM111")
-    mock_get_client.return_value = mock_client
-
-    before_count = db_session.query(Message).count()
-    send_plain_sms(sample_advisor, "+12145559999", "Test")
-    after_count = db_session.query(Message).count()
-
-    assert before_count == after_count
-
-
-def test_send_plain_sms_returns_clear_error_when_twilio_not_configured(db_session, sample_org):
-    from app.models.models import User
-    unconfigured_advisor = User(
-        organization_id=sample_org.id, email="unconfigured@example.com",
-        password_hash="x", full_name="Unconfigured", role="advisor",
-    )
-    db_session.add(unconfigured_advisor)
-    db_session.commit()
-
-    result = send_plain_sms(unconfigured_advisor, "+12145559999", "Test")
-
-    assert result["success"] is False
-    assert result["twilio_sid"] is None
-    assert "Twilio credentials" in result["error"]
-
-
-@patch("app.services.sms_service.get_twilio_client")
-def test_send_plain_sms_returns_clear_error_on_twilio_exception(mock_get_client, sample_advisor):
-    mock_client = MagicMock()
-    mock_client.messages.create.side_effect = Exception("Invalid 'To' Phone Number")
-    mock_get_client.return_value = mock_client
-
-    result = send_plain_sms(sample_advisor, "+1bad", "Test")
-
-    assert result["success"] is False
-    assert "Invalid 'To' Phone Number" in result["error"]
-
-
-@patch("app.services.sms_service.get_twilio_client")
-def test_send_plain_sms_does_not_check_dnc_or_suppression(mock_get_client, db_session, sample_org, sample_advisor):
-    """
-    Unlike send_sms, send_plain_sms has no DNC/suppression check - those
-    exist to protect LEADS from over-contacting, not to gate an advisor
-    messaging their own phone. Confirms a "suppressed" number (which
-    would never apply to the advisor's own number in practice, but
-    proves the check genuinely isn't there) doesn't block the send.
-    """
-    from app.models.models import SuppressionEntry, SuppressionSource
-    db_session.add(SuppressionEntry(organization_id=sample_org.id, phone="12145559999", reason="test", source=SuppressionSource.MANUAL))
-    db_session.commit()
-
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(sid="SM222")
-    mock_get_client.return_value = mock_client
-
-    result = send_plain_sms(sample_advisor, "+12145559999", "Test")
-
-    assert result["success"] is True

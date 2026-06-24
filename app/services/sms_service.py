@@ -48,37 +48,6 @@ def render_template(template: str, lead: Lead, advisor: User, booking_url: str) 
     )
 
 
-def send_plain_sms(advisor: User, to_phone: str, body: str) -> dict:
-    """
-    Sends a bare SMS from the advisor's Twilio number to an arbitrary
-    phone number, with no Lead/Message/booking-link record created.
-
-    Deliberately separate from send_sms() below, which is built
-    specifically for advisor-to-LEAD outreach and always creates a
-    Message row tied to a Lead - that doesn't apply here. This exists
-    for self-alerts (texting the advisor's own phone when a reply comes
-    in), where there's no Lead on the receiving end and creating a fake
-    Message/Lead pairing just to satisfy send_sms()'s shape would be the
-    wrong fit. No DNC/suppression check here either, for the same
-    reason: those checks exist to protect LEADS from over-contacting,
-    not to gate an advisor messaging their own phone.
-
-    Returns {"success": bool, "twilio_sid": str|None, "error": str|None} -
-    same shape style as send_email_via_provider, so callers can check
-    success the same way regardless of channel.
-    """
-    try:
-        client = get_twilio_client(advisor)
-    except ValueError as e:
-        return {"success": False, "twilio_sid": None, "error": str(e)}
-
-    try:
-        twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=to_phone)
-        return {"success": True, "twilio_sid": twilio_msg.sid, "error": None}
-    except Exception as e:
-        return {"success": False, "twilio_sid": None, "error": str(e)}
-
-
 def send_sms(
     db: Session,
     advisor: User,

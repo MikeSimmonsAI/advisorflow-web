@@ -1,12 +1,11 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**See SESSION_LOG_CLOCK_AND_REALTIME_ALERTS.md for the latest session's
-full changelog** (live date/time clock in the top bar, real-time alerts
-expanded to every reply classification not just hot ones, SMS-to-advisor
-opt-in fast channel, silent email-failure tracking, two new database
-migrations that MUST run before this is live). Prior sessions:
-SESSION_LOG_LEAD_CLEANUP_EMAIL_DNC_REPORTS.md,
-SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md, and
+**See SESSION_LOG_LEAD_CLEANUP_EMAIL_DNC_REPORTS.md for the latest
+session's full changelog** (Lead Cleanup duplicate-matching fix, Needs
+Review navigation fix, Email Queue rebuild with review-before-send and
+sent history, DNC quick-action button plus a real reclassify-to-DNC bug
+fix, new Reports page with date-range filtering). Prior sessions:
+SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md and
 SESSION_LOG_BUGFIXES_AND_FEATURES.md.
 
 You've been collecting files in the order I gave them to you, which is exactly

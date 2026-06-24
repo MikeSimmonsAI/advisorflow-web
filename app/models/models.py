@@ -117,8 +117,7 @@ class CadenceStatus(str, enum.Enum):
 
 
 class NotificationType(str, enum.Enum):
-    HOT_REPLY = "hot_reply"  # kept distinct from REPLY_RECEIVED below - some views may want to filter specifically on "was this hot"
-    REPLY_RECEIVED = "reply_received"  # any inbound reply, regardless of classification - added per Mike's explicit request for alerts on every reply, not just hot ones
+    HOT_REPLY = "hot_reply"
     BOOKING_CONFIRMED = "booking_confirmed"
     CADENCE_COMPLETED = "cadence_completed"
 
@@ -181,10 +180,8 @@ class User(Base):
     microsoft_365_connected = Column(Boolean, default=False)
 
     # Notification preferences
-    notification_email = Column(String, nullable=True)  # where reply alert emails go
-    notification_phone = Column(String, nullable=True)  # advisor's own personal cell for SMS alerts - deliberately separate from twilio_phone_number, which is the number leads get texted FROM, not the advisor's own phone they actually carry
-    notify_on_hot_reply = Column(Boolean, default=True)  # despite the name (kept for backward compatibility), this now gates ALL reply alerts, not just hot ones - see notification_service.py's notify_reply
-    notify_via_sms = Column(Boolean, default=False)  # off by default - requires notification_phone to be set, and is an extra cost/traffic decision an advisor should opt into, not get by surprise
+    notification_email = Column(String, nullable=True)  # where HOT reply alerts go
+    notify_on_hot_reply = Column(Boolean, default=True)
 
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
@@ -545,7 +542,6 @@ class Notification(Base):
     is_sent = Column(Boolean, default=False)
     sent_at = Column(DateTime, nullable=True)
     is_read = Column(Boolean, default=False)
-    send_failure_reason = Column(Text, nullable=True)  # populated when the alert email fails to send - previously failures left zero trace anywhere
 
     created_at = Column(DateTime, server_default=func.now())
 

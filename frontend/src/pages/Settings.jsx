@@ -16,11 +16,8 @@ export default function Settings() {
 
   const [notifyEmail, setNotifyEmail] = useState('')
   const [notifyOnHot, setNotifyOnHot] = useState(true)
-  const [notifyPhone, setNotifyPhone] = useState('')
-  const [notifyViaSms, setNotifyViaSms] = useState(false)
   const [savingNotif, setSavingNotif] = useState(false)
   const [notifSaved, setNotifSaved] = useState(false)
-  const [notifError, setNotifError] = useState('')
 
   const [connectingCalendar, setConnectingCalendar] = useState(false)
   const [calendarMessage, setCalendarMessage] = useState(null) // { type: 'success'|'error', text }
@@ -36,8 +33,6 @@ export default function Settings() {
       setCallerIdName(p.twilio_caller_id_name || '')
       setNotifyEmail(p.notification_email || '')
       setNotifyOnHot(p.notify_on_hot_reply)
-      setNotifyPhone(p.notification_phone || '')
-      setNotifyViaSms(p.notify_via_sms)
       setLoading(false)
     })
 
@@ -87,17 +82,14 @@ export default function Settings() {
     e.preventDefault()
     setSavingNotif(true)
     setNotifSaved(false)
-    setNotifError('')
     try {
       await api.put('/settings/notifications', {
         notification_email: notifyEmail || null,
-        notification_phone: notifyPhone || null,
         notify_on_hot_reply: notifyOnHot,
-        notify_via_sms: notifyViaSms,
       })
       setNotifSaved(true)
     } catch (err) {
-      setNotifError(err.message || 'Failed to save notification settings.')
+      alert(`Failed to save: ${err.message}`)
     } finally {
       setSavingNotif(false)
     }
@@ -230,41 +222,21 @@ export default function Settings() {
         <div className="panel-header">
           <h2 className="panel-title">Notifications</h2>
         </div>
-        <p className="settings-help">
-          You'll get an alert the moment any lead replies to you - not just hot ones. Each alert is
-          framed to match what actually happened (a DNC reply looks different from a hot one), but
-          nothing slips by silently.
-        </p>
         <form onSubmit={saveNotifications} className="settings-form">
           <label className="settings-label">
-            Notification email <span className="settings-optional">where reply alerts go</span>
+            Notification email <span className="settings-optional">where hot reply alerts go</span>
             <input className="settings-input" type="email" value={notifyEmail} onChange={(e) => setNotifyEmail(e.target.value)} placeholder={profile.email} />
           </label>
           <label className="settings-checkbox-row">
             <input type="checkbox" checked={notifyOnHot} onChange={(e) => setNotifyOnHot(e.target.checked)} />
-            Email me when a lead replies
+            Email me immediately when a lead replies hot
           </label>
-
-          <label className="settings-label">
-            Notification phone <span className="settings-optional">your own personal cell, for text alerts - not the number leads text</span>
-            <input className="settings-input" type="tel" value={notifyPhone} onChange={(e) => setNotifyPhone(e.target.value)} placeholder="(214) 555-0100" />
-          </label>
-          <label className="settings-checkbox-row">
-            <input type="checkbox" checked={notifyViaSms} onChange={(e) => setNotifyViaSms(e.target.checked)} />
-            Also text me - the fastest way to know right away
-          </label>
-          <p className="settings-help">
-            Off by default. Texting yourself uses your own Twilio number's send capacity, so turn this
-            on once you're comfortable with how often replies come in.
-          </p>
-
           <div className="settings-actions">
             {notifSaved && <span className="settings-saved">Saved</span>}
             <button className="btn btn--primary" type="submit" disabled={savingNotif}>
               {savingNotif ? 'Saving…' : 'Save notification settings'}
             </button>
           </div>
-          {notifError && <div className="compose-error">{notifError}</div>}
         </form>
       </section>
     </div>
