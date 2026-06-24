@@ -19,7 +19,9 @@ class ProfileResponse(BaseModel):
     twilio_caller_id_name: Optional[str] = None
     twilio_configured: bool = False
     notification_email: Optional[str] = None
+    notification_phone: Optional[str] = None
     notify_on_hot_reply: bool = True
+    notify_via_sms: bool = False
     google_calendar_connected: bool = False
     microsoft_365_connected: bool = False
     microsoft_email_address: Optional[str] = None
@@ -34,7 +36,9 @@ class TwilioConfigRequest(BaseModel):
 
 class NotificationConfigRequest(BaseModel):
     notification_email: Optional[str] = None
+    notification_phone: Optional[str] = None
     notify_on_hot_reply: bool = True
+    notify_via_sms: bool = False
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -53,7 +57,9 @@ def get_profile(current_user: User = Depends(get_current_user)):
         twilio_caller_id_name=current_user.twilio_caller_id_name,
         twilio_configured=bool(current_user.twilio_account_sid and current_user.twilio_auth_token_encrypted),
         notification_email=current_user.notification_email,
+        notification_phone=current_user.notification_phone,
         notify_on_hot_reply=current_user.notify_on_hot_reply,
+        notify_via_sms=current_user.notify_via_sms,
         google_calendar_connected=current_user.google_calendar_connected,
         microsoft_365_connected=current_user.microsoft_365_connected,
         microsoft_email_address=current_user.microsoft_email_address,
@@ -87,7 +93,12 @@ def update_notification_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if req.notify_via_sms and not (req.notification_phone or current_user.notification_phone):
+        raise HTTPException(status_code=400, detail="A notification phone number is required to enable SMS alerts.")
+
     current_user.notification_email = req.notification_email
+    current_user.notification_phone = req.notification_phone
     current_user.notify_on_hot_reply = req.notify_on_hot_reply
+    current_user.notify_via_sms = req.notify_via_sms
     db.commit()
     return {"success": True}

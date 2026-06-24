@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { getCurrentUser, logout } from '../api/client'
 import SignalPulse from './SignalPulse'
@@ -52,6 +52,21 @@ export default function Layout({ children }) {
   const user = getCurrentUser()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [now, setNow] = useState(new Date())
+
+  // Live clock in the top bar, visible on every page since Layout wraps
+  // all of them. Mike asked to see the actual current date/time inside
+  // the app itself, not have to ask separately - this reads the
+  // person's own device clock/timezone (via the browser's Intl API),
+  // ticking every second so it's always accurate, not a snapshot from
+  // whenever the page happened to load.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const formattedDate = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  const formattedTime = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 
   function closeSidebar() {
     setSidebarOpen(false)
@@ -133,6 +148,10 @@ export default function Layout({ children }) {
 
       <div className="content-area">
         <header className="top-bar">
+          <div className="top-bar-clock" title={now.toString()}>
+            <span className="top-bar-clock-date">{formattedDate}</span>
+            <span className="top-bar-clock-time mono">{formattedTime}</span>
+          </div>
           <NotificationBell />
         </header>
         <main className="main-content">{children}</main>
