@@ -31,6 +31,26 @@ function formatSaleDate(value) {
   }
 }
 
+function formatRelativeTime(value) {
+  if (!value) return 'Never'
+  const date = new Date(value)
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMinutes / 60)
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (diffMinutes < 1) return 'Just now'
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 30) return `${diffDays}d ago`
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+}
+
+const ACTION_TYPE_LABELS = {
+  sent_message: 'Sent a message',
+  recorded_outcome: 'Recorded an outcome',
+}
+
 const PRODUCT_MIX_LABELS = {
   funeral_arrangement: 'Funeral arrangement',
   cemetery_property: 'Cemetery property',
@@ -45,6 +65,9 @@ export default function Admin() {
   const [funnel, setFunnel] = useState(null)
   const [revenue, setRevenue] = useState(null)
   const [revenueLoading, setRevenueLoading] = useState(false)
+  const [teamActivity, setTeamActivity] = useState(null)
+  const [teamActivityLoading, setTeamActivityLoading] = useState(false)
+  const [activitySortBy, setActivitySortBy] = useState('least_recent') // 'least_recent' | 'most_recent'
   const [allLeads, setAllLeads] = useState([])
   const [unassignedLeads, setUnassignedLeads] = useState([])
   const [loading, setLoading] = useState(true)
@@ -75,7 +98,20 @@ export default function Admin() {
     if (view === 'revenue' && !revenue) {
       loadRevenue()
     }
+    if (view === 'activity' && !teamActivity) {
+      loadTeamActivity()
+    }
   }, [view])
+
+  async function loadTeamActivity() {
+    setTeamActivityLoading(true)
+    try {
+      const data = await api.get('/admin/dashboard/team-activity')
+      setTeamActivity(data)
+    } finally {
+      setTeamActivityLoading(false)
+    }
+  }
 
   function loadUnassigned() {
     setUnassignedLoading(true)
@@ -180,6 +216,9 @@ export default function Admin() {
         </button>
         <button className={`tab ${view === 'revenue' ? 'tab--active' : ''}`} onClick={() => setView('revenue')}>
           Revenue
+        </button>
+        <button className={`tab ${view === 'activity' ? 'tab--active' : ''}`} onClick={() => setView('activity')}>
+          Team Activity
         </button>
       </div>
 
@@ -421,6 +460,72 @@ export default function Admin() {
                 )}
               </section>
             </>
+          )}
+        </>
+      )}
+
+      {view === 'activity' && (
+        <>
+          {teamActivityLoading ? (
+            <section className="panel"><div className="empty-state">Loading team activity…</div></section>
+          ) : (
+            <section className="panel metrics-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">Team Activity</h2>
+                <div className="activity-sort-toggle">
+                  <button
+                    className={`btn btn--secondary ${activitySortBy === 'least_recent' ? 'btn--active' : ''}`}
+                    onClick={() => setActivitySortBy('least_recent')}
+                  >
+                    Quietest first
+                  </button>
+                  <button
+                    className={`btn btn--secondary ${activitySortBy === 'most_recent' ? 'btn--active' : ''}`}
+                    onClick={() => setActivitySortBy('most_recent')}
+                  >
+                    Most active first
+                  </button>
+                </div>
+              </div>
+              {(teamActivity?.advisors || []).length === 0 ? (
+                <div className="empty-state">No advisors on the team yet.</div>
+              ) : (
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Advisor</th>
+                      <th>Status</th>
+                      <th>Last login</th>
+                      <th>Last action</th>
+                      <th>What</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...teamActivity.advisors]
+                      .sort((a, b) => {
+                        const aTime = a.last_action_at ? new Date(a.last_action_at).getTime() : 0
+                        const bTime = b.last_action_at ? new Date(b.last_action_at).getTime() : 0
+                        return activitySortBy === 'least_recent' ? aTime - bTime : bTime - aTime
+                      })
+                      .map((row) => (
+                        <tr key={row.advisor_id} onClick={() => navigate(`/users/${row.advisor_id}`)} style={{ cursor: 'pointer' }}>
+                          <td>{row.advisor_name}</td>
+                          <td>
+                            {row.is_active ? (
+                              <span className="badge badge--green">Active</span>
+                            ) : (
+                              <span className="badge badge--neutral-dim">Deactivated</span>
+                            )}
+                          </td>
+                          <td className="mono" style={{ fontSize: 12 }}>{formatRelativeTime(row.last_login_at)}</td>
+                          <td className="mono" style={{ fontSize: 12 }}>{formatRelativeTime(row.last_action_at)}</td>
+                          <td>{ACTION_TYPE_LABELS[row.last_action_type] || '—'}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
           )}
         </>
       )}

@@ -1,5 +1,5 @@
 """
-One-time manual migration: adds the new 'advisor_flagged' value to the
+One-time manual migration: adds the new 'ADVISOR_FLAGGED' value to the
 suppressionsource Postgres enum type.
 
 REAL ISSUE THIS PREVENTS: SuppressionSource is declared with SAEnum() in
@@ -10,17 +10,39 @@ type enforcement). Adding a new value to the Python enum
 value to an already-existing Postgres enum type - Base.metadata.create_all()
 only creates new tables, it doesn't ALTER an existing enum type. Without
 this migration, the new quick-DNC button (POST /leads/{lead_id}/mark-dnc)
-would fail in production with something like:
-    invalid input value for enum suppressionsource: "advisor_flagged"
+fails in production with something like:
+    invalid input value for enum suppressionsource: "ADVISOR_FLAGGED"
 the first time anyone actually clicked it, despite working fine locally
 against SQLite.
+
+CASING BUG FIXED HERE: the original version of this script added the
+lowercase Python enum VALUE ('advisor_flagged') instead of the uppercase
+enum NAME ('ADVISOR_FLAGGED'). SQLAlchemy's SAEnum writes the enum
+MEMBER NAME to the database by default, not member.value - confirmed
+directly: SuppressionSource.ADVISOR_FLAGGED.name == "ADVISOR_FLAGGED"
+while .value == "advisor_flagged". Postgres enums are case-sensitive,
+so the original migration added a real but USELESS value
+('advisor_flagged') that the running code never actually sends - every
+INSERT kept failing with the exact same error even after the migration
+reported success, because the database still didn't have the value the
+code was actually trying to insert ('ADVISOR_FLAGGED', uppercase). This
+was found and fixed live, the hard way, by checking pg_enum directly via
+Render's Shell tab and comparing it against the real INSERT statement in
+the application logs - that diagnostic step (compare what's actually in
+the enum vs. what the failing INSERT is actually sending) is the fast
+way to catch this class of bug in the future, rather than retrying
+restarts/rollbacks first.
 
 USAGE: run this once, manually, against the live database - e.g. via
 Render's Shell tab on advisorflow-backend:
     python -m app.migrate_add_advisor_flagged_enum_value
 
 Idempotent: Postgres 9.1+ supports "ALTER TYPE ... ADD VALUE IF NOT
-EXISTS", so running this multiple times is always safe.
+EXISTS", so running this multiple times is always safe. Also safe to
+run again even though the wrong-case value ('advisor_flagged') already
+exists in some environments from the original buggy run - that stray
+lowercase value is harmless clutter, not something this script needs to
+clean up, since nothing ever wrote rows using it.
 
 NOTE: this only matters for Postgres (production). SQLite (local/test)
 doesn't enforce enum types at the database level at all, so this script
@@ -49,11 +71,14 @@ def run_migration():
         # running inside an explicit transaction block on some Postgres
         # versions - autocommit avoids that entirely rather than
         # depending on which Postgres version Render happens to be on.
-        sql = "ALTER TYPE suppressionsource ADD VALUE IF NOT EXISTS 'advisor_flagged';"
+        #
+        # Uppercase NAME, not lowercase value - see the casing bug note
+        # in the module docstring above. This is the actual fix.
+        sql = "ALTER TYPE suppressionsource ADD VALUE IF NOT EXISTS 'ADVISOR_FLAGGED';"
         print(f"Running: {sql}")
         conn.execute(text(sql))
 
-    print("\nMigration complete. 'advisor_flagged' is now a valid suppressionsource value (or already was).")
+    print("\nMigration complete. 'ADVISOR_FLAGGED' is now a valid suppressionsource value (or already was).")
 
 
 if __name__ == "__main__":

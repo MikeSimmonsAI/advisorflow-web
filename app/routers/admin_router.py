@@ -186,6 +186,71 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
     }
 
 
+@router.get("/dashboard/team-activity")
+def team_activity(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    One-screen activity board: every advisor's last login and last real
+    action, so Mike can scan the whole team at a glance for who's gone
+    quiet, instead of clicking into each person's individual detail page.
+
+    "Last action" is deliberately the most recent of two reliably
+    ATTRIBUTED signals - Message.sent_at (via sender_id) and
+    LeadOutcome.created_at (via recorded_by_id) - not Lead.updated_at,
+    which auto-updates on system-driven changes (cadence status,
+    engagement recompute) that have nothing to do with whether the
+    advisor actually did something. Reply.reviewed_at was considered and
+    rejected for this purpose: it has no reviewed_by_id column at all,
+    so there's no way to attribute a reply review to a specific advisor
+    without adding a new column - not invented here, since the two
+    signals already available are honest and real.
+
+    Returned unsorted (just by name) - the frontend sorts by recency so
+    "most/least recently active" can be toggled without a re-fetch.
+    """
+    org_id = current_user.organization_id
+    advisors = (
+        db.query(User)
+        .filter(User.organization_id == org_id, User.role.in_(["advisor", "org_admin"]))
+        .order_by(User.full_name.asc())
+        .all()
+    )
+
+    rows = []
+    for advisor in advisors:
+        last_message_at = (
+            db.query(func.max(Message.sent_at))
+            .join(Lead, Message.lead_id == Lead.id)
+            .filter(Lead.organization_id == org_id, Message.sender_id == advisor.id)
+            .scalar()
+        )
+        last_outcome_at = (
+            db.query(func.max(LeadOutcome.created_at))
+            .join(Lead, LeadOutcome.lead_id == Lead.id)
+            .filter(Lead.organization_id == org_id, LeadOutcome.recorded_by_id == advisor.id)
+            .scalar()
+        )
+
+        candidates = [t for t in (last_message_at, last_outcome_at) if t is not None]
+        last_action_at = max(candidates) if candidates else None
+        last_action_type = None
+        if last_action_at == last_message_at and last_message_at is not None:
+            last_action_type = "sent_message"
+        elif last_action_at == last_outcome_at and last_outcome_at is not None:
+            last_action_type = "recorded_outcome"
+
+        rows.append({
+            "advisor_id": advisor.id,
+            "advisor_name": advisor.full_name,
+            "role": advisor.role,
+            "is_active": advisor.is_active,
+            "last_login_at": advisor.last_login_at,
+            "last_action_at": last_action_at,
+            "last_action_type": last_action_type,
+        })
+
+    return {"advisors": rows}
+
+
 @router.get("/dashboard/metrics")
 def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Org-scoped advisor quality metrics for the upgraded Manager Command Dashboard."""

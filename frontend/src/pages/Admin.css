@@ -17,6 +17,17 @@
   color: var(--signal-amber);
 }
 
+.activity-sort-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.activity-sort-toggle .btn--active {
+  border-color: var(--signal-blue);
+  background: var(--signal-blue-dim);
+  color: var(--signal-blue);
+}
+
 .tab {
   background: rgba(7, 14, 31, 0.45);
   border: 1px solid var(--border-subtle);
