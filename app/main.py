@@ -78,6 +78,27 @@ def on_startup():
     # Alembic migrations (see migrations/ folder) instead of this auto-create.
     Base.metadata.create_all(bind=engine)
 
+    # Auto-migration: adds any columns/enum values that exist in the
+    # Python models but haven't reached the live database yet, since
+    # create_all() above only creates brand-new tables - it never alters
+    # an existing table or enum type. Runs on EVERY startup, safely (see
+    # app/auto_migrate.py docstring for the full reasoning) - this is
+    # what replaces the manual "SSH into Render's Shell tab and run a
+    # migration command" step that broke the live site twice this
+    # session when it got skipped. Mike was explicit he never wants to
+    # do that by hand again.
+    from app.auto_migrate import run_auto_migrations
+    try:
+        run_auto_migrations(engine)
+    except Exception as e:
+        # Never let a migration hiccup prevent the app from starting at
+        # all - every statement inside run_auto_migrations already
+        # catches its own errors per-statement; this outer catch is only
+        # for something unexpected at the connection/engine level, and
+        # even then the app should still come up rather than refuse to
+        # boot entirely.
+        print(f"[auto_migrate] Startup migration check failed unexpectedly: {e}")
+
 
 @app.get("/health")
 def health_check():
