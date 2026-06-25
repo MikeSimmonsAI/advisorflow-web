@@ -33,11 +33,16 @@ class ReclassifyReplyRequest(BaseModel):
     classification: ReplyClassification
 
 
+class DraftReplyRequest(BaseModel):
+    tone: str = "standard"  # "soft" | "standard" | "urgent" | "direct" - see draft_reply_service.TONE_GUIDANCE
+
+
 class DraftReplyResponse(BaseModel):
     suggested_reply: str
     booking_url: Optional[str] = None
     booking_link_id: Optional[str] = None
     source: str
+    tone: str = "standard"
 
 
 def _get_org_reply_or_404(db: Session, reply_id: str, current_user: User) -> Reply:
@@ -74,23 +79,38 @@ def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: Us
 @router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
 def draft_reply_for_lead(
     lead_id: str,
+    req: DraftReplyRequest = DraftReplyRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     AI-assisted one-on-one reply drafting for Lead Detail only.
 
-    This endpoint is deliberately non-blocking from the user's point of view:
-    missing OpenAI key, API errors, malformed model output, or any other AI
-    failure all fall back to a safe, editable reply instead of surfacing a 500.
-    It also reuses the real booking-link helper from sms_service.py and only
-    creates a new link when the lead does not already have one.
+    Per Mike's explicit request: previously this only ever produced one
+    fixed tone (polite, soft, "when works for a quick call?") with no
+    way to ask for anything stronger. Now accepts an optional `tone`
+    (soft/standard/urgent/direct), each genuinely changing what the AI
+    writes - not just swapping a word, see TONE_GUIDANCE in
+    draft_reply_service.py for what each one actually instructs the
+    model to do differently. Defaults to "standard" so every existing
+    caller sending no body (or an empty body) gets the exact same
+    behavior as before this change - fully backward compatible.
+
+    This endpoint is deliberately non-blocking from the user's point of
+    view: missing OpenAI key, API errors, malformed model output, or any
+    other AI failure all fall back to a safe, editable reply instead of
+    surfacing a 500. It also reuses the real booking-link helper from
+    sms_service.py and only creates a new link when the lead does not
+    already have one.
     """
+    from app.services.draft_reply_service import draft_reply, VALID_TONES
+
+    if req.tone not in VALID_TONES:
+        raise HTTPException(status_code=400, detail=f"tone must be one of: {', '.join(VALID_TONES)}")
+
     lead = _get_lead_for_current_org_or_404(db, lead_id, current_user)
 
-    from app.services.draft_reply_service import draft_reply
-
-    result = draft_reply(db, lead, current_user)
+    result = draft_reply(db, lead, current_user, tone=req.tone)
     return result
 
 

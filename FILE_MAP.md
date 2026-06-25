@@ -1,10 +1,18 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**See SESSION_LOG_ACCOUNT_MANAGEMENT_AND_IMPORT_ACCESS.md for the latest
-session's full changelog** (fixed the confusing forced-password-change
-screen, admin-specified passwords on create/reset, Excel import now
-admin-only with a per-advisor override toggle — ONE NEW MIGRATION
-COLUMN, must run before this is live). Prior sessions:
+**See SESSION_LOG_REPLY_TONE_SELECTOR.md for the latest session's full
+changelog** (Suggest Reply now has 4 tone options — Soft, Standard,
+Urgent, Direct — each genuinely changing what the AI writes, not just a
+label swap. No migration needed for this one.)
+
+**IMPORTANT: auto-migrations are now permanent.** As of the account-
+management session, the app automatically adds any missing database
+column or enum value on every startup (see app/auto_migrate.py) - the
+old "run this manual migration command" notes in earlier session logs
+below no longer apply. Just deploy and the app handles its own schema
+catch-up.
+
+Prior sessions: SESSION_LOG_ACCOUNT_MANAGEMENT_AND_IMPORT_ACCESS.md,
 SESSION_LOG_CLOCK_AND_REALTIME_ALERTS.md,
 SESSION_LOG_LEAD_CLEANUP_EMAIL_DNC_REPORTS.md,
 SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md, and

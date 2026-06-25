@@ -26,6 +26,7 @@ export default function LeadDetail() {
   const [includeBookingLink, setIncludeBookingLink] = useState(true)
   const [sending, setSending] = useState(false)
   const [suggestingReply, setSuggestingReply] = useState(false)
+  const [replyTone, setReplyTone] = useState('standard')
   const [sendError, setSendError] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
@@ -61,7 +62,7 @@ export default function LeadDetail() {
     setSuggestingReply(true)
     setSendError('')
     try {
-      const draft = await api.post(`/sms/draft-reply/${leadId}`, {})
+      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: replyTone })
       setMessageText(draft.suggested_reply || '')
       if (draft.booking_url) setIncludeBookingLink(false)
     } catch (err) {
@@ -264,6 +265,18 @@ export default function LeadDetail() {
             ) : (
               <div className="compose-box">
                 <div className="compose-suggestion-row">
+                  <select
+                    className="compose-tone-select"
+                    value={replyTone}
+                    onChange={(e) => setReplyTone(e.target.value)}
+                    disabled={suggestingReply}
+                    title="How strongly should the suggested reply push for a follow-up?"
+                  >
+                    <option value="soft">Soft</option>
+                    <option value="standard">Standard</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="direct">Direct</option>
+                  </select>
                   <button
                     type="button"
                     className="btn btn--secondary"

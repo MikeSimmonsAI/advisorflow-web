@@ -234,7 +234,6 @@
 .compose-suggestion-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -242,11 +241,23 @@
   padding: 10px;
 }
 
+.compose-tone-select {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  flex: 0 0 auto;
+}
+
 .compose-suggestion-hint {
   color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1.4;
   text-align: right;
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
@@ -255,7 +266,12 @@
     flex-direction: column;
   }
 
+  .compose-tone-select {
+    width: 100%;
+  }
+
   .compose-suggestion-hint {
     text-align: left;
+    margin-left: 0;
   }
 }
