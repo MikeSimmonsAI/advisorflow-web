@@ -1,9 +1,12 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**See SESSION_LOG_REPLY_TONE_SELECTOR.md for the latest session's full
-changelog** (Suggest Reply now has 4 tone options — Soft, Standard,
-Urgent, Direct — each genuinely changing what the AI writes, not just a
-label swap. No migration needed for this one.)
+**CURRENT VERSION: v1.1.** See SESSION_LOG_V1.1_MANUAL_LEAD_EDIT_OUTCOMES.md
+for the latest session's full changelog (manual single-lead entry, real
+editable Lead Detail with phone/email/notes and a working Save button,
+mandatory outcome selections on the 4 sellable items with 3 new optional
+context fields). Items 1-3 of a 7-item priority list - 4-7 still ahead.
+Prior version: v1.0, see SESSION_LOG_REPLY_TONE_SELECTOR.md (Suggest
+Reply tone selector — Soft, Standard, Urgent, Direct).
 
 **IMPORTANT: auto-migrations are now permanent.** As of the account-
 management session, the app automatically adds any missing database

@@ -59,6 +59,10 @@ COLUMNS_TO_ADD = [
     ("replies", "classification_confidence", "VARCHAR"),
     ("replies", "classification_reasoning", "TEXT"),
     ("notifications", "send_failure_reason", "TEXT"),
+    ("lead_outcomes", "has_preneed_planning", "BOOLEAN"),
+    ("lead_outcomes", "has_insurance_funding", "BOOLEAN"),
+    ("lead_outcomes", "is_veteran", "BOOLEAN"),
+    ("lead_outcomes", "next_step", "TEXT"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

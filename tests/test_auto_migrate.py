@@ -90,10 +90,11 @@ def test_columns_to_add_list_matches_real_model_fields():
     columns on the real models - catches a typo'd table/column name
     before it ships, rather than discovering it live.
     """
-    from app.models.models import User, Lead, Reply, Notification
+    from app.models.models import User, Lead, Reply, Notification, LeadOutcome
 
     model_by_table = {
         "users": User, "leads": Lead, "replies": Reply, "notifications": Notification,
+        "lead_outcomes": LeadOutcome,
     }
 
     for table, column, _definition in COLUMNS_TO_ADD:

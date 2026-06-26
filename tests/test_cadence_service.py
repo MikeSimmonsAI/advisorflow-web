@@ -88,3 +88,81 @@ def test_stop_cadence_on_already_stopped_lead_is_a_no_op(db_session, sample_lead
     state_after_second_call = db_session.query(CadenceState).filter(CadenceState.lead_id == sample_lead.id).first()
     assert state_after_second_call.status == CadenceStatus.STOPPED_REPLIED  # unchanged
     assert state_after_second_call.completed_at == first_completed_at
+
+
+# ---------------------------------------------------------------------------
+# run_due_cadences - real production bug found via Render's cron logs: a
+# deactivated test advisor ("Advisor Three") with no Twilio configured had
+# a real lead assigned to them, and the daily job flagged it as an error
+# EVERY SINGLE DAY since the job had no awareness of advisor.is_active at
+# all. Deactivating the account alone would not have fixed this - the job
+# query needed to actually skip deactivated advisors' leads cleanly.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone
+from app.services.cadence_service import run_due_cadences
+from app.models.models import User, Organization
+from app.services.auth_service import hash_password
+
+
+def _due_state(db_session, lead):
+    state = CadenceState(
+        lead_id=lead.id,
+        status=CadenceStatus.ACTIVE,
+        current_touch_number=0,
+        next_touch_due_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    db_session.add(state)
+    db_session.flush()
+    return state
+
+
+def test_run_due_cadences_skips_deactivated_advisor_without_counting_as_error(db_session, sample_org, sample_advisor):
+    sample_advisor.is_active = False
+    db_session.commit()
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Inactive", last_name="AdvisorLead", phone="12145559001", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)
+    db_session.commit()
+
+    result = run_due_cadences(db_session, organization_id=sample_org.id)
+
+    assert result["errors"] == 0
+    assert not any("no Twilio" in e for e in result["error_details"])
+
+
+def test_run_due_cadences_still_errors_for_active_advisor_with_no_twilio(db_session, sample_org):
+    """The original, still-valid case: an ACTIVE advisor genuinely missing Twilio setup should still surface as a real error to fix."""
+    advisor = User(organization_id=sample_org.id, email="no-twilio@restland.com",
+                   password_hash=hash_password("x"), full_name="No Twilio Advisor", role="advisor",
+                   is_active=True, twilio_phone_number=None)
+    db_session.add(advisor)
+    db_session.flush()
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=advisor.id,
+                first_name="NoTwilio", last_name="Lead", phone="12145559002", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)
+    db_session.commit()
+
+    result = run_due_cadences(db_session, organization_id=sample_org.id)
+
+    assert result["errors"] == 1
+    assert any("no Twilio" in e for e in result["error_details"])
+
+
+def test_run_due_cadences_skips_lead_with_no_assigned_advisor_at_all(db_session, sample_org):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=None,
+                first_name="Unassigned", last_name="Lead", phone="12145559003", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)
+    db_session.commit()
+
+    result = run_due_cadences(db_session, organization_id=sample_org.id)
+
+    assert result["errors"] == 0

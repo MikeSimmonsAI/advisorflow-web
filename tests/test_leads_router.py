@@ -362,3 +362,313 @@ def test_mark_dnc_allowed_for_plain_advisor_not_just_admin(client, db_session, s
     response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
 
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /leads/manual - the manual single-lead entry form Mike asked for
+# directly: "if I get one person's information, I need to be able to enter
+# that person directly into the system without uploading a spreadsheet."
+# Deliberately reuses the SAME dedup registry and tier-to-track mapping
+# the real Excel import uses, not a simplified separate version.
+# ---------------------------------------------------------------------------
+
+def test_create_lead_manually_with_phone(client, db_session, sample_org, sample_advisor, auth_headers):
+    response = client.post("/leads/manual", json={
+        "first_name": "Walk", "last_name": "In", "phone": "12145559500", "tier": "pre_need",
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_name"] == "Walk"
+    assert body["phone"] == "12145559500"
+    assert body["tier"] == "pre_need"
+    assert body["message_track"] == "pre_need_lock_price"
+    assert body["assigned_to_id"] == sample_advisor.id
+    assert body["contact_channel"] == "sms"
+    assert body["is_duplicate"] is False
+
+
+def test_create_lead_manually_with_email_only(client, db_session, sample_org, auth_headers):
+    response = client.post("/leads/manual", json={
+        "first_name": "Email", "last_name": "Only", "email": "emailonly@example.com", "tier": "at_need",
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contact_channel"] == "email_only"
+    assert body["message_track"] == "at_need_support"
+
+
+def test_create_lead_manually_requires_first_and_last_name(client, auth_headers):
+    response = client.post("/leads/manual", json={
+        "first_name": "", "last_name": "Test", "phone": "12145559501",
+    }, headers=auth_headers)
+    assert response.status_code == 400
+
+
+def test_create_lead_manually_requires_phone_or_email(client, auth_headers):
+    response = client.post("/leads/manual", json={
+        "first_name": "No", "last_name": "Contact",
+    }, headers=auth_headers)
+    assert response.status_code == 400
+
+
+def test_create_lead_manually_rejects_invalid_tier(client, auth_headers):
+    response = client.post("/leads/manual", json={
+        "first_name": "Bad", "last_name": "Tier", "phone": "12145559502", "tier": "email_only",
+    }, headers=auth_headers)
+    assert response.status_code == 400
+    assert "tier must be one of" in response.json()["detail"]
+
+
+def test_create_lead_manually_detects_real_duplicate_via_same_registry_as_import(client, db_session, sample_org, sample_advisor, auth_headers):
+    """The actual point of reusing check_and_register: a manual entry must be caught as a duplicate the same way an imported row would be."""
+    first = client.post("/leads/manual", json={
+        "first_name": "First", "last_name": "Entry", "phone": "12145559503", "tier": "pre_need",
+    }, headers=auth_headers)
+    assert first.json()["is_duplicate"] is False
+
+    second = client.post("/leads/manual", json={
+        "first_name": "Different", "last_name": "Entry", "phone": "12145559503", "tier": "at_need",
+    }, headers=auth_headers)
+
+    assert second.status_code == 200
+    assert second.json()["is_duplicate"] is True
+    assert second.json()["duplicate_of_lead_id"] == first.json()["id"]
+
+
+def test_create_lead_manually_registers_new_contact_with_correct_lead_id(client, db_session, sample_org, sample_advisor, auth_headers):
+    """Confirms the first_seen_lead_id backfill step actually works - the one piece that can't be a straight reuse of the batch import logic."""
+    from app.models.models import ContactRegistry
+
+    response = client.post("/leads/manual", json={
+        "first_name": "Registry", "last_name": "Backfill", "phone": "12145559504", "tier": "pre_need",
+    }, headers=auth_headers)
+    lead_id = response.json()["id"]
+
+    entry = db_session.query(ContactRegistry).filter(
+        ContactRegistry.organization_id == sample_org.id, ContactRegistry.normalized_phone == "12145559504",
+    ).first()
+    assert entry is not None
+    assert entry.first_seen_lead_id == lead_id
+
+
+def test_create_lead_manually_can_assign_to_another_advisor_same_org(client, db_session, sample_org, sample_advisor, second_advisor, auth_headers):
+    response = client.post("/leads/manual", json={
+        "first_name": "Assigned", "last_name": "ToOther", "phone": "12145559505",
+        "tier": "pre_need", "assigned_to_id": second_advisor.id,
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["assigned_to_id"] == second_advisor.id
+
+
+def test_create_lead_manually_rejects_assigning_to_advisor_in_different_org(client, db_session, sample_org, auth_headers):
+    from app.models.models import Organization, User
+    from app.services.auth_service import hash_password
+
+    other_org = Organization(name="Other Manual Org", slug="other-manual-org", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other-manual@example.com",
+                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+
+    response = client.post("/leads/manual", json={
+        "first_name": "Cross", "last_name": "OrgAttempt", "phone": "12145559506",
+        "tier": "pre_need", "assigned_to_id": other_advisor.id,
+    }, headers=auth_headers)
+
+    assert response.status_code == 404
+
+
+def test_create_lead_manually_logs_audit_action(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import AuditLogEntry
+
+    response = client.post("/leads/manual", json={
+        "first_name": "Audit", "last_name": "Manual", "phone": "12145559507", "tier": "imminent",
+    }, headers=auth_headers)
+    lead_id = response.json()["id"]
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "lead.create_manual", AuditLogEntry.target_id == lead_id)
+        .first()
+    )
+    assert entry is not None
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage for a real bug found tonight: set_lead_tier and
+# mark_lead_dnc both committed via log_action and then returned the SAME
+# (now-expired) object with no refresh - FastAPI's jsonable_encoder
+# silently serialized that to {} with no error, since no response_model
+# was declared on either route. Never caught before because the existing
+# tests above assert against db_session.refresh(lead) (a fresh read),
+# never against response.json() itself. These tests check the actual
+# HTTP response body directly, which is what a real frontend consumes.
+# ---------------------------------------------------------------------------
+
+def test_set_lead_tier_response_body_contains_real_lead_data_not_empty(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="BodyCheck", last_name="Tier", phone="12145559600")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/tier?new_tier=imminent", headers=auth_headers)
+
+    body = response.json()
+    assert body != {}
+    assert body["first_name"] == "BodyCheck"
+    assert body["tier"] == "imminent"
+
+
+def test_mark_dnc_response_body_contains_real_lead_data_not_empty(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="BodyCheck", last_name="Dnc", phone="12145559601")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/mark-dnc", json={}, headers=auth_headers)
+
+    body = response.json()
+    assert body != {}
+    assert body["first_name"] == "BodyCheck"
+    assert body["status"] == "dnc"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /{lead_id}/details - advisor-facing contact info/notes editing.
+# Mike's explicit complaint: Lead Detail let him VIEW phone/email but
+# never edit them, with no clear Save button. Deliberately ADVISOR-SCOPED
+# (own leads only) per his explicit call - a different scope rule than
+# set_lead_tier's intentionally org-wide access. Reuses the same
+# registry-resync logic as admin_router.py's fix_lead_contact_info.
+# ---------------------------------------------------------------------------
+
+def test_update_lead_details_phone_email_notes(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Edit", last_name="Me", phone="12145559700")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={
+        "phone": "(214) 555-9701", "email": "newemail@example.com", "notes": "Called twice, left voicemail.",
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["phone"] == "12145559701"
+    assert body["email"] == "newemail@example.com"
+    assert body["notes"] == "Called twice, left voicemail."
+    db_session.refresh(lead)
+    assert lead.notes == "Called twice, left voicemail."
+
+
+def test_update_lead_details_blocks_advisor_editing_someone_elses_lead(client, db_session, sample_org, sample_advisor, second_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=second_advisor.id, first_name="NotMine", last_name="Lead", phone="12145559702")
+    db_session.add(lead)
+    db_session.commit()
+
+    # auth_headers belongs to sample_advisor, not second_advisor (the lead's owner)
+    response = client.patch(f"/leads/{lead.id}/details", json={"notes": "trying to edit"}, headers=auth_headers)
+
+    assert response.status_code == 403
+
+
+def test_update_lead_details_admin_can_edit_any_lead_in_org(client, db_session, sample_org, second_advisor, admin_auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=second_advisor.id, first_name="OtherPersons", last_name="Lead", phone="12145559703")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={"notes": "admin override"}, headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["notes"] == "admin override"
+
+
+def test_update_lead_details_requires_at_least_one_field(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Empty", last_name="Request", phone="12145559704")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={}, headers=auth_headers)
+
+    assert response.status_code == 400
+
+
+def test_update_lead_details_rejects_invalid_phone(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Bad", last_name="Phone", phone="12145559705")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={"phone": "abc"}, headers=auth_headers)
+
+    assert response.status_code == 400
+
+
+def test_update_lead_details_404_for_lead_in_different_org(client, db_session, sample_org, auth_headers):
+    other_org = Organization(name="Other Details Org", slug="other-details-org", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other-details@example.com",
+                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+    other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id, first_name="Cross", last_name="OrgLead", phone="12145559706")
+    db_session.add(other_lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{other_lead.id}/details", json={"notes": "x"}, headers=auth_headers)
+
+    assert response.status_code == 404
+
+
+def test_update_lead_details_resyncs_registry_on_phone_change(client, db_session, sample_org, sample_advisor, auth_headers):
+    """Confirms the reused registry-resync logic actually runs - same dedup protection as admin's fix_lead_contact_info."""
+    from app.models.models import ContactRegistry
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Registry", last_name="Resync", phone="12145559707")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={"phone": "12145559799"}, headers=auth_headers)
+
+    assert response.status_code == 200
+    entry = db_session.query(ContactRegistry).filter(
+        ContactRegistry.organization_id == sample_org.id, ContactRegistry.normalized_phone == "12145559799",
+    ).first()
+    assert entry is not None
+
+
+def test_update_lead_details_logs_audit_action_with_diff(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import AuditLogEntry
+    import json
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Audit", last_name="Details", phone="12145559708", notes="old note")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={"notes": "new note"}, headers=auth_headers)
+    assert response.status_code == 200
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "lead.update_details", AuditLogEntry.target_id == lead.id)
+        .first()
+    )
+    assert entry is not None
+    details = json.loads(entry.details)
+    assert details["notes"]["from"] == "old note"
+    assert details["notes"]["to"] == "new note"
+
+
+def test_update_lead_details_partial_update_leaves_other_fields_unchanged(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id, first_name="Partial", last_name="Update",
+                phone="12145559709", email="original@example.com")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.patch(f"/leads/{lead.id}/details", json={"notes": "just adding a note"}, headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "original@example.com"
+    assert response.json()["phone"] == "12145559709"

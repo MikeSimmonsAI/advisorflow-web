@@ -203,7 +203,19 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             continue
 
         advisor = lead.assigned_to
-        if not advisor or not advisor.twilio_phone_number:
+
+        # Deactivated advisor: skip cleanly, don't count as an error. A
+        # real production failure ("Advisor Three has no Twilio
+        # configured") was firing every single day because this check
+        # never looked at advisor.is_active - deactivating the account
+        # alone (the obvious fix) would NOT have stopped this, since
+        # this query has no awareness of account status at all. The
+        # actual fix is here: a deactivated advisor's leads are
+        # expected to go untouched, not flagged as a daily error.
+        if not advisor or not advisor.is_active:
+            continue
+
+        if not advisor.twilio_phone_number:
             error_count += 1
             errors.append(f"Lead {lead.id}: advisor has no Twilio number configured")
             continue

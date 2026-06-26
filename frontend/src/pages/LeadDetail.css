@@ -135,6 +135,29 @@
 
 .detail-table tr:last-child td { border-bottom: none; }
 
+.lead-notes-cell {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  max-width: 320px;
+}
+
+.lead-details-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lead-details-saved-banner {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--signal-green-dim);
+  background: var(--signal-green-dim);
+  color: var(--signal-green);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
 
 
 .lead-detail-header-actions {

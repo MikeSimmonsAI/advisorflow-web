@@ -383,6 +383,18 @@ class LeadOutcome(Base):
     has_memorial = Column(Boolean, nullable=True)
     has_open_closed_status = Column(String, nullable=True)  # "open", "closed", or None if not applicable/unknown
 
+    # Context fields, deliberately OPTIONAL unlike the four sellable
+    # items above - these shape WHICH conversation to have next (e.g.
+    # veteran benefits eligibility), they aren't themselves a missed
+    # sale the way "no marker" is. Forcing a guess on every visit would
+    # produce worse data than fewer, more deliberate selections - see
+    # the has_funeral_arrangement/etc. fields above for the mandatory,
+    # directly-sellable items this distinction is drawn against.
+    has_preneed_planning = Column(Boolean, nullable=True)
+    has_insurance_funding = Column(Boolean, nullable=True)
+    is_veteran = Column(Boolean, nullable=True)
+    next_step = Column(Text, nullable=True)  # free text, not a tri-state - "what happens after this visit" isn't a has-it/doesn't-have-it question
+
     # Sales outcome - did this specific appointment result in a sale,
     # and what was sold. Feeds the Master Control Board revenue
     # reporting (step 6 of the build plan).

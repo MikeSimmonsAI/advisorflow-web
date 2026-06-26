@@ -41,6 +41,15 @@ export default function LeadDetail() {
   const [markingDnc, setMarkingDnc] = useState(false)
   const [dncError, setDncError] = useState('')
 
+  // Editable Details panel - per Mike's explicit complaint: Lead Detail
+  // let him VIEW phone/email but never edit them, with "no clear save
+  // button in some areas."
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [detailsForm, setDetailsForm] = useState({ phone: '', email: '', notes: '' })
+  const [detailsSaving, setDetailsSaving] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
+  const [detailsSaved, setDetailsSaved] = useState(false)
+
   function load() {
     setLoading(true)
     api.get(`/leads/${leadId}/timeline`)
@@ -164,6 +173,33 @@ export default function LeadDetail() {
       setDncError(err.message || 'Could not mark this lead DNC.')
     } finally {
       setMarkingDnc(false)
+    }
+  }
+
+  function startEditingDetails(lead) {
+    setDetailsForm({ phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '' })
+    setEditingDetails(true)
+    setDetailsError('')
+    setDetailsSaved(false)
+  }
+
+  async function handleSaveDetails() {
+    setDetailsSaving(true)
+    setDetailsError('')
+    try {
+      await api.patch(`/leads/${leadId}/details`, {
+        phone: detailsForm.phone.trim() || null,
+        email: detailsForm.email.trim() || null,
+        notes: detailsForm.notes.trim() || null,
+      })
+      setEditingDetails(false)
+      setDetailsSaved(true)
+      load()
+      setTimeout(() => setDetailsSaved(false), 3000)
+    } catch (err) {
+      setDetailsError(err.message || 'Could not save changes.')
+    } finally {
+      setDetailsSaving(false)
     }
   }
 
@@ -365,16 +401,75 @@ export default function LeadDetail() {
           </section>
 
           <section className="panel">
-            <div className="panel-header"><h2 className="panel-title">Details</h2></div>
-            <table className="detail-table">
-              <tbody>
-                <tr><td>Email</td><td className="mono">{lead.email || '—'}</td></tr>
-                <tr><td>Source year</td><td className="mono">{lead.source_year || '—'}</td></tr>
-                <tr><td>Last action</td><td>{lead.last_action_raw || '—'}</td></tr>
-                <tr><td>Status reason</td><td>{lead.status_reason_raw || '—'}</td></tr>
-                <tr><td>Imported from</td><td className="mono" style={{ fontSize: 11 }}>{lead.source_file || '—'}</td></tr>
-              </tbody>
-            </table>
+            <div className="panel-header">
+              <h2 className="panel-title">Details</h2>
+              {!editingDetails && (
+                <button className="btn btn--secondary" onClick={() => startEditingDetails(lead)}>
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {detailsSaved && !editingDetails && (
+              <div className="lead-details-saved-banner">Saved.</div>
+            )}
+
+            {editingDetails ? (
+              <div className="lead-details-edit-form">
+                <label className="settings-label">
+                  Phone
+                  <input
+                    className="settings-input"
+                    type="tel"
+                    value={detailsForm.phone}
+                    onChange={(e) => setDetailsForm({ ...detailsForm, phone: e.target.value })}
+                    placeholder="(214) 555-0100"
+                  />
+                </label>
+                <label className="settings-label">
+                  Email
+                  <input
+                    className="settings-input"
+                    type="email"
+                    value={detailsForm.email}
+                    onChange={(e) => setDetailsForm({ ...detailsForm, email: e.target.value })}
+                  />
+                </label>
+                <label className="settings-label">
+                  Notes
+                  <textarea
+                    className="compose-textarea"
+                    rows={4}
+                    value={detailsForm.notes}
+                    onChange={(e) => setDetailsForm({ ...detailsForm, notes: e.target.value })}
+                    placeholder="Anything worth remembering about this lead — call notes, family details, next steps…"
+                  />
+                </label>
+
+                {detailsError && <div className="compose-error">{detailsError}</div>}
+
+                <div className="settings-actions">
+                  <button className="btn btn--secondary" onClick={() => setEditingDetails(false)} disabled={detailsSaving}>
+                    Cancel
+                  </button>
+                  <button className="btn btn--primary" onClick={handleSaveDetails} disabled={detailsSaving}>
+                    {detailsSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <table className="detail-table">
+                <tbody>
+                  <tr><td>Phone</td><td className="mono">{lead.phone || '—'}</td></tr>
+                  <tr><td>Email</td><td className="mono">{lead.email || '—'}</td></tr>
+                  <tr><td>Notes</td><td className="lead-notes-cell">{lead.notes || '—'}</td></tr>
+                  <tr><td>Source year</td><td className="mono">{lead.source_year || '—'}</td></tr>
+                  <tr><td>Last action</td><td>{lead.last_action_raw || '—'}</td></tr>
+                  <tr><td>Status reason</td><td>{lead.status_reason_raw || '—'}</td></tr>
+                  <tr><td>Imported from</td><td className="mono" style={{ fontSize: 11 }}>{lead.source_file || '—'}</td></tr>
+                </tbody>
+              </table>
+            )}
           </section>
         </div>
       </div>

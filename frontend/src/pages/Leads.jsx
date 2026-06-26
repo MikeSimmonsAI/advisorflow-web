@@ -73,6 +73,15 @@ export default function Leads() {
   const [bulkAssignResult, setBulkAssignResult] = useState(null)
   const [bulkAssignError, setBulkAssignError] = useState('')
 
+  // Manual single-lead entry - "if I get one person's information, I
+  // need to be able to enter that person directly into the system
+  // without uploading a spreadsheet"
+  const [showAddLead, setShowAddLead] = useState(false)
+  const [addLeadForm, setAddLeadForm] = useState({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', notes: '' })
+  const [addLeadSaving, setAddLeadSaving] = useState(false)
+  const [addLeadError, setAddLeadError] = useState('')
+  const [addLeadResult, setAddLeadResult] = useState(null)
+
   function loadLeads() {
     setLoading(true)
     Promise.all([
@@ -135,6 +144,46 @@ export default function Leads() {
     } finally {
       setConfirming(false)
     }
+  }
+
+  async function handleAddLead(e) {
+    e.preventDefault()
+    setAddLeadError('')
+
+    const { first_name, last_name, phone, email } = addLeadForm
+    if (!first_name.trim() || !last_name.trim()) {
+      setAddLeadError('First and last name are required.')
+      return
+    }
+    if (!phone.trim() && !email.trim()) {
+      setAddLeadError('A phone number or email address is required.')
+      return
+    }
+
+    setAddLeadSaving(true)
+    try {
+      const newLead = await api.post('/leads/manual', {
+        first_name: first_name.trim(),
+        last_name: last_name.trim(),
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        tier: addLeadForm.tier,
+        notes: addLeadForm.notes.trim() || null,
+      })
+      setAddLeadResult(newLead)
+      loadLeads()
+    } catch (err) {
+      setAddLeadError(err.message || 'Could not add this lead.')
+    } finally {
+      setAddLeadSaving(false)
+    }
+  }
+
+  function closeAddLeadModal() {
+    setShowAddLead(false)
+    setAddLeadForm({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', notes: '' })
+    setAddLeadError('')
+    setAddLeadResult(null)
   }
 
   function cancelPreview() {
@@ -265,6 +314,9 @@ export default function Leads() {
           <h1 className="page-title">Leads</h1>
           <p className="page-subtitle">Import, dedupe, and route every lead to the right track.</p>
         </div>
+        <button className="btn btn--primary" onClick={() => setShowAddLead(true)}>
+          + Add Lead
+        </button>
       </header>
 
       <section className="panel upload-panel">
@@ -519,6 +571,115 @@ export default function Leads() {
           onClose={() => { setReviewLeadIds(null); loadLeads() }}
           onSent={() => loadLeads()}
         />
+      )}
+
+      {showAddLead && (
+        <div className="message-review-overlay">
+          <div className="message-review-modal add-lead-modal">
+            <div className="message-review-header">
+              <div>
+                <h2 className="panel-title">Add a lead</h2>
+                <p className="message-review-subtitle">
+                  Enter someone directly — a walk-in, a phone call, anyone who didn't come in through a spreadsheet.
+                </p>
+              </div>
+              <button className="back-link" onClick={closeAddLeadModal}>Close</button>
+            </div>
+
+            {addLeadResult ? (
+              <div className="message-review-result">
+                <h3 style={{ color: 'var(--signal-green)' }}>
+                  {addLeadForm.first_name || addLeadResult.first_name} added
+                </h3>
+                {addLeadResult.is_duplicate && (
+                  <p style={{ color: 'var(--signal-amber)', fontSize: 13 }}>
+                    Heads up — this phone number matches an existing lead. Check Lead Cleanup if this might be a duplicate.
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn--secondary" onClick={closeAddLeadModal}>Add another</button>
+                  <button className="btn btn--primary" onClick={() => { closeAddLeadModal(); navigate(`/leads/${addLeadResult.id}`) }}>
+                    Open this lead
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleAddLead} className="add-lead-form">
+                <div className="add-lead-form-row">
+                  <label className="settings-label">
+                    First name
+                    <input
+                      className="settings-input"
+                      value={addLeadForm.first_name}
+                      onChange={(e) => setAddLeadForm({ ...addLeadForm, first_name: e.target.value })}
+                      autoFocus
+                    />
+                  </label>
+                  <label className="settings-label">
+                    Last name
+                    <input
+                      className="settings-input"
+                      value={addLeadForm.last_name}
+                      onChange={(e) => setAddLeadForm({ ...addLeadForm, last_name: e.target.value })}
+                    />
+                  </label>
+                </div>
+                <div className="add-lead-form-row">
+                  <label className="settings-label">
+                    Phone
+                    <input
+                      className="settings-input"
+                      type="tel"
+                      placeholder="(214) 555-0100"
+                      value={addLeadForm.phone}
+                      onChange={(e) => setAddLeadForm({ ...addLeadForm, phone: e.target.value })}
+                    />
+                  </label>
+                  <label className="settings-label">
+                    Email
+                    <input
+                      className="settings-input"
+                      type="email"
+                      value={addLeadForm.email}
+                      onChange={(e) => setAddLeadForm({ ...addLeadForm, email: e.target.value })}
+                    />
+                  </label>
+                </div>
+                <p className="add-lead-form-hint">At least one of phone or email is required.</p>
+                <label className="settings-label">
+                  Tier
+                  <select
+                    className="settings-input"
+                    value={addLeadForm.tier}
+                    onChange={(e) => setAddLeadForm({ ...addLeadForm, tier: e.target.value })}
+                  >
+                    {TIER_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settings-label">
+                  Notes (optional)
+                  <textarea
+                    className="compose-textarea"
+                    rows={3}
+                    value={addLeadForm.notes}
+                    onChange={(e) => setAddLeadForm({ ...addLeadForm, notes: e.target.value })}
+                  />
+                </label>
+
+                {addLeadError && <div className="compose-error">{addLeadError}</div>}
+
+                <div className="settings-actions">
+                  <button type="button" className="btn btn--secondary" onClick={closeAddLeadModal}>Cancel</button>
+                  <button type="submit" className="btn btn--primary" disabled={addLeadSaving}>
+                    {addLeadSaving ? 'Adding…' : 'Add lead'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
