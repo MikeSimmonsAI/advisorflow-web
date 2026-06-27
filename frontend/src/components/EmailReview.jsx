@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import RichEmailComposer from './RichEmailComposer'
 import './EmailReview.css'
 
 /**
@@ -132,13 +133,10 @@ export default function EmailReview({ leadIds, onClose, onSent }) {
                           value={editedSubjects[item.lead_id] || ''}
                           onChange={(e) => setEditedSubjects((prev) => ({ ...prev, [item.lead_id]: e.target.value }))}
                         />
-                        <textarea
-                          className="compose-textarea email-review-body-textarea"
+                        <RichEmailComposer
                           value={editedBodies[item.lead_id] || ''}
-                          onChange={(e) => setEditedBodies((prev) => ({ ...prev, [item.lead_id]: e.target.value }))}
-                          rows={5}
+                          onChange={(html) => setEditedBodies((prev) => ({ ...prev, [item.lead_id]: html }))}
                         />
-                        <p className="email-review-html-note">Body supports simple HTML (e.g. &lt;p&gt; tags), matching how the templates are written.</p>
                       </div>
                     )}
                   </div>

@@ -282,3 +282,100 @@ def test_sent_history_scoped_to_logged_in_advisor(client, db_session, sample_org
     sent_ids = {row["lead_id"] for row in response.json()}
     assert own_lead.id in sent_ids
     assert other_lead.id not in sent_ids
+
+
+# ---------------------------------------------------------------------------
+# Broadened scope - real, confirmed gap Mike caught directly: this
+# queue was filtered to ONLY contact_channel == "email_only", so a lead
+# with BOTH a phone and an email was invisible here entirely, even
+# though email is genuinely useful for them too. Now any lead with a
+# real email on file shows up, regardless of contact_channel.
+# ---------------------------------------------------------------------------
+
+def test_email_queue_includes_leads_with_both_phone_and_email_not_just_email_only_channel(client, db_session, sample_org, sample_advisor, auth_headers):
+    """The actual bug fix - this lead is NOT contact_channel='email_only', it has both methods, and must still appear."""
+    both_methods_lead = Lead(
+        organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+        first_name="Both", last_name="Methods", email="both.methods@example.com",
+        phone="12145559700", contact_channel="sms", status=LeadStatus.NEW,
+    )
+    db_session.add(both_methods_lead)
+    db_session.commit()
+
+    response = client.get("/email/queue", headers=auth_headers)
+
+    assert response.status_code == 200
+    ids = [row["id"] for row in response.json()]
+    assert both_methods_lead.id in ids
+
+
+def test_email_queue_excludes_leads_with_no_email_at_all(client, db_session, sample_org, sample_advisor, auth_headers):
+    """The scope is now 'has an email', not 'is email_only' - a phone-only lead with no email at all must still be excluded."""
+    phone_only_lead = Lead(
+        organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+        first_name="Phone", last_name="OnlyNoEmail", email=None,
+        phone="12145559701", contact_channel="sms", status=LeadStatus.NEW,
+    )
+    db_session.add(phone_only_lead)
+    db_session.commit()
+
+    response = client.get("/email/queue", headers=auth_headers)
+
+    assert response.status_code == 200
+    ids = [row["id"] for row in response.json()]
+    assert phone_only_lead.id not in ids
+
+
+def test_email_queue_excludes_leads_with_blank_string_email(client, db_session, sample_org, sample_advisor, auth_headers):
+    """Defensive check - an empty string email (not None, but also not real) should not count as 'has an email'."""
+    blank_email_lead = Lead(
+        organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+        first_name="Blank", last_name="Email", email="",
+        phone="12145559702", contact_channel="sms", status=LeadStatus.NEW,
+    )
+    db_session.add(blank_email_lead)
+    db_session.commit()
+
+    response = client.get("/email/queue", headers=auth_headers)
+
+    ids = [row["id"] for row in response.json()]
+    assert blank_email_lead.id not in ids
+
+
+def test_sent_history_includes_open_and_click_tracking_fields(client, db_session, sample_org, sample_advisor, auth_headers, monkeypatch):
+    import app.services.email_service as email_service
+    monkeypatch.setattr(email_service, "send_email_via_provider", lambda *a, **k: {"success": True, "provider_message_id": "msg-tracking", "error": None})
+
+    lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Tracked", "Lead", "tracked@example.com")
+    client.post("/email/confirm-send-batch", json={
+        "items": [{"lead_id": lead.id, "subject": "Hello", "body_html": "<p>hi</p>"}],
+    }, headers=auth_headers)
+
+    # Real engagement: simulate the recipient opening the email and clicking a link.
+    sent_response = client.get("/email/sent", headers=auth_headers)
+    email_message_id = None
+    from app.models.models import EmailMessage
+    msg = db_session.query(EmailMessage).filter(EmailMessage.lead_id == lead.id).first()
+    client.get(f"/email-tracking/open/{msg.id}")
+    client.get(f"/email-tracking/click/{msg.id}?url=https://example.com/x", follow_redirects=False)
+    client.get(f"/email-tracking/click/{msg.id}?url=https://example.com/y", follow_redirects=False)
+
+    sent_response = client.get("/email/sent", headers=auth_headers)
+    row = next(r for r in sent_response.json() if r["lead_id"] == lead.id)
+    assert row["opened_at"] is not None
+    assert row["click_count"] == 2
+
+
+def test_sent_history_shows_zero_click_count_and_null_opened_at_when_never_engaged(client, db_session, sample_org, sample_advisor, auth_headers, monkeypatch):
+    import app.services.email_service as email_service
+    monkeypatch.setattr(email_service, "send_email_via_provider", lambda *a, **k: {"success": True, "provider_message_id": "msg-unopened", "error": None})
+
+    lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Unopened", "Lead", "unopened@example.com")
+    client.post("/email/confirm-send-batch", json={
+        "items": [{"lead_id": lead.id, "subject": "Hello", "body_html": "<p>hi</p>"}],
+    }, headers=auth_headers)
+
+    sent_response = client.get("/email/sent", headers=auth_headers)
+    row = next(r for r in sent_response.json() if r["lead_id"] == lead.id)
+    assert row["opened_at"] is None
+    assert row["click_count"] == 0

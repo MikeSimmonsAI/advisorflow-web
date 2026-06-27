@@ -130,6 +130,7 @@ def confirm_email_send_batch(
     """
     from app.services.sms_service import create_booking_link
     from app.services.email_service import send_email_via_provider
+    from app.services.email_tracking_service import inject_tracking
     from app.models.models import EmailMessage
     import os as _os
 
@@ -151,19 +152,30 @@ def confirm_email_send_batch(
         final_subject = item.subject.replace(f"{_os.environ.get('BOOKING_BASE_URL', '')}/book/preview", booking_url)
         final_body = item.body_html.replace(f"{_os.environ.get('BOOKING_BASE_URL', '')}/book/preview", booking_url)
 
-        if current_user.microsoft_365_connected:
-            from app.services.microsoft_email_service import send_email_via_microsoft_graph
-            result = send_email_via_microsoft_graph(current_user, lead.email, final_subject, final_body)
-        else:
-            result = send_email_via_provider(lead.email, final_subject, final_body)
-
+        # Same ordering as send_email_to_lead: create the row first to
+        # get a real id before tracking can reference it, store the
+        # ORIGINAL (edited, untracked) body_html, and inject tracking
+        # only into a separate copy used for the actual provider send
+        # call - see email_tracking_service.py for the full reasoning.
         email_msg = EmailMessage(
             lead_id=lead.id, sender_id=current_user.id,
             subject=final_subject, body_html=final_body,
-            provider_message_id=result.get("provider_message_id"),
-            status="sent" if result["success"] else "failed",
+            status="queued",
         )
         db.add(email_msg)
+        db.commit()
+        db.refresh(email_msg)
+
+        tracked_body = inject_tracking(final_body, email_msg.id)
+
+        if current_user.microsoft_365_connected:
+            from app.services.microsoft_email_service import send_email_via_microsoft_graph
+            result = send_email_via_microsoft_graph(current_user, lead.email, final_subject, tracked_body)
+        else:
+            result = send_email_via_provider(lead.email, final_subject, tracked_body)
+
+        email_msg.provider_message_id = result.get("provider_message_id")
+        email_msg.status = "sent" if result["success"] else "failed"
 
         if result["success"]:
             lead.status = "sent"
@@ -224,28 +236,44 @@ def email_sent_history(
             "subject": email_msg.subject,
             "status": email_msg.status,
             "sent_at": email_msg.sent_at,
+            "opened_at": email_msg.opened_at,
+            "click_count": email_msg.click_count or 0,
         }
         for lead, email_msg in rows
     ]
 
 
 @router.get("/queue")
-def email_only_queue(
+def email_queue(
     search: str | None = Query(default=None, description="Optional partial name or email lookup."),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Leads routed to email outreach for the logged-in advisor.
+    Leads reachable by email for the logged-in advisor.
 
-    Email-only leads can still have a phone number on file from the raw CRM
-    import, so keep `phone` in the response and let the UI display it when
-    present. Search is intentionally scoped after org/advisor/channel filters.
+    BROADENED per Mike's explicit, direct complaint: this was
+    previously filtered to ONLY Lead.contact_channel == "email_only"
+    (people with no phone number at all) - a real, confirmed gap. A
+    lead with BOTH a phone and an email was invisible here entirely,
+    even though email is genuinely useful for them too (Mike's own
+    words: promos and visual content perform better by email than a
+    one-line text, and some households are landline-only and never see
+    a text but do read email). Now any lead with a real email address
+    on file shows up here, regardless of whether they also have a
+    phone - contact_channel is no longer the gate, Lead.email being
+    present is.
+
+    Still scoped to leads NOT already on an active email-sending path
+    elsewhere (status == "new") - this is the manual/one-off queue, not
+    a duplicate of leads already being worked through the mixed-channel
+    cadence sequence.
     """
     query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
-        Lead.contact_channel == "email_only",
+        Lead.email.isnot(None),
+        Lead.email != "",
         Lead.status == "new",
     )
 

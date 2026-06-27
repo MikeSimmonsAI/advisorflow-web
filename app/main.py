@@ -18,7 +18,7 @@ from app.routers import (
     cadence_router, email_router, calendar_router, notification_router,
     settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
     compliance_router, audit_log_router, sample_data_router, health_router, workqueue_router,
-    campaign_router, reports_router,
+    campaign_router, reports_router, email_tracking_router,
 )
 
 app = FastAPI(title="AdvisorFlow Web", version="0.1.0-phase1")
@@ -70,6 +70,7 @@ app.include_router(health_router.router)
 app.include_router(workqueue_router.router)
 app.include_router(campaign_router.router)
 app.include_router(reports_router.router)
+app.include_router(email_tracking_router.router)
 
 
 @app.on_event("startup")

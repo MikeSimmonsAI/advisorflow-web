@@ -630,6 +630,20 @@ class EmailMessage(Base):
     provider_message_id = Column(String, nullable=True)  # e.g. SendGrid/SES message ID
     status = Column(String, default="queued")  # queued, sent, delivered, bounced, failed
 
+    # Open/click tracking - per Mike's explicit request: real
+    # engagement signal email can give that text never does. opened_at
+    # is set the first time the tracking pixel loads (see
+    # email_tracking_router.py); click_count increments on every
+    # tracked-link click, with last_clicked_at reflecting the most
+    # recent one. Deliberately tracks COUNT, not a list of individual
+    # click timestamps/URLs - that level of detail isn't something an
+    # advisor needs to act on day to day, and keeping this simple
+    # avoids a second table for what's fundamentally a lightweight
+    # engagement signal, not a full analytics log.
+    opened_at = Column(DateTime, nullable=True)
+    click_count = Column(Integer, default=0)
+    last_clicked_at = Column(DateTime, nullable=True)
+
     sent_at = Column(DateTime, server_default=func.now())
 
     lead = relationship("Lead", back_populates="email_messages")

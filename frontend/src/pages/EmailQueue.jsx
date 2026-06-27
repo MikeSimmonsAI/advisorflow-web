@@ -71,7 +71,7 @@ export default function EmailQueue() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Email queue</h1>
-          <p className="page-subtitle">Leads routed to email outreach. Some may still have a phone on file from the original import.</p>
+          <p className="page-subtitle">Anyone with an email on file — send a real promo, follow-up, or note with images, formatting, and open/click tracking.</p>
         </div>
         {view === 'queue' && (
           <button className="btn btn--primary" onClick={handleReviewSelected} disabled={selected.size === 0}>
@@ -116,6 +116,8 @@ export default function EmailQueue() {
                   <th>Email</th>
                   <th>Subject</th>
                   <th>Status</th>
+                  <th>Opened</th>
+                  <th>Clicks</th>
                   <th>Sent</th>
                 </tr>
               </thead>
@@ -128,6 +130,16 @@ export default function EmailQueue() {
                     <td data-label="Status">
                       <span className={`badge ${row.status === 'sent' ? 'badge--green' : 'badge--red'}`}>{row.status}</span>
                     </td>
+                    <td data-label="Opened">
+                      {row.opened_at ? (
+                        <span className="badge badge--green" title={formatDate(row.opened_at)}>Opened</span>
+                      ) : (
+                        <span className="badge badge--neutral-dim">Not yet</span>
+                      )}
+                    </td>
+                    <td data-label="Clicks" className="mono">
+                      {row.click_count > 0 ? row.click_count : '—'}
+                    </td>
                     <td data-label="Sent" className="mono" style={{ fontSize: 12 }}>{formatDate(row.sent_at)}</td>
                   </tr>
                 ))}
@@ -136,7 +148,7 @@ export default function EmailQueue() {
           )
         ) : leads.length === 0 ? (
           <div className="empty-state">
-            {searchQuery.trim() ? 'No email-only leads match your search.' : 'Nothing queued. Email-only leads from your imports will show up here.'}
+            {searchQuery.trim() ? 'No leads match your search.' : 'Nothing queued. Any lead with an email on file will show up here.'}
           </div>
         ) : (
           <table className="data-table email-queue-table">

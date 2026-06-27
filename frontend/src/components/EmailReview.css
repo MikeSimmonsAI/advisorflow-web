@@ -12,12 +12,3 @@
   font-weight: 700;
 }
 
-.email-review-body-textarea {
-  font-family: var(--font-body);
-}
-
-.email-review-html-note {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}

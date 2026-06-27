@@ -1,12 +1,17 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v1.7.** See SESSION_LOG_V1.7_MIXED_CHANNEL_CADENCE.md
-for the latest session's full changelog (cadence now intelligently
-mixes text and email for leads who have both, never the same touch on
-both channels at once - Mike's direct correction after spotting the
-risk of double-soliciting through two channels).
+**CURRENT VERSION: v1.8.** See SESSION_LOG_V1.8_EMAIL_QUEUE_REBUILD.md
+for the latest session's full changelog (the full Email Queue rebuild
+Mike asked for - broadened to any lead with an email, a real rich
+content composer with image embedding, open/click tracking on both
+send paths, and all of it surfaced in the UI). **Set TRACKING_BASE_URL
+if the backend's public URL ever changes from the current default.**
 
-Prior version: v1.6, see SESSION_LOG_V1.6_EMAIL_TIMELINE_FIX.md (a real
+Prior version: v1.7, see SESSION_LOG_V1.7_MIXED_CHANNEL_CADENCE.md
+(cadence now intelligently mixes text and email for leads who have
+both, never the same touch on both channels at once).
+
+Before that: v1.6, see SESSION_LOG_V1.6_EMAIL_TIMELINE_FIX.md (a real
 gap Mike caught directly: outbound emails were never shown in a lead's
 Conversation timeline, only SMS. Fixed - email now appears interleaved
 with SMS, correctly ordered, with a clear Email tag and subject line).

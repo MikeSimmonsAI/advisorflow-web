@@ -159,6 +159,29 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     track = lead.message_track or MessageTrack.EMAIL_ONLY_NURTURE
     rendered = render_email(db, track, lead, advisor, booking_url)
 
+    # Create the EmailMessage row FIRST, with a "queued" placeholder
+    # status, so it has a real id before tracking needs to reference
+    # it - open/click tracking URLs are keyed by email_message_id, and
+    # that id doesn't exist until this row is inserted. body_html
+    # stored here is the ORIGINAL, untracked content - the tracking
+    # pixel/rewritten links are injected only into a separate copy used
+    # for the actual provider send call below, so the saved record
+    # stays clean and re-readable without tracking noise baked in
+    # permanently.
+    email_msg = EmailMessage(
+        lead_id=lead.id,
+        sender_id=advisor.id,
+        subject=rendered["subject"],
+        body_html=rendered["body_html"],
+        status="queued",
+    )
+    db.add(email_msg)
+    db.commit()
+    db.refresh(email_msg)
+
+    from app.services.email_tracking_service import inject_tracking
+    tracked_body_html = inject_tracking(rendered["body_html"], email_msg.id)
+
     # Provider selection: send through the advisor's real Microsoft 365
     # mailbox if they've connected it (per Mike's explicit request - real
     # company email, not a generic SendGrid sender), falling back to the
@@ -167,19 +190,12 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     # usable - the OAuth flow alone does nothing if nothing ever calls it.
     if advisor.microsoft_365_connected:
         from app.services.microsoft_email_service import send_email_via_microsoft_graph
-        result = send_email_via_microsoft_graph(advisor, lead.email, rendered["subject"], rendered["body_html"])
+        result = send_email_via_microsoft_graph(advisor, lead.email, rendered["subject"], tracked_body_html)
     else:
-        result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"])
+        result = send_email_via_provider(lead.email, rendered["subject"], tracked_body_html)
 
-    email_msg = EmailMessage(
-        lead_id=lead.id,
-        sender_id=advisor.id,
-        subject=rendered["subject"],
-        body_html=rendered["body_html"],
-        provider_message_id=result.get("provider_message_id"),
-        status="sent" if result["success"] else "failed",
-    )
-    db.add(email_msg)
+    email_msg.provider_message_id = result.get("provider_message_id")
+    email_msg.status = "sent" if result["success"] else "failed"
 
     if result["success"]:
         lead.status = "sent"
