@@ -88,6 +88,16 @@
   opacity: 0.44;
 }
 
+.stat-card--purple::before {
+  background:
+    radial-gradient(circle at 18% 0%, var(--signal-purple-dim), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%);
+}
+
+.stat-card--purple:hover {
+  box-shadow: var(--panel-shadow-strong), var(--glow-purple-md);
+}
+
 .stat-card-label {
   font-size: 11px;
   font-weight: 800;
@@ -110,6 +120,7 @@
 .stat-card-value--red { color: var(--signal-red); text-shadow: var(--glow-red-md); }
 .stat-card-value--amber { color: var(--signal-amber); text-shadow: var(--glow-amber-md); }
 .stat-card-value--neutral { color: var(--text-primary); text-shadow: 0 0 22px rgba(238, 245, 255, 0.18); }
+.stat-card-value--purple { color: var(--signal-purple); text-shadow: var(--glow-purple-md); }
 
 .stat-card-sublabel {
   font-size: 13px;
@@ -125,6 +136,13 @@
 
 .stat-card-trend--up { color: var(--signal-green); }
 .stat-card-trend--down { color: var(--signal-red); }
+
+.stat-card-sparkline {
+  width: 100%;
+  height: 28px;
+  margin-top: auto;
+  opacity: 0.75;
+}
 
 @media (max-width: 768px) {
   .stat-card {

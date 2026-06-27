@@ -98,3 +98,75 @@ def test_inbound_webhook_neutral_reply_does_not_set_hot(client, db_session, samp
 
     db_session.refresh(sample_lead)
     assert sample_lead.status == "replied"
+
+
+# ---------------------------------------------------------------------------
+# Auto-send candidate wiring - confirms the inbound webhook actually
+# triggers the candidate check end-to-end, and critically, that an
+# advisor on the default "off" phase sees ZERO behavior change at all -
+# this feature must be fully invisible until explicitly opted into.
+# ---------------------------------------------------------------------------
+
+def test_inbound_webhook_creates_no_candidate_when_advisor_phase_is_off(client, db_session, sample_lead, sample_advisor):
+    """The default, safe state - confirms the new wiring changes NOTHING for an advisor who hasn't opted in."""
+    from app.models.models import AutoSendCandidate
+    sample_lead.phone = "12145559600"
+    sample_lead.assigned_to_id = sample_advisor.id
+    db_session.commit()
+    assert sample_advisor.auto_send_phase == "off"
+
+    response = client.post("/sms/webhook/inbound", data={
+        "From": "+12145559600", "To": "+19998887777",
+        "Body": "What time works for you?", "MessageSid": "SM_autosend_off_test",
+    })
+
+    assert response.status_code == 200
+    assert db_session.query(AutoSendCandidate).count() == 0
+
+
+def test_inbound_webhook_creates_a_candidate_when_eligible_and_phase_is_candidate(client, db_session, sample_lead, sample_advisor):
+    from unittest.mock import patch
+    from app.models.models import AutoSendCandidate, Reply, ReplyClassification
+    from datetime import datetime, timedelta, timezone
+
+    sample_lead.phone = "12145559601"
+    sample_lead.assigned_to_id = sample_advisor.id
+    sample_advisor.auto_send_phase = "candidate"
+    db_session.commit()
+    # Establish prior context so this isn't treated as the first reply.
+    db_session.add(Reply(lead_id=sample_lead.id, body="Hi there", classification=ReplyClassification.NEUTRAL,
+                          received_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)))
+    db_session.commit()
+
+    with patch("app.services.auto_send_eligibility_service.check_auto_send_eligibility") as mock_check:
+        mock_check.return_value = {"eligible": True, "confidence": "high", "reasoning": "Simple scheduling question."}
+
+        response = client.post("/sms/webhook/inbound", data={
+            "From": "+12145559601", "To": "+19998887777",
+            "Body": "What time works for you?", "MessageSid": "SM_autosend_candidate_test",
+        })
+
+    assert response.status_code == 200
+    candidates = db_session.query(AutoSendCandidate).filter(AutoSendCandidate.lead_id == sample_lead.id).all()
+    assert len(candidates) == 1
+    assert candidates[0].advisor_id == sample_advisor.id
+
+
+def test_inbound_webhook_still_responds_correctly_even_if_candidate_check_fails(client, db_session, sample_lead, sample_advisor):
+    """A failure in the new auto-send wiring must NEVER break the actual Twilio webhook response - this is the real safety property of the try/except wrapping."""
+    from unittest.mock import patch
+    sample_lead.phone = "12145559602"
+    sample_lead.assigned_to_id = sample_advisor.id
+    sample_advisor.auto_send_phase = "candidate"
+    db_session.commit()
+
+    with patch("app.services.auto_send_candidate_service.maybe_create_candidate") as mock_maybe:
+        mock_maybe.side_effect = Exception("Unexpected failure in candidate service")
+
+        response = client.post("/sms/webhook/inbound", data={
+            "From": "+12145559602", "To": "+19998887777",
+            "Body": "What time works for you?", "MessageSid": "SM_autosend_failure_test",
+        })
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "received"

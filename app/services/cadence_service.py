@@ -106,25 +106,25 @@ SEND_IMMEDIATELY_ON_DAY_1 = True
 # keeps this maintainable and matches "rotating message variations to avoid
 # carrier flagging" from Mike's original AHK-era requirement.
 TRACK_BASE_TEMPLATES = {
-    MessageTrack.PRE_NEED_LOCK_PRICE: (
+    "pre_need_lock_price": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "Lock in today's pricing before it changes - here's my booking link: {booking_link}"
     ),
-    MessageTrack.AT_NEED_SUPPORT: (
+    "at_need_support": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "I'm here to help with any arrangements you need. Reach out anytime: {advisor_cell} "
         "or book a time here: {booking_link}"
     ),
-    MessageTrack.IMMINENT_SUPPORT: (
+    "imminent_support": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "Please call me directly at {advisor_cell} - I want to make sure you have support right now."
     ),
-    MessageTrack.UPSELL_EXISTING_CUSTOMER: (
+    "upsell_existing": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "We have options for memorials, markers, and additional services for your family. "
         "Let's chat: {booking_link}"
     ),
-    MessageTrack.NEW_INQUIRY_INTRO: (
+    "new_inquiry_intro": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "I help families with cemetery and funeral planning in the area - happy to "
         "answer any questions, no pressure at all. You can reach me at {advisor_cell} "
@@ -219,7 +219,7 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     """
     from app.services.template_service import get_sms_template
     custom_template = get_sms_template(db, lead.organization_id, lead.message_track)
-    template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES[MessageTrack.PRE_NEED_LOCK_PRICE])
+    template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES["pre_need_lock_price"])
     tone_phrase = TOUCH_TONE_VARIANTS.get(touch_number, TOUCH_TONE_VARIANTS[9])
     return (
         template
@@ -257,13 +257,26 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
         if organization_id and lead.organization_id != organization_id:
             continue
 
-        # Defensive re-check - a lead could have replied/been flagged DNC
-        # between when it entered the queue and when this job runs.
-        if lead.status in (LeadStatus.DNC, LeadStatus.HOT, LeadStatus.REPLIED, LeadStatus.BOOKED):
-            stop_cadence_for_lead(
-                db, lead.id,
-                CadenceStatus.STOPPED_DNC if lead.status == LeadStatus.DNC else CadenceStatus.STOPPED_REPLIED,
-            )
+        # Compliance Preflight re-check - a lead could have replied,
+        # been flagged DNC, or had their number suppressed between when
+        # it entered the cadence queue and when this job runs today.
+        # REAL GAP FIXED HERE: this previously only checked
+        # LeadStatus.DNC directly, never the suppression list - a
+        # number could be suppressed while its Lead.status had drifted
+        # out of sync (exactly the scenario the shared
+        # check_compliance_preflight gate exists to catch everywhere
+        # else in the app). HOT/REPLIED/BOOKED are handled separately
+        # below since those aren't compliance blocks, just normal
+        # reasons to stop an active cadence.
+        from app.services.compliance_service import check_compliance_preflight
+        try:
+            check_compliance_preflight(db, lead)
+        except ValueError:
+            stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
+            continue
+
+        if lead.status in (LeadStatus.HOT, LeadStatus.REPLIED, LeadStatus.BOOKED):
+            stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_REPLIED)
             continue
 
         advisor = lead.assigned_to

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, EmailMessage, MessageTrack
+from app.models.models import User, Lead, EmailMessage
 from app.services.email_service import send_email_to_lead, send_email_batch
 
 router = APIRouter(prefix="/email", tags=["email"])
@@ -93,14 +93,14 @@ def preview_email_batch(
             # booking link isn't created until actual send, so an edited
             # or skipped preview doesn't leave a dead link behind.
             placeholder_booking_url = f"{BOOKING_BASE_URL}/book/preview"
-            track = lead.message_track or MessageTrack.EMAIL_ONLY_NURTURE
+            track = lead.message_track or "email_only_nurture"
             rendered = render_email(db, track, lead, current_user, placeholder_booking_url)
             subject, body_html = rendered["subject"], rendered["body_html"]
 
         results.append(EmailPreviewItem(
             lead_id=lead.id, lead_name=lead_name, email=lead.email,
-            tier=lead.tier.value if lead.tier else None,
-            message_track=lead.message_track.value if lead.message_track else None,
+            tier=lead.tier,
+            message_track=lead.message_track,
             draft_subject=subject, draft_body_html=body_html, skip_reason=skip_reason,
         ))
 
@@ -132,10 +132,11 @@ def confirm_email_send_batch(
     from app.services.sms_service import create_booking_link
     from app.services.email_service import send_email_via_provider
     from app.services.email_tracking_service import inject_tracking
+    from app.services.compliance_service import check_compliance_preflight
     from app.models.models import EmailMessage
     import os as _os
 
-    sent_ids, failed_ids, skipped_ids = [], [], []
+    sent_ids, failed_ids, skipped_ids, blocked_ids = [], [], [], []
 
     for item in req.items:
         lead = db.query(Lead).filter(
@@ -143,6 +144,20 @@ def confirm_email_send_batch(
         ).first()
         if not lead or not lead.email:
             skipped_ids.append(item.lead_id)
+            continue
+
+        # Single, shared Compliance Preflight gate - the real, confirmed
+        # gap this closes: this manual review-and-send path had NO
+        # compliance check at all before this, the same gap as
+        # send_email_to_lead. A DNC/suppressed lead is tracked
+        # separately (blocked_ids) from a lead simply missing an email
+        # address (skipped_ids) - these are different situations and an
+        # advisor reviewing the batch result deserves to know which one
+        # actually happened.
+        try:
+            check_compliance_preflight(db, lead)
+        except ValueError:
+            blocked_ids.append(item.lead_id)
             continue
 
         booking = create_booking_link(db, lead, current_user)
@@ -185,7 +200,7 @@ def confirm_email_send_batch(
             failed_ids.append(lead.id)
 
     db.commit()
-    return {"sent_count": len(sent_ids), "failed_count": len(failed_ids), "skipped_count": len(skipped_ids)}
+    return {"sent_count": len(sent_ids), "failed_count": len(failed_ids), "skipped_count": len(skipped_ids), "blocked_count": len(blocked_ids)}
 
 
 @router.get("/sent")

@@ -223,6 +223,18 @@ def inbound_webhook(
 
     db.commit()
 
+    # Auto-send queue candidate check - per the explicit, careful
+    # design for this feature: only ever does anything if this lead's
+    # advisor has opted in (User.auto_send_phase != "off", the default).
+    # See auto_send_candidate_service.py for the full eligibility gate.
+    # Wrapped defensively, same as every other secondary effect below -
+    # a failure here must never break the Twilio webhook response.
+    try:
+        from app.services.auto_send_candidate_service import maybe_create_candidate
+        maybe_create_candidate(db, reply, lead)
+    except Exception:
+        pass
+
     # Reclassify hot/warm/cold now that a reply just arrived - this is
     # the single most important trigger point for engagement temperature,
     # since a reply is the strongest real-time signal a lead's state changed.

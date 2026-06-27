@@ -122,6 +122,11 @@
   color: var(--text-secondary);
 }
 
+.users-auto-send-select {
+  max-width: 220px;
+  font-size: 12px;
+}
+
 .users-feature-flags-edit {
   display: flex;
   flex-direction: column;

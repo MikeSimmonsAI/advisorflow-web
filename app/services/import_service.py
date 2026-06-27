@@ -71,17 +71,6 @@ INTERNAL_EMAIL_MARKERS = ["@nsmg.com"]
 
 # Tier -> message track mapping. Every tier maps to SOMETHING now; nothing
 # maps to "excluded."
-TIER_TO_TRACK = {
-    LeadTier.PRE_NEED: MessageTrack.PRE_NEED_LOCK_PRICE,
-    LeadTier.AT_NEED: MessageTrack.AT_NEED_SUPPORT,
-    LeadTier.IMMINENT: MessageTrack.IMMINENT_SUPPORT,
-    LeadTier.CONTRACT_SOLD: MessageTrack.UPSELL_EXISTING_CUSTOMER,
-    LeadTier.EMAIL_ONLY: MessageTrack.EMAIL_ONLY_NURTURE,
-    LeadTier.PARTIAL: MessageTrack.NEEDS_REVIEW,
-    LeadTier.ADDR_ONLY: MessageTrack.NEEDS_REVIEW,
-    LeadTier.NEW_INQUIRY: MessageTrack.NEW_INQUIRY_INTRO,
-}
-
 
 def _build_column_lookup(columns) -> dict:
     lookup = {}
@@ -102,7 +91,7 @@ def _is_new_inquiry_source(source_raw: str) -> bool:
     return any(marker in low for marker in NEW_INQUIRY_SOURCE_MARKERS)
 
 
-def _infer_tier(raw_value: str, status_reason: str, source_raw: str = "") -> LeadTier:
+def _infer_tier(raw_value: str, status_reason: str, source_raw: str = "") -> str:
     """
     Determines lead tier. Status Reason "Contract Sold" takes priority over
     Lead Type, since a sold contract is the more important signal for
@@ -116,26 +105,36 @@ def _infer_tier(raw_value: str, status_reason: str, source_raw: str = "") -> Lea
 
     Blank/unrecognized Lead Type -> PARTIAL (needs manual review), never
     silently assumed to be Pre-Need.
+
+    Returns the tier's plain string key (e.g. "pre_need"), not a
+    LeadTier enum object - Lead.tier is a plain String column now,
+    validated against this org's real TierDefinition rows rather than
+    a hardcoded Python enum (see tier_config_service.py). This
+    function's own Restland-specific keyword-matching logic is
+    unchanged - a different industry's Excel import would need
+    entirely different column-parsing logic anyway, so making THIS
+    function itself "industry-agnostic" isn't the relevant problem to
+    solve; only its return type needed to change.
     """
     if status_reason and status_reason.strip().lower() == "contract sold":
-        return LeadTier.CONTRACT_SOLD
+        return LeadTier.CONTRACT_SOLD.value
 
     if _is_new_inquiry_source(source_raw):
-        return LeadTier.NEW_INQUIRY
+        return LeadTier.NEW_INQUIRY.value
 
     if not raw_value:
-        return LeadTier.PARTIAL
+        return LeadTier.PARTIAL.value
 
     val = str(raw_value).strip().lower()
     if "imminent" in val:
-        return LeadTier.IMMINENT
+        return LeadTier.IMMINENT.value
     if "at" in val and "need" in val:
-        return LeadTier.AT_NEED
+        return LeadTier.AT_NEED.value
     if "pre" in val and "need" in val:
-        return LeadTier.PRE_NEED
+        return LeadTier.PRE_NEED.value
     if "new inquiry" in val or "web lead" in val or "cold lead" in val:
-        return LeadTier.NEW_INQUIRY
-    return LeadTier.PARTIAL
+        return LeadTier.NEW_INQUIRY.value
+    return LeadTier.PARTIAL.value
 
 
 def _is_internal_record(email: str, last_name: str) -> bool:
@@ -226,6 +225,14 @@ def import_leads_from_excel(
     """
     rows = parse_excel_file(file_path)
 
+    # Real, per-org tier-to-track mapping - built once here rather than
+    # querying TierDefinition once per row (could be thousands of rows
+    # in a real import). Replaces the old module-level TIER_TO_TRACK
+    # dict, which only ever worked for Restland's hardcoded LeadTier
+    # values - now this is genuinely this organization's own data.
+    from app.services.tier_config_service import list_tier_definitions
+    tier_to_track = {d.tier_key: d.track_key for d in list_tier_definitions(db, organization_id)}
+
     created_leads = []
     duplicate_count = 0
     skipped_no_contact_info = 0
@@ -249,7 +256,7 @@ def import_leads_from_excel(
 
         tier = _infer_tier(row["tier_raw"], row["status_reason_raw"], row["source_raw"])
         if force_new_inquiry:
-            tier = LeadTier.NEW_INQUIRY
+            tier = LeadTier.NEW_INQUIRY.value
         call_restricted = _is_call_restricted(row["allow_calls_raw"])
 
         # Route: phone present -> SMS channel. No phone but email present -> email-only channel.
@@ -265,11 +272,11 @@ def import_leads_from_excel(
             # leads need their own track on BOTH channels, not the same
             # "you have no phone on file" framing as an existing Restland
             # relationship that just happens to lack a phone number.
-            if tier != LeadTier.NEW_INQUIRY:
-                tier = LeadTier.EMAIL_ONLY
+            if tier != LeadTier.NEW_INQUIRY.value:
+                tier = LeadTier.EMAIL_ONLY.value
 
-        message_track = TIER_TO_TRACK.get(tier, MessageTrack.NEEDS_REVIEW)
-        if tier == LeadTier.PARTIAL:
+        message_track = tier_to_track.get(tier, MessageTrack.NEEDS_REVIEW.value)
+        if tier == LeadTier.PARTIAL.value:
             flagged_needs_tier_review += 1
 
         # Parse last contact date if present (best-effort, don't fail import on bad dates)
@@ -301,7 +308,7 @@ def import_leads_from_excel(
         db.add(lead)
         db.flush()
 
-        tier_counts[tier.value] = tier_counts.get(tier.value, 0) + 1
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
         # Dedup only applies to phone-based leads - email-only leads don't
         # have a phone to check against the registry.
@@ -324,7 +331,7 @@ def import_leads_from_excel(
                 duplicate_count += 1
             else:
                 lead.status = (
-                    LeadStatus.NEEDS_TIER_REVIEW if tier == LeadTier.PARTIAL else LeadStatus.NEW
+                    LeadStatus.NEEDS_TIER_REVIEW if tier == LeadTier.PARTIAL.value else LeadStatus.NEW
                 )
         else:
             lead.status = LeadStatus.NEW  # queued for email outreach, not SMS

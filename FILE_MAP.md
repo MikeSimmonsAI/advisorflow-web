@@ -1,12 +1,39 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v1.9.** See SESSION_LOG_V1.9_EMAIL_QUEUE_VISUAL_REDESIGN.md
-for the latest session's full changelog (real scorecards on the Email
-Queue - In queue, Sent today, Open rate, Clicks - plus the queue list
-rebuilt as richer cards instead of a plain table, per Mike's direct
-feedback that the rebuilt page still "looked way too simple").
+**CURRENT VERSION: v2.3.** See SESSION_LOG_V2.3_INDUSTRY_AGNOSTIC_TIERS.md
+for the latest session's full changelog (the industry-agnostic tier
+system - Lead.tier/message_track, Campaign.message_track, and
+MessageTemplate.message_track all migrated from hardcoded Python
+enums to a real, per-organization TierDefinition system; funeral
+itself migrated onto it too, not kept as a separate hardcoded path).
+**⚠️ BEFORE DEPLOYING TO THE LIVE POSTGRES DATABASE: the production
+data migration for converting the existing Postgres ENUM columns to
+VARCHAR has NOT been written yet - this is flagged explicitly in the
+session log as still-needed, careful, separate work. Do not deploy
+this version's model changes against the live database without that
+migration in place first.**
 
-Prior version: v1.8, see SESSION_LOG_V1.8_EMAIL_QUEUE_REBUILD.md (the
+Prior version: v2.2, see SESSION_LOG_V2.2_COMPLIANCE_PREFLIGHT.md (one
+real, shared compliance gate every send path now calls).
+
+Before that: v2.1, see SESSION_LOG_V2.1_AUTO_SEND_QUEUE_PHASE1.md (the
+auto-send queue, Phase 1 complete - a dedicated, hard-gated
+eligibility classifier, AI drafting, a full review queue where nothing
+sends without an explicit advisor click, and an admin-controlled
+toggle to turn it on per-advisor). **Phase 2 (no-click sending) is NOT
+built yet** - every advisor defaults to fully off, and even at
+"candidate" phase, no message can ever go out without a human
+confirming it first.
+
+Prior version: v2.0, see SESSION_LOG_V2.0_DASHBOARD_REDESIGN.md (a full
+"Mission Control" visual redesign across Overview, Replies, and Master
+Dashboard, all built on real, computed data).
+
+Before that: v1.9, see SESSION_LOG_V1.9_EMAIL_QUEUE_VISUAL_REDESIGN.md
+(real scorecards on the Email Queue, plus the queue list rebuilt as
+richer cards instead of a plain table).
+
+Before that: v1.8, see SESSION_LOG_V1.8_EMAIL_QUEUE_REBUILD.md (the
 full Email Queue rebuild - broadened to any lead with an email, a real
 rich content composer with image embedding, open/click tracking on
 both send paths). **Set TRACKING_BASE_URL if the backend's public URL

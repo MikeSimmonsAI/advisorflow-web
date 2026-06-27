@@ -39,14 +39,14 @@ class TemplateAIRewriteRequest(BaseModel):
     tone: str = "standard"
 
 
-def _validate_track_and_channel(message_track: str, channel: str) -> MessageTrack:
-    try:
-        track_enum = MessageTrack(message_track)
-    except ValueError:
+def _validate_track_and_channel(db: Session, organization_id: str, message_track: str, channel: str) -> str:
+    from app.services.tier_config_service import list_tier_definitions
+    valid_tracks = {d.track_key for d in list_tier_definitions(db, organization_id)}
+    if message_track not in valid_tracks:
         raise HTTPException(status_code=400, detail=f"Invalid message_track: {message_track}")
     if channel not in ("sms", "email"):
         raise HTTPException(status_code=400, detail="channel must be 'sms' or 'email'")
-    return track_enum
+    return message_track
 
 
 @router.get("/")
@@ -66,19 +66,13 @@ def update_template(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    try:
-        track_enum = MessageTrack(req.message_track)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid message_track: {req.message_track}")
-
-    if req.channel not in ("sms", "email"):
-        raise HTTPException(status_code=400, detail="channel must be 'sms' or 'email'")
+    track_key = _validate_track_and_channel(db, current_user.organization_id, req.message_track, req.channel)
 
     if req.channel == "email" and not req.email_subject_template:
         raise HTTPException(status_code=400, detail="email_subject_template is required for email templates")
 
     upsert_template(
-        db, current_user.organization_id, track_enum, req.channel,
+        db, current_user.organization_id, track_key, req.channel,
         req.body_template, current_user.id, req.email_subject_template,
     )
 
@@ -99,12 +93,9 @@ def reset_template(
     current_user: User = Depends(require_admin),
 ):
     """Reverts a customized template back to the hardcoded default."""
-    try:
-        track_enum = MessageTrack(message_track)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid message_track: {message_track}")
+    track_key = _validate_track_and_channel(db, current_user.organization_id, message_track, channel)
 
-    deleted = reset_template_to_default(db, current_user.organization_id, track_enum, channel)
+    deleted = reset_template_to_default(db, current_user.organization_id, track_key, channel)
 
     if deleted:
         log_action(
@@ -119,6 +110,7 @@ def reset_template(
 @router.post("/ai/generate")
 def ai_generate_template(
     req: TemplateAIGenerateRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """
@@ -134,9 +126,9 @@ def ai_generate_template(
     if req.tone not in VALID_TONES:
         raise HTTPException(status_code=400, detail=f"tone must be one of: {', '.join(VALID_TONES)}")
 
-    track_enum = _validate_track_and_channel(req.message_track, req.channel)
+    track_key = _validate_track_and_channel(db, current_user.organization_id, req.message_track, req.channel)
     try:
-        return generate_template(track_enum, req.channel, req.instruction, req.tone)
+        return generate_template(db, current_user.organization_id, track_key, req.channel, req.instruction, req.tone)
     except TemplateAIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -144,6 +136,7 @@ def ai_generate_template(
 @router.post("/ai/rewrite")
 def ai_rewrite_template(
     req: TemplateAIRewriteRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """
@@ -156,12 +149,12 @@ def ai_rewrite_template(
     if req.tone not in VALID_TONES:
         raise HTTPException(status_code=400, detail=f"tone must be one of: {', '.join(VALID_TONES)}")
 
-    track_enum = _validate_track_and_channel(req.message_track, req.channel)
+    track_key = _validate_track_and_channel(db, current_user.organization_id, req.message_track, req.channel)
     if req.channel == "email" and not req.current_subject:
         raise HTTPException(status_code=400, detail="current_subject is required when rewriting an email template")
     try:
         return rewrite_template(
-            track_enum, req.channel, req.current_body, req.current_subject, req.instruction, req.tone,
+            db, current_user.organization_id, track_key, req.channel, req.current_body, req.current_subject, req.instruction, req.tone,
         )
     except TemplateAIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

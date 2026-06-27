@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '../api/client'
 import StatCard from '../components/StatCard'
 import SignalPulse from '../components/SignalPulse'
@@ -79,9 +80,23 @@ export default function Admin() {
   const [selectedPoolIds, setSelectedPoolIds] = useState([])
   const [assignTarget, setAssignTarget] = useState('')
   const [reassigning, setReassigning] = useState(false)
+  // Real org-wide lead status distribution for the new "Lead
+  // distribution" donut - genuinely mutually-exclusive counts, see
+  // dashboard_status_distribution's docstring for why this is
+  // different from the existing sequential funnel data.
+  const [statusDistribution, setStatusDistribution] = useState([])
+  const [hotReplies, setHotReplies] = useState([])
 
   useEffect(() => {
     api.get('/admin/dashboard').then(setData).finally(() => setLoading(false))
+    // Real data for the new "Lead distribution," "Top performing
+    // advisors," and "Hot replies" widgets on the default landing
+    // view - fetched upfront here rather than only lazily on Metrics
+    // tab click, since these widgets are now visible immediately on
+    // page load, matching the redesign's layout.
+    loadMetrics()
+    api.get('/admin/dashboard/status-distribution').then(setStatusDistribution).catch(() => setStatusDistribution([]))
+    api.get('/admin/dashboard/hot-replies?limit=5').then(setHotReplies).catch(() => setHotReplies([]))
   }, [])
 
   useEffect(() => {
@@ -180,6 +195,29 @@ export default function Admin() {
     return Math.max(...counts, 1)
   }, [funnel])
 
+  const DISTRIBUTION_COLORS = {
+    new: 'var(--signal-blue)',
+    sent: 'var(--text-tertiary)',
+    replied: 'var(--signal-purple)',
+    hot: 'var(--signal-red)',
+    booked: 'var(--signal-green)',
+    dead: 'var(--text-tertiary)',
+    dnc: 'var(--signal-amber)',
+  }
+  const distributionData = statusDistribution
+    .map((row) => ({ ...row, color: DISTRIBUTION_COLORS[row.status] || 'var(--text-tertiary)' }))
+    .filter((row) => row.count > 0)
+  const distributionTotal = distributionData.reduce((sum, row) => sum + row.count, 0)
+
+  // Top performing advisors - real data, sorted by booking_rate (an
+  // already-computed, already-tested field from /admin/dashboard/metrics),
+  // excluding the org_total summary row which isn't a real advisor.
+  const topAdvisors = (metrics?.advisors || [])
+    .filter((a) => a.advisor_id !== 'org_total')
+    .slice()
+    .sort((a, b) => (b.booking_rate || 0) - (a.booking_rate || 0))
+    .slice(0, 5)
+
   return (
     <div>
       <header className="page-header">
@@ -190,15 +228,111 @@ export default function Admin() {
         <SignalPulse color="blue" label="Org-wide" />
       </header>
 
-      <div className="stat-grid">
-        <StatCard label="Total leads" value={loading ? '—' : data?.total_leads} accent="blue" />
-        <StatCard
-          label="Duplicates prevented"
-          value={loading ? '—' : data?.total_duplicates_prevented}
-          accent="green"
-          sublabel="No double-contact across advisors"
-        />
-        <StatCard label="Advisors active" value={loading ? '—' : data?.advisors?.length} accent="neutral" />
+      <div className="admin-hero-grid">
+        <button className="stat-card-link" onClick={() => setView('leads')}>
+          <StatCard label="Total leads" value={loading ? '—' : data?.total_leads} accent="blue" />
+        </button>
+        <div className="stat-card-link stat-card-link--static">
+          <StatCard
+            label="Duplicates prevented"
+            value={loading ? '—' : data?.total_duplicates_prevented}
+            accent="green"
+            sublabel="No double-contact across advisors"
+          />
+        </div>
+        <button className="stat-card-link" onClick={() => setView('advisors')}>
+          <StatCard label="Advisors active" value={loading ? '—' : data?.advisors?.length} accent="purple" />
+        </button>
+        <button className="stat-card-link" onClick={() => setView('advisors')}>
+          {/* Real response rate, computed here from total_replies /
+              total_messages_sent - both genuine counts from the
+              backend, never a pre-baked or invented percentage. Shows
+              "—" rather than a misleading 0% when nothing's been sent
+              yet, same principle as the Email Queue's open-rate card. */}
+          <StatCard
+            label="Response rate"
+            value={
+              loading ? '—'
+              : !data?.total_messages_sent ? '—'
+              : `${Math.round((data.total_replies / data.total_messages_sent) * 100)}%`
+            }
+            accent="amber"
+            sublabel={loading || data?.total_messages_sent ? 'Replies received per message sent' : 'No messages sent yet'}
+          />
+        </button>
+      </div>
+
+      <div className="admin-widget-grid">
+        <article className="panel admin-widget-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Lead distribution</h2>
+          </div>
+          <div className="chart-frame chart-frame--donut chart-frame--compact">
+            {distributionData.length === 0 ? (
+              <div className="empty-state">No leads yet.</div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={140}>
+                  <PieChart>
+                    <Pie data={distributionData} dataKey="count" nameKey="label" innerRadius="60%" outerRadius="86%" paddingAngle={4}>
+                      {distributionData.map((entry) => <Cell key={entry.status} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ background: 'rgba(7, 14, 32, 0.96)', border: '1px solid rgba(86, 200, 255, 0.42)', borderRadius: 12, color: '#eef5ff' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="chart-legend chart-legend--compact">
+                  {distributionData.map((entry) => (
+                    <span key={entry.status} className="chart-legend-item">
+                      <span className="chart-legend-dot" style={{ background: entry.color }} />
+                      {entry.label}: {entry.count} ({distributionTotal > 0 ? Math.round((entry.count / distributionTotal) * 100) : 0}%)
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </article>
+
+        <article className="panel admin-widget-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Top performing advisors</h2>
+            <span className="chart-subtitle-inline">By booking rate</span>
+          </div>
+          {topAdvisors.length === 0 ? (
+            <div className="empty-state">No advisor activity yet.</div>
+          ) : (
+            <ul className="admin-leaderboard-list">
+              {topAdvisors.map((a, idx) => (
+                <li key={a.advisor_id} className="admin-leaderboard-row">
+                  <span className="admin-leaderboard-rank">{idx + 1}</span>
+                  <span className="admin-leaderboard-name">{a.advisor_name}</span>
+                  <span className="admin-leaderboard-rate mono">{formatPercent(a.booking_rate)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </article>
+
+        <article className="panel admin-widget-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Hot replies</h2>
+            <span className="panel-count">{hotReplies.length}</span>
+          </div>
+          {hotReplies.length === 0 ? (
+            <div className="empty-state">No hot replies yet.</div>
+          ) : (
+            <ul className="reply-list reply-list--compact">
+              {hotReplies.map((r) => (
+                <li key={r.reply_id} className="reply-item reply-item--clickable" onClick={() => navigate(`/leads/${r.lead_id}`)}>
+                  <SignalPulse color="red" size={6} />
+                  <span className="reply-body">
+                    <strong>{r.lead_name}: </strong>{r.body}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </article>
       </div>
 
       <div className="admin-tabs">

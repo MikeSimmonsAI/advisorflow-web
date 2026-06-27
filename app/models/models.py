@@ -42,6 +42,63 @@ class LeadTier(str, enum.Enum):
     NEW_INQUIRY = "new_inquiry"  # brand-new web/cold lead, no prior relationship with Restland
 
 
+# ---------------------------------------------------------------------------
+# TierDefinition - the real, per-organization tier configuration system.
+#
+# Per Mike's explicit decision: funeral itself migrates onto this
+# system rather than living as a separate, hardcoded "default"
+# alongside a new configurable path for other industries. Every
+# organization - including every existing funeral org - owns a real
+# set of TierDefinition rows. Restland's are simply the first ones,
+# pre-seeded to match the existing LeadTier/MessageTrack values
+# exactly, so existing data and existing behavior are completely
+# unaffected the moment this table exists.
+#
+# This table carries everything an org needs to fully own its pipeline:
+#   - tier_key / tier_label: what Lead.tier actually stores, and what
+#     advisors see (e.g. key="pre_need", label="Pre-Need" for Restland;
+#     key="quote_requested", label="Quote Requested" for a roofing org)
+#   - track_key / track_label: the matching message track, replacing
+#     the old hardcoded TIER_TO_TRACK dict in import_service.py
+#   - ai_tone_context: the narrative guidance the AI template writer
+#     uses, replacing the old hardcoded TRACK_CONTEXT dict in
+#     template_ai_service.py - this is the genuinely industry-specific
+#     content (Restland's "Tone should be warm, supportive... never
+#     salesy" has no meaning for a roofing quote-follow-up).
+#
+# Lead.tier and Lead.message_track are now plain String columns,
+# validated against this table's rows for that lead's organization -
+# not a database-level enum anymore, since a hard enum cannot vary
+# per organization. The stored string VALUES for Restland's leads are
+# completely unchanged ("pre_need", "at_need", etc.) - only the
+# column's TYPE changed from enforced-enum to configuration-validated
+# string, so no existing lead data needed to move at all.
+# ---------------------------------------------------------------------------
+class TierDefinition(Base):
+    __tablename__ = "tier_definitions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+
+    tier_key = Column(String, nullable=False)  # e.g. "pre_need", "quote_requested"
+    tier_label = Column(String, nullable=False)  # e.g. "Pre-Need", "Quote Requested"
+    sort_order = Column(Integer, default=0)  # display order in dropdowns/pipeline views
+
+    track_key = Column(String, nullable=False)  # e.g. "pre_need_lock_price"
+    track_label = Column(String, nullable=False)  # e.g. "Pre-Need (Lock Price)"
+    ai_tone_context = Column(Text, nullable=False)  # the genuinely industry-specific AI guidance text
+
+    is_active = Column(Boolean, default=True)  # soft-disable a tier without deleting its history
+    is_manual_selectable = Column(Boolean, default=True)  # False for tiers that are auto-detected import OUTCOMES (e.g. Restland's "Email Only"/"Address Only"/"Partial Info"), never something an advisor manually picks for a new lead
+    created_at = Column(DateTime, server_default=func.now())
+
+    organization = relationship("Organization", back_populates="tier_definitions")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "tier_key", name="uq_tier_definition_org_key"),
+    )
+
+
 class RelationshipType(str, enum.Enum):
     """
     How a referral lead relates to the lead who referred them - per
@@ -154,6 +211,15 @@ class Organization(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
+    # Industry-agnostic tier configuration - per the explicit decision
+    # to migrate funeral itself onto this system rather than building a
+    # separate, parallel one. Every org (including every existing one)
+    # gets a real, owned set of TierDefinition rows - there is no
+    # special-cased "funeral mode" left anywhere in the tier logic once
+    # this is fully wired in; funeral is simply the first, pre-seeded
+    # industry profile, not a hardcoded fallback path.
+    tier_definitions = relationship("TierDefinition", back_populates="organization")
+
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")
@@ -230,6 +296,27 @@ class User(Base):
     # once there are several.
     feature_flags = Column(Text, nullable=True)  # comma-separated flag names, e.g. "early_access_reports,beta_dashboard"
 
+    # Auto-send queue phase toggle - per the explicit, careful design
+    # agreed on for this feature: "soft", "candidate", or "auto".
+    #   - "off" (default): no auto-send queue activity at all for this
+    #     advisor's leads. This is the only safe default for an advisor
+    #     who hasn't opted in.
+    #   - "candidate": Phase 1 / training wheels. Eligible replies land
+    #     in a review queue with an AI-drafted response, but nothing
+    #     sends without the advisor explicitly clicking confirm. Exists
+    #     specifically so an advisor can watch the classifier's real
+    #     judgment calls before trusting it unsupervised.
+    #   - "auto": Phase 2. The exact same eligibility logic, but
+    #     qualifying replies send automatically with no click, logged
+    #     to AutoSentLog for after-the-fact review.
+    # Deliberately its OWN dedicated column, not folded into the
+    # generic feature_flags string above - this controls whether AI
+    # sends real messages to real people with no human in the loop,
+    # which is a categorically higher-stakes permission than a
+    # lightweight UI feature flag and deserves to be directly
+    # queryable, not parsed out of a comma-separated string.
+    auto_send_phase = Column(String, default="off")  # "off" | "candidate" | "auto"
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 
@@ -281,9 +368,9 @@ class Lead(Base):
     phone_raw = Column(String, nullable=True)  # original as imported
     email = Column(String, nullable=True)
 
-    tier = Column(SAEnum(LeadTier), default=LeadTier.PRE_NEED)
+    tier = Column(String, default="pre_need")  # validated against this org's TierDefinition.tier_key, not a hard enum - see TierDefinition's docstring for why
     engagement_temperature = Column(SAEnum(EngagementTemperature), default=EngagementTemperature.UNKNOWN)
-    message_track = Column(SAEnum(MessageTrack), nullable=True)  # which offer/template track applies
+    message_track = Column(String, nullable=True)  # validated against this org's TierDefinition.track_key
     contact_channel = Column(String, default="sms")  # "sms" or "email_only" - drives queue routing
     status = Column(SAEnum(LeadStatus), default=LeadStatus.NEW)
     source_year = Column(Integer, nullable=True)  # e.g. 2012, 2013 (which cohort batch)
@@ -395,6 +482,91 @@ class Reply(Base):
     reviewed_at = Column(DateTime, nullable=True)  # when advisor marked as seen
 
     lead = relationship("Lead", back_populates="replies")
+
+
+# ---------------------------------------------------------------------------
+# AutoSendCandidate / AutoSentLog - the auto-send queue's real data
+# structures, per the explicit, careful design agreed on for this
+# feature: a reply only ever becomes a candidate if it passes a
+# DEDICATED eligibility check (see auto_send_eligibility_service.py) -
+# never the general reply classifier alone, since the general
+# classifier was built to answer "what does this reply mean," not the
+# much higher-stakes question "is it safe to send something back with
+# zero human review."
+#
+# Phase 1 (candidate): a reply lands here, AI drafts a response, the
+# advisor reviews and explicitly confirms before anything sends -
+# nothing in this table alone ever causes a message to go out.
+#
+# Phase 2 (auto): once an advisor's User.auto_send_phase == "auto",
+# the exact same eligibility check still runs, but a qualifying
+# candidate is sent immediately and the row moves straight to
+# AutoSentLog instead of waiting for a click - this is the visible,
+# permanent audit trail an advisor can spot-check after the fact, the
+# real safety net for the unsupervised phase.
+# ---------------------------------------------------------------------------
+class AutoSendCandidateStatus(str, enum.Enum):
+    PENDING = "pending"        # waiting for advisor review (Phase 1)
+    CONFIRMED = "confirmed"    # advisor confirmed, message was sent
+    EDITED_SENT = "edited_sent"  # advisor edited the draft, then sent
+    OVERRIDDEN = "overridden"  # advisor declined the auto-draft, handled as a normal reply instead
+    EXPIRED = "expired"        # left unreviewed past a reasonable window
+
+
+class AutoSendCandidate(Base):
+    __tablename__ = "auto_send_candidates"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    reply_id = Column(String, ForeignKey("replies.id"), nullable=False, unique=True)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    advisor_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    # The actual eligibility decision, preserved permanently - even
+    # after this candidate is resolved, this explains WHY the system
+    # thought it was safe to draft automatically, which matters for
+    # ever debugging or improving the eligibility logic later.
+    eligibility_reasoning = Column(Text, nullable=True)
+    classification_confidence = Column(String, nullable=True)  # "high" - the eligibility check requires high confidence, see auto_send_eligibility_service.py
+
+    ai_drafted_body = Column(Text, nullable=False)
+    final_sent_body = Column(Text, nullable=True)  # what actually went out, if anything did - may differ from ai_drafted_body if the advisor edited it
+
+    status = Column(SAEnum(AutoSendCandidateStatus), default=AutoSendCandidateStatus.PENDING)
+    message_id = Column(String, ForeignKey("messages.id"), nullable=True)  # the real Message row, once something is actually sent
+
+    created_at = Column(DateTime, server_default=func.now())
+    resolved_at = Column(DateTime, nullable=True)
+
+    reply = relationship("Reply", foreign_keys=[reply_id])
+    lead = relationship("Lead", foreign_keys=[lead_id])
+    advisor = relationship("User", foreign_keys=[advisor_id])
+
+
+class AutoSentLog(Base):
+    """
+    Phase 2's permanent audit trail - every message sent with NO human
+    click, ever, lives here. Deliberately a separate table from
+    AutoSendCandidate (which is Phase 1's reviewable queue) rather than
+    one table serving both purposes - an advisor spot-checking what the
+    system sent unsupervised needs a clean, permanent, append-only
+    record, not a queue table where rows get reused/recycled as they're
+    resolved.
+    """
+    __tablename__ = "auto_sent_log"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    reply_id = Column(String, ForeignKey("replies.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    advisor_id = Column(String, ForeignKey("users.id"), nullable=False)
+    message_id = Column(String, ForeignKey("messages.id"), nullable=False)
+
+    sent_body = Column(Text, nullable=False)
+    eligibility_reasoning = Column(Text, nullable=True)
+
+    sent_at = Column(DateTime, server_default=func.now())
+
+    lead = relationship("Lead", foreign_keys=[lead_id])
+    advisor = relationship("User", foreign_keys=[advisor_id])
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +748,7 @@ class Campaign(Base):
     name = Column(String, nullable=False)
     created_by_id = Column(String, ForeignKey("users.id"), nullable=False)
     filter_criteria = Column(Text, nullable=False)
-    message_track = Column(SAEnum(MessageTrack), nullable=True)
+    message_track = Column(String, nullable=True)  # validated against this org's TierDefinition.track_key, not a hard enum - see TierDefinition's docstring for why
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (
@@ -684,7 +856,7 @@ class MessageTemplate(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-    message_track = Column(SAEnum(MessageTrack), nullable=False)
+    message_track = Column(String, nullable=False)  # validated against this org's TierDefinition.track_key, not a hard enum
     channel = Column(String, nullable=False)  # "sms" or "email"
 
     body_template = Column(Text, nullable=False)  # SMS: plain text. Email: HTML body.

@@ -26,7 +26,7 @@ FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@restland-advisorflow.
 # message-track logic used for SMS, so email-only leads still get the
 # right OFFER for their tier rather than a generic blast.
 EMAIL_TEMPLATES = {
-    MessageTrack.PRE_NEED_LOCK_PRICE: {
+    "pre_need_lock_price": {
         "subject": "Lock in today's pricing - {first_name}, let's talk",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -38,7 +38,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    MessageTrack.AT_NEED_SUPPORT: {
+    "at_need_support": {
         "subject": "{first_name}, I'm here to help",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -50,7 +50,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    MessageTrack.IMMINENT_SUPPORT: {
+    "imminent_support": {
         "subject": "{first_name}, please reach out",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -59,7 +59,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    MessageTrack.UPSELL_EXISTING_CUSTOMER: {
+    "upsell_existing": {
         "subject": "Additional options for your family, {first_name}",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -70,7 +70,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    MessageTrack.EMAIL_ONLY_NURTURE: {
+    "email_only_nurture": {
         "subject": "{first_name}, a quick note from Restland",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -81,7 +81,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    MessageTrack.NEW_INQUIRY_INTRO: {
+    "new_inquiry_intro": {
         "subject": "Hi {first_name}, a note from Restland",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -97,7 +97,7 @@ EMAIL_TEMPLATES = {
 }
 
 
-def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url: str) -> dict:
+def render_email(db, track: str, lead: Lead, advisor: User, booking_url: str) -> dict:
     """
     Checks for an org-customized email template first; falls back to the
     hardcoded default if the org hasn't customized this track. Mirrors
@@ -108,7 +108,7 @@ def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url
     if custom:
         template = {"subject": custom["subject"], "body_html": custom["body_html"]}
     else:
-        template = EMAIL_TEMPLATES.get(track, EMAIL_TEMPLATES[MessageTrack.EMAIL_ONLY_NURTURE])
+        template = EMAIL_TEMPLATES.get(track, EMAIL_TEMPLATES["email_only_nurture"])
 
     subs = {
         "{first_name}": lead.first_name or "there",
@@ -151,12 +151,22 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     if not lead.email:
         raise ValueError(f"Lead {lead.id} has no email address.")
 
+    # Single, shared Compliance Preflight gate - per the real, confirmed
+    # gap this closes: email sending previously had NO compliance check
+    # at all, meaning a lead correctly marked DNC after replying STOP
+    # via text could still receive emails through this path or the
+    # mixed-channel cadence's email-touch days. Same gate every SMS
+    # send path already uses, so a DNC/STOP genuinely blocks every
+    # channel for this lead, not just whichever one triggered it.
+    from app.services.compliance_service import check_compliance_preflight
+    check_compliance_preflight(db, lead)
+
     from app.services.sms_service import create_booking_link
     import os as _os
     booking = create_booking_link(db, lead, advisor)
     booking_url = f"{_os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
 
-    track = lead.message_track or MessageTrack.EMAIL_ONLY_NURTURE
+    track = lead.message_track or "email_only_nurture"
     rendered = render_email(db, track, lead, advisor, booking_url)
 
     # Create the EmailMessage row FIRST, with a "queued" placeholder

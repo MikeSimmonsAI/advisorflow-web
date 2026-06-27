@@ -55,6 +55,7 @@ COLUMNS_TO_ADD = [
     ("users", "notify_via_sms", "BOOLEAN DEFAULT FALSE"),
     ("users", "can_import_leads", "BOOLEAN DEFAULT FALSE"),
     ("users", "feature_flags", "TEXT"),
+    ("users", "auto_send_phase", "VARCHAR DEFAULT 'off'"),
     ("leads", "engagement_temperature", "VARCHAR"),
     ("leads", "google_contact_resource_name", "VARCHAR"),
     ("booking_links", "confirmed_at", "TIMESTAMP"),

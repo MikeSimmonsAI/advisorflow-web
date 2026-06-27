@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_admin
-from app.models.models import Campaign, Lead, LeadStatus, LeadTier, MessageTrack, User
+from app.models.models import Campaign, Lead, LeadStatus, User
 from app.services.cadence_service import start_cadence
 from app.routers.audit_log_router import log_action
 
@@ -28,19 +28,19 @@ SUPPORTED_FILTER_KEYS = {"tier", "source_year", "status"}
 class CampaignCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     filter_criteria: dict[str, Any] = Field(default_factory=dict)
-    message_track: Optional[MessageTrack] = None
+    message_track: Optional[str] = None  # validated against this org's real TierDefinition.track_key values, not the old hardcoded MessageTrack enum
 
 
 class CampaignApplyRequest(BaseModel):
     start_cadence: bool = False
 
 
-def _normalize_filter_criteria(criteria: dict[str, Any] | None) -> dict[str, Any]:
+def _normalize_filter_criteria(db: Session, organization_id: str, criteria: dict[str, Any] | None) -> dict[str, Any]:
     """
     Keep Campaign filters intentionally small and explicit.
 
     Supported today:
-    - tier: LeadTier value
+    - tier: a real tier_key for this organization (see tier_config_service.py)
     - source_year: int
     - status: LeadStatus value
     """
@@ -54,10 +54,17 @@ def _normalize_filter_criteria(criteria: dict[str, Any] | None) -> dict[str, Any
             raise HTTPException(status_code=400, detail=f"Unsupported campaign filter: {key}")
 
         if key == "tier":
+            # Real, per-org validation - replaces the old LeadTier(value)
+            # enum construction, which would have incorrectly rejected
+            # any tier key that isn't one of Restland's original 8
+            # hardcoded values, exactly the problem this whole
+            # configurable-tier system exists to solve.
+            from app.services.tier_config_service import validate_tier_key
             try:
-                cleaned[key] = LeadTier(value).value
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid tier filter: {value}")
+                tier_definition = validate_tier_key(db, organization_id, value)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            cleaned[key] = tier_definition.tier_key
 
         elif key == "status":
             try:
@@ -92,7 +99,7 @@ def _campaign_to_dict(campaign: Campaign) -> dict[str, Any]:
         "name": campaign.name,
         "created_by_id": campaign.created_by_id,
         "filter_criteria": _load_filter_criteria(campaign),
-        "message_track": campaign.message_track.value if campaign.message_track else None,
+        "message_track": campaign.message_track,
         "created_at": campaign.created_at,
     }
 
@@ -105,10 +112,10 @@ def _lead_sample(lead: Lead) -> dict[str, Any]:
         "first_name": lead.first_name,
         "last_name": lead.last_name,
         "phone": lead.phone,
-        "tier": lead.tier.value if lead.tier else None,
+        "tier": lead.tier,
         "status": lead.status.value if lead.status else None,
         "source_year": lead.source_year,
-        "message_track": lead.message_track.value if lead.message_track else None,
+        "message_track": lead.message_track,
     }
 
 
@@ -125,9 +132,17 @@ def _campaign_or_404(db: Session, campaign_id: str, organization_id: str) -> Cam
 def _matching_leads_query(db: Session, organization_id: str, filter_criteria: dict[str, Any]):
     query = db.query(Lead).filter(Lead.organization_id == organization_id)
 
+    # Real, per-org tier filter - Lead.tier is a plain string now,
+    # validated against this org's actual TierDefinition rows rather
+    # than the old hardcoded LeadTier enum (which would have incorrectly
+    # rejected any tier key that isn't one of Restland's original 8
+    # values - exactly the problem this whole system exists to fix).
+    # An invalid/unknown tier_key for this org simply matches nothing,
+    # rather than raising - a campaign filter with a typo'd or stale
+    # tier should return zero leads, not crash the preview/apply call.
     tier = filter_criteria.get("tier")
     if tier:
-        query = query.filter(Lead.tier == LeadTier(tier))
+        query = query.filter(Lead.tier == tier)
 
     source_year = filter_criteria.get("source_year")
     if source_year is not None:
@@ -146,7 +161,19 @@ def create_campaign(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    criteria = _normalize_filter_criteria(payload.filter_criteria)
+    criteria = _normalize_filter_criteria(db, current_user.organization_id, payload.filter_criteria)
+
+    # Real, per-org track validation - replaces the old MessageTrack
+    # Pydantic enum type, which previously rejected an invalid value
+    # automatically before the handler ever ran. Now that the field is
+    # a plain string (so a non-Restland org's real track keys are
+    # actually accepted), this explicit check is what does that job.
+    if payload.message_track is not None:
+        from app.services.tier_config_service import list_tier_definitions
+        valid_tracks = {d.track_key for d in list_tier_definitions(db, current_user.organization_id)}
+        if payload.message_track not in valid_tracks:
+            raise HTTPException(status_code=400, detail=f"Invalid message_track. Valid tracks for this organization: {', '.join(sorted(valid_tracks))}")
+
     campaign = Campaign(
         organization_id=current_user.organization_id,
         name=payload.name.strip(),

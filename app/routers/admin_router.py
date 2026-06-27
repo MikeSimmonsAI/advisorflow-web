@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from pydantic import BaseModel, EmailStr
@@ -38,12 +38,28 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
             .filter(Lead.assigned_to_id == advisor.id, Reply.is_hot == True)
             .scalar()
         )
+        # Real reply_count (not just hot replies) - added so the
+        # frontend can compute a genuine response rate
+        # (replies_received / messages_sent), per the dashboard
+        # redesign's request for a "Response rate" KPI. Deliberately
+        # NOT computed here as a pre-baked percentage - the frontend
+        # owns the division so it's the same single source of truth
+        # whether displayed per-advisor or aggregated org-wide, and a
+        # 0-messages-sent advisor never causes a division by zero
+        # server-side that would need its own special-cased response shape.
+        reply_count = (
+            db.query(func.count(Reply.id))
+            .join(Lead, Reply.lead_id == Lead.id)
+            .filter(Lead.assigned_to_id == advisor.id)
+            .scalar()
+        )
         per_advisor_stats.append({
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
             "leads_owned": lead_count,
             "messages_sent": sent_count,
             "hot_replies": hot_count,
+            "reply_count": reply_count,
         })
 
     total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id == org_id).scalar()
@@ -53,10 +69,20 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
         .scalar()
     )
 
+    # Summed from the already-computed per-advisor stats above, not a
+    # second separate query - guarantees the org-wide total always
+    # agrees with what you'd get adding up every advisor row, rather
+    # than risking two slightly different queries disagreeing with
+    # each other.
+    total_messages_sent = sum(a["messages_sent"] or 0 for a in per_advisor_stats)
+    total_replies = sum(a["reply_count"] or 0 for a in per_advisor_stats)
+
     return {
         "organization_id": org_id,
         "total_leads": total_leads,
         "total_duplicates_prevented": total_duplicates,
+        "total_messages_sent": total_messages_sent,
+        "total_replies": total_replies,
         "advisors": per_advisor_stats,
     }
 
@@ -91,7 +117,7 @@ def all_org_leads(db: Session = Depends(get_db), current_user: User = Depends(re
             "last_name": lead.last_name,
             "phone": lead.phone,
             "email": lead.email,
-            "tier": lead.tier.value if lead.tier else None,
+            "tier": lead.tier,
             "status": lead.status.value if lead.status else None,
             "assigned_to_id": lead.assigned_to_id,
             "assigned_to_name": advisors_by_id.get(lead.assigned_to_id, "Unassigned"),
@@ -291,6 +317,78 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
     }
 
 
+@router.get("/dashboard/status-distribution")
+def dashboard_status_distribution(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Org-wide lead status distribution - genuinely mutually-exclusive
+    counts (each lead counted in exactly one bucket, its current
+    status), unlike dashboard_funnel above (a sequential funnel where
+    a booked lead is ALSO counted in sent/replied - correct for a
+    funnel visualization, wrong for a donut chart, which needs
+    non-overlapping categories).
+
+    Mirrors leads_router.status_funnel's exact grouping logic, just
+    org-wide instead of advisor-scoped, for the Master Dashboard's
+    "Lead distribution" donut - real data only, grouped directly by
+    Lead.status, never a derived or estimated split.
+    """
+    org_id = current_user.organization_id
+    stages = [LeadStatus.NEW, LeadStatus.SENT, LeadStatus.REPLIED, LeadStatus.HOT, LeadStatus.BOOKED, LeadStatus.DEAD, LeadStatus.DNC]
+
+    rows = (
+        db.query(Lead.status, func.count(Lead.id))
+        .filter(Lead.organization_id == org_id, Lead.status.in_(stages))
+        .group_by(Lead.status)
+        .all()
+    )
+    counts = {stage.value: 0 for stage in stages}
+    for status, count in rows:
+        if status:
+            counts[status.value] = int(count or 0)
+
+    return [
+        {"status": stage.value, "label": stage.value.replace("_", " ").title(), "count": counts[stage.value]}
+        for stage in stages
+    ]
+
+
+@router.get("/dashboard/hot-replies")
+def dashboard_hot_replies(
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Most recent hot replies org-wide, for the Master Dashboard's
+    preview widget - real reply content and lead names, not just a
+    count. Uses the exact same HOT_REPLY_CLASSIFICATIONS definition as
+    the rest of this dashboard (line 138 above), so "hot" means the
+    same thing here as everywhere else on this page.
+    """
+    rows = (
+        db.query(Reply, Lead)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            (Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True),
+        )
+        .order_by(Reply.received_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "reply_id": reply.id,
+            "lead_id": lead.id,
+            "lead_name": f"{lead.first_name} {lead.last_name}",
+            "body": reply.body,
+            "received_at": reply.received_at,
+        }
+        for reply, lead in rows
+    ]
+
+
 @router.get("/dashboard/funnel")
 def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Org-wide lead funnel counts from existing Lead/Message/Reply/LeadOutcome data."""
@@ -463,6 +561,7 @@ class UserResponse(BaseModel):
     temp_password: str | None = None  # only populated once, right after creation
     can_import_leads: bool = False
     feature_flags: list[str] = []
+    auto_send_phase: str = "off"
 
 
 def _generate_temp_password() -> str:
@@ -502,6 +601,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
             id=u.id, email=u.email, full_name=u.full_name, role=u.role,
             is_active=u.is_active, must_change_password=u.must_change_password,
             can_import_leads=u.can_import_leads, feature_flags=sorted(get_enabled_flags(u)),
+            auto_send_phase=u.auto_send_phase,
         )
         for u in users
     ]
@@ -566,6 +666,7 @@ def create_user(
         temp_password=temp_password,
         can_import_leads=new_user.can_import_leads,
         feature_flags=sorted(get_enabled_flags(new_user)),
+        auto_send_phase=new_user.auto_send_phase,
     )
 
 
@@ -716,6 +817,7 @@ class UpdateUserRequest(BaseModel):
     role: str | None = None  # 'advisor' or 'org_admin' only - see validation below
     can_import_leads: bool | None = None  # per-advisor override for the admin-only-by-default Excel import restriction
     feature_flags: list[str] | None = None  # None = leave unchanged; a list (even []) replaces the full set - see feature_flags_service.py
+    auto_send_phase: str | None = None  # "off" | "candidate" | "auto" - admin-controlled, same as can_import_leads, since this is the single highest-stakes permission in the app: it decides whether AI can ever send a message to a real person with no human click ("auto"). An advisor cannot grant this to themselves.
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
@@ -746,6 +848,7 @@ def update_user(
         "full_name": target.full_name, "email": target.email, "role": target.role,
         "can_import_leads": target.can_import_leads,
         "feature_flags": sorted(get_enabled_flags(target)),
+        "auto_send_phase": target.auto_send_phase,
     }
 
     if req.email is not None and req.email != target.email:
@@ -776,6 +879,12 @@ def update_user(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    if req.auto_send_phase is not None:
+        valid_phases = ("off", "candidate", "auto")
+        if req.auto_send_phase not in valid_phases:
+            raise HTTPException(status_code=400, detail=f"auto_send_phase must be one of: {', '.join(valid_phases)}")
+        target.auto_send_phase = req.auto_send_phase
+
     db.commit()
     db.refresh(target)
 
@@ -783,6 +892,7 @@ def update_user(
         "full_name": target.full_name, "email": target.email, "role": target.role,
         "can_import_leads": target.can_import_leads,
         "feature_flags": sorted(get_enabled_flags(target)),
+        "auto_send_phase": target.auto_send_phase,
     }
     changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
     if changed:
@@ -796,6 +906,7 @@ def update_user(
         id=target.id, email=target.email, full_name=target.full_name, role=target.role,
         is_active=target.is_active, must_change_password=target.must_change_password,
         can_import_leads=target.can_import_leads, feature_flags=sorted(get_enabled_flags(target)),
+        auto_send_phase=target.auto_send_phase,
     )
 
 
@@ -981,7 +1092,7 @@ def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = De
         {
             "id": l.id, "first_name": l.first_name, "last_name": l.last_name,
             "phone": l.phone, "email": l.email,
-            "tier": l.tier.value if l.tier else None,
+            "tier": l.tier,
             "engagement_temperature": l.engagement_temperature.value if l.engagement_temperature else None,
             "created_at": l.created_at,
         }

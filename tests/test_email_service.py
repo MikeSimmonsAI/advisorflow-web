@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from app.services.email_service import render_email, send_email_to_lead, send_email_batch
-from app.models.models import Lead, MessageTrack, EmailMessage
+from app.models.models import Lead, LeadStatus, MessageTrack, EmailMessage
 from app.services.template_service import upsert_template
 
 
@@ -131,3 +131,55 @@ def test_send_email_to_lead_uses_sendgrid_when_microsoft_not_connected(mock_send
 
     send_email_to_lead(db_session, sample_advisor, lead)
     mock_sendgrid.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Compliance Preflight wiring - the actual gap this closes: a lead
+# correctly marked DNC after a STOP reply via text could previously
+# still receive emails, since send_email_to_lead had NO compliance
+# check at all. Now it shares the exact same gate every SMS send path
+# uses.
+# ---------------------------------------------------------------------------
+
+def test_send_email_to_lead_blocks_dnc_status(db_session, sample_org, sample_advisor):
+    dnc_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                     first_name="Blocked", last_name="ByEmail", email="blocked@example.com",
+                     status=LeadStatus.DNC, message_track=MessageTrack.EMAIL_ONLY_NURTURE)
+    db_session.add(dnc_lead)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="DNC"):
+        send_email_to_lead(db_session, sample_advisor, dnc_lead)
+
+
+def test_send_email_to_lead_blocks_a_lead_suppressed_via_phone_even_though_sending_by_email(db_session, sample_org, sample_advisor):
+    """
+    The real, specific scenario Mike described: a lead replies STOP on
+    text (suppressing their PHONE number), and this same lead - who
+    also has an email on file - must still be blocked from email too,
+    not just text.
+    """
+    from app.models.models import SuppressionEntry
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Both", last_name="Methods", phone="12145559950",
+                email="bothmethods@example.com", message_track=MessageTrack.EMAIL_ONLY_NURTURE)
+    db_session.add(lead)
+    db_session.commit()
+    db_session.add(SuppressionEntry(organization_id=sample_org.id, phone="12145559950", reason="Replied STOP"))
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="suppression"):
+        send_email_to_lead(db_session, sample_advisor, lead)
+
+
+def test_send_email_to_lead_blocks_an_email_only_dnc_lead_with_no_phone_at_all(db_session, sample_org, sample_advisor):
+    """The real, original gap: an email-only lead has no phone to suppress at all, so the OLD check (which only ever looked at phone suppression) would have let this through even if it had existed."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="EmailOnly", last_name="DNC", phone=None,
+                email="emailonlydnc@example.com", status=LeadStatus.DNC,
+                message_track=MessageTrack.EMAIL_ONLY_NURTURE)
+    db_session.add(lead)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="DNC"):
+        send_email_to_lead(db_session, sample_advisor, lead)

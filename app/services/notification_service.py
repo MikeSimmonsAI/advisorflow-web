@@ -96,7 +96,7 @@ def notify_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> Notifi
         </blockquote>
         <p>{copy['urgency']}</p>
         <p>Phone: {lead.phone or 'N/A'}<br>
-        Tier: {lead.tier.value if lead.tier else 'N/A'}<br>
+        Tier: {lead.tier or 'N/A'}<br>
         Classification: {classification_value.replace('_', ' ')}</p>
         <p>Log in to AdvisorFlow to respond.</p>
     """

@@ -60,6 +60,7 @@ export default function Users() {
   const [editRole, setEditRole] = useState('advisor')
   const [editCanImportLeads, setEditCanImportLeads] = useState(false)
   const [editFeatureFlags, setEditFeatureFlags] = useState([])
+  const [editAutoSendPhase, setEditAutoSendPhase] = useState('off')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
@@ -161,6 +162,7 @@ export default function Users() {
     setEditRole(u.role)
     setEditCanImportLeads(u.can_import_leads || false)
     setEditFeatureFlags(u.feature_flags || [])
+    setEditAutoSendPhase(u.auto_send_phase || 'off')
     setEditError('')
   }
 
@@ -183,6 +185,7 @@ export default function Users() {
         role: editRole,
         can_import_leads: editCanImportLeads,
         feature_flags: editFeatureFlags,
+        auto_send_phase: editAutoSendPhase,
       })
       setEditingUserId(null)
       load()
@@ -328,6 +331,7 @@ export default function Users() {
                 <th>Role</th>
                 <th>Status</th>
                 <th>Import access</th>
+                <th>Auto-send</th>
                 <th></th>
               </tr>
             </thead>
@@ -392,6 +396,22 @@ export default function Users() {
                           )}
                         </td>
                         <td>
+                          {u.role === 'org_admin' || u.role === 'super_admin' ? (
+                            <span className="users-import-always-on" title="Admins manage this feature, not subject to it">N/A</span>
+                          ) : (
+                            <select
+                              className="settings-input users-auto-send-select"
+                              value={editAutoSendPhase}
+                              onChange={(e) => setEditAutoSendPhase(e.target.value)}
+                              title="Controls whether AI can draft (or send) replies on this advisor's behalf"
+                            >
+                              <option value="off">Off</option>
+                              <option value="candidate">Review queue (AI drafts, advisor confirms)</option>
+                              <option value="auto">Full auto-send (no review)</option>
+                            </select>
+                          )}
+                        </td>
+                        <td>
                           <div style={{ display: 'flex', gap: 6, flexDirection: 'column', alignItems: 'flex-start' }}>
                             {availableFlags.length > 0 && (
                               <div className="users-feature-flags-edit">
@@ -444,6 +464,17 @@ export default function Users() {
                             <span className="badge badge--green">Allowed</span>
                           ) : (
                             <span className="badge badge--neutral-dim">Admin only</span>
+                          )}
+                        </td>
+                        <td>
+                          {u.role === 'org_admin' || u.role === 'super_admin' ? (
+                            <span className="users-import-always-on">N/A</span>
+                          ) : u.auto_send_phase === 'auto' ? (
+                            <span className="badge badge--red" title="AI sends replies on this advisor's behalf with no review">Full auto-send</span>
+                          ) : u.auto_send_phase === 'candidate' ? (
+                            <span className="badge badge--purple" title="AI drafts replies; advisor reviews and confirms before anything sends">Review queue</span>
+                          ) : (
+                            <span className="badge badge--neutral-dim">Off</span>
                           )}
                         </td>
                         <td>

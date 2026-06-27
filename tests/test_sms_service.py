@@ -144,6 +144,29 @@ def test_send_batch_skips_dnc_and_duplicate_leads(mock_get_client, db_session, s
     assert dup_lead.id in result["skipped_ids"]
 
 
+@patch("app.services.sms_service.get_twilio_client")
+def test_send_batch_also_skips_suppressed_leads_in_the_summary(mock_get_client, db_session, sample_org, sample_advisor):
+    """REAL FIX: previously this pre-filter only checked DNC status, never the suppression list - a suppressed lead with drifted status would have ended up in the FAILED list (an exception caught below) rather than cleanly skipped."""
+    from app.models.models import SuppressionEntry
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = MagicMock(sid="SM998", status="queued")
+    mock_get_client.return_value = mock_client
+
+    suppressed_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                            first_name="Suppressed", last_name="Lead", phone="12145554444", status=LeadStatus.NEW)
+    db_session.add(suppressed_lead)
+    db_session.commit()
+    db_session.add(SuppressionEntry(organization_id=sample_org.id, phone="12145554444", reason="Manually suppressed"))
+    db_session.commit()
+
+    result = send_batch(db_session, sample_advisor, [suppressed_lead], "Hi {first_name}")
+
+    assert result["sent_count"] == 0
+    assert result["skipped_count"] == 1
+    assert suppressed_lead.id in result["skipped_ids"]
+    mock_get_client.assert_not_called()  # never even reached the actual send attempt
+
+
 def test_get_twilio_client_raises_clear_error_when_unconfigured(db_session, sample_org):
     from app.services.sms_service import get_twilio_client
     from app.models.models import User
@@ -243,3 +266,80 @@ def test_send_plain_sms_does_not_check_dnc_or_suppression(mock_get_client, db_se
     result = send_plain_sms(sample_advisor, "+12145559999", "Test")
 
     assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# send_exact_sms - sends a final, already-composed body VERBATIM, no
+# template substitution. Built for the auto-send candidate queue,
+# where the body is already a fully-rendered AI draft. Reuses the
+# exact same DNC/suppression safety checks as send_sms.
+# ---------------------------------------------------------------------------
+
+from app.services.sms_service import send_exact_sms
+
+
+def test_send_exact_sms_blocks_dnc_leads(db_session, sample_org, sample_advisor):
+    dnc_lead = Lead(
+        organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+        first_name="Blocked", last_name="Lead", phone="12145550001", status=LeadStatus.DNC,
+    )
+    db_session.add(dnc_lead)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="DNC"):
+        send_exact_sms(db_session, sample_advisor, dnc_lead, "This is the final drafted body.")
+
+
+def test_send_exact_sms_blocks_suppressed_numbers_even_when_status_is_not_dnc(db_session, sample_org, sample_advisor):
+    from app.models.models import SuppressionEntry
+    lead = Lead(
+        organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+        first_name="Suppressed", last_name="NotMarkedDNC", phone="12145559877", status=LeadStatus.NEW,
+    )
+    db_session.add(lead)
+    db_session.commit()
+
+    suppression = SuppressionEntry(organization_id=sample_org.id, phone="12145559877", reason="Manually suppressed")
+    db_session.add(suppression)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="suppression"):
+        send_exact_sms(db_session, sample_advisor, lead, "Final body.")
+
+
+@patch("app.services.sms_service.get_twilio_client")
+def test_send_exact_sms_sends_body_verbatim_with_no_placeholder_substitution(mock_get_client, db_session, sample_org, sample_advisor):
+    """The real, defining behavior: a literal {first_name}-looking string in the body must NOT be substituted - this is verbatim, not render_template."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Jane", last_name="Doe", phone="12145559878")
+    db_session.add(lead)
+    db_session.commit()
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = MagicMock(sid="SM_exact_test", status="queued")
+    mock_get_client.return_value = mock_client
+
+    body_with_literal_braces = "Sounds good, see you then! (ref: {first_name})"
+    message = send_exact_sms(db_session, sample_advisor, lead, body_with_literal_braces)
+
+    assert message.body == body_with_literal_braces
+    mock_client.messages.create.assert_called_once_with(
+        body=body_with_literal_braces, from_=sample_advisor.twilio_phone_number, to=lead.phone,
+    )
+
+
+@patch("app.services.sms_service.get_twilio_client")
+def test_send_exact_sms_creates_a_real_message_record(mock_get_client, db_session, sample_lead, sample_advisor):
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = MagicMock(sid="SM_exact_record", status="queued")
+    mock_get_client.return_value = mock_client
+
+    message = send_exact_sms(db_session, sample_advisor, sample_lead, "Confirmed, see you Tuesday at 2pm.")
+
+    assert message.id is not None
+    assert message.lead_id == sample_lead.id
+    assert message.sender_id == sample_advisor.id
+    assert message.twilio_sid == "SM_exact_record"
+
+    db_session.refresh(sample_lead)
+    assert sample_lead.status == "sent"

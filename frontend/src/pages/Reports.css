@@ -52,12 +52,6 @@
   margin-bottom: 16px;
 }
 
-.chart-subtitle-inline {
-  color: var(--text-tertiary);
-  font-size: 11.5px;
-  font-family: var(--font-mono);
-}
-
 .reports-product-mix-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

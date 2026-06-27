@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import {
+  CartesianGrid, Line, LineChart, Pie, PieChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts'
 import { api } from '../api/client'
 import StatCard from '../components/StatCard'
 import '../styles/shared.css'
@@ -62,6 +65,14 @@ export default function Replies() {
   // not one call per reply. See certification_service.py's
   // get_certification_status_batch for why this matters at 200 replies.
   const [certificationByLead, setCertificationByLead] = useState({})
+  // Real reply-activity history, same endpoint already proven on
+  // Overview - per the redesign request for a chart on this page,
+  // built from genuine data, never fabricated.
+  const [replyActivity, setReplyActivity] = useState([])
+
+  function loadActivity() {
+    api.get('/sms/replies/activity-by-day?days=7').then((data) => setReplyActivity(data || [])).catch(() => setReplyActivity([]))
+  }
 
   function loadCounts() {
     api.get('/sms/replies/counts').then(setCounts).catch(() => {})
@@ -90,6 +101,7 @@ export default function Replies() {
   useEffect(() => {
     loadCounts()
     loadReplies()
+    loadActivity()
   }, [activeBucket])
 
   function updateReplyInState(updatedReply) {
@@ -140,6 +152,33 @@ export default function Replies() {
 
   const activeBucketLabel = BUCKET_CARDS.find((c) => c.key === activeBucket)?.label
 
+  const chartTooltipStyle = {
+    background: 'rgba(7, 14, 32, 0.96)',
+    border: '1px solid rgba(86, 200, 255, 0.42)',
+    borderRadius: 12,
+    color: '#eef5ff',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.45)',
+  }
+
+  const formatActivityDate = (value) => {
+    const date = new Date(`${value}T00:00:00`)
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
+  // Real reply breakdown by classification - built directly from the
+  // same `counts` object the scorecards already render, not a second,
+  // separately-fetched (and potentially inconsistent) data source.
+  const breakdownData = counts ? [
+    { name: 'Needs follow-up', value: counts.needs_follow_up || 0, color: 'var(--signal-red)' },
+    { name: 'Hot', value: counts.hot || 0, color: 'var(--signal-green)' },
+    { name: 'Callback', value: counts.callback || 0, color: 'var(--signal-blue)' },
+    { name: 'Question', value: counts.question || 0, color: 'var(--signal-purple)' },
+    { name: 'Not interested', value: counts.not_interested || 0, color: 'var(--signal-amber)' },
+    { name: 'DNC', value: counts.dnc || 0, color: 'var(--signal-red)' },
+    { name: 'Reviewed', value: counts.reviewed || 0, color: 'var(--text-tertiary)' },
+  ].filter((entry) => entry.value > 0) : []
+  const breakdownTotal = breakdownData.reduce((sum, entry) => sum + entry.value, 0)
+
   return (
     <div>
       <header className="page-header">
@@ -170,6 +209,99 @@ export default function Replies() {
       </div>
 
       {error && <div className="panel reply-error">{error}</div>}
+
+      <div className="reply-chart-grid">
+        <article className="panel reply-chart-panel reply-chart-panel--wide">
+          <div className="panel-header">
+            <h2 className="panel-title">Reply activity</h2>
+            <span className="chart-subtitle-inline">Last 7 days</span>
+          </div>
+          <div className="chart-frame chart-frame--line chart-frame--compact">
+            {replyActivity.length === 0 ? (
+              <div className="empty-state">No reply activity data available yet.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={170}>
+                <LineChart data={replyActivity} margin={{ top: 16, right: 18, left: -18, bottom: 2 }}>
+                  <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="4 8" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={formatActivityDate} stroke="var(--text-tertiary)" tickLine={false} axisLine={false} minTickGap={18} />
+                  <YAxis allowDecimals={false} stroke="var(--text-tertiary)" tickLine={false} axisLine={false} width={36} />
+                  <Tooltip contentStyle={chartTooltipStyle} labelFormatter={formatActivityDate} />
+                  <Line type="monotone" dataKey="count" name="Replies" stroke="var(--signal-blue)" strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </article>
+
+        <article className="panel reply-chart-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Reply breakdown</h2>
+          </div>
+          <div className="chart-frame chart-frame--donut chart-frame--compact">
+            {breakdownData.length === 0 ? (
+              <div className="empty-state">No replies yet.</div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={140}>
+                  <PieChart>
+                    <Pie data={breakdownData} dataKey="value" nameKey="name" innerRadius="60%" outerRadius="86%" paddingAngle={4}>
+                      {breakdownData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={chartTooltipStyle} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="chart-legend chart-legend--compact">
+                  {breakdownData.map((entry) => (
+                    <span key={entry.name} className="chart-legend-item">
+                      <span className="chart-legend-dot" style={{ background: entry.color }} />
+                      {entry.name}: {entry.value} ({breakdownTotal > 0 ? Math.round((entry.value / breakdownTotal) * 100) : 0}%)
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </article>
+
+        {counts && (counts.needs_follow_up > 0 || counts.hot > 0) && (
+          <article className="panel reply-insight-panel reply-chart-panel--wide">
+            <div className="panel-header">
+              <h2 className="panel-title">Today's focus</h2>
+            </div>
+            {/* Deliberately real numbers only, drawn directly from the
+                same counts object the scorecards above use - no
+                fabricated revenue/percentage projections. A version of
+                this panel with a dollar-value "revenue at risk"
+                estimate or a "%X booking rate increase" claim would
+                require a real, defensible calculation behind it that
+                doesn't exist yet; inventing one would mean shipping a
+                business metric that LOOKS computed but isn't. */}
+            <ul className="reply-insight-list">
+              {counts.needs_follow_up > 0 && (
+                <li>
+                  <button className="reply-insight-line" onClick={() => setActiveBucket('needs_follow_up')}>
+                    {counts.needs_follow_up} {counts.needs_follow_up === 1 ? 'reply needs' : 'replies need'} follow-up right now.
+                  </button>
+                </li>
+              )}
+              {counts.hot > 0 && (
+                <li>
+                  <button className="reply-insight-line" onClick={() => setActiveBucket('hot')}>
+                    {counts.hot} {counts.hot === 1 ? 'hot reply is' : 'hot replies are'} waiting on you.
+                  </button>
+                </li>
+              )}
+              {counts.callback > 0 && (
+                <li>
+                  <button className="reply-insight-line" onClick={() => setActiveBucket('callback')}>
+                    {counts.callback} {counts.callback === 1 ? 'lead' : 'leads'} requested a callback.
+                  </button>
+                </li>
+              )}
+            </ul>
+          </article>
+        )}
+      </div>
 
       <section className="panel">
         {loading ? (

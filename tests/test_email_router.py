@@ -474,3 +474,68 @@ def test_email_counts_total_clicks_sums_across_recent_sends(client, db_session, 
     response = client.get("/email/counts", headers=auth_headers)
 
     assert response.json()["total_clicks_30d"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Compliance Preflight wiring for the manual batch-send path - the
+# other real email send route besides send_email_to_lead, which had
+# the exact same gap (zero compliance check at all) before this.
+# ---------------------------------------------------------------------------
+
+def test_confirm_send_batch_blocks_dnc_lead_as_a_distinct_outcome_from_skipped(client, db_session, sample_org, sample_advisor, auth_headers):
+    dnc_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                     first_name="Blocked", last_name="Compliance", email="blocked-compliance@example.com",
+                     status=LeadStatus.DNC)
+    db_session.add(dnc_lead)
+    db_session.commit()
+
+    response = client.post("/email/confirm-send-batch", json={
+        "items": [{"lead_id": dnc_lead.id, "subject": "Subject", "body_html": "<p>Body</p>"}],
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["blocked_count"] == 1
+    assert response.json()["sent_count"] == 0
+    assert response.json()["skipped_count"] == 0  # distinct from "no email" - this is a real compliance block, not a missing-data skip
+
+    from app.models.models import EmailMessage
+    msg = db_session.query(EmailMessage).filter(EmailMessage.lead_id == dnc_lead.id).first()
+    assert msg is None  # confirms no EmailMessage row was ever created for a blocked send
+
+
+def test_confirm_send_batch_blocks_suppressed_lead_even_though_sending_by_email(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import SuppressionEntry
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Suppressed", last_name="ViaPhone", phone="12145559960",
+                email="suppressedviaphone@example.com", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.commit()
+    db_session.add(SuppressionEntry(organization_id=sample_org.id, phone="12145559960", reason="Replied STOP"))
+    db_session.commit()
+
+    response = client.post("/email/confirm-send-batch", json={
+        "items": [{"lead_id": lead.id, "subject": "Subject", "body_html": "<p>Body</p>"}],
+    }, headers=auth_headers)
+
+    assert response.json()["blocked_count"] == 1
+
+
+def test_confirm_send_batch_one_blocked_lead_does_not_stop_the_rest_of_the_batch(client, db_session, sample_org, sample_advisor, auth_headers, monkeypatch):
+    import app.services.email_service as email_service
+    monkeypatch.setattr(email_service, "send_email_via_provider", lambda *a, **k: {"success": True, "provider_message_id": "test-msg-2", "error": None})
+
+    blocked_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                         first_name="Blocked", last_name="One", email="blockedone@example.com", status=LeadStatus.DNC)
+    good_lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Good", "Lead", "goodlead@example.com")
+    db_session.add(blocked_lead)
+    db_session.commit()
+
+    response = client.post("/email/confirm-send-batch", json={
+        "items": [
+            {"lead_id": blocked_lead.id, "subject": "Subject", "body_html": "<p>Body</p>"},
+            {"lead_id": good_lead.id, "subject": "Subject", "body_html": "<p>Body</p>"},
+        ],
+    }, headers=auth_headers)
+
+    assert response.json()["blocked_count"] == 1
+    assert response.json()["sent_count"] == 1

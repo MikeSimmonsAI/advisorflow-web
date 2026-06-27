@@ -100,29 +100,6 @@
   margin-bottom: 12px;
 }
 
-.tab {
-  background: rgba(7, 14, 31, 0.45);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 700;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  transition: border-color 0.16s ease, color 0.16s ease;
-}
-
-.tab:hover { color: var(--text-primary); border-color: var(--border-strong); }
-
-.tab--active {
-  border-color: rgba(47, 182, 255, 0.5);
-  color: var(--signal-blue);
-  background: linear-gradient(120deg, var(--signal-blue-dim), var(--signal-purple-dim));
-  box-shadow: var(--glow-blue-sm);
-}
-
 .tier-select { padding: 6px 8px; font-size: 12px; }
 
 .filter-bar {

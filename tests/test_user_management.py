@@ -879,3 +879,127 @@ def test_list_users_includes_feature_flags_field(client, db_session, sample_org,
 
     row = next(u for u in response.json() if u["id"] == sample_advisor.id)
     assert row["feature_flags"] == ["early_access_reports"]
+
+
+# ---------------------------------------------------------------------------
+# auto_send_phase - admin-controlled, same pattern as can_import_leads,
+# since this is the single highest-stakes permission in the app: it
+# decides whether AI can ever send a message with no human click.
+# ---------------------------------------------------------------------------
+
+def test_new_advisor_defaults_to_auto_send_phase_off(client, db_session, sample_org, sample_advisor):
+    assert sample_advisor.auto_send_phase == "off"
+
+
+def test_update_user_can_grant_candidate_phase(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-autosend1@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "auto_send_phase": "candidate",
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["auto_send_phase"] == "candidate"
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.auto_send_phase == "candidate"
+
+
+def test_update_user_can_grant_full_auto_phase(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-autosend2@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "auto_send_phase": "auto",
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["auto_send_phase"] == "auto"
+
+
+def test_update_user_rejects_invalid_auto_send_phase(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    super_admin = User(organization_id=sample_org.id, email="super-autosend3@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "auto_send_phase": "definitely_not_a_real_phase",
+    }, headers=super_headers)
+
+    assert response.status_code == 400
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.auto_send_phase == "off"  # must NOT have been changed by the rejected request
+
+
+def test_update_user_omitting_auto_send_phase_leaves_it_unchanged(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+    sample_advisor.auto_send_phase = "candidate"
+    db_session.commit()
+    super_admin = User(organization_id=sample_org.id, email="super-autosend4@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "full_name": "Renamed Advisor",
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.auto_send_phase == "candidate"  # unaffected by an update that didn't mention it
+
+
+def test_update_user_auto_send_phase_logs_audit_action(client, db_session, sample_org, sample_advisor):
+    import json
+    from app.services.auth_service import hash_password, create_access_token
+    from app.models.models import AuditLogEntry
+
+    super_admin = User(organization_id=sample_org.id, email="super-autosend5@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    client.patch(f"/admin/users/{sample_advisor.id}", json={"auto_send_phase": "candidate"}, headers=super_headers)
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "user.update", AuditLogEntry.target_id == sample_advisor.id)
+        .order_by(AuditLogEntry.created_at.desc())
+        .first()
+    )
+    assert entry is not None
+    details = json.loads(entry.details)
+    assert details["auto_send_phase"]["from"] == "off"
+    assert details["auto_send_phase"]["to"] == "candidate"
+
+
+def test_list_users_includes_auto_send_phase_field(client, db_session, sample_org, sample_advisor, admin_auth_headers):
+    response = client.get("/admin/users", headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    advisor_entry = next(u for u in response.json() if u["id"] == sample_advisor.id)
+    assert advisor_entry["auto_send_phase"] == "off"
+
+
+def test_regular_advisor_cannot_grant_themselves_auto_send_phase(client, db_session, sample_org, sample_advisor, auth_headers):
+    """The real safety property: a plain advisor (not super_admin) must be rejected outright by the role check, never even reach the validation logic."""
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "auto_send_phase": "auto",
+    }, headers=auth_headers)
+
+    assert response.status_code == 403
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.auto_send_phase == "off"

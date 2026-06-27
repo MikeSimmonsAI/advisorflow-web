@@ -1,3 +1,76 @@
+.admin-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+@media (max-width: 900px) {
+  .admin-hero-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .admin-hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-widget-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.admin-widget-panel {
+  min-height: 220px;
+}
+
+@media (max-width: 1100px) {
+  .admin-widget-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-leaderboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field-soft);
+}
+
+.admin-leaderboard-rank {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  width: 16px;
+}
+
+.admin-leaderboard-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.admin-leaderboard-rate {
+  font-size: 13px;
+  color: var(--signal-green);
+  font-weight: 700;
+}
+
 .admin-tabs {
   display: flex;
   gap: 6px;
@@ -26,29 +99,6 @@
   border-color: var(--signal-blue);
   background: var(--signal-blue-dim);
   color: var(--signal-blue);
-}
-
-.tab {
-  background: rgba(7, 14, 31, 0.45);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 700;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  transition: border-color 0.16s ease, color 0.16s ease;
-}
-
-.tab:hover { color: var(--text-primary); border-color: var(--border-strong); }
-
-.tab--active {
-  border-color: rgba(47, 182, 255, 0.5);
-  color: var(--signal-blue);
-  background: linear-gradient(120deg, var(--signal-blue-dim), var(--signal-purple-dim));
-  box-shadow: var(--glow-blue-sm);
 }
 
 .filter-bar {

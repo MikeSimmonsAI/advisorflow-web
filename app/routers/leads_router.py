@@ -160,17 +160,13 @@ def _create_lead_core(
     if not phone and not email:
         raise HTTPException(status_code=400, detail="A phone number or email address is required.")
 
-    from app.models.models import LeadTier, MessageTrack
-    from app.services.import_service import TIER_TO_TRACK
     from app.services.dedup_service import check_and_register, normalize_phone
+    from app.services.tier_config_service import validate_manually_selectable_tier_key
 
-    manual_entry_tiers = {"pre_need", "at_need", "imminent", "contract_sold", "new_inquiry"}
-    if tier not in manual_entry_tiers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"tier must be one of: {', '.join(sorted(manual_entry_tiers))}",
-        )
-    tier_enum = LeadTier(tier)
+    try:
+        tier_definition = validate_manually_selectable_tier_key(db, organization_id, tier)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     resolved_assigned_to_id = assigned_to_id or current_user.id
     if resolved_assigned_to_id != current_user.id:
@@ -202,8 +198,8 @@ def _create_lead_core(
         phone=norm_phone,
         phone_raw=phone,
         email=email.strip() if email else None,
-        tier=tier_enum,
-        message_track=TIER_TO_TRACK.get(tier_enum, MessageTrack.NEEDS_REVIEW),
+        tier=tier_definition.tier_key,
+        message_track=tier_definition.track_key,
         contact_channel=contact_channel,
         status=LeadStatus.NEW,
         notes=notes,
@@ -597,8 +593,7 @@ def set_lead_tier(
     on that specific advisor. Logged below so there's still a clear trail
     of who changed what.
     """
-    from app.models.models import LeadTier
-    from app.services.import_service import TIER_TO_TRACK
+    from app.services.tier_config_service import validate_tier_key
 
     lead = db.query(Lead).filter(
         Lead.id == lead_id, Lead.organization_id == current_user.organization_id
@@ -607,21 +602,21 @@ def set_lead_tier(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     try:
-        tier_enum = LeadTier(new_tier)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid tier: {new_tier}")
+        tier_definition = validate_tier_key(db, current_user.organization_id, new_tier)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    previous_tier = lead.tier.value if lead.tier else None
+    previous_tier = lead.tier
 
-    lead.tier = tier_enum
-    lead.message_track = TIER_TO_TRACK.get(tier_enum)
+    lead.tier = tier_definition.tier_key
+    lead.message_track = tier_definition.track_key
     lead.status = LeadStatus.NEW
     db.commit()
 
     log_action(
         db, current_user.organization_id, current_user.id,
         action="lead.set_tier", target_type="lead", target_id=lead.id,
-        details={"from": previous_tier, "to": tier_enum.value, "lead_assigned_to_id": lead.assigned_to_id},
+        details={"from": previous_tier, "to": tier_definition.tier_key, "lead_assigned_to_id": lead.assigned_to_id},
     )
 
     # See create_lead_manually's comment for the full explanation: a bare
@@ -824,6 +819,66 @@ def update_lead_details(
     summary = _lead_summary(lead)
     summary["notes"] = lead.notes
     return summary
+
+
+@router.get("/sparklines")
+def overview_sparklines(
+    days: int = Query(7, ge=2, le=30),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Real, recent daily counts for the Overview page's KPI card
+    sparklines - per the visual redesign request for "mini sparklines"
+    on the hero metrics, built from genuine history, never fabricated.
+    Mirrors the exact same proven pattern as
+    sms_router.reply_activity_by_day (empty days return 0, never
+    invented client-side).
+
+    Returns {"leads_imported": [int, ...], "bookings": [int, ...]},
+    each a list of `days` daily counts, oldest to newest - the
+    frontend renders these directly as sparkline data with zero
+    further computation, so there's no path for a fabricated number to
+    sneak in on either side.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_date = now.date() - timedelta(days=days - 1)
+    start_at = datetime.combine(start_date, time.min)
+
+    base_lead_filters = (
+        Lead.organization_id == current_user.organization_id,
+        Lead.assigned_to_id == current_user.id,
+    )
+
+    imported_rows = (
+        db.query(Lead.created_at)
+        .filter(*base_lead_filters, Lead.created_at >= start_at)
+        .all()
+    )
+    booking_rows = (
+        db.query(BookingLink.booked_time)
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            BookingLink.status == "booked",
+            BookingLink.booked_time.isnot(None),
+            BookingLink.booked_time >= start_at,
+        )
+        .all()
+    )
+
+    def _counts_by_day(rows):
+        counts = {(start_date + timedelta(days=offset)).isoformat(): 0 for offset in range(days)}
+        for (ts,) in rows:
+            key = ts.date().isoformat()
+            if key in counts:
+                counts[key] += 1
+        return [counts[date_key] for date_key in sorted(counts.keys())]
+
+    return {
+        "leads_imported": _counts_by_day(imported_rows),
+        "bookings": _counts_by_day(booking_rows),
+    }
 
 
 @router.get("/daily-briefing")
@@ -1171,8 +1226,8 @@ def preview_messages_for_leads(
 
         results.append(MessagePreviewItem(
             lead_id=lead.id, lead_name=lead_name, phone=lead.phone,
-            tier=lead.tier.value if lead.tier else None,
-            message_track=lead.message_track.value if lead.message_track else None,
+            tier=lead.tier,
+            message_track=lead.message_track,
             draft_message=draft, skip_reason=skip_reason,
         ))
 

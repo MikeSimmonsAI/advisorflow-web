@@ -10,6 +10,7 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
 from app.deps import engine
 from app.models.models import Base
@@ -18,7 +19,7 @@ from app.routers import (
     cadence_router, email_router, calendar_router, notification_router,
     settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
     compliance_router, audit_log_router, sample_data_router, health_router, workqueue_router,
-    campaign_router, reports_router, email_tracking_router,
+    campaign_router, reports_router, email_tracking_router, auto_send_router,
 )
 
 app = FastAPI(title="AdvisorFlow Web", version="0.1.0-phase1")
@@ -71,6 +72,7 @@ app.include_router(workqueue_router.router)
 app.include_router(campaign_router.router)
 app.include_router(reports_router.router)
 app.include_router(email_tracking_router.router)
+app.include_router(auto_send_router.router)
 
 
 @app.on_event("startup")
@@ -99,6 +101,22 @@ def on_startup():
         # even then the app should still come up rather than refuse to
         # boot entirely.
         print(f"[auto_migrate] Startup migration check failed unexpectedly: {e}")
+
+    # Seed default tier definitions for any organization that doesn't
+    # have any yet - the real, per-org tier configuration system that
+    # replaced the old hardcoded LeadTier/MessageTrack setup. Runs on
+    # every startup, same idempotent pattern as auto_migrate above, so
+    # this happens automatically in production without anyone needing
+    # to run seed.py by hand - critical for Restland's actual existing
+    # organization, which predates this system entirely.
+    try:
+        from app.models.models import Organization
+        from app.services.tier_config_service import seed_default_tier_definitions
+        with Session(engine) as seed_db:
+            for org in seed_db.query(Organization).all():
+                seed_default_tier_definitions(seed_db, org.id)
+    except Exception as e:
+        print(f"[tier_seed] Startup tier-definition seeding failed unexpectedly: {e}")
 
 
 @app.get("/health")

@@ -315,3 +315,56 @@ def test_run_due_cadences_never_sends_both_channels_for_the_same_touch(db_sessio
     # Touch 1 is sms in the pattern - exactly one channel fired, never both
     assert sms_count == 1
     assert email_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Compliance Preflight wiring in the cadence job - the real gap fixed:
+# the previous re-check only ever looked at Lead.status == DNC, never
+# the suppression list. A suppressed number whose Lead.status had
+# drifted out of sync would have still been texted by this automated,
+# no-human-in-the-loop job.
+# ---------------------------------------------------------------------------
+
+def test_run_due_cadences_stops_a_suppressed_lead_even_when_status_is_not_dnc(db_session, sample_org, sample_advisor):
+    """THE REAL FIX: status says NEW, but the phone is suppressed - the cadence job must still stop and never send."""
+    from app.models.models import SuppressionEntry, Message
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Suppressed", last_name="StatusDrift", phone="12145559610", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)
+    db_session.add(SuppressionEntry(organization_id=sample_org.id, phone="12145559610", reason="Manually suppressed"))
+    db_session.commit()
+
+    with patch("app.services.sms_service.get_twilio_client") as mock_get_client:
+        result = run_due_cadences(db_session, organization_id=sample_org.id)
+
+        mock_get_client.assert_not_called()  # the real proof: Twilio is never even reached
+
+    assert result["sent"] == 0
+    assert db_session.query(Message).filter(Message.lead_id == lead.id).count() == 0
+
+    from app.models.models import CadenceState, CadenceStatus
+    state = db_session.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    assert state.status == CadenceStatus.STOPPED_DNC
+
+
+def test_run_due_cadences_stops_dnc_status_lead_as_before(db_session, sample_org, sample_advisor):
+    """Confirms the original, already-working DNC-status behavior is preserved by the refactor, not just the new suppression case."""
+    from app.models.models import Message, CadenceState, CadenceStatus
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="DncStatus", last_name="Lead", phone="12145559611", status=LeadStatus.DNC)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)
+    db_session.commit()
+
+    with patch("app.services.sms_service.get_twilio_client") as mock_get_client:
+        run_due_cadences(db_session, organization_id=sample_org.id)
+        mock_get_client.assert_not_called()
+
+    assert db_session.query(Message).filter(Message.lead_id == lead.id).count() == 0
+    state = db_session.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    assert state.status == CadenceStatus.STOPPED_DNC

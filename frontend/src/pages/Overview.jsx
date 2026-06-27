@@ -33,6 +33,7 @@ export default function Overview() {
   const [engagementBreakdown, setEngagementBreakdown] = useState(null)
   const [cadenceHealth, setCadenceHealth] = useState(null)
   const [statusFunnel, setStatusFunnel] = useState([])
+  const [sparklines, setSparklines] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -44,7 +45,8 @@ export default function Overview() {
       api.get('/leads/engagement-breakdown').catch(() => null),
       api.get('/cadence/health-summary').catch(() => null),
       api.get('/leads/status-funnel').catch(() => []),
-    ]).then(([leadsData, repliesData, briefingData, replyActivityData, engagementData, cadenceHealthData, statusFunnelData]) => {
+      api.get('/leads/sparklines?days=7').catch(() => null),
+    ]).then(([leadsData, repliesData, briefingData, replyActivityData, engagementData, cadenceHealthData, statusFunnelData, sparklinesData]) => {
       setLeads(leadsData)
       setReplies(repliesData)
       setDailyBriefing(briefingData)
@@ -52,6 +54,7 @@ export default function Overview() {
       setEngagementBreakdown(engagementData)
       setCadenceHealth(cadenceHealthData)
       setStatusFunnel(statusFunnelData || [])
+      setSparklines(sparklinesData)
       setLoading(false)
     })
   }, [])
@@ -108,18 +111,38 @@ export default function Overview() {
         <SignalPulse color="green" label="Live" />
       </header>
 
-      <div className="stat-grid overview-command-stats">
-        <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="New leads" value={loading ? '—' : newCount} accent="blue" sublabel="Ready to contact" />
-        </button>
-        <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="Sent" value={loading ? '—' : sentCount} accent="neutral" sublabel="Awaiting reply" />
+      <div className="overview-hero-grid">
+        <button className="overview-hero-card-link overview-hero-card-link--lead" onClick={() => navigate('/leads')}>
+          <StatCard
+            label="Certified appointments"
+            value={loading ? '—' : (dailyBriefing?.certified_appointments_waiting ?? 0)}
+            accent="green"
+            sublabel="Waiting — solicited, contacted, booked, confirmed"
+          />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/replies?needs_attention=true')}>
           <StatCard label="Hot replies" value={loading ? '—' : hotCount} accent="red" sublabel="Needs your attention" />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="Booked" value={loading ? '—' : bookedCount} accent="green" sublabel="Appointments set" />
+          <StatCard
+            label="New leads"
+            value={loading ? '—' : newCount}
+            accent="blue"
+            sublabel="Ready to contact"
+            sparkline={sparklines?.leads_imported}
+          />
+        </button>
+        <button className="stat-card-link" onClick={() => navigate('/leads')}>
+          <StatCard
+            label="Booked"
+            value={loading ? '—' : bookedCount}
+            accent="amber"
+            sublabel="Appointments set"
+            sparkline={sparklines?.bookings}
+          />
+        </button>
+        <button className="stat-card-link" onClick={() => navigate('/leads')}>
+          <StatCard label="Sent" value={loading ? '—' : sentCount} accent="neutral" sublabel="Awaiting reply" />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/leads')}>
           <StatCard label="Needs tier review" value={loading ? '—' : needsReviewCount} accent="amber" sublabel="Untyped leads" />

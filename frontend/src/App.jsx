@@ -8,6 +8,7 @@ import LeadDetail from './pages/LeadDetail'
 import Replies from './pages/Replies'
 import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
+import AutoSendQueue from './pages/AutoSendQueue'
 import Admin from './pages/Admin'
 import Users from './pages/Users'
 import UserDetail from './pages/UserDetail'
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
         <Route path="/cadence" element={<ProtectedRoute><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute><EmailQueue /></ProtectedRoute>} />
+        <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Admin /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
         <Route path="/users/:userId" element={<ProtectedRoute requireAdmin><UserDetail /></ProtectedRoute>} />

@@ -112,7 +112,7 @@ def test_set_lead_tier_updates_tier_track_and_status(client, db_session, sample_
 
     assert response.status_code == 200
     db_session.refresh(lead)
-    assert lead.tier.value == "pre_need"
+    assert lead.tier == "pre_need"
     assert lead.message_track == MessageTrack.PRE_NEED_LOCK_PRICE
     assert lead.status == LeadStatus.NEW
 
@@ -166,7 +166,7 @@ def test_set_lead_tier_allows_any_advisor_in_org_not_just_assignee(client, db_se
 
     assert response.status_code == 200
     db_session.refresh(lead)
-    assert lead.tier.value == "at_need"
+    assert lead.tier == "at_need"
 
 
 def test_set_lead_tier_logs_audit_action_with_before_and_after(client, db_session, sample_org, sample_advisor, auth_headers):

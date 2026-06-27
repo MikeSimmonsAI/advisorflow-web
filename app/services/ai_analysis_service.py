@@ -125,7 +125,7 @@ def analyze_lead(db: Session, lead: Lead) -> dict:
     """Runs analysis on a single Lead record and writes the result back to ai_lead_quality_note."""
     last_contact_str = lead.last_contact_date.isoformat() if lead.last_contact_date else None
     result = analyze_lead_quality(
-        tier=lead.tier.value if lead.tier else None,
+        tier=lead.tier,
         status_reason=lead.status_reason_raw,
         last_action=lead.last_action_raw,
         last_contact_date=last_contact_str,
