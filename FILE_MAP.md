@@ -1,11 +1,16 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v1.8.** See SESSION_LOG_V1.8_EMAIL_QUEUE_REBUILD.md
-for the latest session's full changelog (the full Email Queue rebuild
-Mike asked for - broadened to any lead with an email, a real rich
-content composer with image embedding, open/click tracking on both
-send paths, and all of it surfaced in the UI). **Set TRACKING_BASE_URL
-if the backend's public URL ever changes from the current default.**
+**CURRENT VERSION: v1.9.** See SESSION_LOG_V1.9_EMAIL_QUEUE_VISUAL_REDESIGN.md
+for the latest session's full changelog (real scorecards on the Email
+Queue - In queue, Sent today, Open rate, Clicks - plus the queue list
+rebuilt as richer cards instead of a plain table, per Mike's direct
+feedback that the rebuilt page still "looked way too simple").
+
+Prior version: v1.8, see SESSION_LOG_V1.8_EMAIL_QUEUE_REBUILD.md (the
+full Email Queue rebuild - broadened to any lead with an email, a real
+rich content composer with image embedding, open/click tracking on
+both send paths). **Set TRACKING_BASE_URL if the backend's public URL
+ever changes from the current default.**
 
 Prior version: v1.7, see SESSION_LOG_V1.7_MIXED_CHANNEL_CADENCE.md
 (cadence now intelligently mixes text and email for leads who have

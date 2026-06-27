@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import EmailReview from '../components/EmailReview'
+import StatCard from '../components/StatCard'
+import { TierBadge } from '../components/StatusBadge'
 import '../styles/shared.css'
 import './EmailQueue.css'
 
@@ -23,6 +25,15 @@ export default function EmailQueue() {
   const [selected, setSelected] = useState(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
+  // Real scorecard numbers, per Mike's direct feedback that this page
+  // "looks way too simple" - same pattern already proven on Replies'
+  // action center, a SEPARATE call from the queue/sent lists so the
+  // numbers reflect true totals, not whatever's currently filtered/paged.
+  const [counts, setCounts] = useState(null)
+
+  function loadCounts() {
+    api.get('/email/counts').then(setCounts).catch(() => {})
+  }
 
   function load(query = searchQuery) {
     setLoading(true)
@@ -45,6 +56,8 @@ export default function EmailQueue() {
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, view])
+
+  useEffect(() => { loadCounts() }, [])
 
   function toggle(id) {
     const next = new Set(selected)
@@ -79,6 +92,18 @@ export default function EmailQueue() {
           </button>
         )}
       </header>
+
+      <div className="email-queue-scorecard-grid">
+        <StatCard label="In queue" value={counts ? counts.queued : '—'} accent="blue" />
+        <StatCard label="Sent today" value={counts ? counts.sent_today : '—'} accent="green" />
+        <StatCard
+          label="Open rate"
+          value={counts && counts.open_rate_pct !== null ? `${counts.open_rate_pct}%` : '—'}
+          sublabel={counts && counts.open_rate_pct === null ? 'No sends in last 30 days' : 'Last 30 days'}
+          accent="purple"
+        />
+        <StatCard label="Clicks" value={counts ? counts.total_clicks_30d : '—'} sublabel="Last 30 days" accent="amber" />
+      </div>
 
       <div className="email-queue-tabs">
         <button className={`tab ${view === 'queue' ? 'tab--active' : ''}`} onClick={() => setView('queue')}>
@@ -151,42 +176,45 @@ export default function EmailQueue() {
             {searchQuery.trim() ? 'No leads match your search.' : 'Nothing queued. Any lead with an email on file will show up here.'}
           </div>
         ) : (
-          <table className="data-table email-queue-table">
-            <thead>
-              <tr>
-                <th><input type="checkbox" checked={leads.length > 0 && selected.size === leads.length} onChange={toggleAll} /></th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            <div className="email-queue-list-header">
+              <label className="compose-checkbox">
+                <input type="checkbox" checked={leads.length > 0 && selected.size === leads.length} onChange={toggleAll} />
+                Select all
+              </label>
+              <span className="filter-count mono">{leads.length} shown</span>
+            </div>
+            <ul className="email-queue-card-list">
               {leads.map((lead) => (
-                <tr key={lead.id}>
-                  <td data-label="Select" onClick={(e) => e.stopPropagation()}>
+                <li key={lead.id} className={`email-queue-card ${selected.has(lead.id) ? 'email-queue-card--selected' : ''}`}>
+                  <label className="compose-checkbox email-queue-card-checkbox" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggle(lead.id)} />
-                  </td>
-                  <td data-label="Name" style={{ cursor: 'pointer' }} onClick={() => navigate(`/leads/${lead.id}`)}>{lead.first_name} {lead.last_name}</td>
-                  <td data-label="Email" className="mono">{lead.email || '—'}</td>
-                  <td data-label="Phone" className="mono">{lead.phone || '—'}</td>
-                  <td data-label="">
-                    <button className="btn btn--secondary email-queue-row-action" onClick={() => handleReviewSingle(lead.id)}>
-                      Review &amp; send
-                    </button>
-                  </td>
-                </tr>
+                  </label>
+                  <div className="email-queue-card-main" onClick={() => navigate(`/leads/${lead.id}`)}>
+                    <div className="email-queue-card-top">
+                      <strong>{lead.first_name} {lead.last_name}</strong>
+                      {lead.tier && <TierBadge tier={lead.tier} />}
+                    </div>
+                    <div className="email-queue-card-contact">
+                      <span className="mono">{lead.email}</span>
+                      {lead.phone && <span className="mono email-queue-card-phone">{lead.phone}</span>}
+                    </div>
+                  </div>
+                  <button className="btn btn--secondary email-queue-row-action" onClick={() => handleReviewSingle(lead.id)}>
+                    Review &amp; send
+                  </button>
+                </li>
               ))}
-            </tbody>
-          </table>
+            </ul>
+          </>
         )}
       </section>
 
       {reviewLeadIds && (
         <EmailReview
           leadIds={reviewLeadIds}
-          onClose={() => { setReviewLeadIds(null); load() }}
-          onSent={() => load()}
+          onClose={() => { setReviewLeadIds(null); load(); loadCounts() }}
+          onSent={() => { load(); loadCounts() }}
         />
       )}
     </div>

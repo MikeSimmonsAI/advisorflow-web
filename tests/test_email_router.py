@@ -379,3 +379,98 @@ def test_sent_history_shows_zero_click_count_and_null_opened_at_when_never_engag
     row = next(r for r in sent_response.json() if r["lead_id"] == lead.id)
     assert row["opened_at"] is None
     assert row["click_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# GET /email/counts - real scorecard numbers for the Email Queue action
+# center, per Mike's direct feedback that the page "looks way too
+# simple." Same pattern already proven on Replies' reply_counts.
+# ---------------------------------------------------------------------------
+
+def test_email_counts_requires_auth(client):
+    response = client.get("/email/counts")
+    assert response.status_code == 401
+
+
+def test_email_counts_queued_matches_actual_queue(client, db_session, sample_org, sample_advisor, auth_headers):
+    _email_lead(db_session, sample_org.id, sample_advisor.id, "Queued", "One", "queued1@example.com")
+    _email_lead(db_session, sample_org.id, sample_advisor.id, "Queued", "Two", "queued2@example.com")
+
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["queued"] == 2
+
+
+def test_email_counts_sent_today_only_counts_todays_sends(client, db_session, sample_org, sample_advisor, auth_headers, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.models.models import EmailMessage
+
+    lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Sent", "Today", "senttoday@example.com")
+    old_msg = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="Old", body_html="<p>x</p>",
+                           status="sent", sent_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=3))
+    today_msg = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="Today", body_html="<p>x</p>",
+                             status="sent", sent_at=datetime.now(timezone.utc).replace(tzinfo=None))
+    db_session.add_all([old_msg, today_msg])
+    db_session.commit()
+
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.json()["sent_today"] == 1
+
+
+def test_email_counts_open_rate_computed_correctly(client, db_session, sample_org, sample_advisor, auth_headers):
+    from datetime import datetime, timezone
+    from app.models.models import EmailMessage
+    lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Rate", "Test", "rate@example.com")
+    opened = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="A", body_html="<p>x</p>",
+                          status="sent", opened_at=datetime.now(timezone.utc).replace(tzinfo=None))
+    not_opened = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="B", body_html="<p>x</p>", status="sent")
+    db_session.add_all([opened, not_opened])
+    db_session.commit()
+
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.json()["open_rate_pct"] == 50
+
+
+def test_email_counts_open_rate_is_none_not_zero_when_nothing_sent(client, db_session, sample_org, sample_advisor, auth_headers):
+    """No sends in the window must read as 'no data' (None), not a misleading 0% open rate."""
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.json()["open_rate_pct"] is None
+
+
+def test_email_counts_open_rate_excludes_sends_older_than_30_days(client, db_session, sample_org, sample_advisor, auth_headers):
+    from datetime import datetime, timedelta, timezone
+    from app.models.models import EmailMessage
+    lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Stale", "Send", "stale@example.com")
+    old_msg = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="Old", body_html="<p>x</p>",
+                           status="sent", sent_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=45))
+    db_session.add(old_msg)
+    db_session.commit()
+
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.json()["open_rate_pct"] is None
+
+
+def test_email_counts_scoped_to_logged_in_advisor_only(client, db_session, sample_org, sample_advisor, second_advisor, auth_headers):
+    _email_lead(db_session, sample_org.id, second_advisor.id, "NotMine", "Lead", "notmine@example.com")
+
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.json()["queued"] == 0
+
+
+def test_email_counts_total_clicks_sums_across_recent_sends(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import EmailMessage
+    lead = _email_lead(db_session, sample_org.id, sample_advisor.id, "Click", "Sum", "clicksum@example.com")
+    msg1 = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="A", body_html="<p>x</p>", status="sent", click_count=2)
+    msg2 = EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="B", body_html="<p>x</p>", status="sent", click_count=3)
+    db_session.add_all([msg1, msg2])
+    db_session.commit()
+
+    response = client.get("/email/counts", headers=auth_headers)
+
+    assert response.json()["total_clicks_30d"] == 5

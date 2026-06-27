@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from datetime import datetime, timezone
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, EmailMessage, MessageTrack
@@ -241,6 +242,79 @@ def email_sent_history(
         }
         for lead, email_msg in rows
     ]
+
+
+@router.get("/counts")
+def email_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Real scorecard numbers for the Email Queue action center - per
+    Mike's direct feedback that the page "looks way too simple," same
+    fix already proven on the Replies page (see sms_router.py's
+    reply_counts). A SEPARATE endpoint from /queue and /sent, not
+    derived from either's result, so the numbers reflect true totals
+    regardless of search filters or the 200-row cap on /sent.
+
+    open_rate is computed from messages sent in the last 30 days only -
+    a true all-time rate would be skewed by very old sends an advisor
+    no longer cares about, and 30 days is long enough to be a stable,
+    meaningful signal without diluting it with months of stale history.
+    """
+    from datetime import timedelta
+
+    base_email_filter = EmailMessage.sender_id == current_user.id
+
+    queued_count = (
+        db.query(func.count(Lead.id))
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+            Lead.email.isnot(None),
+            Lead.email != "",
+            Lead.status == "new",
+        )
+        .scalar()
+        or 0
+    )
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    sent_today_count = (
+        db.query(func.count(EmailMessage.id))
+        .filter(base_email_filter, EmailMessage.sent_at >= today_start)
+        .scalar()
+        or 0
+    )
+
+    thirty_days_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    recent_sent = (
+        db.query(func.count(EmailMessage.id))
+        .filter(base_email_filter, EmailMessage.status == "sent", EmailMessage.sent_at >= thirty_days_ago)
+        .scalar()
+        or 0
+    )
+    recent_opened = (
+        db.query(func.count(EmailMessage.id))
+        .filter(base_email_filter, EmailMessage.status == "sent", EmailMessage.sent_at >= thirty_days_ago, EmailMessage.opened_at.isnot(None))
+        .scalar()
+        or 0
+    )
+    open_rate_pct = round((recent_opened / recent_sent) * 100) if recent_sent > 0 else None
+
+    total_clicks = (
+        db.query(func.sum(EmailMessage.click_count))
+        .filter(base_email_filter, EmailMessage.sent_at >= thirty_days_ago)
+        .scalar()
+        or 0
+    )
+
+    return {
+        "queued": queued_count,
+        "sent_today": sent_today_count,
+        "open_rate_pct": open_rate_pct,  # None if no sends in the last 30 days, not 0 - "no data" must read differently than "0% open rate"
+        "total_clicks_30d": total_clicks,
+    }
 
 
 @router.get("/queue")
