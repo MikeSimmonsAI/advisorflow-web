@@ -1,12 +1,23 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v1.5.** See SESSION_LOG_V1.5_CERTIFICATION_WIRED_IN.md
-for the latest session's full changelog (certification is now actually
-visible where advisors look most: Overview shows a real "certified
-appointments waiting" count, and Replies shows a per-reply badge -
-batched for performance, not one query per reply).
+**CURRENT VERSION: v1.7.** See SESSION_LOG_V1.7_MIXED_CHANNEL_CADENCE.md
+for the latest session's full changelog (cadence now intelligently
+mixes text and email for leads who have both, never the same touch on
+both channels at once - Mike's direct correction after spotting the
+risk of double-soliciting through two channels).
 
-Prior version: v1.4, see SESSION_LOG_V1.4_CERTIFIED_APPOINTMENT_PIPELINE.md
+Prior version: v1.6, see SESSION_LOG_V1.6_EMAIL_TIMELINE_FIX.md (a real
+gap Mike caught directly: outbound emails were never shown in a lead's
+Conversation timeline, only SMS. Fixed - email now appears interleaved
+with SMS, correctly ordered, with a clear Email tag and subject line).
+
+Before that: v1.5, see SESSION_LOG_V1.5_CERTIFICATION_WIRED_IN.md
+(certification is now actually visible where advisors look most:
+Overview shows a real "certified appointments waiting" count, and
+Replies shows a per-reply badge - batched for performance, not one
+query per reply).
+
+Before that: v1.4, see SESSION_LOG_V1.4_CERTIFIED_APPOINTMENT_PIPELINE.md
 (the Certified Appointment pipeline — Solicited → Contacted → Booked →
 Confirmed → Waiting, a real auditable sequence of events, not a score;
 shown on Lead Detail with a "Mark confirmed" action). This is the

@@ -50,11 +50,46 @@
   align-self: flex-start;
 }
 
+.timeline-bubble-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  min-height: 14px;
+}
+
+.timeline-channel-tag {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--signal-purple);
+  background: var(--signal-purple-dim);
+  border: 1px solid var(--signal-purple-dim);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.timeline-email-subject {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
 .timeline-body {
   margin: 0 0 4px;
   font-size: 13px;
   color: var(--text-primary);
   line-height: 1.5;
+}
+
+.timeline-body p {
+  margin: 0 0 8px;
+}
+
+.timeline-body p:last-child {
+  margin-bottom: 0;
 }
 
 .timeline-time {

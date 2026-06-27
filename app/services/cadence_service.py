@@ -33,6 +33,70 @@ from app.services.sms_service import send_sms
 CADENCE_SCHEDULE_DAYS = [1, 3, 7, 10, 14, 21, 30, 45, 60]
 TOTAL_TOUCHES = len(CADENCE_SCHEDULE_DAYS)
 
+# Per-touch channel for a lead who has BOTH a phone and an email - per
+# Mike's explicit, direct correction: NOT two parallel tracks running
+# at once (that would mean the same touch landing on both channels
+# simultaneously, which he was clear is "kinda fucking stupid" - it
+# would solicit the same person twice for the same touch), and NOT a
+# fixed single channel for the whole sequence either. One single
+# sequence, same 9 touches/same schedule, but each touch's CHANNEL is
+# chosen deliberately - mixing text and email rather than locking the
+# whole lead to one channel.
+#
+# The actual reasoning behind this specific pattern, not arbitrary:
+# text carries the early, fast-turnaround touches (speed matters more
+# than content early on); email lands on touches that have had time to
+# build something worth saying. Leans text overall (6 text / 3 email)
+# since text is the faster, more immediate default - but email never
+# appears twice in a row, and the LAST touch (Day 60) is email
+# specifically because Mike's own reasoning was that a real,
+# substantial last attempt does more work than a one-line text ("most
+# people respond on emails for promos because they got a lot of clip
+# art and that kind of jazz").
+#
+# Indexed by touch_number - 1 (touch 1 -> index 0, etc.), matching how
+# CADENCE_SCHEDULE_DAYS is indexed throughout this module.
+#
+# ONLY consulted for leads with BOTH a phone and an email - a lead with
+# only one contact method always uses that one method for every touch,
+# unaffected by this pattern at all (see _channel_for_touch below).
+MIXED_CHANNEL_PATTERN = [
+    "sms",    # Touch 1 (Day 1)  - immediate, fast
+    "sms",    # Touch 2 (Day 3)  - still early, still wants urgency
+    "email",  # Touch 3 (Day 7)  - first real "something to read" moment
+    "sms",    # Touch 4 (Day 10) - quick check-in
+    "sms",    # Touch 5 (Day 14) - same
+    "email",  # Touch 6 (Day 21) - three weeks in, worth a real message again
+    "sms",    # Touch 7 (Day 30) - quick check-in (NOT email - would be back-to-back with Touch 6 otherwise)
+    "sms",    # Touch 8 (Day 45) - quick, low-effort check-in
+    "email",  # Touch 9 (Day 60) - the last attempt, make it count
+]
+
+
+def _channel_for_touch(lead: Lead, touch_number: int) -> str:
+    """
+    Returns "sms" or "email" for this specific touch. A lead with only
+    one real contact method always uses that one, regardless of the
+    mixed pattern - MIXED_CHANNEL_PATTERN only applies when a lead
+    genuinely has both a phone and an email to choose between.
+    """
+    has_phone = bool(lead.phone)
+    has_email = bool(lead.email)
+
+    if has_phone and not has_email:
+        return "sms"
+    if has_email and not has_phone:
+        return "email"
+    if not has_phone and not has_email:
+        # Should not actually happen in practice (a lead with neither
+        # never starts cadence at all - see start_cadence), but default
+        # to sms rather than crash if this is ever reached.
+        return "sms"
+
+    # Has both - consult the deliberate mix.
+    index = (touch_number - 1) % len(MIXED_CHANNEL_PATTERN)
+    return MIXED_CHANNEL_PATTERN[index]
+
 # Day 1 touch fires immediately rather than waiting 24 hours, since "Day 1"
 # means "the day contact starts," not "wait a full day first."
 SEND_IMMEDIATELY_ON_DAY_1 = True
@@ -215,31 +279,44 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
         if not advisor or not advisor.is_active:
             continue
 
-        if not advisor.twilio_phone_number:
+        touch_number = state.current_touch_number + 1
+        channel = _channel_for_touch(lead, touch_number)
+
+        # Only require a Twilio number when this specific touch is
+        # actually going out as SMS - a real, pre-existing bug fixed
+        # here: previously every touch required advisor.twilio_phone_number
+        # unconditionally, even for a lead whose touch should go out as
+        # email. A lead with both phone and email, assigned to an
+        # advisor with email connected but no Twilio configured, would
+        # have failed every single touch as an "error" even on the
+        # touches that were never going to use Twilio at all.
+        if channel == "sms" and not advisor.twilio_phone_number:
             error_count += 1
             errors.append(f"Lead {lead.id}: advisor has no Twilio number configured")
             continue
 
-        touch_number = state.current_touch_number + 1
-
         try:
-            from app.services.sms_service import create_booking_link
-            booking = create_booking_link(db, lead, advisor)
-            import os
-            booking_url = f"{os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
-            body = render_cadence_message(db, lead, advisor, touch_number, booking_url)
+            if channel == "email":
+                from app.services.email_service import send_email_to_lead
+                send_email_to_lead(db, advisor, lead)
+            else:
+                from app.services.sms_service import create_booking_link
+                booking = create_booking_link(db, lead, advisor)
+                import os
+                booking_url = f"{os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
+                body = render_cadence_message(db, lead, advisor, touch_number, booking_url)
 
-            from app.services.sms_service import get_twilio_client
-            client = get_twilio_client(advisor)
-            twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=lead.phone)
+                from app.services.sms_service import get_twilio_client
+                client = get_twilio_client(advisor)
+                twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=lead.phone)
 
-            from app.models.models import Message
-            message = Message(
-                lead_id=lead.id, sender_id=advisor.id, body=body,
-                twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
-                booking_link_id=booking.id,
-            )
-            db.add(message)
+                from app.models.models import Message
+                message = Message(
+                    lead_id=lead.id, sender_id=advisor.id, body=body,
+                    twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
+                    booking_link_id=booking.id,
+                )
+                db.add(message)
 
             state.current_touch_number = touch_number
             state.last_touch_sent_at = now

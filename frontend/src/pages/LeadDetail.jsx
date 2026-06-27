@@ -283,8 +283,18 @@ export default function LeadDetail() {
               <div className="timeline">
                 {events.map((e, i) => (
                   <div key={i} className={`timeline-bubble timeline-bubble--${e.type}`}>
-                    {e.type === 'inbound' && e.is_hot && <SignalPulse color="red" size={6} label="Hot" />}
-                    <p className="timeline-body">{e.body}</p>
+                    <div className="timeline-bubble-top">
+                      {e.channel === 'email' && <span className="timeline-channel-tag">Email</span>}
+                      {e.type === 'inbound' && e.is_hot && <SignalPulse color="red" size={6} label="Hot" />}
+                    </div>
+                    {e.channel === 'email' && e.subject && (
+                      <p className="timeline-email-subject">{e.subject}</p>
+                    )}
+                    {e.channel === 'email' ? (
+                      <div className="timeline-body" dangerouslySetInnerHTML={{ __html: e.body }} />
+                    ) : (
+                      <p className="timeline-body">{e.body}</p>
+                    )}
                     <span className="timeline-time mono">{new Date(e.timestamp).toLocaleString()}</span>
                   </div>
                 ))}

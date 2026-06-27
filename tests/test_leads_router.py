@@ -963,3 +963,72 @@ def test_confirm_appointment_logs_audit_action(client, db_session, sample_org, s
         .first()
     )
     assert entry is not None
+
+
+# ---------------------------------------------------------------------------
+# Timeline now includes outbound email - real, genuine gap found
+# directly by Mike: "I don't see much action with the email... as far
+# as the conversation goes." Confirmed: EmailMessage was never queried
+# at all in get_lead_timeline, even though SMS Message/Reply rows were.
+# This is the outbound half of that gap fixed - inbound email replies
+# don't exist as a model yet at all (separately tracked, blocked on a
+# Gmail-forwarding decision).
+# ---------------------------------------------------------------------------
+
+def test_timeline_includes_outbound_email_events(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import EmailMessage
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Email", last_name="Timeline", phone="12145559400", email="email.timeline@example.com")
+    db_session.add(lead)
+    db_session.commit()
+    db_session.add(EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id,
+                                 subject="Following up", body_html="<p>Hi there</p>", status="sent"))
+    db_session.commit()
+
+    response = client.get(f"/leads/{lead.id}/timeline", headers=auth_headers)
+
+    assert response.status_code == 200
+    events = response.json()["events"]
+    email_events = [e for e in events if e.get("channel") == "email"]
+    assert len(email_events) == 1
+    assert email_events[0]["subject"] == "Following up"
+    assert email_events[0]["type"] == "outbound"
+
+
+def test_timeline_merges_sms_and_email_in_chronological_order(client, db_session, sample_org, sample_advisor, auth_headers):
+    from datetime import datetime, timezone, timedelta
+    from app.models.models import EmailMessage
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Mixed", last_name="Channel", phone="12145559401", email="mixed@example.com")
+    db_session.add(lead)
+    db_session.commit()
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db_session.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="First, an SMS", sent_at=now - timedelta(minutes=10)))
+    db_session.add(EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="Then an email",
+                                 body_html="<p>Second</p>", status="sent", sent_at=now - timedelta(minutes=5)))
+    db_session.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Then another SMS", sent_at=now))
+    db_session.commit()
+
+    response = client.get(f"/leads/{lead.id}/timeline", headers=auth_headers)
+    events = response.json()["events"]
+
+    channels_in_order = [e["channel"] for e in events]
+    assert channels_in_order == ["sms", "email", "sms"]
+
+
+def test_sms_events_have_channel_field_too(client, db_session, sample_org, sample_advisor, auth_headers):
+    """Existing SMS-only conversations must also get the new channel field, not just email ones."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="SmsOnly", last_name="Channel", phone="12145559402")
+    db_session.add(lead)
+    db_session.commit()
+    db_session.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Just an SMS"))
+    db_session.commit()
+
+    response = client.get(f"/leads/{lead.id}/timeline", headers=auth_headers)
+    events = response.json()["events"]
+
+    assert events[0]["channel"] == "sms"

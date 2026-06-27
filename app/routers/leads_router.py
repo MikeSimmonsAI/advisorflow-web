@@ -1002,7 +1002,7 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     tracked on the backend the whole time but never surfaced anywhere in
     the UI - an advisor had no way to see if someone actually booked.
     """
-    from app.models.models import Message, Reply, BookingLink
+    from app.models.models import Message, Reply, BookingLink, EmailMessage
     import json as _json
 
     lead = db.query(Lead).filter(
@@ -1013,11 +1013,22 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
 
     messages = db.query(Message).filter(Message.lead_id == lead_id).all()
     replies = db.query(Reply).filter(Reply.lead_id == lead_id).all()
+    # Real, genuine gap found and fixed: outbound emails (EmailMessage)
+    # were never included in this timeline at all, even though they're
+    # a real, persisted part of the conversation - an advisor emailing a
+    # lead three times had zero visibility into that here, only the SMS
+    # side ever showed. There is currently no INBOUND email reply model
+    # at all (that's the separately-tracked, not-yet-built "inbound
+    # email reply handling" item, blocked on a Gmail-forwarding
+    # decision) - so this fixes the outbound half of the gap, which is
+    # real, existing, queryable data that simply wasn't being shown.
+    email_messages = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).all()
 
     events = []
     for m in messages:
         events.append({
             "type": "outbound",
+            "channel": "sms",
             "body": m.body,
             "timestamp": m.sent_at,
             "status": m.twilio_status,
@@ -1025,9 +1036,19 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     for r in replies:
         events.append({
             "type": "inbound",
+            "channel": "sms",
             "body": r.body,
             "timestamp": r.received_at,
             "is_hot": r.is_hot,
+        })
+    for e in email_messages:
+        events.append({
+            "type": "outbound",
+            "channel": "email",
+            "subject": e.subject,
+            "body": e.body_html,
+            "timestamp": e.sent_at,
+            "status": e.status,
         })
     events.sort(key=lambda e: e["timestamp"] or "")
 

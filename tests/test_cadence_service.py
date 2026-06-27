@@ -166,3 +166,152 @@ def test_run_due_cadences_skips_lead_with_no_assigned_advisor_at_all(db_session,
     result = run_due_cadences(db_session, organization_id=sample_org.id)
 
     assert result["errors"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Channel mixing - per Mike's explicit, direct correction: NOT two
+# parallel tracks running at once for a lead with both phone and email
+# (that would solicit the same touch on both channels simultaneously,
+# which he called "kinda fucking stupid"), and NOT one fixed channel
+# for the whole sequence either. One sequence, same 9 touches, but each
+# touch's CHANNEL is deliberately mixed - text for speed early on,
+# email for touches that have had time to build something worth
+# saying. Only applies to leads with BOTH contact methods - a lead with
+# only one always uses that one for every touch.
+# ---------------------------------------------------------------------------
+
+from app.services.cadence_service import _channel_for_touch, MIXED_CHANNEL_PATTERN
+
+
+def test_channel_for_touch_phone_only_lead_always_sms(db_session, sample_org, sample_advisor):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Phone", last_name="Only", phone="12145559500", email=None)
+    for touch in range(1, 10):
+        assert _channel_for_touch(lead, touch) == "sms"
+
+
+def test_channel_for_touch_email_only_lead_always_email(db_session, sample_org, sample_advisor):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Email", last_name="Only", phone=None, email="emailonly@example.com")
+    for touch in range(1, 10):
+        assert _channel_for_touch(lead, touch) == "email"
+
+
+def test_channel_for_touch_both_contact_methods_uses_mixed_pattern(db_session, sample_org, sample_advisor):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Both", last_name="Methods", phone="12145559501", email="both@example.com")
+
+    actual_channels = [_channel_for_touch(lead, touch) for touch in range(1, 10)]
+
+    assert actual_channels == MIXED_CHANNEL_PATTERN
+
+
+def test_mixed_pattern_never_has_two_emails_in_a_row():
+    """Real correctness check on the pattern itself, not just per-lead behavior - confirms it never doubles up on the slower channel back to back."""
+    for i in range(len(MIXED_CHANNEL_PATTERN) - 1):
+        assert not (MIXED_CHANNEL_PATTERN[i] == "email" and MIXED_CHANNEL_PATTERN[i + 1] == "email"), \
+            f"Two emails in a row at positions {i}, {i+1}"
+
+
+def test_mixed_pattern_has_nine_entries_matching_total_touches():
+    from app.services.cadence_service import TOTAL_TOUCHES
+    assert len(MIXED_CHANNEL_PATTERN) == TOTAL_TOUCHES
+
+
+def test_channel_for_touch_with_neither_contact_method_defaults_to_sms_rather_than_crashing(db_session, sample_org, sample_advisor):
+    """Should not happen in practice (start_cadence excludes such leads) but must never raise if ever reached."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Neither", last_name="Method", phone=None, email=None)
+    assert _channel_for_touch(lead, 1) == "sms"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: run_due_cadences actually sends through the right channel
+# for a lead with both phone and email, and never requires Twilio
+# config for a touch that's going out as email (the real bug fixed
+# alongside this feature - previously EVERY touch unconditionally
+# required advisor.twilio_phone_number, even ones that should have
+# gone out as email).
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch, MagicMock
+
+
+def test_run_due_cadences_sends_sms_for_an_sms_touch(db_session, sample_org, sample_advisor):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="SmsTouch", last_name="Lead", phone="12145559600", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)  # current_touch_number=0 -> this will be touch 1 = sms
+    db_session.commit()
+
+    with patch("app.services.sms_service.get_twilio_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = MagicMock(sid="SM_touch1", status="queued")
+        mock_get_client.return_value = mock_client
+
+        result = run_due_cadences(db_session, organization_id=sample_org.id)
+
+    assert result["errors"] == 0
+    assert result["sent"] == 1
+    from app.models.models import Message, EmailMessage
+    assert db_session.query(Message).filter(Message.lead_id == lead.id).count() == 1
+    assert db_session.query(EmailMessage).filter(EmailMessage.lead_id == lead.id).count() == 0
+
+
+def test_run_due_cadences_sends_email_for_an_email_touch_no_twilio_required(db_session, sample_org, sample_advisor):
+    """
+    The actual bug fix: touch 3 (Day 7) is an email touch in the mixed
+    pattern. An advisor with NO Twilio configured at all must still be
+    able to send this touch successfully, since it never needs Twilio.
+    """
+    sample_advisor.twilio_phone_number = None
+    sample_advisor.twilio_account_sid = None
+    db_session.commit()
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="EmailTouch", last_name="Lead", phone="12145559601",
+                email="emailtouch@example.com", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    state = _due_state(db_session, lead)
+    state.current_touch_number = 2  # next touch is touch 3 = email in the mixed pattern
+    db_session.commit()
+
+    with patch("app.services.email_service.send_email_via_provider") as mock_send_email:
+        mock_send_email.return_value = {"success": True, "provider_message_id": "sg_touch3", "error": None}
+
+        result = run_due_cadences(db_session, organization_id=sample_org.id)
+
+    assert result["errors"] == 0, result["error_details"]
+    assert result["sent"] == 1
+    from app.models.models import Message, EmailMessage
+    assert db_session.query(EmailMessage).filter(EmailMessage.lead_id == lead.id).count() == 1
+    assert db_session.query(Message).filter(Message.lead_id == lead.id).count() == 0
+
+
+def test_run_due_cadences_never_sends_both_channels_for_the_same_touch(db_session, sample_org, sample_advisor):
+    """The core safety property Mike was explicit about - never the same touch on both channels at once."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="BothMethods", last_name="Lead", phone="12145559602",
+                email="bothmethods@example.com", status=LeadStatus.NEW)
+    db_session.add(lead)
+    db_session.flush()
+    _due_state(db_session, lead)  # touch 1 = sms per the mixed pattern
+    db_session.commit()
+
+    with patch("app.services.sms_service.get_twilio_client") as mock_get_client, \
+         patch("app.services.email_service.send_email_via_provider") as mock_send_email:
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = MagicMock(sid="SM_both_test", status="queued")
+        mock_get_client.return_value = mock_client
+        mock_send_email.return_value = {"success": True, "provider_message_id": "sg_both", "error": None}
+
+        run_due_cadences(db_session, organization_id=sample_org.id)
+
+    from app.models.models import Message, EmailMessage
+    sms_count = db_session.query(Message).filter(Message.lead_id == lead.id).count()
+    email_count = db_session.query(EmailMessage).filter(EmailMessage.lead_id == lead.id).count()
+    # Touch 1 is sms in the pattern - exactly one channel fired, never both
+    assert sms_count == 1
+    assert email_count == 0
