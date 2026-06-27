@@ -162,3 +162,54 @@ def test_list_replies_with_no_bucket_returns_everything_unfiltered(client, auth_
     response = client.get("/sms/replies", headers=auth_headers)
     bodies = [r["body"] for r in response.json()]
     assert "Anything" in bodies
+
+
+# ---------------------------------------------------------------------------
+# GET /sms/replies/certification-batch - powers certification badges on
+# the Replies action center without running per-reply queries.
+# ---------------------------------------------------------------------------
+
+def test_certification_batch_requires_auth(client):
+    response = client.get("/sms/replies/certification-batch?lead_ids=abc")
+    assert response.status_code == 401
+
+
+def test_certification_batch_returns_status_for_own_leads(client, auth_headers, db_session, sample_lead):
+    response = client.get(f"/sms/replies/certification-batch?lead_ids={sample_lead.id}", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert sample_lead.id in response.json()
+    assert response.json()[sample_lead.id]["current_step"] is None
+
+
+def test_certification_batch_excludes_leads_not_owned_by_caller(client, auth_headers, db_session, sample_org, second_advisor):
+    other_lead = Lead(organization_id=sample_org.id, assigned_to_id=second_advisor.id,
+                       first_name="NotMine", last_name="Lead", phone="12145559220")
+    db_session.add(other_lead)
+    db_session.commit()
+
+    response = client.get(f"/sms/replies/certification-batch?lead_ids={other_lead.id}", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {}
+
+
+def test_certification_batch_handles_multiple_lead_ids(client, auth_headers, db_session, sample_org, sample_advisor):
+    lead_a = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                  first_name="A", last_name="Lead", phone="12145559221")
+    lead_b = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                  first_name="B", last_name="Lead", phone="12145559222")
+    db_session.add_all([lead_a, lead_b])
+    db_session.commit()
+
+    response = client.get(f"/sms/replies/certification-batch?lead_ids={lead_a.id},{lead_b.id}", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert lead_a.id in response.json()
+    assert lead_b.id in response.json()
+
+
+def test_certification_batch_with_empty_lead_ids_returns_empty(client, auth_headers):
+    response = client.get("/sms/replies/certification-batch?lead_ids=", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json() == {}

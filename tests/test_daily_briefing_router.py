@@ -87,11 +87,18 @@ def test_daily_briefing_counts_are_exact_for_current_advisor(client, db_session,
     booked_recent_1 = _lead(db_session, sample_org, sample_advisor, first_name="BookedOne", phone="12145552011", status=LeadStatus.BOOKED, created_at=now - timedelta(days=30))
     booked_recent_2 = _lead(db_session, sample_org, sample_advisor, first_name="BookedTwo", phone="12145552012", status=LeadStatus.BOOKED, created_at=now - timedelta(days=30))
     booked_old = _lead(db_session, sample_org, sample_advisor, first_name="BookedOld", phone="12145552013", status=LeadStatus.BOOKED, created_at=now - timedelta(days=30))
+    certified_lead = _lead(db_session, sample_org, sample_advisor, first_name="Certified", phone="12145552014", status=LeadStatus.BOOKED, created_at=now - timedelta(days=30))
 
     db_session.add_all([
         BookingLink(lead_id=booked_recent_1.id, user_id=sample_advisor.id, status="booked", booked_time=now - timedelta(days=1)),
         BookingLink(lead_id=booked_recent_2.id, user_id=sample_advisor.id, status="booked", booked_time=now - timedelta(days=6)),
         BookingLink(lead_id=booked_old.id, user_id=sample_advisor.id, status="booked", booked_time=now - timedelta(days=8)),
+        # confirmed_at set - the only one of these four that should count
+        # toward certified_appointments_waiting, regardless of how long
+        # ago it was booked (this metric is NOT time-windowed the way
+        # bookings_last_7_days is).
+        BookingLink(lead_id=certified_lead.id, user_id=sample_advisor.id, status="booked",
+                    booked_time=now - timedelta(days=20), confirmed_at=now - timedelta(days=19)),
     ])
     db_session.commit()
 
@@ -103,6 +110,7 @@ def test_daily_briefing_counts_are_exact_for_current_advisor(client, db_session,
         "cadence_touches_due_today": 2,
         "leads_imported_last_24h": 5,
         "bookings_last_7_days": 2,
+        "certified_appointments_waiting": 1,
     }
 
 
@@ -138,4 +146,39 @@ def test_daily_briefing_is_scoped_to_current_advisor_and_org(client, db_session,
         "cadence_touches_due_today": 1,
         "leads_imported_last_24h": 1,
         "bookings_last_7_days": 1,
+        "certified_appointments_waiting": 0,
     }
+
+
+def test_daily_briefing_certified_appointments_scoped_to_current_advisor_and_org(client, db_session, sample_org, sample_advisor, second_advisor):
+    """
+    Dedicated scoping test for certified_appointments_waiting
+    specifically - the other scoping test above happens to use only
+    unconfirmed bookings, so it never actually exercised whether a
+    CONFIRMED booking belonging to another advisor or org leaks into
+    this advisor's count.
+    """
+    now = _now()
+    other_org = Organization(name="Other Cert Briefing Org", slug="other-cert-briefing-org", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_org_advisor = _advisor(db_session, other_org, email="other-cert-briefing@example.com", name="Other Org Advisor")
+
+    own_lead = _lead(db_session, sample_org, sample_advisor, first_name="OwnCertified", phone="12145554001")
+    same_org_other_advisor = _lead(db_session, sample_org, second_advisor, first_name="OtherAdvisorCertified", phone="12145554002")
+    other_org_lead = _lead(db_session, other_org, other_org_advisor, first_name="OtherOrgCertified", phone="12145554003")
+
+    db_session.add_all([
+        BookingLink(lead_id=own_lead.id, user_id=sample_advisor.id, status="booked",
+                    booked_time=now - timedelta(days=1), confirmed_at=now),
+        BookingLink(lead_id=same_org_other_advisor.id, user_id=second_advisor.id, status="booked",
+                    booked_time=now - timedelta(days=1), confirmed_at=now),
+        BookingLink(lead_id=other_org_lead.id, user_id=other_org_advisor.id, status="booked",
+                    booked_time=now - timedelta(days=1), confirmed_at=now),
+    ])
+    db_session.commit()
+
+    response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor))
+
+    assert response.status_code == 200
+    assert response.json()["certified_appointments_waiting"] == 1

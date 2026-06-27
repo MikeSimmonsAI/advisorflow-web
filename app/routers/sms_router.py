@@ -344,6 +344,51 @@ def reply_activity_by_day(
     ]
 
 
+@router.get("/replies/certification-batch")
+def replies_certification_batch(
+    lead_ids: str = Query(..., description="Comma-separated lead IDs to look up"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Batch certification status lookup for the Replies action center.
+    The Replies page shows up to 200 replies, which may reference only
+    a few dozen distinct leads - this takes the deduplicated list of
+    lead_ids actually on screen and returns certification status for
+    all of them in a small, fixed number of queries (see
+    certification_service.get_certification_status_batch for the full
+    reasoning), instead of the frontend calling the single-lead
+    /leads/{id}/certification endpoint once per reply, which would mean
+    up to 200 separate API calls just to render one page.
+
+    Scoped to the current advisor's own leads only - a lead_id for
+    someone else's lead, or a different org's lead, is silently
+    excluded from the result rather than erroring, since this endpoint
+    is meant to be called with whatever lead_ids are already visible to
+    this advisor on their own Replies page; if the frontend passes one
+    that isn't actually theirs, it just gets no certification result
+    rather than a confusing partial-success error mid-batch.
+    """
+    from app.services.certification_service import get_certification_status_batch
+
+    requested_ids = [lid.strip() for lid in lead_ids.split(",") if lid.strip()]
+    if not requested_ids:
+        return {}
+
+    owned_lead_ids = [
+        row[0] for row in
+        db.query(Lead.id)
+        .filter(
+            Lead.id.in_(requested_ids),
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+        )
+        .all()
+    ]
+
+    return get_certification_status_batch(db, owned_lead_ids)
+
+
 @router.get("/replies/counts")
 def reply_counts(
     db: Session = Depends(get_db),

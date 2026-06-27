@@ -55,8 +55,13 @@
 .reply-card-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 8px;
+}
+
+.reply-card-top .reply-time {
+  margin-left: auto;
 }
 
 .reply-time {

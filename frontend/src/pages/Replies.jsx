@@ -57,6 +57,11 @@ export default function Replies() {
   const [loading, setLoading] = useState(true)
   const [actionBusyId, setActionBusyId] = useState(null)
   const [error, setError] = useState('')
+  // Certification status per lead_id - fetched once per reply LOAD, in
+  // one batched call covering every distinct lead currently on screen,
+  // not one call per reply. See certification_service.py's
+  // get_certification_status_batch for why this matters at 200 replies.
+  const [certificationByLead, setCertificationByLead] = useState({})
 
   function loadCounts() {
     api.get('/sms/replies/counts').then(setCounts).catch(() => {})
@@ -67,7 +72,17 @@ export default function Replies() {
     setError('')
     const query = activeBucket ? `?bucket=${activeBucket}` : ''
     api.get(`/sms/replies${query}`)
-      .then(setReplies)
+      .then((data) => {
+        setReplies(data)
+        const uniqueLeadIds = [...new Set(data.map((r) => r.lead_id).filter(Boolean))]
+        if (uniqueLeadIds.length > 0) {
+          api.get(`/sms/replies/certification-batch?lead_ids=${uniqueLeadIds.join(',')}`)
+            .then(setCertificationByLead)
+            .catch(() => setCertificationByLead({}))
+        } else {
+          setCertificationByLead({})
+        }
+      })
       .catch((err) => setError(err.message || 'Could not load replies.'))
       .finally(() => setLoading(false))
   }
@@ -171,6 +186,7 @@ export default function Replies() {
               const config = CLASSIFICATION_CONFIG[r.classification] || CLASSIFICATION_CONFIG.neutral
               const isBusy = actionBusyId === r.id
               const reviewed = Boolean(r.reviewed_at)
+              const certification = r.lead_id ? certificationByLead[r.lead_id] : null
 
               return (
                 <li
@@ -181,6 +197,16 @@ export default function Replies() {
                 >
                   <div className="reply-card-top">
                     <span className={`badge badge--${config.color}`}>{config.label}</span>
+                    {certification?.is_certified && (
+                      <span className="badge badge--green" title="Solicited, contacted, booked, and confirmed">
+                        ✓ Certified appointment
+                      </span>
+                    )}
+                    {certification?.current_step === 'booked' && (
+                      <span className="badge badge--amber" title="Booked but not yet confirmed">
+                        Booked — needs confirmation
+                      </span>
+                    )}
                     <span className="reply-time mono">{new Date(r.received_at).toLocaleString()}</span>
                   </div>
                   <p className="reply-card-body">{r.body}</p>

@@ -1,12 +1,17 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v1.4.** See SESSION_LOG_V1.4_CERTIFIED_APPOINTMENT_PIPELINE.md
-for the latest session's full changelog (the Certified Appointment
-pipeline — Solicited → Contacted → Booked → Confirmed → Waiting, a
-real auditable sequence of events, not a score; shown on Lead Detail
-with a "Mark confirmed" action). This is the universal, industry-
-agnostic foundation Mike wants future industry-specific features built
-on top of.
+**CURRENT VERSION: v1.5.** See SESSION_LOG_V1.5_CERTIFICATION_WIRED_IN.md
+for the latest session's full changelog (certification is now actually
+visible where advisors look most: Overview shows a real "certified
+appointments waiting" count, and Replies shows a per-reply badge -
+batched for performance, not one query per reply).
+
+Prior version: v1.4, see SESSION_LOG_V1.4_CERTIFIED_APPOINTMENT_PIPELINE.md
+(the Certified Appointment pipeline — Solicited → Contacted → Booked →
+Confirmed → Waiting, a real auditable sequence of events, not a score;
+shown on Lead Detail with a "Mark confirmed" action). This is the
+universal, industry-agnostic foundation Mike wants future
+industry-specific features built on top of.
 
 Prior version: v1.3, see SESSION_LOG_V1.3_GOOGLE_CONTACTS_REFERRALS.md
 (automatic Google Contacts sync, and a real referral-lead system —

@@ -135,3 +135,84 @@ def confirm_appointment(db: Session, booking_link: BookingLink) -> BookingLink:
         booking_link.confirmed_at = datetime.now(timezone.utc)
         db.commit()
     return booking_link
+
+
+def get_certification_status_batch(db: Session, lead_ids: list[str]) -> dict[str, dict]:
+    """
+    Same per-step facts as get_certification_status, but for MANY leads
+    in a small, fixed number of queries instead of one
+    get_certification_status() call per lead.
+
+    Built specifically for the Replies action center: a page of 200
+    replies might reference only 30-50 distinct leads (several replies
+    often belong to the same lead), and naively calling
+    get_certification_status() once per REPLY would mean up to 600
+    queries (3 per lead x 200 replies) on a single page load, much of
+    it duplicate work re-checking the same lead repeatedly. This
+    function takes the deduplicated list of lead_ids actually needed
+    and runs exactly 3 queries total, regardless of how many leads or
+    replies are involved.
+
+    Returns {lead_id: same dict shape as get_certification_status, ...}
+    for every lead_id passed in - leads with no activity at all still
+    get a real entry (current_step=None), not a missing key.
+    """
+    if not lead_ids:
+        return {}
+
+    solicited_lead_ids = {
+        row[0] for row in db.query(Message.lead_id).filter(Message.lead_id.in_(lead_ids)).distinct().all()
+    } | {
+        row[0] for row in db.query(EmailMessage.lead_id).filter(EmailMessage.lead_id.in_(lead_ids)).distinct().all()
+    }
+
+    contacted_lead_ids = {
+        row[0] for row in db.query(Reply.lead_id).filter(Reply.lead_id.in_(lead_ids)).distinct().all()
+    }
+
+    # Most recent BOOKED link per lead, if any - same "most recent wins"
+    # rule as the single-lead version, just computed for every lead at
+    # once instead of one query per lead.
+    bookings_by_lead: dict[str, BookingLink] = {}
+    all_bookings = (
+        db.query(BookingLink)
+        .filter(BookingLink.lead_id.in_(lead_ids), BookingLink.status == "booked")
+        .order_by(BookingLink.booked_time.desc())
+        .all()
+    )
+    for booking in all_bookings:
+        if booking.lead_id not in bookings_by_lead:
+            bookings_by_lead[booking.lead_id] = booking
+
+    results = {}
+    for lead_id in lead_ids:
+        has_solicited = lead_id in solicited_lead_ids
+        has_contacted = lead_id in contacted_lead_ids
+        booking = bookings_by_lead.get(lead_id)
+        has_booked = booking is not None
+        has_confirmed = bool(booking and booking.confirmed_at is not None)
+
+        if not has_solicited:
+            current_step = None
+        elif not has_contacted:
+            current_step = STEP_SOLICITED
+        elif not has_booked:
+            current_step = STEP_CONTACTED
+        elif not has_confirmed:
+            current_step = STEP_BOOKED
+        else:
+            current_step = STEP_WAITING
+
+        results[lead_id] = {
+            "current_step": current_step,
+            "is_certified": current_step == STEP_WAITING,
+            "steps_completed": {
+                STEP_SOLICITED: has_solicited,
+                STEP_CONTACTED: has_contacted,
+                STEP_BOOKED: has_booked,
+                STEP_CONFIRMED: has_confirmed,
+            },
+            "booking_link_id": booking.id if booking else None,
+        }
+
+    return results

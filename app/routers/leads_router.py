@@ -893,11 +893,31 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(g
         or 0
     )
 
+    # Certified appointments waiting - per Mike's exact definition
+    # (Solicited -> Contacted -> Booked -> Confirmed -> Waiting). A
+    # genuinely DIFFERENT count from bookings_last_7_days above: a
+    # booking can exist without confirmed_at set yet (booked but not
+    # yet confirmed is a real, distinct state in the pipeline) - this
+    # counts only bookings that have actually reached the final,
+    # certified state, regardless of how long ago they were booked.
+    certified_appointments_waiting = (
+        db.query(func.count(distinct(BookingLink.lead_id)))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            BookingLink.status == "booked",
+            BookingLink.confirmed_at.isnot(None),
+        )
+        .scalar()
+        or 0
+    )
+
     return {
         "replies_needing_attention": replies_needing_attention,
         "cadence_touches_due_today": cadence_touches_due_today,
         "leads_imported_last_24h": leads_imported_last_24h,
         "bookings_last_7_days": bookings_last_7_days,
+        "certified_appointments_waiting": certified_appointments_waiting,
     }
 
 

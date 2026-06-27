@@ -91,6 +91,7 @@ export default function Overview() {
   const maxFunnelCount = Math.max(1, ...statusFunnel.map((stage) => stage.count || 0))
 
   const briefingLines = dailyBriefing ? [
+    { key: 'certified', count: dailyBriefing.certified_appointments_waiting, text: `${dailyBriefing.certified_appointments_waiting} certified appointment${dailyBriefing.certified_appointments_waiting === 1 ? '' : 's'} waiting`, path: '/leads', accent: 'green' },
     { key: 'replies', count: dailyBriefing.replies_needing_attention, text: `${dailyBriefing.replies_needing_attention} ${dailyBriefing.replies_needing_attention === 1 ? 'reply needs' : 'replies need'} your attention`, path: '/replies?needs_attention=true', accent: 'red' },
     { key: 'cadence', count: dailyBriefing.cadence_touches_due_today, text: `${dailyBriefing.cadence_touches_due_today} cadence ${dailyBriefing.cadence_touches_due_today === 1 ? 'touch is' : 'touches are'} due today`, path: '/cadence', accent: 'blue' },
     { key: 'imports', count: dailyBriefing.leads_imported_last_24h, text: `${dailyBriefing.leads_imported_last_24h} ${dailyBriefing.leads_imported_last_24h === 1 ? 'lead was' : 'leads were'} imported in the last 24 hours`, path: '/leads', accent: 'green' },
