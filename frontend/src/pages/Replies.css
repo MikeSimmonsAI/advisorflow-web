@@ -1,10 +1,35 @@
-.hot-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
+.reply-scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.reply-scorecard-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: transform 0.12s ease;
+}
+
+.reply-scorecard-btn:hover {
+  transform: translateY(-1px);
+}
+
+.reply-scorecard-btn--active .stat-card {
+  outline: 2px solid var(--signal-blue);
+  outline-offset: 1px;
+}
+
+@media (max-width: 600px) {
+  .reply-scorecard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .reply-feed {

@@ -1,12 +1,27 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v1.1.** See SESSION_LOG_V1.1_MANUAL_LEAD_EDIT_OUTCOMES.md
-for the latest session's full changelog (manual single-lead entry, real
-editable Lead Detail with phone/email/notes and a working Save button,
-mandatory outcome selections on the 4 sellable items with 3 new optional
-context fields). Items 1-3 of a 7-item priority list - 4-7 still ahead.
-Prior version: v1.0, see SESSION_LOG_REPLY_TONE_SELECTOR.md (Suggest
-Reply tone selector — Soft, Standard, Urgent, Direct).
+**CURRENT VERSION: v1.4.** See SESSION_LOG_V1.4_CERTIFIED_APPOINTMENT_PIPELINE.md
+for the latest session's full changelog (the Certified Appointment
+pipeline — Solicited → Contacted → Booked → Confirmed → Waiting, a
+real auditable sequence of events, not a score; shown on Lead Detail
+with a "Mark confirmed" action). This is the universal, industry-
+agnostic foundation Mike wants future industry-specific features built
+on top of.
+
+Prior version: v1.3, see SESSION_LOG_V1.3_GOOGLE_CONTACTS_REFERRALS.md
+(automatic Google Contacts sync, and a real referral-lead system —
+adding a permission-to-access plus-one creates a genuine, separate
+Lead record with its own cadence and outcomes, not a notes field).
+**IMPORTANT: anyone who already connected Google Calendar needs to
+RECONNECT once to grant the new Contacts scope.**
+
+Prior version: v1.2, see SESSION_LOG_V1.2_ACTION_CENTER_TOGGLES_ROLES_TONE.md
+(Replies action center, feature toggle system, role descriptions, email
+tone control — completed the original 7-item priority list). Before
+that: v1.1, see SESSION_LOG_V1.1_MANUAL_LEAD_EDIT_OUTCOMES.md (manual
+lead entry, editable Lead Detail, mandatory outcomes). Before that:
+v1.0, see SESSION_LOG_REPLY_TONE_SELECTOR.md (Suggest Reply tone
+selector — Soft, Standard, Urgent, Direct).
 
 **IMPORTANT: auto-migrations are now permanent.** As of the account-
 management session, the app automatically adds any missing database

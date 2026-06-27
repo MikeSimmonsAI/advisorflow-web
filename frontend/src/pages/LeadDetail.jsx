@@ -4,6 +4,8 @@ import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
 import OutcomeTracker from '../components/OutcomeTracker'
+import ReferralPanel from '../components/ReferralPanel'
+import CertificationPanel from '../components/CertificationPanel'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
@@ -374,7 +376,9 @@ export default function LeadDetail() {
             </section>
           )}
 
+          <CertificationPanel leadId={leadId} />
           <OutcomeTracker leadId={leadId} />
+          <ReferralPanel leadId={leadId} />
 
           <section className="panel" style={{ marginBottom: 16 }}>
             <div className="panel-header">

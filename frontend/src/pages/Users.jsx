@@ -4,6 +4,29 @@ import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './Users.css'
 
+// Real, accurate role descriptions - confirmed directly against
+// app/deps.py's require_admin/require_super_admin and every place that
+// checks role in the backend, not written from a guess. Single source
+// of truth used by both role dropdowns and the reference panel below,
+// so the two can never drift out of sync with each other.
+const ROLE_INFO = {
+  advisor: {
+    label: 'Advisor',
+    short: 'Their own leads and day-to-day work',
+    full: 'Can see and work their own assigned leads — send messages, draft AI replies, record outcomes, see their own activity. Cannot see Users, Templates, Campaigns, Compliance, Reports, the Audit Log, or the Master Dashboard. Can be individually granted lead-import access and any feature flags below.',
+  },
+  org_admin: {
+    label: 'Org Admin',
+    short: 'Everything an Advisor can do, plus org-wide management',
+    full: 'Everything an Advisor can do, plus: manage Templates, run Campaigns, view org-wide Reports and the Audit Log, use Lead Cleanup, manage the Compliance suppression list, and see the Master Dashboard. Cannot create accounts, reset passwords, edit another user\u2019s account, or grant feature access \u2014 those are Super Admin only.',
+  },
+  super_admin: {
+    label: 'Super Admin',
+    short: 'Full account control, on top of everything an Org Admin can do',
+    full: 'Everything an Org Admin can do, plus full user-account control: create accounts, reset anyone\u2019s password, edit any user\u2019s name/email/role, and grant or revoke lead-import access and feature flags. A Super Admin\u2019s own role can never be changed by anyone, including themselves.',
+  },
+}
+
 export default function Users() {
   const navigate = useNavigate()
   const [users, setUsers] = useState([])
@@ -36,15 +59,24 @@ export default function Users() {
   const [editEmail, setEditEmail] = useState('')
   const [editRole, setEditRole] = useState('advisor')
   const [editCanImportLeads, setEditCanImportLeads] = useState(false)
+  const [editFeatureFlags, setEditFeatureFlags] = useState([])
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+
+  // Generic per-advisor feature toggle registry - rendered dynamically
+  // from the backend's KNOWN_FEATURE_FLAGS, not hardcoded here, so
+  // adding a new flag later needs zero frontend changes.
+  const [availableFlags, setAvailableFlags] = useState([])
 
   function load() {
     setLoading(true)
     api.get('/admin/users').then(setUsers).finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    api.get('/admin/feature-flags/available').then(setAvailableFlags).catch(() => setAvailableFlags([]))
+  }, [])
 
   async function handleCreate(e) {
     e.preventDefault()
@@ -128,7 +160,14 @@ export default function Users() {
     setEditEmail(u.email)
     setEditRole(u.role)
     setEditCanImportLeads(u.can_import_leads || false)
+    setEditFeatureFlags(u.feature_flags || [])
     setEditError('')
+  }
+
+  function toggleEditFeatureFlag(flagName) {
+    setEditFeatureFlags((current) =>
+      current.includes(flagName) ? current.filter((f) => f !== flagName) : [...current, flagName]
+    )
   }
 
   async function handleSaveUserEdit(userId) {
@@ -143,6 +182,7 @@ export default function Users() {
         // so editRole will already equal the unchanged role in that case.
         role: editRole,
         can_import_leads: editCanImportLeads,
+        feature_flags: editFeatureFlags,
       })
       setEditingUserId(null)
       load()
@@ -192,6 +232,18 @@ export default function Users() {
         </button>
       </header>
 
+      <details className="users-role-reference">
+        <summary>What do the roles mean?</summary>
+        <div className="users-role-reference-grid">
+          {Object.entries(ROLE_INFO).map(([key, info]) => (
+            <div key={key} className="users-role-reference-card">
+              <strong>{info.label}</strong>
+              <p>{info.full}</p>
+            </div>
+          ))}
+        </div>
+      </details>
+
       {justCreated && (
         <section className="panel users-created-banner">
           <div className="panel-header">
@@ -231,6 +283,7 @@ export default function Users() {
                 <option value="org_admin">Org Admin</option>
               </select>
             </label>
+            <p className="users-role-help">{ROLE_INFO[newRole]?.short}</p>
             <div className="users-password-choice">
               <label className="users-radio-label">
                 <input type="radio" checked={newPasswordMode === 'generate'} onChange={() => setNewPasswordMode('generate')} />
@@ -302,12 +355,15 @@ export default function Users() {
                         </td>
                         <td>
                           {u.role === 'super_admin' ? (
-                            <span style={{ textTransform: 'capitalize' }}>{u.role.replace('_', ' ')}</span>
+                            <span style={{ textTransform: 'capitalize' }} title={ROLE_INFO.super_admin.full}>
+                              {u.role.replace('_', ' ')}
+                            </span>
                           ) : (
                             <select
                               className="settings-input users-inline-input"
                               value={editRole}
                               onChange={(e) => setEditRole(e.target.value)}
+                              title={ROLE_INFO[editRole]?.full}
                             >
                               <option value="advisor">Advisor</option>
                               <option value="org_admin">Org Admin</option>
@@ -337,6 +393,21 @@ export default function Users() {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 6, flexDirection: 'column', alignItems: 'flex-start' }}>
+                            {availableFlags.length > 0 && (
+                              <div className="users-feature-flags-edit">
+                                <span className="users-feature-flags-label">Features</span>
+                                {availableFlags.map((flag) => (
+                                  <label key={flag.name} className="compose-checkbox" title={flag.description}>
+                                    <input
+                                      type="checkbox"
+                                      checked={editFeatureFlags.includes(flag.name)}
+                                      onChange={() => toggleEditFeatureFlag(flag.name)}
+                                    />
+                                    {flag.description || flag.name}
+                                  </label>
+                                ))}
+                              </div>
+                            )}
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="btn btn--secondary" onClick={() => setEditingUserId(null)} disabled={editSaving}>Cancel</button>
                               <button className="btn btn--primary" onClick={() => handleSaveUserEdit(u.id)} disabled={editSaving}>

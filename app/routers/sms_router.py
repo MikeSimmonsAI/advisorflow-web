@@ -344,10 +344,72 @@ def reply_activity_by_day(
     ]
 
 
+@router.get("/replies/counts")
+def reply_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Real bucket counts for the Replies action center - per Mike's
+    explicit complaint that the Replies page "should not just send me
+    back to the lead sheet... it should feel like an action center."
+
+    Deliberately a SEPARATE endpoint from list_replies below, not
+    derived from its result: list_replies caps at 200 rows, and these
+    counts need to reflect the advisor's TRUE totals regardless of how
+    many replies exist, not just whatever happened to be in the first
+    page. Buckets here are the ones with real, already-tracked data -
+    "Appointment interest" and "Objections" (also named in Mike's notes)
+    aren't real ReplyClassification values yet and were deliberately
+    NOT invented here; they're logged as a real future classification
+    project, not faked with a guess.
+
+    needs_follow_up = Interested or Callback that hasn't been reviewed
+    yet - the same definition list_replies' needs_attention=True filter
+    already uses, kept consistent rather than introducing a second
+    definition of "needs attention."
+    """
+    base_query = (
+        db.query(Reply)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(Lead.organization_id == current_user.organization_id)
+        .filter(Lead.assigned_to_id == current_user.id)
+    )
+
+    hot = base_query.filter(Reply.classification == ReplyClassification.INTERESTED).count()
+    callback = base_query.filter(Reply.classification == ReplyClassification.CALLBACK).count()
+    question = base_query.filter(Reply.classification == ReplyClassification.QUESTION).count()
+    not_interested = base_query.filter(Reply.classification == ReplyClassification.NOT_INTERESTED).count()
+    wrong_number = base_query.filter(Reply.classification == ReplyClassification.WRONG_NUMBER).count()
+    dnc = base_query.filter(Reply.classification == ReplyClassification.DNC).count()
+    neutral = base_query.filter(Reply.classification == ReplyClassification.NEUTRAL).count()
+
+    needs_follow_up = base_query.filter(
+        Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
+        Reply.reviewed_at.is_(None),
+    ).count()
+    reviewed = base_query.filter(Reply.reviewed_at.isnot(None)).count()
+    total = base_query.count()
+
+    return {
+        "hot": hot,
+        "callback": callback,
+        "question": question,
+        "not_interested": not_interested,
+        "wrong_number": wrong_number,
+        "dnc": dnc,
+        "neutral": neutral,
+        "needs_follow_up": needs_follow_up,
+        "reviewed": reviewed,
+        "total": total,
+    }
+
+
 @router.get("/replies")
 def list_replies(
     hot_only: bool = False,
     needs_attention: bool = False,
+    bucket: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -363,6 +425,14 @@ def list_replies(
     replies that don't need a human decision. This is the filtered
     inbox behind the notification bell and Overview page, distinct from
     the older hot_only flag (which only checks the binary is_hot field).
+
+    bucket is the action-center scorecard filter - clicking a card on
+    the Replies page passes its bucket name here, matching the exact
+    same bucket definitions reply_counts() above uses, so the numbers
+    on the cards always agree with what clicking through actually
+    shows. Kept separate from needs_attention/hot_only (both predate
+    this) rather than replacing them, since other callers (notification
+    bell, Overview) still use needs_attention directly.
     """
     from app.models.models import ReplyClassification
 
@@ -376,4 +446,26 @@ def list_replies(
         query = query.filter(Reply.is_hot == True)
     if needs_attention:
         query = query.filter(Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]))
+
+    bucket_to_classification = {
+        "hot": ReplyClassification.INTERESTED,
+        "callback": ReplyClassification.CALLBACK,
+        "question": ReplyClassification.QUESTION,
+        "not_interested": ReplyClassification.NOT_INTERESTED,
+        "wrong_number": ReplyClassification.WRONG_NUMBER,
+        "dnc": ReplyClassification.DNC,
+        "neutral": ReplyClassification.NEUTRAL,
+    }
+    if bucket in bucket_to_classification:
+        query = query.filter(Reply.classification == bucket_to_classification[bucket])
+    elif bucket == "needs_follow_up":
+        query = query.filter(
+            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
+            Reply.reviewed_at.is_(None),
+        )
+    elif bucket == "reviewed":
+        query = query.filter(Reply.reviewed_at.isnot(None))
+    elif bucket is not None:
+        raise HTTPException(status_code=400, detail=f"Unknown bucket: {bucket}")
+
     return query.order_by(Reply.received_at.desc()).limit(200).all()

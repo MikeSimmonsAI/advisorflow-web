@@ -11,6 +11,7 @@ from app.deps import get_db, require_admin
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry
 from app.services.auth_service import hash_password
 from app.services.dedup_service import normalize_phone, normalize_last_name, normalize_first_name, normalize_email
+from app.services.feature_flags_service import get_enabled_flags, set_feature_flags, KNOWN_FEATURE_FLAGS
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -461,6 +462,7 @@ class UserResponse(BaseModel):
     must_change_password: bool
     temp_password: str | None = None  # only populated once, right after creation
     can_import_leads: bool = False
+    feature_flags: list[str] = []
 
 
 def _generate_temp_password() -> str:
@@ -471,6 +473,19 @@ def _generate_temp_password() -> str:
     password.
     """
     return secrets.token_urlsafe(9) + "!1"
+
+
+@router.get("/feature-flags/available")
+def list_available_feature_flags(current_user: User = Depends(require_admin)):
+    """
+    Returns the real registry of known feature flags (name + description)
+    so the Users page can render toggle checkboxes dynamically, rather
+    than the frontend hardcoding a list that could drift out of sync
+    with KNOWN_FEATURE_FLAGS. Empty today - see feature_flags_service.py's
+    module docstring for why this registry starts empty rather than with
+    invented placeholder flags.
+    """
+    return [{"name": name, "description": desc} for name, desc in KNOWN_FEATURE_FLAGS.items()]
 
 
 @router.get("/users", response_model=list[UserResponse])
@@ -486,7 +501,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
         UserResponse(
             id=u.id, email=u.email, full_name=u.full_name, role=u.role,
             is_active=u.is_active, must_change_password=u.must_change_password,
-            can_import_leads=u.can_import_leads,
+            can_import_leads=u.can_import_leads, feature_flags=sorted(get_enabled_flags(u)),
         )
         for u in users
     ]
@@ -550,6 +565,7 @@ def create_user(
         must_change_password=new_user.must_change_password,
         temp_password=temp_password,
         can_import_leads=new_user.can_import_leads,
+        feature_flags=sorted(get_enabled_flags(new_user)),
     )
 
 
@@ -699,6 +715,7 @@ class UpdateUserRequest(BaseModel):
     email: EmailStr | None = None
     role: str | None = None  # 'advisor' or 'org_admin' only - see validation below
     can_import_leads: bool | None = None  # per-advisor override for the admin-only-by-default Excel import restriction
+    feature_flags: list[str] | None = None  # None = leave unchanged; a list (even []) replaces the full set - see feature_flags_service.py
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
@@ -709,10 +726,13 @@ def update_user(
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Edits an existing user's name, email, role, and/or lead-import
-    access. Fields omitted from the request are left unchanged - this
-    is a partial update, not a full replace, so the frontend doesn't
-    have to resend everything.
+    Edits an existing user's name, email, role, lead-import access,
+    and/or feature flags. Fields omitted from the request are left
+    unchanged - this is a partial update, not a full replace, so the
+    frontend doesn't have to resend everything. feature_flags is the
+    one exception worth calling out: when PROVIDED, it's a full
+    replace of the user's entire flag set, not an add/remove - see
+    feature_flags_service.set_feature_flags for why.
     """
     from fastapi import HTTPException
 
@@ -725,6 +745,7 @@ def update_user(
     before = {
         "full_name": target.full_name, "email": target.email, "role": target.role,
         "can_import_leads": target.can_import_leads,
+        "feature_flags": sorted(get_enabled_flags(target)),
     }
 
     if req.email is not None and req.email != target.email:
@@ -749,12 +770,19 @@ def update_user(
     if req.can_import_leads is not None:
         target.can_import_leads = req.can_import_leads
 
+    if req.feature_flags is not None:
+        try:
+            set_feature_flags(target, req.feature_flags)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     db.commit()
     db.refresh(target)
 
     after = {
         "full_name": target.full_name, "email": target.email, "role": target.role,
         "can_import_leads": target.can_import_leads,
+        "feature_flags": sorted(get_enabled_flags(target)),
     }
     changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
     if changed:
@@ -767,7 +795,7 @@ def update_user(
     return UserResponse(
         id=target.id, email=target.email, full_name=target.full_name, role=target.role,
         is_active=target.is_active, must_change_password=target.must_change_password,
-        can_import_leads=target.can_import_leads,
+        can_import_leads=target.can_import_leads, feature_flags=sorted(get_enabled_flags(target)),
     )
 
 

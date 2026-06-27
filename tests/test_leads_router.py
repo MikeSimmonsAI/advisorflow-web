@@ -672,3 +672,294 @@ def test_update_lead_details_partial_update_leaves_other_fields_unchanged(client
     assert response.status_code == 200
     assert response.json()["email"] == "original@example.com"
     assert response.json()["phone"] == "12145559709"
+
+
+# ---------------------------------------------------------------------------
+# Referral leads - per Mike's explicit, concrete scenario: "I'm dealing
+# with Deborah Brown and... she's now given me Lisa and Tom [via a
+# permission-to-access form]... I need to be able to send out some
+# messages to Lisa and Tom... I need to get them in for a pre-need
+# [conversation]." Lisa and Tom become REAL, separate Lead records
+# (their own cadence, replies, outcomes), not notes on Deborah's record.
+# ---------------------------------------------------------------------------
+
+def test_create_referral_creates_real_separate_lead(client, db_session, sample_org, sample_advisor, auth_headers):
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559100")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559101",
+        "relationship_type": "child", "tier": "pre_need",
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_name"] == "Lisa"
+    assert body["id"] != source_lead.id
+    assert body["tier"] == "pre_need"
+    assert body["source_file"] == "referral"
+
+    # Confirm it's a genuinely real, independently-queryable Lead row
+    referred_lead = db_session.query(Lead).filter(Lead.id == body["id"]).first()
+    assert referred_lead is not None
+    assert referred_lead.organization_id == sample_org.id
+
+
+def test_create_referral_records_the_link_with_correct_relationship(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import LeadReferral, RelationshipType
+
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559102")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Tom", "last_name": "Brown", "phone": "12145559103",
+        "relationship_type": "power_of_attorney",
+    }, headers=auth_headers)
+    referred_lead_id = response.json()["id"]
+
+    link = db_session.query(LeadReferral).filter(
+        LeadReferral.source_lead_id == source_lead.id, LeadReferral.referred_lead_id == referred_lead_id,
+    ).first()
+    assert link is not None
+    assert link.relationship_type == RelationshipType.POWER_OF_ATTORNEY
+
+
+def test_create_referral_uses_same_dedup_check_as_manual_entry(client, db_session, sample_org, sample_advisor, auth_headers):
+    """A referral lead matching an existing lead's phone must be caught as a duplicate, same as any other creation path."""
+    # Created via the real endpoint, not a bare Lead() row - check_and_register
+    # matches against ContactRegistry, which only gets populated by going
+    # through an actual creation path (manual/import/referral), not by
+    # inserting a Lead row directly and bypassing that registration step.
+    client.post("/leads/manual", json={
+        "first_name": "Lisa", "last_name": "Existing", "phone": "12145559104", "tier": "pre_need",
+    }, headers=auth_headers)
+
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559105")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Existing", "phone": "12145559104",
+        "relationship_type": "child",
+    }, headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["is_duplicate"] is True
+
+
+def test_create_referral_rejects_invalid_relationship_type(client, db_session, sample_org, sample_advisor, auth_headers):
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559106")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559107",
+        "relationship_type": "best_friend",
+    }, headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "relationship_type must be one of" in response.json()["detail"]
+
+
+def test_create_referral_404_for_source_lead_in_different_org(client, db_session, sample_org, auth_headers):
+    other_org = Organization(name="Other Referral Org", slug="other-referral-org", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other-referral@example.com",
+                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+    other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,
+                       first_name="Cross", last_name="OrgSource", phone="12145559108")
+    db_session.add(other_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{other_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559109", "relationship_type": "child",
+    }, headers=auth_headers)
+
+    assert response.status_code == 404
+
+
+def test_create_referral_logs_audit_action_with_source_lead_context(client, db_session, sample_org, sample_advisor, auth_headers):
+    from app.models.models import AuditLogEntry
+    import json
+
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559110")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559111", "relationship_type": "child",
+    }, headers=auth_headers)
+    referred_lead_id = response.json()["id"]
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "lead.create_referral", AuditLogEntry.target_id == referred_lead_id)
+        .first()
+    )
+    assert entry is not None
+    details = json.loads(entry.details)
+    assert details["source_lead_id"] == source_lead.id
+    assert details["relationship_type"] == "child"
+
+
+def test_list_referrals_shows_who_a_lead_referred(client, db_session, sample_org, sample_advisor, auth_headers):
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559112")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559113", "relationship_type": "child",
+    }, headers=auth_headers)
+    client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Tom", "last_name": "Brown", "phone": "12145559114", "relationship_type": "child",
+    }, headers=auth_headers)
+
+    response = client.get(f"/leads/{source_lead.id}/referrals", headers=auth_headers)
+
+    assert response.status_code == 200
+    names = {r["first_name"] for r in response.json()["referred"]}
+    assert names == {"Lisa", "Tom"}
+    assert response.json()["referred_by"] is None
+
+
+def test_list_referrals_shows_who_referred_a_lead(client, db_session, sample_org, sample_advisor, auth_headers):
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559115")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    referral_response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559116", "relationship_type": "child",
+    }, headers=auth_headers)
+    referred_lead_id = referral_response.json()["id"]
+
+    response = client.get(f"/leads/{referred_lead_id}/referrals", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["referred_by"]["first_name"] == "Deborah"
+    assert response.json()["referred_by"]["relationship_type"] == "child"
+    assert response.json()["referred"] == []
+
+
+def test_referral_lead_is_independently_eligible_for_cadence(client, db_session, sample_org, sample_advisor, auth_headers):
+    """Confirms the referred lead is a genuinely normal, full Lead row - not a restricted/special type."""
+    from app.models.models import LeadStatus
+    source_lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                        first_name="Deborah", last_name="Brown", phone="12145559117")
+    db_session.add(source_lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{source_lead.id}/referrals", json={
+        "first_name": "Lisa", "last_name": "Brown", "phone": "12145559118", "relationship_type": "child",
+    }, headers=auth_headers)
+    referred_lead = db_session.query(Lead).filter(Lead.id == response.json()["id"]).first()
+
+    assert referred_lead.status == LeadStatus.NEW
+    assert referred_lead.message_track is not None
+    assert referred_lead.assigned_to_id == sample_advisor.id
+
+
+# ---------------------------------------------------------------------------
+# Certified Appointment pipeline endpoints - Mike's exact definition:
+# "we've already solicited. We had to contact them. They booked the
+# appointment. We confirmed. Now we're just waiting for them to come
+# in." Real, auditable sequence of events, not a score.
+# ---------------------------------------------------------------------------
+
+def test_get_certification_returns_real_status(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Cert", last_name="Endpoint", phone="12145559300")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.get(f"/leads/{lead.id}/certification", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["current_step"] is None
+    assert response.json()["is_certified"] is False
+
+
+def test_get_certification_404_for_lead_in_different_org(client, db_session, sample_org, auth_headers):
+    other_org = Organization(name="Other Cert Org", slug="other-cert-org", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+    other_advisor = User(organization_id=other_org.id, email="other-cert@example.com",
+                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+    db_session.add(other_advisor)
+    db_session.commit()
+    other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,
+                       first_name="Cross", last_name="Org", phone="12145559301")
+    db_session.add(other_lead)
+    db_session.commit()
+
+    response = client.get(f"/leads/{other_lead.id}/certification", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_confirm_appointment_endpoint_requires_a_real_booking(client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="NoBooking", last_name="Yet", phone="12145559302")
+    db_session.add(lead)
+    db_session.commit()
+
+    response = client.post(f"/leads/{lead.id}/certification/confirm", headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "no booked appointment" in response.json()["detail"]
+
+
+def test_confirm_appointment_endpoint_advances_to_waiting(client, db_session, sample_org, sample_advisor, auth_headers):
+    from datetime import datetime, timezone
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="ReadyToConfirm", last_name="Test", phone="12145559303")
+    db_session.add(lead)
+    db_session.flush()
+    db_session.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Hi"))
+    db_session.add(Reply(lead_id=lead.id, body="Yes"))
+    db_session.add(BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
+                                booked_time=datetime.now(timezone.utc)))
+    db_session.commit()
+
+    before = client.get(f"/leads/{lead.id}/certification", headers=auth_headers)
+    assert before.json()["current_step"] == "booked"
+
+    response = client.post(f"/leads/{lead.id}/certification/confirm", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["current_step"] == "waiting"
+    assert response.json()["is_certified"] is True
+
+
+def test_confirm_appointment_logs_audit_action(client, db_session, sample_org, sample_advisor, auth_headers):
+    from datetime import datetime, timezone
+    from app.models.models import AuditLogEntry
+
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="AuditCert", last_name="Test", phone="12145559304")
+    db_session.add(lead)
+    db_session.flush()
+    booking = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
+                           booked_time=datetime.now(timezone.utc))
+    db_session.add(booking)
+    db_session.commit()
+
+    client.post(f"/leads/{lead.id}/certification/confirm", headers=auth_headers)
+
+    entry = (
+        db_session.query(AuditLogEntry)
+        .filter(AuditLogEntry.organization_id == sample_org.id, AuditLogEntry.action == "lead.confirm_appointment", AuditLogEntry.target_id == lead.id)
+        .first()
+    )
+    assert entry is not None

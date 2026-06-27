@@ -35,7 +35,12 @@ from app.utils.crypto import encrypt_value, decrypt_value
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "https://<your-domain>/calendar/oauth/callback")
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+
+# Imported from google_contacts_service.py, not duplicated - that module
+# is the single source of truth for what scopes get requested, since
+# adding Google Contacts sync is the reason this list grew from
+# Calendar-only to Calendar+Contacts. One Connect flow now grants both.
+from app.services.google_contacts_service import SCOPES
 
 DEFAULT_APPOINTMENT_DURATION_MINUTES = 30
 

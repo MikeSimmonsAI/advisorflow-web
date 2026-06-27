@@ -336,6 +336,22 @@ def import_leads_from_excel(
     else:
         db.commit()
 
+        # Automatic Google Contacts sync - per Mike's explicit request:
+        # "if I upload a spreadsheet, those contacts need to be able to
+        # go into Google Contacts too," with no separate review step.
+        # Deliberately wrapped in its own try/except even though
+        # sync_leads_to_google_contacts_batch already never raises
+        # internally - this import function's job is importing leads,
+        # and a Google API client failing to even initialize (e.g. a
+        # config issue) must never be allowed to surface as an import
+        # failure after the leads were already successfully committed
+        # above.
+        try:
+            from app.services.google_contacts_service import sync_leads_to_google_contacts_batch
+            sync_leads_to_google_contacts_batch(db, created_leads)
+        except Exception:
+            pass
+
     return {
         "total_rows": len(rows),
         "imported": len(created_leads),

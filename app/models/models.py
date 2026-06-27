@@ -42,6 +42,22 @@ class LeadTier(str, enum.Enum):
     NEW_INQUIRY = "new_inquiry"  # brand-new web/cold lead, no prior relationship with Restland
 
 
+class RelationshipType(str, enum.Enum):
+    """
+    How a referral lead relates to the lead who referred them - per
+    Mike's explicit, concrete scenario: "I'm dealing with Deborah Brown
+    and... she's now given me Lisa and Tom... I need to be able to send
+    out some messages to Lisa and Tom." Confirmed list, not invented.
+    """
+    SPOUSE = "spouse"
+    CHILD = "child"
+    PARENT = "parent"
+    SIBLING = "sibling"
+    DECISION_MAKER = "decision_maker"
+    POWER_OF_ATTORNEY = "power_of_attorney"
+    OTHER_FAMILY = "other_family"
+
+
 class ReplyClassification(str, enum.Enum):
     """
     Richer reply categorization than the old binary is_hot flag - matches
@@ -194,6 +210,26 @@ class User(Base):
     # import access; an admin has to deliberately flip this per person.
     can_import_leads = Column(Boolean, default=False)
 
+    # Generic per-advisor feature toggle system - per Mike's explicit
+    # request for "the ability to add features to that particular
+    # account or not" without it being all-or-nothing by role. Stores a
+    # comma-separated list of enabled flag NAMES (validated against
+    # KNOWN_FEATURE_FLAGS below, never arbitrary free text - see
+    # feature_flags.py for the full reasoning on why this is the
+    # "bulletproof" option Mike specifically asked for over a fully
+    # freeform/configurable system).
+    #
+    # DELIBERATELY NOT used for can_import_leads above, which keeps its
+    # own dedicated column: that permission controls something with
+    # real weight (bulk data import) and already has its own tested,
+    # working, directly-queryable implementation - folding it into a
+    # generic string list would only make it harder to reason about for
+    # zero benefit. This generic system is for SMALLER, lower-stakes
+    # feature gates - early access to a new view, an experimental
+    # feature - where a dedicated column per toggle would get tedious
+    # once there are several.
+    feature_flags = Column(Text, nullable=True)  # comma-separated flag names, e.g. "early_access_reports,beta_dashboard"
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 
@@ -252,6 +288,7 @@ class Lead(Base):
     status = Column(SAEnum(LeadStatus), default=LeadStatus.NEW)
     source_year = Column(Integer, nullable=True)  # e.g. 2012, 2013 (which cohort batch)
     source_file = Column(String, nullable=True)  # original upload filename for traceability
+    google_contact_resource_name = Column(String, nullable=True)  # set once this lead has been synced to the assigned advisor's Google Contacts - presence of a value means "already synced," used to avoid creating duplicate contacts
 
     # CRM history carried over from import - feeds the AI lead-quality analysis
     # Mike requested (last action taken + last contact date + original status
@@ -304,6 +341,40 @@ class Message(Base):
 
 
 # ---------------------------------------------------------------------------
+# LeadReferral - referral/permission-to-access lead generation
+#
+# Per Mike's explicit, concrete scenario, not a vague "next of kin"
+# field: "I'm dealing with Deborah Brown and... she's now given me Lisa
+# and Tom [through a permission-to-access form]... I need to be able to
+# send out some messages to Lisa and Tom so that they know I'm dealing
+# with [Deborah] and I need to get them in for pre-need." Lisa and Tom
+# are not notes on Deborah's record - they become REAL, separate Lead
+# rows (their own cadence, replies, outcomes, the works), each
+# permanently linked back to the lead who referred them.
+#
+# This table is the link, not a duplicate of contact info that already
+# lives on the new Lead row - referred_lead_id IS the new Lead (Lisa's
+# own real record), this table just remembers WHO referred them and
+# HOW they're related, so both Deborah's page ("Referred: Lisa, Tom")
+# and Lisa's page ("Referred by: Deborah") can show that context.
+# ---------------------------------------------------------------------------
+class LeadReferral(Base):
+    __tablename__ = "lead_referrals"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    source_lead_id = Column(String, ForeignKey("leads.id"), nullable=False)  # Deborah
+    referred_lead_id = Column(String, ForeignKey("leads.id"), nullable=False)  # Lisa's own real Lead record
+    relationship_type = Column(SAEnum(RelationshipType), nullable=False)
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=False)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    source_lead = relationship("Lead", foreign_keys=[source_lead_id])
+    referred_lead = relationship("Lead", foreign_keys=[referred_lead_id])
+
+
+# ---------------------------------------------------------------------------
 # Reply - inbound SMS log
 # ---------------------------------------------------------------------------
 class Reply(Base):
@@ -341,6 +412,22 @@ class BookingLink(Base):
     status = Column(String, default="pending")  # pending, booked, expired, cancelled
     booked_time = Column(DateTime, nullable=True)
     calendar_event_id = Column(String, nullable=True)  # Google Calendar event ID once synced
+
+    # Certified Appointment pipeline - per Mike's explicit, concrete
+    # definition: "Solicited, Contacted, Booked, Confirmed, Waiting."
+    # Confirmed is a DELIBERATE, separate step after booking - "we
+    # confirm: if they say yes, I'm still good, that's confirmed" - not
+    # automatically inferred from the booking itself. Deliberately
+    # additive (a new field here), NOT a new LeadStatus value: real,
+    # existing logic in cadence_service.py, engagement_service.py, and
+    # workqueue_router.py all check for LeadStatus.BOOKED specifically -
+    # replacing BOOKED with a CONFIRMED status once confirmation
+    # happened would have silently broken every one of those checks.
+    # confirmed_at is None until someone (advisor or an automated
+    # confirmation message flow, in a later session) explicitly marks
+    # it - see certification_service.py for how this combines with
+    # Solicited/Contacted/Booked into the overall certified status.
+    confirmed_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)

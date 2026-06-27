@@ -126,6 +126,114 @@ def confirm_upload(
     return result
 
 
+def _create_lead_core(
+    db: Session,
+    organization_id: str,
+    current_user: User,
+    first_name: str,
+    last_name: str,
+    phone: str | None,
+    email: str | None,
+    tier: str,
+    notes: str | None,
+    assigned_to_id: str | None,
+    source_file: str,
+) -> Lead:
+    """
+    The shared core of manual lead creation - extracted so
+    create_lead_manually and the referral endpoint
+    (create_referral_lead, see below) both go through the EXACT same
+    dedup registry check and tier-to-track mapping, rather than one of
+    them reimplementing this logic separately and risking drift between
+    the two. source_file distinguishes the two callers in the audit
+    trail/lead history ("manual_entry" vs "referral") without changing
+    any of the actual creation logic itself.
+
+    Does NOT call log_action, sync to Google Contacts, or do the final
+    db.refresh() - those stay in each caller, since create_lead_manually
+    logs a different action name than the referral endpoint will, and
+    the referral endpoint needs to create the LeadReferral link row
+    before its own final refresh/return.
+    """
+    if not first_name.strip() or not last_name.strip():
+        raise HTTPException(status_code=400, detail="First and last name are required.")
+    if not phone and not email:
+        raise HTTPException(status_code=400, detail="A phone number or email address is required.")
+
+    from app.models.models import LeadTier, MessageTrack
+    from app.services.import_service import TIER_TO_TRACK
+    from app.services.dedup_service import check_and_register, normalize_phone
+
+    manual_entry_tiers = {"pre_need", "at_need", "imminent", "contract_sold", "new_inquiry"}
+    if tier not in manual_entry_tiers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tier must be one of: {', '.join(sorted(manual_entry_tiers))}",
+        )
+    tier_enum = LeadTier(tier)
+
+    resolved_assigned_to_id = assigned_to_id or current_user.id
+    if resolved_assigned_to_id != current_user.id:
+        target_advisor = db.query(User).filter(
+            User.id == resolved_assigned_to_id, User.organization_id == organization_id
+        ).first()
+        if not target_advisor:
+            raise HTTPException(status_code=404, detail="The advisor you're assigning this lead to was not found.")
+
+    norm_phone = normalize_phone(phone) if phone else None
+    contact_channel = "sms" if norm_phone else "email_only"
+
+    is_duplicate = False
+    duplicate_of_lead_id = None
+    if norm_phone:
+        is_duplicate, registry_entry = check_and_register(
+            db, organization_id, phone, last_name,
+            lead_id=None,
+            user_id=current_user.id,
+        )
+        if is_duplicate and registry_entry:
+            duplicate_of_lead_id = registry_entry.first_seen_lead_id
+
+    lead = Lead(
+        organization_id=organization_id,
+        assigned_to_id=resolved_assigned_to_id,
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
+        phone=norm_phone,
+        phone_raw=phone,
+        email=email.strip() if email else None,
+        tier=tier_enum,
+        message_track=TIER_TO_TRACK.get(tier_enum, MessageTrack.NEEDS_REVIEW),
+        contact_channel=contact_channel,
+        status=LeadStatus.NEW,
+        notes=notes,
+        is_duplicate=is_duplicate,
+        duplicate_of_lead_id=duplicate_of_lead_id,
+        source_file=source_file,
+    )
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+
+    if norm_phone and not is_duplicate:
+        from app.models.models import ContactRegistry
+        fresh_entry = (
+            db.query(ContactRegistry)
+            .filter(
+                ContactRegistry.organization_id == organization_id,
+                ContactRegistry.normalized_phone == norm_phone,
+                ContactRegistry.first_seen_lead_id.is_(None),
+            )
+            .order_by(ContactRegistry.id.desc())
+            .first()
+        )
+        if fresh_entry:
+            fresh_entry.first_seen_lead_id = lead.id
+            db.commit()
+
+    return lead
+
+
 class CreateLeadRequest(BaseModel):
     first_name: str
     last_name: str
@@ -149,13 +257,8 @@ def create_lead_manually(
     way a lead entered AdvisorFlow at all was an Excel upload, which makes
     no sense for a single walk-in or phone call.
 
-    Deliberately reuses the SAME dedup registry check (check_and_register)
-    and the SAME tier-to-track mapping (TIER_TO_TRACK) that the real
-    Excel import uses - not a separate, simplified version of that logic.
-    A manually-entered lead gets identical duplicate protection and the
-    identical message track assignment as one that came in through a
-    spreadsheet; there is no reason for those two paths to diverge or for
-    this endpoint to reimplement rules that already exist and are tested.
+    Core creation logic lives in _create_lead_core above, shared with
+    the referral endpoint below - see that function's docstring for why.
 
     tier is a plain string here (not every LeadTier value) restricted to
     the ones an advisor would actually choose by hand for someone they
@@ -164,97 +267,28 @@ def create_lead_manually(
     advisor manually picks; that distinction matters even though those
     enum values still technically exist on the Lead model.
     """
-    if not req.first_name.strip() or not req.last_name.strip():
-        raise HTTPException(status_code=400, detail="First and last name are required.")
-    if not req.phone and not req.email:
-        raise HTTPException(status_code=400, detail="A phone number or email address is required.")
-
-    from app.models.models import LeadTier, MessageTrack
-    from app.services.import_service import TIER_TO_TRACK
-    from app.services.dedup_service import check_and_register, normalize_phone
-
-    manual_entry_tiers = {"pre_need", "at_need", "imminent", "contract_sold", "new_inquiry"}
-    if req.tier not in manual_entry_tiers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"tier must be one of: {', '.join(sorted(manual_entry_tiers))}",
-        )
-    tier_enum = LeadTier(req.tier)
-
-    assigned_to_id = req.assigned_to_id or current_user.id
-    if assigned_to_id != current_user.id:
-        # Assigning to someone else requires confirming that user exists
-        # in the SAME org - prevents accidentally (or maliciously)
-        # assigning a lead to a user ID from a different organization.
-        target_advisor = db.query(User).filter(
-            User.id == assigned_to_id, User.organization_id == current_user.organization_id
-        ).first()
-        if not target_advisor:
-            raise HTTPException(status_code=404, detail="The advisor you're assigning this lead to was not found.")
-
-    norm_phone = normalize_phone(req.phone) if req.phone else None
-    contact_channel = "sms" if norm_phone else "email_only"
-
-    is_duplicate = False
-    duplicate_of_lead_id = None
-    if norm_phone:
-        is_duplicate, registry_entry = check_and_register(
-            db, current_user.organization_id, req.phone, req.last_name,
-            lead_id=None,  # filled in below once we have a real lead.id - see note after insert
-            user_id=current_user.id,
-        )
-        if is_duplicate and registry_entry:
-            duplicate_of_lead_id = registry_entry.first_seen_lead_id
-
-    lead = Lead(
-        organization_id=current_user.organization_id,
-        assigned_to_id=assigned_to_id,
-        first_name=req.first_name.strip(),
-        last_name=req.last_name.strip(),
-        phone=norm_phone,
-        phone_raw=req.phone,
-        email=req.email.strip() if req.email else None,
-        tier=tier_enum,
-        message_track=TIER_TO_TRACK.get(tier_enum, MessageTrack.NEEDS_REVIEW),
-        contact_channel=contact_channel,
-        status=LeadStatus.NEW,
-        notes=req.notes,
-        is_duplicate=is_duplicate,
-        duplicate_of_lead_id=duplicate_of_lead_id,
-        source_file="manual_entry",
+    lead = _create_lead_core(
+        db, current_user.organization_id, current_user,
+        req.first_name, req.last_name, req.phone, req.email, req.tier, req.notes,
+        req.assigned_to_id, source_file="manual_entry",
     )
-    db.add(lead)
-    db.commit()
-    db.refresh(lead)
-
-    # check_and_register needs a real lead_id for first_seen_lead_id when
-    # it creates a brand-new registry entry, but that id doesn't exist
-    # until after the insert above - this is the one piece that can't be
-    # fully reused from the batch import path as-is (which has the same
-    # ordering problem, solved there by committing leads individually
-    # inside the loop before registering). Backfill it now for the
-    # not-a-duplicate case, where a fresh entry was just created.
-    if norm_phone and not is_duplicate:
-        from app.models.models import ContactRegistry
-        fresh_entry = (
-            db.query(ContactRegistry)
-            .filter(
-                ContactRegistry.organization_id == current_user.organization_id,
-                ContactRegistry.normalized_phone == norm_phone,
-                ContactRegistry.first_seen_lead_id.is_(None),
-            )
-            .order_by(ContactRegistry.id.desc())
-            .first()
-        )
-        if fresh_entry:
-            fresh_entry.first_seen_lead_id = lead.id
-            db.commit()
 
     log_action(
         db, current_user.organization_id, current_user.id,
         action="lead.create_manual", target_type="lead", target_id=lead.id,
-        details={"tier": req.tier, "is_duplicate": is_duplicate},
+        details={"tier": req.tier, "is_duplicate": lead.is_duplicate},
     )
+
+    # Automatic Google Contacts sync - same as the Excel import path,
+    # per Mike's explicit request that this happen automatically, no
+    # separate review step. Wrapped defensively even though the sync
+    # function itself never raises internally - see import_service.py's
+    # equivalent hook for the full reasoning.
+    try:
+        from app.services.google_contacts_service import sync_lead_to_google_contacts
+        sync_lead_to_google_contacts(db, lead)
+    except Exception:
+        pass
 
     # IMPORTANT: db.refresh() must be the LAST thing before return, after
     # every commit in this function - not just after the insert commit
@@ -272,6 +306,229 @@ def create_lead_manually(
     # never against response.json() itself.
     db.refresh(lead)
     return lead
+
+
+class CreateReferralRequest(BaseModel):
+    first_name: str
+    last_name: str
+    phone: str | None = None
+    email: str | None = None
+    relationship_type: str
+    tier: str = "pre_need"
+    notes: str | None = None
+    assigned_to_id: str | None = None  # defaults to the creating advisor if omitted
+
+
+@router.post("/{lead_id}/referrals")
+def create_referral_lead(
+    lead_id: str,
+    req: CreateReferralRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Creates a REAL, separate Lead record for someone referred by an
+    existing lead - per Mike's explicit, concrete scenario: "I'm
+    dealing with Deborah Brown and... she's now given me Lisa and Tom
+    [via a permission-to-access form]... I need to be able to send out
+    some messages to Lisa and Tom... I need to get them in for a
+    pre-need [conversation]."
+
+    This is deliberately NOT a notes field or a sub-record attached to
+    Deborah's lead - Lisa gets her own full Lead row, eligible for the
+    exact same cadence, replies, and outcome tracking as any other
+    lead, going through the exact same dedup check and tier-to-track
+    mapping (_create_lead_core, shared with create_lead_manually
+    above). The LeadReferral row created here is purely the link
+    remembering WHO referred Lisa and HOW they're related - it never
+    duplicates contact info that already lives on Lisa's own Lead
+    record.
+
+    The source lead (Deborah) must belong to the current user's org;
+    no further ownership check beyond that - any advisor in the org can
+    record a referral from any lead, the same scope as set_lead_tier,
+    since this is fundamentally a data-entry action, not a sensitive
+    edit to someone else's personal contact info.
+    """
+    from app.models.models import RelationshipType, LeadReferral
+
+    source_lead = db.query(Lead).filter(
+        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
+    ).first()
+    if not source_lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    try:
+        relationship_enum = RelationshipType(req.relationship_type)
+    except ValueError:
+        valid = ", ".join(r.value for r in RelationshipType)
+        raise HTTPException(status_code=400, detail=f"relationship_type must be one of: {valid}")
+
+    referred_lead = _create_lead_core(
+        db, current_user.organization_id, current_user,
+        req.first_name, req.last_name, req.phone, req.email, req.tier, req.notes,
+        req.assigned_to_id, source_file="referral",
+    )
+
+    referral = LeadReferral(
+        source_lead_id=source_lead.id,
+        referred_lead_id=referred_lead.id,
+        relationship_type=relationship_enum,
+        created_by_id=current_user.id,
+        notes=req.notes,
+    )
+    db.add(referral)
+    db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="lead.create_referral", target_type="lead", target_id=referred_lead.id,
+        details={
+            "source_lead_id": source_lead.id,
+            "source_lead_name": f"{source_lead.first_name} {source_lead.last_name}",
+            "relationship_type": req.relationship_type,
+            "is_duplicate": referred_lead.is_duplicate,
+        },
+    )
+
+    try:
+        from app.services.google_contacts_service import sync_lead_to_google_contacts
+        sync_lead_to_google_contacts(db, referred_lead)
+    except Exception:
+        pass
+
+    # Same root-cause fix as every other bare-object return in this
+    # file: db.refresh() must be the genuinely last thing before return,
+    # after the LeadReferral commit above too, not just the lead
+    # creation's own internal commits.
+    db.refresh(referred_lead)
+    return referred_lead
+
+
+@router.get("/{lead_id}/referrals")
+def list_referrals_for_lead(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns both directions of referral relationships for a lead -
+    people THIS lead referred (source_lead_id == lead_id), and who
+    referred THIS lead, if anyone (referred_lead_id == lead_id). A
+    lead detail page needs both: Deborah's page shows "Referred: Lisa,
+    Tom"; Lisa's page shows "Referred by: Deborah" - same underlying
+    LeadReferral rows, just queried from each side.
+    """
+    from app.models.models import LeadReferral
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    referred_by_this_lead = (
+        db.query(LeadReferral, Lead)
+        .join(Lead, LeadReferral.referred_lead_id == Lead.id)
+        .filter(LeadReferral.source_lead_id == lead_id)
+        .all()
+    )
+    referred_from = (
+        db.query(LeadReferral, Lead)
+        .join(Lead, LeadReferral.source_lead_id == Lead.id)
+        .filter(LeadReferral.referred_lead_id == lead_id)
+        .first()
+    )
+
+    return {
+        "referred": [
+            {
+                "referral_id": referral.id,
+                "lead_id": referred_lead.id,
+                "first_name": referred_lead.first_name,
+                "last_name": referred_lead.last_name,
+                "relationship_type": referral.relationship_type.value,
+                "phone": referred_lead.phone,
+                "email": referred_lead.email,
+                "status": referred_lead.status.value if referred_lead.status else None,
+            }
+            for referral, referred_lead in referred_by_this_lead
+        ],
+        "referred_by": (
+            {
+                "referral_id": referred_from[0].id,
+                "lead_id": referred_from[1].id,
+                "first_name": referred_from[1].first_name,
+                "last_name": referred_from[1].last_name,
+                "relationship_type": referred_from[0].relationship_type.value,
+            }
+            if referred_from else None
+        ),
+    }
+
+
+@router.get("/{lead_id}/certification")
+def get_lead_certification(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns this lead's position in the Certified Appointment pipeline
+    - Solicited -> Contacted -> Booked -> Confirmed -> Waiting. Per
+    Mike's explicit, direct definition (see certification_service.py
+    for the full reasoning) - this is a real, auditable sequence of
+    events, not an AI-judged score.
+    """
+    from app.services.certification_service import get_certification_status
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    return get_certification_status(db, lead)
+
+
+@router.post("/{lead_id}/certification/confirm")
+def confirm_lead_appointment(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Marks this lead's currently-booked appointment as confirmed - the
+    deliberate, separate action Mike described, not something inferred
+    automatically from booking alone.
+    """
+    from app.services.certification_service import confirm_appointment
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    booking = (
+        db.query(BookingLink)
+        .filter(BookingLink.lead_id == lead.id, BookingLink.status == "booked")
+        .order_by(BookingLink.booked_time.desc())
+        .first()
+    )
+    if not booking:
+        raise HTTPException(status_code=400, detail="This lead has no booked appointment to confirm.")
+
+    confirm_appointment(db, booking)
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="lead.confirm_appointment", target_type="lead", target_id=lead.id,
+        details={"booking_link_id": booking.id},
+    )
+
+    from app.services.certification_service import get_certification_status
+    return get_certification_status(db, lead)
 
 
 @router.get("/")

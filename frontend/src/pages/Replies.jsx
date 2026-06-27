@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import SignalPulse from '../components/SignalPulse'
+import StatCard from '../components/StatCard'
 import '../styles/shared.css'
 import './Replies.css'
 
@@ -25,32 +25,57 @@ const CLASSIFICATION_OPTIONS = [
   { value: 'dnc', label: 'DNC' },
 ]
 
+// Action-center scorecards - per Mike's explicit request that Replies
+// "should not just send me back to the lead sheet... it should feel
+// like an action center, not just a message list." Each card's `key`
+// matches exactly the field names from GET /sms/replies/counts and the
+// bucket= values GET /sms/replies accepts, so clicking a card and the
+// number it shows always agree with each other.
+const BUCKET_CARDS = [
+  { key: 'needs_follow_up', label: 'Needs follow-up', accent: 'red' },
+  { key: 'hot', label: 'Hot replies', accent: 'green' },
+  { key: 'callback', label: 'Callbacks', accent: 'blue' },
+  { key: 'question', label: 'Questions', accent: 'purple' },
+  { key: 'not_interested', label: 'Not interested', accent: 'amber' },
+  { key: 'dnc', label: 'DNC / stop', accent: 'red' },
+  { key: 'reviewed', label: 'Reviewed', accent: 'neutral' },
+]
+
 export default function Replies() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [replies, setReplies] = useState([])
-  // needs_attention replaces the old hot_only flag as the default filter -
-  // Mike's specific request: "only hand me a hot lead when I'm ready to
-  // book", meaning Interested + Callback only, not every reply.
-  const [needsAttentionOnly, setNeedsAttentionOnly] = useState(
+  const [counts, setCounts] = useState(null)
+  // activeBucket replaces the old single needs_attention checkbox as the
+  // way to filter - null means "show everything," matching the
+  // pre-existing default behavior exactly.
+  const [activeBucket, setActiveBucket] = useState(
     searchParams.get('needs_attention') === 'true' || searchParams.get('hot_only') === 'true'
+      ? 'needs_follow_up'
+      : null
   )
   const [loading, setLoading] = useState(true)
   const [actionBusyId, setActionBusyId] = useState(null)
   const [error, setError] = useState('')
 
+  function loadCounts() {
+    api.get('/sms/replies/counts').then(setCounts).catch(() => {})
+  }
+
   function loadReplies() {
     setLoading(true)
     setError('')
-    api.get(`/sms/replies${needsAttentionOnly ? '?needs_attention=true' : ''}`)
+    const query = activeBucket ? `?bucket=${activeBucket}` : ''
+    api.get(`/sms/replies${query}`)
       .then(setReplies)
       .catch((err) => setError(err.message || 'Could not load replies.'))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
+    loadCounts()
     loadReplies()
-  }, [needsAttentionOnly])
+  }, [activeBucket])
 
   function updateReplyInState(updatedReply) {
     setReplies((current) =>
@@ -64,6 +89,7 @@ export default function Replies() {
     try {
       const updatedReply = await api.patch(`/sms/replies/${replyId}/mark-reviewed`, {})
       updateReplyInState(updatedReply)
+      loadCounts() // the reviewed/needs-follow-up counts just changed
     } catch (err) {
       setError(err.message || 'Could not mark reply reviewed.')
     } finally {
@@ -77,6 +103,7 @@ export default function Replies() {
     try {
       const updatedReply = await api.patch(`/sms/replies/${replyId}/reclassify`, { classification })
       updateReplyInState(updatedReply)
+      loadCounts() // bucket counts just shifted
     } catch (err) {
       setError(err.message || 'Could not reclassify reply.')
     } finally {
@@ -92,18 +119,40 @@ export default function Replies() {
     reclassify(replyId, 'dnc')
   }
 
+  function toggleBucket(key) {
+    setActiveBucket((current) => (current === key ? null : key))
+  }
+
+  const activeBucketLabel = BUCKET_CARDS.find((c) => c.key === activeBucket)?.label
+
   return (
     <div>
       <header className="page-header">
         <div>
           <h1 className="page-title">Replies</h1>
-          <p className="page-subtitle">Every reply from your leads, newest first.</p>
+          <p className="page-subtitle">
+            {activeBucketLabel ? `Showing: ${activeBucketLabel}` : 'Every reply from your leads, newest first.'}
+          </p>
         </div>
-        <label className="hot-toggle">
-          <input type="checkbox" checked={needsAttentionOnly} onChange={(e) => setNeedsAttentionOnly(e.target.checked)} />
-          Needs attention only
-        </label>
+        {activeBucket && (
+          <button className="btn btn--secondary" onClick={() => setActiveBucket(null)}>
+            Clear filter
+          </button>
+        )}
       </header>
+
+      <div className="reply-scorecard-grid">
+        {BUCKET_CARDS.map((card) => (
+          <button
+            key={card.key}
+            type="button"
+            className={`reply-scorecard-btn ${activeBucket === card.key ? 'reply-scorecard-btn--active' : ''}`}
+            onClick={() => toggleBucket(card.key)}
+          >
+            <StatCard label={card.label} value={counts ? counts[card.key] : '—'} accent={card.accent} />
+          </button>
+        ))}
+      </div>
 
       {error && <div className="panel reply-error">{error}</div>}
 
@@ -112,8 +161,8 @@ export default function Replies() {
           <div className="empty-state">Loading replies…</div>
         ) : replies.length === 0 ? (
           <div className="empty-state">
-            {needsAttentionOnly
-              ? "Nothing needs your attention right now — hot leads and callback requests will show up here."
+            {activeBucket
+              ? `Nothing in "${activeBucketLabel}" right now.`
               : "No replies yet. Once a lead responds, it'll land here."}
           </div>
         ) : (

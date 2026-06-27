@@ -770,3 +770,112 @@ def test_list_users_includes_can_import_leads_field(client, db_session, sample_o
     assert response.status_code == 200
     row = next(u for u in response.json() if u["id"] == sample_advisor.id)
     assert row["can_import_leads"] is True
+
+
+# ---------------------------------------------------------------------------
+# Generic per-advisor feature toggle system - the "bulletproof" option
+# Mike specifically asked for over a freeform/configurable system: every
+# flag must be in KNOWN_FEATURE_FLAGS, validated server-side, never
+# arbitrary text. Tests here use monkeypatched registry entries since
+# the real registry is empty until a real lightweight feature needs one.
+# ---------------------------------------------------------------------------
+
+def test_list_available_feature_flags_returns_real_registry(client, admin_auth_headers, monkeypatch):
+    from app.services import feature_flags_service as ffs
+    monkeypatch.setitem(ffs.KNOWN_FEATURE_FLAGS, "early_access_reports", "Early access to the new Reports layout")
+
+    response = client.get("/admin/feature-flags/available", headers=admin_auth_headers)
+
+    assert response.status_code == 200
+    names = [f["name"] for f in response.json()]
+    assert "early_access_reports" in names
+
+
+def test_update_user_sets_feature_flags(client, db_session, sample_org, sample_advisor, monkeypatch):
+    from app.services import feature_flags_service as ffs
+    from app.services.auth_service import hash_password, create_access_token
+    monkeypatch.setitem(ffs.KNOWN_FEATURE_FLAGS, "early_access_reports", "desc")
+
+    super_admin = User(organization_id=sample_org.id, email="super-flags@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "feature_flags": ["early_access_reports"],
+    }, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["feature_flags"] == ["early_access_reports"]
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.feature_flags == "early_access_reports"
+
+
+def test_update_user_rejects_unknown_feature_flag(client, db_session, sample_org, sample_advisor):
+    from app.services.auth_service import hash_password, create_access_token
+
+    super_admin = User(organization_id=sample_org.id, email="super-flags2@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={
+        "feature_flags": ["totally_made_up_flag"],
+    }, headers=super_headers)
+
+    assert response.status_code == 400
+    assert "totally_made_up_flag" in response.json()["detail"]
+
+
+def test_update_user_omitting_feature_flags_leaves_existing_flags_unchanged(client, db_session, sample_org, sample_advisor, monkeypatch):
+    from app.services import feature_flags_service as ffs
+    from app.services.auth_service import hash_password, create_access_token
+    monkeypatch.setitem(ffs.KNOWN_FEATURE_FLAGS, "early_access_reports", "desc")
+    sample_advisor.feature_flags = "early_access_reports"
+    db_session.commit()
+
+    super_admin = User(organization_id=sample_org.id, email="super-flags3@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={"full_name": "Renamed Only"}, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["feature_flags"] == ["early_access_reports"]
+
+
+def test_update_user_empty_list_clears_all_feature_flags(client, db_session, sample_org, sample_advisor, monkeypatch):
+    from app.services import feature_flags_service as ffs
+    from app.services.auth_service import hash_password, create_access_token
+    monkeypatch.setitem(ffs.KNOWN_FEATURE_FLAGS, "early_access_reports", "desc")
+    sample_advisor.feature_flags = "early_access_reports"
+    db_session.commit()
+
+    super_admin = User(organization_id=sample_org.id, email="super-flags4@restland.com",
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+    db_session.add(super_admin)
+    db_session.commit()
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+
+    response = client.patch(f"/admin/users/{sample_advisor.id}", json={"feature_flags": []}, headers=super_headers)
+
+    assert response.status_code == 200
+    assert response.json()["feature_flags"] == []
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.feature_flags is None
+
+
+def test_list_users_includes_feature_flags_field(client, db_session, sample_org, sample_advisor, admin_auth_headers, monkeypatch):
+    from app.services import feature_flags_service as ffs
+    monkeypatch.setitem(ffs.KNOWN_FEATURE_FLAGS, "early_access_reports", "desc")
+    sample_advisor.feature_flags = "early_access_reports"
+    db_session.commit()
+
+    response = client.get("/admin/users", headers=admin_auth_headers)
+
+    row = next(u for u in response.json() if u["id"] == sample_advisor.id)
+    assert row["feature_flags"] == ["early_access_reports"]
