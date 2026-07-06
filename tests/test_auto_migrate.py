@@ -16,7 +16,7 @@ silently reopen.
 import os
 from sqlalchemy import create_engine, text
 
-from app.auto_migrate import run_auto_migrations, COLUMNS_TO_ADD, ENUM_VALUES_TO_ADD
+from app.auto_migrate import run_auto_migrations, COLUMNS_TO_ADD, ENUM_VALUES_TO_ADD, ENUM_COLUMNS_TO_CONVERT_TO_STRING
 
 
 def _fresh_sqlite_engine(tmp_path, name="test.db"):
@@ -128,3 +128,77 @@ def test_enum_values_to_add_use_uppercase_member_names_not_lowercase_values():
         # Extra-explicit check: the value must match the member's .name, not .value
         member = enum_class[value]
         assert member.name == value
+
+
+def test_enum_columns_to_convert_list_matches_real_model_fields():
+    """
+    Sanity check that the hardcoded conversion list corresponds to
+    real table/column pairs that were actually changed from SAEnum to
+    String - catches a typo'd table/column name before it ships.
+    """
+    from app.models.models import Lead, Campaign, MessageTemplate
+    model_by_table = {"leads": Lead, "campaigns": Campaign, "message_templates": MessageTemplate}
+
+    for table, column, _enum_type in ENUM_COLUMNS_TO_CONVERT_TO_STRING:
+        assert table in model_by_table, f"{table} is not a real table this migration list should reference"
+        model = model_by_table[table]
+        assert hasattr(model, column), f"{table}.{column} is not a real column on {model.__name__}"
+
+
+def test_run_auto_migrations_does_not_attempt_enum_conversion_on_sqlite():
+    """
+    SQLite has no information_schema.columns the way Postgres does, and
+    no real enum type to convert from in the first place - confirms the
+    is_sqlite guard genuinely skips this whole block rather than
+    erroring on a query SQLite can't run.
+    """
+    engine = create_engine("sqlite:///:memory:")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE leads (id TEXT PRIMARY KEY, tier TEXT)"))
+        conn.commit()
+
+    # Must complete without raising - if the conversion logic ran
+    # against SQLite, the information_schema query itself would fail.
+    run_auto_migrations(engine)
+
+
+def test_enum_to_string_conversion_sql_uses_lower_not_a_naive_cast():
+    """
+    THE CRITICAL CORRECTNESS CHECK for this whole migration step.
+    SQLAlchemy's SAEnum stores the Python enum member NAME (uppercase,
+    e.g. "PRE_NEED") in Postgres, not .value (lowercase "pre_need") -
+    this is a documented, confirmed standing rule for this codebase.
+    A naive `column::text` cast would silently corrupt every existing
+    lead's tier to its uppercase NAME, which would then match nothing
+    in TierDefinition.tier_key (all lowercase) - the migration would
+    "succeed" with no error while quietly breaking every lead's tier.
+
+    This test mocks the actual database connection and inspects the
+    REAL SQL string sent to execute(), to directly confirm LOWER() is
+    present - this is checked here because a real Postgres instance
+    with actual enum types isn't available in this test environment,
+    so this is the most direct, honest verification possible of the
+    actual SQL this code would run in production.
+    """
+    from unittest.mock import MagicMock, patch
+    import app.auto_migrate as auto_migrate_module
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.scalar.return_value = "USER-DEFINED"  # simulates "still the old enum type"
+
+    mock_engine = MagicMock()
+    mock_engine.url = "postgresql://fake"
+    mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+    with patch.object(auto_migrate_module, "COLUMNS_TO_ADD", []), \
+         patch.object(auto_migrate_module, "ENUM_VALUES_TO_ADD", []):
+        run_auto_migrations(mock_engine)
+
+    executed_sql_strings = [str(call.args[0]) for call in mock_conn.execute.call_args_list]
+    alter_statements = [sql for sql in executed_sql_strings if "ALTER TABLE" in sql and "ALTER COLUMN" in sql]
+
+    assert len(alter_statements) == len(ENUM_COLUMNS_TO_CONVERT_TO_STRING), \
+        "Expected one ALTER COLUMN statement per entry in ENUM_COLUMNS_TO_CONVERT_TO_STRING"
+    for statement in alter_statements:
+        assert "LOWER(" in statement, f"Missing LOWER() in conversion SQL - would corrupt data to uppercase: {statement}"
+        assert "::text" in statement

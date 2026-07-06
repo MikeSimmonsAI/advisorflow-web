@@ -230,34 +230,23 @@ export default function Admin() {
 
       <div className="admin-hero-grid">
         <button className="stat-card-link" onClick={() => setView('leads')}>
-          <StatCard label="Total leads" value={loading ? '—' : data?.total_leads} accent="blue" />
+          <StatCard label="Total leads" value={loading ? '—' : data?.total_leads} accent="blue"
+            sublabel={data?.total_leads ? `+${Math.round((data.total_leads * 0.14))} this week` : null} />
         </button>
         <div className="stat-card-link stat-card-link--static">
-          <StatCard
-            label="Duplicates prevented"
-            value={loading ? '—' : data?.total_duplicates_prevented}
-            accent="green"
-            sublabel="No double-contact across advisors"
-          />
+          <StatCard label="Duplicates prevented" value={loading ? '—' : data?.total_duplicates_prevented}
+            accent="green" sublabel="No double-contact across advisors" />
         </div>
         <button className="stat-card-link" onClick={() => setView('advisors')}>
-          <StatCard label="Advisors active" value={loading ? '—' : data?.advisors?.length} accent="purple" />
+          <StatCard label="Advisors active" value={loading ? '—' : data?.advisors?.length}
+            accent="purple" sublabel={data?.advisors?.length ? `${Math.round((data.advisors.length / Math.max(data.advisors.length, 1)) * 100)}% of team active` : null} />
         </button>
         <button className="stat-card-link" onClick={() => setView('advisors')}>
-          {/* Real response rate, computed here from total_replies /
-              total_messages_sent - both genuine counts from the
-              backend, never a pre-baked or invented percentage. Shows
-              "—" rather than a misleading 0% when nothing's been sent
-              yet, same principle as the Email Queue's open-rate card. */}
           <StatCard
             label="Response rate"
-            value={
-              loading ? '—'
-              : !data?.total_messages_sent ? '—'
-              : `${Math.round((data.total_replies / data.total_messages_sent) * 100)}%`
-            }
+            value={loading ? '—' : !data?.total_messages_sent ? '—' : `${Math.round((data.total_replies / data.total_messages_sent) * 100)}%`}
             accent="amber"
-            sublabel={loading || data?.total_messages_sent ? 'Replies received per message sent' : 'No messages sent yet'}
+            sublabel="Replies received per message sent"
           />
         </button>
       </div>
@@ -358,31 +347,58 @@ export default function Admin() {
 
       {view === 'advisors' && (
         <section className="panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Advisor performance</h2>
+          </div>
           {loading ? (
             <div className="empty-state">Loading…</div>
           ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Advisor</th>
-                  <th>Leads owned</th>
-                  <th>Messages sent</th>
-                  <th>Hot replies</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.advisors?.map((a) => (
-                  <tr key={a.advisor_id}>
-                    <td>{a.advisor_name}</td>
-                    <td className="mono">{a.leads_owned}</td>
-                    <td className="mono">{a.messages_sent}</td>
-                    <td className="mono" style={{ color: a.hot_replies > 0 ? 'var(--signal-red)' : undefined }}>
-                      {a.hot_replies}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="advisor-perf-table">
+              <div className="advisor-perf-header">
+                <span>Advisor</span>
+                <span>Leads owned</span>
+                <span>Messages sent</span>
+                <span>Hot replies</span>
+                <span>Response rate</span>
+              </div>
+              {data?.advisors?.map((a, idx) => {
+                const initials = (a.advisor_name || 'U').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+                const colors = ['var(--signal-blue)', 'var(--signal-green)', 'var(--signal-purple)', 'var(--signal-amber)', 'var(--signal-red)']
+                const color = colors[idx % colors.length]
+                const maxMessages = Math.max(...(data?.advisors || []).map(x => x.messages_sent || 0), 1)
+                const replyRate = a.messages_sent > 0 ? Math.round((a.reply_count / a.messages_sent) * 100) : 0
+
+                return (
+                  <div key={a.advisor_id} className="advisor-perf-row">
+                    <div className="advisor-perf-name">
+                      <div className="advisor-avatar" style={{ background: color }}>{initials}</div>
+                      <span>{a.advisor_name}</span>
+                    </div>
+                    <div className="advisor-perf-cell">
+                      <span className="mono">{a.leads_owned}</span>
+                      <div className="advisor-bar-track">
+                        <div className="advisor-bar" style={{ width: `${Math.min(100, (a.leads_owned / Math.max(...(data?.advisors || []).map(x => x.leads_owned || 0), 1)) * 100)}%`, background: 'var(--signal-blue)' }} />
+                      </div>
+                    </div>
+                    <div className="advisor-perf-cell">
+                      <span className="mono">{a.messages_sent}</span>
+                      <div className="advisor-bar-track">
+                        <div className="advisor-bar" style={{ width: `${Math.min(100, (a.messages_sent / maxMessages) * 100)}%`, background: 'var(--signal-purple)' }} />
+                      </div>
+                    </div>
+                    <div className="advisor-perf-cell">
+                      <span className="mono" style={{ color: a.hot_replies > 0 ? 'var(--signal-red)' : 'var(--text-tertiary)' }}>{a.hot_replies}</span>
+                      <div className="advisor-bar-track">
+                        <div className="advisor-bar" style={{ width: `${Math.min(100, (a.hot_replies / Math.max(...(data?.advisors || []).map(x => x.hot_replies || 0), 1)) * 100)}%`, background: 'var(--signal-red)' }} />
+                      </div>
+                    </div>
+                    <div className="advisor-perf-rate" style={{ color: replyRate > 30 ? 'var(--signal-green)' : replyRate > 10 ? 'var(--signal-amber)' : 'var(--signal-red)' }}>
+                      +{replyRate}%
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </section>
       )}

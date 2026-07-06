@@ -83,6 +83,29 @@ ENUM_VALUES_TO_ADD = [
 ]
 
 
+# Real, one-time column-type-change migrations - columns that changed
+# from a hard database enum to a plain string when the per-organization
+# tier/track configuration system (TierDefinition) replaced the old
+# hardcoded LeadTier/MessageTrack Python enums. Each entry is
+# (table, column, postgres_enum_type_name).
+#
+# CRITICAL, documented standing rule for this codebase: SQLAlchemy's
+# SAEnum writes the Python enum member NAME (uppercase, e.g.
+# "PRE_NEED") into Postgres, not .value (lowercase "pre_need"). A naive
+# `ALTER COLUMN ... TYPE VARCHAR USING column::text` cast would
+# therefore convert every existing lead's tier to its UPPERCASE name -
+# which would then silently fail to match any TierDefinition.tier_key
+# (all lowercase, e.g. "pre_need"), since nothing would ever look
+# correct again despite the migration "succeeding." The LOWER() call
+# below is what actually prevents that corruption.
+ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
+    ("leads", "tier", "leadtier"),
+    ("leads", "message_track", "messagetrack"),
+    ("campaigns", "message_track", "messagetrack"),
+    ("message_templates", "message_track", "messagetrack"),
+]
+
+
 def run_auto_migrations(engine) -> None:
     """
     Called once from main.py's startup handler, right after
@@ -110,6 +133,45 @@ def run_auto_migrations(engine) -> None:
                 # the whole app on startup. Each statement is independent.
                 print(f"[auto_migrate] Skipped {table}.{column}: {e}")
         conn.commit()
+
+        if not is_sqlite:
+            # Real, one-time column-type conversions - enum columns that
+            # became plain strings when TierDefinition replaced the old
+            # hardcoded LeadTier/MessageTrack enums. Idempotent: checks
+            # the column's CURRENT data type via information_schema
+            # first, so this is a safe no-op on every later boot once
+            # the conversion has already happened once. SQLite is
+            # skipped entirely here since SQLite has no real column-type
+            # enforcement to begin with - a SQLite column declared as
+            # SAEnum already stores whatever Python handed it (which,
+            # confirmed earlier in this project, is the lowercase
+            # .value via SQLite's loose typing, not the uppercase NAME
+            # quirk that's Postgres-specific), so there's nothing to
+            # convert there.
+            for table, column, enum_type in ENUM_COLUMNS_TO_CONVERT_TO_STRING:
+                try:
+                    current_type = conn.execute(text(
+                        "SELECT data_type FROM information_schema.columns "
+                        "WHERE table_name = :table AND column_name = :column"
+                    ), {"table": table, "column": column}).scalar()
+
+                    if current_type == "USER-DEFINED":
+                        # Still the old enum type - convert now. LOWER()
+                        # is the critical piece: Postgres holds the
+                        # uppercase enum NAME (e.g. "PRE_NEED"), and
+                        # every TierDefinition.tier_key/track_key is
+                        # lowercase - a cast without LOWER() would
+                        # silently corrupt every existing row to a value
+                        # that matches nothing.
+                        conn.execute(text(
+                            f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR USING LOWER({column}::text);"
+                        ))
+                        conn.commit()
+                        print(f"[auto_migrate] Converted {table}.{column} from enum to string (lowercased).")
+                    # else: already a plain string (varchar/text) - genuinely nothing to do, not even a log line needed every single boot.
+                except (OperationalError, ProgrammingError) as e:
+                    conn.rollback()
+                    print(f"[auto_migrate] Skipped enum-to-string conversion for {table}.{column}: {e}")
 
         if not is_sqlite:
             # Postgres enum ADD VALUE has historically had restrictions
