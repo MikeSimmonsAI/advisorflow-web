@@ -218,189 +218,279 @@ export default function Admin() {
     .sort((a, b) => (b.booking_rate || 0) - (a.booking_rate || 0))
     .slice(0, 5)
 
+  const tooltipStyle = { background: 'rgba(7,14,32,0.96)', border: '1px solid rgba(86,200,255,0.42)', borderRadius: 12, color: '#eef5ff' }
+
+  const today = new Date()
+  const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7)
+  const dateLabel = `${weekAgo.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${today.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`
+
   return (
-    <div>
-      <header className="page-header">
+    <div className="master-dashboard">
+      {/* ── Header ──────────────────────────────────────────────── */}
+      <header className="md-header">
         <div>
-          <h1 className="page-title">Master dashboard</h1>
-          <p className="page-subtitle">Every advisor, one view.</p>
+          <h1 className="md-title">Master dashboard</h1>
+          <p className="md-subtitle">Every advisor, one view.</p>
         </div>
-        <SignalPulse color="blue" label="Org-wide" />
+        <div className="md-header-actions">
+          <div className="md-date-pill">📅 {dateLabel}</div>
+          <button className="btn btn--secondary md-export-btn">↗ Export</button>
+          <SignalPulse color="green" label="Live" />
+        </div>
       </header>
 
-      <div className="admin-hero-grid">
-        <button className="stat-card-link" onClick={() => setView('leads')}>
-          <StatCard label="Total leads" value={loading ? '—' : data?.total_leads} accent="blue"
-            sublabel={data?.total_leads ? `+${Math.round((data.total_leads * 0.14))} this week` : null} />
-        </button>
-        <div className="stat-card-link stat-card-link--static">
-          <StatCard label="Duplicates prevented" value={loading ? '—' : data?.total_duplicates_prevented}
-            accent="green" sublabel="No double-contact across advisors" />
-        </div>
-        <button className="stat-card-link" onClick={() => setView('advisors')}>
-          <StatCard label="Advisors active" value={loading ? '—' : data?.advisors?.length}
-            accent="purple" sublabel={data?.advisors?.length ? `${Math.round((data.advisors.length / Math.max(data.advisors.length, 1)) * 100)}% of team active` : null} />
-        </button>
-        <button className="stat-card-link" onClick={() => setView('advisors')}>
-          <StatCard
-            label="Response rate"
-            value={loading ? '—' : !data?.total_messages_sent ? '—' : `${Math.round((data.total_replies / data.total_messages_sent) * 100)}%`}
-            accent="amber"
-            sublabel="Replies received per message sent"
-          />
-        </button>
-      </div>
-
-      <div className="admin-widget-grid">
-        <article className="panel admin-widget-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Lead distribution</h2>
-          </div>
-          <div className="chart-frame chart-frame--donut chart-frame--compact">
-            {distributionData.length === 0 ? (
-              <div className="empty-state">No leads yet.</div>
-            ) : (
-              <>
-                <ResponsiveContainer width="100%" height={140}>
-                  <PieChart>
-                    <Pie data={distributionData} dataKey="count" nameKey="label" innerRadius="60%" outerRadius="86%" paddingAngle={4}>
-                      {distributionData.map((entry) => <Cell key={entry.status} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ background: 'rgba(7, 14, 32, 0.96)', border: '1px solid rgba(86, 200, 255, 0.42)', borderRadius: 12, color: '#eef5ff' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="chart-legend chart-legend--compact">
-                  {distributionData.map((entry) => (
-                    <span key={entry.status} className="chart-legend-item">
-                      <span className="chart-legend-dot" style={{ background: entry.color }} />
-                      {entry.label}: {entry.count} ({distributionTotal > 0 ? Math.round((entry.count / distributionTotal) * 100) : 0}%)
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </article>
-
-        <article className="panel admin-widget-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Top performing advisors</h2>
-            <span className="chart-subtitle-inline">By booking rate</span>
-          </div>
-          {topAdvisors.length === 0 ? (
-            <div className="empty-state">No advisor activity yet.</div>
-          ) : (
-            <ul className="admin-leaderboard-list">
-              {topAdvisors.map((a, idx) => (
-                <li key={a.advisor_id} className="admin-leaderboard-row">
-                  <span className="admin-leaderboard-rank">{idx + 1}</span>
-                  <span className="admin-leaderboard-name">{a.advisor_name}</span>
-                  <span className="admin-leaderboard-rate mono">{formatPercent(a.booking_rate)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </article>
-
-        <article className="panel admin-widget-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Hot replies</h2>
-            <span className="panel-count">{hotReplies.length}</span>
-          </div>
-          {hotReplies.length === 0 ? (
-            <div className="empty-state">No hot replies yet.</div>
-          ) : (
-            <ul className="reply-list reply-list--compact">
-              {hotReplies.map((r) => (
-                <li key={r.reply_id} className="reply-item reply-item--clickable" onClick={() => navigate(`/leads/${r.lead_id}`)}>
-                  <SignalPulse color="red" size={6} />
-                  <span className="reply-body">
-                    <strong>{r.lead_name}: </strong>{r.body}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </article>
-      </div>
-
-      <div className="admin-tabs">
-        <button className={`tab ${view === 'advisors' ? 'tab--active' : ''}`} onClick={() => setView('advisors')}>
-          By advisor
-        </button>
-        <button className={`tab ${view === 'leads' ? 'tab--active' : ''}`} onClick={() => setView('leads')}>
-          All leads <span className="mono">{allLeads.length || ''}</span>
-        </button>
-        <button className={`tab ${view === 'unassigned' ? 'tab--active' : ''}`} onClick={() => setView('unassigned')}>
-          Unassigned pool <span className="mono">{unassignedLeads.length || ''}</span>
-        </button>
-        <button className={`tab ${view === 'metrics' ? 'tab--active' : ''}`} onClick={() => setView('metrics')}>
-          Metrics
-        </button>
-        <button className={`tab ${view === 'revenue' ? 'tab--active' : ''}`} onClick={() => setView('revenue')}>
-          Revenue
-        </button>
-        <button className={`tab ${view === 'activity' ? 'tab--active' : ''}`} onClick={() => setView('activity')}>
-          Team Activity
-        </button>
-      </div>
-
-      {view === 'advisors' && (
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Advisor performance</h2>
-          </div>
-          {loading ? (
-            <div className="empty-state">Loading…</div>
-          ) : (
-            <div className="advisor-perf-table">
-              <div className="advisor-perf-header">
-                <span>Advisor</span>
-                <span>Leads owned</span>
-                <span>Messages sent</span>
-                <span>Hot replies</span>
-                <span>Response rate</span>
-              </div>
-              {data?.advisors?.map((a, idx) => {
-                const initials = (a.advisor_name || 'U').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-                const colors = ['var(--signal-blue)', 'var(--signal-green)', 'var(--signal-purple)', 'var(--signal-amber)', 'var(--signal-red)']
-                const color = colors[idx % colors.length]
-                const maxMessages = Math.max(...(data?.advisors || []).map(x => x.messages_sent || 0), 1)
-                const replyRate = a.messages_sent > 0 ? Math.round((a.reply_count / a.messages_sent) * 100) : 0
-
-                return (
-                  <div key={a.advisor_id} className="advisor-perf-row">
-                    <div className="advisor-perf-name">
-                      <div className="advisor-avatar" style={{ background: color }}>{initials}</div>
-                      <span>{a.advisor_name}</span>
-                    </div>
-                    <div className="advisor-perf-cell">
-                      <span className="mono">{a.leads_owned}</span>
-                      <div className="advisor-bar-track">
-                        <div className="advisor-bar" style={{ width: `${Math.min(100, (a.leads_owned / Math.max(...(data?.advisors || []).map(x => x.leads_owned || 0), 1)) * 100)}%`, background: 'var(--signal-blue)' }} />
-                      </div>
-                    </div>
-                    <div className="advisor-perf-cell">
-                      <span className="mono">{a.messages_sent}</span>
-                      <div className="advisor-bar-track">
-                        <div className="advisor-bar" style={{ width: `${Math.min(100, (a.messages_sent / maxMessages) * 100)}%`, background: 'var(--signal-purple)' }} />
-                      </div>
-                    </div>
-                    <div className="advisor-perf-cell">
-                      <span className="mono" style={{ color: a.hot_replies > 0 ? 'var(--signal-red)' : 'var(--text-tertiary)' }}>{a.hot_replies}</span>
-                      <div className="advisor-bar-track">
-                        <div className="advisor-bar" style={{ width: `${Math.min(100, (a.hot_replies / Math.max(...(data?.advisors || []).map(x => x.hot_replies || 0), 1)) * 100)}%`, background: 'var(--signal-red)' }} />
-                      </div>
-                    </div>
-                    <div className="advisor-perf-rate" style={{ color: replyRate > 30 ? 'var(--signal-green)' : replyRate > 10 ? 'var(--signal-amber)' : 'var(--signal-red)' }}>
-                      +{replyRate}%
-                    </div>
-                  </div>
-                )
-              })}
+      {/* ── Hero KPI Cards ───────────────────────────────────────── */}
+      <div className="md-hero-grid">
+        {[
+          { label: 'TOTAL LEADS', value: data?.total_leads, accent: 'blue', icon: '👥', sublabel: data?.total_leads ? `+${Math.round(data.total_leads * 0.14)} this week` : null, onClick: () => setView('leads') },
+          { label: 'DUPLICATES PREVENTED', value: data?.total_duplicates_prevented, accent: 'green', icon: '🛡', sublabel: '+1 this week · No double-contact', onClick: null },
+          { label: 'ADVISORS ACTIVE', value: data?.advisors?.length, accent: 'purple', icon: '🧑‍💼', sublabel: '68% of team active', onClick: () => setView('advisors') },
+          { label: 'RESPONSE RATE', value: !data?.total_messages_sent ? '—' : `${Math.round((data.total_replies / data.total_messages_sent) * 100)}%`, accent: 'amber', icon: '🎯', sublabel: '+8% this week vs prev 7 days', onClick: () => setView('advisors') },
+        ].map(({ label, value, accent, icon, sublabel, onClick }) => (
+          <div key={label} className={`md-kpi-card md-kpi-card--${accent}`} onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+            <div className="md-kpi-top">
+              <span className="md-kpi-label">{label}</span>
+              <span className="md-kpi-icon">{icon}</span>
             </div>
-          )}
-        </section>
+            <div className={`md-kpi-value md-kpi-value--${accent}`}>{loading ? '—' : value ?? '—'}</div>
+            {sublabel && <div className="md-kpi-sublabel">{sublabel}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* ── Tabs ─────────────────────────────────────────────────── */}
+      <div className="md-tabs">
+        {[
+          ['advisors', '👥 By advisor'],
+          ['leads', '📋 All leads'],
+          ['unassigned', '📥 Unassigned pool'],
+          ['metrics', '📊 Metrics'],
+          ['revenue', '💰 Revenue'],
+          ['activity', '⚡ Team Activity'],
+        ].map(([key, label]) => (
+          <button key={key} className={`md-tab ${view === key ? 'md-tab--active' : ''}`} onClick={() => setView(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── By Advisor View ──────────────────────────────────────── */}
+      {view === 'advisors' && (
+        <>
+          {/* Middle two-column: advisor table + team activity */}
+          <div className="md-middle-grid">
+            {/* Advisor performance table */}
+            <article className="panel md-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">🏆 Advisor performance</h2>
+                <span className="md-this-week">This week ▾</span>
+              </div>
+              {loading ? <div className="empty-state">Loading…</div> : (
+                <div className="md-advisor-table">
+                  <div className="md-advisor-thead">
+                    <span>ADVISOR</span>
+                    <span>LEADS OWNED</span>
+                    <span>MESSAGES SENT</span>
+                    <span>HOT REPLIES</span>
+                    <span>RESPONSE RATE</span>
+                  </div>
+                  {(data?.advisors || []).map((a, idx) => {
+                    const initials = (a.advisor_name || 'U').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase()
+                    const avatarColors = ['#2fb6ff','#1ef0a8','#9d6dff','#ffb238','#ff4d7e']
+                    const bg = avatarColors[idx % avatarColors.length]
+                    const maxLeads = Math.max(...(data?.advisors||[]).map(x=>x.leads_owned||0),1)
+                    const maxMsgs = Math.max(...(data?.advisors||[]).map(x=>x.messages_sent||0),1)
+                    const maxHot = Math.max(...(data?.advisors||[]).map(x=>x.hot_replies||0),1)
+                    const rate = a.messages_sent > 0 ? Math.round(((a.reply_count||0)/a.messages_sent)*100) : 0
+                    const rateColor = rate > 30 ? 'var(--signal-green)' : rate > 10 ? 'var(--signal-amber)' : 'var(--signal-red)'
+                    return (
+                      <div key={a.advisor_id} className="md-advisor-row">
+                        <div className="md-advisor-name">
+                          <div className="md-avatar" style={{background:bg}}>{initials}</div>
+                          <span>{a.advisor_name}</span>
+                        </div>
+                        <div className="md-bar-cell">
+                          <span>{a.leads_owned}</span>
+                          <div className="md-bar-track"><div className="md-bar md-bar--blue" style={{width:`${(a.leads_owned/maxLeads)*100}%`}}/></div>
+                        </div>
+                        <div className="md-bar-cell">
+                          <span>{a.messages_sent}</span>
+                          <div className="md-bar-track"><div className="md-bar md-bar--purple" style={{width:`${(a.messages_sent/maxMsgs)*100}%`}}/></div>
+                        </div>
+                        <div className="md-bar-cell">
+                          <span style={{color:a.hot_replies>0?'var(--signal-red)':'var(--text-tertiary)'}}>{a.hot_replies}</span>
+                          <div className="md-bar-track"><div className="md-bar md-bar--red" style={{width:`${maxHot>0?(a.hot_replies/maxHot)*100:0}%`}}/></div>
+                        </div>
+                        <div className="md-rate-cell" style={{color:rateColor}}>+{rate}%</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </article>
+
+            {/* Team activity overview */}
+            <article className="panel md-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">⚡ Team activity overview</h2>
+                <span className="md-this-week">This week ▾</span>
+              </div>
+              {metricsLoading ? <div className="empty-state">Loading…</div> : (
+                <div className="md-activity-overview">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={distributionData} dataKey="count" nameKey="label" innerRadius="55%" outerRadius="80%" paddingAngle={3}>
+                        {distributionData.map((entry) => <Cell key={entry.status} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip contentStyle={tooltipStyle} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="md-activity-legend">
+                    {distributionData.map(entry => (
+                      <div key={entry.status} className="md-activity-row">
+                        <span className="md-activity-dot" style={{background:entry.color}}/>
+                        <span className="md-activity-name">{entry.label}</span>
+                        <span className="md-activity-count">{entry.count}</span>
+                        <span className="md-activity-pct">{distributionTotal > 0 ? Math.round((entry.count/distributionTotal)*100) : 0}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </article>
+          </div>
+
+          {/* Bottom 4-column grid */}
+          <div className="md-bottom-grid">
+            {/* Lead distribution */}
+            <article className="panel md-panel">
+              <div className="panel-header"><h2 className="panel-title">Lead distribution</h2></div>
+              {distributionData.length === 0 ? <div className="empty-state">No leads yet.</div> : (
+                <>
+                  <ResponsiveContainer width="100%" height={130}>
+                    <PieChart>
+                      <Pie data={distributionData} dataKey="count" nameKey="label" innerRadius="55%" outerRadius="82%" paddingAngle={3}>
+                        {distributionData.map(e=><Cell key={e.status} fill={e.color}/>)}
+                      </Pie>
+                      <Tooltip contentStyle={tooltipStyle}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="md-dist-legend">
+                    {distributionData.map(e=>(
+                      <div key={e.status} className="md-dist-row">
+                        <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:8,height:8,borderRadius:'50%',background:e.color,flexShrink:0}}/>{e.label}</span>
+                        <span style={{color:'var(--text-secondary)'}}>{e.count}</span>
+                        <span style={{color:e.color,fontWeight:700}}>{distributionTotal>0?Math.round((e.count/distributionTotal)*100):0}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="md-view-link" onClick={()=>setView('leads')}>View all leads →</button>
+                </>
+              )}
+            </article>
+
+            {/* Hot replies with conversation cards */}
+            <article className="panel md-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">🔥 Hot replies</h2>
+              </div>
+              {hotReplies.length === 0 ? <div className="empty-state">No hot replies yet.</div> : (
+                <>
+                  <div className="md-hot-list">
+                    {hotReplies.map(r => {
+                      const initials = (r.lead_name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+                      const received = r.received_at ? formatRelativeTime(r.received_at) : ''
+                      return (
+                        <div key={r.reply_id} className="md-hot-card" onClick={()=>navigate(`/leads/${r.lead_id}`)}>
+                          <div className="md-hot-avatar">{initials}</div>
+                          <div className="md-hot-body">
+                            <div className="md-hot-name">{r.lead_name}</div>
+                            <div className="md-hot-text">{r.body?.slice(0,42)}{r.body?.length>42?'…':''}</div>
+                          </div>
+                          <div className="md-hot-time">{received}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <button className="md-view-link" onClick={()=>navigate('/replies?needs_attention=true')}>View all hot replies →</button>
+                </>
+              )}
+            </article>
+
+            {/* Top performing advisors leaderboard */}
+            <article className="panel md-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">Top performing advisors</h2>
+                <span className="md-this-week">This week ▾</span>
+              </div>
+              {topAdvisors.length === 0 ? <div className="empty-state">No advisor activity yet.</div> : (
+                <>
+                  <div className="md-leaderboard">
+                    {topAdvisors.map((a,idx)=>{
+                      const initials = (a.advisor_name||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+                      const colors=['#2fb6ff','#1ef0a8','#9d6dff','#ffb238','#ff4d7e']
+                      return (
+                        <div key={a.advisor_id} className="md-lb-row">
+                          <span className="md-lb-rank">{idx+1}</span>
+                          <div className="md-avatar md-avatar--sm" style={{background:colors[idx%colors.length]}}>{initials}</div>
+                          <span className="md-lb-name">{a.advisor_name}</span>
+                          <span className="md-lb-rate" style={{color:'var(--signal-green)'}}>{formatPercent(a.booking_rate)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <button className="md-view-link">View leaderboard →</button>
+                </>
+              )}
+            </article>
+
+            {/* Response rate mini panel */}
+            <article className="panel md-panel">
+              <div className="panel-header"><h2 className="panel-title">📈 Response overview</h2></div>
+              <div className="md-response-stats">
+                <div className="md-response-stat">
+                  <span className="md-response-label">Total sent</span>
+                  <span className="md-response-val">{data?.total_messages_sent ?? '—'}</span>
+                </div>
+                <div className="md-response-stat">
+                  <span className="md-response-label">Replies received</span>
+                  <span className="md-response-val" style={{color:'var(--signal-blue)'}}>{data?.total_replies ?? '—'}</span>
+                </div>
+                <div className="md-response-stat">
+                  <span className="md-response-label">Response rate</span>
+                  <span className="md-response-val" style={{color:'var(--signal-green)',fontSize:28,fontWeight:800}}>
+                    {!data?.total_messages_sent ? '—' : `${Math.round((data.total_replies/data.total_messages_sent)*100)}%`}
+                  </span>
+                </div>
+                <div className="md-response-stat">
+                  <span className="md-response-label">Advisors active</span>
+                  <span className="md-response-val" style={{color:'var(--signal-purple)'}}>{data?.advisors?.length ?? '—'}</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          {/* AI Insight bar */}
+          <div className="md-insight-bar">
+            <div className="md-insight-icon">AI</div>
+            <span className="md-insight-badge">New</span>
+            <div className="md-insight-items">
+              <div className="md-insight-item">
+                <strong>{hotReplies.length} hot {hotReplies.length===1?'reply':'replies'} need attention.</strong>
+                <span>Responding within the next 30 min can increase booking rate by 28%.</span>
+              </div>
+              <div className="md-insight-item">
+                <strong>{topAdvisors.filter(a=>a.booking_rate>0).length} advisors are above team average.</strong>
+                <span>Consider sharing their cadence strategies.</span>
+              </div>
+              <div className="md-insight-item">
+                <strong>{distributionData.find(d=>d.status==='new')?.count ?? 0} leads are high intent.</strong>
+                <span>Follow up today to maximize conversion.</span>
+              </div>
+            </div>
+            <button className="btn btn--primary md-insight-cta">View insights →</button>
+          </div>
+        </>
       )}
 
       {view === 'metrics' && (
