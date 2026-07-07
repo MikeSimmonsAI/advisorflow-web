@@ -6,34 +6,27 @@ Handles two-way sync between the app and Google Contacts:
 2. Import contacts FROM Google Contacts (bulk pull into the app as leads)
 
 Uses the same Google OAuth refresh token already stored from the Calendar
-connection - but requires the contacts scope to also have been granted.
-If the scope wasn't granted, we direct the user to reconnect with the
-additional scope.
+connection. Requires the contacts scope to have been granted during OAuth.
 """
 
 import os
 import requests
-from sqlalchemy.orm import Session
-from app.models.models import User, Lead
-from app.services.calendar_service import _decrypt_token, get_google_flow
+from app.utils.crypto import decrypt_value
 
 
-CONTACTS_SCOPE = "https://www.googleapis.com/auth/contacts"
 PEOPLE_API_BASE = "https://people.googleapis.com/v1"
 
 
-def _get_access_token(user: User) -> str:
+def _get_access_token(user) -> str:
     """
     Gets a fresh Google access token using the stored refresh token.
-    Raises ValueError if the user hasn't connected Google or the token
-    doesn't have the contacts scope.
+    Raises ValueError if the user hasn't connected Google.
     """
     if not user.google_calendar_connected or not user.google_oauth_refresh_token_encrypted:
         raise ValueError("Google account not connected. Please connect Google in Settings first.")
 
-    refresh_token = _decrypt_token(user.google_oauth_refresh_token_encrypted)
+    refresh_token = decrypt_value(user.google_oauth_refresh_token_encrypted)
 
-    # Exchange refresh token for access token
     client_id = os.environ.get("GOOGLE_CLIENT_ID")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
 
@@ -54,14 +47,12 @@ def _get_access_token(user: User) -> str:
     return data["access_token"]
 
 
-def push_lead_to_google_contacts(db: Session, user: User, lead: Lead) -> dict:
+def push_lead_to_google_contacts(db, user, lead) -> dict:
     """
-    Creates or updates a Google Contact for this lead.
-    Returns the created/updated contact resource name.
+    Creates a Google Contact for this lead in the advisor's Google account.
     """
     access_token = _get_access_token(user)
 
-    # Build the contact payload
     contact_body = {
         "names": [{"givenName": lead.first_name or "", "familyName": lead.last_name or ""}],
     }
@@ -78,7 +69,10 @@ def push_lead_to_google_contacts(db: Session, user: User, lead: Lead) -> dict:
             "contentType": "TEXT_PLAIN"
         }]
 
-    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
 
     resp = requests.post(
         f"{PEOPLE_API_BASE}/people:createContact",
@@ -90,18 +84,17 @@ def push_lead_to_google_contacts(db: Session, user: User, lead: Lead) -> dict:
         if resp.status_code == 403:
             raise ValueError(
                 "Google Contacts permission not granted. Please reconnect Google in Settings "
-                "to allow contact access."
+                "and allow contact access when prompted."
             )
         raise ValueError(f"Failed to create Google Contact: {resp.text}")
 
     return resp.json()
 
 
-def pull_google_contacts(user: User, max_results: int = 500) -> list[dict]:
+def pull_google_contacts(user, max_results: int = 500) -> list[dict]:
     """
-    Pulls contacts from Google Contacts and returns them in the same
-    format as parse_excel_file rows, so they can be fed straight into
-    import_leads_from_excel's processing logic.
+    Pulls contacts from Google Contacts and returns them as rows ready
+    for import_leads_from_rows.
     """
     access_token = _get_access_token(user)
 
@@ -120,12 +113,11 @@ def pull_google_contacts(user: User, max_results: int = 500) -> list[dict]:
         if resp.status_code == 403:
             raise ValueError(
                 "Google Contacts permission not granted. Please reconnect Google in Settings "
-                "to allow contact access."
+                "and allow contact access when prompted."
             )
         raise ValueError(f"Failed to fetch Google Contacts: {resp.text}")
 
-    data = resp.json()
-    connections = data.get("connections", [])
+    connections = resp.json().get("connections", [])
 
     rows = []
     for person in connections:
@@ -139,7 +131,7 @@ def pull_google_contacts(user: User, max_results: int = 500) -> list[dict]:
         email = emails[0].get("value", "") if emails else ""
 
         if not last_name and not phone and not email:
-            continue  # skip contacts with no usable data
+            continue
 
         rows.append({
             "first_name": first_name,
