@@ -18,7 +18,9 @@ from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
     settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
-    compliance_router, sample_data_router, google_contacts_router,
+    compliance_router, audit_log_router, sample_data_router,
+    health_router, workqueue_router, campaign_router,
+    google_contacts_router,
 )
 
 app = FastAPI(title="AdvisorFlow Web", version="0.1.0-phase1")
@@ -37,9 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Public compliance pages - registered FIRST before all other routers
-# so nothing else intercepts these routes. Required for Twilio A2P 10DLC
-# campaign registration - TCR's bot must be able to load these pages.
+# ── Public compliance pages - registered FIRST so nothing else intercepts them.
+# Required for Twilio A2P 10DLC campaign registration.
 
 @app.get("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
 def privacy_policy():
@@ -118,7 +119,7 @@ def terms_and_conditions():
 </html>""")
 
 
-# ── All app routers registered AFTER the public pages above
+# ── All app routers
 app.include_router(auth_router.router)
 app.include_router(leads_router.router)
 app.include_router(sms_router.router)
@@ -133,7 +134,11 @@ app.include_router(ai_router.router)
 app.include_router(outcomes_router.router)
 app.include_router(microsoft_router.router)
 app.include_router(compliance_router.router)
+app.include_router(audit_log_router.router)
 app.include_router(sample_data_router.router)
+app.include_router(health_router.router)
+app.include_router(workqueue_router.router)
+app.include_router(campaign_router.router)
 app.include_router(google_contacts_router.router)
 
 
