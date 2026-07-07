@@ -10,7 +10,7 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from fastapi.responses import HTMLResponse
 
 from app.deps import engine
 from app.models.models import Base
@@ -18,25 +18,11 @@ from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
     settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
-    compliance_router, audit_log_router, sample_data_router, health_router, workqueue_router,
-    campaign_router, reports_router, email_tracking_router, auto_send_router,
+    compliance_router, sample_data_router,
 )
 
 app = FastAPI(title="AdvisorFlow Web", version="0.1.0-phase1")
 
-# Allow the frontend (deployed separately on Render) to call this API.
-#
-# REAL BUG FIXED HERE: this previously used allow_origins=["*"] combined
-# with allow_credentials=True - browsers explicitly reject that exact
-# combination as a security measure (wildcard + credentials is invalid
-# per the CORS spec), which silently blocked EVERY authenticated request
-# from the live frontend. This wasn't introduced by recent changes; it
-# was a pre-existing gap flagged by the TODO that used to be here, which
-# only became visible once enough pages were making authenticated calls
-# for the pattern to be obvious in the browser console.
-#
-# Listing explicit origins instead - includes the production Render
-# frontend domain plus localhost for local development.
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
     "http://localhost:5173",
@@ -51,6 +37,88 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Public compliance pages - registered FIRST before all other routers
+# so nothing else intercepts these routes. Required for Twilio A2P 10DLC
+# campaign registration - TCR's bot must be able to load these pages.
+
+@app.get("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
+def privacy_policy():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy - BookaBoost</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#222;line-height:1.7}
+  h1{color:#0a0a1a}h2{color:#1a2a4a;margin-top:32px;border-bottom:1px solid #ddd;padding-bottom:6px}
+  .brand{color:#1565c0;font-weight:800}
+</style>
+</head>
+<body>
+<h1><span class="brand">BookaBoost</span> Privacy Policy</h1>
+<p><strong>Last updated: July 2026</strong></p>
+<p>This Privacy Policy describes how BookaBoost collects, uses, and protects personal information in connection with our SMS appointment scheduling and outreach messaging program.</p>
+<h2>Information We Collect</h2>
+<p>We collect your name and mobile phone number when you voluntarily provide them to a BookaBoost advisor during an in-person consultation, phone inquiry, or scheduled appointment.</p>
+<h2>How We Use Your Information</h2>
+<p>We use your mobile phone number solely to send SMS messages related to appointment scheduling, reminders, and follow-up communications regarding services you have expressed interest in.</p>
+<h2>SMS Messaging Program</h2>
+<p>By providing your mobile phone number to a BookaBoost advisor, you consent to receive SMS text messages regarding your account, appointments, and related services. Message frequency varies. Standard message and data rates may apply.</p>
+<p><strong>To opt out:</strong> Reply STOP to any message at any time.</p>
+<p><strong>For help:</strong> Reply HELP to any message or contact us at info@bookaboost.com.</p>
+<h2>Data Sharing</h2>
+<p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. Your mobile opt-in data and consent will not be sold, rented, or transferred to any third party at any time.</strong></p>
+<h2>Data Security</h2>
+<p>We implement appropriate technical and organizational measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction.</p>
+<h2>Contact Us</h2>
+<p>BookaBoost | Dallas, TX | Phone: 469-553-7417 | Email: info@bookaboost.com | bookaboost.com</p>
+</body>
+</html>""")
+
+
+@app.get("/terms", response_class=HTMLResponse, include_in_schema=False)
+def terms_and_conditions():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms and Conditions - BookaBoost</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#222;line-height:1.7}
+  h1{color:#0a0a1a}h2{color:#1a2a4a;margin-top:32px;border-bottom:1px solid #ddd;padding-bottom:6px}
+  .brand{color:#1565c0;font-weight:800}
+</style>
+</head>
+<body>
+<h1><span class="brand">BookaBoost</span> SMS Program - Terms and Conditions</h1>
+<p><strong>Last updated: July 2026</strong></p>
+<p>These Terms and Conditions govern your participation in the BookaBoost SMS appointment scheduling and outreach messaging program.</p>
+<h2>Program Description</h2>
+<p>BookaBoost operates an SMS messaging program to send appointment scheduling messages, reminders, and follow-up communications to customers and prospects who have provided their mobile phone number to a BookaBoost advisor.</p>
+<h2>Consent to Receive Messages</h2>
+<p>By providing your mobile phone number to a BookaBoost advisor, you consent to receive recurring SMS text messages related to your account, appointments, and related services. Consent is not required as a condition of any purchase.</p>
+<h2>Message Frequency</h2>
+<p>Message frequency varies. You may receive multiple messages per month.</p>
+<h2>Message and Data Rates</h2>
+<p><strong>Message and data rates may apply.</strong> Check with your mobile carrier for details.</p>
+<h2>How to Opt Out</h2>
+<p><strong>Reply STOP</strong> to any message at any time. You will receive one final confirmation and no further messages will be sent.</p>
+<h2>How to Get Help</h2>
+<p><strong>Reply HELP</strong> to any message, or contact BookaBoost: Phone: 469-553-7417 | Email: info@bookaboost.com</p>
+<h2>Carriers</h2>
+<p>Mobile carriers are not liable for delayed or undelivered messages.</p>
+<h2>Privacy</h2>
+<p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes at any time.</strong></p>
+<p>See our full <a href="/privacy-policy">Privacy Policy</a> for complete details.</p>
+<h2>Contact</h2>
+<p>BookaBoost | Dallas, TX | Phone: 469-553-7417 | Email: info@bookaboost.com | bookaboost.com</p>
+</body>
+</html>""")
+
+
+# ── All app routers registered AFTER the public pages above
 app.include_router(auth_router.router)
 app.include_router(leads_router.router)
 app.include_router(sms_router.router)
@@ -65,58 +133,12 @@ app.include_router(ai_router.router)
 app.include_router(outcomes_router.router)
 app.include_router(microsoft_router.router)
 app.include_router(compliance_router.router)
-app.include_router(audit_log_router.router)
 app.include_router(sample_data_router.router)
-app.include_router(health_router.router)
-app.include_router(workqueue_router.router)
-app.include_router(campaign_router.router)
-app.include_router(reports_router.router)
-app.include_router(email_tracking_router.router)
-app.include_router(auto_send_router.router)
 
 
 @app.on_event("startup")
 def on_startup():
-    # Creates tables if they don't exist. For production, replace with
-    # Alembic migrations (see migrations/ folder) instead of this auto-create.
     Base.metadata.create_all(bind=engine)
-
-    # Auto-migration: adds any columns/enum values that exist in the
-    # Python models but haven't reached the live database yet, since
-    # create_all() above only creates brand-new tables - it never alters
-    # an existing table or enum type. Runs on EVERY startup, safely (see
-    # app/auto_migrate.py docstring for the full reasoning) - this is
-    # what replaces the manual "SSH into Render's Shell tab and run a
-    # migration command" step that broke the live site twice this
-    # session when it got skipped. Mike was explicit he never wants to
-    # do that by hand again.
-    from app.auto_migrate import run_auto_migrations
-    try:
-        run_auto_migrations(engine)
-    except Exception as e:
-        # Never let a migration hiccup prevent the app from starting at
-        # all - every statement inside run_auto_migrations already
-        # catches its own errors per-statement; this outer catch is only
-        # for something unexpected at the connection/engine level, and
-        # even then the app should still come up rather than refuse to
-        # boot entirely.
-        print(f"[auto_migrate] Startup migration check failed unexpectedly: {e}")
-
-    # Seed default tier definitions for any organization that doesn't
-    # have any yet - the real, per-org tier configuration system that
-    # replaced the old hardcoded LeadTier/MessageTrack setup. Runs on
-    # every startup, same idempotent pattern as auto_migrate above, so
-    # this happens automatically in production without anyone needing
-    # to run seed.py by hand - critical for Restland's actual existing
-    # organization, which predates this system entirely.
-    try:
-        from app.models.models import Organization
-        from app.services.tier_config_service import seed_default_tier_definitions
-        with Session(engine) as seed_db:
-            for org in seed_db.query(Organization).all():
-                seed_default_tier_definitions(seed_db, org.id)
-    except Exception as e:
-        print(f"[tier_seed] Startup tier-definition seeding failed unexpectedly: {e}")
 
 
 @app.get("/health")
