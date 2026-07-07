@@ -45,10 +45,10 @@ from app.models.models import Lead, LeadTier, LeadStatus, MessageTrack
 from app.services.dedup_service import check_and_register, normalize_phone
 
 HEADER_MAP = {
-    "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name"],
-    "last_name": ["last name", "lastname", "lname", "last", "surname", "buyerlastname", "buyer last name"],
-    "phone": ["phone", "phone number", "cell", "cell phone", "mobile", "telephone", "buyerphone", "buyer phone"],
-    "email": ["email", "email address", "e-mail", "buyeremail", "buyer email"],
+    "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name", "given name"],
+    "last_name": ["last name", "lastname", "lname", "last", "surname", "buyerlastname", "buyer last name", "family name"],
+    "phone": ["phone", "phone number", "cell", "cell phone", "mobile", "telephone", "buyerphone", "buyer phone", "phone 1 - value", "phone 2 - value"],
+    "email": ["email", "email address", "e-mail", "buyeremail", "buyer email", "e-mail 1 - value", "e-mail 2 - value"],
     "tier": ["tier", "data tier", "lead type", "status type", "salescontractneedtypedescription", "sales contract need type description", "need type"],
     "status_reason": ["status reason", "status", "lead status"],
     "allow_calls": ["allow phone calls?", "allow phone calls", "do not call"],
@@ -128,11 +128,20 @@ def _is_call_restricted(allow_calls_raw: str) -> bool:
 
 def parse_excel_file(file_path: str) -> list[dict]:
     """
-    Reads the FIRST sheet only - real Restland exports include a second
-    "hiddenSheet" used internally by the CRM export tool for column-mapping
-    metadata, which is not lead data and must be ignored.
+    Reads Excel (.xlsx, .xls) or CSV files including Google Contacts exports.
+    For Excel, reads the FIRST sheet only - real Restland exports include a
+    second "hiddenSheet" used internally by the CRM export tool for
+    column-mapping metadata, which is not lead data and must be ignored.
     """
-    df = pd.read_excel(file_path, sheet_name=0, dtype=str)
+    lower_path = file_path.lower()
+    if lower_path.endswith(".csv") or lower_path.endswith(".vcf"):
+        # Try CSV first, then fall back with different encodings
+        try:
+            df = pd.read_csv(file_path, dtype=str, encoding="utf-8-sig")
+        except Exception:
+            df = pd.read_csv(file_path, dtype=str, encoding="latin-1")
+    else:
+        df = pd.read_excel(file_path, sheet_name=0, dtype=str)
     df = df.fillna("")
 
     lookup = _build_column_lookup(df.columns)
@@ -166,12 +175,14 @@ def parse_excel_file(file_path: str) -> list[dict]:
 
 def import_leads_from_excel(
     db: Session,
-    file_path: str,
+    file_path: str | None,
     organization_id: str,
     uploading_user_id: str,
     source_year: int = None,
     source_filename: str = None,
     dry_run: bool = False,
+    force_new_inquiry: bool = False,
+    _preloaded_rows: list | None = None,
 ) -> dict:
     """
     Full import pipeline: parse -> route by tier/channel -> dedup check
@@ -185,7 +196,7 @@ def import_leads_from_excel(
     preview, since the real function commits internally - a caller-side
     savepoint can't wrap a commit.
     """
-    rows = parse_excel_file(file_path)
+    rows = _preloaded_rows if _preloaded_rows is not None else parse_excel_file(file_path)
 
     created_leads = []
     duplicate_count = 0
@@ -313,3 +324,30 @@ def import_leads_from_excel(
         # afterward. Explicitly empty for dry runs to avoid that trap.
         "created_lead_ids": [] if dry_run else [lead.id for lead in created_leads],
     }
+
+
+def import_leads_from_rows(
+    db,
+    rows: list[dict],
+    organization_id: str,
+    uploading_user_id: str,
+    source_filename: str = "API import",
+    source_year: int = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Same import logic as import_leads_from_excel but takes pre-parsed rows
+    directly instead of a file path. Used by Google Contacts import and
+    any other source that produces rows programmatically rather than from
+    a file upload.
+    """
+    return import_leads_from_excel(
+        db=db,
+        file_path=None,
+        organization_id=organization_id,
+        uploading_user_id=uploading_user_id,
+        source_year=source_year,
+        source_filename=source_filename,
+        dry_run=dry_run,
+        _preloaded_rows=rows,
+    )
