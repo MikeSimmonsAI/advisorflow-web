@@ -13,27 +13,10 @@ function statusLabel(value) {
   return value ? value.replaceAll('_', ' ') : 'unknown'
 }
 
-// Maps the backend's match_type categories to clearer human labels.
-// "name_and_email" / "name_and_first_name" matter here specifically because
-// these are corroborated matches (last name PLUS a second signal) - bare
-// last-name-only matching was removed entirely per Mike's explicit
-// complaint that sharing a common surname alone was producing false
-// positives (e.g. "Jay Johnson" and "Ray Johnson" getting grouped with
-// nothing else in common). Falls back to a plain underscore-replace
-// (replaceAll, not replace, so multi-underscore values display correctly)
-// for any future match_type the backend might add.
-const MATCH_TYPE_LABELS = {
-  phone: 'Same phone',
-  name_and_email: 'Same name + email',
-  name_and_first_name: 'Same first & last name',
-}
-
-function matchTypeLabel(matchType) {
-  return MATCH_TYPE_LABELS[matchType] || matchType.replaceAll('_', ' ')
-}
-
 export default function LeadCleanup() {
   const [groups, setGroups] = useState([])
+  const [deletingDuplicates, setDeletingDuplicates] = useState(false)
+  const [deleteResult, setDeleteResult] = useState(null)
   const [selectedKeepByGroup, setSelectedKeepByGroup] = useState({})
   const [mergeResults, setMergeResults] = useState(null)
   const [fixLeadId, setFixLeadId] = useState('')
@@ -219,6 +202,14 @@ export default function LeadCleanup() {
           <span>Potential Leads</span>
           <strong>{loading ? '—' : totalPotentialLeads}</strong>
           <small>{loading ? 'Scanning org data' : `${groups.length} duplicate group(s)`}</small>
+          <button
+            className="btn btn--secondary"
+            onClick={bulkDeleteDuplicates}
+            disabled={deletingDuplicates}
+            style={{marginLeft: 'auto', color: 'var(--signal-red)', borderColor: 'var(--signal-red)'}}
+          >
+            {deletingDuplicates ? 'Deleting…' : '🗑 Delete all duplicates'}
+          </button>
         </div>
       </header>
 
@@ -240,11 +231,16 @@ export default function LeadCleanup() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title">Potential Duplicate Groups</h2>
-              <p className="cleanup-panel-subtitle">Groups require a shared phone, or a shared last name plus a second match (email or first name) — a shared surname alone is never enough.</p>
+              <p className="cleanup-panel-subtitle">Groups are found by shared normalized phone or normalized last name, excluding leads already flagged as duplicates.</p>
             </div>
             <button className="btn btn--secondary" type="button" onClick={loadPotentialDuplicates} disabled={busy || loading}>Refresh</button>
           </div>
 
+          {deleteResult && (
+            <div style={{padding: '10px 14px', borderRadius: 8, background: deleteResult.error ? 'var(--signal-red-dim)' : 'var(--signal-green-dim)', color: deleteResult.error ? 'var(--signal-red)' : 'var(--signal-green)', marginBottom: 10}}>
+              {deleteResult.error || `✓ ${deleteResult.message}`}
+            </div>
+          )}
           {loading ? <div className="cleanup-empty-state">Scanning for likely duplicates...</div> : null}
           {!loading && groups.length === 0 ? <div className="cleanup-empty-state">No uncaught potential duplicates found.</div> : null}
 
@@ -256,7 +252,7 @@ export default function LeadCleanup() {
                 <article className="cleanup-group-card" key={key}>
                   <div className="cleanup-group-header">
                     <div>
-                      <span className={`cleanup-match-pill cleanup-match-pill--${group.match_type}`}>{matchTypeLabel(group.match_type)}</span>
+                      <span className={`cleanup-match-pill cleanup-match-pill--${group.match_type}`}>{group.match_type.replace('_', ' ')}</span>
                       <h3>{group.match_key}</h3>
                     </div>
                     <div className="cleanup-group-actions">

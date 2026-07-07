@@ -1,15 +1,18 @@
 import os
 import shutil
 import tempfile
-from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime, timedelta, time, timezone
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, LeadStatus
+from app.models.models import User, Lead, LeadStatus, Reply, ReplyClassification, CadenceState, CadenceStatus, BookingLink, EngagementTemperature
 from app.services.import_service import import_leads_from_excel, parse_excel_file
 from app.services.dedup_service import bulk_dedup_check
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -23,7 +26,8 @@ def _is_suppressed(db: Session, lead: Lead) -> bool:
 @router.post("/upload/preview")
 def preview_upload(
     file: UploadFile = File(...),
-    source_year: Optional[int] = None,
+    source_year: Optional[int] = Form(None),
+    force_new_inquiry: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -31,11 +35,20 @@ def preview_upload(
     Step 1: advisor uploads an Excel file, we run the REAL import logic
     (tier routing, dedup, compliance flags) in dry_run mode so the preview
     numbers always match what confirm_upload will actually do.
+
+    source_year and force_new_inquiry are explicitly marked as Form(...)
+    fields, not bare params - without that marker FastAPI treats them as
+    query parameters when mixed with a File(...) upload, which silently
+    ignored the frontend's multipart form value for source_year (a real,
+    pre-existing bug found and fixed while wiring up force_new_inquiry,
+    which would have had the exact same problem).
+
+    force_new_inquiry: manual override for batches of brand-new web/cold
+    leads - tags every row as New Inquiry regardless of auto-detection
+    from a source column. See import_service.import_leads_from_excel for
+    the full reasoning.
     """
-    # Use the real file extension so CSV/Google Contacts files are parsed correctly
-    orig_name = file.filename or "upload.xlsx"
-    ext = ".csv" if orig_name.lower().endswith(".csv") else ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
@@ -48,6 +61,7 @@ def preview_upload(
             source_year=source_year,
             source_filename=file.filename,
             dry_run=True,
+            force_new_inquiry=force_new_inquiry,
         )
     finally:
         os.unlink(tmp_path)
@@ -58,14 +72,13 @@ def preview_upload(
 @router.post("/upload/confirm")
 def confirm_upload(
     file: UploadFile = File(...),
-    source_year: Optional[int] = None,
+    source_year: Optional[int] = Form(None),
+    force_new_inquiry: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Step 2: advisor confirms - actually import and persist the leads."""
-    orig_name = file.filename or "upload.xlsx"
-    ext = ".csv" if orig_name.lower().endswith(".csv") else ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+    """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
@@ -77,6 +90,7 @@ def confirm_upload(
             uploading_user_id=current_user.id,
             source_year=source_year,
             source_filename=file.filename,
+            force_new_inquiry=force_new_inquiry,
         )
     finally:
         os.unlink(tmp_path)
@@ -137,7 +151,19 @@ def set_lead_tier(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Manually assign a tier to a needs-review lead, which also sets its message_track and unlocks it for the SMS queue."""
+    """
+    Manually assign a tier to a needs-review lead, which also sets its
+    message_track and unlocks it for the SMS queue.
+
+    Scope note: intentionally org-wide rather than restricted to leads
+    assigned to current_user, unlike GET /needs-review above which only
+    lists the calling advisor's own needs-review leads. Re-tiering is a
+    reversible data-correction action (similar to the Lead Cleanup
+    contact-info fixes), and any advisor noticing a teammate's
+    obviously-mistagged lead should be able to fix it rather than waiting
+    on that specific advisor. Logged below so there's still a clear trail
+    of who changed what.
+    """
     from app.models.models import LeadTier
     from app.services.import_service import TIER_TO_TRACK
 
@@ -152,12 +178,151 @@ def set_lead_tier(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid tier: {new_tier}")
 
+    previous_tier = lead.tier.value if lead.tier else None
+
     lead.tier = tier_enum
     lead.message_track = TIER_TO_TRACK.get(tier_enum)
     lead.status = LeadStatus.NEW
     db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="lead.set_tier", target_type="lead", target_id=lead.id,
+        details={"from": previous_tier, "to": tier_enum.value, "lead_assigned_to_id": lead.assigned_to_id},
+    )
+
     return lead
 
+
+
+@router.get("/daily-briefing")
+def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped daily briefing data for the Overview page.
+
+    This deliberately mirrors the existing needs_attention behavior from
+    GET /sms/replies?needs_attention=true: Interested + Callback replies on
+    leads owned by the logged-in advisor. It does not introduce a separate
+    definition that could drift from the Replies inbox.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_24h = now - timedelta(hours=24)
+    end_of_today = datetime.combine(now.date(), time.max)
+    start_7d = now - timedelta(days=7)
+
+    base_lead_filters = (
+        Lead.organization_id == current_user.organization_id,
+        Lead.assigned_to_id == current_user.id,
+    )
+
+    replies_needing_attention = (
+        db.query(func.count(Reply.id))
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
+        )
+        .scalar()
+        or 0
+    )
+
+    cadence_touches_due_today = (
+        db.query(func.count(CadenceState.id))
+        .join(Lead, CadenceState.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            CadenceState.status == CadenceStatus.ACTIVE,
+            CadenceState.next_touch_due_at.isnot(None),
+            CadenceState.next_touch_due_at <= end_of_today,
+        )
+        .scalar()
+        or 0
+    )
+
+    leads_imported_last_24h = (
+        db.query(func.count(Lead.id))
+        .filter(
+            *base_lead_filters,
+            Lead.created_at >= start_24h,
+        )
+        .scalar()
+        or 0
+    )
+
+    bookings_last_7_days = (
+        db.query(func.count(distinct(BookingLink.lead_id)))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            BookingLink.status == "booked",
+            BookingLink.booked_time.isnot(None),
+            BookingLink.booked_time >= start_7d,
+        )
+        .scalar()
+        or 0
+    )
+
+    return {
+        "replies_needing_attention": replies_needing_attention,
+        "cadence_touches_due_today": cadence_touches_due_today,
+        "leads_imported_last_24h": leads_imported_last_24h,
+        "bookings_last_7_days": bookings_last_7_days,
+    }
+
+
+@router.get("/engagement-breakdown")
+def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped engagement temperature counts for the Overview chart.
+    Uses the real Lead.engagement_temperature field; no client-side guesses.
+    """
+    rows = (
+        db.query(Lead.engagement_temperature, func.count(Lead.id))
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+        )
+        .group_by(Lead.engagement_temperature)
+        .all()
+    )
+    counts = {temperature.value: 0 for temperature in EngagementTemperature}
+    for temperature, count in rows:
+        key = temperature.value if temperature else EngagementTemperature.UNKNOWN.value
+        counts[key] = int(count or 0)
+    return counts
+
+
+@router.get("/status-funnel")
+def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Advisor-scoped real lead status funnel for Overview.
+    Only returns the stages displayed in the dashboard funnel.
+    """
+    stages = [
+        LeadStatus.NEW,
+        LeadStatus.SENT,
+        LeadStatus.REPLIED,
+        LeadStatus.HOT,
+        LeadStatus.BOOKED,
+    ]
+    rows = (
+        db.query(Lead.status, func.count(Lead.id))
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.assigned_to_id == current_user.id,
+            Lead.status.in_(stages),
+        )
+        .group_by(Lead.status)
+        .all()
+    )
+    counts = {stage.value: 0 for stage in stages}
+    for status, count in rows:
+        if status:
+            counts[status.value] = int(count or 0)
+    return [
+        {"status": stage.value, "label": stage.value.replace("_", " ").title(), "count": counts[stage.value]}
+        for stage in stages
+    ]
 
 @router.get("/{lead_id}")
 def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -388,3 +553,35 @@ def confirm_send_batch(
             skipped.append({"lead_id": item.lead_id, "reason": str(e)})
 
     return {"sent_count": len(sent_ids), "skipped_count": len(skipped), "sent_ids": sent_ids, "skipped": skipped}
+
+
+@router.delete("/duplicates/bulk-delete")
+def bulk_delete_duplicate_leads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Permanently deletes all leads flagged as duplicates (is_duplicate=True)
+    for this organization. These leads were already blocked from all
+    outreach by the dedup engine - this just removes them from the
+    database entirely for a clean list.
+
+    Requires org_admin or super_admin role - advisors cannot bulk delete.
+    """
+    from app.deps import require_admin
+    if current_user.role not in ("org_admin", "super_admin"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Admin role required to bulk delete leads.")
+
+    duplicates = db.query(Lead).filter(
+        Lead.organization_id == current_user.organization_id,
+        Lead.is_duplicate == True,
+    ).all()
+
+    count = len(duplicates)
+    for lead in duplicates:
+        db.delete(lead)
+
+    db.commit()
+
+    return {"deleted": count, "message": f"Permanently deleted {count} duplicate leads."}
