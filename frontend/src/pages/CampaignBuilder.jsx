@@ -87,7 +87,7 @@ export default function CampaignBuilder() {
       params.set('has_phone', filters.has_phone ? 'true' : 'false')
       params.set('exclude_dnc', filters.exclude_dnc ? 'true' : 'false')
       params.set('exclude_duplicates', filters.exclude_duplicates ? 'true' : 'false')
-      const data = await api.get(`/campaigns/preview?${params.toString()}`)
+      const data = await api.get(`/campaigns/builder/preview?${params.toString()}`)
       setPreviewLeads(data || [])
     } catch (err) {
       setPreviewError(err.message || 'Could not preview leads.')
@@ -121,7 +121,7 @@ export default function CampaignBuilder() {
           exclude_duplicates: filters.exclude_duplicates,
         },
       }
-      const result = await api.post('/campaigns/send', payload)
+      const result = await api.post('/campaigns/builder/send', payload)
       setSendResult(result)
     } catch (err) {
       setSendError(err.message || 'Campaign send failed.')
