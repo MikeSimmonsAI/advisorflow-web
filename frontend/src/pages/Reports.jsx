@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import '../styles/shared.css'
 
+function fmtPct(value) {
+  if (value === null || value === undefined) return '–'
+  // _safe_rate on the backend already returns a percentage (e.g. 66.7), NOT a 0-1 decimal.
+  // Do NOT multiply by 100 again here.
+  const n = Number(value)
+  return `${n % 1 === 0 ? n : n.toFixed(1)}%`
+}
+
 export default function Reports() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -30,16 +38,20 @@ export default function Reports() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
             {[
-              { label: 'Total leads', value: data.totals?.leads_owned ?? '–' },
-              { label: 'Messages sent', value: data.totals?.messages_sent ?? '–' },
+              { label: 'Total leads',    value: data.totals?.leads_owned ?? '–' },
+              { label: 'Messages sent',  value: data.totals?.messages_sent ?? '–' },
               { label: 'Replies received', value: data.totals?.replies ?? '–' },
-              { label: 'Reply rate', value: data.totals?.reply_rate != null ? `${Math.round(data.totals.reply_rate * 100)}%` : '–' },
-              { label: 'Hot reply rate', value: data.totals?.hot_reply_rate != null ? `${Math.round(data.totals.hot_reply_rate * 100)}%` : '–' },
-              { label: 'Booking rate', value: data.totals?.booking_rate != null ? `${Math.round(data.totals.booking_rate * 100)}%` : '–' },
+              { label: 'Reply rate',     value: fmtPct(data.totals?.reply_rate) },
+              { label: 'Hot reply rate', value: fmtPct(data.totals?.hot_reply_rate) },
+              { label: 'Booking rate',   value: fmtPct(data.totals?.booking_rate) },
             ].map(stat => (
               <div key={stat.label} className="panel" style={{ padding: '18px 20px' }}>
-                <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: 700 }}>{stat.label}</span>
-                <strong style={{ display: 'block', fontSize: 28, color: 'var(--text-primary)', marginTop: 6, letterSpacing: '-0.02em' }}>{stat.value}</strong>
+                <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                  {stat.label}
+                </span>
+                <strong style={{ display: 'block', fontSize: 28, color: 'var(--text-primary)', marginTop: 6, letterSpacing: '-0.02em' }}>
+                  {stat.value}
+                </strong>
               </div>
             ))}
           </div>
@@ -71,10 +83,10 @@ export default function Reports() {
                       <td className="mono">{a.leads_owned}</td>
                       <td className="mono">{a.messages_sent}</td>
                       <td className="mono">{a.replies}</td>
-                      <td className="mono">{a.reply_rate != null ? `${Math.round(a.reply_rate * 100)}%` : '–'}</td>
-                      <td className="mono">{a.hot_reply_rate != null ? `${Math.round(a.hot_reply_rate * 100)}%` : '–'}</td>
-                      <td className="mono">{a.booking_rate != null ? `${Math.round(a.booking_rate * 100)}%` : '–'}</td>
-                      <td className="mono">{a.dnc_rate != null ? `${Math.round(a.dnc_rate * 100)}%` : '–'}</td>
+                      <td className="mono">{fmtPct(a.reply_rate)}</td>
+                      <td className="mono">{fmtPct(a.hot_reply_rate)}</td>
+                      <td className="mono">{fmtPct(a.booking_rate)}</td>
+                      <td className="mono">{fmtPct(a.dnc_rate)}</td>
                     </tr>
                   ))}
                 </tbody>
