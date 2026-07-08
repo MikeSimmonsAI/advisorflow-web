@@ -1,0 +1,148 @@
+:root {
+  /* BookaBoost command center - real screens only, CSS-only skin.
+     Every color is a variable here; every other file references these
+     names, never raw hex, so the whole palette can be retuned from
+     this one file alone. */
+  --bg-base: #03060f;
+  --bg-panel: rgba(7, 14, 32, 0.86);
+  --bg-card: rgba(10, 20, 44, 0.80);
+  --bg-card-hover: rgba(16, 32, 68, 0.92);
+  --border-subtle: rgba(64, 170, 255, 0.18);
+  --border-strong: rgba(86, 200, 255, 0.42);
+
+  --signal-green: #1ef0a8;
+  --signal-green-dim: rgba(30, 240, 168, 0.15);
+  --signal-blue: #2fb6ff;
+  --signal-blue-dim: rgba(47, 182, 255, 0.16);
+  --signal-red: #ff4d7e;
+  --signal-red-dim: rgba(255, 77, 126, 0.16);
+  --signal-amber: #ffb238;
+  --signal-amber-dim: rgba(255, 178, 56, 0.16);
+
+  --signal-purple: #9d6dff;
+  --signal-purple-dim: rgba(157, 109, 255, 0.16);
+
+  --text-primary: #eef5ff;
+  --text-secondary: #9fb0cf;
+  --text-tertiary: #5e6f8f;
+
+  --text-inverse: #061018;
+  --text-danger-soft: #ffdce6;
+  --bg-field: rgba(7, 14, 31, 0.7);
+  --bg-field-soft: rgba(8, 17, 39, 0.6);
+  --bg-row: rgba(8, 16, 36, 0.52);
+  --bg-row-hover: rgba(16, 32, 68, 0.72);
+  --border-danger: rgba(255, 77, 126, 0.34);
+
+  --font-display: 'Space Grotesk', 'Inter', sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --sidebar-width: 268px;
+
+  --glow-blue-sm: 0 0 14px rgba(47, 182, 255, 0.28);
+  --glow-blue-md: 0 0 24px rgba(47, 182, 255, 0.30);
+  --glow-blue-lg: 0 0 52px rgba(47, 182, 255, 0.34);
+  --glow-purple-md: 0 0 26px rgba(157, 109, 255, 0.26);
+  --glow-green-sm: 0 0 14px rgba(30, 240, 168, 0.26);
+  --glow-green-md: 0 0 30px rgba(30, 240, 168, 0.30);
+  --glow-red-sm: 0 0 14px rgba(255, 77, 126, 0.26);
+  --glow-red-md: 0 0 30px rgba(255, 77, 126, 0.30);
+  --glow-amber-md: 0 0 30px rgba(255, 178, 56, 0.28);
+  --panel-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --panel-shadow-strong: 0 34px 110px rgba(0, 0, 0, 0.58), 0 0 42px rgba(47, 182, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --corner-bracket-size: 34px;
+}
+
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(47, 182, 255, 0.16), transparent 30%),
+    radial-gradient(circle at 100% 14%, rgba(157, 109, 255, 0.14), transparent 28%),
+    radial-gradient(circle at 50% 100%, rgba(30, 240, 168, 0.06), transparent 36%),
+    linear-gradient(150deg, var(--bg-base) 0%, var(--bg-panel) 48%, var(--bg-base) 100%);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(47, 182, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(47, 182, 255, 0.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.85), transparent 70%);
+}
+
+#root {
+  min-height: 100vh;
+  isolation: isolate;
+}
+
+a { color: inherit; text-decoration: none; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+
+/*
+ * Site-wide fix: native <option> elements do NOT inherit a parent
+ * <select>'s background/color - every select on the dark theme (tier
+ * assignment, filters, role pickers, bulk-assign dropdowns, etc.) was
+ * rendering its open dropdown menu using the browser/OS default styling
+ * (typically white background, inconsistent text color), making options
+ * unreadable - text only became visible by accident once a hover
+ * highlight provided contrast. This is a real, global CSS gap: no page
+ * ever styled <option> directly, only the parent <select>. Fixing once,
+ * here, covers every select sitewide rather than patching each page's
+ * own .tier-select/.filter-select/etc. individually.
+ */
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+::selection {
+  background: var(--signal-blue-dim);
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal-blue);
+  outline-offset: 3px;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 2px solid var(--bg-base);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--signal-blue); }
