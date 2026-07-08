@@ -42,79 +42,6 @@ class LeadTier(str, enum.Enum):
     NEW_INQUIRY = "new_inquiry"  # brand-new web/cold lead, no prior relationship with Restland
 
 
-# ---------------------------------------------------------------------------
-# TierDefinition - the real, per-organization tier configuration system.
-#
-# Per Mike's explicit decision: funeral itself migrates onto this
-# system rather than living as a separate, hardcoded "default"
-# alongside a new configurable path for other industries. Every
-# organization - including every existing funeral org - owns a real
-# set of TierDefinition rows. Restland's are simply the first ones,
-# pre-seeded to match the existing LeadTier/MessageTrack values
-# exactly, so existing data and existing behavior are completely
-# unaffected the moment this table exists.
-#
-# This table carries everything an org needs to fully own its pipeline:
-#   - tier_key / tier_label: what Lead.tier actually stores, and what
-#     advisors see (e.g. key="pre_need", label="Pre-Need" for Restland;
-#     key="quote_requested", label="Quote Requested" for a roofing org)
-#   - track_key / track_label: the matching message track, replacing
-#     the old hardcoded TIER_TO_TRACK dict in import_service.py
-#   - ai_tone_context: the narrative guidance the AI template writer
-#     uses, replacing the old hardcoded TRACK_CONTEXT dict in
-#     template_ai_service.py - this is the genuinely industry-specific
-#     content (Restland's "Tone should be warm, supportive... never
-#     salesy" has no meaning for a roofing quote-follow-up).
-#
-# Lead.tier and Lead.message_track are now plain String columns,
-# validated against this table's rows for that lead's organization -
-# not a database-level enum anymore, since a hard enum cannot vary
-# per organization. The stored string VALUES for Restland's leads are
-# completely unchanged ("pre_need", "at_need", etc.) - only the
-# column's TYPE changed from enforced-enum to configuration-validated
-# string, so no existing lead data needed to move at all.
-# ---------------------------------------------------------------------------
-class TierDefinition(Base):
-    __tablename__ = "tier_definitions"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-
-    tier_key = Column(String, nullable=False)  # e.g. "pre_need", "quote_requested"
-    tier_label = Column(String, nullable=False)  # e.g. "Pre-Need", "Quote Requested"
-    sort_order = Column(Integer, default=0)  # display order in dropdowns/pipeline views
-
-    track_key = Column(String, nullable=False)  # e.g. "pre_need_lock_price"
-    track_label = Column(String, nullable=False)  # e.g. "Pre-Need (Lock Price)"
-    ai_tone_context = Column(Text, nullable=False)  # the genuinely industry-specific AI guidance text
-
-    is_active = Column(Boolean, default=True)  # soft-disable a tier without deleting its history
-    is_manual_selectable = Column(Boolean, default=True)  # False for tiers that are auto-detected import OUTCOMES (e.g. Restland's "Email Only"/"Address Only"/"Partial Info"), never something an advisor manually picks for a new lead
-    created_at = Column(DateTime, server_default=func.now())
-
-    organization = relationship("Organization", back_populates="tier_definitions")
-
-    __table_args__ = (
-        UniqueConstraint("organization_id", "tier_key", name="uq_tier_definition_org_key"),
-    )
-
-
-class RelationshipType(str, enum.Enum):
-    """
-    How a referral lead relates to the lead who referred them - per
-    Mike's explicit, concrete scenario: "I'm dealing with Deborah Brown
-    and... she's now given me Lisa and Tom... I need to be able to send
-    out some messages to Lisa and Tom." Confirmed list, not invented.
-    """
-    SPOUSE = "spouse"
-    CHILD = "child"
-    PARENT = "parent"
-    SIBLING = "sibling"
-    DECISION_MAKER = "decision_maker"
-    POWER_OF_ATTORNEY = "power_of_attorney"
-    OTHER_FAMILY = "other_family"
-
-
 class ReplyClassification(str, enum.Enum):
     """
     Richer reply categorization than the old binary is_hot flag - matches
@@ -190,8 +117,7 @@ class CadenceStatus(str, enum.Enum):
 
 
 class NotificationType(str, enum.Enum):
-    HOT_REPLY = "hot_reply"  # kept distinct from REPLY_RECEIVED below - some views may want to filter specifically on "was this hot"
-    REPLY_RECEIVED = "reply_received"  # any inbound reply, regardless of classification - added per Mike's explicit request for alerts on every reply, not just hot ones
+    HOT_REPLY = "hot_reply"
     BOOKING_CONFIRMED = "booking_confirmed"
     CADENCE_COMPLETED = "cadence_completed"
 
@@ -210,15 +136,6 @@ class Organization(Base):
     plan = Column(String, default="trial")  # trial, standard ($299/mo), enterprise
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
-
-    # Industry-agnostic tier configuration - per the explicit decision
-    # to migrate funeral itself onto this system rather than building a
-    # separate, parallel one. Every org (including every existing one)
-    # gets a real, owned set of TierDefinition rows - there is no
-    # special-cased "funeral mode" left anywhere in the tier logic once
-    # this is fully wired in; funeral is simply the first, pre-seeded
-    # industry profile, not a hardcoded fallback path.
-    tier_definitions = relationship("TierDefinition", back_populates="organization")
 
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
@@ -263,59 +180,8 @@ class User(Base):
     microsoft_365_connected = Column(Boolean, default=False)
 
     # Notification preferences
-    notification_email = Column(String, nullable=True)  # where reply alert emails go
-    notification_phone = Column(String, nullable=True)  # advisor's own personal cell for SMS alerts - deliberately separate from twilio_phone_number, which is the number leads get texted FROM, not the advisor's own phone they actually carry
-    notify_on_hot_reply = Column(Boolean, default=True)  # despite the name (kept for backward compatibility), this now gates ALL reply alerts, not just hot ones - see notification_service.py's notify_reply
-    notify_via_sms = Column(Boolean, default=False)  # off by default - requires notification_phone to be set, and is an extra cost/traffic decision an advisor should opt into, not get by surprise
-
-    # Per-advisor permission override - lead import (Excel upload) is
-    # admin-only by default per Mike's explicit request, but he also
-    # wanted the ability to grant specific advisors that right
-    # individually rather than it being all-or-nothing. False by
-    # default so existing/new advisor accounts don't silently gain
-    # import access; an admin has to deliberately flip this per person.
-    can_import_leads = Column(Boolean, default=False)
-
-    # Generic per-advisor feature toggle system - per Mike's explicit
-    # request for "the ability to add features to that particular
-    # account or not" without it being all-or-nothing by role. Stores a
-    # comma-separated list of enabled flag NAMES (validated against
-    # KNOWN_FEATURE_FLAGS below, never arbitrary free text - see
-    # feature_flags.py for the full reasoning on why this is the
-    # "bulletproof" option Mike specifically asked for over a fully
-    # freeform/configurable system).
-    #
-    # DELIBERATELY NOT used for can_import_leads above, which keeps its
-    # own dedicated column: that permission controls something with
-    # real weight (bulk data import) and already has its own tested,
-    # working, directly-queryable implementation - folding it into a
-    # generic string list would only make it harder to reason about for
-    # zero benefit. This generic system is for SMALLER, lower-stakes
-    # feature gates - early access to a new view, an experimental
-    # feature - where a dedicated column per toggle would get tedious
-    # once there are several.
-    feature_flags = Column(Text, nullable=True)  # comma-separated flag names, e.g. "early_access_reports,beta_dashboard"
-
-    # Auto-send queue phase toggle - per the explicit, careful design
-    # agreed on for this feature: "soft", "candidate", or "auto".
-    #   - "off" (default): no auto-send queue activity at all for this
-    #     advisor's leads. This is the only safe default for an advisor
-    #     who hasn't opted in.
-    #   - "candidate": Phase 1 / training wheels. Eligible replies land
-    #     in a review queue with an AI-drafted response, but nothing
-    #     sends without the advisor explicitly clicking confirm. Exists
-    #     specifically so an advisor can watch the classifier's real
-    #     judgment calls before trusting it unsupervised.
-    #   - "auto": Phase 2. The exact same eligibility logic, but
-    #     qualifying replies send automatically with no click, logged
-    #     to AutoSentLog for after-the-fact review.
-    # Deliberately its OWN dedicated column, not folded into the
-    # generic feature_flags string above - this controls whether AI
-    # sends real messages to real people with no human in the loop,
-    # which is a categorically higher-stakes permission than a
-    # lightweight UI feature flag and deserves to be directly
-    # queryable, not parsed out of a comma-separated string.
-    auto_send_phase = Column(String, default="off")  # "off" | "candidate" | "auto"
+    notification_email = Column(String, nullable=True)  # where HOT reply alerts go
+    notify_on_hot_reply = Column(Boolean, default=True)
 
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
@@ -368,14 +234,13 @@ class Lead(Base):
     phone_raw = Column(String, nullable=True)  # original as imported
     email = Column(String, nullable=True)
 
-    tier = Column(String, default="pre_need")  # validated against this org's TierDefinition.tier_key, not a hard enum - see TierDefinition's docstring for why
+    tier = Column(SAEnum(LeadTier), default=LeadTier.PRE_NEED)
     engagement_temperature = Column(SAEnum(EngagementTemperature), default=EngagementTemperature.UNKNOWN)
-    message_track = Column(String, nullable=True)  # validated against this org's TierDefinition.track_key
+    message_track = Column(SAEnum(MessageTrack), nullable=True)  # which offer/template track applies
     contact_channel = Column(String, default="sms")  # "sms" or "email_only" - drives queue routing
     status = Column(SAEnum(LeadStatus), default=LeadStatus.NEW)
     source_year = Column(Integer, nullable=True)  # e.g. 2012, 2013 (which cohort batch)
     source_file = Column(String, nullable=True)  # original upload filename for traceability
-    google_contact_resource_name = Column(String, nullable=True)  # set once this lead has been synced to the assigned advisor's Google Contacts - presence of a value means "already synced," used to avoid creating duplicate contacts
 
     # CRM history carried over from import - feeds the AI lead-quality analysis
     # Mike requested (last action taken + last contact date + original status
@@ -428,40 +293,6 @@ class Message(Base):
 
 
 # ---------------------------------------------------------------------------
-# LeadReferral - referral/permission-to-access lead generation
-#
-# Per Mike's explicit, concrete scenario, not a vague "next of kin"
-# field: "I'm dealing with Deborah Brown and... she's now given me Lisa
-# and Tom [through a permission-to-access form]... I need to be able to
-# send out some messages to Lisa and Tom so that they know I'm dealing
-# with [Deborah] and I need to get them in for pre-need." Lisa and Tom
-# are not notes on Deborah's record - they become REAL, separate Lead
-# rows (their own cadence, replies, outcomes, the works), each
-# permanently linked back to the lead who referred them.
-#
-# This table is the link, not a duplicate of contact info that already
-# lives on the new Lead row - referred_lead_id IS the new Lead (Lisa's
-# own real record), this table just remembers WHO referred them and
-# HOW they're related, so both Deborah's page ("Referred: Lisa, Tom")
-# and Lisa's page ("Referred by: Deborah") can show that context.
-# ---------------------------------------------------------------------------
-class LeadReferral(Base):
-    __tablename__ = "lead_referrals"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    source_lead_id = Column(String, ForeignKey("leads.id"), nullable=False)  # Deborah
-    referred_lead_id = Column(String, ForeignKey("leads.id"), nullable=False)  # Lisa's own real Lead record
-    relationship_type = Column(SAEnum(RelationshipType), nullable=False)
-    created_by_id = Column(String, ForeignKey("users.id"), nullable=False)
-    notes = Column(Text, nullable=True)
-
-    created_at = Column(DateTime, server_default=func.now())
-
-    source_lead = relationship("Lead", foreign_keys=[source_lead_id])
-    referred_lead = relationship("Lead", foreign_keys=[referred_lead_id])
-
-
-# ---------------------------------------------------------------------------
 # Reply - inbound SMS log
 # ---------------------------------------------------------------------------
 class Reply(Base):
@@ -485,91 +316,6 @@ class Reply(Base):
 
 
 # ---------------------------------------------------------------------------
-# AutoSendCandidate / AutoSentLog - the auto-send queue's real data
-# structures, per the explicit, careful design agreed on for this
-# feature: a reply only ever becomes a candidate if it passes a
-# DEDICATED eligibility check (see auto_send_eligibility_service.py) -
-# never the general reply classifier alone, since the general
-# classifier was built to answer "what does this reply mean," not the
-# much higher-stakes question "is it safe to send something back with
-# zero human review."
-#
-# Phase 1 (candidate): a reply lands here, AI drafts a response, the
-# advisor reviews and explicitly confirms before anything sends -
-# nothing in this table alone ever causes a message to go out.
-#
-# Phase 2 (auto): once an advisor's User.auto_send_phase == "auto",
-# the exact same eligibility check still runs, but a qualifying
-# candidate is sent immediately and the row moves straight to
-# AutoSentLog instead of waiting for a click - this is the visible,
-# permanent audit trail an advisor can spot-check after the fact, the
-# real safety net for the unsupervised phase.
-# ---------------------------------------------------------------------------
-class AutoSendCandidateStatus(str, enum.Enum):
-    PENDING = "pending"        # waiting for advisor review (Phase 1)
-    CONFIRMED = "confirmed"    # advisor confirmed, message was sent
-    EDITED_SENT = "edited_sent"  # advisor edited the draft, then sent
-    OVERRIDDEN = "overridden"  # advisor declined the auto-draft, handled as a normal reply instead
-    EXPIRED = "expired"        # left unreviewed past a reasonable window
-
-
-class AutoSendCandidate(Base):
-    __tablename__ = "auto_send_candidates"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    reply_id = Column(String, ForeignKey("replies.id"), nullable=False, unique=True)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
-    advisor_id = Column(String, ForeignKey("users.id"), nullable=False)
-
-    # The actual eligibility decision, preserved permanently - even
-    # after this candidate is resolved, this explains WHY the system
-    # thought it was safe to draft automatically, which matters for
-    # ever debugging or improving the eligibility logic later.
-    eligibility_reasoning = Column(Text, nullable=True)
-    classification_confidence = Column(String, nullable=True)  # "high" - the eligibility check requires high confidence, see auto_send_eligibility_service.py
-
-    ai_drafted_body = Column(Text, nullable=False)
-    final_sent_body = Column(Text, nullable=True)  # what actually went out, if anything did - may differ from ai_drafted_body if the advisor edited it
-
-    status = Column(SAEnum(AutoSendCandidateStatus), default=AutoSendCandidateStatus.PENDING)
-    message_id = Column(String, ForeignKey("messages.id"), nullable=True)  # the real Message row, once something is actually sent
-
-    created_at = Column(DateTime, server_default=func.now())
-    resolved_at = Column(DateTime, nullable=True)
-
-    reply = relationship("Reply", foreign_keys=[reply_id])
-    lead = relationship("Lead", foreign_keys=[lead_id])
-    advisor = relationship("User", foreign_keys=[advisor_id])
-
-
-class AutoSentLog(Base):
-    """
-    Phase 2's permanent audit trail - every message sent with NO human
-    click, ever, lives here. Deliberately a separate table from
-    AutoSendCandidate (which is Phase 1's reviewable queue) rather than
-    one table serving both purposes - an advisor spot-checking what the
-    system sent unsupervised needs a clean, permanent, append-only
-    record, not a queue table where rows get reused/recycled as they're
-    resolved.
-    """
-    __tablename__ = "auto_sent_log"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    reply_id = Column(String, ForeignKey("replies.id"), nullable=False)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
-    advisor_id = Column(String, ForeignKey("users.id"), nullable=False)
-    message_id = Column(String, ForeignKey("messages.id"), nullable=False)
-
-    sent_body = Column(Text, nullable=False)
-    eligibility_reasoning = Column(Text, nullable=True)
-
-    sent_at = Column(DateTime, server_default=func.now())
-
-    lead = relationship("Lead", foreign_keys=[lead_id])
-    advisor = relationship("User", foreign_keys=[advisor_id])
-
-
-# ---------------------------------------------------------------------------
 # BookingLink - stateless token booking system
 # (mirrors the existing advisorflow-booking.vercel.app backend)
 # ---------------------------------------------------------------------------
@@ -584,22 +330,6 @@ class BookingLink(Base):
     status = Column(String, default="pending")  # pending, booked, expired, cancelled
     booked_time = Column(DateTime, nullable=True)
     calendar_event_id = Column(String, nullable=True)  # Google Calendar event ID once synced
-
-    # Certified Appointment pipeline - per Mike's explicit, concrete
-    # definition: "Solicited, Contacted, Booked, Confirmed, Waiting."
-    # Confirmed is a DELIBERATE, separate step after booking - "we
-    # confirm: if they say yes, I'm still good, that's confirmed" - not
-    # automatically inferred from the booking itself. Deliberately
-    # additive (a new field here), NOT a new LeadStatus value: real,
-    # existing logic in cadence_service.py, engagement_service.py, and
-    # workqueue_router.py all check for LeadStatus.BOOKED specifically -
-    # replacing BOOKED with a CONFIRMED status once confirmation
-    # happened would have silently broken every one of those checks.
-    # confirmed_at is None until someone (advisor or an automated
-    # confirmation message flow, in a later session) explicitly marks
-    # it - see certification_service.py for how this combines with
-    # Solicited/Contacted/Booked into the overall certified status.
-    confirmed_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)
@@ -642,18 +372,6 @@ class LeadOutcome(Base):
     has_memorial = Column(Boolean, nullable=True)
     has_open_closed_status = Column(String, nullable=True)  # "open", "closed", or None if not applicable/unknown
 
-    # Context fields, deliberately OPTIONAL unlike the four sellable
-    # items above - these shape WHICH conversation to have next (e.g.
-    # veteran benefits eligibility), they aren't themselves a missed
-    # sale the way "no marker" is. Forcing a guess on every visit would
-    # produce worse data than fewer, more deliberate selections - see
-    # the has_funeral_arrangement/etc. fields above for the mandatory,
-    # directly-sellable items this distinction is drawn against.
-    has_preneed_planning = Column(Boolean, nullable=True)
-    has_insurance_funding = Column(Boolean, nullable=True)
-    is_veteran = Column(Boolean, nullable=True)
-    next_step = Column(Text, nullable=True)  # free text, not a tri-state - "what happens after this visit" isn't a has-it/doesn't-have-it question
-
     # Sales outcome - did this specific appointment result in a sale,
     # and what was sold. Feeds the Master Control Board revenue
     # reporting (step 6 of the build plan).
@@ -685,9 +403,8 @@ class LeadOutcome(Base):
 # String/gen_uuid). Ported the logic, fixed the ID types.
 # ---------------------------------------------------------------------------
 class SuppressionSource(str, enum.Enum):
-    MANUAL = "manual"  # entered directly in Compliance Center by an admin, by raw phone number
-    REPLY_STOP = "reply_stop"  # automatic - hard-stop keyword match (stop/unsubscribe/remove me) in the webhook
-    ADVISOR_FLAGGED = "advisor_flagged"  # manual quick-action from a specific lead/reply - an advisor caught what the automatic keyword check missed
+    MANUAL = "manual"
+    REPLY_STOP = "reply_stop"
 
 
 class SuppressionEntry(Base):
@@ -748,7 +465,7 @@ class Campaign(Base):
     name = Column(String, nullable=False)
     created_by_id = Column(String, ForeignKey("users.id"), nullable=False)
     filter_criteria = Column(Text, nullable=False)
-    message_track = Column(String, nullable=True)  # validated against this org's TierDefinition.track_key, not a hard enum - see TierDefinition's docstring for why
+    message_track = Column(SAEnum(MessageTrack), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (
@@ -802,20 +519,6 @@ class EmailMessage(Base):
     provider_message_id = Column(String, nullable=True)  # e.g. SendGrid/SES message ID
     status = Column(String, default="queued")  # queued, sent, delivered, bounced, failed
 
-    # Open/click tracking - per Mike's explicit request: real
-    # engagement signal email can give that text never does. opened_at
-    # is set the first time the tracking pixel loads (see
-    # email_tracking_router.py); click_count increments on every
-    # tracked-link click, with last_clicked_at reflecting the most
-    # recent one. Deliberately tracks COUNT, not a list of individual
-    # click timestamps/URLs - that level of detail isn't something an
-    # advisor needs to act on day to day, and keeping this simple
-    # avoids a second table for what's fundamentally a lightweight
-    # engagement signal, not a full analytics log.
-    opened_at = Column(DateTime, nullable=True)
-    click_count = Column(Integer, default=0)
-    last_clicked_at = Column(DateTime, nullable=True)
-
     sent_at = Column(DateTime, server_default=func.now())
 
     lead = relationship("Lead", back_populates="email_messages")
@@ -838,7 +541,6 @@ class Notification(Base):
     is_sent = Column(Boolean, default=False)
     sent_at = Column(DateTime, nullable=True)
     is_read = Column(Boolean, default=False)
-    send_failure_reason = Column(Text, nullable=True)  # populated when the alert email fails to send - previously failures left zero trace anywhere
 
     created_at = Column(DateTime, server_default=func.now())
 
@@ -856,7 +558,7 @@ class MessageTemplate(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-    message_track = Column(String, nullable=False)  # validated against this org's TierDefinition.track_key, not a hard enum
+    message_track = Column(SAEnum(MessageTrack), nullable=False)
     channel = Column(String, nullable=False)  # "sms" or "email"
 
     body_template = Column(Text, nullable=False)  # SMS: plain text. Email: HTML body.

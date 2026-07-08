@@ -61,8 +61,6 @@ def sample_org(db_session):
     org = Organization(name="Restland Cemetery & Funeral Home", slug="restland", plan="standard")
     db_session.add(org)
     db_session.commit()
-    from app.services.tier_config_service import seed_default_tier_definitions
-    seed_default_tier_definitions(db_session, org.id)
     return org
 
 

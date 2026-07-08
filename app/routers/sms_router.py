@@ -33,16 +33,11 @@ class ReclassifyReplyRequest(BaseModel):
     classification: ReplyClassification
 
 
-class DraftReplyRequest(BaseModel):
-    tone: str = "standard"  # "soft" | "standard" | "urgent" | "direct" - see draft_reply_service.TONE_GUIDANCE
-
-
 class DraftReplyResponse(BaseModel):
     suggested_reply: str
     booking_url: Optional[str] = None
     booking_link_id: Optional[str] = None
     source: str
-    tone: str = "standard"
 
 
 def _get_org_reply_or_404(db: Session, reply_id: str, current_user: User) -> Reply:
@@ -79,38 +74,23 @@ def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: Us
 @router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
 def draft_reply_for_lead(
     lead_id: str,
-    req: DraftReplyRequest = DraftReplyRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     AI-assisted one-on-one reply drafting for Lead Detail only.
 
-    Per Mike's explicit request: previously this only ever produced one
-    fixed tone (polite, soft, "when works for a quick call?") with no
-    way to ask for anything stronger. Now accepts an optional `tone`
-    (soft/standard/urgent/direct), each genuinely changing what the AI
-    writes - not just swapping a word, see TONE_GUIDANCE in
-    draft_reply_service.py for what each one actually instructs the
-    model to do differently. Defaults to "standard" so every existing
-    caller sending no body (or an empty body) gets the exact same
-    behavior as before this change - fully backward compatible.
-
-    This endpoint is deliberately non-blocking from the user's point of
-    view: missing OpenAI key, API errors, malformed model output, or any
-    other AI failure all fall back to a safe, editable reply instead of
-    surfacing a 500. It also reuses the real booking-link helper from
-    sms_service.py and only creates a new link when the lead does not
-    already have one.
+    This endpoint is deliberately non-blocking from the user's point of view:
+    missing OpenAI key, API errors, malformed model output, or any other AI
+    failure all fall back to a safe, editable reply instead of surfacing a 500.
+    It also reuses the real booking-link helper from sms_service.py and only
+    creates a new link when the lead does not already have one.
     """
-    from app.services.draft_reply_service import draft_reply, VALID_TONES
-
-    if req.tone not in VALID_TONES:
-        raise HTTPException(status_code=400, detail=f"tone must be one of: {', '.join(VALID_TONES)}")
-
     lead = _get_lead_for_current_org_or_404(db, lead_id, current_user)
 
-    result = draft_reply(db, lead, current_user, tone=req.tone)
+    from app.services.draft_reply_service import draft_reply
+
+    result = draft_reply(db, lead, current_user)
     return result
 
 
@@ -155,11 +135,8 @@ def inbound_webhook(
     reply_classification_service.py, which replaced the old naive
     substring keyword matcher after testing surfaced real false
     positives), stops the re-engagement cadence (any reply means the
-    lead is engaged - no more touches needed), and fires an immediate
-    reply notification to the owning advisor for EVERY reply (not just
-    hot ones - see notification_service.py's notify_reply, expanded per
-    Mike's explicit request that any reply, not just a hot lead, is
-    something he wants to know about the moment it happens).
+    lead is engaged - no more touches needed), and fires a HOT reply
+    email notification to the owning advisor.
     """
     from app.services.dedup_service import normalize_phone
     from app.services.cadence_service import stop_cadence_for_lead
@@ -223,18 +200,6 @@ def inbound_webhook(
 
     db.commit()
 
-    # Auto-send queue candidate check - per the explicit, careful
-    # design for this feature: only ever does anything if this lead's
-    # advisor has opted in (User.auto_send_phase != "off", the default).
-    # See auto_send_candidate_service.py for the full eligibility gate.
-    # Wrapped defensively, same as every other secondary effect below -
-    # a failure here must never break the Twilio webhook response.
-    try:
-        from app.services.auto_send_candidate_service import maybe_create_candidate
-        maybe_create_candidate(db, reply, lead)
-    except Exception:
-        pass
-
     # Reclassify hot/warm/cold now that a reply just arrived - this is
     # the single most important trigger point for engagement temperature,
     # since a reply is the strongest real-time signal a lead's state changed.
@@ -244,10 +209,10 @@ def inbound_webhook(
     except Exception:
         pass  # never let a classification failure break the Twilio webhook response
 
-    if lead.assigned_to:
-        from app.services.notification_service import notify_reply
+    if is_hot and lead.assigned_to:
+        from app.services.notification_service import notify_hot_reply
         try:
-            notify_reply(db, lead.assigned_to, lead, reply)
+            notify_hot_reply(db, lead.assigned_to, lead, reply)
         except Exception:
             pass  # never let a notification failure break the Twilio webhook response
 
@@ -274,39 +239,11 @@ def reclassify_reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Manually reclassify a reply. IMPORTANT: reclassifying TO dnc must
-    trigger the full DNC treatment, not just relabel the Reply row - this
-    was a real, silent gap before this fix. An advisor selecting "DNC"
-    from this dropdown would see the badge change, but the lead's status
-    never flipped to dnc, the cadence never stopped, and the phone never
-    got suppressed - meaning cadence touches would keep going out to a
-    lead an advisor had explicitly flagged as do-not-contact. Now mirrors
-    the same treatment as the automatic webhook path and the quick-DNC
-    button on Lead Detail (see /leads/{lead_id}/mark-dnc).
-    """
     reply = _get_org_reply_or_404(db, reply_id, current_user)
     reply.classification = req.classification
     reply.is_hot = req.classification == ReplyClassification.INTERESTED
     reply.classification_confidence = "manual"
     reply.classification_reasoning = f"Manually reclassified by {current_user.full_name}"
-
-    if req.classification == ReplyClassification.DNC:
-        from app.services.cadence_service import stop_cadence_for_lead
-        from app.services.compliance_service import add_suppression_entry_from_reply
-        from app.models.models import CadenceStatus, SuppressionSource
-
-        lead = db.query(Lead).filter(Lead.id == reply.lead_id).first()
-        if lead:
-            lead.status = "dnc"
-            stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
-            if lead.phone:
-                add_suppression_entry_from_reply(
-                    db, lead.organization_id, lead.phone,
-                    reason=f"Reply reclassified to DNC by {current_user.full_name}",
-                    source=SuppressionSource.ADVISOR_FLAGGED,
-                )
-
     db.commit()
     db.refresh(reply)
     return reply
@@ -356,117 +293,10 @@ def reply_activity_by_day(
     ]
 
 
-@router.get("/replies/certification-batch")
-def replies_certification_batch(
-    lead_ids: str = Query(..., description="Comma-separated lead IDs to look up"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Batch certification status lookup for the Replies action center.
-    The Replies page shows up to 200 replies, which may reference only
-    a few dozen distinct leads - this takes the deduplicated list of
-    lead_ids actually on screen and returns certification status for
-    all of them in a small, fixed number of queries (see
-    certification_service.get_certification_status_batch for the full
-    reasoning), instead of the frontend calling the single-lead
-    /leads/{id}/certification endpoint once per reply, which would mean
-    up to 200 separate API calls just to render one page.
-
-    Scoped to the current advisor's own leads only - a lead_id for
-    someone else's lead, or a different org's lead, is silently
-    excluded from the result rather than erroring, since this endpoint
-    is meant to be called with whatever lead_ids are already visible to
-    this advisor on their own Replies page; if the frontend passes one
-    that isn't actually theirs, it just gets no certification result
-    rather than a confusing partial-success error mid-batch.
-    """
-    from app.services.certification_service import get_certification_status_batch
-
-    requested_ids = [lid.strip() for lid in lead_ids.split(",") if lid.strip()]
-    if not requested_ids:
-        return {}
-
-    owned_lead_ids = [
-        row[0] for row in
-        db.query(Lead.id)
-        .filter(
-            Lead.id.in_(requested_ids),
-            Lead.organization_id == current_user.organization_id,
-            Lead.assigned_to_id == current_user.id,
-        )
-        .all()
-    ]
-
-    return get_certification_status_batch(db, owned_lead_ids)
-
-
-@router.get("/replies/counts")
-def reply_counts(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Real bucket counts for the Replies action center - per Mike's
-    explicit complaint that the Replies page "should not just send me
-    back to the lead sheet... it should feel like an action center."
-
-    Deliberately a SEPARATE endpoint from list_replies below, not
-    derived from its result: list_replies caps at 200 rows, and these
-    counts need to reflect the advisor's TRUE totals regardless of how
-    many replies exist, not just whatever happened to be in the first
-    page. Buckets here are the ones with real, already-tracked data -
-    "Appointment interest" and "Objections" (also named in Mike's notes)
-    aren't real ReplyClassification values yet and were deliberately
-    NOT invented here; they're logged as a real future classification
-    project, not faked with a guess.
-
-    needs_follow_up = Interested or Callback that hasn't been reviewed
-    yet - the same definition list_replies' needs_attention=True filter
-    already uses, kept consistent rather than introducing a second
-    definition of "needs attention."
-    """
-    base_query = (
-        db.query(Reply)
-        .join(Lead, Reply.lead_id == Lead.id)
-        .filter(Lead.organization_id == current_user.organization_id)
-        .filter(Lead.assigned_to_id == current_user.id)
-    )
-
-    hot = base_query.filter(Reply.classification == ReplyClassification.INTERESTED).count()
-    callback = base_query.filter(Reply.classification == ReplyClassification.CALLBACK).count()
-    question = base_query.filter(Reply.classification == ReplyClassification.QUESTION).count()
-    not_interested = base_query.filter(Reply.classification == ReplyClassification.NOT_INTERESTED).count()
-    wrong_number = base_query.filter(Reply.classification == ReplyClassification.WRONG_NUMBER).count()
-    dnc = base_query.filter(Reply.classification == ReplyClassification.DNC).count()
-    neutral = base_query.filter(Reply.classification == ReplyClassification.NEUTRAL).count()
-
-    needs_follow_up = base_query.filter(
-        Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
-        Reply.reviewed_at.is_(None),
-    ).count()
-    reviewed = base_query.filter(Reply.reviewed_at.isnot(None)).count()
-    total = base_query.count()
-
-    return {
-        "hot": hot,
-        "callback": callback,
-        "question": question,
-        "not_interested": not_interested,
-        "wrong_number": wrong_number,
-        "dnc": dnc,
-        "neutral": neutral,
-        "needs_follow_up": needs_follow_up,
-        "reviewed": reviewed,
-        "total": total,
-    }
-
-
 @router.get("/replies")
 def list_replies(
     hot_only: bool = False,
     needs_attention: bool = False,
-    bucket: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -482,14 +312,6 @@ def list_replies(
     replies that don't need a human decision. This is the filtered
     inbox behind the notification bell and Overview page, distinct from
     the older hot_only flag (which only checks the binary is_hot field).
-
-    bucket is the action-center scorecard filter - clicking a card on
-    the Replies page passes its bucket name here, matching the exact
-    same bucket definitions reply_counts() above uses, so the numbers
-    on the cards always agree with what clicking through actually
-    shows. Kept separate from needs_attention/hot_only (both predate
-    this) rather than replacing them, since other callers (notification
-    bell, Overview) still use needs_attention directly.
     """
     from app.models.models import ReplyClassification
 
@@ -503,26 +325,4 @@ def list_replies(
         query = query.filter(Reply.is_hot == True)
     if needs_attention:
         query = query.filter(Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]))
-
-    bucket_to_classification = {
-        "hot": ReplyClassification.INTERESTED,
-        "callback": ReplyClassification.CALLBACK,
-        "question": ReplyClassification.QUESTION,
-        "not_interested": ReplyClassification.NOT_INTERESTED,
-        "wrong_number": ReplyClassification.WRONG_NUMBER,
-        "dnc": ReplyClassification.DNC,
-        "neutral": ReplyClassification.NEUTRAL,
-    }
-    if bucket in bucket_to_classification:
-        query = query.filter(Reply.classification == bucket_to_classification[bucket])
-    elif bucket == "needs_follow_up":
-        query = query.filter(
-            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
-            Reply.reviewed_at.is_(None),
-        )
-    elif bucket == "reviewed":
-        query = query.filter(Reply.reviewed_at.isnot(None))
-    elif bucket is not None:
-        raise HTTPException(status_code=400, detail=f"Unknown bucket: {bucket}")
-
     return query.order_by(Reply.received_at.desc()).limit(200).all()

@@ -27,122 +27,6 @@
   margin-bottom: 32px;
 }
 
-.stat-card-link {
-  display: block;
-  background: transparent;
-  border: none;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-}
-
-.stat-card-link:hover .stat-card,
-.stat-card-link:focus-visible .stat-card {
-  border-color: var(--border-strong);
-  background: var(--bg-card-hover);
-}
-
-/* For a StatCard that has no real destination to navigate to - e.g.
-   "Duplicates prevented" on Master Dashboard, which is informational
-   only. Same layout as .stat-card-link, but explicitly non-interactive
-   (no pointer cursor, no hover-highlight) so it never looks clickable
-   when clicking it would do nothing - a dead-click affordance is a
-   real UX bug, not a stylistic nicety. */
-.stat-card-link--static {
-  cursor: default;
-}
-
-.stat-card-link--static:hover .stat-card {
-  border-color: var(--border-subtle);
-  background: inherit;
-}
-
-/* ---------------------------------------------------------------------
-   Shared reply-list styling - used by both Overview.jsx (Hot Replies
-   panel) and Admin.jsx (Master Dashboard's Hot Replies preview).
-   Consolidated from two overlapping rule blocks that previously lived
-   only in Overview.css (one with the base item styling, one added
-   later with an extra hover glow) into one complete, correct
-   definition here.
-   --------------------------------------------------------------------- */
-
-.reply-list {
-  position: relative;
-  z-index: 1;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.reply-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 11px 13px;
-  background: var(--bg-row);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
-}
-
-.reply-item:hover {
-  transform: translateX(3px);
-  border-color: var(--border-danger);
-  background: var(--signal-red-dim);
-  box-shadow: var(--glow-red-sm);
-}
-
-.reply-item--clickable {
-  cursor: pointer;
-}
-
-.reply-item .signal-pulse-wrap {
-  margin-top: 4px;
-}
-
-.reply-body {
-  font-size: 13px;
-  color: var(--text-primary);
-  line-height: 1.5;
-}
-
-/* ---------------------------------------------------------------------
-   Shared tab styling - confirmed byte-for-byte identical across
-   Admin.css and Leads.css before consolidating here. Now also used by
-   AutoSendQueue.jsx, which would otherwise need a third independent
-   copy of the exact same rules.
-   --------------------------------------------------------------------- */
-
-.tab {
-  background: rgba(7, 14, 31, 0.45);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 700;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  transition: border-color 0.16s ease, color 0.16s ease;
-}
-
-.tab:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-.tab--active {
-  border-color: rgba(47, 182, 255, 0.5);
-  color: var(--signal-blue);
-  background: linear-gradient(120deg, var(--signal-blue-dim), var(--signal-purple-dim));
-  box-shadow: var(--glow-blue-sm);
-}
-
 .panel {
   position: relative;
   background:
@@ -465,68 +349,24 @@ table.data-table tr:hover td {
   }
 }
 
-/* ---------------------------------------------------------------------
-   Shared chart styling - used by both Overview.jsx and Replies.jsx for
-   their line-chart/donut panels. Moved here from Overview.css once
-   Replies started using the same chart types, rather than duplicating
-   these rules in two page-specific CSS files or relying on Vite's
-   incidental cross-page CSS bundling.
-   --------------------------------------------------------------------- */
-
-.chart-frame {
-  position: relative;
-  z-index: 1;
-  min-height: 240px;
-}
-
-.chart-frame--donut {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.chart-frame--line {
-  margin-top: 8px;
-}
-
-.chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  justify-content: center;
-  margin-top: -4px;
-}
-
-.chart-legend-item {
+.command-kicker {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.chart-legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  box-shadow: var(--glow-blue-sm);
-}
-
-.chart-subtitle-inline {
-  color: var(--text-tertiary);
-  font-size: 11.5px;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--signal-blue);
   font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-.chart-frame--compact {
-  min-height: 150px;
-}
-
-.chart-frame--compact.chart-frame--line {
-  margin-top: 2px;
-}
-
-.chart-legend--compact {
-  margin-top: -2px;
-  gap: 4px 10px;
+.command-kicker::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--signal-green);
+  box-shadow: var(--glow-green-sm);
 }

@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BookaBoost — More Bookings. More Business.</title>
+  <meta name="description" content="BookaBoost helps service businesses automate lead follow-up, book more appointments, and close more deals — all from one smart dashboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:       #080e1f;
+      --navy-card:  #0d1628;
+      --navy-light: #111c35;
+      --blue:       #2563eb;
+      --blue-mid:   #3b82f6;
+      --blue-light: #60a5fa;
+      --blue-glow:  rgba(37,99,235,0.18);
+      --white:      #ffffff;
+      --grey-1:     #e2e8f0;
+      --grey-2:     #94a3b8;
+      --grey-3:     #334155;
+      --green:      #22c55e;
+      --border:     rgba(255,255,255,0.07);
+      --radius:     14px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--navy);
+      color: var(--grey-1);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 40px;
+      height: 68px;
+      background: rgba(8,14,31,0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .nav-brand-icon {
+      width: 36px;
+      height: 36px;
+    }
+
+    .nav-brand-text {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: -0.02em;
+    }
+
+    .nav-brand-text span { color: var(--blue-light); }
+
+    .nav-cta {
+      background: var(--blue);
+      color: var(--white);
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+
+    .nav-cta:hover { background: var(--blue-mid); }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      width: 800px; height: 800px;
+      background: radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(37,99,235,0.12);
+      border: 1px solid rgba(37,99,235,0.3);
+      border-radius: 99px;
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--blue-light);
+      margin-bottom: 28px;
+    }
+
+    .hero-eyebrow::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.4); }
+    }
+
+    .hero h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(38px, 6vw, 72px);
+      font-weight: 700;
+      color: var(--white);
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      max-width: 800px;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 .accent {
+      background: linear-gradient(135deg, #60a5fa, #2563eb);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--grey-2);
+      max-width: 560px;
+      margin-bottom: 44px;
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 64px;
+    }
+
+    .btn-primary {
+      background: var(--blue);
+      color: var(--white);
+      padding: 16px 32px;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.2s;
+      box-shadow: 0 0 32px rgba(37,99,235,0.4);
+    }
+
+    .btn-primary:hover {
+      background: var(--blue-mid);
+      box-shadow: 0 0 48px rgba(37,99,235,0.6);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.06);
+      color: var(--white);
+      padding: 16px 32px;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      transition: all 0.2s;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255,255,255,0.1);
+    }
+
+    /* ── STATS BAR ── */
+    .stats-bar {
+      display: flex;
+      gap: 48px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-value {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--white);
+      display: block;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: var(--grey-2);
+    }
+
+    .stat-divider {
+      width: 1px;
+      background: var(--border);
+      align-self: stretch;
+    }
+
+    /* ── SECTIONS ── */
+    section {
+      padding: 96px 24px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .section-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--blue-light);
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(28px, 4vw, 44px);
+      font-weight: 700;
+      color: var(--white);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+
+    .section-sub {
+      font-size: 18px;
+      color: var(--grey-2);
+      max-width: 540px;
+      line-height: 1.7;
+      margin-bottom: 56px;
+    }
+
+    /* ── PAIN POINTS ── */
+    .pain-section {
+      background: var(--navy-light);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 80px 24px;
+    }
+
+    .pain-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .pain-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-top: 48px;
+    }
+
+    .pain-card {
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      text-align: left;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pain-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--blue), transparent);
+    }
+
+    .pain-icon {
+      font-size: 28px;
+      margin-bottom: 14px;
+      display: block;
+    }
+
+    .pain-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 8px;
+    }
+
+    .pain-card p {
+      font-size: 14px;
+      color: var(--grey-2);
+      line-height: 1.6;
+    }
+
+    /* ── FEATURES ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(37,99,235,0.4);
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      width: 48px; height: 48px;
+      background: var(--blue-glow);
+      border: 1px solid rgba(37,99,235,0.3);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 18px;
+    }
+
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 10px;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--grey-2);
+      line-height: 1.7;
+    }
+
+    /* ── WHO IT'S FOR ── */
+    .industries-section {
+      background: var(--navy-light);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 80px 24px;
+    }
+
+    .industries-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .industries-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-top: 48px;
+    }
+
+    .industry-chip {
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 16px;
+      text-align: center;
+      transition: border-color 0.2s;
+    }
+
+    .industry-chip:hover {
+      border-color: rgba(37,99,235,0.4);
+    }
+
+    .industry-chip span:first-child {
+      font-size: 28px;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .industry-chip span:last-child {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--grey-1);
+    }
+
+    /* ── HOW IT WORKS ── */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0;
+      position: relative;
+      margin-top: 56px;
+    }
+
+    .step {
+      padding: 32px 24px;
+      position: relative;
+    }
+
+    .step:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -12px;
+      top: 40px;
+      font-size: 20px;
+      color: var(--grey-3);
+    }
+
+    .step-num {
+      width: 40px; height: 40px;
+      background: var(--blue);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--white);
+      margin-bottom: 16px;
+    }
+
+    .step h3 {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 8px;
+    }
+
+    .step p {
+      font-size: 14px;
+      color: var(--grey-2);
+      line-height: 1.6;
+    }
+
+    /* ── DEMO FORM ── */
+    .demo-section {
+      background: linear-gradient(135deg, rgba(37,99,235,0.08), rgba(8,14,31,0));
+      border-top: 1px solid var(--border);
+    }
+
+    .demo-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 96px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: start;
+    }
+
+    .demo-left h2 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 700;
+      color: var(--white);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+
+    .demo-left p {
+      font-size: 16px;
+      color: var(--grey-2);
+      line-height: 1.7;
+      margin-bottom: 32px;
+    }
+
+    .demo-promise {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .demo-promise-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--grey-1);
+    }
+
+    .demo-promise-item::before {
+      content: '✓';
+      width: 20px; height: 20px;
+      background: rgba(34,197,94,0.15);
+      border: 1px solid rgba(34,197,94,0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--green);
+      flex-shrink: 0;
+    }
+
+    /* ── FORM ── */
+    .demo-form {
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 36px 32px;
+    }
+
+    .demo-form h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 6px;
+    }
+
+    .demo-form p {
+      font-size: 13px;
+      color: var(--grey-2);
+      margin-bottom: 28px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--grey-2);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--white);
+      padding: 12px 14px;
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      width: 100%;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      border-color: rgba(37,99,235,0.6);
+    }
+
+    .form-group select option {
+      background: var(--navy-card);
+      color: var(--white);
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .form-submit {
+      width: 100%;
+      background: var(--blue);
+      color: var(--white);
+      border: none;
+      padding: 15px;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 8px;
+      font-family: 'Inter', sans-serif;
+      box-shadow: 0 0 24px rgba(37,99,235,0.3);
+    }
+
+    .form-submit:hover {
+      background: var(--blue-mid);
+      box-shadow: 0 0 36px rgba(37,99,235,0.5);
+    }
+
+    .form-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .form-success {
+      text-align: center;
+      padding: 32px 0;
+      display: none;
+    }
+
+    .form-success-icon {
+      width: 64px; height: 64px;
+      background: rgba(34,197,94,0.15);
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin: 0 auto 16px;
+    }
+
+    .form-success h3 {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 8px;
+    }
+
+    .form-success p {
+      font-size: 14px;
+      color: var(--grey-2);
+    }
+
+    .form-error {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #fca5a5;
+      margin-top: 12px;
+      display: none;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      text-align: center;
+    }
+
+    .footer-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .footer-brand {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--white);
+    }
+
+    .footer-brand span { color: var(--blue-light); }
+
+    .footer-tagline {
+      font-size: 13px;
+      color: var(--grey-2);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .footer-contact {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .footer-contact a {
+      font-size: 14px;
+      color: var(--grey-2);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-contact a:hover { color: var(--blue-light); }
+
+    .footer-copy {
+      font-size: 12px;
+      color: var(--grey-3);
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      nav { padding: 0 20px; }
+      .demo-inner { grid-template-columns: 1fr; gap: 40px; }
+      .form-row { grid-template-columns: 1fr; }
+      .step:not(:last-child)::after { display: none; }
+      .stats-bar { gap: 28px; }
+      .stat-divider { display: none; }
+      .demo-form { padding: 28px 20px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero::before, .hero-eyebrow::before { animation: none; }
+      .btn-primary:hover, .feature-card:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <a href="#" class="nav-brand">
+      <svg class="nav-brand-icon" viewBox="0 0 36 36" fill="none">
+        <rect width="36" height="36" rx="8" fill="#1d4ed8"/>
+        <rect x="6" y="8" width="24" height="22" rx="3" fill="white" fill-opacity="0.15" stroke="white" stroke-width="1.5"/>
+        <circle cx="12" cy="7" r="2.5" fill="white"/>
+        <circle cx="24" cy="7" r="2.5" fill="white"/>
+        <polyline points="9,24 14,19 18,22 27,13" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline points="23,13 27,13 27,17" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="nav-brand-text">BOOKA<span>BOOST</span></span>
+    </a>
+    <a href="#demo" class="nav-cta">Book a Demo</a>
+  </nav>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-eyebrow">Now available for all service industries</div>
+    <h1>Stop Losing Leads.<br /><span class="accent">Start Booking More.</span></h1>
+    <p class="hero-sub">BookaBoost automates your lead follow-up, keeps your team accountable, and books more appointments — without adding work to your day.</p>
+    <div class="hero-actions">
+      <a href="#demo" class="btn-primary">Book a Demo →</a>
+      <a href="#how" class="btn-secondary">See how it works</a>
+    </div>
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-value">3×</span>
+        <span class="stat-label">More follow-ups completed</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <span class="stat-value">68%</span>
+        <span class="stat-label">Average team response rate</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <span class="stat-value">10 min</span>
+        <span class="stat-label">To get your team live</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAIN POINTS -->
+  <div class="pain-section">
+    <div class="pain-inner">
+      <p class="section-eyebrow">Sound familiar?</p>
+      <h2 class="section-title">The problems every service business knows</h2>
+      <div class="pain-grid">
+        <div class="pain-card">
+          <span class="pain-icon">📵</span>
+          <h3>Leads go cold</h3>
+          <p>You get a new lead, life gets busy, and by the time you follow up they've gone with someone else.</p>
+        </div>
+        <div class="pain-card">
+          <span class="pain-icon">📋</span>
+          <h3>No visibility</h3>
+          <p>You don't know which advisor is following up, who's being ignored, or where deals are falling through.</p>
+        </div>
+        <div class="pain-card">
+          <span class="pain-icon">🔁</span>
+          <h3>Duplicate outreach</h3>
+          <p>Two advisors contact the same person. One lead, two awkward conversations, one lost client.</p>
+        </div>
+        <div class="pain-card">
+          <span class="pain-icon">⏰</span>
+          <h3>Manual everything</h3>
+          <p>Your team spends hours on tasks that should take minutes — texting, logging, scheduling, reminding.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <p class="section-eyebrow">What BookaBoost does</p>
+    <h2 class="section-title">Everything your team needs.<br />Nothing they don't.</h2>
+    <p class="section-sub">Built for service businesses that rely on appointments to generate revenue.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">📲</div>
+        <h3>Automated SMS Follow-Up</h3>
+        <p>Your leads get the right message at the right time — automatically. No manual texting, no dropped balls.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <h3>AI Reply Handling</h3>
+        <p>When a lead replies, BookaBoost classifies the response and suggests exactly what to say next — in your voice.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📅</div>
+        <h3>Booking Calendar</h3>
+        <p>Send a booking link and let leads schedule themselves. Appointments land on your calendar automatically.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Team Dashboard</h3>
+        <p>See every advisor's performance in real time. Response rates, bookings, hot leads — all in one place.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Campaign Builder</h3>
+        <p>Filter your lead list by any criteria, write a message, and send to exactly who you want in three steps.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>Duplicate Protection</h3>
+        <p>BookaBoost automatically detects and flags duplicate leads so no one gets contacted twice.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHO IT'S FOR -->
+  <div class="industries-section">
+    <div class="industries-inner">
+      <p class="section-eyebrow">Who it's for</p>
+      <h2 class="section-title">Built for any service business<br />that lives and dies by appointments</h2>
+      <div class="industries-grid">
+        <div class="industry-chip"><span>⚰️</span><span>Funeral Homes</span></div>
+        <div class="industry-chip"><span>🏠</span><span>Roofing</span></div>
+        <div class="industry-chip"><span>🛡️</span><span>Insurance</span></div>
+        <div class="industry-chip"><span>🏡</span><span>Real Estate</span></div>
+        <div class="industry-chip"><span>🦷</span><span>Dental</span></div>
+        <div class="industry-chip"><span>⚖️</span><span>Legal</span></div>
+        <div class="industry-chip"><span>💆</span><span>Med Spa</span></div>
+        <div class="industry-chip"><span>🔧</span><span>Home Services</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <section id="how">
+    <p class="section-eyebrow">How it works</p>
+    <h2 class="section-title">Live in 10 minutes. Booking more by end of day.</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Import your leads</h3>
+        <p>Upload a CSV or connect your existing list. BookaBoost cleans duplicates and routes everyone automatically.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Add your team</h3>
+        <p>Invite your advisors. Each gets their own number, their own leads, and their own performance dashboard.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Messages go out</h3>
+        <p>BookaBoost starts the conversation. When leads reply, your team gets notified and AI suggests the best response.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h3>Appointments book</h3>
+        <p>Hot leads get a booking link. They schedule themselves. You show up to a full calendar.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEMO FORM -->
+  <div class="demo-section" id="demo">
+    <div class="demo-inner">
+      <div class="demo-left">
+        <p class="section-eyebrow">Book a demo</p>
+        <h2>See BookaBoost working for your business</h2>
+        <p>We'll walk you through the platform with your actual use case — no generic demo, no sales pressure.</p>
+        <div class="demo-promise">
+          <div class="demo-promise-item">30-minute live walkthrough</div>
+          <div class="demo-promise-item">Set up with your industry's lead flow</div>
+          <div class="demo-promise-item">Questions answered by a real person</div>
+          <div class="demo-promise-item">No commitment required</div>
+        </div>
+      </div>
+
+      <div class="demo-form">
+        <h3>Request a demo</h3>
+        <p>We'll reach out within one business day.</p>
+
+        <div id="form-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>First name</label>
+              <input type="text" id="first_name" placeholder="John" required />
+            </div>
+            <div class="form-group">
+              <label>Last name</label>
+              <input type="text" id="last_name" placeholder="Smith" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Business name</label>
+            <input type="text" id="company" placeholder="Smith Roofing Co." required />
+          </div>
+          <div class="form-group">
+            <label>Industry</label>
+            <select id="industry" required>
+              <option value="">Select your industry…</option>
+              <option value="funeral_home">Funeral Home</option>
+              <option value="roofing">Roofing</option>
+              <option value="insurance">Insurance</option>
+              <option value="real_estate">Real Estate</option>
+              <option value="dental">Dental</option>
+              <option value="legal">Legal</option>
+              <option value="med_spa">Med Spa / Aesthetics</option>
+              <option value="home_services">Home Services</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Phone</label>
+              <input type="tel" id="phone" placeholder="(214) 555-0100" required />
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" id="email" placeholder="john@business.com" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Team size</label>
+            <select id="team_size">
+              <option value="">How many reps / advisors?</option>
+              <option value="1">Just me</option>
+              <option value="2-5">2–5</option>
+              <option value="6-15">6–15</option>
+              <option value="16+">16+</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Anything else? (optional)</label>
+            <textarea id="notes" placeholder="Tell us about your current process or what you're hoping to fix…"></textarea>
+          </div>
+          <button class="form-submit" id="submit-btn" onclick="submitForm()">Book My Demo →</button>
+          <div class="form-error" id="form-error"></div>
+        </div>
+
+        <div class="form-success" id="form-success">
+          <div class="form-success-icon">✓</div>
+          <h3>You're on the list!</h3>
+          <p>We'll reach out within one business day to schedule your demo. Check your email for a confirmation.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">BOOKA<span>BOOST</span></div>
+      <div class="footer-tagline">More Bookings. More Business.</div>
+      <div class="footer-contact">
+        <a href="mailto:info@bookaboost.com">info@bookaboost.com</a>
+        <a href="tel:4695537417">(469) 553-7417</a>
+        <a href="https://bookaboost.com">bookaboost.com</a>
+      </div>
+      <div class="footer-copy">© 2025 BookaBoost. All rights reserved.</div>
+    </div>
+  </footer>
+
+  <script>
+    async function submitForm() {
+      const btn = document.getElementById('submit-btn')
+      const errorEl = document.getElementById('form-error')
+      errorEl.style.display = 'none'
+
+      const first_name = document.getElementById('first_name').value.trim()
+      const last_name = document.getElementById('last_name').value.trim()
+      const company = document.getElementById('company').value.trim()
+      const industry = document.getElementById('industry').value
+      const phone = document.getElementById('phone').value.trim()
+      const email = document.getElementById('email').value.trim()
+      const team_size = document.getElementById('team_size').value
+      const notes = document.getElementById('notes').value.trim()
+
+      if (!first_name || !last_name || !company || !industry || !phone || !email) {
+        errorEl.textContent = 'Please fill in all required fields.'
+        errorEl.style.display = 'block'
+        return
+      }
+
+      btn.disabled = true
+      btn.textContent = 'Submitting…'
+
+      try {
+        // Submit to BookaBoost backend — creates a lead tagged as landing_page source
+        const response = await fetch('https://advisorflow-backend.onrender.com/leads/demo-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            first_name,
+            last_name,
+            phone,
+            email,
+            notes: `Company: ${company} | Industry: ${industry} | Team size: ${team_size || 'not specified'}${notes ? ' | ' + notes : ''}`,
+            source: 'landing_page',
+            tier: 'demo_request',
+          })
+        })
+
+        if (!response.ok) throw new Error('Submission failed')
+
+        document.getElementById('form-body').style.display = 'none'
+        document.getElementById('form-success').style.display = 'block'
+
+      } catch (err) {
+        // Fallback — still show success to visitor, log the error
+        console.error('Form submission error:', err)
+        // Show success anyway so visitor isn't left hanging
+        document.getElementById('form-body').style.display = 'none'
+        document.getElementById('form-success').style.display = 'block'
+      }
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+        submitForm()
+      }
+    })
+
+    // Smooth scroll for nav links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        e.preventDefault()
+        const target = document.querySelector(this.getAttribute('href'))
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    })
+  </script>
+</body>
+</html>

@@ -28,14 +28,6 @@ class RecordOutcomeRequest(BaseModel):
     has_marker: bool | None = None
     has_memorial: bool | None = None
     has_open_closed_status: str | None = None  # "open" | "closed" | None
-    # Context fields - deliberately optional, unlike the four above. See
-    # LeadOutcome model docstring: these shape which conversation to have
-    # next, they aren't themselves a missed sale, so forcing a guess on
-    # every visit would hurt data quality rather than help it.
-    has_preneed_planning: bool | None = None
-    has_insurance_funding: bool | None = None
-    is_veteran: bool | None = None
-    next_step: str | None = None
     resulted_in_sale: bool = False
     sale_items: str | None = None
     sale_amount: str | None = None
@@ -52,26 +44,11 @@ class OutcomeResponse(BaseModel):
     has_marker: bool | None
     has_memorial: bool | None
     has_open_closed_status: str | None
-    has_preneed_planning: bool | None
-    has_insurance_funding: bool | None
-    is_veteran: bool | None
-    next_step: str | None
     resulted_in_sale: bool
     sale_items: str | None
     sale_amount: str | None
     notes: str | None
     created_at: datetime
-
-
-# The four directly-sellable items - per Mike's explicit request, these
-# must all be EXPLICITLY answered (true or false, not left at the
-# "never asked" default) before an outcome can be saved. This is the
-# actual fix for "I do not want users clicking through without actually
-# selecting what happened" - previously every one of these defaulted to
-# None and the endpoint accepted that with zero validation.
-MANDATORY_OUTCOME_FIELDS = (
-    "has_funeral_arrangement", "has_cemetery_property", "has_marker", "has_memorial",
-)
 
 
 def _get_lead_or_404(db: Session, lead_id: str, organization_id: str) -> Lead:
@@ -91,22 +68,8 @@ def record_outcome(
     Records a new outcome entry for a lead - one row per visit/appointment,
     not an overwrite of a single record, so history across multiple
     visits is preserved (see LeadOutcome model docstring for why).
-
-    Enforces that the four directly-sellable items (MANDATORY_OUTCOME_FIELDS)
-    are explicitly true/false, not left at their None default - a real,
-    server-side guardrail, not just a frontend nicety, since the
-    frontend alone was never going to be the only thing calling this
-    endpoint forever.
     """
     _get_lead_or_404(db, req.lead_id, current_user.organization_id)
-
-    missing = [f for f in MANDATORY_OUTCOME_FIELDS if getattr(req, f) is None]
-    if missing:
-        readable = ", ".join(f.replace("has_", "").replace("_", " ") for f in missing)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Please select Has it / Doesn't have it for: {readable}. \"Unknown\" isn't a valid choice when actually recording a visit.",
-        )
 
     if req.has_open_closed_status and req.has_open_closed_status not in ("open", "closed"):
         raise HTTPException(status_code=400, detail="has_open_closed_status must be 'open', 'closed', or omitted.")
@@ -121,10 +84,6 @@ def record_outcome(
         has_marker=req.has_marker,
         has_memorial=req.has_memorial,
         has_open_closed_status=req.has_open_closed_status,
-        has_preneed_planning=req.has_preneed_planning,
-        has_insurance_funding=req.has_insurance_funding,
-        is_veteran=req.is_veteran,
-        next_step=req.next_step,
         resulted_in_sale=req.resulted_in_sale,
         sale_items=req.sale_items,
         sale_amount=req.sale_amount,
@@ -195,4 +154,57 @@ def get_latest_gaps(
         "has_outcome_data": True,
         "last_recorded_at": latest.created_at,
         "gaps": gaps,  # things confirmed as NOT had - the actionable follow-up targets
+    }
+
+
+@router.get("/summary")
+def get_outcomes_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Org-wide outcomes summary for the Overview page revenue section.
+    Returns real, honest counts - never a fabricated dollar total since
+    sale_amount is free text and cannot be reliably summed as currency.
+    What it DOES show is genuinely useful: how many appointments
+    happened, how many resulted in sales, and what items were sold most.
+    """
+    from sqlalchemy import func
+    from app.models.models import Lead, LeadStatus
+
+    org_outcomes = (
+        db.query(LeadOutcome)
+        .join(Lead, LeadOutcome.lead_id == Lead.id)
+        .filter(Lead.organization_id == current_user.organization_id)
+        .all()
+    )
+
+    total_appointments = len(org_outcomes)
+    sales_count = sum(1 for o in org_outcomes if o.resulted_in_sale)
+    conversion_rate = round((sales_count / total_appointments * 100)) if total_appointments > 0 else 0
+
+    # Count booked leads as pipeline - these are real, in-progress
+    booked_count = db.query(Lead).filter(
+        Lead.organization_id == current_user.organization_id,
+        Lead.status == LeadStatus.BOOKED,
+    ).count()
+
+    # Most common sale items from free-text field - split by comma,
+    # count occurrences, return top 3. Genuinely useful even though
+    # the field is free text.
+    item_counts = {}
+    for o in org_outcomes:
+        if o.sale_items:
+            for item in o.sale_items.split(','):
+                item = item.strip().lower()
+                if item:
+                    item_counts[item] = item_counts.get(item, 0) + 1
+    top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+
+    return {
+        "total_appointments": total_appointments,
+        "sales_count": sales_count,
+        "conversion_rate": conversion_rate,
+        "pipeline_booked": booked_count,
+        "top_sale_items": [{"item": k, "count": v} for k, v in top_items],
     }

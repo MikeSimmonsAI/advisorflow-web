@@ -106,7 +106,7 @@ export default function Compliance() {
     <div className="compliance-page">
       <section className="compliance-hero glass-panel">
         <div>
-          <p className="eyebrow">AdvisorFlow Control</p>
+          <p className="eyebrow">BookaBoost Control</p>
           <h1>Compliance Center</h1>
           <p className="hero-copy">
             Manage permanent suppression, manual DNC requests, and reply-based STOP protections.

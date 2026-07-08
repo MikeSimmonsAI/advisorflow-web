@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Line,
@@ -34,6 +32,7 @@ export default function Overview() {
   const [cadenceHealth, setCadenceHealth] = useState(null)
   const [statusFunnel, setStatusFunnel] = useState([])
   const [sparklines, setSparklines] = useState(null)
+  const [outcomesSummary, setOutcomesSummary] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -46,7 +45,8 @@ export default function Overview() {
       api.get('/cadence/health-summary').catch(() => null),
       api.get('/leads/status-funnel').catch(() => []),
       api.get('/leads/sparklines?days=7').catch(() => null),
-    ]).then(([leadsData, repliesData, briefingData, replyActivityData, engagementData, cadenceHealthData, statusFunnelData, sparklinesData]) => {
+      api.get('/outcomes/summary').catch(() => null),
+    ]).then(([leadsData, repliesData, briefingData, replyActivityData, engagementData, cadenceHealthData, statusFunnelData, sparklinesData, outcomesData]) => {
       setLeads(leadsData)
       setReplies(repliesData)
       setDailyBriefing(briefingData)
@@ -55,6 +55,7 @@ export default function Overview() {
       setCadenceHealth(cadenceHealthData)
       setStatusFunnel(statusFunnelData || [])
       setSparklines(sparklinesData)
+      setOutcomesSummary(outcomesData)
       setLoading(false)
     })
   }, [])
@@ -124,22 +125,10 @@ export default function Overview() {
           <StatCard label="Hot replies" value={loading ? '—' : hotCount} accent="red" sublabel="Needs your attention" />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard
-            label="New leads"
-            value={loading ? '—' : newCount}
-            accent="blue"
-            sublabel="Ready to contact"
-            sparkline={sparklines?.leads_imported}
-          />
+          <StatCard label="New leads" value={loading ? '—' : newCount} accent="blue" sublabel="Ready to contact" sparkline={sparklines?.leads_imported} />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard
-            label="Booked"
-            value={loading ? '—' : bookedCount}
-            accent="amber"
-            sublabel="Appointments set"
-            sparkline={sparklines?.bookings}
-          />
+          <StatCard label="Booked" value={loading ? '—' : bookedCount} accent="amber" sublabel="Appointments set" sparkline={sparklines?.bookings} />
         </button>
         <button className="stat-card-link" onClick={() => navigate('/leads')}>
           <StatCard label="Sent" value={loading ? '—' : sentCount} accent="neutral" sublabel="Awaiting reply" />
@@ -288,6 +277,64 @@ export default function Overview() {
           </div>
         </article>
       </section>
+
+      {/* ── Revenue Activity Section ─────────────────────────── */}
+      <section className="overview-revenue-section">
+        <div className="panel-header">
+          <h2 className="panel-title">💰 Revenue activity</h2>
+          <span className="chart-subtitle-inline">Based on recorded outcomes</span>
+        </div>
+        <div className="overview-revenue-grid">
+
+          <article className="panel overview-revenue-card overview-revenue-card--pipeline">
+            <span className="overview-revenue-label">Pipeline</span>
+            <div className="overview-revenue-value overview-revenue-value--blue">
+              {loading ? '—' : bookedCount}
+            </div>
+            <span className="overview-revenue-sub">Booked appointments in progress</span>
+          </article>
+
+          <article className="panel overview-revenue-card overview-revenue-card--appointments">
+            <span className="overview-revenue-label">Appointments completed</span>
+            <div className="overview-revenue-value overview-revenue-value--green">
+              {loading ? '—' : (outcomesSummary?.total_appointments ?? 0)}
+            </div>
+            <span className="overview-revenue-sub">Total recorded outcomes</span>
+          </article>
+
+          <article className="panel overview-revenue-card overview-revenue-card--sales">
+            <span className="overview-revenue-label">Sales recorded</span>
+            <div className="overview-revenue-value overview-revenue-value--purple">
+              {loading ? '—' : (outcomesSummary?.sales_count ?? 0)}
+            </div>
+            <span className="overview-revenue-sub">
+              {outcomesSummary?.conversion_rate != null
+                ? `${outcomesSummary.conversion_rate}% conversion rate`
+                : 'No outcomes recorded yet'}
+            </span>
+          </article>
+
+          <article className="panel overview-revenue-card overview-revenue-card--items">
+            <span className="overview-revenue-label">Top sale items</span>
+            {outcomesSummary?.top_sale_items?.length > 0 ? (
+              <ul className="overview-revenue-items">
+                {outcomesSummary.top_sale_items.map((item) => (
+                  <li key={item.item} className="overview-revenue-item">
+                    <span className="overview-revenue-item-name">{item.item}</span>
+                    <span className="overview-revenue-item-count">{item.count}×</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-state" style={{ fontSize: 12 }}>
+                Record outcomes on leads to see top items.
+              </div>
+            )}
+          </article>
+
+        </div>
+      </section>
+
     </div>
   )
 }

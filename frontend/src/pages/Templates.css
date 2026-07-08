@@ -84,11 +84,6 @@
   min-width: 180px;
 }
 
-.template-ai-tone {
-  flex: 0 0 auto;
-  width: 110px;
-}
-
 .compose-textarea {
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);

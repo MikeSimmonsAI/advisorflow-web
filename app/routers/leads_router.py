@@ -585,3 +585,69 @@ def bulk_delete_duplicate_leads(
     db.commit()
 
     return {"deleted": count, "message": f"Permanently deleted {count} duplicate leads."}
+
+
+# ── PUBLIC: Landing page demo request (no auth required) ──────────────────
+from pydantic import BaseModel as _BaseModel
+
+class DemoRequestCreate(_BaseModel):
+    first_name: str
+    last_name: str
+    phone: str
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    source: str = "landing_page"
+    tier: Optional[str] = "demo_request"
+
+
+@router.post("/demo-request", status_code=201)
+def create_demo_request(
+    payload: DemoRequestCreate,
+    db: Session = Depends(get_db),
+):
+    """Public endpoint — no auth required. Called by bookaboost.com landing page."""
+    from app.models.models import Organization
+    import uuid
+    from datetime import datetime
+
+    bookaboost_org = db.query(Organization).filter(
+        Organization.name.ilike('%bookaboost%')
+    ).first()
+    if not bookaboost_org:
+        bookaboost_org = db.query(Organization).first()
+    if not bookaboost_org:
+        return {"status": "received", "message": "Demo request received."}
+
+    existing = None
+    if payload.phone:
+        existing = db.query(Lead).filter(
+            Lead.org_id == bookaboost_org.id,
+            Lead.phone == payload.phone,
+        ).first()
+    if not existing and payload.email:
+        existing = db.query(Lead).filter(
+            Lead.org_id == bookaboost_org.id,
+            Lead.email == payload.email,
+        ).first()
+
+    if existing:
+        existing.notes = f"{existing.notes or ''}\n[New demo request {datetime.utcnow().strftime('%Y-%m-%d')}] {payload.notes or ''}".strip()
+        db.commit()
+        return {"status": "updated", "message": "Demo request received."}
+
+    lead = Lead(
+        id=str(uuid.uuid4()),
+        org_id=bookaboost_org.id,
+        first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),
+        phone=payload.phone.strip() if payload.phone else None,
+        email=payload.email.strip() if payload.email else None,
+        notes=payload.notes,
+        source_file=payload.source,
+        tier=payload.tier,
+        status='new',
+        created_at=datetime.utcnow(),
+    )
+    db.add(lead)
+    db.commit()
+    return {"status": "created", "message": "Demo request received.", "id": str(lead.id)}

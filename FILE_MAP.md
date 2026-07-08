@@ -1,93 +1,13 @@
 # AdvisorFlow Web — Where Every File Goes
 
-**CURRENT VERSION: v2.3.** See SESSION_LOG_V2.3_INDUSTRY_AGNOSTIC_TIERS.md
-for the latest session's full changelog (the industry-agnostic tier
-system - Lead.tier/message_track, Campaign.message_track, and
-MessageTemplate.message_track all migrated from hardcoded Python
-enums to a real, per-organization TierDefinition system; funeral
-itself migrated onto it too, not kept as a separate hardcoded path).
-**⚠️ BEFORE DEPLOYING TO THE LIVE POSTGRES DATABASE: the production
-data migration for converting the existing Postgres ENUM columns to
-VARCHAR has NOT been written yet - this is flagged explicitly in the
-session log as still-needed, careful, separate work. Do not deploy
-this version's model changes against the live database without that
-migration in place first.**
-
-Prior version: v2.2, see SESSION_LOG_V2.2_COMPLIANCE_PREFLIGHT.md (one
-real, shared compliance gate every send path now calls).
-
-Before that: v2.1, see SESSION_LOG_V2.1_AUTO_SEND_QUEUE_PHASE1.md (the
-auto-send queue, Phase 1 complete - a dedicated, hard-gated
-eligibility classifier, AI drafting, a full review queue where nothing
-sends without an explicit advisor click, and an admin-controlled
-toggle to turn it on per-advisor). **Phase 2 (no-click sending) is NOT
-built yet** - every advisor defaults to fully off, and even at
-"candidate" phase, no message can ever go out without a human
-confirming it first.
-
-Prior version: v2.0, see SESSION_LOG_V2.0_DASHBOARD_REDESIGN.md (a full
-"Mission Control" visual redesign across Overview, Replies, and Master
-Dashboard, all built on real, computed data).
-
-Before that: v1.9, see SESSION_LOG_V1.9_EMAIL_QUEUE_VISUAL_REDESIGN.md
-(real scorecards on the Email Queue, plus the queue list rebuilt as
-richer cards instead of a plain table).
-
-Before that: v1.8, see SESSION_LOG_V1.8_EMAIL_QUEUE_REBUILD.md (the
-full Email Queue rebuild - broadened to any lead with an email, a real
-rich content composer with image embedding, open/click tracking on
-both send paths). **Set TRACKING_BASE_URL if the backend's public URL
-ever changes from the current default.**
-
-Prior version: v1.7, see SESSION_LOG_V1.7_MIXED_CHANNEL_CADENCE.md
-(cadence now intelligently mixes text and email for leads who have
-both, never the same touch on both channels at once).
-
-Before that: v1.6, see SESSION_LOG_V1.6_EMAIL_TIMELINE_FIX.md (a real
-gap Mike caught directly: outbound emails were never shown in a lead's
-Conversation timeline, only SMS. Fixed - email now appears interleaved
-with SMS, correctly ordered, with a clear Email tag and subject line).
-
-Before that: v1.5, see SESSION_LOG_V1.5_CERTIFICATION_WIRED_IN.md
-(certification is now actually visible where advisors look most:
-Overview shows a real "certified appointments waiting" count, and
-Replies shows a per-reply badge - batched for performance, not one
-query per reply).
-
-Before that: v1.4, see SESSION_LOG_V1.4_CERTIFIED_APPOINTMENT_PIPELINE.md
-(the Certified Appointment pipeline — Solicited → Contacted → Booked →
-Confirmed → Waiting, a real auditable sequence of events, not a score;
-shown on Lead Detail with a "Mark confirmed" action). This is the
-universal, industry-agnostic foundation Mike wants future
-industry-specific features built on top of.
-
-Prior version: v1.3, see SESSION_LOG_V1.3_GOOGLE_CONTACTS_REFERRALS.md
-(automatic Google Contacts sync, and a real referral-lead system —
-adding a permission-to-access plus-one creates a genuine, separate
-Lead record with its own cadence and outcomes, not a notes field).
-**IMPORTANT: anyone who already connected Google Calendar needs to
-RECONNECT once to grant the new Contacts scope.**
-
-Prior version: v1.2, see SESSION_LOG_V1.2_ACTION_CENTER_TOGGLES_ROLES_TONE.md
-(Replies action center, feature toggle system, role descriptions, email
-tone control — completed the original 7-item priority list). Before
-that: v1.1, see SESSION_LOG_V1.1_MANUAL_LEAD_EDIT_OUTCOMES.md (manual
-lead entry, editable Lead Detail, mandatory outcomes). Before that:
-v1.0, see SESSION_LOG_REPLY_TONE_SELECTOR.md (Suggest Reply tone
-selector — Soft, Standard, Urgent, Direct).
-
-**IMPORTANT: auto-migrations are now permanent.** As of the account-
-management session, the app automatically adds any missing database
-column or enum value on every startup (see app/auto_migrate.py) - the
-old "run this manual migration command" notes in earlier session logs
-below no longer apply. Just deploy and the app handles its own schema
-catch-up.
-
-Prior sessions: SESSION_LOG_ACCOUNT_MANAGEMENT_AND_IMPORT_ACCESS.md,
-SESSION_LOG_CLOCK_AND_REALTIME_ALERTS.md,
-SESSION_LOG_LEAD_CLEANUP_EMAIL_DNC_REPORTS.md,
-SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md, and
-SESSION_LOG_BUGFIXES_AND_FEATURES.md.
+**See SESSION_LOG_AUTONOMOUS_BACKLOG_PASS.md for the latest session's full
+changelog** (Lead Cleanup contact editing actually fixed, audit logging
+wired into every sensitive action, admin route protection fixed on the
+frontend, Master Control Board / revenue analytics built). Prior session:
+SESSION_LOG_BUGFIXES_AND_FEATURES.md (New Inquiry lead tier, reply
+reclassification expansion, AI Suggest Reply name fix, User Management
+edit + detail page, sitewide dropdown styling fix, System Health rebuild,
+Overview scroll reduction).
 
 You've been collecting files in the order I gave them to you, which is exactly
 right. This doc tells you the FINAL folder each file belongs in. If a file

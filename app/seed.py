@@ -38,18 +38,6 @@ if not org:
 else:
     print(f"Organization already exists: {org.name} ({org.id})")
 
-# --- 1b. Tier definitions - the real, per-org configuration system that
-# replaces the old hardcoded LeadTier/MessageTrack/TIER_TO_TRACK setup.
-# Idempotent (see seed_default_tier_definitions's docstring) - safe to
-# run against the real, already-existing production database to
-# backfill Restland's org, which predates this system entirely.
-from app.services.tier_config_service import seed_default_tier_definitions
-created_tiers = seed_default_tier_definitions(db, org.id)
-if created_tiers:
-    print(f"Seeded {len(created_tiers)} tier definitions for {org.name}")
-else:
-    print(f"Tier definitions already exist for {org.name}")
-
 # --- 2. Mike's super_admin account ---
 mike_email = "michael.simmons@nsmg.com"
 mike = db.query(User).filter(User.email == mike_email).first()

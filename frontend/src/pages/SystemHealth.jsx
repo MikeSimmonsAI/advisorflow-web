@@ -108,7 +108,7 @@ export default function SystemHealth() {
         <div className="cadence-health-value">
           <span className="mono">{loading ? 'Loading...' : formatDate(status?.last_cadence_run)}</span>
           <p>
-            AdvisorFlow currently tracks per-lead cadence timestamps. A dedicated cadence job-run timestamp has not been added yet.
+            BookaBoost currently tracks per-lead cadence timestamps. A dedicated cadence job-run timestamp has not been added yet.
           </p>
         </div>
       </section>

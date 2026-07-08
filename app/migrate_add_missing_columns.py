@@ -1,9 +1,9 @@
 """
 One-time manual migration: adds columns that were added to the SQLAlchemy
-models across recent sessions but never actually applied to the live
-production database, since this project relies on
-Base.metadata.create_all() at startup - which only creates NEW tables,
-and never adds new COLUMNS to a table that already exists.
+models tonight but never actually applied to the live production
+database, since this project relies on Base.metadata.create_all() at
+startup - which only creates NEW tables, and never adds new COLUMNS to
+a table that already exists.
 
 REAL BUG THIS FIXES: confirmed via Render's live logs - every request
 touching the users table was failing with
@@ -34,25 +34,10 @@ COLUMNS_TO_ADD = [
     ("users", "microsoft_oauth_refresh_token_encrypted", "VARCHAR"),
     ("users", "microsoft_email_address", "VARCHAR"),
     ("users", "microsoft_365_connected", "BOOLEAN DEFAULT FALSE"),
-    ("users", "notification_phone", "VARCHAR"),
-    ("users", "notify_via_sms", "BOOLEAN DEFAULT FALSE"),
-    ("users", "can_import_leads", "BOOLEAN DEFAULT FALSE"),
-    ("users", "feature_flags", "TEXT"),
-    ("users", "auto_send_phase", "VARCHAR DEFAULT 'off'"),
     ("leads", "engagement_temperature", "VARCHAR"),
-    ("leads", "google_contact_resource_name", "VARCHAR"),
-    ("booking_links", "confirmed_at", "TIMESTAMP"),
-    ("email_messages", "opened_at", "TIMESTAMP"),
-    ("email_messages", "click_count", "INTEGER DEFAULT 0"),
-    ("email_messages", "last_clicked_at", "TIMESTAMP"),
     ("replies", "classification", "VARCHAR"),
     ("replies", "classification_confidence", "VARCHAR"),
     ("replies", "classification_reasoning", "TEXT"),
-    ("notifications", "send_failure_reason", "TEXT"),
-    ("lead_outcomes", "has_preneed_planning", "BOOLEAN"),
-    ("lead_outcomes", "has_insurance_funding", "BOOLEAN"),
-    ("lead_outcomes", "is_veteran", "BOOLEAN"),
-    ("lead_outcomes", "next_step", "TEXT"),
 ]
 
 

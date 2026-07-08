@@ -52,11 +52,6 @@ export default function ChangePassword({ forced = false }) {
         <p className="login-subtitle">
           {forced ? 'Set a new password to continue' : 'Change your password'}
         </p>
-        {forced && (
-          <p className="login-help-text">
-            Enter the temporary password you were given below, then choose a new password of your own.
-          </p>
-        )}
 
         {success ? (
           <div style={{ textAlign: 'center', color: 'var(--signal-green)', fontSize: 14, padding: '20px 0' }}>
@@ -65,7 +60,7 @@ export default function ChangePassword({ forced = false }) {
         ) : (
           <form onSubmit={handleSubmit} className="login-form">
             <label className="login-label">
-              {forced ? 'Temporary password' : 'Current password'}
+              Current password
               <input
                 type="password"
                 value={currentPassword}
@@ -73,7 +68,6 @@ export default function ChangePassword({ forced = false }) {
                 required
                 autoFocus
                 className="login-input"
-                placeholder={forced ? 'The temporary password you were given' : undefined}
               />
             </label>
             <label className="login-label">
@@ -88,9 +82,6 @@ export default function ChangePassword({ forced = false }) {
                 placeholder="At least 8 characters"
               />
             </label>
-            <p className="login-help-text login-help-text--rules">
-              Must be at least 8 characters. No other requirements.
-            </p>
             <label className="login-label">
               Confirm new password
               <input

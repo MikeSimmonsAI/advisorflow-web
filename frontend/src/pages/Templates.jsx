@@ -23,7 +23,6 @@ export default function Templates() {
   // AI writer — both a one-click "Generate" from scratch and a free-text
   // instruction box to rewrite whatever's currently in the editor.
   const [aiInstruction, setAiInstruction] = useState('')
-  const [aiTone, setAiTone] = useState('standard')
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
 
@@ -39,7 +38,6 @@ export default function Templates() {
     setDraftBody(t.body_template)
     setDraftSubject(t.email_subject_template || '')
     setAiInstruction('')
-    setAiTone('standard')
     setAiError('')
   }
 
@@ -79,7 +77,6 @@ export default function Templates() {
         message_track: editing.message_track,
         channel: editing.channel,
         instruction: aiInstruction.trim() || null,
-        tone: aiTone,
       })
       setDraftBody(result.body_template)
       if (editing.channel === 'email') setDraftSubject(result.subject_template)
@@ -104,7 +101,6 @@ export default function Templates() {
         current_body: draftBody,
         current_subject: editing.channel === 'email' ? draftSubject : null,
         instruction: aiInstruction.trim(),
-        tone: aiTone,
       })
       setDraftBody(result.body_template)
       if (editing.channel === 'email') setDraftSubject(result.subject_template)
@@ -170,18 +166,6 @@ export default function Templates() {
                           />
 
                           <div className="template-ai-bar">
-                            <select
-                              className="settings-input template-ai-tone"
-                              value={aiTone}
-                              onChange={(e) => setAiTone(e.target.value)}
-                              disabled={aiBusy}
-                              title="How strongly should the generated copy push for a follow-up?"
-                            >
-                              <option value="soft">Soft</option>
-                              <option value="standard">Standard</option>
-                              <option value="urgent">Urgent</option>
-                              <option value="direct">Direct</option>
-                            </select>
                             <input
                               className="settings-input template-ai-instruction"
                               placeholder='Optional: "make this warmer", "shorter", "add urgency"…'

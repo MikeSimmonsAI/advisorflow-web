@@ -61,7 +61,6 @@ if errorlevel 1 (
 
 echo.
 echo Pushing to GitHub...
-git config gc.auto 0
 git push
 
 if errorlevel 1 (

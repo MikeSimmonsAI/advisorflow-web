@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.models.models import (
-    User, Lead, LeadStatus, EngagementTemperature,
+    User, Lead, LeadTier, LeadStatus, MessageTrack, EngagementTemperature,
     Reply, ReplyClassification, CadenceState, CadenceStatus, Message,
 )
 from app.routers.admin_router import require_super_admin
@@ -98,24 +98,24 @@ def generate_sample_data(
 
     scenarios = [
         # (tier, status, message_track, engagement_temp, has_reply, reply_classification, in_cadence)
-        ("pre_need", LeadStatus.NEW, "pre_need_lock_price", EngagementTemperature.UNKNOWN, False, None, False),
-        ("pre_need", LeadStatus.SENT, "pre_need_lock_price", EngagementTemperature.WARM, False, None, True),
-        ("pre_need", LeadStatus.HOT, "pre_need_lock_price", EngagementTemperature.HOT, True, ReplyClassification.INTERESTED, False),
-        ("at_need", LeadStatus.REPLIED, "at_need_support", EngagementTemperature.WARM, True, ReplyClassification.CALLBACK, False),
-        ("imminent", LeadStatus.HOT, "imminent_support", EngagementTemperature.HOT, True, ReplyClassification.INTERESTED, False),
-        ("contract_sold", LeadStatus.SENT, "upsell_existing", EngagementTemperature.WARM, False, None, True),
-        ("contract_sold", LeadStatus.BOOKED, "upsell_existing", EngagementTemperature.HOT, True, ReplyClassification.INTERESTED, False),
-        ("partial", LeadStatus.NEEDS_TIER_REVIEW, None, EngagementTemperature.UNKNOWN, False, None, False),
-        ("pre_need", LeadStatus.REPLIED, "pre_need_lock_price", EngagementTemperature.WARM, True, ReplyClassification.NEUTRAL, False),
-        ("pre_need", LeadStatus.DNC, "pre_need_lock_price", EngagementTemperature.COLD, True, ReplyClassification.DNC, False),
-        ("at_need", LeadStatus.SENT, "at_need_support", EngagementTemperature.COLD, False, None, False),
-        ("email_only", LeadStatus.NEW, "email_only_nurture", EngagementTemperature.UNKNOWN, False, None, False),
+        (LeadTier.PRE_NEED, LeadStatus.NEW, MessageTrack.PRE_NEED_LOCK_PRICE, EngagementTemperature.UNKNOWN, False, None, False),
+        (LeadTier.PRE_NEED, LeadStatus.SENT, MessageTrack.PRE_NEED_LOCK_PRICE, EngagementTemperature.WARM, False, None, True),
+        (LeadTier.PRE_NEED, LeadStatus.HOT, MessageTrack.PRE_NEED_LOCK_PRICE, EngagementTemperature.HOT, True, ReplyClassification.INTERESTED, False),
+        (LeadTier.AT_NEED, LeadStatus.REPLIED, MessageTrack.AT_NEED_SUPPORT, EngagementTemperature.WARM, True, ReplyClassification.CALLBACK, False),
+        (LeadTier.IMMINENT, LeadStatus.HOT, MessageTrack.IMMINENT_SUPPORT, EngagementTemperature.HOT, True, ReplyClassification.INTERESTED, False),
+        (LeadTier.CONTRACT_SOLD, LeadStatus.SENT, MessageTrack.UPSELL_EXISTING_CUSTOMER, EngagementTemperature.WARM, False, None, True),
+        (LeadTier.CONTRACT_SOLD, LeadStatus.BOOKED, MessageTrack.UPSELL_EXISTING_CUSTOMER, EngagementTemperature.HOT, True, ReplyClassification.INTERESTED, False),
+        (LeadTier.PARTIAL, LeadStatus.NEEDS_TIER_REVIEW, None, EngagementTemperature.UNKNOWN, False, None, False),
+        (LeadTier.PRE_NEED, LeadStatus.REPLIED, MessageTrack.PRE_NEED_LOCK_PRICE, EngagementTemperature.WARM, True, ReplyClassification.NEUTRAL, False),
+        (LeadTier.PRE_NEED, LeadStatus.DNC, MessageTrack.PRE_NEED_LOCK_PRICE, EngagementTemperature.COLD, True, ReplyClassification.DNC, False),
+        (LeadTier.AT_NEED, LeadStatus.SENT, MessageTrack.AT_NEED_SUPPORT, EngagementTemperature.COLD, False, None, False),
+        (LeadTier.EMAIL_ONLY, LeadStatus.NEW, MessageTrack.EMAIL_ONLY_NURTURE, EngagementTemperature.UNKNOWN, False, None, False),
     ]
 
     for i, (tier, status, track, temp, has_reply, reply_class, in_cadence) in enumerate(scenarios):
         first = random.choice(FIRST_NAMES)
         last = random.choice(LAST_NAMES)
-        is_email_only = tier == "email_only"
+        is_email_only = tier == LeadTier.EMAIL_ONLY
 
         lead = Lead(
             organization_id=current_user.organization_id,

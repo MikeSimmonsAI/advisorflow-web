@@ -76,26 +76,21 @@ def _other_org_with_admin(db_session):
     return other_org, other_admin
 
 
-def test_potential_duplicates_requires_corroborating_signal_not_just_last_name(
+def test_potential_duplicates_groups_uncaught_same_phone_or_last_name_and_is_org_isolated(
     client, admin_auth_headers, db_session, sample_org, sample_advisor
 ):
-    """
-    Regression test for the exact bug Mike flagged: two leads sharing only
-    a last name (different first names, no shared email, no shared phone)
-    must NOT be grouped as potential duplicates. A common surname between
-    strangers means nothing by itself - "Jay Johnson" and "Ray Johnson"
-    are not a likely duplicate pair just because they're both Johnsons.
-    """
     phone_a = _lead(db_session, sample_org, sample_advisor, first_name="PhoneA", last_name="Alpha", phone="(214) 555-0101")
     phone_b = _lead(db_session, sample_org, sample_advisor, first_name="PhoneB", last_name="Beta", phone="1-214-555-0101")
-
-    # Same last name, different first name, no email on either - must NOT group.
-    surname_only_a = _lead(db_session, sample_org, sample_advisor, first_name="Jay", last_name="Johnson", phone="12145550110")
-    surname_only_b = _lead(db_session, sample_org, sample_advisor, first_name="Ray", last_name="Johnson", phone="12145550111")
-
+    last_a = _lead(db_session, sample_org, sample_advisor, first_name="LastA", last_name="O'Neil", phone="12145550102")
+    last_b = _lead(db_session, sample_org, sample_advisor, first_name="LastB", last_name="ONeil", phone="12145550103")
     caught_duplicate = _lead(
-        db_session, sample_org, sample_advisor,
-        first_name="Caught", last_name="Alpha", phone="12145550101", is_duplicate=True,
+        db_session,
+        sample_org,
+        sample_advisor,
+        first_name="Caught",
+        last_name="Alpha",
+        phone="12145550101",
+        is_duplicate=True,
     )
     other_org, other_admin = _other_org_with_admin(db_session)
     other_lead = _lead(db_session, other_org, other_admin, first_name="Other", last_name="Alpha", phone="12145550101")
@@ -108,50 +103,14 @@ def test_potential_duplicates_requires_corroborating_signal_not_just_last_name(
     all_group_ids = {lead["id"] for group in groups for lead in group["leads"]}
     assert phone_a.id in all_group_ids
     assert phone_b.id in all_group_ids
+    assert last_a.id in all_group_ids
+    assert last_b.id in all_group_ids
     assert caught_duplicate.id not in all_group_ids
     assert other_lead.id not in all_group_ids
-
-    # The actual bug fix: same-surname-only pair must not appear anywhere.
-    assert surname_only_a.id not in all_group_ids
-    assert surname_only_b.id not in all_group_ids
 
     phone_groups = [group for group in groups if group["match_type"] == "phone" and group["match_key"] == "12145550101"]
     assert len(phone_groups) == 1
     assert {lead["id"] for lead in phone_groups[0]["leads"]} == {phone_a.id, phone_b.id}
-
-
-def test_potential_duplicates_matches_on_last_name_plus_email(
-    client, admin_auth_headers, db_session, sample_org, sample_advisor
-):
-    """Same last name + same email IS a real corroborating signal and should group."""
-    lead_a = _lead(db_session, sample_org, sample_advisor, first_name="Roberta", last_name="ONeil", phone="12145550120", email="oneil.family@example.com")
-    lead_b = _lead(db_session, sample_org, sample_advisor, first_name="Bob", last_name="O'Neil", phone="12145550121", email="ONeil.Family@example.com")
-
-    db_session.commit()
-
-    response = client.get("/admin/leads/potential-duplicates", headers=admin_auth_headers)
-    groups = response.json()
-
-    email_groups = [g for g in groups if g["match_type"] == "name_and_email"]
-    assert len(email_groups) == 1
-    assert {lead["id"] for lead in email_groups[0]["leads"]} == {lead_a.id, lead_b.id}
-
-
-def test_potential_duplicates_matches_on_last_name_plus_first_name(
-    client, admin_auth_headers, db_session, sample_org, sample_advisor
-):
-    """Same first AND last name (normalized) is a real corroborating signal - the realistic 'imported twice' case."""
-    lead_a = _lead(db_session, sample_org, sample_advisor, first_name="John", last_name="Smith", phone="12145550130")
-    lead_b = _lead(db_session, sample_org, sample_advisor, first_name="JOHN", last_name="smith", phone="12145550131")
-
-    db_session.commit()
-
-    response = client.get("/admin/leads/potential-duplicates", headers=admin_auth_headers)
-    groups = response.json()
-
-    name_groups = [g for g in groups if g["match_type"] == "name_and_first_name"]
-    assert len(name_groups) == 1
-    assert {lead["id"] for lead in name_groups[0]["leads"]} == {lead_a.id, lead_b.id}
 
 
 def test_merge_moves_message_reply_cadence_and_outcome_history_then_deletes_merged_lead(

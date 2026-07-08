@@ -26,7 +26,7 @@ FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@restland-advisorflow.
 # message-track logic used for SMS, so email-only leads still get the
 # right OFFER for their tier rather than a generic blast.
 EMAIL_TEMPLATES = {
-    "pre_need_lock_price": {
+    MessageTrack.PRE_NEED_LOCK_PRICE: {
         "subject": "Lock in today's pricing - {first_name}, let's talk",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -38,7 +38,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    "at_need_support": {
+    MessageTrack.AT_NEED_SUPPORT: {
         "subject": "{first_name}, I'm here to help",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -50,7 +50,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    "imminent_support": {
+    MessageTrack.IMMINENT_SUPPORT: {
         "subject": "{first_name}, please reach out",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -59,7 +59,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    "upsell_existing": {
+    MessageTrack.UPSELL_EXISTING_CUSTOMER: {
         "subject": "Additional options for your family, {first_name}",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -70,7 +70,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    "email_only_nurture": {
+    MessageTrack.EMAIL_ONLY_NURTURE: {
         "subject": "{first_name}, a quick note from Restland",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -81,7 +81,7 @@ EMAIL_TEMPLATES = {
             <p>Best,<br>{advisor_name}</p>
         """,
     },
-    "new_inquiry_intro": {
+    MessageTrack.NEW_INQUIRY_INTRO: {
         "subject": "Hi {first_name}, a note from Restland",
         "body_html": """
             <p>Hi {first_name},</p>
@@ -97,7 +97,7 @@ EMAIL_TEMPLATES = {
 }
 
 
-def render_email(db, track: str, lead: Lead, advisor: User, booking_url: str) -> dict:
+def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url: str) -> dict:
     """
     Checks for an org-customized email template first; falls back to the
     hardcoded default if the org hasn't customized this track. Mirrors
@@ -108,7 +108,7 @@ def render_email(db, track: str, lead: Lead, advisor: User, booking_url: str) ->
     if custom:
         template = {"subject": custom["subject"], "body_html": custom["body_html"]}
     else:
-        template = EMAIL_TEMPLATES.get(track, EMAIL_TEMPLATES["email_only_nurture"])
+        template = EMAIL_TEMPLATES.get(track, EMAIL_TEMPLATES[MessageTrack.EMAIL_ONLY_NURTURE])
 
     subs = {
         "{first_name}": lead.first_name or "there",
@@ -151,46 +151,13 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     if not lead.email:
         raise ValueError(f"Lead {lead.id} has no email address.")
 
-    # Single, shared Compliance Preflight gate - per the real, confirmed
-    # gap this closes: email sending previously had NO compliance check
-    # at all, meaning a lead correctly marked DNC after replying STOP
-    # via text could still receive emails through this path or the
-    # mixed-channel cadence's email-touch days. Same gate every SMS
-    # send path already uses, so a DNC/STOP genuinely blocks every
-    # channel for this lead, not just whichever one triggered it.
-    from app.services.compliance_service import check_compliance_preflight
-    check_compliance_preflight(db, lead)
-
     from app.services.sms_service import create_booking_link
     import os as _os
     booking = create_booking_link(db, lead, advisor)
     booking_url = f"{_os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
 
-    track = lead.message_track or "email_only_nurture"
+    track = lead.message_track or MessageTrack.EMAIL_ONLY_NURTURE
     rendered = render_email(db, track, lead, advisor, booking_url)
-
-    # Create the EmailMessage row FIRST, with a "queued" placeholder
-    # status, so it has a real id before tracking needs to reference
-    # it - open/click tracking URLs are keyed by email_message_id, and
-    # that id doesn't exist until this row is inserted. body_html
-    # stored here is the ORIGINAL, untracked content - the tracking
-    # pixel/rewritten links are injected only into a separate copy used
-    # for the actual provider send call below, so the saved record
-    # stays clean and re-readable without tracking noise baked in
-    # permanently.
-    email_msg = EmailMessage(
-        lead_id=lead.id,
-        sender_id=advisor.id,
-        subject=rendered["subject"],
-        body_html=rendered["body_html"],
-        status="queued",
-    )
-    db.add(email_msg)
-    db.commit()
-    db.refresh(email_msg)
-
-    from app.services.email_tracking_service import inject_tracking
-    tracked_body_html = inject_tracking(rendered["body_html"], email_msg.id)
 
     # Provider selection: send through the advisor's real Microsoft 365
     # mailbox if they've connected it (per Mike's explicit request - real
@@ -200,12 +167,19 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     # usable - the OAuth flow alone does nothing if nothing ever calls it.
     if advisor.microsoft_365_connected:
         from app.services.microsoft_email_service import send_email_via_microsoft_graph
-        result = send_email_via_microsoft_graph(advisor, lead.email, rendered["subject"], tracked_body_html)
+        result = send_email_via_microsoft_graph(advisor, lead.email, rendered["subject"], rendered["body_html"])
     else:
-        result = send_email_via_provider(lead.email, rendered["subject"], tracked_body_html)
+        result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"])
 
-    email_msg.provider_message_id = result.get("provider_message_id")
-    email_msg.status = "sent" if result["success"] else "failed"
+    email_msg = EmailMessage(
+        lead_id=lead.id,
+        sender_id=advisor.id,
+        subject=rendered["subject"],
+        body_html=rendered["body_html"],
+        provider_message_id=result.get("provider_message_id"),
+        status="sent" if result["success"] else "failed",
+    )
+    db.add(email_msg)
 
     if result["success"]:
         lead.status = "sent"

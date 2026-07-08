@@ -164,16 +164,10 @@
   color: var(--signal-blue);
 }
 
-.cleanup-match-pill--name_and_email {
+.cleanup-match-pill--last_name {
   border: 1px solid rgba(157, 109, 255, 0.26);
   background: var(--signal-purple-dim);
   color: var(--signal-purple);
-}
-
-.cleanup-match-pill--name_and_first_name {
-  border: 1px solid var(--signal-amber-dim);
-  background: var(--signal-amber-dim);
-  color: var(--signal-amber);
 }
 
 .cleanup-status-pill {

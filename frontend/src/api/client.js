@@ -1,15 +1,15 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 function getToken() {
-  return localStorage.getItem('advisorflow_token')
+  return localStorage.getItem('bookaboost_token')
 }
 
 export function setToken(token) {
-  localStorage.setItem('advisorflow_token', token)
+  localStorage.setItem('bookaboost_token', token)
 }
 
 export function clearToken() {
-  localStorage.removeItem('advisorflow_token')
+  localStorage.removeItem('bookaboost_token')
 }
 
 async function request(path, options = {}) {
@@ -66,7 +66,7 @@ export async function login(email, password) {
   }
   const data = await res.json()
   setToken(data.access_token)
-  localStorage.setItem('advisorflow_user', JSON.stringify({
+  localStorage.setItem('bookaboost_user', JSON.stringify({
     full_name: data.full_name, role: data.role, organization_id: data.organization_id,
     must_change_password: data.must_change_password,
   }))
@@ -77,15 +77,15 @@ export function setMustChangePassword(value) {
   const user = getCurrentUser()
   if (!user) return
   user.must_change_password = value
-  localStorage.setItem('advisorflow_user', JSON.stringify(user))
+  localStorage.setItem('bookaboost_user', JSON.stringify(user))
 }
 
 export function getCurrentUser() {
-  const raw = localStorage.getItem('advisorflow_user')
+  const raw = localStorage.getItem('bookaboost_user')
   return raw ? JSON.parse(raw) : null
 }
 
 export function logout() {
   clearToken()
-  localStorage.removeItem('advisorflow_user')
+  localStorage.removeItem('bookaboost_user')
 }

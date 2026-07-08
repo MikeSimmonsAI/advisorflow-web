@@ -19,6 +19,75 @@ const TIER_OPTIONS = [
   { value: 'new_inquiry', label: 'New Inquiry' },
 ]
 
+// ── Timeline event type config ──────────────────────────────────────────────
+const EVENT_META = {
+  outbound:      { label: 'SMS Sent',       color: 'blue',       icon: '→' },
+  inbound:       { label: 'SMS Reply',      color: 'green',      icon: '←' },
+  email:         { label: 'Email',          color: 'purple',     icon: '✉' },
+  cadence:       { label: 'Cadence Touch',  color: 'amber',      icon: '⏱' },
+  booking:       { label: 'Booking',        color: 'green',      icon: '📅' },
+  booking_cancel:{ label: 'Booking Cancelled', color: 'red',     icon: '✕' },
+  outcome:       { label: 'Outcome',        color: 'teal',       icon: '✓' },
+  note:          { label: 'Note',           color: 'neutral',    icon: '📝' },
+}
+
+function TimelineEvent({ event }) {
+  const meta = EVENT_META[event.type] || EVENT_META.note
+  return (
+    <div className={`timeline-event timeline-event--${meta.color}`}>
+      <div className="timeline-event-icon">{meta.icon}</div>
+      <div className="timeline-event-body">
+        <div className="timeline-event-header">
+          <span className={`timeline-type-pill timeline-type-pill--${meta.color}`}>{meta.label}</span>
+          <span className="timeline-time mono">
+            {event.timestamp ? new Date(event.timestamp).toLocaleString() : '–'}
+          </span>
+        </div>
+
+        {/* Email subject */}
+        {event.channel === 'email' && event.subject && (
+          <p className="timeline-email-subject">{event.subject}</p>
+        )}
+
+        {/* Body / content */}
+        {event.channel === 'email' ? (
+          <div className="timeline-body" dangerouslySetInnerHTML={{ __html: event.body }} />
+        ) : event.body ? (
+          <p className="timeline-body">{event.body}</p>
+        ) : null}
+
+        {/* Cadence touch number */}
+        {event.type === 'cadence' && event.touch_number != null && (
+          <p className="timeline-meta-text">Touch {event.touch_number}</p>
+        )}
+
+        {/* Booking details */}
+        {event.type === 'booking' && event.booked_time && (
+          <p className="timeline-meta-text">
+            Booked for {new Date(event.booked_time).toLocaleString()}
+            {event.calendar_event_id ? ' · on Google Calendar' : ''}
+          </p>
+        )}
+
+        {/* Outcome details */}
+        {event.type === 'outcome' && event.outcome_type && (
+          <p className="timeline-meta-text">{event.outcome_type.replaceAll('_', ' ')}</p>
+        )}
+
+        {/* Hot reply signal */}
+        {event.type === 'inbound' && event.is_hot && (
+          <SignalPulse color="red" size={6} label="Hot" />
+        )}
+
+        {/* Reply classification */}
+        {event.type === 'inbound' && event.classification && (
+          <span className="timeline-classification">{event.classification.replaceAll('_', ' ')}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams()
   const navigate = useNavigate()
@@ -43,9 +112,7 @@ export default function LeadDetail() {
   const [markingDnc, setMarkingDnc] = useState(false)
   const [dncError, setDncError] = useState('')
 
-  // Editable Details panel - per Mike's explicit complaint: Lead Detail
-  // let him VIEW phone/email but never edit them, with "no clear save
-  // button in some areas."
+  // Editable Details panel
   const [editingDetails, setEditingDetails] = useState(false)
   const [detailsForm, setDetailsForm] = useState({ phone: '', email: '', notes: '' })
   const [detailsSaving, setDetailsSaving] = useState(false)
@@ -162,10 +229,9 @@ export default function LeadDetail() {
 
   async function handleMarkDnc() {
     const confirmed = window.confirm(
-      "Mark this lead as Do Not Contact? This stops any active cadence and blocks this phone number from all future sends across the org. This can't be casually undone."
+      'Mark this lead as Do Not Contact? This stops any active cadence and blocks this phone number from all future sends across the org. This can\'t be casually undone.'
     )
     if (!confirmed) return
-
     setMarkingDnc(true)
     setDncError('')
     try {
@@ -211,6 +277,52 @@ export default function LeadDetail() {
   const { lead, events, ai_quality, booking } = data
   const canSend = lead.phone && lead.status !== 'dnc' && !lead.is_duplicate
 
+  // ── Build unified timeline ──────────────────────────────────────────────
+  // Normalize all event types into one array and sort by timestamp desc
+  const timelineEvents = []
+
+  // SMS / email events from the existing timeline feed
+  ;(events || []).forEach(e => {
+    timelineEvents.push({
+      ...e,
+      timestamp: e.timestamp || e.created_at,
+    })
+  })
+
+  // Cadence touches (if backend returns them on the timeline endpoint)
+  ;(data.cadence_events || []).forEach(e => {
+    timelineEvents.push({
+      type: 'cadence',
+      timestamp: e.sent_at || e.scheduled_at,
+      body: e.message_body || null,
+      touch_number: e.touch_number,
+    })
+  })
+
+  // Booking events
+  if (booking) {
+    timelineEvents.push({
+      type: booking.status === 'cancelled' ? 'booking_cancel' : 'booking',
+      timestamp: booking.created_at,
+      booked_time: booking.booked_time,
+      calendar_event_id: booking.calendar_event_id,
+      body: null,
+    })
+  }
+
+  // Outcome events (if backend returns them)
+  ;(data.outcomes || []).forEach(o => {
+    timelineEvents.push({
+      type: 'outcome',
+      timestamp: o.created_at,
+      outcome_type: o.outcome_type,
+      body: o.notes || null,
+    })
+  })
+
+  // Sort newest first
+  timelineEvents.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+
   return (
     <div>
       <button className="back-link" onClick={() => navigate('/leads')}>
@@ -232,7 +344,7 @@ export default function LeadDetail() {
               disabled={tierSaving}
             >
               <option value="" disabled>{lead.tier ? 'Reassign…' : 'Assign…'}</option>
-              {TIER_OPTIONS.map((opt) => (
+              {TIER_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
@@ -274,41 +386,35 @@ export default function LeadDetail() {
       {dncError && <div className="compose-error lead-assignment-error">{dncError}</div>}
 
       <div className="detail-grid">
+        {/* ── LEFT COLUMN ── */}
         <div>
+          {/* Unified Timeline */}
           <section className="panel" style={{ marginBottom: 16 }}>
-            <div className="panel-header"><h2 className="panel-title">Conversation</h2></div>
-            {events.length === 0 ? (
-              <div className="empty-state">No messages yet. Send the first one below.</div>
+            <div className="panel-header">
+              <h2 className="panel-title">Timeline</h2>
+              <span className="mono" style={{ fontSize: 12, opacity: 0.5 }}>{timelineEvents.length} events</span>
+            </div>
+            {timelineEvents.length === 0 ? (
+              <div className="empty-state">No activity yet. Send the first message below.</div>
             ) : (
               <div className="timeline">
-                {events.map((e, i) => (
-                  <div key={i} className={`timeline-bubble timeline-bubble--${e.type}`}>
-                    <div className="timeline-bubble-top">
-                      {e.channel === 'email' && <span className="timeline-channel-tag">Email</span>}
-                      {e.type === 'inbound' && e.is_hot && <SignalPulse color="red" size={6} label="Hot" />}
-                    </div>
-                    {e.channel === 'email' && e.subject && (
-                      <p className="timeline-email-subject">{e.subject}</p>
-                    )}
-                    {e.channel === 'email' ? (
-                      <div className="timeline-body" dangerouslySetInnerHTML={{ __html: e.body }} />
-                    ) : (
-                      <p className="timeline-body">{e.body}</p>
-                    )}
-                    <span className="timeline-time mono">{new Date(e.timestamp).toLocaleString()}</span>
-                  </div>
+                {timelineEvents.map((e, i) => (
+                  <TimelineEvent key={i} event={e} />
                 ))}
               </div>
             )}
           </section>
 
+          {/* Send a message */}
           <section className="panel">
             <div className="panel-header"><h2 className="panel-title">Send a message</h2></div>
             {!canSend ? (
               <div className="empty-state">
-                {lead.is_duplicate ? 'This lead is a duplicate of one another advisor already owns.' :
-                 lead.status === 'dnc' ? 'This lead is marked do-not-contact.' :
-                 'This lead has no phone number on file — use the Email Queue instead.'}
+                {lead.is_duplicate
+                  ? 'This lead is a duplicate of one another advisor already owns.'
+                  : lead.status === 'dnc'
+                  ? 'This lead is marked do-not-contact.'
+                  : 'This lead has no phone number on file — use the Email Queue instead.'}
               </div>
             ) : (
               <div className="compose-box">
@@ -357,7 +463,9 @@ export default function LeadDetail() {
           </section>
         </div>
 
+        {/* ── RIGHT COLUMN ── */}
         <div>
+          {/* Booking panel */}
           {booking && (
             <section className="panel" style={{ marginBottom: 16 }}>
               <div className="panel-header">
@@ -390,6 +498,7 @@ export default function LeadDetail() {
           <OutcomeTracker leadId={leadId} />
           <ReferralPanel leadId={leadId} />
 
+          {/* AI read */}
           <section className="panel" style={{ marginBottom: 16 }}>
             <div className="panel-header">
               <h2 className="panel-title">AI read</h2>
@@ -414,6 +523,7 @@ export default function LeadDetail() {
             {analysisError && <div className="compose-error" style={{ marginTop: 8 }}>{analysisError}</div>}
           </section>
 
+          {/* Details */}
           <section className="panel">
             <div className="panel-header">
               <h2 className="panel-title">Details</h2>
@@ -459,13 +569,9 @@ export default function LeadDetail() {
                     placeholder="Anything worth remembering about this lead — call notes, family details, next steps…"
                   />
                 </label>
-
                 {detailsError && <div className="compose-error">{detailsError}</div>}
-
                 <div className="settings-actions">
-                  <button className="btn btn--secondary" onClick={() => setEditingDetails(false)} disabled={detailsSaving}>
-                    Cancel
-                  </button>
+                  <button className="btn btn--secondary" onClick={() => setEditingDetails(false)} disabled={detailsSaving}>Cancel</button>
                   <button className="btn btn--primary" onClick={handleSaveDetails} disabled={detailsSaving}>
                     {detailsSaving ? 'Saving…' : 'Save'}
                   </button>
@@ -474,13 +580,13 @@ export default function LeadDetail() {
             ) : (
               <table className="detail-table">
                 <tbody>
-                  <tr><td>Phone</td><td className="mono">{lead.phone || '—'}</td></tr>
-                  <tr><td>Email</td><td className="mono">{lead.email || '—'}</td></tr>
-                  <tr><td>Notes</td><td className="lead-notes-cell">{lead.notes || '—'}</td></tr>
-                  <tr><td>Source year</td><td className="mono">{lead.source_year || '—'}</td></tr>
-                  <tr><td>Last action</td><td>{lead.last_action_raw || '—'}</td></tr>
-                  <tr><td>Status reason</td><td>{lead.status_reason_raw || '—'}</td></tr>
-                  <tr><td>Imported from</td><td className="mono" style={{ fontSize: 11 }}>{lead.source_file || '—'}</td></tr>
+                  <tr><td>Phone</td><td className="mono">{lead.phone || '–'}</td></tr>
+                  <tr><td>Email</td><td className="mono">{lead.email || '–'}</td></tr>
+                  <tr><td>Notes</td><td className="lead-notes-cell">{lead.notes || '–'}</td></tr>
+                  <tr><td>Source year</td><td className="mono">{lead.source_year || '–'}</td></tr>
+                  <tr><td>Last action</td><td>{lead.last_action || '–'}</td></tr>
+                  <tr><td>Status reason</td><td>{lead.status_reason_raw || '–'}</td></tr>
+                  <tr><td>Imported from</td><td className="mono" style={{ fontSize: 11 }}>{lead.source_file || '–'}</td></tr>
                 </tbody>
               </table>
             )}

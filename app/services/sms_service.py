@@ -48,37 +48,6 @@ def render_template(template: str, lead: Lead, advisor: User, booking_url: str) 
     )
 
 
-def send_plain_sms(advisor: User, to_phone: str, body: str) -> dict:
-    """
-    Sends a bare SMS from the advisor's Twilio number to an arbitrary
-    phone number, with no Lead/Message/booking-link record created.
-
-    Deliberately separate from send_sms() below, which is built
-    specifically for advisor-to-LEAD outreach and always creates a
-    Message row tied to a Lead - that doesn't apply here. This exists
-    for self-alerts (texting the advisor's own phone when a reply comes
-    in), where there's no Lead on the receiving end and creating a fake
-    Message/Lead pairing just to satisfy send_sms()'s shape would be the
-    wrong fit. No DNC/suppression check here either, for the same
-    reason: those checks exist to protect LEADS from over-contacting,
-    not to gate an advisor messaging their own phone.
-
-    Returns {"success": bool, "twilio_sid": str|None, "error": str|None} -
-    same shape style as send_email_via_provider, so callers can check
-    success the same way regardless of channel.
-    """
-    try:
-        client = get_twilio_client(advisor)
-    except ValueError as e:
-        return {"success": False, "twilio_sid": None, "error": str(e)}
-
-    try:
-        twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=to_phone)
-        return {"success": True, "twilio_sid": twilio_msg.sid, "error": None}
-    except Exception as e:
-        return {"success": False, "twilio_sid": None, "error": str(e)}
-
-
 def send_sms(
     db: Session,
     advisor: User,
@@ -92,14 +61,20 @@ def send_sms(
     at the Twilio phone number / messaging service level, not per-message -
     that's configured once via configure_caller_id_name() below.
     """
-    # Single, shared Compliance Preflight gate - per the explicit
-    # consolidation request, this used to be two inline checks
-    # duplicated separately in every send path. Now every path
-    # (SMS or email) calls the exact same function, so a DNC/STOP
-    # genuinely blocks every channel, not just whichever one happened
-    # to remember to check.
-    from app.services.compliance_service import check_compliance_preflight
-    check_compliance_preflight(db, lead)
+    if lead.status.value == "dnc":
+        raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
+
+    # Independent suppression-list check, not a substitute for the
+    # Lead.status check above but an additional, direct guard. REAL GAP
+    # THIS CLOSES: a number could exist in the Compliance Center's
+    # suppression list while its matching Lead.status was never updated
+    # to DNC (confirmed via testing - this was especially likely before
+    # the phone-format bug in compliance_router.py was also fixed,
+    # since the two systems' normalized phone formats didn't even match
+    # each other). Every real send path must check this directly.
+    from app.services.compliance_service import is_phone_suppressed
+    if is_phone_suppressed(db, lead.organization_id, lead.phone):
+        raise ValueError(f"Lead {lead.id}'s phone number is on the suppression list - blocked from sending.")
 
     booking_url = ""
     booking_link = None
@@ -131,45 +106,6 @@ def send_sms(
     return message
 
 
-def send_exact_sms(db: Session, advisor: User, lead: Lead, body: str) -> Message:
-    """
-    Sends a final, already-composed message body VERBATIM - no
-    {first_name}/{booking_link} placeholder substitution via
-    render_template, since the body here is already fully rendered
-    (an AI draft from draft_reply_service, or an advisor's edit of
-    one) and running it through render_template again would be both
-    unnecessary and a real, if small, correctness risk if the drafted
-    text happened to contain literal curly-brace text.
-
-    Reuses the single, shared Compliance Preflight gate - same one
-    every other send path (SMS or email) calls, so a DNC/STOP genuinely
-    blocks every channel.
-    """
-    from app.services.compliance_service import check_compliance_preflight
-    check_compliance_preflight(db, lead)
-
-    client = get_twilio_client(advisor)
-    twilio_msg = client.messages.create(
-        body=body,
-        from_=advisor.twilio_phone_number,
-        to=lead.phone,
-    )
-
-    message = Message(
-        lead_id=lead.id,
-        sender_id=advisor.id,
-        body=body,
-        twilio_sid=twilio_msg.sid,
-        twilio_status=twilio_msg.status,
-    )
-    db.add(message)
-
-    lead.status = "sent"
-    db.commit()
-    db.refresh(message)
-    return message
-
-
 def configure_caller_id_name(advisor: User) -> None:
     """
     Sets the Caller ID Name (a.k.a. CNAM) on the advisor's Twilio number.
@@ -198,27 +134,11 @@ def send_batch(
     template: str,
     include_booking_link: bool = True,
 ) -> dict:
-    """
-    Sends to multiple leads, skipping any that are DNC/duplicate/
-    suppressed BEFORE attempting send_sms, so the batch summary's
-    `skipped` list is accurate and complete - send_sms's own
-    Compliance Preflight gate is still the real, authoritative check
-    (this pre-filter is a courtesy for the summary, not a replacement
-    for it; if a lead's status changes between this check and the
-    actual send_sms call, send_sms still blocks it correctly either
-    way).
-    """
-    from app.services.compliance_service import check_compliance_preflight
-
+    """Sends to multiple leads, skipping any that are DNC/duplicate."""
     sent = []
     skipped = []
     for lead in leads:
-        if lead.is_duplicate:
-            skipped.append(lead.id)
-            continue
-        try:
-            check_compliance_preflight(db, lead)
-        except ValueError:
+        if lead.is_duplicate or lead.status.value == "dnc":
             skipped.append(lead.id)
             continue
         try:

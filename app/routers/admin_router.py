@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from pydantic import BaseModel, EmailStr
@@ -10,8 +10,7 @@ from typing import Any
 from app.deps import get_db, require_admin
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry
 from app.services.auth_service import hash_password
-from app.services.dedup_service import normalize_phone, normalize_last_name, normalize_first_name, normalize_email
-from app.services.feature_flags_service import get_enabled_flags, set_feature_flags, KNOWN_FEATURE_FLAGS
+from app.services.dedup_service import normalize_phone, normalize_last_name
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -38,28 +37,12 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
             .filter(Lead.assigned_to_id == advisor.id, Reply.is_hot == True)
             .scalar()
         )
-        # Real reply_count (not just hot replies) - added so the
-        # frontend can compute a genuine response rate
-        # (replies_received / messages_sent), per the dashboard
-        # redesign's request for a "Response rate" KPI. Deliberately
-        # NOT computed here as a pre-baked percentage - the frontend
-        # owns the division so it's the same single source of truth
-        # whether displayed per-advisor or aggregated org-wide, and a
-        # 0-messages-sent advisor never causes a division by zero
-        # server-side that would need its own special-cased response shape.
-        reply_count = (
-            db.query(func.count(Reply.id))
-            .join(Lead, Reply.lead_id == Lead.id)
-            .filter(Lead.assigned_to_id == advisor.id)
-            .scalar()
-        )
         per_advisor_stats.append({
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
             "leads_owned": lead_count,
             "messages_sent": sent_count,
             "hot_replies": hot_count,
-            "reply_count": reply_count,
         })
 
     total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id == org_id).scalar()
@@ -69,20 +52,10 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
         .scalar()
     )
 
-    # Summed from the already-computed per-advisor stats above, not a
-    # second separate query - guarantees the org-wide total always
-    # agrees with what you'd get adding up every advisor row, rather
-    # than risking two slightly different queries disagreeing with
-    # each other.
-    total_messages_sent = sum(a["messages_sent"] or 0 for a in per_advisor_stats)
-    total_replies = sum(a["reply_count"] or 0 for a in per_advisor_stats)
-
     return {
         "organization_id": org_id,
         "total_leads": total_leads,
         "total_duplicates_prevented": total_duplicates,
-        "total_messages_sent": total_messages_sent,
-        "total_replies": total_replies,
         "advisors": per_advisor_stats,
     }
 
@@ -117,7 +90,7 @@ def all_org_leads(db: Session = Depends(get_db), current_user: User = Depends(re
             "last_name": lead.last_name,
             "phone": lead.phone,
             "email": lead.email,
-            "tier": lead.tier,
+            "tier": lead.tier.value if lead.tier else None,
             "status": lead.status.value if lead.status else None,
             "assigned_to_id": lead.assigned_to_id,
             "assigned_to_name": advisors_by_id.get(lead.assigned_to_id, "Unassigned"),
@@ -213,71 +186,6 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
     }
 
 
-@router.get("/dashboard/team-activity")
-def team_activity(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """
-    One-screen activity board: every advisor's last login and last real
-    action, so Mike can scan the whole team at a glance for who's gone
-    quiet, instead of clicking into each person's individual detail page.
-
-    "Last action" is deliberately the most recent of two reliably
-    ATTRIBUTED signals - Message.sent_at (via sender_id) and
-    LeadOutcome.created_at (via recorded_by_id) - not Lead.updated_at,
-    which auto-updates on system-driven changes (cadence status,
-    engagement recompute) that have nothing to do with whether the
-    advisor actually did something. Reply.reviewed_at was considered and
-    rejected for this purpose: it has no reviewed_by_id column at all,
-    so there's no way to attribute a reply review to a specific advisor
-    without adding a new column - not invented here, since the two
-    signals already available are honest and real.
-
-    Returned unsorted (just by name) - the frontend sorts by recency so
-    "most/least recently active" can be toggled without a re-fetch.
-    """
-    org_id = current_user.organization_id
-    advisors = (
-        db.query(User)
-        .filter(User.organization_id == org_id, User.role.in_(["advisor", "org_admin"]))
-        .order_by(User.full_name.asc())
-        .all()
-    )
-
-    rows = []
-    for advisor in advisors:
-        last_message_at = (
-            db.query(func.max(Message.sent_at))
-            .join(Lead, Message.lead_id == Lead.id)
-            .filter(Lead.organization_id == org_id, Message.sender_id == advisor.id)
-            .scalar()
-        )
-        last_outcome_at = (
-            db.query(func.max(LeadOutcome.created_at))
-            .join(Lead, LeadOutcome.lead_id == Lead.id)
-            .filter(Lead.organization_id == org_id, LeadOutcome.recorded_by_id == advisor.id)
-            .scalar()
-        )
-
-        candidates = [t for t in (last_message_at, last_outcome_at) if t is not None]
-        last_action_at = max(candidates) if candidates else None
-        last_action_type = None
-        if last_action_at == last_message_at and last_message_at is not None:
-            last_action_type = "sent_message"
-        elif last_action_at == last_outcome_at and last_outcome_at is not None:
-            last_action_type = "recorded_outcome"
-
-        rows.append({
-            "advisor_id": advisor.id,
-            "advisor_name": advisor.full_name,
-            "role": advisor.role,
-            "is_active": advisor.is_active,
-            "last_login_at": advisor.last_login_at,
-            "last_action_at": last_action_at,
-            "last_action_type": last_action_type,
-        })
-
-    return {"advisors": rows}
-
-
 @router.get("/dashboard/metrics")
 def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Org-scoped advisor quality metrics for the upgraded Manager Command Dashboard."""
@@ -315,78 +223,6 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
         "totals": totals,
         "advisors": advisor_rows,
     }
-
-
-@router.get("/dashboard/status-distribution")
-def dashboard_status_distribution(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """
-    Org-wide lead status distribution - genuinely mutually-exclusive
-    counts (each lead counted in exactly one bucket, its current
-    status), unlike dashboard_funnel above (a sequential funnel where
-    a booked lead is ALSO counted in sent/replied - correct for a
-    funnel visualization, wrong for a donut chart, which needs
-    non-overlapping categories).
-
-    Mirrors leads_router.status_funnel's exact grouping logic, just
-    org-wide instead of advisor-scoped, for the Master Dashboard's
-    "Lead distribution" donut - real data only, grouped directly by
-    Lead.status, never a derived or estimated split.
-    """
-    org_id = current_user.organization_id
-    stages = [LeadStatus.NEW, LeadStatus.SENT, LeadStatus.REPLIED, LeadStatus.HOT, LeadStatus.BOOKED, LeadStatus.DEAD, LeadStatus.DNC]
-
-    rows = (
-        db.query(Lead.status, func.count(Lead.id))
-        .filter(Lead.organization_id == org_id, Lead.status.in_(stages))
-        .group_by(Lead.status)
-        .all()
-    )
-    counts = {stage.value: 0 for stage in stages}
-    for status, count in rows:
-        if status:
-            counts[status.value] = int(count or 0)
-
-    return [
-        {"status": stage.value, "label": stage.value.replace("_", " ").title(), "count": counts[stage.value]}
-        for stage in stages
-    ]
-
-
-@router.get("/dashboard/hot-replies")
-def dashboard_hot_replies(
-    limit: int = Query(5, ge=1, le=20),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    """
-    Most recent hot replies org-wide, for the Master Dashboard's
-    preview widget - real reply content and lead names, not just a
-    count. Uses the exact same HOT_REPLY_CLASSIFICATIONS definition as
-    the rest of this dashboard (line 138 above), so "hot" means the
-    same thing here as everywhere else on this page.
-    """
-    rows = (
-        db.query(Reply, Lead)
-        .join(Lead, Reply.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            (Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True),
-        )
-        .order_by(Reply.received_at.desc())
-        .limit(limit)
-        .all()
-    )
-
-    return [
-        {
-            "reply_id": reply.id,
-            "lead_id": lead.id,
-            "lead_name": f"{lead.first_name} {lead.last_name}",
-            "body": reply.body,
-            "received_at": reply.received_at,
-        }
-        for reply, lead in rows
-    ]
 
 
 @router.get("/dashboard/funnel")
@@ -548,7 +384,6 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     full_name: str
     role: str = "advisor"  # advisor, org_admin (super_admin is reserved, not creatable here)
-    password: str | None = None  # if provided, used as-is instead of auto-generating - per Mike's explicit request for both options
 
 
 class UserResponse(BaseModel):
@@ -559,9 +394,6 @@ class UserResponse(BaseModel):
     is_active: bool
     must_change_password: bool
     temp_password: str | None = None  # only populated once, right after creation
-    can_import_leads: bool = False
-    feature_flags: list[str] = []
-    auto_send_phase: str = "off"
 
 
 def _generate_temp_password() -> str:
@@ -572,19 +404,6 @@ def _generate_temp_password() -> str:
     password.
     """
     return secrets.token_urlsafe(9) + "!1"
-
-
-@router.get("/feature-flags/available")
-def list_available_feature_flags(current_user: User = Depends(require_admin)):
-    """
-    Returns the real registry of known feature flags (name + description)
-    so the Users page can render toggle checkboxes dynamically, rather
-    than the frontend hardcoding a list that could drift out of sync
-    with KNOWN_FEATURE_FLAGS. Empty today - see feature_flags_service.py's
-    module docstring for why this registry starts empty rather than with
-    invented placeholder flags.
-    """
-    return [{"name": name, "description": desc} for name, desc in KNOWN_FEATURE_FLAGS.items()]
 
 
 @router.get("/users", response_model=list[UserResponse])
@@ -600,8 +419,6 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
         UserResponse(
             id=u.id, email=u.email, full_name=u.full_name, role=u.role,
             is_active=u.is_active, must_change_password=u.must_change_password,
-            can_import_leads=u.can_import_leads, feature_flags=sorted(get_enabled_flags(u)),
-            auto_send_phase=u.auto_send_phase,
         )
         for u in users
     ]
@@ -615,15 +432,10 @@ def create_user(
 ):
     """
     Creates a new advisor (or org_admin) account in the current admin's
-    organization. If req.password is provided, it's used directly (still
-    must be 8+ characters); otherwise a temporary password is generated.
-    Either way, the resulting password/temp_password is returned ONCE in
-    this response only - never retrievable again afterward, same
-    security pattern as how Twilio/OpenAI show API keys only at creation
-    time. The new account is forced to change that password on first
-    login regardless of which path was used, so an admin-set password is
-    never the account's permanent one without the advisor explicitly
-    confirming/changing it themselves.
+    organization. Generates a temporary password, returned ONCE in this
+    response only - never retrievable again afterward, same security
+    pattern as how Twilio/OpenAI show API keys only at creation time.
+    The new account is forced to change that password on first login.
     """
     existing = db.query(User).filter(User.email == req.email).first()
     if existing:
@@ -634,14 +446,7 @@ def create_user(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
 
-    if req.password is not None:
-        if len(req.password) < 8:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-        temp_password = req.password
-    else:
-        temp_password = _generate_temp_password()
-
+    temp_password = _generate_temp_password()
     new_user = User(
         organization_id=current_user.organization_id,
         email=req.email,
@@ -664,9 +469,6 @@ def create_user(
         role=new_user.role, is_active=new_user.is_active,
         must_change_password=new_user.must_change_password,
         temp_password=temp_password,
-        can_import_leads=new_user.can_import_leads,
-        feature_flags=sorted(get_enabled_flags(new_user)),
-        auto_send_phase=new_user.auto_send_phase,
     )
 
 
@@ -730,10 +532,6 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
 # the super_admin role alone.
 # ---------------------------------------------------------------------------
 
-class ResetPasswordRequest(BaseModel):
-    password: str | None = None  # if provided, used as-is instead of auto-generating
-
-
 class ResetPasswordResponse(BaseModel):
     email: str
     temp_password: str
@@ -755,22 +553,15 @@ def require_super_admin(current_user: User = Depends(require_admin)) -> User:
 @router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
 def reset_user_password(
     user_id: str,
-    req: ResetPasswordRequest = ResetPasswordRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Resets any user's password - to an admin-provided password if given
-    (req.password, still must be 8+ characters), otherwise to a
-    generated temp password. Either way, forces them to set/confirm a
-    real password on next login. Deliberately restricted to super_admin
+    Resets any user's password to a new temp password, forcing them to
+    set a real one on next login. Deliberately restricted to super_admin
     only (see require_super_admin above) - an org_admin should never be
     able to take over another advisor's account by resetting their
     password, even within the same organization.
-
-    req defaults to an empty ResetPasswordRequest() so existing callers
-    that send no body at all (the original behavior) still work
-    unchanged - this stays backward compatible.
     """
     from fastapi import HTTPException
     target = db.query(User).filter(
@@ -779,13 +570,7 @@ def reset_user_password(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if req.password is not None:
-        if len(req.password) < 8:
-            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-        temp_password = req.password
-    else:
-        temp_password = _generate_temp_password()
-
+    temp_password = _generate_temp_password()
     target.password_hash = hash_password(temp_password)
     target.must_change_password = True
     db.commit()
@@ -815,9 +600,6 @@ class UpdateUserRequest(BaseModel):
     full_name: str | None = None
     email: EmailStr | None = None
     role: str | None = None  # 'advisor' or 'org_admin' only - see validation below
-    can_import_leads: bool | None = None  # per-advisor override for the admin-only-by-default Excel import restriction
-    feature_flags: list[str] | None = None  # None = leave unchanged; a list (even []) replaces the full set - see feature_flags_service.py
-    auto_send_phase: str | None = None  # "off" | "candidate" | "auto" - admin-controlled, same as can_import_leads, since this is the single highest-stakes permission in the app: it decides whether AI can ever send a message to a real person with no human click ("auto"). An advisor cannot grant this to themselves.
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
@@ -828,13 +610,9 @@ def update_user(
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Edits an existing user's name, email, role, lead-import access,
-    and/or feature flags. Fields omitted from the request are left
-    unchanged - this is a partial update, not a full replace, so the
-    frontend doesn't have to resend everything. feature_flags is the
-    one exception worth calling out: when PROVIDED, it's a full
-    replace of the user's entire flag set, not an add/remove - see
-    feature_flags_service.set_feature_flags for why.
+    Edits an existing user's name, email, and/or role. Fields omitted from
+    the request are left unchanged - this is a partial update, not a
+    full replace, so the frontend doesn't have to resend everything.
     """
     from fastapi import HTTPException
 
@@ -844,12 +622,7 @@ def update_user(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    before = {
-        "full_name": target.full_name, "email": target.email, "role": target.role,
-        "can_import_leads": target.can_import_leads,
-        "feature_flags": sorted(get_enabled_flags(target)),
-        "auto_send_phase": target.auto_send_phase,
-    }
+    before = {"full_name": target.full_name, "email": target.email, "role": target.role}
 
     if req.email is not None and req.email != target.email:
         existing = db.query(User).filter(User.email == req.email, User.id != target.id).first()
@@ -870,30 +643,10 @@ def update_user(
             raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
         target.role = req.role
 
-    if req.can_import_leads is not None:
-        target.can_import_leads = req.can_import_leads
-
-    if req.feature_flags is not None:
-        try:
-            set_feature_flags(target, req.feature_flags)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    if req.auto_send_phase is not None:
-        valid_phases = ("off", "candidate", "auto")
-        if req.auto_send_phase not in valid_phases:
-            raise HTTPException(status_code=400, detail=f"auto_send_phase must be one of: {', '.join(valid_phases)}")
-        target.auto_send_phase = req.auto_send_phase
-
     db.commit()
     db.refresh(target)
 
-    after = {
-        "full_name": target.full_name, "email": target.email, "role": target.role,
-        "can_import_leads": target.can_import_leads,
-        "feature_flags": sorted(get_enabled_flags(target)),
-        "auto_send_phase": target.auto_send_phase,
-    }
+    after = {"full_name": target.full_name, "email": target.email, "role": target.role}
     changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
     if changed:
         log_action(
@@ -905,8 +658,6 @@ def update_user(
     return UserResponse(
         id=target.id, email=target.email, full_name=target.full_name, role=target.role,
         is_active=target.is_active, must_change_password=target.must_change_password,
-        can_import_leads=target.can_import_leads, feature_flags=sorted(get_enabled_flags(target)),
-        auto_send_phase=target.auto_send_phase,
     )
 
 
@@ -1092,7 +843,7 @@ def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = De
         {
             "id": l.id, "first_name": l.first_name, "last_name": l.last_name,
             "phone": l.phone, "email": l.email,
-            "tier": l.tier,
+            "tier": l.tier.value if l.tier else None,
             "engagement_temperature": l.engagement_temperature.value if l.engagement_temperature else None,
             "created_at": l.created_at,
         }
@@ -1232,32 +983,9 @@ def potential_duplicate_leads(
     """
     Find likely messy duplicate leads that were not caught by the import dedup flow.
 
-    REWORKED per Mike's explicit, justified complaint: the original version
-    grouped any two leads sharing a normalized LAST NAME ALONE into a
-    "potential duplicate" - so every unrelated "Johnson" or "Cooper" in the
-    org got bundled together with no other corroborating signal at all.
-    A shared surname among strangers is common and means nothing by
-    itself; it was turning a quick cleanup task into a slog through
-    unrelated people who happen to share a common name.
-
-    Matching now works like this:
-    - "phone": two or more leads share the same normalized phone number.
-      Kept as a standalone signal - a shared phone is still meaningful
-      even without a name match (could be a shared household line, which
-      is itself worth a human glance, not a false positive).
-    - "name_and_email": leads share BOTH normalized last name AND
-      normalized email. Last name alone is no longer sufficient; this
-      requires a second, independent signal.
-    - "name_and_first_name": leads share BOTH normalized last name AND
-      normalized first name (exact match after normalization - not fuzzy,
-      to avoid trading one kind of false positive for another). This is
-      what actually catches the realistic case (a genuine duplicate import
-      of "John Smith" twice) without catching "John Smith" and "Mary Smith"
-      who just happen to share a surname.
-
-    Bare last-name-only matching is intentionally NOT a category anymore.
-    Existing import-caught duplicates (Lead.is_duplicate=True) are still
-    excluded, same as before.
+    A group appears when two or more non-duplicate leads in the same org share
+    the same normalized phone OR normalized last name. Existing import-caught
+    duplicates (Lead.is_duplicate=True) are intentionally excluded.
     """
     leads = (
         db.query(Lead)
@@ -1274,20 +1002,10 @@ def potential_duplicate_leads(
     for lead in leads:
         phone_key = normalize_phone(lead.phone or lead.phone_raw or "")
         last_key = normalize_last_name(lead.last_name or "")
-        first_key = normalize_first_name(lead.first_name or "")
-        email_key = normalize_email(lead.email or "")
-
         if phone_key:
             grouped[("phone", phone_key)].append(lead)
-
-        # Last name is required but never sufficient alone - it must be
-        # combined with a second signal (email or first name) to form a
-        # group key at all. A bare last_key with no email/first_key never
-        # produces a grouping key below, which is the actual fix.
-        if last_key and email_key:
-            grouped[("name_and_email", f"{last_key}:{email_key}")].append(lead)
-        if last_key and first_key:
-            grouped[("name_and_first_name", f"{first_key} {last_key}")].append(lead)
+        if last_key:
+            grouped[("last_name", last_key)].append(lead)
 
     results = []
     seen_exact_group_keys: set[tuple[str, str]] = set()
@@ -1295,10 +1013,8 @@ def potential_duplicate_leads(
         if len(group_leads) < 2:
             continue
         group_ids = tuple(sorted(lead.id for lead in group_leads))
-        # Keep distinct match types for the same cluster of leads (e.g. a
-        # phone match AND a name_and_email match might both legitimately
-        # fire for the same pair), but avoid returning the exact same
-        # group twice under the same match type.
+        # Keep both phone and last-name groups when they identify different clusters,
+        # but avoid returning the exact same group twice if phone and last name both match.
         dedupe_key = (match_type, "|".join(group_ids))
         if dedupe_key in seen_exact_group_keys:
             continue

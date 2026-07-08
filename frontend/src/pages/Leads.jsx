@@ -33,6 +33,22 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'dnc', label: 'DNC' },
 ]
 
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'name_az', label: 'Name A–Z' },
+  { value: 'name_za', label: 'Name Z–A' },
+]
+
+const EMPTY_LEAD_FORM = {
+  first_name: '',
+  last_name: '',
+  phone: '',
+  email: '',
+  tier: '',
+  notes: '',
+}
+
 export default function Leads() {
   const navigate = useNavigate()
   const [leads, setLeads] = useState([])
@@ -53,6 +69,7 @@ export default function Leads() {
   const [searchQuery, setSearchQuery] = useState('')
   const [tierFilter, setTierFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sortBy, setSortBy] = useState('newest')
 
   // Bulk select & send
   const [selected, setSelected] = useState(new Set())
@@ -61,6 +78,12 @@ export default function Leads() {
   const [bulkSending, setBulkSending] = useState(false)
   const [bulkResult, setBulkResult] = useState(null)
   const [showBulkCompose, setShowBulkCompose] = useState(false)
+
+  // Add Lead modal
+  const [showAddLead, setShowAddLead] = useState(false)
+  const [addLeadForm, setAddLeadForm] = useState(EMPTY_LEAD_FORM)
+  const [addLeadSaving, setAddLeadSaving] = useState(false)
+  const [addLeadError, setAddLeadError] = useState('')
 
   function loadLeads() {
     setLoading(true)
@@ -80,7 +103,7 @@ export default function Leads() {
     setGoogleImporting(true)
     setGoogleImportResult(null)
     try {
-      const result = await api.post('/google-contacts/import', {})
+      const result = await api.post('/google_contacts/import', {})
       setGoogleImportResult(result)
       // Refresh leads list
       const leadsData = await api.get('/leads/')
@@ -118,20 +141,11 @@ export default function Leads() {
       const formData = new FormData()
       formData.append('file', pendingFile.current)
       if (sourceYear) formData.append('source_year', sourceYear)
-      const result = await api.upload('/leads/upload/confirm', formData)
+      await api.upload('/leads/upload/confirm', formData)
       setPreview(null)
       pendingFile.current = null
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadLeads()
-
-      // The real fix: leads used to sit silently at status=NEW after
-      // import, with nothing telling the advisor a message was about to
-      // go out automatically. Now the import hands off straight into the
-      // review screen - drafted messages shown per lead, nothing sends
-      // until explicitly confirmed there.
-      if (result.created_lead_ids && result.created_lead_ids.length > 0) {
-        setReviewLeadIds(result.created_lead_ids)
-      }
     } catch (err) {
       alert(`Import failed: ${err.message}`)
     } finally {
@@ -154,23 +168,52 @@ export default function Leads() {
     }
   }
 
+  async function handleAddLead(e) {
+    e.preventDefault()
+    if (!addLeadForm.first_name.trim() && !addLeadForm.last_name.trim()) {
+      setAddLeadError('First or last name is required.')
+      return
+    }
+    setAddLeadSaving(true)
+    setAddLeadError('')
+    try {
+      await api.post('/leads/', {
+        first_name: addLeadForm.first_name.trim() || null,
+        last_name: addLeadForm.last_name.trim() || null,
+        phone: addLeadForm.phone.trim() || null,
+        email: addLeadForm.email.trim() || null,
+        tier: addLeadForm.tier || null,
+        notes: addLeadForm.notes.trim() || null,
+      })
+      setShowAddLead(false)
+      setAddLeadForm(EMPTY_LEAD_FORM)
+      loadLeads()
+    } catch (err) {
+      setAddLeadError(err.message || 'Could not add lead.')
+    } finally {
+      setAddLeadSaving(false)
+    }
+  }
+
   const baseLeads = view === 'review' ? needsReview : leads
 
-  // Filtering & search applied client-side over whichever list is active.
-  // Search matches name or phone (digits-only comparison so formatting doesn't matter).
+  // Real (non-duplicate) lead count for the tab badge
+  const realLeadCount = useMemo(() => leads.filter(l => !l.is_duplicate).length, [leads])
+
+  // Filtering, search, and sort applied client-side
   const filteredLeads = useMemo(() => {
     let result = baseLeads
 
-    if (tierFilter) result = result.filter((l) => l.tier === tierFilter)
-    if (statusFilter) result = result.filter((l) => l.status === statusFilter)
+    if (tierFilter) result = result.filter(l => l.tier === tierFilter)
+    if (statusFilter) result = result.filter(l => l.status === statusFilter)
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
       const qDigits = q.replace(/\D/g, '')
-      result = result.filter((l) => {
+      result = result.filter(l => {
         const name = `${l.first_name || ''} ${l.last_name || ''}`.toLowerCase()
-        const phoneDigits = (l.phone || '').replace(/\D/g, '')
         const email = (l.email || '').toLowerCase()
+        const phoneDigits = (l.phone || '').replace(/\D/g, '')
         return (
           name.includes(q) ||
           email.includes(q) ||
@@ -179,11 +222,23 @@ export default function Leads() {
       })
     }
 
+    // Sort
+    result = [...result]
+    if (sortBy === 'newest') {
+      result.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    } else if (sortBy === 'oldest') {
+      result.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
+    } else if (sortBy === 'name_az') {
+      result.sort((a, b) => `${a.last_name || ''}${a.first_name || ''}`.localeCompare(`${b.last_name || ''}${b.first_name || ''}`))
+    } else if (sortBy === 'name_za') {
+      result.sort((a, b) => `${b.last_name || ''}${b.first_name || ''}`.localeCompare(`${a.last_name || ''}${a.first_name || ''}`))
+    }
+
     return result
-  }, [baseLeads, tierFilter, statusFilter, searchQuery])
+  }, [baseLeads, tierFilter, statusFilter, searchQuery, sortBy])
 
   // Only leads with a phone, not DNC, not duplicate are eligible for bulk SMS send.
-  const sendableLeads = filteredLeads.filter((l) => l.phone && l.status !== 'dnc' && !l.is_duplicate)
+  const sendableLeads = filteredLeads.filter(l => l.phone && l.status !== 'dnc' && !l.is_duplicate)
 
   function toggleSelect(id) {
     const next = new Set(selected)
@@ -192,11 +247,11 @@ export default function Leads() {
   }
 
   function toggleSelectAll() {
-    const sendableIds = sendableLeads.map((l) => l.id)
-    const allSelected = sendableIds.length > 0 && sendableIds.every((id) => selected.has(id))
+    const sendableIds = sendableLeads.map(l => l.id)
+    const allSelected = sendableIds.length > 0 && sendableIds.every(id => selected.has(id))
     if (allSelected) {
       const next = new Set(selected)
-      sendableIds.forEach((id) => next.delete(id))
+      sendableIds.forEach(id => next.delete(id))
       setSelected(next)
     } else {
       setSelected(new Set([...selected, ...sendableIds]))
@@ -228,11 +283,94 @@ export default function Leads() {
 
   return (
     <div>
+      {/* Add Lead Modal */}
+      {showAddLead && (
+        <div className="modal-overlay" onClick={() => setShowAddLead(false)}>
+          <div className="modal-panel" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="panel-title">Add Lead</h2>
+              <button className="back-link" onClick={() => { setShowAddLead(false); setAddLeadForm(EMPTY_LEAD_FORM); setAddLeadError('') }}>✕</button>
+            </div>
+            <form className="add-lead-form" onSubmit={handleAddLead}>
+              <div className="add-lead-row">
+                <label>
+                  First name
+                  <input
+                    value={addLeadForm.first_name}
+                    onChange={e => setAddLeadForm(f => ({ ...f, first_name: e.target.value }))}
+                    placeholder="First name"
+                  />
+                </label>
+                <label>
+                  Last name
+                  <input
+                    value={addLeadForm.last_name}
+                    onChange={e => setAddLeadForm(f => ({ ...f, last_name: e.target.value }))}
+                    placeholder="Last name"
+                  />
+                </label>
+              </div>
+              <label>
+                Phone
+                <input
+                  value={addLeadForm.phone}
+                  onChange={e => setAddLeadForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="214-555-0199"
+                  type="tel"
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  value={addLeadForm.email}
+                  onChange={e => setAddLeadForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="family@example.com"
+                  type="email"
+                />
+              </label>
+              <label>
+                Tier
+                <select
+                  value={addLeadForm.tier}
+                  onChange={e => setAddLeadForm(f => ({ ...f, tier: e.target.value }))}
+                >
+                  <option value="">Select tier…</option>
+                  {TIER_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Notes
+                <textarea
+                  value={addLeadForm.notes}
+                  onChange={e => setAddLeadForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Optional notes…"
+                  rows={3}
+                />
+              </label>
+              {addLeadError && <div className="upload-error">{addLeadError}</div>}
+              <div className="add-lead-actions">
+                <button type="button" className="btn btn--secondary" onClick={() => { setShowAddLead(false); setAddLeadForm(EMPTY_LEAD_FORM); setAddLeadError('') }}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={addLeadSaving}>
+                  {addLeadSaving ? 'Saving…' : 'Add Lead'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <header className="page-header">
         <div>
           <h1 className="page-title">Leads</h1>
           <p className="page-subtitle">Import, dedupe, and route every lead to the right track.</p>
         </div>
+        <button className="btn btn--primary" onClick={() => setShowAddLead(true)}>
+          + Add Lead
+        </button>
       </header>
 
       <section className="panel upload-panel">
@@ -260,15 +398,15 @@ export default function Leads() {
             disabled={googleImporting}
             title="Import contacts directly from your Google Contacts"
           >
-            {googleImporting ? 'Importing…' : '📇 Import from Google Contacts'}
+            {googleImporting ? 'Importing…' : '📋 Import from Google Contacts'}
           </button>
         </div>
+
         {googleImportResult && (
           <div className={googleImportResult.error ? 'upload-error' : 'upload-success'}>
             {googleImportResult.error
               ? googleImportResult.error
-              : `Imported ${googleImportResult.new_active_sms_leads || 0} new leads from Google Contacts. ${googleImportResult.duplicates_flagged || 0} duplicates skipped.`
-            }
+              : `Imported ${googleImportResult.new_active_sms_leads || 0} new leads from Google Contacts. ${googleImportResult.duplicates_flagged || 0} duplicates skipped.`}
           </div>
         )}
 
@@ -303,7 +441,7 @@ export default function Leads() {
 
       <div className="leads-tabs">
         <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => setView('all')}>
-          All leads <span className="mono">{leads.length}</span>
+          All leads <span className="mono">{realLeadCount}</span>
         </button>
         <button className={`tab ${view === 'review' ? 'tab--active' : ''}`} onClick={() => setView('review')}>
           Needs tier review <span className="mono">{needsReview.length}</span>
@@ -319,10 +457,13 @@ export default function Leads() {
           className="search-input"
         />
         <select className="filter-select" value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
-          {TIER_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          {TIER_FILTER_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
         <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          {STATUS_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          {STATUS_FILTER_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        </select>
+        <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+          {SORT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
         <span className="filter-count mono">{filteredLeads.length} shown</span>
       </div>
@@ -349,7 +490,7 @@ export default function Leads() {
             rows={4}
           />
           <p className="settings-help">
-            Use <code>{'{first_name}'}</code>, <code>{'{advisor_name}'}</code>, and <code>{'{booking_link}'}</code> as placeholders — they'll be filled in per lead.
+            Use <code>&#123;'first_name'&#125;</code>, <code>&#123;'advisor_name'&#125;</code>, and <code>&#123;'booking_link'&#125;</code> as placeholders — they'll be filled in per lead.
           </p>
           <div className="compose-footer">
             <label className="compose-checkbox">
@@ -383,7 +524,7 @@ export default function Leads() {
                   <th style={{ width: 30 }}>
                     <input
                       type="checkbox"
-                      checked={sendableLeads.length > 0 && sendableLeads.every((l) => selected.has(l.id))}
+                      checked={sendableLeads.length > 0 && sendableLeads.every(l => selected.has(l.id))}
                       onChange={toggleSelectAll}
                     />
                   </th>
@@ -408,13 +549,17 @@ export default function Leads() {
                     {view !== 'review' && (
                       <td onClick={(e) => e.stopPropagation()}>
                         {sendable && (
-                          <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} />
+                          <input
+                            type="checkbox"
+                            checked={selected.has(lead.id)}
+                            onChange={() => toggleSelect(lead.id)}
+                          />
                         )}
                       </td>
                     )}
                     <td>{lead.first_name} {lead.last_name}</td>
-                    <td className="mono">{lead.phone || '—'}</td>
-                    <td className="mono">{lead.email || '—'}</td>
+                    <td className="mono">{lead.phone || '–'}</td>
+                    <td className="mono">{lead.email || '–'}</td>
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>
                     {view === 'review' && (
@@ -426,7 +571,7 @@ export default function Leads() {
                           onChange={(e) => e.target.value && assignTier(lead.id, e.target.value)}
                         >
                           <option value="" disabled>Assign…</option>
-                          {TIER_OPTIONS.map((opt) => (
+                          {TIER_OPTIONS.map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>

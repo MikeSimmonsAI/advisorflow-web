@@ -135,7 +135,7 @@ def list_active_cadences(db: Session = Depends(get_db), current_user: User = Dep
             "lead_id": lead.id,
             "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
             "phone": lead.phone,
-            "tier": lead.tier,
+            "tier": lead.tier.value if lead.tier else None,
             "current_touch_number": state.current_touch_number,
             "total_touches": 9,
             "next_touch_due_at": state.next_touch_due_at,

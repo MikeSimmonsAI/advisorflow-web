@@ -50,7 +50,7 @@ export default function LeadCleanup() {
   const fixPanelRef = useRef(null)
 
   // The actual fix for "I click on somebody and can't change anything
-  // about that person" - this loads the clicked lead's current values
+  // about that person" — this loads the clicked lead's current values
   // straight into the Fix Contact Info form and scrolls it into view,
   // instead of the lead name just being a dead-end link to Lead Detail
   // (which has no contact editing) while the real fix form sat in a
@@ -108,6 +108,26 @@ export default function LeadCleanup() {
 
   function groupKey(group, index) {
     return `${group.match_type}:${group.match_key}:${index}`
+  }
+
+  async function bulkDeleteDuplicates() {
+    const confirmed = window.confirm(
+      `This will permanently delete all leads flagged as duplicates in your organization. This cannot be undone. Continue?`
+    )
+    if (!confirmed) return
+
+    setDeletingDuplicates(true)
+    setDeleteResult(null)
+    setError('')
+    try {
+      const result = await api.delete('/leads/duplicates/bulk-delete')
+      setDeleteResult({ error: false, message: result.message || `Deleted ${result.deleted_count ?? 'all'} duplicate leads.` })
+      await loadPotentialDuplicates()
+    } catch (err) {
+      setDeleteResult({ error: true, message: err.message || 'Bulk delete failed.' })
+    } finally {
+      setDeletingDuplicates(false)
+    }
   }
 
   async function mergeGroup(group, index) {
@@ -199,14 +219,14 @@ export default function LeadCleanup() {
           </p>
         </div>
         <div className="panel lead-cleanup-command-card">
-          <span>Potential Leads</span>
-          <strong>{loading ? '—' : totalPotentialLeads}</strong>
-          <small>{loading ? 'Scanning org data' : `${groups.length} duplicate group(s)`}</small>
+          <span>Potential leads</span>
+          <strong>{loading ? '…' : totalPotentialLeads}</strong>
+          <small>{loading ? 'Scanning org data…' : `${groups.length} duplicate group(s)`}</small>
           <button
             className="btn btn--secondary"
             onClick={bulkDeleteDuplicates}
             disabled={deletingDuplicates}
-            style={{marginLeft: 'auto', color: 'var(--signal-red)', borderColor: 'var(--signal-red)'}}
+            style={{ marginLeft: 'auto', color: 'var(--signal-red)', borderColor: 'var(--signal-red)' }}
           >
             {deletingDuplicates ? 'Deleting…' : '🗑 Delete all duplicates'}
           </button>
@@ -225,6 +245,17 @@ export default function LeadCleanup() {
           Updated {nameForLead(fixResult)} — {fixResult.phone || 'no phone'} / {fixResult.email || 'no email'}.
         </div>
       ) : null}
+      {deleteResult ? (
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: 8,
+          background: deleteResult.error ? 'var(--signal-red-dim)' : 'var(--signal-green-dim)',
+          color: deleteResult.error ? 'var(--signal-red)' : 'var(--signal-green)',
+          marginBottom: 10
+        }}>
+          {deleteResult.error ? '✖' : '✓'} {deleteResult.message}
+        </div>
+      ) : null}
 
       <section className="cleanup-grid">
         <section className="panel cleanup-groups-panel">
@@ -236,11 +267,6 @@ export default function LeadCleanup() {
             <button className="btn btn--secondary" type="button" onClick={loadPotentialDuplicates} disabled={busy || loading}>Refresh</button>
           </div>
 
-          {deleteResult && (
-            <div style={{padding: '10px 14px', borderRadius: 8, background: deleteResult.error ? 'var(--signal-red-dim)' : 'var(--signal-green-dim)', color: deleteResult.error ? 'var(--signal-red)' : 'var(--signal-green)', marginBottom: 10}}>
-              {deleteResult.error || `✓ ${deleteResult.message}`}
-            </div>
-          )}
           {loading ? <div className="cleanup-empty-state">Scanning for likely duplicates...</div> : null}
           {!loading && groups.length === 0 ? <div className="cleanup-empty-state">No uncaught potential duplicates found.</div> : null}
 

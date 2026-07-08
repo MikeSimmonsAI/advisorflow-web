@@ -13,43 +13,6 @@ from app.models.models import SuppressionEntry, SuppressionSource
 from app.routers.compliance_router import normalize_phone
 
 
-def check_compliance_preflight(db: Session, lead) -> None:
-    """
-    THE single, real gate every send path - SMS or email, manual or
-    automated - must call before sending anything to a lead. Raises
-    ValueError with a clear reason if the send should be blocked;
-    returns None (does nothing) if it's clear to send.
-
-    Real, confirmed gap this closes: before this function existed, DNC
-    enforcement depended on every individual send path remembering to
-    check both Lead.status and the suppression list correctly -
-    send_sms and send_exact_sms each did, but send_email_to_lead and
-    the email confirm-send-batch endpoint had ZERO compliance check at
-    all. A lead who replied STOP via text (correctly marked DNC) could
-    still receive emails, since the email send paths never looked at
-    Lead.status, let alone the suppression list.
-
-    Per Mike's explicit, direct confirmation: a DNC/STOP must block
-    EVERY channel for that lead, not just the one that triggered it -
-    a text opt-out blocks email too, and vice versa. This is why the
-    check below is Lead.status == DNC FIRST, unconditionally, before
-    the phone-suppression check - status is the real, channel-agnostic
-    signal that applies to a lead regardless of which channel they
-    have. The phone-suppression check below is an ADDITIONAL guard
-    specifically for phone numbers (catches a suppression-list entry
-    that exists independently of whatever Lead.status currently says,
-    e.g. an admin manually suppressing a number before any lead record
-    for it exists) - it is never a substitute for the status check,
-    and a lead with no phone number at all simply skips that part
-    entirely rather than erroring.
-    """
-    if lead.status is not None and lead.status.value == "dnc":
-        raise ValueError(f"Lead {lead.id} is marked DNC - blocked from all contact, any channel.")
-
-    if lead.phone and is_phone_suppressed(db, lead.organization_id, lead.phone):
-        raise ValueError(f"Lead {lead.id}'s phone number is on the suppression list - blocked from all contact, any channel.")
-
-
 def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
     """
     THE REAL ENFORCEMENT CHECK that was missing entirely. Confirmed by
@@ -72,28 +35,14 @@ def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
     )
 
 
-def add_suppression_entry_from_reply(
-    db: Session,
-    organization_id: str,
-    phone: str,
-    reason: str,
-    source: SuppressionSource = SuppressionSource.REPLY_STOP,
-) -> SuppressionEntry:
+def add_suppression_entry_from_reply(db: Session, organization_id: str, phone: str, reason: str) -> SuppressionEntry:
     """
-    Adds a number to the suppression list, distinguishing WHO/WHAT
-    flagged it via the source parameter (defaults to REPLY_STOP, the
-    original caller - the automatic webhook keyword/AI detection path in
-    sms_router.py). leads_router.py's manual quick-DNC action passes
-    source=ADVISOR_FLAGGED instead.
-
-    Idempotent - if the number is already suppressed (e.g. an admin
-    already added it manually, or they replied STOP twice), returns the
-    EXISTING entry rather than erroring or creating a duplicate.
-    Specifically does NOT overwrite an existing entry's source on a
-    repeat call - if it was already suppressed for one reason, a second
-    flagging attempt shouldn't silently rewrite the original
-    attribution; the existing record stands as the source of truth for
-    "who/what suppressed this first."
+    Adds a number to the suppression list with source=REPLY_STOP,
+    distinguishing it from numbers an admin added manually via the
+    Compliance Center. Idempotent - if the number is already
+    suppressed (e.g. an admin already added it manually, or they
+    replied STOP twice), returns the existing entry rather than
+    erroring or creating a duplicate.
     """
     normalized = normalize_phone(phone)
     existing = (
@@ -108,7 +57,7 @@ def add_suppression_entry_from_reply(
         organization_id=organization_id,
         phone=normalized,
         reason=reason,
-        source=source,
+        source=SuppressionSource.REPLY_STOP,
     )
     db.add(entry)
     db.commit()

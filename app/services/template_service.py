@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.models import MessageTemplate, MessageTrack
 
 
-def get_sms_template(db: Session, organization_id: str, track: str) -> str | None:
+def get_sms_template(db: Session, organization_id: str, track: MessageTrack) -> str | None:
     """Returns the org's custom SMS template for this track, or None if no override exists."""
     override = db.query(MessageTemplate).filter(
         MessageTemplate.organization_id == organization_id,
@@ -22,7 +22,7 @@ def get_sms_template(db: Session, organization_id: str, track: str) -> str | Non
     return override.body_template if override else None
 
 
-def get_email_template(db: Session, organization_id: str, track: str) -> dict | None:
+def get_email_template(db: Session, organization_id: str, track: MessageTrack) -> dict | None:
     """Returns {'subject': ..., 'body_html': ...} for this org's custom email template, or None."""
     override = db.query(MessageTemplate).filter(
         MessageTemplate.organization_id == organization_id,
@@ -37,7 +37,7 @@ def get_email_template(db: Session, organization_id: str, track: str) -> dict | 
 def upsert_template(
     db: Session,
     organization_id: str,
-    track: str,
+    track: MessageTrack,
     channel: str,
     body_template: str,
     updated_by_user_id: str,
@@ -70,7 +70,7 @@ def upsert_template(
     return new_template
 
 
-def reset_template_to_default(db: Session, organization_id: str, track: str, channel: str) -> bool:
+def reset_template_to_default(db: Session, organization_id: str, track: MessageTrack, channel: str) -> bool:
     """Deletes the org's override, reverting to the hardcoded default."""
     existing = db.query(MessageTemplate).filter(
         MessageTemplate.organization_id == organization_id,
@@ -90,34 +90,20 @@ def list_all_templates_with_defaults(db: Session, organization_id: str) -> list[
     one exists, or the hardcoded default text otherwise - so the editor UI
     always has something to display and edit, even on day one before any
     customization has happened.
-
-    Iterates this organization's REAL, configured track keys (from its
-    own TierDefinition rows), not the old hardcoded MessageTrack Python
-    enum - a non-Restland org with its own custom tiers/tracks must see
-    ITS tracks here, not Restland's 7 funeral-specific ones regardless
-    of what that org actually configured.
     """
     from app.services.cadence_service import TRACK_BASE_TEMPLATES
     from app.services.email_service import EMAIL_TEMPLATES
-    from app.services.tier_config_service import list_tier_definitions
 
     overrides = {
         (o.message_track, o.channel): o
         for o in db.query(MessageTemplate).filter(MessageTemplate.organization_id == organization_id).all()
     }
 
-    # Each org may define multiple tiers that share the same track
-    # (e.g. Restland's "Partial Info" and "Address Only" both map to
-    # "needs_review") - de-duplicate to the real, distinct track keys
-    # this org actually has, so the editor doesn't show the same track
-    # twice.
-    track_keys = sorted({d.track_key for d in list_tier_definitions(db, organization_id)})
-
     results = []
-    for track in track_keys:
+    for track in MessageTrack:
         sms_override = overrides.get((track, "sms"))
         results.append({
-            "message_track": track,
+            "message_track": track.value,
             "channel": "sms",
             "body_template": sms_override.body_template if sms_override else TRACK_BASE_TEMPLATES.get(track, ""),
             "email_subject_template": None,
@@ -127,7 +113,7 @@ def list_all_templates_with_defaults(db: Session, organization_id: str) -> list[
         email_override = overrides.get((track, "email"))
         default_email = EMAIL_TEMPLATES.get(track, {})
         results.append({
-            "message_track": track,
+            "message_track": track.value,
             "channel": "email",
             "body_template": email_override.body_template if email_override else default_email.get("body_html", ""),
             "email_subject_template": email_override.email_subject_template if email_override else default_email.get("subject", ""),

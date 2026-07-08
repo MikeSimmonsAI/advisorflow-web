@@ -9,13 +9,6 @@ const GAP_LABELS = {
   memorial: 'Memorial',
 }
 
-// The four directly-sellable items - must match
-// outcomes_router.py's MANDATORY_OUTCOME_FIELDS exactly. These are the
-// only fields the Save button actually enforces; the context fields
-// below (preneed/insurance/veteran) stay optional on purpose - forcing
-// a guess there would hurt data quality, not help it.
-const MANDATORY_FIELDS = ['has_funeral_arrangement', 'has_cemetery_property', 'has_marker', 'has_memorial']
-
 /**
  * Records what a family does/doesn't have after a visit, and shows the
  * confirmed gaps prominently so the next conversation can be specific
@@ -27,24 +20,16 @@ export default function OutcomeTracker({ leadId }) {
   const [gaps, setGaps] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
   const [form, setForm] = useState({
     has_funeral_arrangement: null,
     has_cemetery_property: null,
     has_marker: null,
     has_memorial: null,
     has_open_closed_status: '',
-    has_preneed_planning: null,
-    has_insurance_funding: null,
-    is_veteran: null,
-    next_step: '',
     resulted_in_sale: false,
     sale_items: '',
     notes: '',
   })
-
-  const missingMandatoryFields = MANDATORY_FIELDS.filter((f) => form[f] === null)
-  const canSave = missingMandatoryFields.length === 0
 
   function loadGaps() {
     api.get(`/outcomes/lead/${leadId}/latest-gaps`).then(setGaps)
@@ -60,9 +45,7 @@ export default function OutcomeTracker({ leadId }) {
   }
 
   async function handleSave() {
-    if (!canSave) return // the button is disabled in this case too, but never trust only the disabled attribute
     setSaving(true)
-    setSaveError('')
     try {
       await api.post('/outcomes/', {
         lead_id: leadId,
@@ -71,10 +54,6 @@ export default function OutcomeTracker({ leadId }) {
         has_marker: form.has_marker,
         has_memorial: form.has_memorial,
         has_open_closed_status: form.has_open_closed_status || null,
-        has_preneed_planning: form.has_preneed_planning,
-        has_insurance_funding: form.has_insurance_funding,
-        is_veteran: form.is_veteran,
-        next_step: form.next_step || null,
         resulted_in_sale: form.resulted_in_sale,
         sale_items: form.sale_items || null,
         notes: form.notes || null,
@@ -84,11 +63,10 @@ export default function OutcomeTracker({ leadId }) {
       setForm({
         has_funeral_arrangement: null, has_cemetery_property: null,
         has_marker: null, has_memorial: null, has_open_closed_status: '',
-        has_preneed_planning: null, has_insurance_funding: null, is_veteran: null, next_step: '',
         resulted_in_sale: false, sale_items: '', notes: '',
       })
     } catch (err) {
-      setSaveError(err.message || 'Failed to save this outcome.')
+      alert(`Failed to save: ${err.message}`)
     } finally {
       setSaving(false)
     }
@@ -117,7 +95,6 @@ export default function OutcomeTracker({ leadId }) {
 
       {showForm && (
         <div className="outcome-form">
-          <p className="outcome-form-section-label">What they have (required)</p>
           <TriStateRow label="Funeral arrangement" value={form.has_funeral_arrangement} onChange={(v) => setTriState('has_funeral_arrangement', v)} />
           <TriStateRow label="Cemetery property" value={form.has_cemetery_property} onChange={(v) => setTriState('has_cemetery_property', v)} />
           <TriStateRow label="Marker" value={form.has_marker} onChange={(v) => setTriState('has_marker', v)} />
@@ -134,23 +111,6 @@ export default function OutcomeTracker({ leadId }) {
               <option value="open">Open</option>
               <option value="closed">Closed</option>
             </select>
-          </label>
-
-          <p className="outcome-form-section-label" style={{ marginTop: 16 }}>
-            Context <span className="settings-optional">optional — helps shape the next conversation</span>
-          </p>
-          <TriStateRow label="Pre-need planning" value={form.has_preneed_planning} onChange={(v) => setTriState('has_preneed_planning', v)} />
-          <TriStateRow label="Insurance / funding" value={form.has_insurance_funding} onChange={(v) => setTriState('has_insurance_funding', v)} />
-          <TriStateRow label="Veteran" value={form.is_veteran} onChange={(v) => setTriState('is_veteran', v)} />
-
-          <label className="settings-label" style={{ marginTop: 10 }}>
-            Next step <span className="settings-optional">optional</span>
-            <input
-              className="settings-input"
-              placeholder="e.g. Schedule family meeting next Tuesday"
-              value={form.next_step}
-              onChange={(e) => setForm((p) => ({ ...p, next_step: e.target.value }))}
-            />
           </label>
 
           <label className="compose-checkbox" style={{ marginTop: 10 }}>
@@ -181,15 +141,8 @@ export default function OutcomeTracker({ leadId }) {
             style={{ marginTop: 10 }}
           />
 
-          {!canSave && (
-            <p className="outcome-form-missing-hint">
-              Select Has it / Doesn't have it for: {missingMandatoryFields.map((f) => GAP_LABELS[f.replace('has_', '')] || f).join(', ')}
-            </p>
-          )}
-          {saveError && <div className="compose-error" style={{ marginTop: 8 }}>{saveError}</div>}
-
           <div className="settings-actions" style={{ marginTop: 10 }}>
-            <button className="btn btn--primary" onClick={handleSave} disabled={saving || !canSave}>
+            <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving…' : 'Save outcome'}
             </button>
           </div>

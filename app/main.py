@@ -1,5 +1,5 @@
 """
-AdvisorFlow Web - Main Application Entry Point
+BookaBoost Web - Main Application Entry Point
 
 Run locally:
     uvicorn app.main:app --reload --port 8000
@@ -22,11 +22,13 @@ from app.routers import (
     health_router, workqueue_router, campaign_router,
     google_contacts_router,
 )
+from app.routers.objection_router import router as objection_router
 
-app = FastAPI(title="AdvisorFlow Web", version="0.1.0-phase1")
+app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
+    "https://bookaboost.com",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
@@ -119,6 +121,12 @@ def terms_and_conditions():
 </html>""")
 
 
+# ── Public endpoint for landing page demo requests (no auth required)
+@app.get("/leads/demo-request")
+def demo_request_docs():
+    return {"message": "POST to this endpoint to submit a demo request"}
+
+
 # ── All app routers
 app.include_router(auth_router.router)
 app.include_router(leads_router.router)
@@ -140,6 +148,7 @@ app.include_router(health_router.router)
 app.include_router(workqueue_router.router)
 app.include_router(campaign_router.router)
 app.include_router(google_contacts_router.router)
+app.include_router(objection_router)
 
 
 @app.on_event("startup")
