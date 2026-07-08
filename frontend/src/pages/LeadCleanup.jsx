@@ -164,8 +164,7 @@ export default function LeadCleanup() {
     }
   }
 
-  async function fixContactInfo(event) {
-    event.preventDefault()
+  async function fixContactInfo() {
     setBusy(true)
     setError('')
     setFixResult(null)
@@ -342,7 +341,7 @@ export default function LeadCleanup() {
             </div>
           )}
 
-          <form className="cleanup-fix-form" onSubmit={fixContactInfo}>
+          <div className="cleanup-fix-form">
             <label>
               Lead ID
               <input value={fixLeadId} onChange={(event) => setFixLeadId(event.target.value)} placeholder="Paste lead UUID, or click Edit on a lead above" required />
@@ -365,12 +364,12 @@ export default function LeadCleanup() {
             </label>
             <button
               className="btn btn--primary"
-              type="submit"
+              onClick={fixContactInfo}
               disabled={busy || !fixLeadId.trim() || (!fixPhone.trim() && !fixEmail.trim() && !fixFirstName.trim() && !fixLastName.trim())}
             >
               {busy ? 'Saving…' : 'Save Lead Info'}
             </button>
-          </form>
+          </div>
 
           <div className="cleanup-warning-card">
             <strong>Merge safety</strong>

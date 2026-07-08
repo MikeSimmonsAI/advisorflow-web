@@ -121,6 +121,93 @@ def terms_and_conditions():
 </html>""")
 
 
+@app.get("/sms-consent-evidence", response_class=HTMLResponse, include_in_schema=False)
+def sms_consent_evidence():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMS Consent Evidence - Restland Cemetery &amp; Funeral Home</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 24px;color:#222;line-height:1.7}
+  h1{color:#0a0a1a}h2{color:#1a2a4a;margin-top:32px;border-bottom:2px solid #1565c0;padding-bottom:6px}
+  .box{background:#f5f8ff;border:1px solid #c0d0ee;border-radius:8px;padding:20px 24px;margin:16px 0}
+  .box p{margin:6px 0}
+  .label{font-weight:700;color:#1a2a4a}
+  .consent-text{background:#fff;border:2px solid #1565c0;border-radius:6px;padding:16px;margin:12px 0;font-size:15px}
+  .checkbox-row{display:flex;align-items:flex-start;gap:10px;margin:10px 0}
+  .checkbox-row input{margin-top:4px;width:16px;height:16px;flex-shrink:0}
+  .step{background:#e8f0fe;border-left:4px solid #1565c0;padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  td,th{border:1px solid #ddd;padding:10px 14px;text-align:left}
+  th{background:#1a2a4a;color:#fff}
+</style>
+</head>
+<body>
+<h1>SMS Consent Evidence</h1>
+<p><strong>Business:</strong> Restland Cemetery &amp; Funeral Home, Dallas, TX</p>
+<p><strong>SMS Program:</strong> Appointment scheduling and follow-up outreach via Restland Family Service Advisors</p>
+<p><strong>Document purpose:</strong> This page documents all opt-in paths used for the A2P 10DLC SMS campaign and is provided for TCR campaign review purposes.</p>
+
+<h2>Opt-In Path 1 — Website Form</h2>
+<div class="box">
+  <p class="label">How it works:</p>
+  <p>Prospective customers visit the Restland booking page and submit a contact form. The form includes an <strong>unchecked</strong> SMS consent checkbox that the user must actively check before submitting.</p>
+  <p class="label">Form URL:</p>
+  <p><a href="https://advisorflow-backend.onrender.com/book">https://advisorflow-backend.onrender.com/book</a></p>
+  <p class="label">Consent language displayed on the form:</p>
+  <div class="consent-text">
+    <div class="checkbox-row">
+      <input type="checkbox" disabled>
+      <span>I agree to receive SMS text messages from Restland Cemetery &amp; Funeral Home regarding appointment scheduling and funeral or cemetery planning services. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time. Reply HELP for assistance. View our <a href="https://advisorflow-backend.onrender.com/privacy-policy">Privacy Policy</a> and <a href="https://advisorflow-backend.onrender.com/terms">Terms &amp; Conditions</a>.</span>
+    </div>
+  </div>
+  <p><em>The checkbox is unchecked by default. The user must actively check it to provide consent. Form cannot be submitted without completing this field.</em></p>
+</div>
+
+<h2>Opt-In Path 2 — Verbal Consent (In-Person or Phone)</h2>
+<div class="box">
+  <p class="label">How it works:</p>
+  <p>Restland Family Service Advisors collect verbal consent from customers during in-person consultations, phone inquiries, or scheduled file review appointments.</p>
+  <p class="label">Verbal disclosure script used by advisors:</p>
+  <div class="step">
+    "With your permission, we'd like to send you follow-up text messages regarding your appointment and our services. These messages are sent by our scheduling system and message and data rates may apply. You can opt out at any time by replying STOP. Do you consent to receive these text messages?"
+  </div>
+  <p class="label">Consent documentation:</p>
+  <p>Advisor records verbal consent in the BookaBoost platform at the time of collection. The timestamp and advisor ID are logged in the system.</p>
+</div>
+
+<h2>Required Disclosures Present in Both Opt-In Paths</h2>
+<table>
+  <tr><th>Required Element</th><th>Present</th><th>Location</th></tr>
+  <tr><td>Business name identified</td><td>✅ Yes</td><td>Both paths</td></tr>
+  <tr><td>Message frequency disclosure</td><td>✅ Yes</td><td>Both paths</td></tr>
+  <tr><td>Message and data rates may apply</td><td>✅ Yes</td><td>Both paths</td></tr>
+  <tr><td>STOP opt-out instruction</td><td>✅ Yes</td><td>Both paths</td></tr>
+  <tr><td>HELP instruction</td><td>✅ Yes</td><td>Both paths</td></tr>
+  <tr><td>Privacy Policy link</td><td>✅ Yes</td><td>Website form + below</td></tr>
+  <tr><td>Terms &amp; Conditions link</td><td>✅ Yes</td><td>Website form + below</td></tr>
+  <tr><td>Checkbox unchecked by default</td><td>✅ Yes</td><td>Website form</td></tr>
+  <tr><td>No third-party data sharing</td><td>✅ Yes</td><td>Privacy Policy</td></tr>
+</table>
+
+<h2>Legal Pages</h2>
+<div class="box">
+  <p><strong>Privacy Policy:</strong> <a href="https://advisorflow-backend.onrender.com/privacy-policy">https://advisorflow-backend.onrender.com/privacy-policy</a></p>
+  <p><strong>Terms &amp; Conditions:</strong> <a href="https://advisorflow-backend.onrender.com/terms">https://advisorflow-backend.onrender.com/terms</a></p>
+</div>
+
+<h2>Contact</h2>
+<div class="box">
+  <p><strong>Restland Cemetery &amp; Funeral Home</strong></p>
+  <p>13005 Greenville Ave, Dallas, TX 75243</p>
+  <p>Phone: 469-553-7417 | Email: info@bookaboost.com</p>
+</div>
+</body>
+</html>""")
+
+
 # ── Public endpoint for landing page demo requests (no auth required)
 @app.get("/leads/demo-request")
 def demo_request_docs():
