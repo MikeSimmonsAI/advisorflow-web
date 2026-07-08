@@ -46,7 +46,7 @@ def notify_hot_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> No
             {reply.body}
         </blockquote>
         <p>Phone: {lead.phone or 'N/A'}<br>
-        Tier: {lead.tier.value if lead.tier else 'N/A'}</p>
+        Tier: {lead.tier if lead.tier else 'N/A'}</p>
         <p>Log in to AdvisorFlow to respond.</p>
     """
 

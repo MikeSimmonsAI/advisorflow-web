@@ -83,10 +83,10 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
     overdue_active_count = 0
 
     for state in states:
-        status_key = state.status.value if state.status else "unknown"
+        status_key = state.status if state.status else "unknown"
         if status_key in counts:
             counts[status_key] += 1
-        if state.status == CadenceStatus.ACTIVE:
+        if state.status == "active":
             active_count += 1
             if state.next_touch_due_at is None or state.next_touch_due_at >= now:
                 healthy_active_count += 1
@@ -121,7 +121,7 @@ def list_active_cadences(db: Session = Depends(get_db), current_user: User = Dep
         .filter(
             Lead.organization_id == current_user.organization_id,
             Lead.assigned_to_id == current_user.id,
-            CadenceState.status == CadenceStatus.ACTIVE,
+            CadenceState.status == "active",
         )
         .order_by(CadenceState.next_touch_due_at.asc())
         .all()
@@ -135,7 +135,7 @@ def list_active_cadences(db: Session = Depends(get_db), current_user: User = Dep
             "lead_id": lead.id,
             "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
             "phone": lead.phone,
-            "tier": lead.tier.value if lead.tier else None,
+            "tier": lead.tier if lead.tier else None,
             "current_touch_number": state.current_touch_number,
             "total_touches": 9,
             "next_touch_due_at": state.next_touch_due_at,

@@ -63,13 +63,13 @@ INTERNAL_EMAIL_MARKERS = ["@nsmg.com"]
 # Tier -> message track mapping. Every tier maps to SOMETHING now; nothing
 # maps to "excluded."
 TIER_TO_TRACK = {
-    LeadTier.PRE_NEED: MessageTrack.PRE_NEED_LOCK_PRICE,
-    LeadTier.AT_NEED: MessageTrack.AT_NEED_SUPPORT,
-    LeadTier.IMMINENT: MessageTrack.IMMINENT_SUPPORT,
-    LeadTier.CONTRACT_SOLD: MessageTrack.UPSELL_EXISTING_CUSTOMER,
-    LeadTier.EMAIL_ONLY: MessageTrack.EMAIL_ONLY_NURTURE,
-    LeadTier.PARTIAL: MessageTrack.NEEDS_REVIEW,
-    LeadTier.ADDR_ONLY: MessageTrack.NEEDS_REVIEW,
+    "pre_need": "pre_need_lock_price",
+    "at_need": "at_need_support",
+    "imminent": "imminent_support",
+    "contract_sold": "upsell_existing",
+    "email_only": "email_only_nurture",
+    "partial": "needs_review",
+    "addr_only": "needs_review",
 }
 
 
@@ -93,19 +93,19 @@ def _infer_tier(raw_value: str, status_reason: str) -> LeadTier:
     silently assumed to be Pre-Need.
     """
     if status_reason and status_reason.strip().lower() == "contract sold":
-        return LeadTier.CONTRACT_SOLD
+        return "contract_sold"
 
     if not raw_value:
-        return LeadTier.PARTIAL
+        return "partial"
 
     val = str(raw_value).strip().lower()
     if "imminent" in val:
-        return LeadTier.IMMINENT
+        return "imminent"
     if "at" in val and "need" in val:
-        return LeadTier.AT_NEED
+        return "at_need"
     if "pre" in val and "need" in val:
-        return LeadTier.PRE_NEED
-    return LeadTier.PARTIAL
+        return "pre_need"
+    return "partial"
 
 
 def _is_internal_record(email: str, last_name: str) -> bool:
@@ -227,11 +227,11 @@ def import_leads_from_excel(
             contact_channel = "sms"
         else:
             contact_channel = "email_only"
-            tier = LeadTier.EMAIL_ONLY  # channel overrides tier classification for routing purposes
+            tier = "email_only"  # channel overrides tier classification for routing purposes
             email_only_count += 1
 
-        message_track = TIER_TO_TRACK.get(tier, MessageTrack.NEEDS_REVIEW)
-        if tier == LeadTier.PARTIAL:
+        message_track = TIER_TO_TRACK.get(tier, "needs_review")
+        if tier == "partial":
             flagged_needs_tier_review += 1
 
         # Parse last contact date if present (best-effort, don't fail import on bad dates)
@@ -253,7 +253,7 @@ def import_leads_from_excel(
             tier=tier,
             message_track=message_track,
             contact_channel=contact_channel,
-            status=LeadStatus.NEW,
+            status="new",
             source_year=source_year,
             source_file=source_filename,
             last_action_raw=row["last_action_raw"] or None,
@@ -277,19 +277,19 @@ def import_leads_from_excel(
                 user_id=uploading_user_id,
             )
             if call_restricted:
-                lead.status = LeadStatus.DNC
+                lead.status = "dnc"
                 flagged_call_restricted += 1
             elif is_dup:
                 lead.is_duplicate = True
                 lead.duplicate_of_lead_id = registry_entry.first_seen_lead_id
-                lead.status = LeadStatus.DNC  # someone already owns this relationship
+                lead.status = "dnc"  # someone already owns this relationship
                 duplicate_count += 1
             else:
                 lead.status = (
-                    LeadStatus.NEEDS_TIER_REVIEW if tier == LeadTier.PARTIAL else LeadStatus.NEW
+                    "needs_tier_review" if tier == "partial" else "new"
                 )
         else:
-            lead.status = LeadStatus.NEW  # queued for email outreach, not SMS
+            lead.status = "new"  # queued for email outreach, not SMS
 
         created_leads.append(lead)
 

@@ -139,7 +139,7 @@ def leads_needing_tier_review(
     leads = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
-        Lead.status == LeadStatus.NEEDS_TIER_REVIEW,
+        Lead.status == "needs_tier_review",
     ).order_by(Lead.created_at.desc()).all()
     return leads
 
@@ -178,11 +178,11 @@ def set_lead_tier(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid tier: {new_tier}")
 
-    previous_tier = lead.tier.value if lead.tier else None
+    previous_tier = lead.tier if lead.tier else None
 
     lead.tier = tier_enum
     lead.message_track = TIER_TO_TRACK.get(tier_enum)
-    lead.status = LeadStatus.NEW
+    lead.status = "new"
     db.commit()
 
     log_action(
@@ -231,7 +231,7 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(g
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
             *base_lead_filters,
-            CadenceState.status == CadenceStatus.ACTIVE,
+            CadenceState.status == "active",
             CadenceState.next_touch_due_at.isnot(None),
             CadenceState.next_touch_due_at <= end_of_today,
         )
@@ -299,11 +299,11 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(ge
     Only returns the stages displayed in the dashboard funnel.
     """
     stages = [
-        LeadStatus.NEW,
-        LeadStatus.SENT,
-        LeadStatus.REPLIED,
-        LeadStatus.HOT,
-        LeadStatus.BOOKED,
+        "new",
+        "sent",
+        "replied",
+        "hot",
+        "booked",
     ]
     rows = (
         db.query(Lead.status, func.count(Lead.id))
@@ -474,7 +474,7 @@ def preview_messages_for_leads(
         skip_reason = None
         draft = ""
 
-        if lead.status == LeadStatus.DNC:
+        if lead.status == "dnc":
             skip_reason = "DNC - excluded from outreach"
         elif lead.is_duplicate:
             skip_reason = "Duplicate - already owned by another lead record"
@@ -499,8 +499,8 @@ def preview_messages_for_leads(
 
         results.append(MessagePreviewItem(
             lead_id=lead.id, lead_name=lead_name, phone=lead.phone,
-            tier=lead.tier.value if lead.tier else None,
-            message_track=lead.message_track.value if lead.message_track else None,
+            tier=lead.tier if lead.tier else None,
+            message_track=lead.message_track if lead.message_track else None,
             draft_message=draft, skip_reason=skip_reason,
         ))
 

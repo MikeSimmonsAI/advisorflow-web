@@ -65,7 +65,7 @@ def push_lead_to_google_contacts(db, user, lead) -> dict:
 
     if lead.tier:
         contact_body["biographies"] = [{
-            "value": f"BookaBoost Lead | Tier: {lead.tier} | Status: {lead.status.value if lead.status else 'new'}",
+            "value": f"BookaBoost Lead | Tier: {lead.tier} | Status: {lead.status if lead.status else 'new'}",
             "contentType": "TEXT_PLAIN"
         }]
 

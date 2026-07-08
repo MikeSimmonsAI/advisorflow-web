@@ -111,7 +111,7 @@ def get_objection_reply(
     lead = db.query(Lead).filter(Lead.id == reply.lead_id).first()
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "the lead"
     first_name = lead_name.split()[0] if lead_name else "there"
-    lead_tier = lead.tier.value if lead and lead.tier else "unknown"
+    lead_tier = lead.tier if lead and lead.tier else "unknown"
 
     tone_desc = TONE_INSTRUCTIONS.get(request.tone, TONE_INSTRUCTIONS["standard"])
 

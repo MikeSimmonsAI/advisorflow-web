@@ -38,7 +38,7 @@ def classify_lead_temperature(db: Session, lead: Lead) -> EngagementTemperature:
     on its current state. Does NOT save it - caller decides whether to
     persist (see recompute_and_save below).
     """
-    if lead.status == LeadStatus.BOOKED:
+    if lead.status == "booked":
         return EngagementTemperature.HOT
 
     has_hot_reply = (
@@ -53,22 +53,22 @@ def classify_lead_temperature(db: Session, lead: Lead) -> EngagementTemperature:
     has_any_reply = (
         db.query(Reply).filter(Reply.lead_id == lead.id).first() is not None
     )
-    if has_any_reply and lead.tier == LeadTier.IMMINENT:
+    if has_any_reply and lead.tier == "imminent":
         # Imminent-need leads who reply at all get treated as hot - the
         # urgency of the tier itself elevates any engagement signal.
         return EngagementTemperature.HOT
 
-    if lead.status == LeadStatus.DEAD or lead.status == LeadStatus.DNC:
+    if lead.status == "dead" or lead.status == "dnc":
         return EngagementTemperature.COLD
 
     cadence = lead.cadence_state
     if cadence is not None:
-        if cadence.status == CadenceStatus.ACTIVE:
+        if cadence.status == "active":
             return EngagementTemperature.WARM
-        if cadence.status == CadenceStatus.COMPLETED:
+        if cadence.status == "completed":
             # Finished all 9 touches with zero resolution - genuinely cold
             return EngagementTemperature.COLD
-        if cadence.status == CadenceStatus.STOPPED_DNC:
+        if cadence.status == "stopped_dnc":
             return EngagementTemperature.COLD
         # STOPPED_REPLIED / STOPPED_BOOKED fall through to the reply/booked
         # checks above, which already handle those cases correctly.

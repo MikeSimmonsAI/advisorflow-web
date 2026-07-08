@@ -61,7 +61,7 @@ def send_sms(
     at the Twilio phone number / messaging service level, not per-message -
     that's configured once via configure_caller_id_name() below.
     """
-    if lead.status.value == "dnc":
+    if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
     # Independent suppression-list check, not a substitute for the
@@ -138,7 +138,7 @@ def send_batch(
     sent = []
     skipped = []
     for lead in leads:
-        if lead.is_duplicate or lead.status.value == "dnc":
+        if lead.is_duplicate or lead.status == "dnc":
             skipped.append(lead.id)
             continue
         try:

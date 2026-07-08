@@ -90,8 +90,8 @@ def all_org_leads(db: Session = Depends(get_db), current_user: User = Depends(re
             "last_name": lead.last_name,
             "phone": lead.phone,
             "email": lead.email,
-            "tier": lead.tier.value if lead.tier else None,
-            "status": lead.status.value if lead.status else None,
+            "tier": lead.tier if lead.tier else None,
+            "status": lead.status if lead.status else None,
             "assigned_to_id": lead.assigned_to_id,
             "assigned_to_name": advisors_by_id.get(lead.assigned_to_id, "Unassigned"),
             "created_at": lead.created_at,
@@ -154,13 +154,13 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
     booked_leads = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
-        Lead.status == LeadStatus.BOOKED,
+        Lead.status == "booked",
     ).scalar() or 0
 
     dnc_leads = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
-        Lead.status == LeadStatus.DNC,
+        Lead.status == "dnc",
     ).scalar() or 0
 
     duplicate_leads_prevented = db.query(func.count(Lead.id)).filter(
@@ -247,7 +247,7 @@ def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends
 
     booked = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == org_id,
-        Lead.status == LeadStatus.BOOKED,
+        Lead.status == "booked",
     ).scalar() or 0
 
     sold = db.query(func.count(distinct(Lead.id))).join(LeadOutcome, LeadOutcome.lead_id == Lead.id).filter(
@@ -843,7 +843,7 @@ def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = De
         {
             "id": l.id, "first_name": l.first_name, "last_name": l.last_name,
             "phone": l.phone, "email": l.email,
-            "tier": l.tier.value if l.tier else None,
+            "tier": l.tier if l.tier else None,
             "engagement_temperature": l.engagement_temperature.value if l.engagement_temperature else None,
             "created_at": l.created_at,
         }
@@ -901,7 +901,7 @@ def _lead_summary(lead: Lead) -> dict[str, Any]:
         "last_name": lead.last_name,
         "phone": lead.phone,
         "email": lead.email,
-        "status": lead.status.value if lead.status else None,
+        "status": lead.status if lead.status else None,
         "assigned_to_id": lead.assigned_to_id,
         "is_duplicate": bool(lead.is_duplicate),
     }

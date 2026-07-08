@@ -42,25 +42,25 @@ SEND_IMMEDIATELY_ON_DAY_1 = True
 # keeps this maintainable and matches "rotating message variations to avoid
 # carrier flagging" from Mike's original AHK-era requirement.
 TRACK_BASE_TEMPLATES = {
-    MessageTrack.PRE_NEED_LOCK_PRICE: (
+    "pre_need_lock_price": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "Lock in today's pricing before it changes - here's my booking link: {booking_link}"
     ),
-    MessageTrack.AT_NEED_SUPPORT: (
+    "at_need_support": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "I'm here to help with any arrangements you need. Reach out anytime: {advisor_cell} "
         "or book a time here: {booking_link}"
     ),
-    MessageTrack.IMMINENT_SUPPORT: (
+    "imminent_support": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "Please call me directly at {advisor_cell} - I want to make sure you have support right now."
     ),
-    MessageTrack.UPSELL_EXISTING_CUSTOMER: (
+    "upsell_existing": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "We have options for memorials, markers, and additional services for your family. "
         "Let's chat: {booking_link}"
     ),
-    MessageTrack.NEW_INQUIRY_INTRO: (
+    "new_inquiry_intro": (
         "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
         "I help families with cemetery and funeral planning in the area - happy to "
         "answer any questions, no pressure at all. You can reach me at {advisor_cell} "
@@ -89,7 +89,7 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
     in any active outreach cadence (DNC, duplicate, needs tier review,
     email-only - email has its own nurture flow, not this SMS cadence).
     """
-    if lead.status in (LeadStatus.DNC, LeadStatus.NEEDS_TIER_REVIEW):
+    if lead.status in ("dnc", "needs_tier_review"):
         return None
     if lead.is_duplicate:
         return None
@@ -105,7 +105,7 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
 
     state = CadenceState(
         lead_id=lead.id,
-        status=CadenceStatus.ACTIVE,
+        status="active",
         current_touch_number=0,
         cadence_started_at=now,
         next_touch_due_at=first_due,
@@ -132,7 +132,7 @@ def stop_cadence_for_lead(db: Session, lead_id: str, reason: CadenceStatus) -> N
     is flagged DNC for any reason.
     """
     state = db.query(CadenceState).filter(CadenceState.lead_id == lead_id).first()
-    if not state or state.status != CadenceStatus.ACTIVE:
+    if not state or state.status != "active":
         return
     state.status = reason
     state.completed_at = datetime.now(timezone.utc)
@@ -155,7 +155,7 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     """
     from app.services.template_service import get_sms_template
     custom_template = get_sms_template(db, lead.organization_id, lead.message_track)
-    template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES[MessageTrack.PRE_NEED_LOCK_PRICE])
+    template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES["pre_need_lock_price"])
     tone_phrase = TOUCH_TONE_VARIANTS.get(touch_number, TOUCH_TONE_VARIANTS[9])
     return (
         template
@@ -178,7 +178,7 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
     """
     now = datetime.now(timezone.utc)
     query = db.query(CadenceState).filter(
-        CadenceState.status == CadenceStatus.ACTIVE,
+        CadenceState.status == "active",
         CadenceState.next_touch_due_at <= now,
     )
 
@@ -195,10 +195,10 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
 
         # Defensive re-check - a lead could have replied/been flagged DNC
         # between when it entered the queue and when this job runs.
-        if lead.status in (LeadStatus.DNC, LeadStatus.HOT, LeadStatus.REPLIED, LeadStatus.BOOKED):
+        if lead.status in ("dnc", "hot", "replied", "booked"):
             stop_cadence_for_lead(
                 db, lead.id,
-                CadenceStatus.STOPPED_DNC if lead.status == LeadStatus.DNC else CadenceStatus.STOPPED_REPLIED,
+                "stopped_dnc" if lead.status == "dnc" else "stopped_replied",
             )
             continue
 
@@ -233,14 +233,14 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             state.last_touch_sent_at = now
 
             if touch_number >= TOTAL_TOUCHES:
-                state.status = CadenceStatus.COMPLETED
+                state.status = "completed"
                 state.completed_at = now
                 completed_count += 1
             else:
                 next_day_offset = CADENCE_SCHEDULE_DAYS[touch_number]  # next touch's day offset
                 state.next_touch_due_at = state.cadence_started_at + timedelta(days=next_day_offset)
 
-            lead.status = LeadStatus.SENT
+            lead.status = "sent"
             db.commit()
             sent_count += 1
 

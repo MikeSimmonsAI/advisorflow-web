@@ -119,7 +119,7 @@ def _campaign_to_dict(campaign: Campaign) -> dict[str, Any]:
         "name": campaign.name,
         "created_by_id": campaign.created_by_id,
         "filter_criteria": _load_filter_criteria(campaign),
-        "message_track": campaign.message_track.value if campaign.message_track else None,
+        "message_track": campaign.message_track if campaign.message_track else None,
         "created_at": campaign.created_at,
     }
 
@@ -133,10 +133,10 @@ def _lead_sample(lead: Lead) -> dict[str, Any]:
         "last_name": lead.last_name,
         "phone": lead.phone,
         "email": lead.email,
-        "tier": lead.tier.value if lead.tier else None,
-        "status": lead.status.value if lead.status else None,
+        "tier": lead.tier if lead.tier else None,
+        "status": lead.status if lead.status else None,
         "source_year": lead.source_year,
-        "message_track": lead.message_track.value if lead.message_track else None,
+        "message_track": lead.message_track if lead.message_track else None,
         "assigned_to_name": None,
     }
 
@@ -213,7 +213,7 @@ def preview_campaign(
     query = _matching_leads_query(db, current_user.organization_id, criteria)
 
     matching_count = query.count()
-    dnc_count = query.filter(Lead.status == LeadStatus.DNC).count()
+    dnc_count = query.filter(Lead.status == "dnc").count()
     sample = query.order_by(Lead.created_at.desc()).limit(10).all()
 
     return {
@@ -243,7 +243,7 @@ def apply_campaign(
     cadence_started_count = 0
 
     for lead in matching_leads:
-        if lead.status == LeadStatus.DNC:
+        if lead.status == "dnc":
             skipped_dnc_count += 1
             continue
 
@@ -321,7 +321,7 @@ def builder_preview(
     if has_phone:
         query = query.filter(Lead.phone.isnot(None), Lead.phone != "")
     if exclude_dnc:
-        query = query.filter(Lead.status != LeadStatus.DNC)
+        query = query.filter(Lead.status != "dnc")
     if exclude_duplicates:
         query = query.filter(Lead.is_duplicate == False)
     if no_contact_days:
@@ -346,8 +346,8 @@ def builder_preview(
             "last_name": l.last_name,
             "phone": l.phone,
             "email": l.email,
-            "tier": l.tier.value if l.tier else None,
-            "status": l.status.value if l.status else None,
+            "tier": l.tier if l.tier else None,
+            "status": l.status if l.status else None,
             "source_year": l.source_year,
             "assigned_to_name": advisor_map.get(str(l.assigned_to_id)),
         }
