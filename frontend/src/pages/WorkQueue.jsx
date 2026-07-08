@@ -44,7 +44,7 @@ const sections = [
 ]
 
 function formatDate(value) {
-  if (!value) return '–'
+  if (!value) return '—'
   try {
     return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
   } catch {
@@ -66,47 +66,9 @@ function itemMeta(sectionKey, item) {
   return item.tier?.replaceAll('_', ' ') || item.status || 'lead'
 }
 
-function QueueItem({ item, sectionKey, accent, selected, onToggle, onOpen, lastSelectedRef, allItems }) {
-  function handleClick(e) {
-    if (e.shiftKey && lastSelectedRef.current !== null) {
-      // Shift+click: select range
-      const lastIdx = allItems.findIndex(i => i.lead_id === lastSelectedRef.current)
-      const thisIdx = allItems.findIndex(i => i.lead_id === item.lead_id)
-      if (lastIdx !== -1 && thisIdx !== -1) {
-        const [start, end] = lastIdx < thisIdx ? [lastIdx, thisIdx] : [thisIdx, lastIdx]
-        const rangeIds = allItems.slice(start, end + 1).map(i => i.lead_id)
-        onToggle(rangeIds, true)
-        return
-      }
-    }
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl+click: toggle single
-      lastSelectedRef.current = item.lead_id
-      onToggle([item.lead_id])
-      return
-    }
-    // Plain click: open lead
-    onOpen(item.lead_id)
-  }
-
-  function handleCheckbox(e) {
-    e.stopPropagation()
-    lastSelectedRef.current = item.lead_id
-    onToggle([item.lead_id])
-  }
-
+function QueueItem({ item, sectionKey, accent, onOpen }) {
   return (
-    <div
-      className={`workqueue-item ${selected ? 'workqueue-item--selected' : ''}`}
-      onClick={handleClick}
-    >
-      <div className="workqueue-item-check" onClick={e => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={handleCheckbox}
-        />
-      </div>
+    <button className="workqueue-item" onClick={() => onOpen(item.lead_id)}>
       <div className={`workqueue-item-signal workqueue-item-signal--${accent}`} />
       <div className="workqueue-item-main">
         <div className="workqueue-item-topline">
@@ -120,7 +82,7 @@ function QueueItem({ item, sectionKey, accent, selected, onToggle, onOpen, lastS
         <span className={`workqueue-pill workqueue-pill--${accent}`}>{itemMeta(sectionKey, item)}</span>
         <span className="mono">{formatDate(itemTimestamp(sectionKey, item))}</span>
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -130,25 +92,7 @@ export default function WorkQueue() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Multi-select state
-  const [selected, setSelected] = useState(new Set())
-  const [showBulkCompose, setShowBulkCompose] = useState(false)
-  const [bulkMessage, setBulkMessage] = useState('')
-  const [bulkIncludeBooking, setBulkIncludeBooking] = useState(true)
-  const [bulkSending, setBulkSending] = useState(false)
-  const [bulkResult, setBulkResult] = useState(null)
-
-  // Tracks last selected item per section for shift+click range
-  const lastSelectedRefs = useMemo(() => {
-    const refs = {}
-    sections.forEach(s => { refs[s.key] = { current: null } })
-    return refs
-  }, [])
-
-  const total = useMemo(
-    () => sections.reduce((sum, section) => sum + (queue[section.key]?.length || 0), 0),
-    [queue]
-  )
+  const total = useMemo(() => sections.reduce((sum, section) => sum + (queue[section.key]?.length || 0), 0), [queue])
 
   async function loadQueue() {
     setError('')
@@ -163,47 +107,13 @@ export default function WorkQueue() {
     }
   }
 
-  useEffect(() => { loadQueue() }, [])
+  useEffect(() => {
+    loadQueue()
+  }, [])
 
   function openLead(leadId) {
     if (leadId) navigate(`/leads/${leadId}`)
   }
-
-  function handleToggle(ids, forceOn = false) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (forceOn) {
-        ids.forEach(id => next.add(id))
-      } else {
-        ids.forEach(id => next.has(id) ? next.delete(id) : next.add(id))
-      }
-      return next
-    })
-  }
-
-  async function handleBulkSend() {
-    if (!bulkMessage.trim() || selected.size === 0) return
-    setBulkSending(true)
-    setBulkResult(null)
-    try {
-      const result = await api.post('/sms/send-batch', {
-        lead_ids: Array.from(selected),
-        template: bulkMessage,
-        include_booking_link: bulkIncludeBooking,
-      })
-      setBulkResult(result)
-      setSelected(new Set())
-      setBulkMessage('')
-      setShowBulkCompose(false)
-      loadQueue()
-    } catch (err) {
-      alert(`Bulk send failed: ${err.message}`)
-    } finally {
-      setBulkSending(false)
-    }
-  }
-
-  const selectedCount = selected.size
 
   return (
     <div className="workqueue-page">
@@ -215,56 +125,13 @@ export default function WorkQueue() {
         </div>
         <div className="workqueue-summary panel">
           <SignalPulse color={total > 0 ? 'blue' : 'green'} label={total > 0 ? 'Action needed' : 'Clear'} />
-          <strong>{loading ? '–' : total}</strong>
+          <strong>{loading ? '—' : total}</strong>
           <span>open work items</span>
           <button className="btn btn--secondary" onClick={loadQueue} disabled={loading}>Refresh</button>
         </div>
       </header>
 
       {error ? <div className="workqueue-alert">{error}</div> : null}
-
-      {/* Bulk action bar */}
-      {selectedCount > 0 && (
-        <div className="bulk-bar">
-          <span className="bulk-bar-count">{selectedCount} selected</span>
-          <button className="btn btn--secondary" onClick={() => setSelected(new Set())}>Clear</button>
-          <button className="btn btn--primary" onClick={() => setShowBulkCompose(true)}>Send to selected</button>
-        </div>
-      )}
-
-      {/* Bulk compose panel */}
-      {showBulkCompose && (
-        <section className="panel bulk-compose-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Send to {selectedCount} leads</h2>
-            <button className="back-link" onClick={() => setShowBulkCompose(false)}>Cancel</button>
-          </div>
-          <textarea
-            className="compose-textarea"
-            placeholder="Hi {first_name}, this is..."
-            value={bulkMessage}
-            onChange={(e) => setBulkMessage(e.target.value)}
-            rows={4}
-          />
-          <p className="settings-help">
-            Use <code>&#123;'first_name'&#125;</code>, <code>&#123;'advisor_name'&#125;</code>, and <code>&#123;'booking_link'&#125;</code> as placeholders.
-          </p>
-          <div className="compose-footer">
-            <label className="compose-checkbox">
-              <input type="checkbox" checked={bulkIncludeBooking} onChange={(e) => setBulkIncludeBooking(e.target.checked)} />
-              Include booking link
-            </label>
-            <button className="btn btn--primary" onClick={handleBulkSend} disabled={bulkSending || !bulkMessage.trim()}>
-              {bulkSending ? 'Sending…' : `Send to ${selectedCount} leads`}
-            </button>
-          </div>
-          {bulkResult && (
-            <div className="bulk-result mono">
-              Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}
-            </div>
-          )}
-        </section>
-      )}
 
       <div className="workqueue-grid">
         {sections.map((section) => {
@@ -276,7 +143,7 @@ export default function WorkQueue() {
                   <h2 className="panel-title">{section.title}</h2>
                   <p className="workqueue-section-subtitle">{section.subtitle}</p>
                 </div>
-                <span className={`workqueue-count workqueue-count--${section.accent}`}>{loading ? '–' : items.length}</span>
+                <span className={`workqueue-count workqueue-count--${section.accent}`}>{loading ? '—' : items.length}</span>
               </div>
 
               {loading ? (
@@ -291,11 +158,7 @@ export default function WorkQueue() {
                       item={item}
                       sectionKey={section.key}
                       accent={section.accent}
-                      selected={selected.has(item.lead_id)}
-                      onToggle={handleToggle}
                       onOpen={openLead}
-                      lastSelectedRef={lastSelectedRefs[section.key]}
-                      allItems={items}
                     />
                   ))}
                 </div>
