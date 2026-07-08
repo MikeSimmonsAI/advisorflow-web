@@ -1,94 +1,50 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import StatCard from '../components/StatCard'
 import '../styles/shared.css'
-import '../components/StatusBadge.css'
-import './AutoSendQueue.css'
 
-/**
- * Phase 1 (training-wheels) review queue for the auto-send feature -
- * per the explicit, careful design agreed on: nothing here ever sends
- * without an advisor reading the AI draft and explicitly confirming,
- * editing, or declining it. There is no "send all" or bulk-confirm
- * action anywhere on this page, on purpose - every candidate gets a
- * real, individual look.
- */
 export default function AutoSendQueue() {
-  const navigate = useNavigate()
-  const [candidates, setCandidates] = useState([])
+  const [queue, setQueue] = useState([])
   const [history, setHistory] = useState([])
-  const [view, setView] = useState('queue') // 'queue' | 'history'
   const [loading, setLoading] = useState(true)
-  const [busyId, setBusyId] = useState(null)
-  const [editingId, setEditingId] = useState(null)
-  const [editedBody, setEditedBody] = useState('')
-  const [error, setError] = useState('')
+  const [tab, setTab] = useState('queue')
+  const [actioning, setActioning] = useState(null)
 
   function load() {
     setLoading(true)
-    setError('')
     Promise.all([
       api.get('/auto-send/queue').catch(() => []),
       api.get('/auto-send/history').catch(() => []),
-    ]).then(([queueData, historyData]) => {
-      setCandidates(queueData)
-      setHistory(historyData)
-    }).finally(() => setLoading(false))
+    ]).then(([q, h]) => {
+      setQueue(q || [])
+      setHistory(h || [])
+      setLoading(false)
+    })
   }
 
   useEffect(() => { load() }, [])
 
-  async function handleConfirm(candidateId) {
-    setBusyId(candidateId)
-    setError('')
+  async function handleApprove(id) {
+    setActioning(id)
     try {
-      await api.post(`/auto-send/queue/${candidateId}/confirm`, {})
+      await api.post(`/auto-send/${id}/approve`, {})
       load()
     } catch (err) {
-      setError(err.message || 'Could not send this reply.')
+      alert(err.message)
     } finally {
-      setBusyId(null)
+      setActioning(null)
     }
   }
 
-  function startEditing(candidate) {
-    setEditingId(candidate.candidate_id)
-    setEditedBody(candidate.ai_drafted_body)
-  }
-
-  async function handleEditAndSend(candidateId) {
-    setBusyId(candidateId)
-    setError('')
+  async function handleSkip(id) {
+    setActioning(id)
     try {
-      await api.post(`/auto-send/queue/${candidateId}/edit-and-send`, { body: editedBody })
-      setEditingId(null)
+      await api.post(`/auto-send/${id}/skip`, {})
       load()
     } catch (err) {
-      setError(err.message || 'Could not send this reply.')
+      alert(err.message)
     } finally {
-      setBusyId(null)
+      setActioning(null)
     }
-  }
-
-  async function handleOverride(candidateId) {
-    setBusyId(candidateId)
-    setError('')
-    try {
-      await api.post(`/auto-send/queue/${candidateId}/override`, {})
-      load()
-    } catch (err) {
-      setError(err.message || 'Could not decline this draft.')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  const STATUS_LABELS = {
-    confirmed: { label: 'Sent as drafted', color: 'green' },
-    edited_sent: { label: 'Sent (edited)', color: 'blue' },
-    overridden: { label: 'Declined', color: 'neutral-dim' },
-    expired: { label: 'Expired', color: 'amber' },
   }
 
   return (
@@ -96,117 +52,91 @@ export default function AutoSendQueue() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Auto-send queue</h1>
-          <p className="page-subtitle">
-            AI drafts a reply for simple, low-stakes questions — you read it and decide. Nothing sends without you.
-          </p>
+          <p className="page-subtitle">AI drafts a reply for simple, low-stakes questions — you read it and decide. Nothing sends without you.</p>
         </div>
       </header>
 
-      <div className="auto-send-scorecard-grid">
-        <StatCard label="Waiting for review" value={loading ? '—' : candidates.length} accent="purple" />
-        <StatCard label="Resolved" value={loading ? '—' : history.length} accent="neutral" sublabel="Last 100" />
-      </div>
-
-      <div className="auto-send-tabs">
-        <button className={`tab ${view === 'queue' ? 'tab--active' : ''}`} onClick={() => setView('queue')}>
-          Queue {candidates.length > 0 && `(${candidates.length})`}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button
+          className={`btn ${tab === 'queue' ? 'btn--primary' : 'btn--secondary'}`}
+          onClick={() => setTab('queue')}
+        >
+          Queue
         </button>
-        <button className={`tab ${view === 'history' ? 'tab--active' : ''}`} onClick={() => setView('history')}>
+        <button
+          className={`btn ${tab === 'history' ? 'btn--primary' : 'btn--secondary'}`}
+          onClick={() => setTab('history')}
+        >
           History
         </button>
       </div>
 
-      {error && <div className="panel auto-send-error">{error}</div>}
+      <div style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
+        <div className="panel" style={{ padding: '20px 24px' }}>
+          <strong style={{ fontSize: 28, color: 'var(--text-primary)' }}>
+            {tab === 'queue' ? queue.length : history.length}
+          </strong>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+            {tab === 'queue' ? 'Waiting for review' : 'Last 100'}
+          </p>
+        </div>
+      </div>
 
-      {loading ? (
-        <div className="panel"><div className="empty-state">Loading…</div></div>
-      ) : view === 'queue' ? (
-        candidates.length === 0 ? (
-          <div className="panel">
-            <div className="empty-state">
-              Nothing waiting right now. Eligible replies — simple scheduling questions on leads you've already heard from — will show up here for your review.
-            </div>
+      <section className="panel">
+        {loading ? (
+          <div className="empty-state">Loading...</div>
+        ) : tab === 'queue' && queue.length === 0 ? (
+          <div className="empty-state">
+            Nothing waiting right now. Eligible replies — simple scheduling questions on leads you've already heard from — will show up here for your review.
           </div>
+        ) : tab === 'history' && history.length === 0 ? (
+          <div className="empty-state">No history yet.</div>
         ) : (
-          <ul className="auto-send-list">
-            {candidates.map((c) => (
-              <li key={c.candidate_id} className="panel auto-send-card">
-                <div className="auto-send-card-top">
-                  <button className="auto-send-lead-link" onClick={() => navigate(`/leads/${c.lead_id}`)}>
-                    {c.lead_name}
-                  </button>
-                  {c.classification_confidence && (
-                    <span className="badge badge--purple">{c.classification_confidence} confidence</span>
-                  )}
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {(tab === 'queue' ? queue : history).map(item => (
+              <li key={item.id} style={{ padding: '16px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>{item.lead_name || 'Unknown lead'}</strong>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {item.received_at ? new Date(item.received_at).toLocaleString() : ''}
+                  </span>
                 </div>
-
-                {c.eligibility_reasoning && (
-                  <p className="auto-send-reasoning">Why this is eligible: {c.eligibility_reasoning}</p>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
+                  <strong>Their reply:</strong> {item.reply_body}
+                </p>
+                <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: '0 0 12px', padding: '10px', borderRadius: 8, background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.2)' }}>
+                  <strong>Suggested:</strong> {item.suggested_response}
+                </p>
+                {tab === 'queue' && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className="btn btn--primary"
+                      onClick={() => handleApprove(item.id)}
+                      disabled={actioning === item.id}
+                      style={{ fontSize: 13 }}
+                    >
+                      {actioning === item.id ? 'Sending...' : 'Send this'}
+                    </button>
+                    <button
+                      className="btn btn--secondary"
+                      onClick={() => handleSkip(item.id)}
+                      disabled={actioning === item.id}
+                      style={{ fontSize: 13 }}
+                    >
+                      Skip
+                    </button>
+                  </div>
                 )}
-
-                <div className="auto-send-draft-box">
-                  <span className="auto-send-draft-label">AI-drafted reply</span>
-                  {editingId === c.candidate_id ? (
-                    <textarea
-                      className="compose-textarea"
-                      rows={3}
-                      value={editedBody}
-                      onChange={(e) => setEditedBody(e.target.value)}
-                      autoFocus
-                    />
-                  ) : (
-                    <p className="auto-send-draft-text">{c.ai_drafted_body || '(No draft available — write a reply yourself.)'}</p>
-                  )}
-                </div>
-
-                <div className="auto-send-card-actions">
-                  {editingId === c.candidate_id ? (
-                    <>
-                      <button className="btn btn--secondary" onClick={() => setEditingId(null)} disabled={busyId === c.candidate_id}>
-                        Cancel
-                      </button>
-                      <button className="btn btn--primary" onClick={() => handleEditAndSend(c.candidate_id)} disabled={busyId === c.candidate_id || !editedBody.trim()}>
-                        {busyId === c.candidate_id ? 'Sending…' : 'Send edited reply'}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button className="btn btn--secondary" onClick={() => handleOverride(c.candidate_id)} disabled={busyId === c.candidate_id}>
-                        Decline — I'll reply myself
-                      </button>
-                      <button className="btn btn--secondary" onClick={() => startEditing(c)} disabled={busyId === c.candidate_id || !c.ai_drafted_body}>
-                        Edit
-                      </button>
-                      <button className="btn btn--primary" onClick={() => handleConfirm(c.candidate_id)} disabled={busyId === c.candidate_id || !c.ai_drafted_body}>
-                        {busyId === c.candidate_id ? 'Sending…' : 'Send as drafted'}
-                      </button>
-                    </>
-                  )}
-                </div>
+                {tab === 'history' && (
+                  <span className={`badge badge--${item.action === 'approved' ? 'green' : 'neutral-dim'}`}>
+                    {item.action === 'approved' ? 'Sent' : 'Skipped'}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
-        )
-      ) : history.length === 0 ? (
-        <div className="panel"><div className="empty-state">No resolved candidates yet.</div></div>
-      ) : (
-        <ul className="auto-send-list">
-          {history.map((c) => {
-            const statusInfo = STATUS_LABELS[c.status] || { label: c.status, color: 'neutral' }
-            return (
-              <li key={c.candidate_id} className="panel auto-send-card auto-send-card--compact">
-                <div className="auto-send-card-top">
-                  <button className="auto-send-lead-link" onClick={() => navigate(`/leads/${c.lead_id}`)}>
-                    {c.lead_name}
-                  </button>
-                  <span className={`badge badge--${statusInfo.color}`}>{statusInfo.label}</span>
-                </div>
-                {c.final_sent_body && <p className="auto-send-draft-text">{c.final_sent_body}</p>}
-              </li>
-            )
-          })}
-        </ul>
-      )}
+        )}
+      </section>
     </div>
   )
 }

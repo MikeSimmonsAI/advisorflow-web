@@ -52,7 +52,6 @@ const EMPTY_LEAD_FORM = {
 export default function Leads() {
   const navigate = useNavigate()
   const currentUser = getCurrentUser()
-  const currentUser = getCurrentUser()
   const [leads, setLeads] = useState([])
   const [needsReview, setNeedsReview] = useState([])
   const [loading, setLoading] = useState(true)
