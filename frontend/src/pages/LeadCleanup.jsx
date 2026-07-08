@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './LeadCleanup.css'
@@ -20,7 +19,7 @@ export default function LeadCleanup() {
   const [selectedKeepByGroup, setSelectedKeepByGroup] = useState({})
   const [mergeResults, setMergeResults] = useState(null)
   const [fixLeadId, setFixLeadId] = useState('')
-  const [fixLeadName, setFixLeadName] = useState('') // display-only, shown above the form once a lead is picked
+  const [fixLeadName, setFixLeadName] = useState('')
   const [fixFirstName, setFixFirstName] = useState('')
   const [fixLastName, setFixLastName] = useState('')
   const [fixPhone, setFixPhone] = useState('')
@@ -29,33 +28,37 @@ export default function LeadCleanup() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  // Per-group assignment — lets an admin route an entire duplicate cluster
-  // to one advisor in a single action, same /admin/leads/reassign endpoint
-  // the main Leads page and Lead Detail page already use.
-  const currentUser = getCurrentUser()
-  const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
-  const [assignableUsers, setAssignableUsers] = useState([])
-  const [assignTargetByGroup, setAssignTargetByGroup] = useState({})
-  const [assigningGroupKey, setAssigningGroupKey] = useState('')
-  const [assignResult, setAssignResult] = useState(null)
+  const [advisors, setAdvisors] = useState([])
+  const [reassignAdvisorId, setReassignAdvisorId] = useState('')
+  const [selectedForReassign, setSelectedForReassign] = useState(new Set())
+  const [reassignResult, setReassignResult] = useState(null)
+  const fixRef = useRef(null)
+  const user = getCurrentUser()
 
   useEffect(() => {
-    if (!canBulkAssign) return
     api.get('/admin/users')
-      .then((users) => setAssignableUsers(users.filter((u) => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))))
+      .then((users) => setAdvisors(users.filter((u) => u.role === 'advisor')))
       .catch(() => {})
-  }, [canBulkAssign])
+    loadPotentialDuplicates()
+  }, [])
 
-  const fixPanelRef = useRef(null)
+  function loadPotentialDuplicates() {
+    setLoading(true)
+    setError('')
+    api.get('/admin/leads/potential-duplicates')
+      .then((data) => {
+        setGroups(data)
+        const defaults = {}
+        data.forEach((g, i) => {
+          if (g.leads.length > 0) defaults[i] = g.leads[0].id
+        })
+        setSelectedKeepByGroup(defaults)
+      })
+      .catch((err) => setError(err.message || 'Could not load duplicates.'))
+      .finally(() => setLoading(false))
+  }
 
-  // The actual fix for "I click on somebody and can't change anything
-  // about that person" - this loads the clicked lead's current values
-  // straight into the Fix Contact Info form and scrolls it into view,
-  // instead of the lead name just being a dead-end link to Lead Detail
-  // (which has no contact editing) while the real fix form sat in a
-  // separate panel requiring a manually pasted Lead ID.
-  function startFixingLead(lead) {
+  function prefillFixForm(lead) {
     setFixLeadId(lead.id)
     setFixLeadName(nameForLead(lead))
     setFixFirstName(lead.first_name || '')
@@ -63,7 +66,7 @@ export default function LeadCleanup() {
     setFixPhone(lead.phone || '')
     setFixEmail(lead.email || '')
     setFixResult(null)
-    fixPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setTimeout(() => fixRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
   }
 
   function clearFixForm() {
@@ -73,68 +76,20 @@ export default function LeadCleanup() {
     setFixLastName('')
     setFixPhone('')
     setFixEmail('')
+    setFixResult(null)
   }
 
-  const totalPotentialLeads = useMemo(() => {
-    const ids = new Set()
-    groups.forEach((group) => group.leads.forEach((lead) => ids.add(lead.id)))
-    return ids.size
-  }, [groups])
-
-  async function loadPotentialDuplicates() {
-    setLoading(true)
-    setError('')
-    try {
-      const data = await api.get('/admin/leads/potential-duplicates')
-      setGroups(data || [])
-      setSelectedKeepByGroup((current) => {
-        const next = { ...current }
-        ;(data || []).forEach((group, index) => {
-          const key = groupKey(group, index)
-          if (!next[key] && group.leads?.[0]?.id) next[key] = group.leads[0].id
-        })
-        return next
-      })
-    } catch (err) {
-      setError(err.message || 'Could not load potential duplicates.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadPotentialDuplicates()
-  }, [])
-
-  function groupKey(group, index) {
-    return `${group.match_type}:${group.match_key}:${index}`
-  }
-
-  async function mergeGroup(group, index) {
-    const key = groupKey(group, index)
-    const keepLeadId = selectedKeepByGroup[key]
-    const mergeLeadIds = group.leads.map((lead) => lead.id).filter((id) => id !== keepLeadId)
-
-    if (!keepLeadId || mergeLeadIds.length === 0) {
-      setError('Pick one lead to keep and at least one lead to merge.')
-      return
-    }
-
-    const keepLead = group.leads.find((lead) => lead.id === keepLeadId)
-    const confirmed = window.confirm(
-      `Merge ${mergeLeadIds.length} lead(s) into ${nameForLead(keepLead)}? This deletes the merged lead records after moving their history.`,
-    )
-    if (!confirmed) return
-
+  async function mergeGroup(groupIdx) {
+    const group = groups[groupIdx]
+    const keepId = selectedKeepByGroup[groupIdx]
+    if (!keepId) return
+    const mergeIds = group.leads.filter((l) => l.id !== keepId).map((l) => l.id)
+    if (mergeIds.length === 0) return
     setBusy(true)
     setError('')
-    setMergeResults(null)
     try {
-      const result = await api.post('/admin/leads/merge', {
-        keep_lead_id: keepLeadId,
-        merge_lead_ids: mergeLeadIds,
-      })
-      setMergeResults(result)
+      const result = await api.post('/admin/leads/merge', { keep_lead_id: keepId, merge_lead_ids: mergeIds })
+      setMergeResults((prev) => ({ ...(prev || {}), [groupIdx]: result }))
       await loadPotentialDuplicates()
     } catch (err) {
       setError(err.message || 'Merge failed.')
@@ -143,38 +98,34 @@ export default function LeadCleanup() {
     }
   }
 
-  async function assignGroup(group, index) {
-    const key = groupKey(group, index)
-    const targetId = assignTargetByGroup[key] || ''
-    const leadIds = group.leads.map((lead) => lead.id)
-
-    setAssigningGroupKey(key)
+  async function reassignSelected() {
+    if (!reassignAdvisorId || selectedForReassign.size === 0) return
+    setBusy(true)
     setError('')
-    setAssignResult(null)
     try {
       const result = await api.post('/admin/leads/reassign', {
-        lead_ids: leadIds,
-        new_assigned_to_id: targetId || null,
+        lead_ids: Array.from(selectedForReassign),
+        advisor_id: reassignAdvisorId,
       })
-      setAssignResult({ ...result, groupKey: key })
+      setReassignResult(result)
+      setSelectedForReassign(new Set())
     } catch (err) {
-      setError(err.message || 'Assignment failed.')
+      setError(err.message || 'Reassign failed.')
     } finally {
-      setAssigningGroupKey('')
+      setBusy(false)
     }
   }
 
   async function fixContactInfo() {
+    if (!fixLeadId.trim()) return
     setBusy(true)
     setError('')
     setFixResult(null)
-
     const payload = {}
     if (fixPhone.trim()) payload.phone = fixPhone.trim()
     if (fixEmail.trim()) payload.email = fixEmail.trim()
     if (fixFirstName.trim()) payload.first_name = fixFirstName.trim()
     if (fixLastName.trim()) payload.last_name = fixLastName.trim()
-
     try {
       const result = await api.patch(`/admin/leads/${fixLeadId.trim()}/fix-contact-info`, payload)
       setFixResult(result)
@@ -187,194 +138,200 @@ export default function LeadCleanup() {
     }
   }
 
+  const totalLeadsInGroups = useMemo(() => {
+    const ids = new Set()
+    groups.forEach((g) => g.leads.forEach((l) => ids.add(l.id)))
+    return ids.size
+  }, [groups])
+
   return (
     <div className="lead-cleanup-page">
-      <header className="page-header lead-cleanup-header">
+      <header className="page-header">
         <div>
-          <p className="lead-cleanup-eyebrow">Data Integrity</p>
-          <h1 className="page-title">Lead Cleanup Center</h1>
-          <p className="page-subtitle">
-            Resolve likely duplicates, preserve lead history, and correct bad phone or email values without touching unrelated organizations.
-          </p>
+          <h1 className="page-title">Lead Cleanup</h1>
+          <p className="page-subtitle">Find and merge duplicate leads, fix contact info, reassign leads.</p>
         </div>
-        <div className="panel lead-cleanup-command-card">
-          <span>Potential Leads</span>
-          <strong>{loading ? '—' : totalPotentialLeads}</strong>
-          <small>{loading ? 'Scanning org data' : `${groups.length} duplicate group(s)`}</small>
-          <button
-            className="btn btn--secondary"
-            onClick={bulkDeleteDuplicates}
-            disabled={deletingDuplicates}
-            style={{marginLeft: 'auto', color: 'var(--signal-red)', borderColor: 'var(--signal-red)'}}
-          >
-            {deletingDuplicates ? 'Deleting…' : '🗑 Delete all duplicates'}
-          </button>
-        </div>
+        <button className="btn btn--secondary" onClick={loadPotentialDuplicates} disabled={loading}>
+          {loading ? 'Scanning…' : 'Refresh'}
+        </button>
       </header>
 
-      {error ? <div className="cleanup-alert cleanup-alert--error">{error}</div> : null}
-      {mergeResults ? (
-        <div className="cleanup-alert cleanup-alert--success">
-          Merged {mergeResults.merged_count} lead(s). Moved {mergeResults.moved_messages} messages, {mergeResults.moved_replies} replies,
-          {` ${mergeResults.moved_outcomes}`} outcomes, and {mergeResults.moved_cadence_states} cadence state(s).
+      {error && <div className="cleanup-error">{error}</div>}
+
+      <div className="cleanup-kpi-row">
+        <div className="panel cleanup-kpi-card">
+          <span className="cleanup-kpi-label">Duplicate groups found</span>
+          <strong className="cleanup-kpi-value" style={{ color: 'var(--signal-amber)' }}>{loading ? '—' : groups.length}</strong>
         </div>
-      ) : null}
-      {fixResult ? (
-        <div className="cleanup-alert cleanup-alert--success">
-          Updated {nameForLead(fixResult)} — {fixResult.phone || 'no phone'} / {fixResult.email || 'no email'}.
+        <div className="panel cleanup-kpi-card">
+          <span className="cleanup-kpi-label">Leads affected</span>
+          <strong className="cleanup-kpi-value" style={{ color: 'var(--signal-red)' }}>{loading ? '—' : totalLeadsInGroups}</strong>
         </div>
-      ) : null}
+        <div className="panel cleanup-kpi-card">
+          <span className="cleanup-kpi-label">Merges this session</span>
+          <strong className="cleanup-kpi-value" style={{ color: 'var(--signal-green)' }}>{mergeResults ? Object.keys(mergeResults).length : 0}</strong>
+        </div>
+      </div>
 
-      <section className="cleanup-grid">
-        <section className="panel cleanup-groups-panel">
-          <div className="panel-header">
-            <div>
-              <h2 className="panel-title">Potential Duplicate Groups</h2>
-              <p className="cleanup-panel-subtitle">Groups are found by shared normalized phone or normalized last name, excluding leads already flagged as duplicates.</p>
+      <section className="cleanup-main">
+        <div className="cleanup-groups">
+          <div className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Potential duplicates</h2>
+              <span className="panel-count">{groups.length} groups</span>
             </div>
-            <button className="btn btn--secondary" type="button" onClick={loadPotentialDuplicates} disabled={busy || loading}>Refresh</button>
-          </div>
 
-          {deleteResult && (
-            <div style={{padding: '10px 14px', borderRadius: 8, background: deleteResult.error ? 'var(--signal-red-dim)' : 'var(--signal-green-dim)', color: deleteResult.error ? 'var(--signal-red)' : 'var(--signal-green)', marginBottom: 10}}>
-              {deleteResult.error || `✓ ${deleteResult.message}`}
-            </div>
-          )}
-          {loading ? <div className="cleanup-empty-state">Scanning for likely duplicates...</div> : null}
-          {!loading && groups.length === 0 ? <div className="cleanup-empty-state">No uncaught potential duplicates found.</div> : null}
-
-          <div className="cleanup-group-list">
-            {groups.map((group, index) => {
-              const key = groupKey(group, index)
-              const keepLeadId = selectedKeepByGroup[key] || group.leads?.[0]?.id || ''
-              return (
-                <article className="cleanup-group-card" key={key}>
-                  <div className="cleanup-group-header">
-                    <div>
-                      <span className={`cleanup-match-pill cleanup-match-pill--${group.match_type}`}>{group.match_type.replace('_', ' ')}</span>
-                      <h3>{group.match_key}</h3>
-                    </div>
-                    <div className="cleanup-group-actions">
-                      {canBulkAssign && (
-                        <>
-                          <select
-                            className="filter-select cleanup-assign-select"
-                            value={assignTargetByGroup[key] || ''}
-                            onChange={(e) => setAssignTargetByGroup((current) => ({ ...current, [key]: e.target.value }))}
-                          >
-                            <option value="">Unassigned</option>
-                            {assignableUsers.map((user) => (
-                              <option key={user.id} value={user.id}>
-                                {user.full_name} {user.role !== 'advisor' ? `(${user.role.replace('_', ' ')})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            onClick={() => assignGroup(group, index)}
-                            disabled={assigningGroupKey === key}
-                          >
-                            {assigningGroupKey === key ? 'Assigning…' : 'Assign group'}
-                          </button>
-                        </>
+            {loading ? (
+              <div className="empty-state">Scanning for duplicates…</div>
+            ) : groups.length === 0 ? (
+              <div className="empty-state">No duplicate leads found. Your data is clean.</div>
+            ) : (
+              <div className="cleanup-group-list">
+                {groups.map((group, gi) => (
+                  <div key={gi} className="cleanup-group">
+                    <div className="cleanup-group-header">
+                      <span className="cleanup-match-badge">
+                        {group.match_type === 'phone' ? '📞 Phone match' : '👤 Name match'}
+                      </span>
+                      <span className="cleanup-match-key mono">{group.match_key}</span>
+                      {mergeResults?.[gi] && (
+                        <span className="cleanup-merged-badge">✓ Merged</span>
                       )}
-                      <button className="btn btn--danger" type="button" onClick={() => mergeGroup(group, index)} disabled={busy || group.leads.length < 2}>
-                        Merge Selected
+                    </div>
+                    <table className="data-table cleanup-group-table">
+                      <thead>
+                        <tr>
+                          <th>Keep</th>
+                          <th>Name</th>
+                          <th>Phone</th>
+                          <th>Email</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.leads.map((lead) => (
+                          <tr key={lead.id} className={selectedKeepByGroup[gi] === lead.id ? 'cleanup-row--keep' : ''}>
+                            <td>
+                              <input
+                                type="radio"
+                                name={`keep-${gi}`}
+                                checked={selectedKeepByGroup[gi] === lead.id}
+                                onChange={() => setSelectedKeepByGroup((p) => ({ ...p, [gi]: lead.id }))}
+                              />
+                            </td>
+                            <td>{nameForLead(lead)}</td>
+                            <td className="mono">{lead.phone || '—'}</td>
+                            <td className="mono">{lead.email || '—'}</td>
+                            <td><span className="cleanup-status-pill">{statusLabel(lead.status)}</span></td>
+                            <td>
+                              <button className="btn btn--secondary cleanup-btn-sm" onClick={() => prefillFixForm(lead)}>
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="cleanup-group-actions">
+                      <span className="cleanup-hint">Select the lead to keep, others will be merged into it.</span>
+                      <button
+                        className="btn btn--primary"
+                        onClick={() => mergeGroup(gi)}
+                        disabled={busy || !selectedKeepByGroup[gi] || !!mergeResults?.[gi]}
+                      >
+                        {busy ? 'Merging…' : mergeResults?.[gi] ? 'Merged' : 'Merge duplicates'}
                       </button>
                     </div>
                   </div>
-
-                  {assignResult?.groupKey === key && (
-                    <div className="cleanup-alert cleanup-alert--success cleanup-group-assign-result">
-                      Assigned {assignResult.reassigned_count} lead{assignResult.reassigned_count === 1 ? '' : 's'} in this group.
-                      {assignResult.skipped_count > 0 && ` Skipped ${assignResult.skipped_count}.`}
-                    </div>
-                  )}
-
-                  <div className="cleanup-lead-list">
-                    {group.leads.map((lead) => (
-                      <label className="cleanup-lead-row" key={lead.id}>
-                        <input
-                          type="radio"
-                          name={`keep-${key}`}
-                          checked={keepLeadId === lead.id}
-                          onChange={() => setSelectedKeepByGroup((current) => ({ ...current, [key]: lead.id }))}
-                        />
-                        <div className="cleanup-lead-main">
-                          <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()}>{nameForLead(lead)}</Link>
-                          <span>{lead.phone || 'No phone'} · {lead.email || 'No email'}</span>
-                        </div>
-                        <span className="cleanup-status-pill">{statusLabel(lead.status)}</span>
-                        <span className="cleanup-keep-label">{keepLeadId === lead.id ? 'Keep' : 'Merge'}</span>
-                        <button
-                          type="button"
-                          className="btn btn--secondary cleanup-lead-edit-btn"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); startFixingLead(lead) }}
-                        >
-                          Edit
-                        </button>
-                      </label>
-                    ))}
-                  </div>
-                </article>
-              )
-            })}
+                ))}
+              </div>
+            )}
           </div>
-        </section>
+        </div>
 
-        <aside className="panel cleanup-fix-panel" ref={fixPanelRef}>
-          <div className="panel-header">
-            <div>
-              <h2 className="panel-title">Fix Lead Info</h2>
-              <p className="cleanup-panel-subtitle">
-                Click "Edit" on any lead in a duplicate group to load it here, or paste a Lead ID directly below.
-                Phone values are normalized by the backend dedup service; correcting the last name re-checks for duplicate matches too.
-              </p>
+        <aside className="cleanup-sidebar">
+          <div className="panel" ref={fixRef}>
+            <div className="panel-header">
+              <h2 className="panel-title">Fix contact info</h2>
+            </div>
+            {fixLeadName && (
+              <div className="cleanup-editing-badge">
+                Editing: <strong>{fixLeadName}</strong>
+                <button className="back-link" onClick={clearFixForm}>Clear</button>
+              </div>
+            )}
+            <div className="cleanup-fix-form">
+              <label className="cleanup-label">
+                Lead ID
+                <input
+                  className="cleanup-input"
+                  value={fixLeadId}
+                  onChange={(e) => setFixLeadId(e.target.value)}
+                  placeholder="Paste lead UUID or click Edit above"
+                />
+              </label>
+              <label className="cleanup-label">
+                First name
+                <input className="cleanup-input" value={fixFirstName} onChange={(e) => setFixFirstName(e.target.value)} placeholder="First name" />
+              </label>
+              <label className="cleanup-label">
+                Last name
+                <input className="cleanup-input" value={fixLastName} onChange={(e) => setFixLastName(e.target.value)} placeholder="Last name" />
+              </label>
+              <label className="cleanup-label">
+                Phone
+                <input className="cleanup-input" value={fixPhone} onChange={(e) => setFixPhone(e.target.value)} placeholder="214-555-0199" />
+              </label>
+              <label className="cleanup-label">
+                Email
+                <input className="cleanup-input" value={fixEmail} onChange={(e) => setFixEmail(e.target.value)} placeholder="family@example.com" />
+              </label>
+              <button
+                className="btn btn--primary"
+                onClick={fixContactInfo}
+                disabled={busy || !fixLeadId.trim() || (!fixPhone.trim() && !fixEmail.trim() && !fixFirstName.trim() && !fixLastName.trim())}
+              >
+                {busy ? 'Saving…' : 'Save contact info'}
+              </button>
+              {fixResult && <div className="cleanup-success">Contact info updated.</div>}
             </div>
           </div>
 
-          {fixLeadName && (
-            <div className="cleanup-fix-active-lead">
-              Editing: <strong>{fixLeadName}</strong>
-              <button type="button" className="back-link" onClick={clearFixForm}>Clear</button>
+          {user?.role === 'admin' && advisors.length > 0 && (
+            <div className="panel">
+              <div className="panel-header">
+                <h2 className="panel-title">Reassign leads</h2>
+              </div>
+              <p className="cleanup-hint" style={{ marginBottom: 12 }}>
+                Select leads from the duplicate groups above, then reassign to an advisor.
+              </p>
+              <label className="cleanup-label">
+                Assign to
+                <select className="cleanup-input" value={reassignAdvisorId} onChange={(e) => setReassignAdvisorId(e.target.value)}>
+                  <option value="">Select advisor…</option>
+                  {advisors.map((a) => (
+                    <option key={a.id} value={a.id}>{a.full_name}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="btn btn--secondary"
+                onClick={reassignSelected}
+                disabled={busy || !reassignAdvisorId || selectedForReassign.size === 0}
+              >
+                Reassign {selectedForReassign.size > 0 ? `${selectedForReassign.size} leads` : ''}
+              </button>
+              {reassignResult && (
+                <div className="cleanup-success">Reassigned {reassignResult.reassigned_count} leads.</div>
+              )}
             </div>
           )}
 
-          <div className="cleanup-fix-form">
-            <label>
-              Lead ID
-              <input value={fixLeadId} onChange={(event) => setFixLeadId(event.target.value)} placeholder="Paste lead UUID, or click Edit on a lead above" required />
-            </label>
-            <label>
-              First name
-              <input value={fixFirstName} onChange={(event) => setFixFirstName(event.target.value)} placeholder="First name" />
-            </label>
-            <label>
-              Last name
-              <input value={fixLastName} onChange={(event) => setFixLastName(event.target.value)} placeholder="Last name" />
-            </label>
-            <label>
-              Correct phone
-              <input value={fixPhone} onChange={(event) => setFixPhone(event.target.value)} placeholder="214-555-0199" />
-            </label>
-            <label>
-              Correct email
-              <input value={fixEmail} onChange={(event) => setFixEmail(event.target.value)} placeholder="family@example.com" />
-            </label>
-            <button
-              className="btn btn--primary"
-              onClick={fixContactInfo}
-              disabled={busy || !fixLeadId.trim() || (!fixPhone.trim() && !fixEmail.trim() && !fixFirstName.trim() && !fixLastName.trim())}
-            >
-              {busy ? 'Saving…' : 'Save Lead Info'}
-            </button>
-          </div>
-
-          <div className="cleanup-warning-card">
-            <strong>Merge safety</strong>
-            <p>
-              Merge runs as one transaction. If moving history or deleting merged records fails, the backend rolls the entire operation back.
+          <div className="panel cleanup-warning-card">
+            <strong style={{ color: 'var(--signal-amber)' }}>Merge safety</strong>
+            <p className="cleanup-hint" style={{ marginTop: 6 }}>
+              Merges run as a single transaction. If anything fails, the entire operation rolls back — no partial state is left behind.
             </p>
           </div>
         </aside>
