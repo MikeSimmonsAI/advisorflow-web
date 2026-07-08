@@ -588,9 +588,7 @@ def bulk_delete_duplicate_leads(
 
 
 # ── PUBLIC: Landing page demo request (no auth required) ──────────────────
-from pydantic import BaseModel as _BaseModel
-
-class DemoRequestCreate(_BaseModel):
+class DemoRequestCreate(BaseModel):
     first_name: str
     last_name: str
     phone: str
@@ -621,12 +619,12 @@ def create_demo_request(
     existing = None
     if payload.phone:
         existing = db.query(Lead).filter(
-            Lead.org_id == bookaboost_org.id,
+            Lead.organization_id == bookaboost_org.id,
             Lead.phone == payload.phone,
         ).first()
     if not existing and payload.email:
         existing = db.query(Lead).filter(
-            Lead.org_id == bookaboost_org.id,
+            Lead.organization_id == bookaboost_org.id,
             Lead.email == payload.email,
         ).first()
 
@@ -637,7 +635,7 @@ def create_demo_request(
 
     lead = Lead(
         id=str(uuid.uuid4()),
-        org_id=bookaboost_org.id,
+        organization_id=bookaboost_org.id,
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
         phone=payload.phone.strip() if payload.phone else None,
