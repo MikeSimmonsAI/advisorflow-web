@@ -110,7 +110,7 @@ def admin_assign_twilio(
 
     target = db.query(User).filter(
         User.id == user_id,
-        User.org_id == current_user.org_id,
+        User.organization_id == current_user.organization_id,
     ).first()
 
     if not target:

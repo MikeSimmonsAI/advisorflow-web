@@ -234,11 +234,11 @@ class Lead(Base):
     phone_raw = Column(String, nullable=True)  # original as imported
     email = Column(String, nullable=True)
 
-    tier = Column(SAEnum(LeadTier), default=LeadTier.PRE_NEED)
+    tier = Column(String, nullable=True)  # pre_need, at_need, imminent, contract_sold, email_only, etc
     engagement_temperature = Column(SAEnum(EngagementTemperature), default=EngagementTemperature.UNKNOWN)
-    message_track = Column(SAEnum(MessageTrack), nullable=True)  # which offer/template track applies
+    message_track = Column(String, nullable=True)  # which offer/template track applies
     contact_channel = Column(String, default="sms")  # "sms" or "email_only" - drives queue routing
-    status = Column(SAEnum(LeadStatus), default=LeadStatus.NEW)
+    status = Column(String, default="new")  # new, sent, replied, hot, booked, dnc, etc
     source_year = Column(Integer, nullable=True)  # e.g. 2012, 2013 (which cohort batch)
     source_file = Column(String, nullable=True)  # original upload filename for traceability
 
@@ -465,7 +465,7 @@ class Campaign(Base):
     name = Column(String, nullable=False)
     created_by_id = Column(String, ForeignKey("users.id"), nullable=False)
     filter_criteria = Column(Text, nullable=False)
-    message_track = Column(SAEnum(MessageTrack), nullable=True)
+    message_track = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (
@@ -489,7 +489,7 @@ class CadenceState(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=False, unique=True)
 
-    status = Column(SAEnum(CadenceStatus), default=CadenceStatus.ACTIVE)
+    status = Column(String, default="active")  # active, paused, completed, cancelled
     current_touch_number = Column(Integer, default=0)  # 0 = not yet sent touch 1
     cadence_started_at = Column(DateTime, server_default=func.now())
     next_touch_due_at = Column(DateTime, nullable=True)
@@ -558,7 +558,7 @@ class MessageTemplate(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-    message_track = Column(SAEnum(MessageTrack), nullable=False)
+    message_track = Column(String, nullable=False)
     channel = Column(String, nullable=False)  # "sms" or "email"
 
     body_template = Column(Text, nullable=False)  # SMS: plain text. Email: HTML body.
