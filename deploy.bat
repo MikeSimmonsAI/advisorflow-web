@@ -11,6 +11,9 @@ echo   AdvisorFlow Deploy
 echo ===================================
 echo.
 
+REM Disable git garbage collection so it never asks interactive y/n questions
+git config gc.auto 0
+
 REM Make sure we're actually inside a git repo before doing anything
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
@@ -29,11 +32,6 @@ echo -----------------------------------
 echo.
 
 REM If there's nothing to commit, stop here instead of doing a pointless push.
-REM IMPORTANT: this checks git status --short directly (not just git diff),
-REM since git diff alone misses untracked new files entirely - a real bug
-REM caught before shipping this script. Tonight's actual work repeatedly
-REM involved brand new files (e.g. Compliance.jsx) that only show up as
-REM untracked, not as a tracked diff, until after "git add" runs.
 for %%A in ("%TEMP%\advisorflow_status.txt") do set STATUSSIZE=%%~zA
 del "%TEMP%\advisorflow_status.txt"
 if "%STATUSSIZE%"=="0" (
@@ -51,7 +49,7 @@ echo Adding all changed files...
 git add .
 
 echo Committing...
-git commit -m "%COMMITMSG%"
+git -c gc.auto=0 commit -m "%COMMITMSG%"
 if errorlevel 1 (
     echo.
     echo Nothing was committed - there may be nothing new to commit.
@@ -61,7 +59,7 @@ if errorlevel 1 (
 
 echo.
 echo Pushing to GitHub...
-git push
+git -c gc.auto=0 push
 
 if errorlevel 1 (
     echo.
@@ -74,8 +72,8 @@ if errorlevel 1 (
 echo.
 echo ===================================
 echo   Done! Pushed to GitHub.
-echo   Render will redeploy automatically
-echo   in 1-3 minutes.
+echo   Render will auto-deploy in 1-3 min
+echo   or trigger Manual Deploy on Render.
 echo ===================================
 echo.
 pause
