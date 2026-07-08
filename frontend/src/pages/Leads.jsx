@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import MessageReview from '../components/MessageReview'
 import '../styles/shared.css'
@@ -51,6 +51,8 @@ const EMPTY_LEAD_FORM = {
 
 export default function Leads() {
   const navigate = useNavigate()
+  const currentUser = getCurrentUser()
+  const currentUser = getCurrentUser()
   const [leads, setLeads] = useState([])
   const [needsReview, setNeedsReview] = useState([])
   const [loading, setLoading] = useState(true)
@@ -88,7 +90,7 @@ export default function Leads() {
   function loadLeads() {
     setLoading(true)
     Promise.all([
-      api.get('/leads/'),
+      api.get(currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin' ? '/admin/leads' : '/leads/'),
       api.get('/leads/needs-review'),
     ]).then(([leadsData, reviewData]) => {
       setLeads(leadsData)
@@ -106,7 +108,7 @@ export default function Leads() {
       const result = await api.post('/google_contacts/import', {})
       setGoogleImportResult(result)
       // Refresh leads list
-      const leadsData = await api.get('/leads/')
+      const leadsData = await api.get(currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin' ? '/admin/leads' : '/leads/')
       setLeads(leadsData)
     } catch (err) {
       setGoogleImportResult({ error: err.message || 'Import failed. Make sure Google is connected in Settings.' })
