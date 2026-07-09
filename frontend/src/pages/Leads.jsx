@@ -66,6 +66,10 @@ export default function Leads() {
   const [bulkIncludeBooking, setBulkIncludeBooking] = useState(true)
   const [bulkSending, setBulkSending] = useState(false)
   const [bulkResult, setBulkResult] = useState(null)
+  const [aiTone, setAiTone] = useState('warm')
+  const [aiChannel, setAiChannel] = useState('sms') // sms | email | both
+  const [aiActioning, setAiActioning] = useState(null) // null | 'queue' | 'send_sms' | 'send_email' | 'send_both'
+  const [aiResult, setAiResult] = useState(null)
   const [showBulkCompose, setShowBulkCompose] = useState(false)
 
   const currentUser = getCurrentUser()
@@ -202,6 +206,33 @@ export default function Leads() {
       setSelected(next)
     } else {
       setSelected(new Set([...selected, ...sendableIds]))
+    }
+  }
+
+  async function handleAiAction(mode) {
+    // mode: 'queue' | 'send_sms' | 'send_email' | 'send_both'
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    setAiActioning(mode)
+    setAiResult(null)
+    try {
+      const autoSend = mode !== 'queue'
+      const channel = mode === 'send_email' ? 'email' : mode === 'send_both' ? 'both' : 'sms'
+
+      const result = await api.post('/ai-conversation/generate-batch', {
+        lead_ids: ids,
+        tone: aiTone,
+        auto_send: autoSend,
+        channel,
+      })
+      setAiResult({ mode, ...result })
+      if (!autoSend) {
+        // Queued — tell user to go check Auto-Send Queue
+      }
+    } catch (err) {
+      setAiResult({ error: err.message })
+    } finally {
+      setAiActioning(null)
     }
   }
 
@@ -510,36 +541,110 @@ export default function Leads() {
         </div>
       )}
 
-      {/* ── Bulk Compose Panel ── */}
+      {/* ── AI Auto-Send Panel ── */}
       {showBulkCompose && (
-        <section className="panel">
+        <section className="panel leads-ai-panel">
           <div className="panel-header">
-            <h2 className="panel-title">Send to {sendableSelectedIds.length} lead{sendableSelectedIds.length === 1 ? '' : 's'}</h2>
-            <button className="back-link" onClick={() => setShowBulkCompose(false)}>Cancel</button>
+            <h2 className="panel-title">AI outreach — {sendableSelectedIds.length} lead{sendableSelectedIds.length === 1 ? '' : 's'}</h2>
+            <button className="back-link" onClick={() => { setShowBulkCompose(false); setAiResult(null) }}>Cancel</button>
           </div>
-          <textarea
-            className="compose-textarea"
-            placeholder="Hi {first_name}, this is..."
-            value={bulkMessage}
-            onChange={(e) => setBulkMessage(e.target.value)}
-            rows={4}
-          />
-          <div className="compose-footer">
-            <label className="compose-checkbox">
-              <input type="checkbox" checked={bulkIncludeBooking} onChange={(e) => setBulkIncludeBooking(e.target.checked)} />
-              Include booking link
-            </label>
+
+          <div className="leads-ai-controls">
+            <div className="leads-ai-tone-row">
+              <span className="leads-ai-section-label">Tone</span>
+              {[
+                { value: 'cold', label: '❄️ Cold' },
+                { value: 'warm', label: '☀️ Warm' },
+                { value: 'hot', label: '🔥 Hot' },
+                { value: 'urgent', label: '⚡ Urgent' },
+              ].map((t) => (
+                <button key={t.value}
+                  className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
+                  onClick={() => setAiTone(t.value)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="leads-ai-channel-row">
+              <span className="leads-ai-section-label">Channel</span>
+              {[
+                { value: 'sms', label: '💬 SMS' },
+                { value: 'email', label: '✉️ Email' },
+                { value: 'both', label: '📡 Both' },
+              ].map((c) => (
+                <button key={c.value}
+                  className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
+                  onClick={() => setAiChannel(c.value)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="leads-ai-actions">
             <button
-              className="btn btn--primary"
-              onClick={handleBulkSend}
-              disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
+              className="btn btn--secondary leads-ai-btn"
+              onClick={() => handleAiAction('queue')}
+              disabled={!!aiActioning}
             >
-              {bulkSending ? 'Sending…' : `Send to ${sendableSelectedIds.length} lead${sendableSelectedIds.length === 1 ? '' : 's'}`}
+              {aiActioning === 'queue' ? '⏳ Generating…' : '📥 AI Draft & Queue for review'}
+            </button>
+            <button
+              className={`btn btn--primary leads-ai-btn ${aiChannel === 'email' ? 'leads-ai-btn--email' : ''}`}
+              onClick={() => handleAiAction(aiChannel === 'email' ? 'send_email' : aiChannel === 'both' ? 'send_both' : 'send_sms')}
+              disabled={!!aiActioning || sendableSelectedIds.length === 0}
+            >
+              {aiActioning && aiActioning !== 'queue' ? '⏳ Sending…' :
+                aiChannel === 'email' ? `✉️ AI Auto-Send Email to ${sendableSelectedIds.length}` :
+                aiChannel === 'both' ? `📡 AI Auto-Send SMS + Email to ${sendableSelectedIds.length}` :
+                `💬 AI Auto-Send SMS to ${sendableSelectedIds.length}`}
             </button>
           </div>
-          {bulkResult && (
-            <div className="leads-bulk-result">Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
+
+          <p className="leads-ai-note">
+            "Draft & Queue" puts AI messages in Auto-Send Queue for your review. "Auto-Send" fires immediately.
+          </p>
+
+          {aiResult && !aiResult.error && (
+            <div className="leads-ai-result">
+              {aiResult.mode === 'queue'
+                ? `✓ ${aiResult.queued} messages queued in Auto-Send Queue for your review`
+                : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped} · Errors: ${aiResult.errors}`}
+            </div>
           )}
+          {aiResult?.error && <div className="compose-error">{aiResult.error}</div>}
+
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+            <div className="panel-header" style={{ marginBottom: 12 }}>
+              <h3 className="panel-title" style={{ fontSize: 14 }}>Or write your own message</h3>
+            </div>
+            <textarea
+              className="compose-textarea"
+              placeholder="Hi {first_name}, this is..."
+              value={bulkMessage}
+              onChange={(e) => setBulkMessage(e.target.value)}
+              rows={3}
+            />
+            <div className="compose-footer">
+              <label className="compose-checkbox">
+                <input type="checkbox" checked={bulkIncludeBooking} onChange={(e) => setBulkIncludeBooking(e.target.checked)} />
+                Include booking link
+              </label>
+              <button
+                className="btn btn--secondary"
+                onClick={handleBulkSend}
+                disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
+              >
+                {bulkSending ? 'Sending…' : `Send to ${sendableSelectedIds.length}`}
+              </button>
+            </div>
+            {bulkResult && (
+              <div className="leads-bulk-result">Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
+            )}
+          </div>
         </section>
       )}
 
@@ -636,10 +741,9 @@ export default function Leads() {
           )}
           <button
             className="btn btn--primary"
-            onClick={() => setShowBulkCompose(true)}
-            disabled={sendableSelectedIds.length === 0}
+            onClick={() => { setShowBulkCompose(true); setAiResult(null) }}
           >
-            Send to {sendableSelectedIds.length}
+            ✨ AI Outreach ({selectedCount})
           </button>
         </div>
       )}

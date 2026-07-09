@@ -20,7 +20,8 @@ router = APIRouter(prefix="/ai-conversation", tags=["ai-conversation"])
 class AutoReplyRequest(BaseModel):
     lead_ids: list[str]
     tone: str = "warm"
-    auto_send: bool = False  # False = queue for review, True = send immediately
+    auto_send: bool = False
+    channel: str = "sms"  # sms | email | both
 
 
 class SingleReplyRequest(BaseModel):
@@ -97,24 +98,47 @@ def generate_batch_replies(
                 continue
 
             if req.auto_send and ai_result["reply"]:
-                # Send immediately via SMS
-                from app.services.sms_service import send_sms
-                sms_result = send_sms(
-                    db=db,
-                    lead=lead,
-                    advisor=current_user,
-                    template=ai_result["reply"],
-                    include_booking_link=False,
-                )
-                sent += 1
-                log_action(db, current_user, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
-                results.append({
-                    "lead_id": lead.id,
-                    "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
-                    "action": "sent",
-                    "reply": ai_result["reply"],
-                    "reason": ai_result["reason"],
-                })
+                channel = req.channel
+                send_errors = []
+                did_send = False
+
+                if channel in ("sms", "both") and lead.phone and lead.status != "dnc":
+                    try:
+                        from app.services.sms_service import send_sms
+                        send_sms(db=db, lead=lead, advisor=current_user, template=ai_result["reply"], include_booking_link=False)
+                        did_send = True
+                    except Exception as e:
+                        send_errors.append(f"SMS: {e}")
+
+                if channel in ("email", "both") and lead.email:
+                    try:
+                        from app.services.email_service import send_email
+                        send_email(db=db, lead=lead, advisor=current_user,
+                            subject=f"Following up, {lead.first_name or 'there'}",
+                            body=ai_result["reply"])
+                        did_send = True
+                    except Exception as e:
+                        send_errors.append(f"Email: {e}")
+
+                if did_send:
+                    sent += 1
+                    log_action(db, current_user, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
+                    results.append({
+                        "lead_id": lead.id,
+                        "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
+                        "action": "sent",
+                        "reply": ai_result["reply"],
+                        "reason": ai_result["reason"],
+                    })
+                else:
+                    errors += 1
+                    results.append({
+                        "lead_id": lead.id,
+                        "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
+                        "action": "error",
+                        "reply": "",
+                        "reason": "; ".join(send_errors) or "No valid channel",
+                    })
             else:
                 queued += 1
                 results.append({
