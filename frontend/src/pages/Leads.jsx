@@ -165,7 +165,7 @@ export default function Leads() {
     }
   }
 
-  const baseLeads = view === 'review' ? needsReview : leads
+  const baseLeads = view === 'review' ? needsReview : view === 'duplicates' ? leads.filter((l) => l.is_duplicate) : leads.filter((l) => !l.is_duplicate)
 
   const filteredLeads = useMemo(() => {
     let result = baseLeads
@@ -449,10 +449,14 @@ export default function Leads() {
       <div className="leads-controls">
         <div className="leads-tabs">
           <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => setView('all')}>
-            All leads <span className="mono">{leads.length}</span>
+            All leads <span className="mono">{leads.filter(l => !l.is_duplicate).length}</span>
           </button>
           <button className={`tab ${view === 'review' ? 'tab--active' : ''}`} onClick={() => setView('review')}>
             Needs tier review <span className="mono">{needsReview.length}</span>
+          </button>
+          <button className={`tab ${view === 'duplicates' ? 'tab--active' : ''}`} onClick={() => setView('duplicates')}
+            style={{ color: view === 'duplicates' ? 'var(--signal-amber)' : undefined }}>
+            Duplicates <span className="mono">{leads.filter(l => l.is_duplicate).length}</span>
           </button>
         </div>
 

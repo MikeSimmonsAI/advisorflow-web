@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { getCurrentUser, logout } from '../api/client'
 import SignalPulse from './SignalPulse'
@@ -23,6 +23,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/users', label: 'Users', icon: 'user-plus' },
   { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/campaigns', label: 'Campaigns', icon: 'target' },
+  { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
   { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
   { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
   { to: '/audit-log', label: 'Audit Log', icon: 'activity' },
@@ -43,7 +44,10 @@ function Icon({ name }) {
     'file-text': <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8" />,
     'user-plus': <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6" />,
     target: <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></>,
-    activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
+    sliders: <><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></>,
+    sun: <><circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></>,
+    moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -52,14 +56,52 @@ function Icon({ name }) {
   )
 }
 
+function LiveClock() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <div className="top-bar-clock">
+      <span className="top-bar-time">
+        {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+      </span>
+      <span className="top-bar-date">
+        {now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+      </span>
+    </div>
+  )
+}
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('bb_theme')
+    return saved !== 'light'
+  })
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    localStorage.setItem('bb_theme', dark ? 'dark' : 'light')
+  }, [dark])
+
+  return (
+    <button
+      className="theme-toggle"
+      onClick={() => setDark(!dark)}
+      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      <Icon name={dark ? 'sun' : 'moon'} />
+    </button>
+  )
+}
+
 export default function Layout({ children }) {
   const user = getCurrentUser()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  function closeSidebar() {
-    setSidebarOpen(false)
-  }
+  function closeSidebar() { setSidebarOpen(false) }
 
   function handleLogout() {
     logout()
@@ -68,40 +110,25 @@ export default function Layout({ children }) {
 
   return (
     <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
-      <button
-        type="button"
-        className="mobile-menu-btn"
-        onClick={() => setSidebarOpen(true)}
-        aria-label="Open navigation menu"
-      >
-        <span />
-        <span />
-        <span />
+      <button type="button" className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu">
+        <span /><span /><span />
       </button>
-      <button
-        type="button"
-        className="sidebar-backdrop"
-        onClick={closeSidebar}
-        aria-label="Close navigation menu"
-      />
+      <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
       <aside className="sidebar">
         <div className="sidebar-brand">
           <SignalPulse color="blue" size={9} />
           <span className="brand-mark">Booka<span className="brand-accent">Boost</span></span>
-          <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close navigation menu">×</button>
+          <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
         </div>
 
         <nav className="sidebar-nav">
           {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
+            <NavLink key={item.to} to={item.to} end={item.to === '/'}
               className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
               onClick={closeSidebar}
             >
-              <Icon name={item.icon} />
-              {item.label}
+              <Icon name={item.icon} />{item.label}
             </NavLink>
           ))}
 
@@ -109,14 +136,11 @@ export default function Layout({ children }) {
             <>
               <div className="nav-divider" />
               {ADMIN_NAV_ITEMS.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
+                <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
                 >
-                  <Icon name={item.icon} />
-                  {item.label}
+                  <Icon name={item.icon} />{item.label}
                 </NavLink>
               ))}
             </>
@@ -137,7 +161,11 @@ export default function Layout({ children }) {
 
       <div className="content-area">
         <header className="top-bar">
-          <NotificationBell />
+          <LiveClock />
+          <div className="top-bar-right">
+            <ThemeToggle />
+            <NotificationBell />
+          </div>
         </header>
         <main className="main-content">{children}</main>
       </div>

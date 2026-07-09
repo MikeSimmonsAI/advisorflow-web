@@ -16,7 +16,10 @@
   height: 100vh;
   box-shadow: 16px 0 70px rgba(0, 0, 0, 0.40);
   backdrop-filter: blur(18px) saturate(140%);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(47,182,255,0.18) transparent;
 }
 
 .sidebar::before {
@@ -325,4 +328,30 @@
     max-width: none;
     padding: 16px 14px 32px;
   }
+}
+
+/* Clock */
+.top-bar-clock { display: flex; flex-direction: column; align-items: flex-start; margin-right: auto; }
+.top-bar-time { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--text-primary); letter-spacing: 0.04em; }
+.top-bar-date { font-size: 11px; color: var(--text-tertiary); }
+.top-bar-right { display: flex; align-items: center; gap: 12px; }
+
+/* Theme toggle */
+.theme-toggle { background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; transition: all 0.15s; }
+.theme-toggle:hover { border-color: var(--signal-blue); color: var(--signal-blue); }
+
+/* Light mode overrides */
+[data-theme="light"] {
+  --bg-base: #f0f4f8;
+  --bg-panel: rgba(255, 255, 255, 0.95);
+  --bg-card: rgba(240, 244, 248, 0.90);
+  --bg-card-hover: rgba(224, 232, 244, 0.95);
+  --bg-field: rgba(240, 244, 248, 0.8);
+  --bg-row: rgba(240, 244, 248, 0.6);
+  --bg-row-hover: rgba(224, 232, 244, 0.8);
+  --text-primary: #0a1628;
+  --text-secondary: #3a4a6a;
+  --text-tertiary: #6a7a9a;
+  --border-subtle: rgba(10, 22, 40, 0.12);
+  --border-strong: rgba(10, 22, 40, 0.25);
 }

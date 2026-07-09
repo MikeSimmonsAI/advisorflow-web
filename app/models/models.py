@@ -571,3 +571,41 @@ class MessageTemplate(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "message_track", "channel", name="uq_template_per_track_channel"),
     )
+
+
+# ── Cadence Templates ──────────────────────────────────────────────────────────
+# Org-level reusable cadence templates. Each template has N touches.
+# Each touch defines: day offset, time of day, channel (sms/email/both).
+
+class CadenceTemplate(Base):
+    __tablename__ = "cadence_templates"
+
+    id = Column(String, primary_key=True)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    industry = Column(String, default="funeral")
+    is_default = Column(Boolean, default=False)
+    allow_advisor_override = Column(Boolean, default=False)
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+
+    touches = relationship("CadenceTemplateTouch", back_populates="template", order_by="CadenceTemplateTouch.touch_number", cascade="all, delete-orphan")
+
+
+class CadenceTemplateTouch(Base):
+    __tablename__ = "cadence_template_touches"
+
+    id = Column(String, primary_key=True)
+    template_id = Column(String, ForeignKey("cadence_templates.id"), nullable=False)
+    touch_number = Column(Integer, nullable=False)  # 1-based
+    day_offset = Column(Integer, nullable=False)    # days after cadence start
+    send_hour = Column(Integer, default=10)         # 0-23 hour in advisor's timezone
+    channel = Column(String, default="sms")         # sms | email | both
+    message_template = Column(String, nullable=True)  # optional pre-filled message
+    subject_template = Column(String, nullable=True)  # for email touches
+    is_active = Column(Boolean, default=True)
+
+    template = relationship("CadenceTemplate", back_populates="touches")

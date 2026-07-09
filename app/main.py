@@ -23,7 +23,7 @@ from app.routers import (
     google_contacts_router,
 )
 from app.routers.objection_router import router as objection_router
-from app.routers import onboarding_router, ai_conversation_router
+from app.routers import onboarding_router, ai_conversation_router, cadence_template_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -239,6 +239,7 @@ app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
 app.include_router(onboarding_router.router)
 app.include_router(ai_conversation_router.router)
+app.include_router(cadence_template_router.router)
 
 
 @app.on_event("startup")
