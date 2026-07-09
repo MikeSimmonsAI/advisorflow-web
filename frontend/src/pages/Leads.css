@@ -305,3 +305,7 @@
   .leads-bulk-bar { left: 16px; right: 16px; transform: none; }
   .leads-preview-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+.leads-add-panel { margin-bottom: 16px; }
+.leads-add-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.leads-add-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }

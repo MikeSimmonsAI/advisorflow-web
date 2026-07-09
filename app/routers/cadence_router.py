@@ -1,14 +1,21 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin
-from app.models.models import User, Lead, CadenceState, CadenceStatus
+from app.models.models import User, Lead, CadenceState
 from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
 )
 
 router = APIRouter(prefix="/cadence", tags=["cadence"])
+
+VALID_STATUSES = {"active", "paused", "completed", "cancelled"}
+
+
+class CadenceControlRequest(BaseModel):
+    action: str  # "pause" | "resume" | "cancel"
 
 
 @router.post("/start/{lead_id}")
@@ -39,14 +46,47 @@ def start_batch_cadence(lead_ids: list[str], db: Session = Depends(get_db), curr
 
 @router.post("/run-due")
 def run_due(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """
-    Manually triggers the cadence job for the current org. In production
-    this should run on a schedule (Render cron job hitting this endpoint,
-    or a background worker loop) rather than being click-triggered every
-    time - exposed here for testing/manual runs during the proof of concept.
-    """
     result = run_due_cadences(db, organization_id=current_user.organization_id)
     return result
+
+
+@router.post("/{cadence_state_id}/control")
+def control_cadence(
+    cadence_state_id: str,
+    req: CadenceControlRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Pause, resume, or cancel an individual lead's cadence."""
+    state = (
+        db.query(CadenceState)
+        .join(Lead, CadenceState.lead_id == Lead.id)
+        .filter(
+            CadenceState.id == cadence_state_id,
+            Lead.organization_id == current_user.organization_id,
+        )
+        .first()
+    )
+    if not state:
+        raise HTTPException(status_code=404, detail="Cadence not found")
+
+    if req.action == "pause":
+        if state.status != "active":
+            raise HTTPException(status_code=400, detail="Only active cadences can be paused")
+        state.status = "paused"
+    elif req.action == "resume":
+        if state.status != "paused":
+            raise HTTPException(status_code=400, detail="Only paused cadences can be resumed")
+        state.status = "active"
+    elif req.action == "cancel":
+        if state.status not in ("active", "paused"):
+            raise HTTPException(status_code=400, detail="Only active or paused cadences can be cancelled")
+        state.status = "cancelled"
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {req.action}")
+
+    db.commit()
+    return {"cadence_state_id": cadence_state_id, "status": state.status, "action": req.action}
 
 
 @router.get("/summary")
@@ -56,15 +96,6 @@ def cadence_summary(db: Session = Depends(get_db), current_user: User = Depends(
 
 @router.get("/health-summary")
 def cadence_health_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Advisor-scoped cadence health for the Overview gauge.
-
-    Formula: health_score = healthy_active_count / active_count * 100.
-    An active cadence is considered healthy when next_touch_due_at is not set
-    (nothing scheduled yet, so nothing can be overdue) OR is not yet due at
-    request time. If there are no active cadences, the score is 0 rather than
-    a fictional perfect score.
-    """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     states = (
@@ -77,7 +108,8 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
         .all()
     )
 
-    counts = {status.value: 0 for status in CadenceStatus}
+    # CadenceState.status is plain VARCHAR — never call .value on it
+    counts = {s: 0 for s in ("active", "paused", "completed", "cancelled")}
     active_count = 0
     healthy_active_count = 0
     overdue_active_count = 0
@@ -101,27 +133,18 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
         "healthy_active_count": healthy_active_count,
         "overdue_active_count": overdue_active_count,
         "health_score": health_score,
-        "formula": "healthy_active_count / active_count * 100; active cadence is healthy when next_touch_due_at is unset or not yet due",
     }
 
 
 @router.get("/active")
 def list_active_cadences(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Returns every lead currently in an active cadence for the current
-    advisor, with their touch progress and next-due date - the detail
-    view behind the summary counts shown on the Cadence dashboard, so
-    an advisor can actually see WHO is queued up, not just how many.
-    """
-    from app.models.models import CadenceState, CadenceStatus, Lead
-
     states = (
         db.query(CadenceState)
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
             Lead.organization_id == current_user.organization_id,
             Lead.assigned_to_id == current_user.id,
-            CadenceState.status == "active",
+            CadenceState.status.in_(["active", "paused"]),
         )
         .order_by(CadenceState.next_touch_due_at.asc())
         .all()
@@ -136,6 +159,7 @@ def list_active_cadences(db: Session = Depends(get_db), current_user: User = Dep
             "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
             "phone": lead.phone,
             "tier": lead.tier if lead.tier else None,
+            "status": state.status,
             "current_touch_number": state.current_touch_number,
             "total_touches": 9,
             "next_touch_due_at": state.next_touch_due_at,

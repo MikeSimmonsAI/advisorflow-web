@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import Onboarding from './pages/Onboarding'
 import ChangePassword from './pages/ChangePassword'
 import Overview from './pages/Overview'
 import Leads from './pages/Leads'
@@ -57,6 +58,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/onboarding" element={<Onboarding />} />
         <Route
           path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />}

@@ -52,6 +52,10 @@ export default function Leads() {
   const pendingFile = useRef(null)
   const [googleImporting, setGoogleImporting] = useState(false)
   const [googleImportResult, setGoogleImportResult] = useState(null)
+  const [showAddLead, setShowAddLead] = useState(false)
+  const [addLeadForm, setAddLeadForm] = useState({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', source_year: '' })
+  const [addLeadSaving, setAddLeadSaving] = useState(false)
+  const [addLeadResult, setAddLeadResult] = useState(null)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [tierFilter, setTierFilter] = useState('')
@@ -264,6 +268,25 @@ export default function Leads() {
       .catch(() => {})
   }, [canBulkAssign])
 
+  async function handleAddLead() {
+    if (!addLeadForm.first_name.trim() || !addLeadForm.last_name.trim()) return
+    setAddLeadSaving(true)
+    setAddLeadResult(null)
+    try {
+      const result = await api.post('/leads/create', {
+        ...addLeadForm,
+        source_year: addLeadForm.source_year ? parseInt(addLeadForm.source_year) : null,
+      })
+      setAddLeadResult(result)
+      setAddLeadForm({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', source_year: '' })
+      loadLeads()
+    } catch (err) {
+      setAddLeadResult({ error: err.message || 'Could not create lead.' })
+    } finally {
+      setAddLeadSaving(false)
+    }
+  }
+
   return (
     <div className="leads-page">
 
@@ -274,10 +297,60 @@ export default function Leads() {
           <h1 className="page-title">Leads</h1>
           <p className="page-subtitle">Import, dedupe, search, assign, and send from one control surface.</p>
         </div>
-        <button className="btn btn--primary leads-import-btn" onClick={() => setShowImport(!showImport)}>
-          {showImport ? '✕ Close import' : '+ Import leads'}
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn--secondary" onClick={() => { setShowAddLead(!showAddLead); setShowImport(false) }}>
+            {showAddLead ? '✕ Cancel' : '+ Add lead'}
+          </button>
+          <button className="btn btn--primary leads-import-btn" onClick={() => { setShowImport(!showImport); setShowAddLead(false) }}>
+            {showImport ? '✕ Close import' : '⬆ Import leads'}
+          </button>
+        </div>
       </header>
+
+      {showAddLead && (
+        <section className="panel leads-add-panel">
+          <div className="panel-header"><h2 className="panel-title">Add a lead manually</h2></div>
+          <div className="leads-add-grid">
+            <label className="leads-add-label">First name *
+              <input className="search-input" value={addLeadForm.first_name} onChange={(e) => setAddLeadForm((p) => ({ ...p, first_name: e.target.value }))} placeholder="First name" />
+            </label>
+            <label className="leads-add-label">Last name *
+              <input className="search-input" value={addLeadForm.last_name} onChange={(e) => setAddLeadForm((p) => ({ ...p, last_name: e.target.value }))} placeholder="Last name" />
+            </label>
+            <label className="leads-add-label">Phone
+              <input className="search-input" value={addLeadForm.phone} onChange={(e) => setAddLeadForm((p) => ({ ...p, phone: e.target.value }))} placeholder="214-555-0199" />
+            </label>
+            <label className="leads-add-label">Email
+              <input className="search-input" value={addLeadForm.email} onChange={(e) => setAddLeadForm((p) => ({ ...p, email: e.target.value }))} placeholder="name@email.com" />
+            </label>
+            <label className="leads-add-label">Tier
+              <select className="filter-select" value={addLeadForm.tier} onChange={(e) => setAddLeadForm((p) => ({ ...p, tier: e.target.value }))}>
+                {TIER_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </label>
+            <label className="leads-add-label">Source year
+              <input className="search-input" value={addLeadForm.source_year} onChange={(e) => setAddLeadForm((p) => ({ ...p, source_year: e.target.value }))} placeholder="2024" type="number" />
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
+            <button
+              className="btn btn--primary"
+              onClick={handleAddLead}
+              disabled={addLeadSaving || !addLeadForm.first_name.trim() || !addLeadForm.last_name.trim()}
+            >
+              {addLeadSaving ? 'Saving…' : 'Create lead'}
+            </button>
+            {addLeadResult && !addLeadResult.error && (
+              <span style={{ color: 'var(--signal-green)', fontSize: 13 }}>
+                ✓ {addLeadResult.name} created{addLeadResult.is_duplicate ? ' (flagged as potential duplicate)' : ''}
+              </span>
+            )}
+            {addLeadResult?.error && (
+              <span style={{ color: 'var(--signal-red)', fontSize: 13 }}>{addLeadResult.error}</span>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── KPI Cards ── */}
       <div className="leads-kpi-grid">
@@ -492,6 +565,7 @@ export default function Leads() {
                 <th>Email</th>
                 <th>Tier</th>
                 <th>Status</th>
+                <th>Source</th>
                 {view === 'review' && <th>Assign tier</th>}
               </tr>
             </thead>
@@ -521,6 +595,10 @@ export default function Leads() {
                     <td className="mono leads-secondary">{lead.email || '—'}</td>
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>
+                    <td className="mono leads-secondary" style={{ fontSize: 11 }}>
+                      {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
+                      {lead.source_year ? ` (${lead.source_year})` : ''}
+                    </td>
                     {view === 'review' && (
                       <td>
                         <select

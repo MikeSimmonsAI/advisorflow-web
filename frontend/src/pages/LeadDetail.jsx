@@ -9,6 +9,13 @@ import './LeadDetail.css'
 
 const QUALITY_COLOR = { hot: 'red', warm: 'amber', cold: 'blue', dead: 'neutral-dim', unknown: 'neutral' }
 
+const TONES = [
+  { key: 'cold', label: '❄️ Cold', color: 'var(--signal-blue)', desc: 'Soft intro, no pressure' },
+  { key: 'warm', label: '☀️ Warm', color: 'var(--signal-amber)', desc: 'Friendly, suggest meeting' },
+  { key: 'hot', label: '🔥 Hot', color: 'var(--signal-red)', desc: 'Direct, ask for appointment' },
+  { key: 'urgent', label: '⚡ Urgent', color: 'var(--signal-purple)', desc: 'Brief, time-sensitive ask' },
+]
+
 function timeAgo(dateStr) {
   if (!dateStr) return ''
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -33,6 +40,7 @@ export default function LeadDetail() {
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const [tone, setTone] = useState(1) // 0=cold 1=warm 2=hot 3=urgent
   const currentUser = getCurrentUser()
   const canReassignLead = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
   const [assignableUsers, setAssignableUsers] = useState([])
@@ -60,7 +68,7 @@ export default function LeadDetail() {
     setSuggestingReply(true)
     setSendError('')
     try {
-      const draft = await api.post(`/sms/draft-reply/${leadId}`, {})
+      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: TONES[tone].key })
       setMessageText(draft.suggested_reply || '')
       if (draft.booking_url) setIncludeBookingLink(false)
     } catch (err) {
@@ -138,16 +146,14 @@ export default function LeadDetail() {
   const { lead, events, ai_quality, booking } = data
   const canSend = lead.phone && lead.status !== 'dnc' && !lead.is_duplicate
   const initials = `${(lead.first_name || '?')[0]}${(lead.last_name || '?')[0]}`.toUpperCase()
+  const currentTone = TONES[tone]
 
   return (
     <div className="lead-detail-page">
-
-      {/* ── Back ── */}
       <button className="lead-detail-back" onClick={() => navigate('/leads')}>
         ← Back to leads
       </button>
 
-      {/* ── Hero Header ── */}
       <div className="lead-detail-hero">
         <div className="lead-detail-hero-left">
           <div className="lead-detail-avatar">{initials}</div>
@@ -164,7 +170,6 @@ export default function LeadDetail() {
             </div>
           </div>
         </div>
-
         {canReassignLead && (
           <div className="lead-detail-assign">
             <span className="lead-detail-assign-label">Assigned to</span>
@@ -185,12 +190,8 @@ export default function LeadDetail() {
 
       {assignmentError && <div className="compose-error">{assignmentError}</div>}
 
-      {/* ── Main Grid ── */}
       <div className="lead-detail-grid">
-
-        {/* Left — Conversation */}
         <div className="lead-detail-left">
-
           <section className="panel lead-detail-panel">
             <div className="panel-header">
               <h2 className="panel-title">💬 Conversation</h2>
@@ -223,13 +224,30 @@ export default function LeadDetail() {
               </div>
             ) : (
               <div className="lead-compose">
+                <div className="lead-tone-bar">
+                  <span className="lead-tone-label">Message tone</span>
+                  <div className="lead-tone-pills">
+                    {TONES.map((t, i) => (
+                      <button
+                        key={t.key}
+                        className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
+                        style={tone === i ? { borderColor: t.color, color: t.color, background: `${t.color}18` } : {}}
+                        onClick={() => setTone(i)}
+                        title={t.desc}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="lead-tone-desc">{currentTone.desc}</span>
+                </div>
                 <div className="lead-compose-suggest">
                   <button
                     className="btn btn--secondary"
                     onClick={handleSuggestReply}
                     disabled={suggestingReply}
                   >
-                    {suggestingReply ? '⏳ Drafting…' : '✨ Suggest reply'}
+                    {suggestingReply ? '⏳ Drafting…' : `✨ Suggest ${currentTone.label} reply`}
                   </button>
                   <span className="lead-compose-hint">AI fills the box. You edit and send manually.</span>
                 </div>
@@ -263,10 +281,7 @@ export default function LeadDetail() {
           </section>
         </div>
 
-        {/* Right — Info panels */}
         <div className="lead-detail-right">
-
-          {/* Booking */}
           {booking && (
             <section className="panel lead-detail-panel">
               <div className="panel-header">
@@ -292,7 +307,6 @@ export default function LeadDetail() {
             </section>
           )}
 
-          {/* AI Read */}
           <section className="panel lead-detail-panel">
             <div className="panel-header">
               <h2 className="panel-title">🤖 AI read</h2>
@@ -317,19 +331,17 @@ export default function LeadDetail() {
             {analysisError && <div className="compose-error">{analysisError}</div>}
           </section>
 
-          {/* Outcome Tracker */}
           <OutcomeTracker leadId={leadId} />
 
-          {/* Details */}
           <section className="panel lead-detail-panel">
             <div className="panel-header"><h2 className="panel-title">📋 Details</h2></div>
             <div className="lead-detail-facts">
               {[
                 { label: 'Email', value: lead.email },
+                { label: 'Source', value: lead.source_file },
                 { label: 'Source year', value: lead.source_year },
                 { label: 'Last action', value: lead.last_action_raw },
                 { label: 'Status reason', value: lead.status_reason_raw },
-                { label: 'Source file', value: lead.source_file },
               ].map(({ label, value }) => value ? (
                 <div key={label} className="lead-detail-fact">
                   <span className="lead-detail-fact-label">{label}</span>
@@ -338,7 +350,6 @@ export default function LeadDetail() {
               ) : null)}
             </div>
           </section>
-
         </div>
       </div>
     </div>

@@ -649,3 +649,73 @@ def create_demo_request(
     db.add(lead)
     db.commit()
     return {"status": "created", "message": "Demo request received.", "id": str(lead.id)}
+
+
+class ManualLeadCreate(BaseModel):
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    tier: Optional[str] = "pre_need"
+    source_year: Optional[int] = None
+    notes: Optional[str] = None
+
+
+@router.post("/create", status_code=201)
+def create_lead_manually(
+    payload: ManualLeadCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create a single lead manually from the Leads page UI.
+    Runs through dedup check against existing org leads.
+    """
+    import uuid
+    from app.services.dedup_service import normalize_phone, normalize_last_name
+
+    phone_normalized = normalize_phone(payload.phone or "")
+    last_normalized = normalize_last_name(payload.last_name or "")
+
+    # Check for duplicate by phone
+    is_dup = False
+    if phone_normalized:
+        existing = db.query(Lead).filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.phone_normalized == phone_normalized,
+            Lead.is_duplicate == False,
+        ).first()
+        if existing:
+            is_dup = True
+
+    lead = Lead(
+        id=str(uuid.uuid4()),
+        organization_id=current_user.organization_id,
+        assigned_to_id=current_user.id,
+        first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),
+        phone=payload.phone,
+        phone_raw=payload.phone,
+        phone_normalized=phone_normalized,
+        email=payload.email,
+        tier=payload.tier,
+        status="new",
+        contact_channel="sms" if payload.phone else "email_only",
+        source_year=payload.source_year,
+        source_file="manual",
+        is_duplicate=is_dup,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+
+    log_action(db, current_user, action="lead.create_manual", target_type="lead", target_id=lead.id)
+
+    return {
+        "id": lead.id,
+        "name": f"{lead.first_name} {lead.last_name}",
+        "is_duplicate": is_dup,
+        "status": "created",
+    }

@@ -232,3 +232,11 @@
   .lead-detail-left { order: 1; }
   .lead-detail-right { order: 2; }
 }
+
+.lead-tone-bar { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--bg-field); border-radius: var(--radius-sm); margin-bottom: 12px; border: 1px solid var(--border-subtle); }
+.lead-tone-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); font-weight: 700; }
+.lead-tone-pills { display: flex; gap: 6px; }
+.lead-tone-pill { padding: 5px 12px; font-size: 12px; border: 1px solid var(--border-subtle); border-radius: 20px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.15s; font-weight: 600; }
+.lead-tone-pill:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.lead-tone-pill--active { font-weight: 700; }
+.lead-tone-desc { font-size: 11px; color: var(--text-tertiary); }

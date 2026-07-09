@@ -71,27 +71,24 @@ def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: Us
     return lead
 
 
+class DraftReplyRequest(BaseModel):
+    tone: str = "warm"  # cold | warm | hot | urgent
+
+
 @router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
 def draft_reply_for_lead(
     lead_id: str,
+    req: DraftReplyRequest = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    AI-assisted one-on-one reply drafting for Lead Detail only.
-
-    This endpoint is deliberately non-blocking from the user's point of view:
-    missing OpenAI key, API errors, malformed model output, or any other AI
-    failure all fall back to a safe, editable reply instead of surfacing a 500.
-    It also reuses the real booking-link helper from sms_service.py and only
-    creates a new link when the lead does not already have one.
-    """
     lead = _get_lead_for_current_org_or_404(db, lead_id, current_user)
-
     from app.services.draft_reply_service import draft_reply
-
-    result = draft_reply(db, lead, current_user)
+    tone = (req.tone if req and req.tone else "warm")
+    result = draft_reply(db, lead, current_user, tone=tone)
     return result
+
+
 
 
 @router.post("/send")

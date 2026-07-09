@@ -1,9 +1,6 @@
 """
-AI-drafted one-click reply suggestions for the Lead Detail conversation view.
-
-This follows the same lazy OpenAI client + safe fallback pattern as the existing
-AI services. The endpoint using this service must never fail just because the AI
-provider is unavailable; advisors still need a usable reply draft.
+AI-drafted reply suggestions for Lead Detail.
+Now supports a tone parameter: cold, warm, hot, urgent.
 """
 
 import json
@@ -27,18 +24,26 @@ def _get_client() -> OpenAI:
     return _client
 
 
+TONE_INSTRUCTIONS = {
+    "cold": "Use a soft, low-pressure, friendly tone. This is an early touch — don't push for an appointment yet. Just introduce yourself and leave the door open.",
+    "warm": "Use a warm, conversational tone. Express genuine interest and suggest a meeting, but don't be pushy. A light call-to-action is appropriate.",
+    "hot": "Be direct and confident. The lead has shown interest — match their energy, confirm next steps, and clearly ask for the appointment.",
+    "urgent": "Be brief and urgent. Time is a factor. Get straight to the point, make a specific ask, and create a sense of gentle urgency without being aggressive.",
+}
+
 DRAFT_REPLY_PROMPT = """You are drafting a short SMS reply from a cemetery/funeral-home sales advisor to a lead.
 
-Advisor sending this message: {advisor_name}
+Advisor: {advisor_name}
+Tone instruction: {tone_instruction}
 
 Rules:
 - Respond with ONLY JSON, no markdown and no preamble.
 - JSON shape: {{"suggested_reply": "..."}}
-- Keep it under 320 characters when possible.
-- Sound human, respectful, and appointment-focused.
-- Sign as {advisor_name} if the message includes a closing/sign-off - don't invent a different name or leave a placeholder.
+- Keep it under 320 characters.
+- Sound human and respectful.
+- Sign as {advisor_name} if the message includes a sign-off.
 - Do not claim anything not shown in the conversation.
-- Include this booking link exactly once if it is relevant and not already in your draft: {booking_url}
+- Include this booking link exactly once if relevant and not already in your draft: {booking_url}
 
 Lead:
 - First name: {first_name}
@@ -60,7 +65,7 @@ def _booking_url(token: str) -> str:
 def get_or_create_booking_link(db: Session, lead: Lead, advisor: User) -> BookingLink:
     existing = (
         db.query(BookingLink)
-        .filter(BookingLink.lead_id == lead.id)
+        .filter(BookingLink.lead_id == lead.id, BookingLink.status == "pending")
         .order_by(BookingLink.created_at.desc())
         .first()
     )
@@ -69,58 +74,57 @@ def get_or_create_booking_link(db: Session, lead: Lead, advisor: User) -> Bookin
     return create_booking_link(db, lead, advisor)
 
 
-def _conversation_history(db: Session, lead: Lead) -> tuple[list[dict[str, Any]], Reply | None]:
-    messages = db.query(Message).filter(Message.lead_id == lead.id).all()
-    replies = db.query(Reply).filter(Reply.lead_id == lead.id).all()
+def _conversation_history(db: Session, lead: Lead):
+    messages = db.query(Message).filter(Message.lead_id == lead.id).order_by(Message.sent_at.asc()).all()
+    replies = db.query(Reply).filter(Reply.lead_id == lead.id).order_by(Reply.received_at.asc()).all()
 
-    events: list[dict[str, Any]] = []
-    for message in messages:
-        events.append({
-            "type": "advisor",
-            "body": message.body,
-            "timestamp": message.sent_at,
-        })
-    for reply in replies:
-        events.append({
-            "type": "lead",
-            "body": reply.body,
-            "timestamp": reply.received_at,
-        })
+    events = []
+    for m in messages:
+        events.append({"type": "outbound", "body": m.body, "ts": m.sent_at})
+    for r in replies:
+        events.append({"type": "inbound", "body": r.body, "ts": r.received_at})
 
-    events.sort(key=lambda item: item.get("timestamp") or datetime.min)
-    latest_reply = max(replies, key=lambda reply: reply.received_at or datetime.min, default=None)
+    events.sort(key=lambda e: e["ts"] or datetime.min)
+
+    latest_reply = None
+    for r in sorted(replies, key=lambda r: r.received_at or datetime.min, reverse=True):
+        latest_reply = r
+        break
+
     return events, latest_reply
 
 
-def _fallback_reply(lead: Lead, advisor: User, booking_url: str) -> str:
-    name = lead.first_name or "there"
-    advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
-    return (
-        f"Hi {name}, thanks for your reply. I can help with that. "
-        f"When works for a quick call or file review? You can also pick a time here: {booking_url} - {advisor_name}"
-    )
+def _safe_parse_json(raw: str) -> dict:
+    try:
+        return json.loads(raw)
+    except Exception:
+        clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        try:
+            return json.loads(clean)
+        except Exception:
+            return {}
 
 
 def _ensure_booking_link_in_text(text: str, lead: Lead, advisor: User, booking_url: str) -> str:
-    cleaned = (text or "").strip()
-    if not cleaned:
-        return _fallback_reply(lead, advisor, booking_url)
-    if booking_url in cleaned:
-        return cleaned
-    return f"{cleaned}\n\nYou can also pick a time here: {booking_url}"
+    if booking_url and booking_url not in text:
+        return f"{text.rstrip()} {booking_url}".strip()
+    return text
 
 
-def _safe_parse_json(raw: str) -> dict[str, Any]:
-    cleaned = (raw or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
-    parsed = json.loads(cleaned)
-    if not isinstance(parsed, dict):
-        raise ValueError("Draft reply response was not a JSON object")
-    return parsed
+def _fallback_reply(lead: Lead, advisor: User, booking_url: str, tone: str = "warm") -> str:
+    name = lead.first_name or "there"
+    advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
+    if tone == "urgent":
+        return f"Hi {name}, I wanted to reach out one more time. Please let me know if you'd like to connect — I have time this week. {booking_url}"
+    if tone == "hot":
+        return f"Hi {name}, great hearing from you. I'd love to set up a time to talk — here's my booking link: {booking_url}"
+    if tone == "cold":
+        return f"Hi {name}, this is {advisor_name}. Just wanted to introduce myself and let you know I'm here whenever you're ready. {booking_url}"
+    return f"Hi {name}, this is {advisor_name}. I'd love to connect and walk you through your options. {booking_url}"
 
 
-def draft_reply(db: Session, lead: Lead, advisor: User) -> dict[str, Any]:
+def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm") -> dict[str, Any]:
+    tone = tone if tone in TONE_INSTRUCTIONS else "warm"
     booking = get_or_create_booking_link(db, lead, advisor)
     booking_url = _booking_url(booking.token)
     history, latest_reply = _conversation_history(db, lead)
@@ -129,11 +133,11 @@ def draft_reply(db: Session, lead: Lead, advisor: User) -> dict[str, Any]:
         f"{item['type']}: {item['body']}" for item in history[-12:]
     ) or "No prior conversation."
     latest_reply_text = latest_reply.body if latest_reply else "No inbound reply yet."
-
     advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
 
     prompt = DRAFT_REPLY_PROMPT.format(
         advisor_name=advisor_name,
+        tone_instruction=TONE_INSTRUCTIONS[tone],
         booking_url=booking_url,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
@@ -154,7 +158,7 @@ def draft_reply(db: Session, lead: Lead, advisor: User) -> dict[str, Any]:
         suggested = _ensure_booking_link_in_text(parsed.get("suggested_reply", ""), lead, advisor, booking_url)
         source = "ai"
     except Exception:
-        suggested = _fallback_reply(lead, advisor, booking_url)
+        suggested = _fallback_reply(lead, advisor, booking_url, tone)
         source = "fallback"
 
     return {

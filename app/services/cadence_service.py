@@ -270,4 +270,4 @@ def get_cadence_summary(db: Session, organization_id: str) -> dict:
         .group_by(CadenceState.status)
         .all()
     )
-    return {status.value: count for status, count in counts}
+    return {str(status): count for status, count in counts}
