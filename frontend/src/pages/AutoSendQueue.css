@@ -1,115 +1,32 @@
-.auto-send-scorecard-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
+.asq-kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+.asq-kpi-card { padding: 20px 22px; }
+.asq-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-secondary); font-weight: 600; display: block; margin-bottom: 8px; }
+.asq-kpi-value { font-size: 36px; font-weight: 700; font-family: var(--font-mono); display: block; letter-spacing: -0.02em; }
 
-.auto-send-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 12px;
-}
+.asq-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+.asq-badge { background: var(--signal-amber-dim); color: var(--signal-amber); font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-left: 6px; }
 
-.auto-send-error {
-  border-color: var(--border-danger);
-  background: var(--signal-red-dim);
-  color: var(--text-primary);
-  font-size: 13px;
-  margin-bottom: 12px;
-  padding: 12px 16px;
-}
+.asq-empty { padding: 40px 32px; text-align: center; }
+.asq-empty-icon { font-size: 48px; margin-bottom: 12px; }
+.asq-empty h3 { font-size: 18px; color: var(--text-primary); margin-bottom: 8px; }
+.asq-empty p { font-size: 14px; color: var(--text-secondary); margin-bottom: 20px; }
+.asq-how-to { background: var(--bg-field); border-radius: var(--radius-sm); padding: 16px 20px; text-align: left; font-size: 13px; color: var(--text-secondary); }
+.asq-how-to p { margin-bottom: 8px; }
+.asq-how-to ul { margin: 0; padding-left: 18px; }
+.asq-how-to li { margin-bottom: 6px; }
 
-.auto-send-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.auto-send-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.auto-send-card--compact {
-  gap: 6px;
-}
-
-.auto-send-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.auto-send-lead-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-primary);
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  transition: text-decoration-color 0.14s ease;
-}
-
-.auto-send-lead-link:hover {
-  text-decoration-color: var(--signal-blue);
-}
-
-.auto-send-reasoning {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  font-style: italic;
-}
-
-.auto-send-draft-box {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-field-soft);
-  padding: 10px 12px;
-}
-
-.auto-send-draft-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--signal-purple);
-  margin-bottom: 6px;
-}
-
-.auto-send-draft-text {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-primary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.auto-send-card-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-@media (max-width: 600px) {
-  .auto-send-card-actions {
-    justify-content: stretch;
-  }
-
-  .auto-send-card-actions .btn {
-    flex: 1;
-  }
-}
+.asq-item-list { display: flex; flex-direction: column; gap: 12px; }
+.asq-item { padding: 18px 20px; }
+.asq-item-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.asq-item-lead { cursor: pointer; }
+.asq-lead-name { display: block; font-size: 15px; font-weight: 600; color: var(--signal-blue); }
+.asq-lead-contact { display: block; font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+.asq-item-meta { display: flex; align-items: center; gap: 8px; }
+.asq-channel-badge { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px; }
+.asq-channel-badge--sms { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.asq-channel-badge--email { background: var(--signal-purple-dim); color: var(--signal-purple); }
+.asq-source { font-size: 11px; color: var(--text-tertiary); text-transform: capitalize; }
+.asq-subject { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; font-style: italic; }
+.asq-message { background: var(--bg-field); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 14px; color: var(--text-primary); line-height: 1.6; margin-bottom: 8px; }
+.asq-reason { font-size: 11px; color: var(--text-tertiary); margin-bottom: 12px; font-style: italic; }
+.asq-item-actions { display: flex; gap: 8px; }

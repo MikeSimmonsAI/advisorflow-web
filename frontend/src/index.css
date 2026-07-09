@@ -152,36 +152,110 @@ select option {
 [data-theme="light"] {
   --bg-base: #f0f4f8;
   --bg-panel: rgba(255, 255, 255, 0.98);
-  --bg-card: rgba(240, 244, 250, 0.95);
-  --bg-card-hover: rgba(224, 234, 248, 0.98);
-  --bg-field: rgba(235, 241, 250, 0.9);
-  --bg-field-soft: rgba(228, 236, 248, 0.8);
-  --bg-row: rgba(240, 246, 255, 0.7);
-  --bg-row-hover: rgba(220, 232, 248, 0.9);
-  --border-subtle: rgba(10, 40, 100, 0.12);
-  --border-strong: rgba(10, 40, 100, 0.28);
-  --border-danger: rgba(200, 30, 60, 0.25);
+  --bg-card: rgba(245, 248, 255, 0.95);
+  --bg-card-hover: rgba(230, 238, 252, 0.98);
+  --bg-field: rgba(235, 241, 252, 0.9);
+  --bg-field-soft: rgba(228, 236, 250, 0.8);
+  --bg-row: rgba(245, 248, 255, 0.8);
+  --bg-row-hover: rgba(220, 232, 250, 0.9);
+  --border-subtle: rgba(10, 40, 100, 0.14);
+  --border-strong: rgba(10, 40, 100, 0.32);
+  --border-danger: rgba(180, 20, 50, 0.28);
+
+  /* Text — dark on light */
   --text-primary: #0a1628;
-  --text-secondary: #2a3a5a;
-  --text-tertiary: #5a6a8a;
+  --text-secondary: #243450;
+  --text-tertiary: #4a5e80;
   --text-inverse: #eef5ff;
   --text-danger-soft: #7a0020;
-  --panel-shadow: 0 4px 24px rgba(10, 40, 100, 0.10), inset 0 1px 0 rgba(255,255,255,0.8);
-  --panel-shadow-strong: 0 8px 40px rgba(10, 40, 100, 0.14), inset 0 1px 0 rgba(255,255,255,0.9);
+
+  /* Signal colors — darkened for light bg readability */
+  --signal-blue: #0070cc;
+  --signal-blue-dim: rgba(0, 112, 204, 0.12);
+  --signal-green: #007a4d;
+  --signal-green-dim: rgba(0, 122, 77, 0.12);
+  --signal-red: #c0003a;
+  --signal-red-dim: rgba(192, 0, 58, 0.10);
+  --signal-amber: #b56000;
+  --signal-amber-dim: rgba(181, 96, 0, 0.12);
+  --signal-purple: #5a00c8;
+  --signal-purple-dim: rgba(90, 0, 200, 0.10);
+
+  /* Glows off in light mode */
+  --glow-blue-sm: none;
+  --glow-blue-md: none;
+  --glow-blue-lg: none;
+  --glow-green-sm: none;
+  --glow-green-md: none;
+  --glow-red-sm: none;
+  --glow-red-md: none;
+  --glow-amber-md: none;
+  --glow-purple-md: none;
+
+  --panel-shadow: 0 2px 16px rgba(10, 40, 100, 0.08), 0 1px 0 rgba(255,255,255,0.9);
+  --panel-shadow-strong: 0 6px 32px rgba(10, 40, 100, 0.12);
   color-scheme: light;
 }
 
 [data-theme="light"] body,
 [data-theme="light"] html {
   background: linear-gradient(150deg, #e8f0fc 0%, #f4f7fd 50%, #eaf2ff 100%);
+  color: #0a1628;
 }
 
 [data-theme="light"] .sidebar {
   background: linear-gradient(180deg, #1a2a4a, #0d1b35) !important;
 }
 
+[data-theme="light"] .sidebar .nav-item {
+  color: rgba(200, 220, 255, 0.85) !important;
+}
+
+[data-theme="light"] .sidebar .nav-item--active {
+  color: #7ec8ff !important;
+  background: rgba(47, 182, 255, 0.15) !important;
+}
+
+[data-theme="light"] .sidebar .brand-mark {
+  color: #eef5ff !important;
+}
+
+[data-theme="light"] .sidebar .user-name {
+  color: #eef5ff !important;
+}
+
+[data-theme="light"] .sidebar .user-role {
+  color: rgba(200, 220, 255, 0.6) !important;
+}
+
+[data-theme="light"] .sidebar .logout-btn {
+  color: rgba(200, 220, 255, 0.7) !important;
+  border-color: rgba(200, 220, 255, 0.2) !important;
+}
+
 [data-theme="light"] select,
 [data-theme="light"] option {
   background: #f0f4f8;
   color: #0a1628;
+}
+
+[data-theme="light"] .panel {
+  border-color: rgba(10, 40, 100, 0.12);
+}
+
+[data-theme="light"] .data-table th {
+  background: rgba(10, 40, 100, 0.06);
+  color: #243450;
+}
+
+[data-theme="light"] .data-table td {
+  border-color: rgba(10, 40, 100, 0.08);
+}
+
+[data-theme="light"] .top-bar-time {
+  color: #0a1628;
+}
+
+[data-theme="light"] .top-bar-date {
+  color: #4a5e80;
 }

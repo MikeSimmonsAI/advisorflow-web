@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import '../styles/shared.css'
+import './AutoSendQueue.css'
 
 export default function AutoSendQueue() {
+  const navigate = useNavigate()
   const [queue, setQueue] = useState([])
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('queue')
   const [actioning, setActioning] = useState(null)
+  const [approvingAll, setApprovingAll] = useState(false)
+  const [error, setError] = useState('')
 
   function load() {
     setLoading(true)
@@ -25,11 +30,12 @@ export default function AutoSendQueue() {
 
   async function handleApprove(id) {
     setActioning(id)
+    setError('')
     try {
       await api.post(`/auto-send/${id}/approve`, {})
       load()
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
     } finally {
       setActioning(null)
     }
@@ -40,103 +46,169 @@ export default function AutoSendQueue() {
     try {
       await api.post(`/auto-send/${id}/skip`, {})
       load()
-    } catch (err) {
-      alert(err.message)
     } finally {
       setActioning(null)
     }
+  }
+
+  async function handleApproveAll() {
+    if (!confirm(`Send all ${queue.length} queued messages now?`)) return
+    setApprovingAll(true)
+    try {
+      const result = await api.post('/auto-send/approve-all', {})
+      load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setApprovingAll(false)
+    }
+  }
+
+  function statusColor(status) {
+    return {
+      sent: 'var(--signal-green)',
+      pending: 'var(--signal-amber)',
+      skipped: 'var(--text-tertiary)',
+      failed: 'var(--signal-red)',
+    }[status] || 'var(--text-secondary)'
   }
 
   return (
     <div>
       <header className="page-header">
         <div>
-          <h1 className="page-title">Auto-send queue</h1>
-          <p className="page-subtitle">AI drafts a reply for simple, low-stakes questions — you read it and decide. Nothing sends without you.</p>
+          <h1 className="page-title">Auto-Send Queue</h1>
+          <p className="page-subtitle">AI-drafted messages waiting for your review before sending.</p>
         </div>
+        {queue.length > 0 && (
+          <button className="btn btn--primary" onClick={handleApproveAll} disabled={approvingAll}>
+            {approvingAll ? 'Sending all…' : `✓ Approve & send all ${queue.length}`}
+          </button>
+        )}
       </header>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button
-          className={`btn ${tab === 'queue' ? 'btn--primary' : 'btn--secondary'}`}
-          onClick={() => setTab('queue')}
-        >
-          Queue
+      {error && <div style={{ background: 'var(--signal-red-dim)', color: 'var(--signal-red)', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>{error}</div>}
+
+      <div className="asq-kpi-row">
+        <div className="panel asq-kpi-card">
+          <span className="asq-kpi-label">Pending review</span>
+          <strong className="asq-kpi-value" style={{ color: queue.length > 0 ? 'var(--signal-amber)' : 'var(--signal-green)' }}>{loading ? '—' : queue.length}</strong>
+        </div>
+        <div className="panel asq-kpi-card">
+          <span className="asq-kpi-label">Sent today</span>
+          <strong className="asq-kpi-value" style={{ color: 'var(--signal-green)' }}>
+            {loading ? '—' : history.filter(h => h.status === 'sent' && new Date(h.actioned_at) > new Date(Date.now() - 86400000)).length}
+          </strong>
+        </div>
+        <div className="panel asq-kpi-card">
+          <span className="asq-kpi-label">Skipped</span>
+          <strong className="asq-kpi-value" style={{ color: 'var(--text-secondary)' }}>
+            {loading ? '—' : history.filter(h => h.status === 'skipped').length}
+          </strong>
+        </div>
+      </div>
+
+      <div className="asq-tabs">
+        <button className={`tab ${tab === 'queue' ? 'tab--active' : ''}`} onClick={() => setTab('queue')}>
+          Pending {queue.length > 0 && <span className="asq-badge">{queue.length}</span>}
         </button>
-        <button
-          className={`btn ${tab === 'history' ? 'btn--primary' : 'btn--secondary'}`}
-          onClick={() => setTab('history')}
-        >
+        <button className={`tab ${tab === 'history' ? 'tab--active' : ''}`} onClick={() => setTab('history')}>
           History
         </button>
       </div>
 
-      <div style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
-        <div className="panel" style={{ padding: '20px 24px' }}>
-          <strong style={{ fontSize: 28, color: 'var(--text-primary)' }}>
-            {tab === 'queue' ? queue.length : history.length}
-          </strong>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-            {tab === 'queue' ? 'Waiting for review' : 'Last 100'}
-          </p>
-        </div>
-      </div>
-
-      <section className="panel">
-        {loading ? (
-          <div className="empty-state">Loading...</div>
-        ) : tab === 'queue' && queue.length === 0 ? (
-          <div className="empty-state">
-            Nothing waiting right now. Eligible replies — simple scheduling questions on leads you've already heard from — will show up here for your review.
+      {tab === 'queue' && (
+        loading ? (
+          <div className="empty-state">Loading queue…</div>
+        ) : queue.length === 0 ? (
+          <div className="panel asq-empty">
+            <div className="asq-empty-icon">✓</div>
+            <h3>Queue is clear</h3>
+            <p>No messages waiting for review. AI-drafted messages from campaigns and cadences will appear here when auto-send is enabled.</p>
+            <div className="asq-how-to">
+              <p><strong>How to get messages here:</strong></p>
+              <ul>
+                <li>Run a Campaign with "AI auto-reply" toggled on</li>
+                <li>Start a Cadence — when AI drafts a reply to an inbound message, it queues here</li>
+                <li>Use AI Auto-conversation from the Leads page</li>
+              </ul>
+            </div>
           </div>
-        ) : tab === 'history' && history.length === 0 ? (
+        ) : (
+          <div className="asq-item-list">
+            {queue.map((item) => (
+              <div key={item.id} className="panel asq-item">
+                <div className="asq-item-header">
+                  <div className="asq-item-lead" onClick={() => navigate(`/leads/${item.lead_id}`)}>
+                    <span className="asq-lead-name">{item.lead_name || '—'}</span>
+                    <span className="asq-lead-contact mono">{item.channel === 'email' ? item.email : item.phone}</span>
+                  </div>
+                  <div className="asq-item-meta">
+                    <span className={`asq-channel-badge asq-channel-badge--${item.channel}`}>
+                      {item.channel === 'email' ? '✉️ Email' : '💬 SMS'}
+                    </span>
+                    <span className="asq-source">{item.source}</span>
+                  </div>
+                </div>
+                {item.subject && <div className="asq-subject">Subject: {item.subject}</div>}
+                <div className="asq-message">{item.message}</div>
+                {item.ai_reason && <div className="asq-reason">AI: {item.ai_reason}</div>}
+                <div className="asq-item-actions">
+                  <button
+                    className="btn btn--primary"
+                    onClick={() => handleApprove(item.id)}
+                    disabled={actioning === item.id}
+                  >
+                    {actioning === item.id ? 'Sending…' : '✓ Approve & send'}
+                  </button>
+                  <button
+                    className="btn btn--secondary"
+                    onClick={() => handleSkip(item.id)}
+                    disabled={actioning === item.id}
+                  >
+                    Skip
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {tab === 'history' && (
+        history.length === 0 ? (
           <div className="empty-state">No history yet.</div>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {(tab === 'queue' ? queue : history).map(item => (
-              <li key={item.id} style={{ padding: '16px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>{item.lead_name || 'Unknown lead'}</strong>
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {item.received_at ? new Date(item.received_at).toLocaleString() : ''}
-                  </span>
-                </div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  <strong>Their reply:</strong> {item.reply_body}
-                </p>
-                <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: '0 0 12px', padding: '10px', borderRadius: 8, background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.2)' }}>
-                  <strong>Suggested:</strong> {item.suggested_response}
-                </p>
-                {tab === 'queue' && (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      className="btn btn--primary"
-                      onClick={() => handleApprove(item.id)}
-                      disabled={actioning === item.id}
-                      style={{ fontSize: 13 }}
-                    >
-                      {actioning === item.id ? 'Sending...' : 'Send this'}
-                    </button>
-                    <button
-                      className="btn btn--secondary"
-                      onClick={() => handleSkip(item.id)}
-                      disabled={actioning === item.id}
-                      style={{ fontSize: 13 }}
-                    >
-                      Skip
-                    </button>
-                  </div>
-                )}
-                {tab === 'history' && (
-                  <span className={`badge badge--${item.action === 'approved' ? 'green' : 'neutral-dim'}`}>
-                    {item.action === 'approved' ? 'Sent' : 'Skipped'}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          <section className="panel">
+            <table className="data-table">
+              <thead>
+                <tr><th>Lead</th><th>Channel</th><th>Message</th><th>Status</th><th>When</th></tr>
+              </thead>
+              <tbody>
+                {history.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <span style={{ color: 'var(--signal-blue)', cursor: 'pointer' }} onClick={() => navigate(`/leads/${item.lead_id}`)}>
+                        {item.lead_name || '—'}
+                      </span>
+                    </td>
+                    <td className="mono" style={{ fontSize: 11 }}>{item.channel}</td>
+                    <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 300 }}>{item.message?.slice(0, 80)}{item.message?.length > 80 ? '…' : ''}</td>
+                    <td>
+                      <span style={{ color: statusColor(item.status), fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
+                        {item.status}
+                      </span>
+                    </td>
+                    <td className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                      {item.actioned_at ? new Date(item.actioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )
+      )}
     </div>
   )
 }
