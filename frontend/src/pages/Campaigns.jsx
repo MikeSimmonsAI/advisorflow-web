@@ -1,7 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api/client'
 import '../styles/shared.css'
 import './Campaigns.css'
+
+const TONES = [
+  { value: 'cold', label: '❄️ Cold', desc: 'Soft intro, no pressure' },
+  { value: 'warm', label: '☀️ Warm', desc: 'Friendly, suggest meeting' },
+  { value: 'hot', label: '🔥 Hot', desc: 'Direct, clear ask' },
+  { value: 'urgent', label: '⚡ Urgent', desc: 'Brief, time-sensitive' },
+]
+
+const CONTACT_HISTORY_OPTIONS = [
+  { value: '', label: 'Any contact history' },
+  { value: 'never_contacted', label: 'Never contacted' },
+  { value: 'contacted_no_reply', label: 'Contacted but no reply' },
+  { value: 'replied_not_booked', label: 'Replied but not booked' },
+]
 
 const TIER_OPTIONS = [
   { value: '', label: 'Any tier' },
@@ -10,353 +24,440 @@ const TIER_OPTIONS = [
   { value: 'imminent', label: 'Imminent' },
   { value: 'contract_sold', label: 'Contract Sold' },
   { value: 'email_only', label: 'Email Only' },
-  { value: 'addr_only', label: 'Address Only' },
   { value: 'partial', label: 'Partial / Needs Review' },
 ]
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
   { value: 'new', label: 'New' },
-  { value: 'queued', label: 'Queued' },
   { value: 'sent', label: 'Sent' },
   { value: 'replied', label: 'Replied' },
   { value: 'hot', label: 'Hot' },
   { value: 'booked', label: 'Booked' },
-  { value: 'dnc', label: 'DNC' },
   { value: 'dead', label: 'Dead' },
-  { value: 'needs_tier_review', label: 'Needs Tier Review' },
 ]
 
-const TRACK_OPTIONS = [
-  { value: '', label: 'Leave track unchanged' },
-  { value: 'pre_need_lock_price', label: 'Pre-Need Lock Price' },
-  { value: 'at_need_support', label: 'At-Need Support' },
-  { value: 'imminent_support', label: 'Imminent Support' },
-  { value: 'upsell_existing', label: 'Upsell Existing Customer' },
-  { value: 'email_only_nurture', label: 'Email-Only Nurture' },
-  { value: 'needs_review', label: 'Needs Review' },
+const CHANNEL_OPTIONS = [
+  { value: '', label: 'Any channel' },
+  { value: 'sms', label: 'SMS only' },
+  { value: 'email_only', label: 'Email only' },
 ]
 
-function formatDate(value) {
-  if (!value) return '—'
-  try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-  } catch {
-    return value
-  }
-}
-
-function labelFromOptions(options, value) {
-  return options.find((option) => option.value === value)?.label || value || '—'
-}
-
-function buildCriteria({ tier, sourceYear, status }) {
-  const criteria = {}
-  if (tier) criteria.tier = tier
-  if (sourceYear) criteria.source_year = Number(sourceYear)
-  if (status) criteria.status = status
-  return criteria
-}
-
-function CriteriaPills({ criteria }) {
-  const entries = Object.entries(criteria || {})
-  if (entries.length === 0) return <span className="campaign-muted">All leads in org</span>
-
-  return (
-    <div className="campaign-pill-row">
-      {entries.map(([key, value]) => (
-        <span className="campaign-filter-pill" key={key}>
-          {key.replace('_', ' ')}: {String(value).replaceAll('_', ' ')}
-        </span>
-      ))}
-    </div>
-  )
-}
+const STEPS = ['Purpose', 'Audience', 'Message', 'Review & Send']
 
 export default function Campaigns() {
+  const [step, setStep] = useState(0)
+  const [purposes, setPurposes] = useState([])
   const [campaigns, setCampaigns] = useState([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState('')
-  const [preview, setPreview] = useState(null)
-  const [applyResult, setApplyResult] = useState(null)
+  const [advisors, setAdvisors] = useState([])
+  const [cadenceTemplates, setCadenceTemplates] = useState([])
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
+
+  // Step 1 — Purpose
+  const [purpose, setPurpose] = useState('')
+  const [campaignName, setCampaignName] = useState('')
+
+  // Step 2 — Audience filters
+  const [tier, setTier] = useState('')
+  const [status, setStatus] = useState('')
+  const [sourceYear, setSourceYear] = useState('')
+  const [sourceFile, setSourceFile] = useState('')
+  const [channel, setChannel] = useState('')
+  const [advisorId, setAdvisorId] = useState('')
+  const [contactHistory, setContactHistory] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [previewing, setPreviewing] = useState(false)
+
+  // Step 3 — Message
+  const [tone, setTone] = useState('warm')
+  const [message, setMessage] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [startCadence, setStartCadence] = useState(false)
+  const [cadenceTemplateId, setCadenceTemplateId] = useState('')
+  const [autoReply, setAutoReply] = useState(false)
+
+  // Step 4 — Send
+  const [savedCampaignId, setSavedCampaignId] = useState(null)
+  const [sending, setSending] = useState(false)
+  const [sendResult, setSendResult] = useState(null)
   const [error, setError] = useState('')
 
-  const [name, setName] = useState('')
-  const [tier, setTier] = useState('')
-  const [sourceYear, setSourceYear] = useState('')
-  const [status, setStatus] = useState('')
-  const [messageTrack, setMessageTrack] = useState('')
-  const [startCadence, setStartCadence] = useState(false)
-
-  const selectedCampaign = useMemo(
-    () => campaigns.find((campaign) => campaign.id === selectedCampaignId) || null,
-    [campaigns, selectedCampaignId],
-  )
-
-  async function loadCampaigns() {
-    setLoading(true)
-    setError('')
-    try {
-      const data = await api.get('/campaigns')
-      setCampaigns(data || [])
-      if (!selectedCampaignId && data?.length) setSelectedCampaignId(data[0].id)
-    } catch (err) {
-      setError(err.message || 'Could not load campaigns.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    loadCampaigns()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    Promise.all([
+      api.get('/campaigns/purposes').catch(() => []),
+      api.get('/campaigns').catch(() => []),
+      api.get('/admin/users').catch(() => []),
+      api.get('/cadence-templates/').catch(() => []),
+    ]).then(([purposeData, campaignData, userData, templateData]) => {
+      setPurposes(purposeData)
+      setCampaigns(campaignData)
+      setAdvisors(userData.filter(u => u.role === 'advisor' || u.role === 'org_admin'))
+      setCadenceTemplates(templateData)
+      setLoading(false)
+    })
   }, [])
 
-  async function createCampaign(event) {
-    event.preventDefault()
-    setBusy(true)
-    setError('')
+  const filterCriteria = useMemo(() => {
+    const c = {}
+    if (tier) c.tier = tier
+    if (status) c.status = status
+    if (sourceYear) c.source_year = parseInt(sourceYear)
+    if (sourceFile) c.source_file = sourceFile
+    if (channel) c.channel = channel
+    if (advisorId) c.advisor_id = advisorId
+    if (contactHistory) c.contact_history = contactHistory
+    return c
+  }, [tier, status, sourceYear, sourceFile, channel, advisorId, contactHistory])
+
+  async function handlePreview() {
+    setPreviewing(true)
     setPreview(null)
-    setApplyResult(null)
-
     try {
-      const payload = {
-        name: name.trim(),
-        filter_criteria: buildCriteria({ tier, sourceYear, status }),
-        message_track: messageTrack || null,
-      }
-      const created = await api.post('/campaigns', payload)
-      setCampaigns((current) => [created, ...current])
-      setSelectedCampaignId(created.id)
-      setName('')
-      setTier('')
-      setSourceYear('')
-      setStatus('')
-      setMessageTrack('')
+      const result = await api.post('/campaigns/preview', { filter_criteria: filterCriteria, purpose, tone })
+      setPreview(result)
     } catch (err) {
-      setError(err.message || 'Could not create campaign.')
+      setError(err.message)
     } finally {
-      setBusy(false)
+      setPreviewing(false)
     }
   }
 
-  async function previewCampaign(campaignId = selectedCampaignId) {
-    if (!campaignId) return
-    setBusy(true)
+  async function handleGenerateMessage() {
+    if (!purpose) { setError('Select a campaign purpose first.'); return }
+    setGenerating(true)
     setError('')
-    setApplyResult(null)
     try {
-      const data = await api.post(`/campaigns/${campaignId}/preview`, {})
-      setPreview(data)
-      setSelectedCampaignId(campaignId)
+      const result = await api.post('/campaigns/generate-message', { purpose, tone })
+      setMessage(result.message)
     } catch (err) {
-      setError(err.message || 'Could not preview campaign.')
+      setError('Could not generate message. You can write it manually.')
     } finally {
-      setBusy(false)
+      setGenerating(false)
     }
   }
 
-  async function applyCampaign() {
-    if (!selectedCampaignId) return
-    setBusy(true)
+  async function handleSaveAndReview() {
+    if (!campaignName.trim()) { setError('Give your campaign a name.'); return }
+    if (!purpose) { setError('Select a campaign purpose.'); return }
     setError('')
     try {
-      const data = await api.post(`/campaigns/${selectedCampaignId}/apply`, { start_cadence: startCadence })
-      setApplyResult(data)
-      await previewCampaign(selectedCampaignId)
+      const result = await api.post('/campaigns', {
+        name: campaignName,
+        purpose,
+        filter_criteria: filterCriteria,
+        tone,
+        cadence_template_id: cadenceTemplateId || null,
+        auto_reply: autoReply,
+      })
+      setSavedCampaignId(result.id)
+      setStep(3)
     } catch (err) {
-      setError(err.message || 'Could not apply campaign.')
-    } finally {
-      setBusy(false)
+      setError(err.message || 'Could not save campaign.')
     }
+  }
+
+  async function handleSend() {
+    if (!savedCampaignId || !message.trim()) return
+    setSending(true)
+    setError('')
+    try {
+      const result = await api.post(`/campaigns/${savedCampaignId}/send`, {
+        campaign_id: savedCampaignId,
+        message,
+        start_cadence: startCadence,
+        cadence_template_id: cadenceTemplateId || null,
+        auto_reply: autoReply,
+      })
+      setSendResult(result)
+    } catch (err) {
+      setError(err.message || 'Send failed.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function reset() {
+    setStep(0); setPurpose(''); setCampaignName(''); setTier(''); setStatus('')
+    setSourceYear(''); setSourceFile(''); setChannel(''); setAdvisorId('')
+    setContactHistory(''); setPreview(null); setTone('warm'); setMessage('')
+    setStartCadence(false); setCadenceTemplateId(''); setAutoReply(false)
+    setSavedCampaignId(null); setSendResult(null); setError('')
+  }
+
+  if (sendResult) {
+    return (
+      <div>
+        <header className="page-header">
+          <h1 className="page-title">Campaign sent</h1>
+        </header>
+        <div className="panel campaign-success">
+          <div className="campaign-success-icon">🚀</div>
+          <h2 className="campaign-success-title">Campaign launched!</h2>
+          <div className="campaign-result-grid">
+            <div className="campaign-result-stat"><span>Sent</span><strong style={{ color: 'var(--signal-green)' }}>{sendResult.sent}</strong></div>
+            <div className="campaign-result-stat"><span>Skipped</span><strong style={{ color: 'var(--signal-amber)' }}>{sendResult.skipped}</strong></div>
+            <div className="campaign-result-stat"><span>Errors</span><strong style={{ color: sendResult.errors > 0 ? 'var(--signal-red)' : 'var(--text-secondary)' }}>{sendResult.errors}</strong></div>
+            <div className="campaign-result-stat"><span>Total</span><strong>{sendResult.total}</strong></div>
+          </div>
+          {autoReply && <p className="campaign-auto-note">✓ AI auto-reply is active — leads who respond will get automatic follow-ups until they book.</p>}
+          <button className="btn btn--primary" onClick={reset}>Start new campaign</button>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="campaigns-page">
-      <header className="page-header campaigns-header">
+    <div>
+      <header className="page-header">
         <div>
-          <p className="campaigns-eyebrow">Cohort Builder</p>
-          <h1 className="page-title">Campaigns</h1>
-          <p className="page-subtitle">
-            Save lead filters, preview the current match count, then apply a message track and optional cadence start in one controlled step.
-          </p>
-        </div>
-        <div className="panel campaigns-command-card">
-          <span>Saved Campaigns</span>
-          <strong>{loading ? '—' : campaigns.length}</strong>
-          <small>Organization-scoped admin tools</small>
+          <h1 className="page-title">Campaign Builder</h1>
+          <p className="page-subtitle">AI-driven outreach — target the right leads with the right message.</p>
         </div>
       </header>
 
-      {error ? <div className="campaigns-alert">{error}</div> : null}
-
-      <section className="campaigns-grid">
-        <form className="panel campaign-form" onSubmit={createCampaign}>
-          <div className="panel-header">
-            <div>
-              <h2 className="panel-title">Create Campaign</h2>
-              <p className="campaign-panel-subtitle">Build a saved filter using existing lead fields only.</p>
-            </div>
+      <div className="campaign-steps">
+        {STEPS.map((label, i) => (
+          <div key={label} className={`campaign-step ${i === step ? 'campaign-step--active' : i < step ? 'campaign-step--done' : ''}`}
+            onClick={() => i < step && setStep(i)} style={{ cursor: i < step ? 'pointer' : 'default' }}>
+            <div className="campaign-step-dot">{i < step ? '✓' : i + 1}</div>
+            <span>{label}</span>
           </div>
+        ))}
+      </div>
 
-          <label>
-            Campaign name
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="2012 Pre-Need Re-Engagement" required />
+      {error && <div className="campaign-error">{error}</div>}
+
+      {step === 0 && (
+        <section className="panel campaign-section">
+          <h2 className="campaign-section-title">What is this campaign about?</h2>
+          <label className="campaign-label">Campaign name
+            <input className="campaign-input" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="e.g. July Pre-Need Push, Memorial Day Outreach" />
           </label>
+          <div className="campaign-purpose-grid">
+            {loading ? <div className="empty-state">Loading…</div> : purposes.map((p) => (
+              <button key={p.value} className={`campaign-purpose-card ${purpose === p.value ? 'campaign-purpose-card--active' : ''}`} onClick={() => setPurpose(p.value)}>
+                <span className="campaign-purpose-label">{p.label}</span>
+                <span className="campaign-purpose-desc">{p.desc}</span>
+              </button>
+            ))}
+          </div>
+          <div className="campaign-nav">
+            <button className="btn btn--primary" onClick={() => { if (!campaignName.trim()) { setError('Give your campaign a name.'); return } if (!purpose) { setError('Select a purpose.'); return } setError(''); setStep(1) }}>
+              Next: Choose audience →
+            </button>
+          </div>
+        </section>
+      )}
 
-          <div className="campaign-form-row">
-            <label>
-              Tier
-              <select value={tier} onChange={(event) => setTier(event.target.value)}>
-                {TIER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      {step === 1 && (
+        <section className="panel campaign-section">
+          <h2 className="campaign-section-title">Who should receive this campaign?</h2>
+          <div className="campaign-filters-grid">
+            <label className="campaign-label">Tier
+              <select className="campaign-input" value={tier} onChange={(e) => setTier(e.target.value)}>
+                {TIER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
-
-            <label>
-              Source year
-              <input value={sourceYear} onChange={(event) => setSourceYear(event.target.value)} inputMode="numeric" placeholder="2012" />
+            <label className="campaign-label">Status
+              <select className="campaign-input" value={status} onChange={(e) => setStatus(e.target.value)}>
+                {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="campaign-label">Contact history
+              <select className="campaign-input" value={contactHistory} onChange={(e) => setContactHistory(e.target.value)}>
+                {CONTACT_HISTORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="campaign-label">Channel
+              <select className="campaign-input" value={channel} onChange={(e) => setChannel(e.target.value)}>
+                {CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="campaign-label">Source year
+              <input className="campaign-input" type="number" value={sourceYear} onChange={(e) => setSourceYear(e.target.value)} placeholder="e.g. 2022" />
+            </label>
+            <label className="campaign-label">Source file (partial match)
+              <input className="campaign-input" value={sourceFile} onChange={(e) => setSourceFile(e.target.value)} placeholder="e.g. restland_export" />
+            </label>
+            <label className="campaign-label">Advisor
+              <select className="campaign-input" value={advisorId} onChange={(e) => setAdvisorId(e.target.value)}>
+                <option value="">Any advisor</option>
+                {advisors.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+              </select>
             </label>
           </div>
 
-          <label>
-            Status
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-
-          <label>
-            Message track override
-            <select value={messageTrack} onChange={(event) => setMessageTrack(event.target.value)}>
-              {TRACK_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-
-          <button className="btn btn--primary" type="submit" disabled={busy || !name.trim()}>
-            Save Campaign
+          <button className="btn btn--secondary" onClick={handlePreview} disabled={previewing}>
+            {previewing ? 'Previewing…' : '👁 Preview matching leads'}
           </button>
-        </form>
 
-        <section className="panel campaign-preview-panel">
-          <div className="panel-header">
-            <div>
-              <h2 className="panel-title">Preview & Apply</h2>
-              <p className="campaign-panel-subtitle">Preview before committing. DNC leads are counted but skipped on apply.</p>
+          {preview && (
+            <div className="campaign-preview-box">
+              <div className="campaign-preview-count">
+                <strong style={{ color: preview.total_matched > 0 ? 'var(--signal-green)' : 'var(--signal-amber)' }}>
+                  {preview.total_matched.toLocaleString()}
+                </strong> leads match these filters
+              </div>
+              {preview.sample.length > 0 && (
+                <table className="data-table campaign-preview-table">
+                  <thead><tr><th>Name</th><th>Tier</th><th>Status</th><th>Source</th></tr></thead>
+                  <tbody>
+                    {preview.sample.map((l) => (
+                      <tr key={l.id}>
+                        <td>{l.name || '—'}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>{l.tier || '—'}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>{l.status || '—'}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>{l.source_file ? l.source_file.slice(0, 20) : '—'}{l.source_year ? ` (${l.source_year})` : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {preview.total_matched > 10 && <p className="campaign-preview-note">Showing 10 of {preview.total_matched} matches</p>}
             </div>
-          </div>
-
-          <label>
-            Selected campaign
-            <select value={selectedCampaignId} onChange={(event) => { setSelectedCampaignId(event.target.value); setPreview(null); setApplyResult(null) }}>
-              <option value="">Select campaign</option>
-              {campaigns.map((campaign) => (
-                <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
-              ))}
-            </select>
-          </label>
-
-          {selectedCampaign ? (
-            <div className="campaign-selected-card">
-              <strong>{selectedCampaign.name}</strong>
-              <CriteriaPills criteria={selectedCampaign.filter_criteria} />
-              <small>Track: {labelFromOptions(TRACK_OPTIONS, selectedCampaign.message_track)}</small>
-            </div>
-          ) : (
-            <div className="campaign-empty-state">Create or select a campaign to preview matching leads.</div>
           )}
 
-          <label className="campaign-checkbox">
-            <input type="checkbox" checked={startCadence} onChange={(event) => setStartCadence(event.target.checked)} />
-            Start cadence for eligible matching leads on apply
-          </label>
-
-          <div className="campaign-action-row">
-            <button className="btn btn--secondary" type="button" onClick={() => previewCampaign()} disabled={busy || !selectedCampaignId}>
-              Preview Matches
-            </button>
-            <button className="btn btn--primary" type="button" onClick={applyCampaign} disabled={busy || !selectedCampaignId || !preview}>
-              Apply Campaign
+          <div className="campaign-nav">
+            <button className="btn btn--secondary" onClick={() => setStep(0)}>← Back</button>
+            <button className="btn btn--primary" onClick={() => { if (!preview) { handlePreview().then(() => setStep(2)) } else setStep(2) }}>
+              Next: Write message →
             </button>
           </div>
-
-          {preview ? (
-            <div className="campaign-preview-result">
-              <div className="campaign-preview-stats">
-                <article><span>Matching</span><strong>{preview.matching_count}</strong></article>
-                <article><span>Eligible</span><strong>{preview.eligible_count}</strong></article>
-                <article><span>DNC skipped</span><strong>{preview.skipped_dnc_count}</strong></article>
-              </div>
-              <div className="campaign-sample-list">
-                <h3>Sample leads</h3>
-                {(preview.sample || []).length === 0 ? (
-                  <p className="campaign-muted">No matching leads right now.</p>
-                ) : (
-                  preview.sample.map((lead) => (
-                    <div className="campaign-sample-item" key={lead.id}>
-                      <div>
-                        <strong>{lead.name}</strong>
-                        <span>{lead.phone || 'No phone'}</span>
-                      </div>
-                      <small>{lead.tier?.replaceAll('_', ' ')} · {lead.status?.replaceAll('_', ' ')} · {lead.source_year || 'no year'}</small>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          {applyResult ? (
-            <div className="campaign-apply-result">
-              Applied: {applyResult.updated_count} updated, {applyResult.skipped_dnc_count} DNC skipped, {applyResult.cadence_started_count} cadences started.
-            </div>
-          ) : null}
         </section>
-      </section>
+      )}
 
-      <section className="panel campaigns-list-panel">
-        <div className="panel-header">
-          <div>
-            <h2 className="panel-title">Existing Campaigns</h2>
-            <p className="campaign-panel-subtitle">Saved filters available for preview and apply.</p>
+      {step === 2 && (
+        <section className="panel campaign-section">
+          <h2 className="campaign-section-title">Craft your message</h2>
+
+          <div className="campaign-tone-row">
+            {TONES.map((t) => (
+              <button key={t.value} className={`campaign-tone-btn ${tone === t.value ? 'campaign-tone-btn--active' : ''}`} onClick={() => setTone(t.value)} title={t.desc}>
+                {t.label}
+              </button>
+            ))}
           </div>
-        </div>
 
-        <div className="campaigns-table-wrap">
-          <table className="data-table campaigns-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Criteria</th>
-                <th>Track</th>
-                <th>Created</th>
-                <th></th>
-              </tr>
-            </thead>
+          <div className="campaign-ai-row">
+            <button className="btn btn--secondary" onClick={handleGenerateMessage} disabled={generating}>
+              {generating ? '⏳ Writing…' : '✨ AI write message'}
+            </button>
+            <span className="campaign-ai-hint">AI writes an opening message based on your campaign purpose and tone. You can edit it.</span>
+          </div>
+
+          <textarea
+            className="campaign-textarea"
+            placeholder="Your message here — use {first_name} and {booking_url} as variables"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={5}
+          />
+
+          <div className="campaign-char-count" style={{ color: message.length > 320 ? 'var(--signal-red)' : 'var(--text-tertiary)' }}>
+            {message.length} / 320 characters
+          </div>
+
+          <div className="campaign-options">
+            <label className="campaign-check-label">
+              <input type="checkbox" checked={startCadence} onChange={(e) => setStartCadence(e.target.checked)} />
+              Start cadence after sending
+            </label>
+            {startCadence && cadenceTemplates.length > 0 && (
+              <select className="campaign-input" value={cadenceTemplateId} onChange={(e) => setCadenceTemplateId(e.target.value)}>
+                <option value="">Use default cadence</option>
+                {cadenceTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <label className="campaign-check-label">
+              <input type="checkbox" checked={autoReply} onChange={(e) => setAutoReply(e.target.checked)} />
+              Enable AI auto-reply — AI continues conversation until lead books
+            </label>
+            {autoReply && (
+              <div className="campaign-auto-info">
+                When a lead replies, AI will automatically respond based on the conversation context. You'll be notified of hot replies. Auto-reply stops when the lead books or opts out.
+              </div>
+            )}
+          </div>
+
+          <div className="campaign-nav">
+            <button className="btn btn--secondary" onClick={() => setStep(1)}>← Back</button>
+            <button className="btn btn--primary" onClick={handleSaveAndReview} disabled={!message.trim()}>
+              Review & send →
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 3 && (
+        <section className="panel campaign-section">
+          <h2 className="campaign-section-title">Review and launch</h2>
+          <div className="campaign-review-grid">
+            <div className="campaign-review-block">
+              <span className="campaign-review-label">Campaign</span>
+              <span className="campaign-review-value">{campaignName}</span>
+            </div>
+            <div className="campaign-review-block">
+              <span className="campaign-review-label">Purpose</span>
+              <span className="campaign-review-value">{purposes.find(p => p.value === purpose)?.label || purpose}</span>
+            </div>
+            <div className="campaign-review-block">
+              <span className="campaign-review-label">Audience</span>
+              <span className="campaign-review-value">{preview ? `${preview.total_matched.toLocaleString()} leads` : 'Preview to see count'}</span>
+            </div>
+            <div className="campaign-review-block">
+              <span className="campaign-review-label">Tone</span>
+              <span className="campaign-review-value">{TONES.find(t => t.value === tone)?.label}</span>
+            </div>
+            <div className="campaign-review-block" style={{ gridColumn: '1 / -1' }}>
+              <span className="campaign-review-label">Message</span>
+              <div className="campaign-review-message">{message}</div>
+            </div>
+            {startCadence && (
+              <div className="campaign-review-block">
+                <span className="campaign-review-label">Cadence</span>
+                <span className="campaign-review-value">{cadenceTemplateId ? cadenceTemplates.find(t => t.id === cadenceTemplateId)?.name : 'Default cadence'}</span>
+              </div>
+            )}
+            {autoReply && (
+              <div className="campaign-review-block">
+                <span className="campaign-review-label">AI auto-reply</span>
+                <span className="campaign-review-value" style={{ color: 'var(--signal-green)' }}>✓ Enabled</span>
+              </div>
+            )}
+          </div>
+
+          <div className="campaign-nav">
+            <button className="btn btn--secondary" onClick={() => setStep(2)}>← Edit message</button>
+            <button className="btn btn--primary campaign-send-btn" onClick={handleSend} disabled={sending || !message.trim()}>
+              {sending ? 'Launching…' : `🚀 Launch campaign`}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {campaigns.length > 0 && (
+        <section className="panel" style={{ marginTop: 20 }}>
+          <div className="panel-header">
+            <h2 className="panel-title">Past campaigns</h2>
+            <span className="panel-count">{campaigns.length}</span>
+          </div>
+          <table className="data-table">
+            <thead><tr><th>Name</th><th>Created</th><th>Track</th><th>Filters</th></tr></thead>
             <tbody>
-              {loading ? (
-                <tr><td colSpan="5" className="campaign-empty-cell">Loading campaigns...</td></tr>
-              ) : campaigns.length === 0 ? (
-                <tr><td colSpan="5" className="campaign-empty-cell">No campaigns saved yet.</td></tr>
-              ) : (
-                campaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td><strong>{campaign.name}</strong></td>
-                    <td><CriteriaPills criteria={campaign.filter_criteria} /></td>
-                    <td>{labelFromOptions(TRACK_OPTIONS, campaign.message_track)}</td>
-                    <td>{formatDate(campaign.created_at)}</td>
-                    <td>
-                      <button className="btn btn--secondary btn--small" type="button" onClick={() => previewCampaign(campaign.id)} disabled={busy}>
-                        Preview
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
+              {campaigns.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td className="mono" style={{ fontSize: 11 }}>{c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
+                  <td className="mono" style={{ fontSize: 11 }}>{c.message_track || '—'}</td>
+                  <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {Object.entries(c.filter_criteria || {}).map(([k, v]) => `${k}: ${v}`).join(', ') || 'All leads'}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   )
 }
