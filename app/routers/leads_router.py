@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import json as _json
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
@@ -351,8 +352,7 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     tracked on the backend the whole time but never surfaced anywhere in
     the UI - an advisor had no way to see if someone actually booked.
     """
-    from app.models.models import Message, Reply, BookingLink
-    import json as _json
+    from app.models.models import Message, Reply, BookingLink, EmailMessage, CadenceState
 
     lead = db.query(Lead).filter(
         Lead.id == lead_id, Lead.organization_id == current_user.organization_id
@@ -362,11 +362,13 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
 
     messages = db.query(Message).filter(Message.lead_id == lead_id).all()
     replies = db.query(Reply).filter(Reply.lead_id == lead_id).all()
+    email_messages = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).all()
 
     events = []
     for m in messages:
         events.append({
             "type": "outbound",
+            "channel": "sms",
             "body": m.body,
             "timestamp": m.sent_at,
             "status": m.twilio_status,
@@ -374,10 +376,32 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     for r in replies:
         events.append({
             "type": "inbound",
+            "channel": "sms",
             "body": r.body,
             "timestamp": r.received_at,
             "is_hot": r.is_hot,
         })
+    for e in email_messages:
+        events.append({
+            "type": "outbound",
+            "channel": "email",
+            "body": e.subject,
+            "body_preview": e.body_html[:200] if e.body_html else "",
+            "timestamp": e.sent_at,
+            "status": e.status,
+        })
+
+    # Add cadence milestones
+    cadence = db.query(CadenceState).filter(CadenceState.lead_id == lead_id).first()
+    if cadence and cadence.cadence_started_at:
+        events.append({
+            "type": "system",
+            "channel": "cadence",
+            "body": f"Cadence started — {cadence.current_touch_number} of 9 touches sent",
+            "timestamp": cadence.cadence_started_at,
+            "status": cadence.status,
+        })
+
     events.sort(key=lambda e: e["timestamp"] or "")
 
     ai_note = None
@@ -387,15 +411,6 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
         except Exception:
             ai_note = {"raw": lead.ai_lead_quality_note}
 
-    # NOTE: created_at has only second-level precision on some databases
-    # (confirmed during testing - two BookingLinks created in the same
-    # second get identical timestamps). For the real-world case (one
-    # booking link per lead, occasionally resent days/weeks apart) this
-    # is a non-issue. It only matters if two links are created for the
-    # same lead within the same second, which doesn't happen in normal
-    # usage (a human re-sending a link takes longer than that). Not
-    # adding a UUID tie-breaker since UUID4 ordering has no relationship
-    # to creation order and would be actively misleading.
     latest_booking = (
         db.query(BookingLink)
         .filter(BookingLink.lead_id == lead_id)

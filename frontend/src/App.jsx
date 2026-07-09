@@ -3,6 +3,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
 import CadenceTemplates from './pages/CadenceTemplates'
+import OrgSettings from './pages/OrgSettings'
 import ChangePassword from './pages/ChangePassword'
 import Overview from './pages/Overview'
 import Leads from './pages/Leads'
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />
+        <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route
           path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />}

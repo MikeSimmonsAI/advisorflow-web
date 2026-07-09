@@ -137,6 +137,17 @@ class Organization(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
+    # White label / branding
+    brand_name = Column(String, nullable=True)        # overrides "BookaBoost" in UI
+    brand_logo_url = Column(String, nullable=True)    # URL to org logo
+    brand_color_primary = Column(String, nullable=True)   # hex e.g. "#2fb6ff"
+    brand_color_accent = Column(String, nullable=True)    # hex e.g. "#1ef0a8"
+    industry = Column(String, default="funeral")          # funeral, roofing, insurance, etc.
+
+    # Industry-agnostic tier config — JSON array of tier definitions
+    # e.g. [{"value": "pre_need", "label": "Pre-Need", "color": "blue"}, ...]
+    tier_config = Column(Text, nullable=True)
+
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")

@@ -229,11 +229,15 @@ export default function LeadDetail() {
             ) : (
               <div className="lead-timeline">
                 {events.map((e, i) => (
-                  <div key={i} className={`lead-bubble lead-bubble--${e.type}`}>
+                  <div key={i} className={`lead-bubble lead-bubble--${e.type} ${e.channel === 'email' ? 'lead-bubble--email' : ''} ${e.channel === 'cadence' ? 'lead-bubble--system' : ''}`}>
                     {e.type === 'inbound' && e.is_hot && (
                       <div className="lead-bubble-hot"><SignalPulse color="red" size={6} /> Hot reply</div>
                     )}
+                    {e.channel && e.channel !== 'sms' && (
+                      <span className="lead-bubble-channel">{e.channel === 'email' ? '✉️ Email' : e.channel === 'cadence' ? '🔁 Cadence' : e.channel}</span>
+                    )}
                     <p className="lead-bubble-text">{e.body}</p>
+                    {e.body_preview && <p className="lead-bubble-preview">{e.body_preview}</p>}
                     <span className="lead-bubble-time">{timeAgo(e.timestamp)}</span>
                   </div>
                 ))}

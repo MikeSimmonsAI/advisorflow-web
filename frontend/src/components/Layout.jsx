@@ -24,6 +24,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/campaigns', label: 'Campaigns', icon: 'target' },
   { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
+  { to: '/org-settings', label: 'Org Settings', icon: 'settings' },
   { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
   { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
   { to: '/audit-log', label: 'Audit Log', icon: 'activity' },

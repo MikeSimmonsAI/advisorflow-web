@@ -46,6 +46,20 @@ export default function Replies() {
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [classificationFilter, setClassificationFilter] = useState('')
+  const [objectionData, setObjectionData] = useState({}) // reply_id -> objection response
+  const [objectionLoading, setObjectionLoading] = useState(null)
+
+  async function fetchObjectionReply(replyId) {
+    setObjectionLoading(replyId)
+    try {
+      const result = await api.post(`/ai/objection-reply/${replyId}`, { tone: 'direct' })
+      setObjectionData((prev) => ({ ...prev, [replyId]: result }))
+    } catch (err) {
+      setObjectionData((prev) => ({ ...prev, [replyId]: { error: err.message } }))
+    } finally {
+      setObjectionLoading(null)
+    }
+  }
 
   function loadReplies() {
     setLoading(true)
@@ -266,6 +280,30 @@ export default function Replies() {
                         </select>
                       </div>
                     </div>
+                    {objectionData[r.id] && !objectionData[r.id].error && (
+                      <div className="replies-objection-panel">
+                        <div className="replies-objection-type">
+                          🧠 {objectionData[r.id].objection_type?.replace(/_/g, ' ')}
+                        </div>
+                        <p className="replies-objection-response">{objectionData[r.id].suggested_reply}</p>
+                        <button
+                          className="btn btn--secondary replies-action-btn"
+                          onClick={() => { navigator.clipboard.writeText(objectionData[r.id].suggested_reply) }}
+                        >
+                          Copy response
+                        </button>
+                      </div>
+                    )}
+                    {objectionData[r.id]?.error && (
+                      <div className="replies-objection-error">{objectionData[r.id].error}</div>
+                    )}
+                    <button
+                      className="replies-objection-btn"
+                      onClick={(e) => { e.stopPropagation(); fetchObjectionReply(r.id) }}
+                      disabled={objectionLoading === r.id}
+                    >
+                      {objectionLoading === r.id ? '⏳ Analyzing…' : objectionData[r.id] ? '🧠 Re-analyze objection' : '🧠 AI objection handler'}
+                    </button>
                   </div>
                 </li>
               )

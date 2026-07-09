@@ -370,3 +370,67 @@ table.data-table tr:hover td {
   background: var(--signal-green);
   box-shadow: var(--glow-green-sm);
 }
+
+/* ── Mobile responsive overrides ── */
+@media (max-width: 640px) {
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-header .btn { width: 100%; justify-content: center; }
+
+  /* KPI card grids — 2 col on mobile */
+  .overview-hero-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .rpt-hero-kpi { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .admin-hero-kpi { grid-template-columns: 1fr !important; }
+  .admin-metrics-kpi { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .eq-kpi-row { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .cadence-kpi-row { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .cleanup-kpi-row { grid-template-columns: 1fr !important; }
+  .asq-kpi-row { grid-template-columns: 1fr !important; }
+  .campaign-result-grid { grid-template-columns: repeat(2, 1fr) !important; }
+
+  /* Multi-col grids collapse to single */
+  .overview-top-grid { grid-template-columns: 1fr !important; }
+  .overview-chart-grid { grid-template-columns: 1fr !important; }
+  .overview-bottom-grid { grid-template-columns: 1fr !important; }
+  .lead-detail-grid { grid-template-columns: 1fr !important; }
+  .cleanup-main { grid-template-columns: 1fr !important; }
+  .advisor-scorecard-grid { grid-template-columns: 1fr !important; }
+  .rpt-bottom-grid { grid-template-columns: 1fr !important; }
+  .campaign-filters-grid { grid-template-columns: 1fr !important; }
+  .campaign-review-grid { grid-template-columns: 1fr !important; }
+  .ct-editor-meta { grid-template-columns: 1fr !important; }
+  .cadence-schedule-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .today-briefing-list { grid-template-columns: 1fr !important; }
+  .leads-add-grid { grid-template-columns: 1fr !important; }
+  .campaign-purpose-grid { grid-template-columns: 1fr !important; }
+  .onboarding-industry-grid { grid-template-columns: repeat(2, 1fr) !important; }
+
+  /* Tables scroll horizontally */
+  .data-table { font-size: 12px; }
+  .data-table th, .data-table td { padding: 8px 10px; }
+
+  /* Lead detail */
+  .lead-detail-hero { flex-direction: column; gap: 14px; }
+  .lead-detail-hero-left { flex-direction: column; gap: 10px; }
+  .lead-tone-pills { flex-wrap: wrap; }
+
+  /* Cadence touch dots smaller */
+  .cadence-touch-dots { gap: 2px; }
+  .cadence-dot { width: 6px; height: 6px; }
+
+  /* Campaign tone row wrap */
+  .campaign-tone-row { flex-wrap: wrap; }
+
+  /* Tabs scroll */
+  .admin-tabs { overflow-x: auto; }
+  .leads-tabs { overflow-x: auto; }
+
+  /* KPI values smaller on mobile */
+  .overview-kpi-value { font-size: 28px !important; }
+  .rpt-hero-value { font-size: 22px !important; }
+
+  /* Onboarding card */
+  .onboarding-card { padding: 24px 20px; }
+
+  /* Top bar clock hide seconds on mobile */
+  .top-bar-time { font-size: 13px; }
+}

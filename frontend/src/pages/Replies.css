@@ -326,3 +326,10 @@
 @media (max-width: 560px) {
   .replies-kpi-grid { grid-template-columns: 1fr; }
 }
+
+.replies-objection-btn { background: none; border: none; color: var(--signal-purple); font-size: 12px; cursor: pointer; padding: 6px 0 0; font-weight: 600; display: block; }
+.replies-objection-btn:hover { text-decoration: underline; }
+.replies-objection-panel { background: var(--signal-purple-dim); border: 1px solid rgba(90,0,200,0.2); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 10px; }
+.replies-objection-type { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--signal-purple); margin-bottom: 6px; }
+.replies-objection-response { font-size: 13px; color: var(--text-primary); line-height: 1.6; margin-bottom: 10px; }
+.replies-objection-error { font-size: 12px; color: var(--signal-red); margin-top: 8px; }
