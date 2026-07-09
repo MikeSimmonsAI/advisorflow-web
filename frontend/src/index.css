@@ -259,3 +259,81 @@ select option {
 [data-theme="light"] .top-bar-date {
   color: #4a5e80;
 }
+
+/* ── Additional light mode fixes ── */
+[data-theme="light"] .panel {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(10, 40, 100, 0.10);
+}
+
+[data-theme="light"] .overview-kpi-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(10, 40, 100, 0.12);
+}
+
+[data-theme="light"] .overview-kpi-card::before {
+  display: none;
+}
+
+[data-theme="light"] .today-briefing-line {
+  background: rgba(240, 246, 255, 0.8);
+  border-color: rgba(10, 40, 100, 0.10);
+  color: #243450;
+}
+
+[data-theme="light"] .reply-item {
+  background: rgba(240, 246, 255, 0.8);
+  border-color: rgba(10, 40, 100, 0.10);
+}
+
+[data-theme="light"] .reply-body {
+  color: #243450;
+}
+
+[data-theme="light"] .funnel-track {
+  background: rgba(10, 40, 100, 0.08);
+}
+
+[data-theme="light"] .logout-btn {
+  background: rgba(10, 40, 100, 0.08);
+  color: rgba(200, 220, 255, 0.85);
+  border-color: rgba(200, 220, 255, 0.2);
+}
+
+[data-theme="light"] .nav-divider {
+  background: rgba(200, 220, 255, 0.15);
+}
+
+[data-theme="light"] .data-table tbody tr:hover td {
+  background: rgba(220, 232, 250, 0.6);
+}
+
+[data-theme="light"] .tab {
+  color: #4a5e80;
+}
+
+[data-theme="light"] .tab--active {
+  color: #0070cc;
+  border-bottom-color: #0070cc;
+}
+
+[data-theme="light"] .badge--blue { background: rgba(0, 112, 204, 0.12); color: #0070cc; }
+[data-theme="light"] .badge--green { background: rgba(0, 122, 77, 0.12); color: #007a4d; }
+[data-theme="light"] .badge--red { background: rgba(192, 0, 58, 0.10); color: #c0003a; }
+[data-theme="light"] .badge--amber { background: rgba(181, 96, 0, 0.12); color: #b56000; }
+
+[data-theme="light"] .compose-textarea,
+[data-theme="light"] .search-input,
+[data-theme="light"] .filter-select {
+  background: rgba(235, 241, 252, 0.9);
+  color: #0a1628;
+  border-color: rgba(10, 40, 100, 0.15);
+}
+
+[data-theme="light"] .empty-state {
+  color: #5a6a8a;
+}
+
+[data-theme="light"] .signal-pulse {
+  filter: brightness(0.7);
+}
