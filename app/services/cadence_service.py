@@ -139,7 +139,41 @@ def stop_cadence_for_lead(db: Session, lead_id: str, reason: CadenceStatus) -> N
     db.commit()
 
 
-def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number: int, booking_url: str) -> str:
+def _get_org_cadence_schedule(db, organization_id: str) -> list[dict]:
+    """
+    Returns the cadence schedule for an org.
+    If the org has a default CadenceTemplate, use its touches.
+    Otherwise fall back to the hardcoded CADENCE_SCHEDULE_DAYS.
+    Each item: {day_offset, send_hour, channel, message_template, touch_number}
+    """
+    from app.models.models import CadenceTemplate
+    template = db.query(CadenceTemplate).filter(
+        CadenceTemplate.organization_id == organization_id,
+        CadenceTemplate.is_default == True,
+        CadenceTemplate.is_active == True,
+    ).first()
+
+    if template and template.touches:
+        return [
+            {
+                "touch_number": t.touch_number,
+                "day_offset": t.day_offset,
+                "send_hour": t.send_hour,
+                "channel": t.channel,
+                "message_template": t.message_template,
+            }
+            for t in sorted(template.touches, key=lambda x: x.touch_number)
+            if t.is_active
+        ]
+
+    # Fallback to hardcoded schedule
+    return [
+        {"touch_number": i + 1, "day_offset": day, "send_hour": 10, "channel": "sms", "message_template": None}
+        for i, day in enumerate(CADENCE_SCHEDULE_DAYS)
+    ]
+
+
+def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number: int, booking_url: str, message_template: str = None) -> str:
     """
     Checks for an org-customized template first (see template_service.py);
     falls back to the hardcoded default if the org hasn't customized this
@@ -153,6 +187,19 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     preview a user sees before confirming an import batch is genuinely
     the same text that would actually go out, not an approximation.
     """
+    # If a cadence template touch provides a message, use it directly
+    if message_template:
+        org = db.query(__import__('app.models.models', fromlist=['Organization']).Organization).filter_by(id=lead.organization_id).first()
+        org_name = org.name if org else "our organization"
+        return (
+            message_template
+            .replace("{first_name}", lead.first_name or "there")
+            .replace("{advisor_name}", advisor.full_name or "your advisor")
+            .replace("{org_name}", org_name)
+            .replace("{booking_url}", booking_url)
+            .replace("{booking_link}", booking_url)
+        )
+
     from app.services.template_service import get_sms_template
     custom_template = get_sms_template(db, lead.organization_id, lead.message_track)
     template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES["pre_need_lock_price"])
@@ -210,12 +257,26 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
 
         touch_number = state.current_touch_number + 1
 
+        # Get the org's cadence schedule (template or fallback)
+        schedule = _get_org_cadence_schedule(db, lead.organization_id)
+        total_touches = len(schedule)
+
+        # Find the touch definition for this touch number
+        touch_def = next((t for t in schedule if t["touch_number"] == touch_number), None)
+        if not touch_def:
+            # Beyond the end of the template
+            state.status = "completed"
+            state.completed_at = now
+            db.commit()
+            completed_count += 1
+            continue
+
         try:
             from app.services.sms_service import create_booking_link
             booking = create_booking_link(db, lead, advisor)
             import os
             booking_url = f"{os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
-            body = render_cadence_message(db, lead, advisor, touch_number, booking_url)
+            body = render_cadence_message(db, lead, advisor, touch_number, booking_url, touch_def.get("message_template"))
 
             from app.services.sms_service import get_twilio_client
             client = get_twilio_client(advisor)
@@ -232,13 +293,19 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             state.current_touch_number = touch_number
             state.last_touch_sent_at = now
 
-            if touch_number >= TOTAL_TOUCHES:
+            if touch_number >= total_touches:
                 state.status = "completed"
                 state.completed_at = now
                 completed_count += 1
             else:
-                next_day_offset = CADENCE_SCHEDULE_DAYS[touch_number]  # next touch's day offset
-                state.next_touch_due_at = state.cadence_started_at + timedelta(days=next_day_offset)
+                # Find next touch day offset from template schedule
+                next_touch_def = next((t for t in schedule if t["touch_number"] == touch_number + 1), None)
+                if next_touch_def:
+                    state.next_touch_due_at = state.cadence_started_at + timedelta(days=next_touch_def["day_offset"])
+                else:
+                    state.status = "completed"
+                    state.completed_at = now
+                    completed_count += 1
 
             lead.status = "sent"
             db.commit()

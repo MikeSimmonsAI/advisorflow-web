@@ -133,21 +133,25 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
     leads_owned = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
+        Lead.is_duplicate == False,
     ).scalar() or 0
 
     messages_sent = db.query(func.count(Message.id)).join(Lead, Message.lead_id == Lead.id).filter(
         Lead.organization_id == organization_id,
         Message.sender_id == advisor.id,
+        Lead.is_duplicate == False,
     ).scalar() or 0
 
     replies = db.query(func.count(Reply.id)).join(Lead, Reply.lead_id == Lead.id).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
+        Lead.is_duplicate == False,
     ).scalar() or 0
 
     hot_replies = db.query(func.count(Reply.id)).join(Lead, Reply.lead_id == Lead.id).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
+        Lead.is_duplicate == False,
         ((Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)),
     ).scalar() or 0
 
@@ -155,12 +159,14 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
         Lead.status == "booked",
+        Lead.is_duplicate == False,
     ).scalar() or 0
 
     dnc_leads = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
         Lead.status == "dnc",
+        Lead.is_duplicate == False,
     ).scalar() or 0
 
     duplicate_leads_prevented = db.query(func.count(Lead.id)).filter(
@@ -981,11 +987,22 @@ def potential_duplicate_leads(
     current_user: User = Depends(require_admin),
 ):
     """
-    Find likely messy duplicate leads that were not caught by the import dedup flow.
+    Find likely duplicate leads using tiered confidence matching:
 
-    A group appears when two or more non-duplicate leads in the same org share
-    the same normalized phone OR normalized last name. Existing import-caught
-    duplicates (Lead.is_duplicate=True) are intentionally excluded.
+    Tier 1 — PHONE match: same normalized phone number.
+              Strongest signal. Always grouped.
+
+    Tier 2 — PHONE + LAST NAME: same phone AND same last name.
+              Redundant with Tier 1 in most cases, but surfaces conflicts.
+
+    Tier 3 — LAST NAME + SOURCE YEAR: same normalized last name AND same
+              source_year. Only grouped if source_year is set on both leads.
+              Avoids grouping every "Jones" across all years.
+
+    Last name only (no phone, no year) is intentionally excluded — too noisy.
+
+    Existing import-caught duplicates (Lead.is_duplicate=True) are excluded
+    since they're already flagged.
     """
     leads = (
         db.query(Lead)
@@ -994,36 +1011,56 @@ def potential_duplicate_leads(
             (Lead.is_duplicate == False) | (Lead.is_duplicate.is_(None)),
         )
         .order_by(Lead.created_at.desc())
-        .limit(2000)
+        .limit(5000)
         .all()
     )
 
-    grouped: dict[tuple[str, str], list[Lead]] = defaultdict(list)
+    # Tier 1: group by phone
+    phone_groups: dict[str, list[Lead]] = defaultdict(list)
+    # Tier 3: group by last_name + source_year (only when year is set)
+    name_year_groups: dict[tuple[str, int], list[Lead]] = defaultdict(list)
+
     for lead in leads:
         phone_key = normalize_phone(lead.phone or lead.phone_raw or "")
         last_key = normalize_last_name(lead.last_name or "")
+
         if phone_key:
-            grouped[("phone", phone_key)].append(lead)
-        if last_key:
-            grouped[("last_name", last_key)].append(lead)
+            phone_groups[phone_key].append(lead)
+
+        if last_key and lead.source_year:
+            name_year_groups[(last_key, lead.source_year)].append(lead)
 
     results = []
-    seen_exact_group_keys: set[tuple[str, str]] = set()
-    for (match_type, match_key), group_leads in grouped.items():
+    # Track which lead IDs are already in a phone group to avoid
+    # showing the same leads again in a name+year group
+    leads_in_phone_groups: set[str] = set()
+
+    # Tier 1 — phone matches (highest confidence)
+    for phone_key, group_leads in phone_groups.items():
         if len(group_leads) < 2:
             continue
-        group_ids = tuple(sorted(lead.id for lead in group_leads))
-        # Keep both phone and last-name groups when they identify different clusters,
-        # but avoid returning the exact same group twice if phone and last name both match.
-        dedupe_key = (match_type, "|".join(group_ids))
-        if dedupe_key in seen_exact_group_keys:
-            continue
-        seen_exact_group_keys.add(dedupe_key)
+        for l in group_leads:
+            leads_in_phone_groups.add(l.id)
         results.append({
-            "match_type": match_type,
-            "match_key": match_key,
-            "leads": [_lead_summary(lead) for lead in group_leads],
+            "match_type": "phone",
+            "match_key": phone_key,
+            "leads": [_lead_summary(l) for l in group_leads],
         })
+
+    # Tier 3 — last name + source year (only leads NOT already in a phone group)
+    for (last_key, year), group_leads in name_year_groups.items():
+        # Filter out leads already surfaced by phone grouping
+        new_leads = [l for l in group_leads if l.id not in leads_in_phone_groups]
+        if len(new_leads) < 2:
+            continue
+        results.append({
+            "match_type": "name_year",
+            "match_key": f"{last_key} ({year})",
+            "leads": [_lead_summary(l) for l in new_leads],
+        })
+
+    # Sort: phone matches first (most actionable), then name+year
+    results.sort(key=lambda r: (0 if r["match_type"] == "phone" else 1, r["match_key"]))
 
     return results
 

@@ -55,6 +55,7 @@ def get_todays_work(
             Lead.organization_id == org_id,
             Lead.assigned_to_id == user_id,
             Lead.status == "new",
+            Lead.is_duplicate == False,
         )
         .order_by(Lead.created_at.asc(), Lead.id.asc())
         .limit(100)
@@ -68,6 +69,7 @@ def get_todays_work(
         .filter(
             Lead.organization_id == org_id,
             Lead.assigned_to_id == user_id,
+            Lead.is_duplicate == False,
             Reply.classification.in_(["interested", "callback"]),
             Reply.reviewed_at.is_(None),
         )
@@ -83,6 +85,7 @@ def get_todays_work(
         .filter(
             Lead.organization_id == org_id,
             Lead.assigned_to_id == user_id,
+            Lead.is_duplicate == False,
             CadenceState.status == "active",
             CadenceState.next_touch_due_at.isnot(None),
             CadenceState.next_touch_due_at <= now,
@@ -92,20 +95,14 @@ def get_todays_work(
         .all()
     )
 
-    # Booked leads with no outcome recorded — use subquery instead of group_by
-    leads_with_outcomes = (
-        db.query(LeadOutcome.lead_id)
-        .filter(LeadOutcome.lead_id.isnot(None))
-        .distinct()
-        .subquery()
-    )
-
+    # Booked leads with no outcome recorded
     outcomes_needed_leads = (
         db.query(Lead)
         .filter(
             Lead.organization_id == org_id,
             Lead.assigned_to_id == user_id,
             Lead.status == "booked",
+            Lead.is_duplicate == False,
             ~Lead.id.in_(
                 db.query(LeadOutcome.lead_id)
                 .filter(LeadOutcome.lead_id.isnot(None))
