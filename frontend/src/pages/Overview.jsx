@@ -1,25 +1,25 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  PolarAngleAxis,
-  RadialBar,
-  RadialBarChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
+  CartesianGrid, Cell, Line, LineChart, Pie, PieChart,
+  PolarAngleAxis, RadialBar, RadialBarChart,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { api } from '../api/client'
-import { getCurrentUser } from '../api/client'
-import StatCard from '../components/StatCard'
+import { api, getCurrentUser } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import './Overview.css'
+
+const chartTooltipStyle = {
+  background: 'rgba(7, 14, 32, 0.96)',
+  border: '1px solid rgba(86, 200, 255, 0.42)',
+  borderRadius: 12,
+  color: '#eef5ff',
+}
+
+function formatDate(value) {
+  const date = new Date(`${value}T00:00:00`)
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 export default function Overview() {
   const user = getCurrentUser()
@@ -31,7 +31,6 @@ export default function Overview() {
   const [engagementBreakdown, setEngagementBreakdown] = useState(null)
   const [cadenceHealth, setCadenceHealth] = useState(null)
   const [statusFunnel, setStatusFunnel] = useState([])
-  const [sparklines, setSparklines] = useState(null)
   const [outcomesSummary, setOutcomesSummary] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -44,17 +43,15 @@ export default function Overview() {
       api.get('/leads/engagement-breakdown').catch(() => null),
       api.get('/cadence/health-summary').catch(() => null),
       api.get('/leads/status-funnel').catch(() => []),
-      api.get('/leads/sparklines?days=7').catch(() => null),
       api.get('/outcomes/summary').catch(() => null),
-    ]).then(([leadsData, repliesData, briefingData, replyActivityData, engagementData, cadenceHealthData, statusFunnelData, sparklinesData, outcomesData]) => {
-      setLeads(leadsData)
-      setReplies(repliesData)
+    ]).then(([leadsData, repliesData, briefingData, replyActivityData, engagementData, cadenceHealthData, statusFunnelData, outcomesData]) => {
+      setLeads(leadsData || [])
+      setReplies(repliesData || [])
       setDailyBriefing(briefingData)
       setReplyActivity(replyActivityData || [])
       setEngagementBreakdown(engagementData)
       setCadenceHealth(cadenceHealthData)
       setStatusFunnel(statusFunnelData || [])
-      setSparklines(sparklinesData)
       setOutcomesSummary(outcomesData)
       setLoading(false)
     })
@@ -62,45 +59,29 @@ export default function Overview() {
 
   const newCount = leads.filter((l) => l.status === 'new').length
   const sentCount = leads.filter((l) => l.status === 'sent').length
-  const hotCount = leads.filter((l) => l.status === 'hot').length
+  const hotCount = replies.length
   const bookedCount = leads.filter((l) => l.status === 'booked').length
   const needsReviewCount = leads.filter((l) => l.status === 'needs_tier_review').length
-
-  const chartTooltipStyle = {
-    background: 'rgba(7, 14, 32, 0.96)',
-    border: '1px solid rgba(86, 200, 255, 0.42)',
-    borderRadius: 12,
-    color: '#eef5ff',
-    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.45)',
-  }
-
-  const formatActivityDate = (value) => {
-    const date = new Date(`${value}T00:00:00`)
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  }
+  const certifiedCount = dailyBriefing?.certified_appointments_waiting ?? 0
 
   const engagementChartData = engagementBreakdown ? [
-    { name: 'Hot', key: 'hot', value: engagementBreakdown.hot || 0, color: 'var(--signal-red)' },
-    { name: 'Warm', key: 'warm', value: engagementBreakdown.warm || 0, color: 'var(--signal-amber)' },
-    { name: 'Cold', key: 'cold', value: engagementBreakdown.cold || 0, color: 'var(--signal-blue)' },
-    { name: 'Unknown', key: 'unknown', value: engagementBreakdown.unknown || 0, color: 'var(--text-tertiary)' },
+    { name: 'Hot', value: engagementBreakdown.hot || 0, color: 'var(--signal-red)' },
+    { name: 'Warm', value: engagementBreakdown.warm || 0, color: 'var(--signal-amber)' },
+    { name: 'Cold', value: engagementBreakdown.cold || 0, color: 'var(--signal-blue)' },
+    { name: 'Unknown', value: engagementBreakdown.unknown || 0, color: 'rgba(255,255,255,0.18)' },
   ] : []
 
-  const cadenceGaugeData = [{
-    name: 'Healthy active cadences',
-    value: cadenceHealth?.health_score || 0,
-    fill: 'var(--signal-green)',
-  }]
+  const cadenceGaugeData = [{ name: 'Health', value: cadenceHealth?.health_score || 0, fill: 'var(--signal-green)' }]
+  const maxFunnelCount = Math.max(1, ...statusFunnel.map((s) => s.count || 0))
 
-  const maxFunnelCount = Math.max(1, ...statusFunnel.map((stage) => stage.count || 0))
-
-  const briefingLines = dailyBriefing ? [
-    { key: 'certified', count: dailyBriefing.certified_appointments_waiting, text: `${dailyBriefing.certified_appointments_waiting} certified appointment${dailyBriefing.certified_appointments_waiting === 1 ? '' : 's'} waiting`, path: '/leads', accent: 'green' },
-    { key: 'replies', count: dailyBriefing.replies_needing_attention, text: `${dailyBriefing.replies_needing_attention} ${dailyBriefing.replies_needing_attention === 1 ? 'reply needs' : 'replies need'} your attention`, path: '/replies?needs_attention=true', accent: 'red' },
-    { key: 'cadence', count: dailyBriefing.cadence_touches_due_today, text: `${dailyBriefing.cadence_touches_due_today} cadence ${dailyBriefing.cadence_touches_due_today === 1 ? 'touch is' : 'touches are'} due today`, path: '/cadence', accent: 'blue' },
-    { key: 'imports', count: dailyBriefing.leads_imported_last_24h, text: `${dailyBriefing.leads_imported_last_24h} ${dailyBriefing.leads_imported_last_24h === 1 ? 'lead was' : 'leads were'} imported in the last 24 hours`, path: '/leads', accent: 'green' },
-    { key: 'bookings', count: dailyBriefing.bookings_last_7_days, text: `${dailyBriefing.bookings_last_7_days} ${dailyBriefing.bookings_last_7_days === 1 ? 'booking was' : 'bookings were'} created in the last 7 days`, path: '/leads', accent: 'amber' },
-  ] : []
+  const heroCards = [
+    { label: 'Certified appts', value: certifiedCount, color: 'var(--signal-green)', glow: 'var(--glow-green-md)', path: '/leads', sub: 'Waiting to be worked' },
+    { label: 'Hot replies', value: hotCount, color: 'var(--signal-red)', glow: 'var(--glow-red-md)', path: '/replies', sub: 'Needs your attention' },
+    { label: 'New leads', value: newCount, color: 'var(--signal-blue)', glow: 'var(--glow-blue-md)', path: '/leads', sub: 'Ready to contact' },
+    { label: 'Booked', value: bookedCount, color: 'var(--signal-amber)', glow: 'var(--glow-amber-md)', path: '/leads', sub: 'Appointments set' },
+    { label: 'Sent', value: sentCount, color: 'var(--text-primary)', glow: 'none', path: '/leads', sub: 'Awaiting reply' },
+    { label: 'Needs review', value: needsReviewCount, color: 'var(--signal-amber)', glow: 'var(--glow-amber-md)', path: '/leads', sub: 'Untyped leads' },
+  ]
 
   return (
     <div className="overview-page">
@@ -113,29 +94,15 @@ export default function Overview() {
       </header>
 
       <div className="overview-hero-grid">
-        <button className="overview-hero-card-link overview-hero-card-link--lead" onClick={() => navigate('/leads')}>
-          <StatCard
-            label="Certified appointments"
-            value={loading ? '—' : (dailyBriefing?.certified_appointments_waiting ?? 0)}
-            accent="green"
-            sublabel="Waiting — solicited, contacted, booked, confirmed"
-          />
-        </button>
-        <button className="stat-card-link" onClick={() => navigate('/replies?needs_attention=true')}>
-          <StatCard label="Hot replies" value={loading ? '—' : hotCount} accent="red" sublabel="Needs your attention" />
-        </button>
-        <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="New leads" value={loading ? '—' : newCount} accent="blue" sublabel="Ready to contact" sparkline={sparklines?.leads_imported} />
-        </button>
-        <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="Booked" value={loading ? '—' : bookedCount} accent="amber" sublabel="Appointments set" sparkline={sparklines?.bookings} />
-        </button>
-        <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="Sent" value={loading ? '—' : sentCount} accent="neutral" sublabel="Awaiting reply" />
-        </button>
-        <button className="stat-card-link" onClick={() => navigate('/leads')}>
-          <StatCard label="Needs tier review" value={loading ? '—' : needsReviewCount} accent="amber" sublabel="Untyped leads" />
-        </button>
+        {heroCards.map((card) => (
+          <button key={card.label} className="overview-kpi-card" onClick={() => navigate(card.path)}>
+            <span className="overview-kpi-label">{card.label}</span>
+            <strong className="overview-kpi-value" style={{ color: card.color, textShadow: card.glow }}>
+              {loading ? '—' : card.value}
+            </strong>
+            <span className="overview-kpi-sub">{card.sub}</span>
+          </button>
+        ))}
       </div>
 
       <div className="overview-top-grid">
@@ -144,18 +111,24 @@ export default function Overview() {
             <h2 className="panel-title">Today</h2>
           </div>
           {loading ? (
-            <div className="empty-state">Building your daily briefing...</div>
+            <div className="empty-state">Building briefing…</div>
           ) : dailyBriefing ? (
             <div className="today-briefing-list">
-              {briefingLines.map((item) => (
+              {[
+                { key: 'certified', count: dailyBriefing.certified_appointments_waiting, text: `${dailyBriefing.certified_appointments_waiting} certified appointments waiting`, path: '/leads', accent: 'green' },
+                { key: 'replies', count: dailyBriefing.replies_needing_attention, text: `${dailyBriefing.replies_needing_attention} replies need attention`, path: '/replies', accent: 'red' },
+                { key: 'cadence', count: dailyBriefing.cadence_touches_due_today, text: `${dailyBriefing.cadence_touches_due_today} cadence touches due today`, path: '/cadence', accent: 'blue' },
+                { key: 'imports', count: dailyBriefing.leads_imported_last_24h, text: `${dailyBriefing.leads_imported_last_24h} leads imported in 24h`, path: '/leads', accent: 'green' },
+                { key: 'bookings', count: dailyBriefing.bookings_last_7_days, text: `${dailyBriefing.bookings_last_7_days} bookings in last 7 days`, path: '/leads', accent: 'amber' },
+              ].map((item) => (
                 <button key={item.key} className={`today-briefing-line today-briefing-line--${item.accent}`} onClick={() => navigate(item.path)}>
-                  <span className="today-briefing-dot" aria-hidden="true" />
-                  <span>{item.text}.</span>
+                  <span className="today-briefing-dot" />
+                  <span>{item.text}</span>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="empty-state">Daily briefing is unavailable right now.</div>
+            <div className="empty-state">No briefing data available.</div>
           )}
         </section>
 
@@ -165,12 +138,12 @@ export default function Overview() {
             <span className="panel-count">{replies.length}</span>
           </div>
           {replies.length === 0 ? (
-            <div className="empty-state">No hot replies yet.</div>
+            <div className="empty-state">No hot replies right now.</div>
           ) : (
             <ul className="reply-list reply-list--compact">
-              {replies.slice(0, 4).map((r) => (
+              {replies.slice(0, 5).map((r) => (
                 <li key={r.id} className="reply-item reply-item--clickable" onClick={() => r.lead_id && navigate(`/leads/${r.lead_id}`)}>
-                  <SignalPulse color="red" size={6} />
+                  <span className="overview-hot-dot" />
                   <span className="reply-body">{r.body}</span>
                 </li>
               ))}
@@ -179,162 +152,117 @@ export default function Overview() {
         </section>
       </div>
 
-      <section className="overview-chart-grid overview-chart-grid--compact" aria-label="Real-time advisor charts">
+      <div className="overview-chart-grid">
         <article className="panel overview-chart-panel overview-chart-panel--wide">
           <div className="panel-header">
             <h2 className="panel-title">Reply activity</h2>
             <span className="chart-subtitle-inline">Last 14 days</span>
           </div>
-          <div className="chart-frame chart-frame--line chart-frame--compact">
-            {replyActivity.length === 0 ? (
-              <div className="empty-state">No reply activity data available yet.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={170}>
-                <LineChart data={replyActivity} margin={{ top: 16, right: 18, left: -18, bottom: 2 }}>
-                  <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="4 8" vertical={false} />
-                  <XAxis dataKey="date" tickFormatter={formatActivityDate} stroke="var(--text-tertiary)" tickLine={false} axisLine={false} minTickGap={18} />
-                  <YAxis allowDecimals={false} stroke="var(--text-tertiary)" tickLine={false} axisLine={false} width={36} />
-                  <Tooltip contentStyle={chartTooltipStyle} labelFormatter={formatActivityDate} />
-                  <Line type="monotone" dataKey="count" name="Replies" stroke="var(--signal-blue)" strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+          {replyActivity.length === 0 ? (
+            <div className="empty-state">No reply data yet.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={160}>
+              <LineChart data={replyActivity} margin={{ top: 10, right: 16, left: -18, bottom: 2 }}>
+                <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="4 8" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={formatDate} stroke="var(--text-tertiary)" tickLine={false} axisLine={false} minTickGap={18} />
+                <YAxis allowDecimals={false} stroke="var(--text-tertiary)" tickLine={false} axisLine={false} width={36} />
+                <Tooltip contentStyle={chartTooltipStyle} labelFormatter={formatDate} />
+                <Line type="monotone" dataKey="count" name="Replies" stroke="var(--signal-blue)" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </article>
 
         <article className="panel overview-chart-panel">
           <div className="panel-header">
             <h2 className="panel-title">Engagement</h2>
           </div>
-          <div className="chart-frame chart-frame--donut chart-frame--compact">
-            {engagementChartData.length === 0 ? (
-              <div className="empty-state">No engagement data yet.</div>
-            ) : (
-              <>
-                <ResponsiveContainer width="100%" height={150}>
-                  <PieChart>
-                    <Pie data={engagementChartData} dataKey="value" nameKey="name" innerRadius="60%" outerRadius="86%" paddingAngle={4}>
-                      {engagementChartData.map((entry) => <Cell key={entry.key} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={chartTooltipStyle} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="chart-legend chart-legend--compact">
-                  {engagementChartData.map((entry) => (
-                    <span key={entry.key} className="chart-legend-item">
-                      <span className="chart-legend-dot" style={{ background: entry.color }} />
-                      {entry.name}: {entry.value}
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          {engagementChartData.length === 0 ? (
+            <div className="empty-state">No engagement data yet.</div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={130}>
+                <PieChart>
+                  <Pie data={engagementChartData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="84%" paddingAngle={3}>
+                    {engagementChartData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                  </Pie>
+                  <Tooltip contentStyle={chartTooltipStyle} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="chart-legend chart-legend--compact">
+                {engagementChartData.map((e) => (
+                  <span key={e.name} className="chart-legend-item">
+                    <span className="chart-legend-dot" style={{ background: e.color }} />
+                    {e.name}: {e.value}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
         </article>
 
         <article className="panel overview-chart-panel">
           <div className="panel-header">
             <h2 className="panel-title">Cadence health</h2>
           </div>
-          <div className="chart-frame chart-frame--gauge chart-frame--compact">
-            {cadenceHealth ? (
-              <>
-                <ResponsiveContainer width="100%" height={140}>
-                  <RadialBarChart innerRadius="70%" outerRadius="100%" data={cadenceGaugeData} startAngle={180} endAngle={0}>
-                    <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-                    <RadialBar dataKey="value" cornerRadius={14} background={{ fill: 'rgba(47, 182, 255, 0.12)' }} />
-                  </RadialBarChart>
-                </ResponsiveContainer>
-                <div className="gauge-readout gauge-readout--compact">
-                  <strong>{cadenceHealth.health_score}%</strong>
-                  <span>{cadenceHealth.healthy_active_count}/{cadenceHealth.active_count} healthy</span>
-                </div>
-              </>
-            ) : (
-              <div className="empty-state">No cadence data yet.</div>
-            )}
-          </div>
+          {cadenceHealth ? (
+            <>
+              <ResponsiveContainer width="100%" height={130}>
+                <RadialBarChart innerRadius="70%" outerRadius="100%" data={cadenceGaugeData} startAngle={180} endAngle={0}>
+                  <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                  <RadialBar dataKey="value" cornerRadius={12} background={{ fill: 'rgba(47, 182, 255, 0.10)' }} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+              <div className="gauge-readout gauge-readout--compact">
+                <strong>{cadenceHealth.health_score}%</strong>
+                <span>{cadenceHealth.healthy_active_count}/{cadenceHealth.active_count} healthy</span>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">No cadence data.</div>
+          )}
         </article>
+      </div>
 
-        <article className="panel overview-chart-panel overview-chart-panel--wide">
+      <div className="overview-bottom-grid">
+        <article className="panel">
           <div className="panel-header">
             <h2 className="panel-title">Status funnel</h2>
           </div>
-          <div className="funnel-list funnel-list--compact">
-            {statusFunnel.length === 0 ? (
-              <div className="empty-state">No status funnel data available yet.</div>
-            ) : statusFunnel.map((stage) => (
-              <div key={stage.status} className={`funnel-row funnel-row--${stage.status}`}>
-                <div className="funnel-row-meta">
-                  <span>{stage.label}</span>
-                  <strong>{stage.count}</strong>
-                </div>
-                <div className="funnel-track" aria-hidden="true">
-                  <div className="funnel-bar" style={{ width: `${Math.max(6, Math.round(((stage.count || 0) / maxFunnelCount) * 100))}%` }} />
-                </div>
+          {statusFunnel.length === 0 ? (
+            <div className="empty-state">No funnel data yet.</div>
+          ) : statusFunnel.map((stage) => (
+            <div key={stage.status} className="funnel-row">
+              <div className="funnel-row-meta">
+                <span>{stage.label}</span>
+                <strong>{stage.count}</strong>
+              </div>
+              <div className="funnel-track">
+                <div className="funnel-bar" style={{ width: `${Math.max(4, Math.round(((stage.count || 0) / maxFunnelCount) * 100))}%` }} />
+              </div>
+            </div>
+          ))}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Revenue activity</h2>
+          </div>
+          <div className="overview-revenue-cards">
+            {[
+              { label: 'Pipeline', value: bookedCount, color: 'var(--signal-blue)', sub: 'Booked appointments' },
+              { label: 'Completed', value: outcomesSummary?.total_appointments ?? 0, color: 'var(--signal-green)', sub: 'Recorded outcomes' },
+              { label: 'Sales', value: outcomesSummary?.sales_count ?? 0, color: 'var(--signal-purple)', sub: outcomesSummary?.conversion_rate != null ? `${outcomesSummary.conversion_rate}% conversion` : 'No outcomes yet' },
+            ].map((item) => (
+              <div key={item.label} className="overview-revenue-stat">
+                <span className="overview-revenue-label">{item.label}</span>
+                <strong className="overview-revenue-value" style={{ color: item.color }}>{loading ? '—' : item.value}</strong>
+                <span className="overview-revenue-sub">{item.sub}</span>
               </div>
             ))}
           </div>
         </article>
-      </section>
-
-      {/* ── Revenue Activity Section ─────────────────────────── */}
-      <section className="overview-revenue-section">
-        <div className="panel-header">
-          <h2 className="panel-title">💰 Revenue activity</h2>
-          <span className="chart-subtitle-inline">Based on recorded outcomes</span>
-        </div>
-        <div className="overview-revenue-grid">
-
-          <article className="panel overview-revenue-card overview-revenue-card--pipeline">
-            <span className="overview-revenue-label">Pipeline</span>
-            <div className="overview-revenue-value overview-revenue-value--blue">
-              {loading ? '—' : bookedCount}
-            </div>
-            <span className="overview-revenue-sub">Booked appointments in progress</span>
-          </article>
-
-          <article className="panel overview-revenue-card overview-revenue-card--appointments">
-            <span className="overview-revenue-label">Appointments completed</span>
-            <div className="overview-revenue-value overview-revenue-value--green">
-              {loading ? '—' : (outcomesSummary?.total_appointments ?? 0)}
-            </div>
-            <span className="overview-revenue-sub">Total recorded outcomes</span>
-          </article>
-
-          <article className="panel overview-revenue-card overview-revenue-card--sales">
-            <span className="overview-revenue-label">Sales recorded</span>
-            <div className="overview-revenue-value overview-revenue-value--purple">
-              {loading ? '—' : (outcomesSummary?.sales_count ?? 0)}
-            </div>
-            <span className="overview-revenue-sub">
-              {outcomesSummary?.conversion_rate != null
-                ? `${outcomesSummary.conversion_rate}% conversion rate`
-                : 'No outcomes recorded yet'}
-            </span>
-          </article>
-
-          <article className="panel overview-revenue-card overview-revenue-card--items">
-            <span className="overview-revenue-label">Top sale items</span>
-            {outcomesSummary?.top_sale_items?.length > 0 ? (
-              <ul className="overview-revenue-items">
-                {outcomesSummary.top_sale_items.map((item) => (
-                  <li key={item.item} className="overview-revenue-item">
-                    <span className="overview-revenue-item-name">{item.item}</span>
-                    <span className="overview-revenue-item-count">{item.count}×</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="empty-state" style={{ fontSize: 12 }}>
-                Record outcomes on leads to see top items.
-              </div>
-            )}
-          </article>
-
-        </div>
-      </section>
-
+      </div>
     </div>
   )
 }

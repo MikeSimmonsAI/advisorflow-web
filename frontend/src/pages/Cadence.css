@@ -1,0 +1,39 @@
+.cadence-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 18px; }
+.cadence-kpi-card { padding: 18px 20px; }
+.cadence-kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); font-weight: 700; display: block; margin-bottom: 8px; }
+.cadence-kpi-value { font-size: 30px; font-weight: 700; font-family: var(--font-mono); display: block; letter-spacing: -0.02em; }
+.cadence-kpi-sub { font-size: 11px; color: var(--text-tertiary); display: block; margin-top: 4px; }
+
+.cadence-run-result { margin-bottom: 16px; }
+.cadence-run-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.cadence-run-stat { text-align: center; }
+.cadence-run-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); display: block; margin-bottom: 4px; }
+.cadence-run-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); display: block; }
+
+.cadence-lead-link { color: var(--signal-blue); cursor: pointer; display: block; }
+.cadence-lead-link:hover { text-decoration: underline; }
+.cadence-phone { font-size: 11px; color: var(--text-tertiary); display: block; margin-top: 2px; }
+
+.cadence-status-pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; text-transform: capitalize; letter-spacing: 0.04em; }
+.cadence-status-pill--active { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.cadence-status-pill--paused { background: var(--signal-amber-dim); color: var(--signal-amber); }
+.cadence-status-pill--cancelled { background: var(--signal-red-dim); color: var(--signal-red); }
+
+.cadence-progress { display: flex; align-items: center; gap: 8px; }
+.cadence-touch-dots { display: flex; gap: 3px; }
+.cadence-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.cadence-dot--done { background: var(--signal-green); }
+.cadence-dot--next { background: var(--signal-blue); box-shadow: 0 0 6px var(--signal-blue); }
+.cadence-dot--pending { background: rgba(255,255,255,0.12); }
+.cadence-progress-label { font-size: 11px; color: var(--text-secondary); }
+
+.cadence-controls { display: flex; gap: 6px; }
+.cadence-ctrl-btn { padding: 4px 10px; font-size: 12px; }
+
+.cadence-schedule-panel { }
+.cadence-schedule-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; margin-bottom: 14px; }
+.cadence-schedule-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 10px; text-align: center; }
+.cadence-schedule-touch { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); display: block; margin-bottom: 6px; }
+.cadence-schedule-day { font-size: 18px; font-weight: 700; font-family: var(--font-mono); color: var(--signal-blue); display: block; margin-bottom: 4px; }
+.cadence-schedule-desc { font-size: 10px; color: var(--text-secondary); display: block; }
+.cadence-schedule-note { font-size: 12px; color: var(--text-tertiary); line-height: 1.6; }
