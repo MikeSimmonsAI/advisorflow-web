@@ -240,3 +240,9 @@
 .lead-tone-pill:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .lead-tone-pill--active { font-weight: 700; }
 .lead-tone-desc { font-size: 11px; color: var(--text-tertiary); }
+
+.lead-send-mode-tabs { display: flex; gap: 4px; }
+.lead-send-tab { padding: 5px 14px; font-size: 12px; border: 1px solid var(--border-subtle); border-radius: 20px; background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 600; transition: all 0.15s; }
+.lead-send-tab--active { border-color: var(--signal-blue); color: var(--signal-blue); background: var(--signal-blue-dim); }
+.compose-subject { width: 100%; background: var(--bg-field); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 9px 12px; color: var(--text-primary); font-size: 13px; margin-bottom: 8px; }
+.compose-subject:focus { outline: none; border-color: var(--signal-blue); }

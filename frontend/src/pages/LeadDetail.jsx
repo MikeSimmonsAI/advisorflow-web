@@ -35,8 +35,12 @@ export default function LeadDetail() {
   const [messageText, setMessageText] = useState('')
   const [includeBookingLink, setIncludeBookingLink] = useState(true)
   const [sending, setSending] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
   const [suggestingReply, setSuggestingReply] = useState(false)
   const [sendError, setSendError] = useState('')
+  const [sendMode, setSendMode] = useState('sms') // 'sms' | 'email'
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [cancelling, setCancelling] = useState(false)
@@ -97,6 +101,25 @@ export default function LeadDetail() {
     }
   }
 
+  async function handleSendEmail() {
+    if (!emailBody.trim()) return
+    setSendingEmail(true)
+    setSendError('')
+    try {
+      await api.post(`/email/send/${leadId}`, {
+        subject: emailSubject || `Following up, ${lead?.first_name || 'there'}`,
+        body: emailBody,
+      })
+      setEmailSubject('')
+      setEmailBody('')
+      load()
+    } catch (err) {
+      setSendError(err.message)
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
   async function handleRunAnalysis() {
     setAnalyzing(true)
     setAnalysisError('')
@@ -144,9 +167,13 @@ export default function LeadDetail() {
   if (!data) return <div className="empty-state" style={{ marginTop: 40 }}>Couldn't load this lead.</div>
 
   const { lead, events, ai_quality, booking } = data
-  const canSend = lead.phone && lead.status !== 'dnc' && !lead.is_duplicate
+  const canSendSMS = lead.phone && lead.status !== 'dnc' && !lead.is_duplicate
+  const canSendEmail = lead.email && lead.status !== 'dnc' && !lead.is_duplicate
+  const canSend = canSendSMS || canSendEmail
   const initials = `${(lead.first_name || '?')[0]}${(lead.last_name || '?')[0]}`.toUpperCase()
   const currentTone = TONES[tone]
+  // Default send mode based on what's available
+  const effectiveSendMode = canSendSMS && sendMode === 'sms' ? 'sms' : canSendEmail ? 'email' : 'sms'
 
   return (
     <div className="lead-detail-page">
@@ -215,26 +242,30 @@ export default function LeadDetail() {
           </section>
 
           <section className="panel lead-detail-panel">
-            <div className="panel-header"><h2 className="panel-title">✏️ Send a message</h2></div>
+            <div className="panel-header">
+              <h2 className="panel-title">✏️ Send a message</h2>
+              {canSendSMS && canSendEmail && (
+                <div className="lead-send-mode-tabs">
+                  <button className={`lead-send-tab ${effectiveSendMode === 'sms' ? 'lead-send-tab--active' : ''}`} onClick={() => setSendMode('sms')}>💬 SMS</button>
+                  <button className={`lead-send-tab ${effectiveSendMode === 'email' ? 'lead-send-tab--active' : ''}`} onClick={() => setSendMode('email')}>✉️ Email</button>
+                </div>
+              )}
+            </div>
             {!canSend ? (
               <div className="empty-state">
                 {lead.is_duplicate ? 'This lead is a duplicate.' :
                  lead.status === 'dnc' ? 'This lead is marked do-not-contact.' :
-                 'No phone number — use Email Queue instead.'}
+                 'No phone or email on file.'}
               </div>
-            ) : (
+            ) : effectiveSendMode === 'sms' && canSendSMS ? (
               <div className="lead-compose">
                 <div className="lead-tone-bar">
                   <span className="lead-tone-label">Message tone</span>
                   <div className="lead-tone-pills">
                     {TONES.map((t, i) => (
-                      <button
-                        key={t.key}
-                        className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
+                      <button key={t.key} className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
                         style={tone === i ? { borderColor: t.color, color: t.color, background: `${t.color}18` } : {}}
-                        onClick={() => setTone(i)}
-                        title={t.desc}
-                      >
+                        onClick={() => setTone(i)} title={t.desc}>
                         {t.label}
                       </button>
                     ))}
@@ -242,42 +273,52 @@ export default function LeadDetail() {
                   <span className="lead-tone-desc">{currentTone.desc}</span>
                 </div>
                 <div className="lead-compose-suggest">
-                  <button
-                    className="btn btn--secondary"
-                    onClick={handleSuggestReply}
-                    disabled={suggestingReply}
-                  >
+                  <button className="btn btn--secondary" onClick={handleSuggestReply} disabled={suggestingReply}>
                     {suggestingReply ? '⏳ Drafting…' : `✨ Suggest ${currentTone.label} reply`}
                   </button>
                   <span className="lead-compose-hint">AI fills the box. You edit and send manually.</span>
                 </div>
-                <textarea
-                  className="compose-textarea"
-                  placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  rows={4}
-                />
+                <textarea className="compose-textarea" placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
+                  value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={4} />
                 <div className="compose-footer">
                   <label className="compose-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={includeBookingLink}
-                      onChange={(e) => setIncludeBookingLink(e.target.checked)}
-                    />
+                    <input type="checkbox" checked={includeBookingLink} onChange={(e) => setIncludeBookingLink(e.target.checked)} />
                     Include booking link
                   </label>
-                  <button
-                    className="btn btn--primary"
-                    onClick={handleSend}
-                    disabled={sending || !messageText.trim()}
-                  >
-                    {sending ? 'Sending…' : 'Send now'}
+                  <button className="btn btn--primary" onClick={handleSend} disabled={sending || !messageText.trim()}>
+                    {sending ? 'Sending…' : 'Send SMS'}
                   </button>
                 </div>
                 {sendError && <div className="compose-error">{sendError}</div>}
               </div>
-            )}
+            ) : canSendEmail ? (
+              <div className="lead-compose">
+                <div className="lead-compose-suggest">
+                  <button className="btn btn--secondary" onClick={async () => {
+                    setSuggestingReply(true)
+                    try {
+                      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: TONES[tone].key })
+                      setEmailBody(draft.suggested_reply || '')
+                      setEmailSubject(`Following up, ${lead.first_name || 'there'}`)
+                    } catch (err) { setSendError(err.message) }
+                    finally { setSuggestingReply(false) }
+                  }} disabled={suggestingReply}>
+                    {suggestingReply ? '⏳ Drafting…' : '✨ AI draft email'}
+                  </button>
+                  <span className="lead-compose-hint">Sends from your connected Microsoft 365 inbox.</span>
+                </div>
+                <input className="compose-subject" placeholder={`Subject — e.g. Following up, ${lead.first_name || 'there'}`}
+                  value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
+                <textarea className="compose-textarea" placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
+                  value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={5} />
+                <div className="compose-footer">
+                  <button className="btn btn--primary" onClick={handleSendEmail} disabled={sendingEmail || !emailBody.trim()}>
+                    {sendingEmail ? 'Sending…' : 'Send email'}
+                  </button>
+                </div>
+                {sendError && <div className="compose-error">{sendError}</div>}
+              </div>
+            ) : null}
           </section>
         </div>
 

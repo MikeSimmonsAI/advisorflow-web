@@ -339,19 +339,3 @@
 /* Theme toggle */
 .theme-toggle { background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; transition: all 0.15s; }
 .theme-toggle:hover { border-color: var(--signal-blue); color: var(--signal-blue); }
-
-/* Light mode overrides */
-[data-theme="light"] {
-  --bg-base: #f0f4f8;
-  --bg-panel: rgba(255, 255, 255, 0.95);
-  --bg-card: rgba(240, 244, 248, 0.90);
-  --bg-card-hover: rgba(224, 232, 244, 0.95);
-  --bg-field: rgba(240, 244, 248, 0.8);
-  --bg-row: rgba(240, 244, 248, 0.6);
-  --bg-row-hover: rgba(224, 232, 244, 0.8);
-  --text-primary: #0a1628;
-  --text-secondary: #3a4a6a;
-  --text-tertiary: #6a7a9a;
-  --border-subtle: rgba(10, 22, 40, 0.12);
-  --border-strong: rgba(10, 22, 40, 0.25);
-}
