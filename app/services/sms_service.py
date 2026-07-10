@@ -34,6 +34,71 @@ def get_twilio_client(advisor: User) -> Client:
 BOOKING_SECRET = os.environ.get("BOOKING_SECRET", "advisorflow2026restland")
 
 
+# Appointment type map — based on lead tier, message_track, or source
+APPT_TYPE_MAP = {
+    # Pre-Need / Planning
+    "pre_need":              {"label": "Pre-Need Planning Consultation",     "duration": "45"},
+    "pre-need":              {"label": "Pre-Need Planning Consultation",     "duration": "45"},
+    "preneed":               {"label": "Pre-Need Planning Consultation",     "duration": "45"},
+    "preplanning":           {"label": "Pre-Planning Consultation",          "duration": "45"},
+    "pre_planning":          {"label": "Pre-Planning Consultation",          "duration": "45"},
+    # At-Need
+    "at_need":               {"label": "At-Need Arrangement Conference",     "duration": "60"},
+    "at-need":               {"label": "At-Need Arrangement Conference",     "duration": "60"},
+    "atneed":                {"label": "At-Need Arrangement Conference",     "duration": "60"},
+    # Imminent
+    "imminent":              {"label": "Immediate Need Consultation",        "duration": "30"},
+    "urgent":                {"label": "Urgent Arrangement Consultation",    "duration": "30"},
+    # File Check / Code
+    "file_check":            {"label": "Family File Review",                 "duration": "20"},
+    "file check":            {"label": "Family File Review",                 "duration": "20"},
+    "code_lead":             {"label": "Family File Review",                 "duration": "20"},
+    "code lead":             {"label": "Family File Review",                 "duration": "20"},
+    "file_review":           {"label": "Family File Review",                 "duration": "20"},
+    # Property / Cemetery
+    "property":              {"label": "Property Ownership Review",          "duration": "30"},
+    "property_transfer":     {"label": "Property Transfer Appointment",      "duration": "30"},
+    "plot":                  {"label": "Cemetery Property Consultation",     "duration": "30"},
+    "marker":                {"label": "Marker & Memorial Consultation",     "duration": "30"},
+    "memorial":              {"label": "Memorial Planning Consultation",     "duration": "30"},
+    "flower":                {"label": "Memorial Flower Review",             "duration": "20"},
+    "flowers":               {"label": "Memorial Flower Review",             "duration": "20"},
+    # Contract / Existing
+    "contract":              {"label": "Contract Review Appointment",        "duration": "20"},
+    "contract_sold":         {"label": "Contract Review Appointment",        "duration": "20"},
+    "existing_customer":     {"label": "Family Services Appointment",        "duration": "20"},
+    # Referral / Web
+    "referral":              {"label": "Family Services Consultation",       "duration": "30"},
+    "web_lead":              {"label": "General Consultation",               "duration": "20"},
+    "web lead":              {"label": "General Consultation",               "duration": "20"},
+    "new_inquiry":           {"label": "New Family Consultation",            "duration": "30"},
+    "new inquiry":           {"label": "New Family Consultation",            "duration": "30"},
+    # Insurance / Financial
+    "insurance":             {"label": "Insurance & Benefits Review",        "duration": "30"},
+    "benefits":              {"label": "Benefits & Coverage Consultation",   "duration": "30"},
+    # Veteran
+    "veteran":               {"label": "Veterans Benefits Consultation",     "duration": "30"},
+    "veterans":              {"label": "Veterans Benefits Consultation",     "duration": "30"},
+    # Default
+    "general":               {"label": "Family Services Appointment",        "duration": "20"},
+}
+
+def _detect_appt_type(lead: Lead) -> dict:
+    """Detect appointment type from lead tier, message_track, or source."""
+    # Check multiple fields in priority order
+    for field in [lead.message_track, lead.tier, lead.contact_channel]:
+        if not field:
+            continue
+        key = str(field).lower().strip()
+        if key in APPT_TYPE_MAP:
+            return APPT_TYPE_MAP[key]
+        # Partial match
+        for map_key, appt in APPT_TYPE_MAP.items():
+            if map_key in key or key in map_key:
+                return appt
+    return {"label": "Family Services Appointment", "duration": "20"}
+
+
 def _encode_booking_token(lead: Lead, advisor: User) -> str:
     """
     Generate a base64 self-contained token compatible with the Vercel booking app.
@@ -44,14 +109,19 @@ def _encode_booking_token(lead: Lead, advisor: User) -> str:
     import json as _json
     from datetime import timedelta
 
+    appt = _detect_appt_type(lead)
     expires = (datetime.utcnow() + timedelta(days=14)).isoformat()
     data = {
         "lead": {
             "First Name": lead.first_name or "",
             "Last Name": lead.last_name or "",
             "Phone": lead.phone or "",
+            "Tier": lead.tier or "",
+            "Lead Type": lead.message_track or "",
         },
-        "appt_type": "file_review",
+        "appt_type": appt["label"],
+        "appt_label": appt["label"],
+        "duration": appt["duration"],
         "expires": expires,
     }
     payload = base64.urlsafe_b64encode(_json.dumps(data).encode()).decode().rstrip("=")
