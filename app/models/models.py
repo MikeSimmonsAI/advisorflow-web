@@ -341,10 +341,7 @@ class BookingLink(Base):
 
     status = Column(String, default="pending")  # pending, booked, confirmed, expired, cancelled
     booked_time = Column(DateTime, nullable=True)
-    appointment_at = Column(DateTime, nullable=True)  # the actual scheduled appointment datetime
-    calendar_event_id = Column(String, nullable=True)  # Google Calendar event ID once synced
-    reminder_24h_sent = Column(Boolean, default=False)
-    reminder_2h_sent = Column(Boolean, default=False)
+    calendar_event_id = Column(String, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)

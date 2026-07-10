@@ -56,7 +56,10 @@ export default function LeadDetail() {
     setLoading(true)
     api.get(`/leads/${leadId}/timeline`)
       .then(setData)
-      .catch((err) => setSendError(err.message))
+      .catch((err) => {
+        console.error('LeadDetail load error:', err)
+        setSendError(err.message || 'Failed to load lead')
+      })
       .finally(() => setLoading(false))
   }
 
@@ -165,7 +168,13 @@ export default function LeadDetail() {
   }
 
   if (loading) return <div className="empty-state" style={{ marginTop: 40 }}>Loading lead…</div>
-  if (!data) return <div className="empty-state" style={{ marginTop: 40 }}>Couldn't load this lead.</div>
+  if (!data) return (
+    <div className="empty-state" style={{ marginTop: 40 }}>
+      <div>Couldn't load this lead.</div>
+      {sendError && <div style={{ fontSize: 13, color: 'var(--signal-red)', marginTop: 8 }}>{sendError}</div>}
+      <button className="btn btn--secondary" style={{ marginTop: 16 }} onClick={load}>Try again</button>
+    </div>
+  )
 
   const { lead, events, ai_quality, booking } = data
   const canSendSMS = lead.phone && lead.status !== 'dnc' && !lead.is_duplicate

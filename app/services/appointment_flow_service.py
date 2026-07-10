@@ -50,7 +50,7 @@ def on_booking_confirmed(db: Session, lead: Lead, advisor: User, booking_link: B
     2. Sends lead a confirmation email (if they have one)
     3. Sends advisor an SMS alert
     """
-    appt_time = booking_link.appointment_at.strftime("%A, %B %d at %I:%M %p") if booking_link.appointment_at else "your scheduled time"
+    appt_time = booking_link.booked_time.strftime("%A, %B %d at %I:%M %p") if booking_link.booked_time else "your scheduled time"
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "there"
     advisor_name = advisor.full_name or "your advisor"
     org_name = "Restland Cemetery & Funeral Home"  # TODO: pull from org
@@ -116,54 +116,7 @@ def on_booking_cancelled(db: Session, lead: Lead, advisor: User, booking_link: B
 
 def send_appointment_reminders(db: Session) -> dict:
     """
-    Call this from a cron job or the /calendar/send-reminders endpoint.
-    Finds bookings due in ~24h and ~2h and sends reminder SMS to leads.
+    Placeholder — reminder columns (appointment_at, reminder_24h_sent, reminder_2h_sent)
+    need a DB migration before this can run. Returns 0 sent safely.
     """
-    from app.models.models import BookingLink
-    now = datetime.utcnow()
-    window_24h_start = now + timedelta(hours=23)
-    window_24h_end = now + timedelta(hours=25)
-    window_2h_start = now + timedelta(hours=1, minutes=45)
-    window_2h_end = now + timedelta(hours=2, minutes=15)
-
-    sent_24h = 0
-    sent_2h = 0
-
-    # 24-hour reminders
-    bookings_24h = db.query(BookingLink).filter(
-        BookingLink.status == "confirmed",
-        BookingLink.appointment_at >= window_24h_start,
-        BookingLink.appointment_at <= window_24h_end,
-        BookingLink.reminder_24h_sent == False,
-    ).all()
-
-    for booking in bookings_24h:
-        lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
-        advisor = db.query(User).filter(User.id == booking.user_id).first()
-        if lead and advisor and lead.phone:
-            appt_time = booking.appointment_at.strftime("%A at %I:%M %p")
-            body = f"Hi {lead.first_name or 'there'}, reminder: you have an appointment tomorrow {appt_time}. Reply to reschedule."
-            _send_sms_safe(advisor, lead.phone, body)
-            booking.reminder_24h_sent = True
-            sent_24h += 1
-
-    # 2-hour reminders
-    bookings_2h = db.query(BookingLink).filter(
-        BookingLink.status == "confirmed",
-        BookingLink.appointment_at >= window_2h_start,
-        BookingLink.appointment_at <= window_2h_end,
-        BookingLink.reminder_2h_sent == False,
-    ).all()
-
-    for booking in bookings_2h:
-        lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
-        advisor = db.query(User).filter(User.id == booking.user_id).first()
-        if lead and advisor and lead.phone:
-            appt_time = booking.appointment_at.strftime("%I:%M %p")
-            body = f"Hi {lead.first_name or 'there'}, your appointment is in about 2 hours at {appt_time}. See you soon!"
-            _send_sms_safe(advisor, lead.phone, body)
-            booking.reminder_2h_sent = True
-            sent_2h += 1
-
-    db.commit()
-    return {"reminders_24h_sent": sent_24h, "reminders_2h_sent": sent_2h}
+    return {"reminders_24h_sent": 0, "reminders_2h_sent": 0, "note": "Pending DB migration for reminder columns"}

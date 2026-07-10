@@ -406,7 +406,7 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
             "status": cadence.status,
         })
 
-    events.sort(key=lambda e: e["timestamp"] or "")
+    events.sort(key=lambda e: (e["timestamp"] is None, e["timestamp"] or ""))
 
     ai_note = None
     if lead.ai_lead_quality_note:

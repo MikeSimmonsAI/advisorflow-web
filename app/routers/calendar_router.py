@@ -92,8 +92,6 @@ def confirm_booking(req: BookingConfirmRequest, db: Session = Depends(get_db)):
 
     # Store appointment time and fire confirmation messages
     try:
-        from datetime import datetime as dt
-        booking.appointment_at = dt.fromisoformat(req.booked_datetime) if isinstance(req.booked_datetime, str) else req.booked_datetime
         booking.status = "confirmed"
         db.commit()
         db.refresh(booking)
