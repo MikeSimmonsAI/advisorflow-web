@@ -27,6 +27,33 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+function ConversationBubble({ event: e }) {
+  const [expanded, setExpanded] = useState(false)
+  const isLong = (e.body || '').length > 120
+  const displayText = isLong && !expanded ? (e.body || '').slice(0, 120) + '…' : (e.body || '')
+  return (
+    <div className={`lead-bubble lead-bubble--${e.type} ${e.channel === 'email' ? 'lead-bubble--email' : ''} ${e.channel === 'cadence' ? 'lead-bubble--system' : ''}`}>
+      {e.type === 'inbound' && e.is_hot && (
+        <div className="lead-bubble-hot"><SignalPulse color="red" size={6} /> Hot reply</div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        {e.channel && e.channel !== 'sms' && (
+          <span className="lead-bubble-channel">{e.channel === 'email' ? '✉️' : e.channel === 'cadence' ? '🔁' : e.channel}</span>
+        )}
+        {e.subject && <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.subject}</span>}
+        <span className="lead-bubble-time">{timeAgo(e.timestamp)}</span>
+      </div>
+      <p className="lead-bubble-text" style={{ margin: 0 }}>{displayText}</p>
+      {isLong && (
+        <button onClick={() => setExpanded(!expanded)}
+          style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', marginTop: 2 }}>
+          {expanded ? 'Show less ▲' : 'Show more ▼'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams()
   const navigate = useNavigate()
@@ -240,17 +267,7 @@ export default function LeadDetail() {
             ) : (
               <div className="lead-timeline">
                 {events.map((e, i) => (
-                  <div key={i} className={`lead-bubble lead-bubble--${e.type} ${e.channel === 'email' ? 'lead-bubble--email' : ''} ${e.channel === 'cadence' ? 'lead-bubble--system' : ''}`}>
-                    {e.type === 'inbound' && e.is_hot && (
-                      <div className="lead-bubble-hot"><SignalPulse color="red" size={6} /> Hot reply</div>
-                    )}
-                    {e.channel && e.channel !== 'sms' && (
-                      <span className="lead-bubble-channel">{e.channel === 'email' ? '✉️ Email' : e.channel === 'cadence' ? '🔁 Cadence' : e.channel}</span>
-                    )}
-                    <p className="lead-bubble-text">{e.body}</p>
-                    {e.body_preview && <p className="lead-bubble-preview">{e.body_preview}</p>}
-                    <span className="lead-bubble-time">{timeAgo(e.timestamp)}</span>
-                  </div>
+                  <ConversationBubble key={i} event={e} />
                 ))}
               </div>
             )}
