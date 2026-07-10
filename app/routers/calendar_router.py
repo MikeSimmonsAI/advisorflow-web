@@ -229,10 +229,22 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             # Parse slot time from display string
             event_start = None
             try:
-                from dateutil import parser as dateparser
-                event_start = dateparser.parse(slot_display)
+                event_start = None  # parsed below with strptime
             except Exception:
                 pass
+
+            if not event_start:
+                # Try parsing common formats without dateutil
+                for fmt in ["%A, %B %d, %Y at %I:%M %p", "%A, %B %d at %I:%M %p",
+                            "%m/%d/%Y at %I:%M %p", "%Y-%m-%dT%H:%M:%S"]:
+                    try:
+                        clean = slot_display.replace(" at ", " at ").strip()
+                        event_start = datetime.strptime(clean, fmt)
+                        if event_start.year == 1900:
+                            event_start = event_start.replace(year=datetime.now().year)
+                        break
+                    except Exception:
+                        continue
 
             if event_start:
                 from datetime import timedelta
