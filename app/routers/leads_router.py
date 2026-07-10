@@ -730,7 +730,7 @@ def create_lead_manually(
     db.commit()
     db.refresh(lead)
 
-    log_action(db, current_user, action="lead.create_manual", target_type="lead", target_id=lead.id)
+    log_action(db, current_user.organization_id, current_user.id, action="lead.create_manual", target_type="lead", target_id=lead.id)
 
     return {
         "id": lead.id,
@@ -759,7 +759,7 @@ def delete_lead(
     if current_user.role == "advisor" and lead.assigned_to_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only delete your own leads")
 
-    log_action(db, current_user, action="lead.delete", target_type="lead", target_id=lead_id)
+    log_action(db, current_user.organization_id, current_user.id, action="lead.delete", target_type="lead", target_id=lead_id)
     db.delete(lead)
     db.commit()
     return {"deleted": True, "id": lead_id}
@@ -792,5 +792,5 @@ def update_lead_type(
         lead.notes = (lead.notes or "") + f"\n[AI Direction]: {payload.ai_direction}"
     lead.updated_at = datetime.utcnow()
     db.commit()
-    log_action(db, current_user, action="lead.update_type", target_type="lead", target_id=lead_id)
+    log_action(db, current_user.organization_id, current_user.id, action="lead.update_type", target_type="lead", target_id=lead_id)
     return {"updated": True}

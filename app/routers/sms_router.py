@@ -228,7 +228,15 @@ def mark_reply_reviewed(
     reply.reviewed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(reply)
-    return reply
+    return {
+        "id": reply.id,
+        "lead_id": reply.lead_id,
+        "body": reply.body,
+        "classification": reply.classification.value if reply.classification else None,
+        "is_hot": reply.is_hot,
+        "reviewed_at": reply.reviewed_at,
+        "received_at": reply.received_at,
+    }
 
 
 @router.patch("/replies/{reply_id}/reclassify")
@@ -245,7 +253,15 @@ def reclassify_reply(
     reply.classification_reasoning = f"Manually reclassified by {current_user.full_name}"
     db.commit()
     db.refresh(reply)
-    return reply
+    return {
+        "id": reply.id,
+        "lead_id": reply.lead_id,
+        "body": reply.body,
+        "classification": reply.classification.value if reply.classification else None,
+        "is_hot": reply.is_hot,
+        "reviewed_at": reply.reviewed_at,
+        "received_at": reply.received_at,
+    }
 
 
 @router.get("/replies/activity-by-day")

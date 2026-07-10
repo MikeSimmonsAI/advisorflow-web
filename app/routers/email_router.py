@@ -15,11 +15,58 @@ class EmailBatchRequest(BaseModel):
     lead_ids: list[str]
 
 
+class SingleEmailRequest(BaseModel):
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    include_booking_link: bool = True
+
+
 @router.post("/send/{lead_id}")
-def send_single_email(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def send_single_email(
+    lead_id: str,
+    req: SingleEmailRequest = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+
+    # If custom body provided, use it directly
+    if req and req.body:
+        from app.services.email_service import send_email_via_provider
+        body_html = req.body.replace('\n', '<br>')
+
+        # Append booking link if requested
+        if req.include_booking_link:
+            from app.services.sms_service import create_booking_link
+            import os
+            booking_link = create_booking_link(db, lead, current_user)
+            booking_url = f"{os.environ.get('BOOKING_BASE_URL', 'https://advisorflow-booking.vercel.app')}/book/{booking_link.token}"
+            body_html += f'<br><br><a href="{booking_url}">📅 Book an appointment with me</a>'
+
+        subject = req.subject or f"Following up, {lead.first_name or 'there'}"
+        result = send_email_via_provider(lead.email, subject, body_html)
+        if not result["success"]:
+            raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
+
+        from app.models.models import EmailMessage
+        from datetime import datetime
+        msg = EmailMessage(
+            lead_id=lead.id,
+            sender_id=current_user.id,
+            subject=subject,
+            body_html=body_html,
+            status="sent",
+            provider_message_id=result.get("provider_message_id"),
+            sent_at=datetime.utcnow(),
+        )
+        db.add(msg)
+        lead.status = "sent"
+        db.commit()
+        return {"email_id": msg.id, "status": "sent"}
+
+    # Fallback to template-based send
     try:
         msg = send_email_to_lead(db, current_user, lead)
     except ValueError as e:

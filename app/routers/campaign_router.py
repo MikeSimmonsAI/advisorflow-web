@@ -262,7 +262,7 @@ def create_campaign(
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    log_action(db, current_user, action="campaign.create", target_type="campaign", target_id=campaign.id)
+    log_action(db, current_user.organization_id, current_user.id, action="campaign.create", target_type="campaign", target_id=campaign.id)
     return {"id": campaign.id, "name": campaign.name}
 
 
@@ -330,7 +330,7 @@ def send_campaign(
         except Exception:
             errors += 1
 
-    log_action(db, current_user, action="campaign.send", target_type="campaign", target_id=campaign_id)
+    log_action(db, current_user.organization_id, current_user.id, action="campaign.send", target_type="campaign", target_id=campaign_id)
     return {"sent": sent, "skipped": skipped, "errors": errors, "total": len(leads)}
 
 
@@ -492,7 +492,7 @@ def builder_send(
             errors += 1
             error_details.append({"lead_id": lead.id, "error": str(e)})
 
-    log_action(db, current_user, action="campaign.builder_send", target_type="campaign", target_id=campaign.id)
+    log_action(db, current_user.organization_id, current_user.id, action="campaign.builder_send", target_type="campaign", target_id=campaign.id)
 
     return {
         "campaign_id": campaign.id,

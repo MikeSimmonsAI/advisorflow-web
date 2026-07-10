@@ -937,6 +937,12 @@ def _delete_merged_lead_records(db: Session, merge_leads: list[Lead]) -> None:
     db.query(Message).filter(Message.lead_id.in_(merge_ids)).delete(synchronize_session=False)
     db.query(Reply).filter(Reply.lead_id.in_(merge_ids)).delete(synchronize_session=False)
 
+    # Clear self-referential duplicate_of_lead_id on any leads pointing to ones being deleted
+    db.query(Lead).filter(Lead.duplicate_of_lead_id.in_(merge_ids)).update(
+        {"duplicate_of_lead_id": None, "is_duplicate": False},
+        synchronize_session=False
+    )
+
     # Now safe to delete the lead rows
     db.query(Lead).filter(Lead.id.in_(merge_ids)).delete(synchronize_session=False)
 
@@ -1336,18 +1342,21 @@ def provision_client(
     db.refresh(new_org)
     db.refresh(new_supervisor)
 
-    log_action(
-        db, current_user.organization_id, current_user.id,
-        action="provision_client",
-        target_type="organization",
-        target_id=new_org.id,
-        details={
-            "org_name": new_org.name,
-            "org_slug": new_org.slug,
-            "supervisor_email": new_supervisor.email,
-            "created_by": current_user.full_name,
-        },
-    )
+    try:
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="provision_client",
+            target_type="organization",
+            target_id=new_org.id,
+            details={
+                "org_name": new_org.name,
+                "org_slug": new_org.slug,
+                "supervisor_email": new_supervisor.email,
+                "created_by": current_user.full_name,
+            },
+        )
+    except Exception:
+        pass  # audit log failure should never block provisioning
 
     return ProvisionClientResponse(
         org_id=new_org.id,

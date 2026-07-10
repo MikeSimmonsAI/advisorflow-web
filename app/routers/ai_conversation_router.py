@@ -122,7 +122,7 @@ def generate_batch_replies(
 
                 if did_send:
                     sent += 1
-                    log_action(db, current_user, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
+                    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
                     results.append({
                         "lead_id": lead.id,
                         "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
@@ -196,5 +196,5 @@ def send_approved_reply(
         template=req.message,
         include_booking_link=req.include_booking_link,
     )
-    log_action(db, current_user, action="ai_conversation.approved_sent", target_type="lead", target_id=lead.id)
+    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.approved_sent", target_type="lead", target_id=lead.id)
     return {"sent": True, "lead_id": lead.id}

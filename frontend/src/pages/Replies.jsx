@@ -24,6 +24,13 @@ const CLASSIFICATION_OPTIONS = [
   { value: 'dnc', label: 'DNC' },
 ]
 
+const TONE_OPTIONS = [
+  { key: 'cold',   label: '❄️ Cold',   desc: 'Soft, low-pressure intro' },
+  { key: 'warm',   label: '☀️ Warm',   desc: 'Friendly, suggest a conversation' },
+  { key: 'hot',    label: '🔥 Hot',    desc: 'Direct, clear call to action' },
+  { key: 'urgent', label: '⚡ Urgent', desc: 'Brief, time-sensitive' },
+]
+
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -46,13 +53,14 @@ export default function Replies() {
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [classificationFilter, setClassificationFilter] = useState('')
-  const [objectionData, setObjectionData] = useState({}) // reply_id -> objection response
+  const [objectionData, setObjectionData] = useState({})
+  const [replyTone, setReplyTone] = useState('warm') // reply_id -> objection response
   const [objectionLoading, setObjectionLoading] = useState(null)
 
   async function fetchObjectionReply(replyId) {
     setObjectionLoading(replyId)
     try {
-      const result = await api.post(`/ai/objection-reply/${replyId}`, { tone: 'direct' })
+      const result = await api.post(`/ai/objection-reply/${replyId}`, { tone: replyTone })
       setObjectionData((prev) => ({ ...prev, [replyId]: result }))
     } catch (err) {
       setObjectionData((prev) => ({ ...prev, [replyId]: { error: err.message } }))

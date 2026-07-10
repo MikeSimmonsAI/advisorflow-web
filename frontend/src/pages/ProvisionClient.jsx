@@ -77,10 +77,7 @@ export default function ProvisionClient() {
         payload.supervisor_password = form.supervisor_password.trim()
       }
 
-      const res = await api.get('/admin/provision-client', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
+      const res = await api.post('/admin/provision-client', payload)
       setResult(res)
       // Refresh org list
       api.get('/admin/organizations').then(setOrgs).catch(() => {})

@@ -139,7 +139,7 @@ def approve_item(
             send_sms(db=db, lead=lead, advisor=current_user, template=item.message, include_booking_link=False)
 
         item.status = "sent"
-        log_action(db, current_user, action="auto_send.approved", target_type="lead", target_id=lead.id)
+        log_action(db, current_user.organization_id, current_user.id, action="auto_send.approved", target_type="lead", target_id=lead.id)
     except Exception as e:
         item.status = "failed"
         item.ai_reason = str(e)
@@ -169,7 +169,7 @@ def skip_item(
     item.actioned_at = datetime.utcnow()
     item.actioned_by_id = current_user.id
     db.commit()
-    log_action(db, current_user, action="auto_send.skipped", target_type="lead", target_id=item.lead_id)
+    log_action(db, current_user.organization_id, current_user.id, action="auto_send.skipped", target_type="lead", target_id=item.lead_id)
     return {"status": "skipped", "item_id": item_id}
 
 
