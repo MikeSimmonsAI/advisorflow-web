@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Overview', icon: 'grid' },
   { to: '/leads', label: 'Leads', icon: 'users' },
   { to: '/replies', label: 'Replies', icon: 'message' },
+  { to: '/pipeline', label: 'AI Pipeline', icon: 'zap' },
   { to: '/workqueue', label: 'Work Queue', icon: 'zap' },
   { to: '/auto-send', label: 'Auto-Send Queue', icon: 'send' },
   { to: '/cadence', label: 'Cadence', icon: 'repeat' },

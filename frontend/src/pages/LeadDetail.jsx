@@ -317,6 +317,28 @@ export default function LeadDetail() {
               </div>
             ) : canSendEmail ? (
               <div className="lead-compose">
+                <div className="lead-tone-bar">
+                  <span className="lead-tone-label">Message tone</span>
+                  <div className="lead-tone-pills">
+                    {TONES.map((t, i) => (
+                      <button key={t.key} className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
+                        style={tone === i ? { borderColor: t.color, color: t.color, background: `${t.color}18` } : {}}
+                        onClick={() => setTone(i)} title={t.desc}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="lead-tone-desc">{currentTone.desc}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="compose-subject"
+                    style={{ flex: 1, fontSize: 12 }}
+                    placeholder="AI direction: e.g. file check — ask if they still need planning"
+                    value={aiDirection}
+                    onChange={e => setAiDirection(e.target.value)}
+                  />
+                </div>
                 <div className="lead-compose-suggest">
                   <button className="btn btn--secondary" onClick={async () => {
                     setSuggestingReply(true)
@@ -327,7 +349,7 @@ export default function LeadDetail() {
                     } catch (err) { setSendError(err.message) }
                     finally { setSuggestingReply(false) }
                   }} disabled={suggestingReply}>
-                    {suggestingReply ? '⏳ Drafting…' : '✨ AI draft email'}
+                    {suggestingReply ? '⏳ Drafting…' : `✨ AI draft ${currentTone.label} email`}
                   </button>
                   <span className="lead-compose-hint">Sends from your connected Microsoft 365 inbox.</span>
                 </div>
@@ -336,6 +358,10 @@ export default function LeadDetail() {
                 <textarea className="compose-textarea" placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
                   value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={5} />
                 <div className="compose-footer">
+                  <label className="compose-checkbox">
+                    <input type="checkbox" checked={includeBookingLink} onChange={(e) => setIncludeBookingLink(e.target.checked)} />
+                    Include booking link
+                  </label>
                   <button className="btn btn--primary" onClick={handleSendEmail} disabled={sendingEmail || !emailBody.trim()}>
                     {sendingEmail ? 'Sending…' : 'Send email'}
                   </button>

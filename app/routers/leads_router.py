@@ -127,7 +127,7 @@ def list_leads(
         query = query.filter(Lead.tier == tier)
     if message_track:
         query = query.filter(Lead.message_track == message_track)
-    leads = query.order_by(Lead.created_at.desc()).limit(500).all()
+    leads = query.order_by(Lead.created_at.desc()).all()
     return leads
 
 

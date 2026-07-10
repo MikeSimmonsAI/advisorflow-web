@@ -167,6 +167,17 @@ def inbound_webhook(
         classification_reasoning="Hard STOP keyword match" if is_hard_stop else ai_result.get("reasoning"),
     )
     db.add(reply)
+    db.flush()  # get reply.id before pipeline processing
+
+    # Fire pipeline auto-conversation if active
+    try:
+        from app.services.pipeline_service import process_inbound_reply
+        advisor = db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
+        if advisor:
+            process_inbound_reply(db, lead, advisor, reply)
+    except Exception as _pe:
+        import logging
+        logging.getLogger(__name__).error("Pipeline processing error: %s", _pe)
 
     if classification == ReplyClassification.DNC:
         lead.status = "dnc"

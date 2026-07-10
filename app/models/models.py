@@ -621,3 +621,64 @@ class CadenceTemplateTouch(Base):
     is_active = Column(Boolean, default=True)
 
     template = relationship("CadenceTemplate", back_populates="touches")
+
+
+# ── Pipeline Conversations ─────────────────────────────────────────────────────
+# Tracks the full AI conversation pipeline for each lead.
+# Stage progression: outreach_sent → replied → ai_responding → booking_sent
+#                  → booked → confirmed → kept → sale
+# Replaces the old auto-send queue with a proper pipeline model.
+
+class PipelineConversation(Base):
+    __tablename__ = "pipeline_conversations"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    advisor_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    # Current stage in the pipeline
+    stage = Column(String, default="outreach_sent")
+    # outreach_sent | replied | ai_responding | booking_sent |
+    # booked | confirmed | kept | sale | stopped | dnc
+
+    # Context set when pipeline was launched
+    lead_type = Column(String, nullable=True)    # file_check, code_lead, new_inquiry, etc.
+    channel = Column(String, default="sms")      # sms | email | both
+    tone = Column(String, default="warm")        # cold | warm | hot | urgent
+    ai_direction = Column(String, nullable=True) # custom instruction for AI
+
+    # AI auto-conversation state
+    auto_respond = Column(Boolean, default=True)       # AI responds automatically
+    confidence_threshold = Column(Integer, default=85) # below this % → flag for review
+    response_delay_seconds = Column(Integer, default=180)  # 2-5 min random delay
+
+    # Flagged for human review
+    flagged = Column(Boolean, default=False)
+    flag_reason = Column(String, nullable=True)
+    flagged_reply_body = Column(Text, nullable=True)
+    flagged_suggested_response = Column(Text, nullable=True)
+    flagged_at = Column(DateTime, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    # Engagement tracking
+    messages_sent = Column(Integer, default=0)
+    replies_received = Column(Integer, default=0)
+    ai_responses_sent = Column(Integer, default=0)
+    ai_responses_flagged = Column(Integer, default=0)
+    last_outbound_at = Column(DateTime, nullable=True)
+    last_inbound_at = Column(DateTime, nullable=True)
+
+    # Outcome tracking
+    booking_link_sent_at = Column(DateTime, nullable=True)
+    booked_at = Column(DateTime, nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    appointment_kept_at = Column(DateTime, nullable=True)
+    sale_recorded_at = Column(DateTime, nullable=True)
+
+    # Notifications sent
+    booking_notification_sent = Column(Boolean, default=False)
+    confirmation_notification_sent = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -14,6 +14,7 @@ export default function Overview() {
   const [outcomesSummary, setOutcomesSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [time, setTime] = useState(new Date())
+  const [pipelineForecast, setPipelineForecast] = useState(null)
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000)
@@ -28,13 +29,15 @@ export default function Overview() {
       api.get('/sms/replies/activity-by-day?days=14').catch(() => []),
       api.get('/leads/status-funnel').catch(() => []),
       api.get('/outcomes/summary').catch(() => null),
-    ]).then(([leadsData, repliesData, briefingData, activityData, funnelData, outcomesData]) => {
+      api.get('/pipeline/forecast').catch(() => null),
+    ]).then(([leadsData, repliesData, briefingData, activityData, funnelData, outcomesData, forecastData]) => {
       setLeads(leadsData || [])
       setReplies(repliesData || [])
       setDailyBriefing(briefingData)
       setReplyActivity(activityData || [])
       setStatusFunnel(funnelData || [])
       setOutcomesSummary(outcomesData)
+      setPipelineForecast(forecastData)
       setLoading(false)
     })
   }, [])
@@ -248,6 +251,43 @@ export default function Overview() {
         </section>
 
       </div>
+      {/* AI Forecast + Pipeline Summary */}
+      {pipelineForecast && (
+        <div className="panel" style={{ marginTop: 0 }}>
+          <div className="panel-header">
+            <h2 className="panel-title">🤖 AI Forecast</h2>
+            <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 12px' }}
+              onClick={() => window.location.href = '/pipeline'}>
+              Open pipeline →
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
+            {[
+              { label: 'Active conversations', value: pipelineForecast.active_conversations, color: '#2fb6ff' },
+              { label: 'Reply rate', value: `${pipelineForecast.reply_rate}%`, color: '#1ef0a8' },
+              { label: 'Need your review', value: pipelineForecast.flagged_count, color: '#ff4d4d' },
+              { label: 'Projected bookings', value: pipelineForecast.projected_bookings_this_week, color: '#ffd700' },
+            ].map(item => (
+              <div key={item.label} className="ov-revenue-cell">
+                <strong className="ov-revenue-value" style={{ color: item.color }}>{item.value}</strong>
+                <span className="ov-revenue-label">{item.label}</span>
+              </div>
+            ))}
+          </div>
+          {pipelineForecast.alerts?.map((alert, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+              borderRadius: 10, marginBottom: 6, cursor: 'pointer',
+              background: alert.type === 'urgent' ? 'rgba(255,77,77,0.07)' : 'rgba(47,182,255,0.05)',
+              border: `1px solid ${alert.type === 'urgent' ? 'rgba(255,77,77,0.18)' : 'rgba(47,182,255,0.12)'}`,
+            }} onClick={() => window.location.href = alert.path}>
+              <span>{alert.type === 'urgent' ? '⚠️' : '💡'}</span>
+              <span style={{ flex: 1, fontSize: 13 }}>{alert.message}</span>
+              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{alert.action} →</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

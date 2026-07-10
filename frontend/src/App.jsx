@@ -26,6 +26,7 @@ import LeadCleanup from './pages/LeadCleanup'
 import Settings from './pages/Settings'
 import Templates from './pages/Templates'
 import ProvisionClient from './pages/ProvisionClient'
+import Pipeline from './pages/Pipeline'
 import { getCurrentUser } from './api/client'
 
 function isAuthenticated() {
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute requireAdmin><Templates /></ProtectedRoute>} />
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
+        <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
