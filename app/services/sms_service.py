@@ -15,6 +15,7 @@ Per Mike's walkthrough:
 """
 
 import os
+from datetime import datetime
 from twilio.rest import Client
 from sqlalchemy.orm import Session
 from app.models.models import User, Lead, Message, BookingLink
@@ -30,8 +31,37 @@ def get_twilio_client(advisor: User) -> Client:
     return Client(advisor.twilio_account_sid, auth_token)
 
 
+BOOKING_SECRET = os.environ.get("BOOKING_SECRET", "advisorflow2026restland")
+
+
+def _encode_booking_token(lead: Lead, advisor: User) -> str:
+    """
+    Generate a base64 self-contained token compatible with the Vercel booking app.
+    Format: base64(json({lead, appt_type, expires_at}))~sha256sig
+    """
+    import base64
+    import hashlib
+    import json as _json
+    from datetime import timedelta
+
+    expires = (datetime.utcnow() + timedelta(days=14)).isoformat()
+    data = {
+        "lead": {
+            "First Name": lead.first_name or "",
+            "Last Name": lead.last_name or "",
+            "Phone": lead.phone or "",
+        },
+        "appt_type": "file_review",
+        "expires": expires,
+    }
+    payload = base64.urlsafe_b64encode(_json.dumps(data).encode()).decode().rstrip("=")
+    sig = hashlib.sha256(f"{BOOKING_SECRET}:{payload}".encode()).hexdigest()[:16]
+    return f"{payload}~{sig}"
+
+
 def create_booking_link(db: Session, lead: Lead, advisor: User) -> BookingLink:
-    booking = BookingLink(lead_id=lead.id, user_id=advisor.id, status="pending")
+    token = _encode_booking_token(lead, advisor)
+    booking = BookingLink(lead_id=lead.id, user_id=advisor.id, status="pending", token=token)
     db.add(booking)
     db.commit()
     return booking
