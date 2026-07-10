@@ -34,7 +34,6 @@ def send_single_email(
 
     # If custom body provided, use it directly
     if req and req.body:
-        from app.services.email_service import send_email_via_provider
         body_html = req.body.replace('\n', '<br>')
 
         # Append booking link if requested
@@ -46,9 +45,17 @@ def send_single_email(
             body_html += f'<br><br><a href="{booking_url}">📅 Book an appointment with me</a>'
 
         subject = req.subject or f"Following up, {lead.first_name or 'there'}"
-        result = send_email_via_provider(lead.email, subject, body_html)
+
+        # Route through Microsoft 365 if connected — never use SendGrid when advisor has M365
+        if current_user.microsoft_365_connected:
+            from app.services.microsoft_email_service import send_email_via_microsoft_graph
+            result = send_email_via_microsoft_graph(current_user, lead.email, subject, body_html)
+        else:
+            from app.services.email_service import send_email_via_provider
+            result = send_email_via_provider(lead.email, subject, body_html)
+
         if not result["success"]:
-            raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
+            raise HTTPException(status_code=500, detail=result.get("error", "Email send failed. Check your Microsoft 365 connection in Settings."))
 
         from app.models.models import EmailMessage
         from datetime import datetime
