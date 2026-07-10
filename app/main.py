@@ -19,7 +19,7 @@ from app.routers import (
     cadence_router, email_router, calendar_router, notification_router,
     settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
     compliance_router, audit_log_router, sample_data_router,
-    health_router, workqueue_router, campaign_router, pipeline_router,
+    health_router, workqueue_router, campaign_router,
     google_contacts_router,
 )
 from app.routers.objection_router import router as objection_router
@@ -235,7 +235,8 @@ app.include_router(sample_data_router.router)
 app.include_router(health_router.router)
 app.include_router(workqueue_router.router)
 app.include_router(campaign_router.router)
-app.include_router(pipeline_router.router)
+from app.routers.pipeline_router import router as pipeline_router
+app.include_router(pipeline_router)
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
 app.include_router(onboarding_router.router)
