@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from app.deps import get_db, require_admin
-from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry
+from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry, Organization
 from app.services.auth_service import hash_password
 from app.services.dedup_service import normalize_phone, normalize_last_name
 from app.routers.audit_log_router import log_action
@@ -1243,3 +1243,124 @@ def fix_lead_contact_info(
         )
 
     return _lead_summary(lead)
+
+
+# ---------------------------------------------------------------------------
+# Provision Client — super_admin only
+# Creates a new Organization + supervisor (org_admin) account in one shot.
+# ---------------------------------------------------------------------------
+
+class ProvisionClientRequest(BaseModel):
+    org_name: str
+    org_slug: str           # url-safe identifier e.g. "acme-funeral"
+    industry: str = "funeral"
+    plan: str = "trial"
+    supervisor_full_name: str
+    supervisor_email: EmailStr
+    supervisor_password: str | None = None  # if omitted, a temp password is generated
+
+
+class ProvisionClientResponse(BaseModel):
+    org_id: str
+    org_name: str
+    supervisor_id: str
+    supervisor_email: str
+    temp_password: str | None   # returned only when we generated one
+    message: str
+
+
+@router.post("/provision-client", response_model=ProvisionClientResponse)
+def provision_client(
+    req: ProvisionClientRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    One-shot endpoint: creates the org and its first supervisor account.
+    Restricted to super_admin (Mike) only.
+    """
+    # Slug uniqueness check
+    existing = db.query(Organization).filter(Organization.slug == req.org_slug).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Slug '{req.org_slug}' is already taken.")
+
+    # Email uniqueness check
+    existing_user = db.query(User).filter(User.email == req.supervisor_email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail=f"Email '{req.supervisor_email}' is already registered.")
+
+    # Create org
+    new_org = Organization(
+        name=req.org_name,
+        slug=req.org_slug,
+        industry=req.industry,
+        plan=req.plan,
+        is_active=True,
+    )
+    db.add(new_org)
+    db.flush()  # get new_org.id before creating user
+
+    # Password — use provided or generate temp
+    generated_password = None
+    if req.supervisor_password:
+        raw_password = req.supervisor_password
+    else:
+        generated_password = _generate_temp_password()
+        raw_password = generated_password
+
+    new_supervisor = User(
+        organization_id=new_org.id,
+        email=req.supervisor_email,
+        password_hash=hash_password(raw_password),
+        full_name=req.supervisor_full_name,
+        role="org_admin",
+        is_active=True,
+        must_change_password=True,
+    )
+    db.add(new_supervisor)
+    db.commit()
+    db.refresh(new_org)
+    db.refresh(new_supervisor)
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="provision_client",
+        target_type="organization",
+        target_id=new_org.id,
+        details={
+            "org_name": new_org.name,
+            "org_slug": new_org.slug,
+            "supervisor_email": new_supervisor.email,
+            "created_by": current_user.full_name,
+        },
+    )
+
+    return ProvisionClientResponse(
+        org_id=new_org.id,
+        org_name=new_org.name,
+        supervisor_id=new_supervisor.id,
+        supervisor_email=new_supervisor.email,
+        temp_password=generated_password,
+        message=f"Client '{req.org_name}' provisioned successfully.",
+    )
+
+
+@router.get("/organizations")
+def list_organizations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """List all orgs — super_admin only, for the provision client page."""
+    orgs = db.query(Organization).order_by(Organization.created_at.desc()).all()
+    return [
+        {
+            "id": o.id,
+            "name": o.name,
+            "slug": o.slug,
+            "industry": o.industry,
+            "plan": o.plan,
+            "is_active": o.is_active,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+        for o in orgs
+    ]

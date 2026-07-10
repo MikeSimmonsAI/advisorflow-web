@@ -102,9 +102,9 @@ def get_objection_reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from app.models.models import SMSReply, Lead
+    from app.models.models import Reply, Lead
 
-    reply = db.query(SMSReply).filter(SMSReply.id == reply_id).first()
+    reply = db.query(Reply).filter(Reply.id == reply_id).first()
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
 

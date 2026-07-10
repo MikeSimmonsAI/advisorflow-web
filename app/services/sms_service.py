@@ -91,6 +91,56 @@ def send_sms(
         to=lead.phone,
     )
 
+
+def send_mms(
+    db: Session,
+    advisor: User,
+    lead: Lead,
+    template: str,
+    media_url: str,
+    include_booking_link: bool = False,
+) -> Message:
+    """
+    Sends an MMS (text + image/flyer) from advisor -> lead.
+    media_url must be a publicly accessible URL (e.g. uploaded to S3 or Cloudinary).
+    Twilio A2P 10DLC approval is required for MMS just like SMS.
+    """
+    if lead.status == "dnc":
+        raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")
+
+    from app.services.compliance_service import is_phone_suppressed
+    if is_phone_suppressed(db, lead.organization_id, lead.phone):
+        raise ValueError(f"Lead {lead.id}'s phone is on the suppression list - blocked.")
+
+    booking_url = ""
+    booking_link = None
+    if include_booking_link:
+        booking_link = create_booking_link(db, lead, advisor)
+        booking_url = f"{BOOKING_BASE_URL}/book/{booking_link.token}"
+
+    body = render_template(template, lead, advisor, booking_url)
+
+    client = get_twilio_client(advisor)
+    twilio_msg = client.messages.create(
+        body=body,
+        from_=advisor.twilio_phone_number,
+        to=lead.phone,
+        media_url=[media_url],
+    )
+
+    message = Message(
+        lead_id=lead.id,
+        sender_id=advisor.id,
+        body=f"[MMS] {body}",
+        twilio_sid=twilio_msg.sid,
+        twilio_status=twilio_msg.status,
+        booking_link_id=booking_link.id if booking_link else None,
+    )
+    db.add(message)
+    lead.status = "sent"
+    db.commit()
+    return message
+
     message = Message(
         lead_id=lead.id,
         sender_id=advisor.id,

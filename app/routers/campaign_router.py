@@ -53,6 +53,19 @@ def _apply_filters(query, organization_id: str, criteria: dict):
     if criteria.get("source_year"):
         query = query.filter(Lead.source_year == int(criteria["source_year"]))
 
+    if criteria.get("source_year_min"):
+        query = query.filter(Lead.source_year >= int(criteria["source_year_min"]))
+
+    if criteria.get("source_year_max"):
+        query = query.filter(Lead.source_year <= int(criteria["source_year_max"]))
+
+    if criteria.get("message_track") or criteria.get("lead_type"):
+        track = criteria.get("message_track") or criteria.get("lead_type")
+        query = query.filter(Lead.message_track == track)
+
+    if criteria.get("engagement_temperature"):
+        query = query.filter(Lead.engagement_temperature == criteria["engagement_temperature"])
+
     if criteria.get("source_file"):
         query = query.filter(Lead.source_file.ilike(f"%{criteria['source_file']}%"))
 
@@ -83,7 +96,7 @@ def _apply_filters(query, organization_id: str, criteria: dict):
 
 # ── AI message generation ─────────────────────────────────────────────────────
 
-def _generate_campaign_message(purpose: str, tone: str, org_name: str, advisor_name: str) -> str:
+def _generate_campaign_message(purpose: str, tone: str, org_name: str, advisor_name: str, lead_type: str = None, ai_direction: str = None) -> str:
     """Generate an AI opening message for this campaign."""
     from openai import OpenAI
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -97,12 +110,15 @@ def _generate_campaign_message(purpose: str, tone: str, org_name: str, advisor_n
     }
     tone_desc = tone_map.get(tone, "warm and professional")
 
+    lead_type_line = f"\nLead type: {lead_type}" if lead_type else ""
+    direction_line = f"\nSpecific direction: {ai_direction}" if ai_direction else ""
+
     prompt = f"""Write a short SMS outreach message for a campaign.
 
 Business: {org_name}
 Advisor: {advisor_name}
 Campaign type: {purpose_label}
-Tone: {tone_desc}
+Tone: {tone_desc}{lead_type_line}{direction_line}
 
 Rules:
 - Under 320 characters
@@ -132,10 +148,16 @@ class CampaignFilterCriteria(BaseModel):
     tier: Optional[str] = None
     status: Optional[str] = None
     source_year: Optional[int] = None
+    source_year_min: Optional[int] = None   # year range start
+    source_year_max: Optional[int] = None   # year range end
     source_file: Optional[str] = None
     channel: Optional[str] = None
     advisor_id: Optional[str] = None
     contact_history: Optional[str] = None  # never_contacted | contacted_no_reply | replied_not_booked
+    message_track: Optional[str] = None    # file_check | code_lead | new_inquiry | referral | web_lead
+    engagement_temperature: Optional[str] = None  # hot | warm | cold | unknown
+    lead_type: Optional[str] = None        # alias for message_track - used in UI
+    contractor_type: Optional[str] = None  # for non-funeral orgs: roofing, insurance, etc.
 
 
 class CampaignCreate(BaseModel):
@@ -165,6 +187,8 @@ class CampaignSend(BaseModel):
 class GenerateMessageRequest(BaseModel):
     purpose: str
     tone: str = "warm"
+    lead_type: Optional[str] = None
+    ai_direction: Optional[str] = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -186,7 +210,7 @@ def generate_message(
     org_name = org.name if org else "our organization"
     advisor_name = current_user.full_name or "your advisor"
 
-    message = _generate_campaign_message(req.purpose, req.tone, org_name, advisor_name)
+    message = _generate_campaign_message(req.purpose, req.tone, org_name, advisor_name, lead_type=req.lead_type, ai_direction=req.ai_direction)
     return {"message": message, "purpose": req.purpose, "tone": req.tone}
 
 
@@ -308,3 +332,173 @@ def send_campaign(
 
     log_action(db, current_user, action="campaign.send", target_type="campaign", target_id=campaign_id)
     return {"sent": sent, "skipped": skipped, "errors": errors, "total": len(leads)}
+
+
+# ── Campaign Builder endpoints (used by CampaignBuilder.jsx) ─────────────────
+# The builder UI calls /campaigns/builder/preview and /campaigns/builder/send.
+# These are the entry points that actually power the Campaign Builder wizard.
+
+class BuilderPreviewRequest(BaseModel):
+    tier: Optional[str] = None
+    status: Optional[str] = None
+    source_year_min: Optional[int] = None
+    source_year_max: Optional[int] = None
+    assigned_to_id: Optional[str] = None
+    no_contact_days: Optional[int] = None
+    has_phone: bool = True
+    exclude_dnc: bool = True
+    exclude_duplicates: bool = True
+    lead_type: Optional[str] = None
+    engagement_temperature: Optional[str] = None
+    contact_history: Optional[str] = None
+
+
+class BuilderSendRequest(BaseModel):
+    name: str
+    message_template: str
+    include_booking_link: bool = True
+    lead_ids: list[str]
+    filters: Optional[dict] = None
+    ai_direction: Optional[str] = None
+    schedule_type: str = "now"
+    scheduled_at: Optional[str] = None
+
+
+@router.get("/builder/preview")
+def builder_preview(
+    tier: Optional[str] = None,
+    status: Optional[str] = None,
+    source_year_min: Optional[int] = None,
+    source_year_max: Optional[int] = None,
+    assigned_to_id: Optional[str] = None,
+    no_contact_days: Optional[int] = None,
+    has_phone: bool = True,
+    exclude_dnc: bool = True,
+    exclude_duplicates: bool = True,
+    lead_type: Optional[str] = None,
+    engagement_temperature: Optional[str] = None,
+    contact_history: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Preview leads matching the Campaign Builder filters. Returns full lead list."""
+    criteria = {}
+    if tier: criteria["tier"] = tier
+    if status: criteria["status"] = status
+    if source_year_min: criteria["source_year_min"] = source_year_min
+    if source_year_max: criteria["source_year_max"] = source_year_max
+    if assigned_to_id: criteria["advisor_id"] = assigned_to_id
+    if lead_type: criteria["lead_type"] = lead_type
+    if engagement_temperature: criteria["engagement_temperature"] = engagement_temperature
+    if contact_history: criteria["contact_history"] = contact_history
+
+    query = _apply_filters(db.query(Lead), current_user.organization_id, criteria)
+
+    if has_phone:
+        query = query.filter(Lead.phone.isnot(None), Lead.phone != "")
+    if exclude_dnc:
+        query = query.filter(Lead.status != "dnc")
+    if exclude_duplicates:
+        query = query.filter(Lead.is_duplicate == False)
+    if no_contact_days:
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=no_contact_days)
+        contacted_recent = db.query(Message.lead_id).filter(Message.sent_at >= cutoff).distinct()
+        query = query.filter(~Lead.id.in_(contacted_recent))
+
+    leads = query.order_by(Lead.last_name.asc(), Lead.first_name.asc()).all()
+
+    return [
+        {
+            "id": l.id,
+            "first_name": l.first_name,
+            "last_name": l.last_name,
+            "phone": l.phone,
+            "email": l.email,
+            "tier": l.tier,
+            "status": l.status,
+            "source_year": l.source_year,
+            "source_file": l.source_file,
+            "message_track": l.message_track,
+            "assigned_to_name": l.assigned_to.full_name if l.assigned_to else None,
+        }
+        for l in leads
+    ]
+
+
+@router.post("/builder/send")
+def builder_send(
+    req: BuilderSendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Execute Campaign Builder send — any advisor can run this.
+    Creates a campaign record, then sends to all lead_ids provided.
+    """
+    from app.services.sms_service import send_sms
+
+    # Create campaign record for history
+    campaign = Campaign(
+        id=str(uuid.uuid4()),
+        organization_id=current_user.organization_id,
+        name=req.name,
+        created_by_id=current_user.id,
+        filter_criteria=json.dumps(req.filters or {}),
+        created_at=datetime.utcnow(),
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+
+    # Fetch the leads
+    leads = db.query(Lead).filter(
+        Lead.id.in_(req.lead_ids),
+        Lead.organization_id == current_user.organization_id,
+        Lead.is_duplicate == False,
+        Lead.status != "dnc",
+    ).all()
+
+    sent = 0
+    skipped = 0
+    errors = 0
+    error_details = []
+
+    for lead in leads:
+        try:
+            if not lead.phone and lead.contact_channel != "email_only":
+                skipped += 1
+                continue
+            if lead.contact_channel == "email_only":
+                skipped += 1
+                continue
+
+            # Personalize
+            name = lead.first_name or "there"
+            personalized = (req.message_template
+                .replace("{first_name}", name)
+                .replace("{advisor_name}", current_user.full_name or "")
+                .replace("{booking_url}", ""))
+
+            send_sms(
+                db=db,
+                lead=lead,
+                advisor=current_user,
+                template=personalized,
+                include_booking_link=req.include_booking_link,
+            )
+            sent += 1
+        except Exception as e:
+            errors += 1
+            error_details.append({"lead_id": lead.id, "error": str(e)})
+
+    log_action(db, current_user, action="campaign.builder_send", target_type="campaign", target_id=campaign.id)
+
+    return {
+        "campaign_id": campaign.id,
+        "sent": sent,
+        "skipped": skipped,
+        "errors": errors,
+        "total": len(leads),
+        "error_details": error_details[:5],  # first 5 errors for debugging
+    }

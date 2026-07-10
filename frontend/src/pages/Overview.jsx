@@ -10,10 +10,10 @@ import SignalPulse from '../components/SignalPulse'
 import './Overview.css'
 
 const chartTooltipStyle = {
-  background: 'rgba(7, 14, 32, 0.96)',
-  border: '1px solid rgba(86, 200, 255, 0.42)',
+  background: 'var(--bg-panel)',
+  border: '1px solid var(--border-strong)',
   borderRadius: 12,
-  color: '#eef5ff',
+  color: 'var(--text-primary)',
 }
 
 function formatDate(value) {

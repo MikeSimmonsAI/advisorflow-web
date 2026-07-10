@@ -50,7 +50,7 @@
 }
 
 .message-review-card {
-  background: rgba(8, 17, 39, 0.5);
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 12px 14px;

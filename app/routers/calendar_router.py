@@ -79,9 +79,8 @@ class BookingConfirmRequest(BaseModel):
 def confirm_booking(req: BookingConfirmRequest, db: Session = Depends(get_db)):
     """
     Called by the stateless booking backend (advisorflow-booking.vercel.app)
-    once a lead picks a time slot. Creates the actual Google Calendar event.
-    No auth dependency - the booking_token itself is the authorization,
-    matching the existing stateless-token booking pattern.
+    once a lead picks a time slot. Creates the actual Google Calendar event
+    and fires appointment confirmation messages to lead + advisor.
     """
     booking = db.query(BookingLink).filter(BookingLink.token == req.booking_token).first()
     if not booking:
@@ -90,26 +89,39 @@ def confirm_booking(req: BookingConfirmRequest, db: Session = Depends(get_db)):
     result = create_calendar_event_for_booking(db, booking, req.booked_datetime, req.duration_minutes)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
+
+    # Store appointment time and fire confirmation messages
+    try:
+        from datetime import datetime as dt
+        booking.appointment_at = dt.fromisoformat(req.booked_datetime) if isinstance(req.booked_datetime, str) else req.booked_datetime
+        booking.status = "confirmed"
+        db.commit()
+        db.refresh(booking)
+
+        from app.models.models import Lead as LeadModel
+        lead = db.query(LeadModel).filter(LeadModel.id == booking.lead_id).first()
+        advisor = db.query(User).filter(User.id == booking.user_id).first()
+        if lead and advisor:
+            from app.services.appointment_flow_service import on_booking_confirmed
+            on_booking_confirmed(db, lead, advisor, booking)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Appointment flow error: %s", e)
+
     return result
 
 
 @router.post("/cancel-booking/{booking_id}")
 def cancel_booking(booking_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
-    Cancels a booking's calendar event.
-
-    SECURITY FIX: this previously had no ownership check at all - any
-    logged-in advisor could cancel any OTHER advisor's booking just by
-    knowing or guessing the booking_id, with zero org isolation either.
-    Now verifies the booking's lead belongs to the current advisor's
-    organization, matching the pattern used everywhere else in this app.
+    Cancels a booking's calendar event and fires cancellation messages.
     """
-    from app.models.models import Lead
+    from app.models.models import Lead as LeadModel
 
     booking = (
         db.query(BookingLink)
-        .join(Lead, BookingLink.lead_id == Lead.id)
-        .filter(BookingLink.id == booking_id, Lead.organization_id == current_user.organization_id)
+        .join(LeadModel, BookingLink.lead_id == LeadModel.id)
+        .filter(BookingLink.id == booking_id, LeadModel.organization_id == current_user.organization_id)
         .first()
     )
     if not booking:
@@ -118,4 +130,29 @@ def cancel_booking(booking_id: str, db: Session = Depends(get_db), current_user:
     result = cancel_calendar_event(db, booking)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
+
+    # Fire cancellation messages
+    try:
+        lead = db.query(LeadModel).filter(LeadModel.id == booking.lead_id).first()
+        if lead:
+            from app.services.appointment_flow_service import on_booking_cancelled
+            on_booking_cancelled(db, lead, current_user, booking)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Cancellation flow error: %s", e)
+
+    return result
+
+
+@router.post("/send-reminders")
+def send_reminders(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually trigger appointment reminders (24h and 2h).
+    In production, call this from a cron job every 15-30 minutes.
+    """
+    from app.services.appointment_flow_service import send_appointment_reminders
+    result = send_appointment_reminders(db)
     return result

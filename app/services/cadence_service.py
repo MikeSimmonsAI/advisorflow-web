@@ -125,16 +125,16 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
     return state
 
 
-def stop_cadence_for_lead(db: Session, lead_id: str, reason: CadenceStatus) -> None:
+def stop_cadence_for_lead(db: Session, lead_id: str, reason) -> None:
     """
-    Stops the cadence for a lead - call this from the inbound SMS webhook
-    on any reply, from the booking confirmation handler, or when a lead
-    is flagged DNC for any reason.
+    Stops the cadence for a lead.
+    reason can be a CadenceStatus enum or a plain string — both handled safely.
     """
     state = db.query(CadenceState).filter(CadenceState.lead_id == lead_id).first()
     if not state or state.status != "active":
         return
-    state.status = reason
+    # CadenceState.status is plain VARCHAR — always store as string
+    state.status = reason.value if hasattr(reason, "value") else str(reason)
     state.completed_at = datetime.now(timezone.utc)
     db.commit()
 

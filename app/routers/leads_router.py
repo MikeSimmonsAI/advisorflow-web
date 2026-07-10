@@ -49,7 +49,9 @@ def preview_upload(
     from a source column. See import_service.import_leads_from_excel for
     the full reasoning.
     """
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+    import os as _os
+    original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
@@ -79,7 +81,9 @@ def confirm_upload(
     current_user: User = Depends(get_current_user),
 ):
     """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+    import os as _os
+    original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
@@ -734,3 +738,59 @@ def create_lead_manually(
         "is_duplicate": is_dup,
         "status": "created",
     }
+
+
+# ── Delete a single lead ──────────────────────────────────────────────────────
+
+@router.delete("/{lead_id}")
+def delete_lead(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete a single lead. Advisors can delete their own leads; admins can delete any."""
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if current_user.role == "advisor" and lead.assigned_to_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own leads")
+
+    log_action(db, current_user, action="lead.delete", target_type="lead", target_id=lead_id)
+    db.delete(lead)
+    db.commit()
+    return {"deleted": True, "id": lead_id}
+
+
+# ── Update lead type / AI direction ──────────────────────────────────────────
+
+class LeadTypeUpdate(BaseModel):
+    lead_type: Optional[str] = None   # file_check, code_lead, new_inquiry, referral, web_lead, etc.
+    ai_direction: Optional[str] = None  # free-text instruction for AI messaging this lead
+
+@router.patch("/{lead_id}/lead-type")
+def update_lead_type(
+    lead_id: str,
+    payload: LeadTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set the lead type and/or AI direction override for a lead."""
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if payload.lead_type is not None:
+        lead.message_track = payload.lead_type
+    if payload.ai_direction is not None:
+        lead.notes = (lead.notes or "") + f"\n[AI Direction]: {payload.ai_direction}"
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+    log_action(db, current_user, action="lead.update_type", target_type="lead", target_id=lead_id)
+    return {"updated": True}

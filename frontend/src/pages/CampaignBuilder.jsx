@@ -24,6 +24,32 @@ const TIER_OPTIONS = [
   { value: 'contract_sold', label: 'Contract Sold' },
 ]
 
+const LEAD_TYPE_OPTIONS = [
+  { value: '', label: 'All lead types' },
+  { value: 'file_check', label: 'File Check' },
+  { value: 'code_lead', label: 'Code Lead' },
+  { value: 'new_inquiry', label: 'New Inquiry' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'web_lead', label: 'Web Lead' },
+  { value: 'at_need', label: 'At-Need Contact' },
+  { value: 'pre_need', label: 'Pre-Need Interest' },
+]
+
+const ENGAGEMENT_OPTIONS = [
+  { value: '', label: 'All engagement levels' },
+  { value: 'hot', label: '🔥 Hot' },
+  { value: 'warm', label: '☀️ Warm' },
+  { value: 'cold', label: '❄️ Cold' },
+  { value: 'unknown', label: 'Unknown' },
+]
+
+const CONTACT_HISTORY_OPTIONS = [
+  { value: '', label: 'Any contact history' },
+  { value: 'never_contacted', label: 'Never contacted' },
+  { value: 'contacted_no_reply', label: 'Contacted — no reply' },
+  { value: 'replied_not_booked', label: 'Replied — not booked' },
+]
+
 const EMPTY_FILTERS = {
   tier: '',
   status: '',
@@ -31,6 +57,10 @@ const EMPTY_FILTERS = {
   source_year_max: '',
   assigned_to_id: '',
   no_contact_days: '',
+  lead_type: '',
+  engagement_temperature: '',
+  contact_history: '',
+  ai_direction: '',
   has_phone: true,
   exclude_dnc: true,
   exclude_duplicates: true,
@@ -84,6 +114,9 @@ export default function CampaignBuilder() {
       if (filters.source_year_max) params.set('source_year_max', filters.source_year_max)
       if (filters.assigned_to_id) params.set('assigned_to_id', filters.assigned_to_id)
       if (filters.no_contact_days) params.set('no_contact_days', filters.no_contact_days)
+      if (filters.lead_type) params.set('lead_type', filters.lead_type)
+      if (filters.engagement_temperature) params.set('engagement_temperature', filters.engagement_temperature)
+      if (filters.contact_history) params.set('contact_history', filters.contact_history)
       params.set('has_phone', filters.has_phone ? 'true' : 'false')
       params.set('exclude_dnc', filters.exclude_dnc ? 'true' : 'false')
       params.set('exclude_duplicates', filters.exclude_duplicates ? 'true' : 'false')
@@ -119,7 +152,11 @@ export default function CampaignBuilder() {
           has_phone: filters.has_phone,
           exclude_dnc: filters.exclude_dnc,
           exclude_duplicates: filters.exclude_duplicates,
+          lead_type: filters.lead_type || null,
+          engagement_temperature: filters.engagement_temperature || null,
+          contact_history: filters.contact_history || null,
         },
+        ai_direction: filters.ai_direction || null,
       }
       const result = await api.post('/campaigns/builder/send', payload)
       setSendResult(result)
@@ -226,6 +263,27 @@ export default function CampaignBuilder() {
                   onChange={e => setFilter('source_year_max', e.target.value)}
                 />
               </label>
+
+              <label className="settings-label">
+                Lead type
+                <select className="filter-select" value={filters.lead_type} onChange={e => setFilter('lead_type', e.target.value)}>
+                  {LEAD_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+
+              <label className="settings-label">
+                Engagement level
+                <select className="filter-select" value={filters.engagement_temperature} onChange={e => setFilter('engagement_temperature', e.target.value)}>
+                  {ENGAGEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+
+              <label className="settings-label">
+                Contact history
+                <select className="filter-select" value={filters.contact_history} onChange={e => setFilter('contact_history', e.target.value)}>
+                  {CONTACT_HISTORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
             </div>
 
             <div className="campaign-checkbox-row">
@@ -323,6 +381,19 @@ export default function CampaignBuilder() {
               </label>
 
               <label className="settings-label">
+                AI Direction (optional)
+                <input
+                  className="settings-input"
+                  value={filters.ai_direction}
+                  onChange={e => setFilter('ai_direction', e.target.value)}
+                  placeholder="e.g. This is a file check campaign — ask if they still need pre-need planning"
+                />
+                <span className="settings-help" style={{ fontSize: 11 }}>
+                  Tell the AI what this campaign is about. The more specific, the better the message.
+                </span>
+              </label>
+
+              <label className="settings-label">
                 Message
                 <textarea
                   className="compose-textarea"
@@ -336,6 +407,31 @@ export default function CampaignBuilder() {
                   {charCount > 160 && <span className="campaign-char-warn"> · Keep under 160 for single segment</span>}
                 </div>
               </label>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn--secondary"
+                  style={{ fontSize: 13 }}
+                  onClick={async () => {
+                    try {
+                      const result = await api.post('/campaigns/generate-message', {
+                        purpose: filters.lead_type || 'custom',
+                        tone: filters.engagement_temperature === 'hot' ? 'direct' : filters.engagement_temperature === 'cold' ? 'soft' : 'warm',
+                        lead_type: filters.lead_type || null,
+                        ai_direction: filters.ai_direction || null,
+                      })
+                      if (result.message) setMessageText(result.message)
+                    } catch (err) {
+                      alert('AI generation failed: ' + err.message)
+                    }
+                  }}
+                >
+                  ✨ AI Write Message
+                </button>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', alignSelf: 'center' }}>
+                  Uses your lead type and direction above
+                </span>
+              </div>
 
               <p className="settings-help">
                 Placeholders: <code>&#123;first_name&#125;</code>, <code>&#123;advisor_name&#125;</code>, <code>&#123;booking_link&#125;</code> — filled in per lead at send time.

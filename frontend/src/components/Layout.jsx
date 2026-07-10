@@ -21,11 +21,16 @@ const ADMIN_NAV_ITEMS = [
   { to: '/admin', label: 'Master Dashboard', icon: 'shield' },
   { to: '/reports', label: 'Reports', icon: 'activity' },
   { to: '/users', label: 'Users', icon: 'user-plus' },
-  { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/campaigns', label: 'Campaigns', icon: 'target' },
+  { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
+]
+
+// Super admin only — platform-level tools not visible to org supervisors
+const SUPER_ADMIN_NAV_ITEMS = [
+  { to: '/provision-client', label: 'Provision Client', icon: 'user-plus' },
+  { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
   { to: '/org-settings', label: 'Org Settings', icon: 'settings' },
-  { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
   { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
   { to: '/audit-log', label: 'Audit Log', icon: 'activity' },
 ]
@@ -137,6 +142,21 @@ export default function Layout({ children }) {
             <>
               <div className="nav-divider" />
               {ADMIN_NAV_ITEMS.map((item) => (
+                <NavLink key={item.to} to={item.to}
+                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                  onClick={closeSidebar}
+                >
+                  <Icon name={item.icon} />{item.label}
+                </NavLink>
+              ))}
+            </>
+          )}
+
+          {user?.role === 'super_admin' && (
+            <>
+              <div className="nav-divider" />
+              <div className="nav-section-label">Platform Admin</div>
+              {SUPER_ADMIN_NAV_ITEMS.map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}

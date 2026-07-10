@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from typing import Optional
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, EmailMessage
@@ -68,3 +69,101 @@ def email_only_queue(
         )
 
     return query.order_by(Lead.created_at.desc(), Lead.last_name.asc(), Lead.first_name.asc()).all()
+
+
+# ── Email with flyer/attachment ───────────────────────────────────────────────
+
+from fastapi import UploadFile, File, Form
+import base64, os
+
+class EmailWithAttachmentRequest(BaseModel):
+    lead_id: str
+    subject: str
+    body_html: str
+
+
+@router.post("/send-with-attachment/{lead_id}")
+async def send_email_with_attachment(
+    lead_id: str,
+    subject: str = Form(...),
+    body_html: str = Form(...),
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Send an email to a lead with an optional flyer/image attachment.
+    Accepts multipart form: subject, body_html, and optional file upload.
+    """
+    from app.services.email_service import send_email_via_provider
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not lead.email:
+        raise HTTPException(status_code=400, detail="Lead has no email address")
+
+    attachments = []
+    if file and file.filename:
+        file_bytes = await file.read()
+        attachments.append({
+            "filename": file.filename,
+            "content": base64.b64encode(file_bytes).decode(),
+            "content_type": file.content_type or "application/octet-stream",
+        })
+
+    result = send_email_via_provider(lead.email, subject, body_html, attachments=attachments or None)
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
+
+    # Log it
+    from app.models.models import EmailMessage
+    from datetime import datetime
+    msg = EmailMessage(
+        lead_id=lead.id,
+        sender_id=current_user.id,
+        subject=subject,
+        body_html=body_html,
+        status="sent",
+        provider_message_id=result.get("provider_message_id"),
+        sent_at=datetime.utcnow(),
+    )
+    db.add(msg)
+    db.commit()
+    return {"email_id": msg.id, "status": "sent", "has_attachment": bool(attachments)}
+
+
+# ── AI email draft — talking points + 3 options ───────────────────────────────
+
+class EmailDraftRequest(BaseModel):
+    tone: str = "warm"
+    ai_direction: Optional[str] = None
+
+
+@router.post("/draft/{lead_id}")
+def draft_email(
+    lead_id: str,
+    req: EmailDraftRequest = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AI generates talking points + 3 full email draft options for a lead.
+    Uses the lead's full context (tier, source year, last action, etc.)
+    to personalize — not a generic template.
+    """
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    from app.services.draft_reply_service import draft_email_options
+    tone = (req.tone if req else "warm")
+    ai_direction = (req.ai_direction if req else None)
+
+    return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction)

@@ -263,7 +263,7 @@ def import_leads_from_excel(
         db.add(lead)
         db.flush()
 
-        tier_counts[tier.value] = tier_counts.get(tier.value, 0) + 1
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
         # Dedup only applies to phone-based leads - email-only leads don't
         # have a phone to check against the registry.

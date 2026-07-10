@@ -124,14 +124,14 @@ def generate_sample_data(
             last_name=last,
             phone=None if is_email_only else _random_phone(i),
             email=f"{first.lower()}.{last.lower()}@example.com" if is_email_only or random.random() > 0.4 else None,
-            tier=tier,
+            tier=tier.value if hasattr(tier, 'value') else tier,
             engagement_temperature=temp,
             message_track=track,
             contact_channel="email_only" if is_email_only else "sms",
-            status=status,
+            status=status.value if hasattr(status, 'value') else status,
             source_year=2024,
             source_file=SAMPLE_TAG,
-            last_action_raw="Called: Scheduled Appt." if status == LeadStatus.BOOKED else "Called: LM/No Answer",
+            last_action_raw="Called: Scheduled Appt." if (status.value if hasattr(status, 'value') else status) == "booked" else "Called: LM/No Answer",
             last_contact_date=now - timedelta(days=random.randint(1, 14)),
         )
         db.add(lead)
@@ -164,7 +164,7 @@ def generate_sample_data(
         if in_cadence:
             cadence = CadenceState(
                 lead_id=lead.id,
-                status=CadenceStatus.ACTIVE,
+                status="active",
                 current_touch_number=random.randint(1, 4),
                 cadence_started_at=now - timedelta(days=random.randint(1, 10)),
                 next_touch_due_at=now + timedelta(days=random.randint(1, 5)),

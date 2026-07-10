@@ -119,12 +119,68 @@ def _serialize_template(t: CadenceTemplate) -> dict:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+def _seed_defaults_for_org(db: Session, organization_id: str, created_by_id: str, industry: str = "funeral") -> list:
+    """Internal helper to seed default templates for an org. Safe to call multiple times."""
+    seeded = []
+    for key, data in DEFAULTS.items():
+        if industry != "all" and key != industry:
+            continue
+        existing = db.query(CadenceTemplate).filter(
+            CadenceTemplate.organization_id == organization_id,
+            CadenceTemplate.name == data["name"],
+        ).first()
+        if existing:
+            seeded.append({"name": data["name"], "status": "already_exists"})
+            continue
+        template = CadenceTemplate(
+            id=str(uuid.uuid4()),
+            organization_id=organization_id,
+            name=data["name"],
+            description=data["description"],
+            industry=key,
+            is_default=(key == industry),
+            allow_advisor_override=False,
+            created_by_id=created_by_id,
+            created_at=datetime.utcnow(),
+            is_active=True,
+        )
+        db.add(template)
+        db.flush()
+        for touch_data in data["touches"]:
+            touch = CadenceTemplateTouch(
+                id=str(uuid.uuid4()),
+                template_id=template.id,
+                touch_number=touch_data["touch_number"],
+                day_offset=touch_data["day_offset"],
+                send_hour=touch_data.get("send_hour", 10),
+                channel=touch_data["channel"],
+                message_template=touch_data.get("message_template"),
+                subject_template=touch_data.get("subject_template"),
+                is_active=True,
+            )
+            db.add(touch)
+        seeded.append({"name": data["name"], "status": "created"})
+    db.commit()
+    return seeded
+
 @router.get("/")
 def list_templates(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     templates = db.query(CadenceTemplate).filter(
         CadenceTemplate.organization_id == current_user.organization_id,
         CadenceTemplate.is_active == True,
     ).order_by(CadenceTemplate.is_default.desc(), CadenceTemplate.created_at.asc()).all()
+
+    # Auto-seed funeral defaults if this org has never had templates
+    if not templates:
+        try:
+            _seed_defaults_for_org(db, current_user.organization_id, current_user.id, industry="funeral")
+            templates = db.query(CadenceTemplate).filter(
+                CadenceTemplate.organization_id == current_user.organization_id,
+                CadenceTemplate.is_active == True,
+            ).order_by(CadenceTemplate.is_default.desc(), CadenceTemplate.created_at.asc()).all()
+        except Exception:
+            pass
+
     return [_serialize_template(t) for t in templates]
 
 
@@ -143,52 +199,10 @@ def get_template(template_id: str, db: Session = Depends(get_db), current_user: 
 def seed_default_templates(
     industry: str = "funeral",
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),  # any logged-in user can seed
 ):
-    """Seed the pre-built default templates for this org."""
-    seeded = []
-    for key, data in DEFAULTS.items():
-        if industry != "all" and key != industry:
-            continue
-        existing = db.query(CadenceTemplate).filter(
-            CadenceTemplate.organization_id == current_user.organization_id,
-            CadenceTemplate.name == data["name"],
-        ).first()
-        if existing:
-            seeded.append({"name": data["name"], "status": "already_exists"})
-            continue
-
-        template = CadenceTemplate(
-            id=str(uuid.uuid4()),
-            organization_id=current_user.organization_id,
-            name=data["name"],
-            description=data["description"],
-            industry=key,
-            is_default=(key == industry),
-            allow_advisor_override=False,
-            created_by_id=current_user.id,
-            created_at=datetime.utcnow(),
-            is_active=True,
-        )
-        db.add(template)
-        db.flush()
-
-        for touch_data in data["touches"]:
-            touch = CadenceTemplateTouch(
-                id=str(uuid.uuid4()),
-                template_id=template.id,
-                touch_number=touch_data["touch_number"],
-                day_offset=touch_data["day_offset"],
-                send_hour=touch_data.get("send_hour", 10),
-                channel=touch_data["channel"],
-                message_template=touch_data.get("message_template"),
-                subject_template=touch_data.get("subject_template"),
-                is_active=True,
-            )
-            db.add(touch)
-        seeded.append({"name": data["name"], "status": "created"})
-
-    db.commit()
+    """Seed the pre-built default templates for this org. Any advisor can trigger this."""
+    seeded = _seed_defaults_for_org(db, current_user.organization_id, current_user.id, industry=industry)
     return {"seeded": seeded}
 
 

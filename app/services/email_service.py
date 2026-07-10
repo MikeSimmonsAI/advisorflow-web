@@ -124,21 +124,31 @@ def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url
     return {"subject": subject, "body_html": body}
 
 
-def send_email_via_provider(to_email: str, subject: str, body_html: str) -> dict:
+def send_email_via_provider(to_email: str, subject: str, body_html: str, attachments: list = None) -> dict:
     """
     Sends via SendGrid. Returns {"success": bool, "provider_message_id": str|None, "error": str|None}.
-    If SENDGRID_API_KEY isn't set, returns success=False with a clear error
-    rather than silently failing, so the caller can surface it.
+    attachments: list of dicts with keys: filename, content (base64 string), content_type
     """
     if not SENDGRID_API_KEY:
         return {"success": False, "provider_message_id": None, "error": "SENDGRID_API_KEY not configured"}
 
     try:
         import sendgrid
-        from sendgrid.helpers.mail import Mail
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         message = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=body_html)
+
+        if attachments:
+            for att in attachments:
+                attachment = Attachment(
+                    FileContent(att["content"]),
+                    FileName(att["filename"]),
+                    FileType(att.get("content_type", "application/octet-stream")),
+                    Disposition("attachment"),
+                )
+                message.add_attachment(attachment)
+
         response = sg.send(message)
         message_id = response.headers.get("X-Message-Id") if hasattr(response, "headers") else None
         return {"success": response.status_code in (200, 201, 202), "provider_message_id": message_id, "error": None}

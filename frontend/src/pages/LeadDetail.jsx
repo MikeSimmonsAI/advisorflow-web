@@ -45,6 +45,7 @@ export default function LeadDetail() {
   const [analysisError, setAnalysisError] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const [tone, setTone] = useState(1) // 0=cold 1=warm 2=hot 3=urgent
+  const [aiDirection, setAiDirection] = useState('')  // per-lead AI messaging direction
   const currentUser = getCurrentUser()
   const canReassignLead = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
   const [assignableUsers, setAssignableUsers] = useState([])
@@ -72,7 +73,7 @@ export default function LeadDetail() {
     setSuggestingReply(true)
     setSendError('')
     try {
-      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: TONES[tone].key })
+      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: TONES[tone].key, ai_direction: aiDirection || null })
       setMessageText(draft.suggested_reply || '')
       if (draft.booking_url) setIncludeBookingLink(false)
     } catch (err) {
@@ -276,6 +277,15 @@ export default function LeadDetail() {
                   </div>
                   <span className="lead-tone-desc">{currentTone.desc}</span>
                 </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="compose-subject"
+                    style={{ flex: 1, fontSize: 12 }}
+                    placeholder="AI direction: e.g. file check — ask if they still need planning"
+                    value={aiDirection}
+                    onChange={e => setAiDirection(e.target.value)}
+                  />
+                </div>
                 <div className="lead-compose-suggest">
                   <button className="btn btn--secondary" onClick={handleSuggestReply} disabled={suggestingReply}>
                     {suggestingReply ? '⏳ Drafting…' : `✨ Suggest ${currentTone.label} reply`}
@@ -301,7 +311,7 @@ export default function LeadDetail() {
                   <button className="btn btn--secondary" onClick={async () => {
                     setSuggestingReply(true)
                     try {
-                      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: TONES[tone].key })
+                      const draft = await api.post(`/sms/draft-reply/${leadId}`, { tone: TONES[tone].key, ai_direction: aiDirection || null })
                       setEmailBody(draft.suggested_reply || '')
                       setEmailSubject(`Following up, ${lead.first_name || 'there'}`)
                     } catch (err) { setSendError(err.message) }

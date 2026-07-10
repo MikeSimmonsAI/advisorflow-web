@@ -28,15 +28,22 @@ export default function Cadence() {
   const [controlling, setControlling] = useState(null)
   const user = getCurrentUser()
   const isAdmin = user?.role === 'org_admin' || user?.role === 'super_admin'
+  const [templates, setTemplates] = useState([])
+  const [selectedTemplate, setSelectedTemplate] = useState('')
 
   function load() {
     setLoading(true)
     Promise.all([
       api.get('/cadence/summary').catch(() => ({})),
       api.get('/cadence/active').catch(() => []),
-    ]).then(([summaryData, activeData]) => {
+      api.get('/cadence-templates/').catch(() => []),
+    ]).then(([summaryData, activeData, templateData]) => {
       setSummary(summaryData || {})
       setActive(activeData || [])
+      setTemplates(templateData || [])
+      if (templateData?.length > 0 && !selectedTemplate) {
+        setSelectedTemplate(templateData[0].id)
+      }
       setLoading(false)
     })
   }
@@ -77,7 +84,7 @@ export default function Cadence() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Cadence</h1>
-          <p className="page-subtitle">9-touch re-engagement sequence — Day 1, 3, 7, 10, 14, 21, 30, 45, 60.</p>
+          <p className="page-subtitle">Automated re-engagement sequences — select a template or build your own rhythm.</p>
         </div>
         {isAdmin && (
           <button className="btn btn--primary" onClick={handleRunDue} disabled={running}>
@@ -85,6 +92,62 @@ export default function Cadence() {
           </button>
         )}
       </header>
+
+      {/* Template selector */}
+      {templates.length > 0 && (
+        <div className="panel" style={{ marginBottom: 16, padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>📋 Cadence template:</span>
+            <select
+              className="filter-select"
+              style={{ minWidth: 260 }}
+              value={selectedTemplate}
+              onChange={e => setSelectedTemplate(e.target.value)}
+            >
+              {templates.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.name} — {t.touch_count} touches{t.is_default ? ' ★' : ''}
+                </option>
+              ))}
+            </select>
+            {selectedTemplate && templates.find(t => t.id === selectedTemplate) && (
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {templates.find(t => t.id === selectedTemplate)?.description}
+              </span>
+            )}
+            <a href="/cadence-templates" style={{ fontSize: 12, color: 'var(--accent)', marginLeft: 'auto' }}>
+              Manage templates →
+            </a>
+          </div>
+          {selectedTemplate && templates.find(t => t.id === selectedTemplate) && (
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {templates.find(t => t.id === selectedTemplate)?.touches?.map(touch => (
+                <span
+                  key={touch.touch_number}
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 10px',
+                    borderRadius: 20,
+                    background: touch.channel === 'email' ? 'rgba(47,182,255,0.12)' : 'rgba(30,240,168,0.12)',
+                    color: touch.channel === 'email' ? 'var(--signal-blue)' : 'var(--signal-green)',
+                    border: '1px solid currentColor',
+                  }}
+                >
+                  Day {touch.day_offset} — {touch.channel}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {templates.length === 0 && !loading && (
+        <div className="panel" style={{ marginBottom: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No cadence templates yet.</span>
+          <a href="/cadence-templates" className="btn btn--secondary" style={{ fontSize: 13 }}>
+            ⚡ Set up templates
+          </a>
+        </div>
+      )}
 
       <div className="cadence-kpi-row">
         <div className="panel cadence-kpi-card">

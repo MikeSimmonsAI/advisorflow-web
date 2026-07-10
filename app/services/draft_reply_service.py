@@ -31,10 +31,12 @@ TONE_INSTRUCTIONS = {
     "urgent": "Be brief and urgent. Time is a factor. Get straight to the point, make a specific ask, and create a sense of gentle urgency without being aggressive.",
 }
 
-DRAFT_REPLY_PROMPT = """You are drafting a short SMS reply from a cemetery/funeral-home sales advisor to a lead.
+DRAFT_REPLY_PROMPT = """You are drafting a short SMS reply from a service business advisor to a lead.
 
 Advisor: {advisor_name}
 Tone instruction: {tone_instruction}
+Lead type: {lead_type}
+AI direction: {ai_direction}
 
 Rules:
 - Respond with ONLY JSON, no markdown and no preamble.
@@ -43,6 +45,7 @@ Rules:
 - Sound human and respectful.
 - Sign as {advisor_name} if the message includes a sign-off.
 - Do not claim anything not shown in the conversation.
+- If AI direction is provided, use it to shape the message purpose and context.
 - Include this booking link exactly once if relevant and not already in your draft: {booking_url}
 
 Lead:
@@ -123,7 +126,7 @@ def _fallback_reply(lead: Lead, advisor: User, booking_url: str, tone: str = "wa
     return f"Hi {name}, this is {advisor_name}. I'd love to connect and walk you through your options. {booking_url}"
 
 
-def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm") -> dict[str, Any]:
+def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm", ai_direction: str = None) -> dict[str, Any]:
     tone = tone if tone in TONE_INSTRUCTIONS else "warm"
     booking = get_or_create_booking_link(db, lead, advisor)
     booking_url = _booking_url(booking.token)
@@ -167,3 +170,166 @@ def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm") -> d
         "booking_link_id": booking.id,
         "source": source,
     }
+
+
+# ── Email draft with talking points + 3 options ───────────────────────────────
+
+EMAIL_DRAFT_PROMPT = """You are helping a service business advisor write a cold outreach email to a lead.
+
+Advisor: {advisor_name}
+Organization: {org_name}
+Tone: {tone_desc}
+Lead type / context: {lead_type}
+AI direction: {ai_direction}
+
+Lead profile:
+- Name: {first_name} {last_name}
+- Tier: {tier}
+- Source year: {source_year}
+- Last action on file: {last_action}
+- Last contact date: {last_contact}
+- Status reason: {status_reason}
+- Notes: {notes}
+
+Rules:
+- This is likely a COLD contact — they may not remember us
+- Use the lead's history (last action, source year, status reason) to make it personal and relevant
+- Keep emails under 150 words
+- Sound like a real person, not a mass marketing template
+- Each option should have a different angle/hook
+- Never be pushy or desperate
+- Always give them an easy out
+
+Respond ONLY with valid JSON, no markdown:
+{{
+  "talking_points": ["Point 1 about this specific lead", "Point 2", "Point 3"],
+  "options": [
+    {{
+      "label": "Warm & personal",
+      "subject": "Subject line here",
+      "body": "Full email body here"
+    }},
+    {{
+      "label": "Direct & clear",
+      "subject": "Subject line here",
+      "body": "Full email body here"
+    }},
+    {{
+      "label": "Value-first",
+      "subject": "Subject line here",
+      "body": "Full email body here"
+    }}
+  ]
+}}"""
+
+
+def draft_email_options(
+    db,
+    lead,
+    advisor,
+    tone: str = "warm",
+    ai_direction: str = None,
+) -> dict:
+    """
+    Generate talking points + 3 email draft options for a lead.
+    Uses full lead context (tier, source year, last action, etc.) to
+    personalize the message rather than using a generic template.
+    """
+    from openai import OpenAI
+    import json, os
+
+    tone_map = {
+        "cold": "soft, low-pressure, just a gentle introduction",
+        "warm": "friendly and inviting, suggest a conversation without being pushy",
+        "hot": "direct and confident, clear call to action",
+        "urgent": "brief and to the point, create gentle urgency",
+    }
+    tone_desc = tone_map.get(tone, tone_map["warm"])
+
+    # Pull org name
+    try:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+        org_name = org.name if org else "our organization"
+    except Exception:
+        org_name = "our organization"
+
+    # Format last contact date
+    last_contact = "unknown"
+    if lead.last_contact_date:
+        try:
+            last_contact = lead.last_contact_date.strftime("%B %Y")
+        except Exception:
+            last_contact = str(lead.last_contact_date)
+
+    prompt = EMAIL_DRAFT_PROMPT.format(
+        advisor_name=advisor.full_name or "your advisor",
+        org_name=org_name,
+        tone_desc=tone_desc,
+        lead_type=lead.message_track or lead.tier or "not specified",
+        ai_direction=ai_direction or "general reconnection outreach",
+        first_name=lead.first_name or "",
+        last_name=lead.last_name or "",
+        tier=lead.tier or "unknown",
+        source_year=lead.source_year or "unknown",
+        last_action=lead.last_action_raw or "none on file",
+        last_contact=last_contact,
+        status_reason=lead.status_reason_raw or "none on file",
+        notes=(lead.notes or "none")[:200],
+    )
+
+    try:
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.6,
+            max_tokens=800,
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        result = json.loads(raw)
+        return {
+            "talking_points": result.get("talking_points", []),
+            "options": result.get("options", []),
+            "lead_context": {
+                "tier": lead.tier,
+                "source_year": lead.source_year,
+                "last_action": lead.last_action_raw,
+                "last_contact": last_contact,
+            }
+        }
+    except Exception as e:
+        # Fallback — generic options
+        first = lead.first_name or "there"
+        advisor_name = advisor.full_name or "your advisor"
+        return {
+            "talking_points": [
+                f"{first_name} was last contacted in {last_contact}" if last_contact != "unknown" else f"Re-engaging {first} after a gap",
+                f"Tier: {lead.tier or 'unassigned'} — tailor the message to their situation",
+                "Keep it short, personal, and low pressure",
+            ],
+            "options": [
+                {
+                    "label": "Warm & personal",
+                    "subject": f"Checking in, {first}",
+                    "body": f"Hi {first},\n\nThis is {advisor_name} with {org_name}. I wanted to personally reach out and see if there's anything I can help you with.\n\nNo pressure at all — just here when you're ready.\n\n{advisor_name}",
+                },
+                {
+                    "label": "Direct & clear",
+                    "subject": f"Quick question, {first}",
+                    "body": f"Hi {first},\n\n{advisor_name} here from {org_name}. I had a chance to look at your file and wanted to connect.\n\nWould you have 10 minutes this week?\n\n{advisor_name}",
+                },
+                {
+                    "label": "Value-first",
+                    "subject": f"Something I think could help, {first}",
+                    "body": f"Hi {first},\n\nI work with families at {org_name} and I've found that a short conversation can save a lot of stress later.\n\nI'd love to share some options with you — no obligation.\n\n{advisor_name}",
+                },
+            ],
+            "lead_context": {
+                "tier": lead.tier,
+                "source_year": lead.source_year,
+                "last_action": lead.last_action_raw,
+                "last_contact": last_contact,
+            }
+        }

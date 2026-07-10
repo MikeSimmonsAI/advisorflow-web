@@ -38,7 +38,7 @@
 }
 
 .outcome-tristate-btn {
-  background: rgba(8, 17, 39, 0.5);
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   font-size: 11px;

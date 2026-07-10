@@ -206,7 +206,7 @@
 }
 
 .leads-table thead tr {
-  background: rgba(7, 14, 32, 0.6);
+  background: var(--bg-field);
   border-bottom: 1px solid var(--border-subtle);
 }
 

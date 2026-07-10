@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, Form, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Reply, Message, ReplyClassification, BookingLink
-from app.services.sms_service import send_sms, send_batch
+from app.services.sms_service import send_sms, send_batch, send_mms
 
 router = APIRouter(prefix="/sms", tags=["sms"])
 
@@ -73,6 +73,7 @@ def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: Us
 
 class DraftReplyRequest(BaseModel):
     tone: str = "warm"  # cold | warm | hot | urgent
+    ai_direction: Optional[str] = None  # per-lead context override
 
 
 @router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
@@ -85,7 +86,8 @@ def draft_reply_for_lead(
     lead = _get_lead_for_current_org_or_404(db, lead_id, current_user)
     from app.services.draft_reply_service import draft_reply
     tone = (req.tone if req and req.tone else "warm")
-    result = draft_reply(db, lead, current_user, tone=tone)
+    ai_direction = (req.ai_direction if req and req.ai_direction else None)
+    result = draft_reply(db, lead, current_user, tone=tone, ai_direction=ai_direction)
     return result
 
 
@@ -323,3 +325,69 @@ def list_replies(
     if needs_attention:
         query = query.filter(Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]))
     return query.order_by(Reply.received_at.desc()).limit(200).all()
+
+
+# ── MMS (image/flyer) send ────────────────────────────────────────────────────
+
+class MMSSendRequest(BaseModel):
+    lead_id: str
+    template: str
+    media_url: str          # publicly accessible URL of image/flyer
+    include_booking_link: bool = False
+
+
+@router.post("/send-mms")
+def send_mms_endpoint(
+    req: MMSSendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Send an MMS (text + image/flyer) to a single lead."""
+    lead = db.query(Lead).filter(
+        Lead.id == req.lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    try:
+        message = send_mms(db, current_user, lead, req.template, req.media_url, req.include_booking_link)
+        return {"message_id": message.id, "status": message.twilio_status}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Media upload (flyers/images for MMS or email attachments) ────────────────
+
+@router.post("/upload-media")
+async def upload_media(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Upload a flyer/image to be used in MMS or email.
+    Returns a public URL. Files are stored in /tmp for now — 
+    configure MEDIA_BASE_URL env var to point to your CDN/S3 bucket.
+    In production, replace local storage with S3 or Cloudinary upload.
+    """
+    import uuid, os, shutil
+    media_base = os.environ.get("MEDIA_BASE_URL", "")
+    ext = os.path.splitext(file.filename or "upload")[1] or ".jpg"
+    filename = f"{uuid.uuid4().hex}{ext}"
+    upload_dir = "/tmp/bookaboost_media"
+    os.makedirs(upload_dir, exist_ok=True)
+    dest = os.path.join(upload_dir, filename)
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    if media_base:
+        public_url = f"{media_base.rstrip('/')}/{filename}"
+    else:
+        public_url = f"/media/{filename}"   # serve locally via static mount if no CDN
+
+    return {
+        "filename": filename,
+        "media_url": public_url,
+        "size_bytes": os.path.getsize(dest),
+        "note": "Set MEDIA_BASE_URL env var to your CDN/S3 for public MMS delivery"
+    }

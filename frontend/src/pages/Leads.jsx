@@ -55,6 +55,7 @@ export default function Leads() {
   const [showAddLead, setShowAddLead] = useState(false)
   const [addLeadForm, setAddLeadForm] = useState({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', source_year: '' })
   const [addLeadSaving, setAddLeadSaving] = useState(false)
+  const [importError, setImportError] = useState('')
   const [addLeadResult, setAddLeadResult] = useState(null)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -115,6 +116,7 @@ export default function Leads() {
     pendingFile.current = file
     setPreviewing(true)
     setPreview(null)
+    setImportError('')
     try {
       const formData = new FormData()
       formData.append('file', file)
@@ -123,7 +125,7 @@ export default function Leads() {
       const result = await api.upload('/leads/upload/preview', formData)
       setPreview(result)
     } catch (err) {
-      alert(`Preview failed: ${err.message}`)
+      setImportError(`Preview failed: ${err.message}`)
     } finally {
       setPreviewing(false)
     }
@@ -148,7 +150,7 @@ export default function Leads() {
         setReviewLeadIds(result.created_lead_ids)
       }
     } catch (err) {
-      alert(`Import failed: ${err.message}`)
+      setImportError(`Import failed: ${err.message}`)
     } finally {
       setConfirming(false)
     }
@@ -318,6 +320,28 @@ export default function Leads() {
     }
   }
 
+  async function handleDeleteLead(e, leadId) {
+    e.stopPropagation()
+    if (!window.confirm('Permanently delete this lead? This cannot be undone.')) return
+    try {
+      await api.delete(`/leads/${leadId}`)
+      loadLeads()
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`)
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (!window.confirm(`Permanently delete ${selectedCount} leads? This cannot be undone.`)) return
+    try {
+      await Promise.all([...selected].map(id => api.delete(`/leads/${id}`)))
+      setSelected(new Set())
+      loadLeads()
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`)
+    }
+  }
+
   return (
     <div className="leads-page">
 
@@ -447,6 +471,11 @@ export default function Leads() {
           )}
 
           {previewing && <div className="empty-state">Checking for duplicates and routing tiers…</div>}
+          {importError && (
+            <div className="compose-error" style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,77,77,0.1)', color: 'var(--signal-red)', fontSize: 13 }}>
+              ⚠️ {importError}
+            </div>
+          )}
 
           {preview && (
             <div className="leads-preview-box">
@@ -708,6 +737,14 @@ export default function Leads() {
                       {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
                       {lead.source_year ? ` (${lead.source_year})` : ''}
                     </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="btn btn--ghost"
+                        style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-red)' }}
+                        onClick={(e) => handleDeleteLead(e, lead.id)}
+                        title="Delete lead"
+                      >🗑</button>
+                    </td>
                     {view === 'review' && (
                       <td>
                         <select
@@ -739,6 +776,13 @@ export default function Leads() {
           {canBulkAssign && (
             <button className="btn btn--secondary" onClick={() => setShowBulkAssign(true)}>Assign to…</button>
           )}
+          <button
+            className="btn btn--danger"
+            style={{ background: 'var(--signal-red)', color: '#fff', border: 'none' }}
+            onClick={handleDeleteSelected}
+          >
+            🗑 Delete ({selectedCount})
+          </button>
           <button
             className="btn btn--primary"
             onClick={() => { setShowBulkCompose(true); setAiResult(null) }}

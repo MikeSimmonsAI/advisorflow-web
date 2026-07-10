@@ -26,3 +26,118 @@
 .eq-send-result { padding: 12px 16px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px; }
 .eq-send-result--success { background: var(--signal-green-dim); color: var(--signal-green); }
 .eq-send-result--error { background: var(--signal-red-dim); color: var(--signal-red); }
+
+/* ── AI Draft Panel ───────────────────────────────────────────────── */
+.eq-draft-panel {
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  border-top: 1px solid var(--border);
+  border-bottom: 2px solid var(--accent, #2fb6ff);
+  padding: 20px 24px;
+}
+
+.eq-draft-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.eq-draft-body { display: flex; flex-direction: column; gap: 16px; }
+
+.eq-talking-points {
+  background: rgba(47, 182, 255, 0.06);
+  border: 1px solid rgba(47, 182, 255, 0.2);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.eq-talking-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #2fb6ff);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.eq-talking-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eq-talking-list li {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.eq-options-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.eq-options-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .eq-options-grid { grid-template-columns: 1fr; }
+}
+
+.eq-option-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: var(--surface-1, transparent);
+}
+
+.eq-option-card:hover { border-color: var(--accent, #2fb6ff); background: rgba(47, 182, 255, 0.04); }
+
+.eq-option-card--selected {
+  border-color: var(--accent, #2fb6ff);
+  background: rgba(47, 182, 255, 0.08);
+}
+
+.eq-option-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent, #2fb6ff);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.eq-option-subject {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.eq-option-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.eq-edit-section { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.eq-edit-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+
+/* Tone pills in email queue */
+.eq-tone-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}

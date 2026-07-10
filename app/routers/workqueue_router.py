@@ -70,7 +70,7 @@ def get_todays_work(
             Lead.organization_id == org_id,
             Lead.assigned_to_id == user_id,
             Lead.is_duplicate == False,
-            Reply.classification.in_(["interested", "callback"]),
+            Reply.classification.in_(["interested", "callback", "hot", "callback_request"]),
             Reply.reviewed_at.is_(None),
         )
         .order_by(Reply.received_at.desc(), Reply.id.desc())
