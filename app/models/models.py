@@ -314,15 +314,16 @@ class Reply(Base):
     lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
 
     body = Column(Text, nullable=False)
+    source = Column(String, default="sms")  # sms | email
     twilio_sid = Column(String, nullable=True)
-    is_hot = Column(Boolean, default=False)  # flagged by keyword/sentiment detection
-    hot_reason = Column(String, nullable=True)  # e.g. "interested keyword: 'yes'"
+    is_hot = Column(Boolean, default=False)
+    hot_reason = Column(String, nullable=True)
     classification = Column(SAEnum(ReplyClassification), nullable=True, default=ReplyClassification.NEUTRAL)
-    classification_confidence = Column(String, nullable=True)  # "high" | "medium" | "low"
+    classification_confidence = Column(String, nullable=True)
     classification_reasoning = Column(Text, nullable=True)
 
     received_at = Column(DateTime, server_default=func.now())
-    reviewed_at = Column(DateTime, nullable=True)  # when advisor marked as seen
+    reviewed_at = Column(DateTime, nullable=True)
 
     lead = relationship("Lead", back_populates="replies")
 

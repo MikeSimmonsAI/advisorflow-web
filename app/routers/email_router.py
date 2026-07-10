@@ -231,3 +231,32 @@ def draft_email(
     ai_direction = (req.ai_direction if req else None)
 
     return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction)
+
+
+@router.post("/poll-inbox")
+def poll_inbox(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Poll Microsoft 365 inbox for new replies from leads.
+    Matches by sender email, saves as Reply, triggers AI pipeline.
+    Call this every 5 minutes via cron or manually.
+    """
+    from app.services.email_poller_service import poll_inbox_for_replies
+    result = poll_inbox_for_replies(db, current_user.id)
+    return result
+
+
+@router.post("/poll-inbox/all")
+def poll_inbox_all(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Poll inbox for all M365-connected advisors in the org. Super admin only."""
+    if current_user.role != "super_admin":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Super admin only")
+    from app.services.email_poller_service import poll_all_advisors
+    result = poll_all_advisors(db, current_user.organization_id)
+    return result

@@ -31,6 +31,15 @@ const TONE_OPTIONS = [
   { key: 'urgent', label: '⚡ Urgent', desc: 'Brief, time-sensitive' },
 ]
 
+async function pollEmailInbox(setPollResult) {
+  try {
+    const result = await api.post('/email/poll-inbox', {})
+    setPollResult(result)
+  } catch (err) {
+    setPollResult({ error: err.message })
+  }
+}
+
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -294,6 +303,9 @@ export default function Replies() {
                           🧠 {objectionData[r.id].objection_type?.replace(/_/g, ' ')}
                         </div>
                         <p className="replies-objection-response">{objectionData[r.id].suggested_reply}</p>
+                        <span style={{ fontSize: 11, color: r.source === 'email' ? '#2fb6ff' : '#a78bfa', background: r.source === 'email' ? 'rgba(47,182,255,0.1)' : 'rgba(167,139,250,0.1)', padding: '2px 8px', borderRadius: 20, marginTop: 4, display: 'inline-block' }}>
+                          {r.source === 'email' ? '✉️ Email reply' : '💬 SMS reply'}
+                        </span>
                         <button
                           className="btn btn--secondary replies-action-btn"
                           onClick={() => { navigator.clipboard.writeText(objectionData[r.id].suggested_reply) }}

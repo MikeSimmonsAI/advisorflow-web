@@ -185,3 +185,112 @@ def send_reminders(
     from app.services.appointment_flow_service import send_appointment_reminders
     result = send_appointment_reminders(db)
     return result
+
+
+@router.post("/booking-confirmed")
+async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Called by Vercel booking app after lead confirms appointment.
+    Creates Microsoft 365 Outlook calendar event and sends FSA SMS notification.
+    No auth required — called by Vercel serverless function.
+    """
+    from app.models.models import BookingLink, Lead
+    from datetime import datetime
+
+    body = await request.json()
+    token = body.get("booking_token", "")
+    slot_display = body.get("slot_display", "")
+    lead_name = body.get("lead_name", "")
+    lead_phone = body.get("lead_phone", "")
+    appt_label = body.get("appt_label", "Family File Review")
+    advisor_name = body.get("advisor_name", "")
+
+    # Find the booking link and advisor
+    booking = db.query(BookingLink).filter(BookingLink.token == token).first()
+    advisor = None
+    lead = None
+
+    if booking:
+        from app.models.models import User
+        advisor = db.query(User).filter(User.id == booking.user_id).first()
+        lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+        booking.status = "booked"
+        if lead:
+            lead.status = "booked"
+
+    # Create Microsoft 365 Outlook calendar event
+    calendar_result = {"success": False, "note": "No advisor found"}
+    if advisor and advisor.microsoft_365_connected and advisor.microsoft_oauth_refresh_token_encrypted:
+        try:
+            from app.services.microsoft_email_service import _get_fresh_access_token
+            import httpx, os
+            access_token = _get_fresh_access_token(advisor)
+
+            # Parse slot time from display string
+            event_start = None
+            try:
+                from dateutil import parser as dateparser
+                event_start = dateparser.parse(slot_display)
+            except Exception:
+                pass
+
+            if event_start:
+                from datetime import timedelta
+                event_end = event_start + timedelta(minutes=30)
+                event_body = {
+                    "subject": f"{appt_label} — {lead_name or lead_phone}",
+                    "body": {
+                        "contentType": "HTML",
+                        "content": f"<p>Appointment with {lead_name or 'Lead'}</p><p>Phone: {lead_phone}</p><p>Booked via BookaBoost</p>"
+                    },
+                    "start": {
+                        "dateTime": event_start.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "timeZone": "America/Chicago"
+                    },
+                    "end": {
+                        "dateTime": event_end.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "timeZone": "America/Chicago"
+                    },
+                    "location": {
+                        "displayName": "13005 Greenville Ave, Dallas, TX 75243"
+                    },
+                }
+                cal_response = httpx.post(
+                    "https://graph.microsoft.com/v1.0/me/events",
+                    headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+                    json=event_body,
+                    timeout=15,
+                )
+                calendar_result = {"success": cal_response.status_code in (200, 201), "status": cal_response.status_code}
+        except Exception as e:
+            calendar_result = {"success": False, "error": str(e)}
+
+    # Send FSA SMS notification
+    sms_result = {"success": False}
+    if advisor:
+        try:
+            notification_phone = getattr(advisor, 'notification_phone', None) or getattr(advisor, 'twilio_phone_number', None)
+            if notification_phone and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+                from twilio.rest import Client
+                from app.utils.crypto import decrypt_value
+                auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
+                client = Client(advisor.twilio_account_sid, auth_token)
+                msg = f"📅 BookaBoost: {lead_name or 'A lead'} just booked a {appt_label} for {slot_display}. Check your Outlook calendar. — BookaBoost"
+                client.messages.create(
+                    body=msg,
+                    from_=advisor.twilio_phone_number,
+                    to=notification_phone,
+                )
+                sms_result = {"success": True}
+        except Exception as e:
+            sms_result = {"success": False, "error": str(e)}
+
+    db.commit()
+
+    return {
+        "received": True,
+        "calendar": calendar_result,
+        "sms": sms_result,
+        "lead_name": lead_name,
+        "slot": slot_display,
+    }
