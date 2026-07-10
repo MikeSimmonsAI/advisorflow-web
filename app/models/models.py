@@ -336,7 +336,7 @@ class BookingLink(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     token = Column(String, unique=True, nullable=False, default=gen_uuid)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     status = Column(String, default="pending")  # pending, booked, confirmed, expired, cancelled

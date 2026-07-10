@@ -921,10 +921,24 @@ def _delete_merged_lead_records(db: Session, merge_leads: list[Lead]) -> None:
     Uses a bulk delete instead of ORM db.delete(lead) so SQLAlchemy does not
     try to null out one-to-one relationship children such as CadenceState after
     their lead_id has already been reassigned to the kept lead.
+
+    Must delete child records with non-cascading FKs first (booking_links,
+    lead_outcomes, messages, replies) before deleting the lead rows.
     """
+    from app.models.models import BookingLink, LeadOutcome, Message, Reply
+
     merge_ids = [lead.id for lead in merge_leads]
-    if merge_ids:
-        db.query(Lead).filter(Lead.id.in_(merge_ids)).delete(synchronize_session=False)
+    if not merge_ids:
+        return
+
+    # Delete child records that reference lead_id without CASCADE
+    db.query(BookingLink).filter(BookingLink.lead_id.in_(merge_ids)).delete(synchronize_session=False)
+    db.query(LeadOutcome).filter(LeadOutcome.lead_id.in_(merge_ids)).delete(synchronize_session=False)
+    db.query(Message).filter(Message.lead_id.in_(merge_ids)).delete(synchronize_session=False)
+    db.query(Reply).filter(Reply.lead_id.in_(merge_ids)).delete(synchronize_session=False)
+
+    # Now safe to delete the lead rows
+    db.query(Lead).filter(Lead.id.in_(merge_ids)).delete(synchronize_session=False)
 
 
 def _apply_contact_registry_after_contact_fix(db: Session, lead: Lead) -> None:
