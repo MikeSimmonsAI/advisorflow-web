@@ -42,7 +42,17 @@ def send_single_email(
             import os
             booking_link = create_booking_link(db, lead, current_user)
             booking_url = f"{os.environ.get('BOOKING_BASE_URL', 'https://advisorflow-booking.vercel.app')}/book/{booking_link.token}"
-            body_html += f'<br><br><a href="{booking_url}">📅 Book an appointment with me</a>'
+            body_html += f"""<br><br>
+<table width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr><td align="center" style="padding:20px 0;">
+    <a href="{booking_url}" style="background-color:#1a5fa8;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;font-size:15px;display:inline-block;">
+      Schedule Your Appointment
+    </a>
+  </td></tr>
+  <tr><td align="center" style="font-size:12px;color:#888888;padding-bottom:10px;">
+    If button does not work, visit: {booking_url}
+  </td></tr>
+</table>"""
 
         subject = req.subject or f"Following up, {lead.first_name or 'there'}"
 

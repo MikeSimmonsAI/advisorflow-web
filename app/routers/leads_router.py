@@ -320,12 +320,12 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(ge
         .group_by(Lead.status)
         .all()
     )
-    counts = {stage.value: 0 for stage in stages}
+    counts = {stage: 0 for stage in stages}
     for status, count in rows:
-        if status:
-            counts[status.value] = int(count or 0)
+        if status and status in counts:
+            counts[status] = int(count or 0)
     return [
-        {"status": stage.value, "label": stage.value.replace("_", " ").title(), "count": counts[stage.value]}
+        {"status": stage, "label": stage.replace("_", " ").title(), "count": counts[stage]}
         for stage in stages
     ]
 

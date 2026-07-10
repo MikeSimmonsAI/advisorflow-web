@@ -75,7 +75,38 @@ class BookingConfirmRequest(BaseModel):
     duration_minutes: int = 30
 
 
-@router.post("/confirm-booking")
+@router.get("/booking/{token}")
+def get_booking_by_token(token: str, db: Session = Depends(get_db)):
+    """
+    Public endpoint — no auth required.
+    The Vercel booking frontend calls this to get booking details by token.
+    """
+    from app.models.models import Lead, Organization
+    booking = db.query(BookingLink).filter(
+        BookingLink.token == token,
+        BookingLink.status == "pending",
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking link not found or already used")
+
+    lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+    advisor = db.query(User).filter(User.id == booking.user_id).first()
+    org = db.query(Organization).filter(Organization.id == booking.organization_id).first() if hasattr(booking, 'organization_id') else None
+
+    return {
+        "token": token,
+        "booking_id": booking.id,
+        "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Guest",
+        "advisor_name": advisor.full_name if advisor else "Your Advisor",
+        "org_name": org.name if org else "Restland Cemetery & Funeral Home",
+        "org_address": "13005 Greenville Ave, Dallas, TX 75243",
+        "org_phone": "214-550-1234",
+        "status": booking.status,
+        "created_at": booking.created_at,
+    }
+
+
+
 def confirm_booking(req: BookingConfirmRequest, db: Session = Depends(get_db)):
     """
     Called by the stateless booking backend (advisorflow-booking.vercel.app)
