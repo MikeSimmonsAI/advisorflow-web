@@ -113,6 +113,7 @@ export default function LeadDetail() {
       await api.post(`/email/send/${leadId}`, {
         subject: emailSubject || `Following up, ${lead?.first_name || 'there'}`,
         body: emailBody,
+        include_booking_link: includeBookingLink,
       })
       setEmailSubject('')
       setEmailBody('')

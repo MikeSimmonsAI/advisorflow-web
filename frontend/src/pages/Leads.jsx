@@ -453,8 +453,16 @@ export default function Leads() {
               type="file"
               accept=".xlsx,.csv,.xls"
               onChange={handleFileChange}
-              className="file-input"
+              style={{ display: 'none' }}
             />
+            <button
+              className="btn btn--primary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={previewing}
+              style={{ minWidth: 140 }}
+            >
+              {previewing ? '⏳ Checking…' : '📂 Choose file & preview'}
+            </button>
             <button
               className="btn btn--secondary"
               onClick={handleGoogleContactsImport}

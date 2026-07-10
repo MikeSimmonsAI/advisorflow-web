@@ -701,7 +701,7 @@ def create_lead_manually(
     if phone_normalized:
         existing = db.query(Lead).filter(
             Lead.organization_id == current_user.organization_id,
-            Lead.phone_normalized == phone_normalized,
+            Lead.phone == phone_normalized,
             Lead.is_duplicate == False,
         ).first()
         if existing:
@@ -713,9 +713,8 @@ def create_lead_manually(
         assigned_to_id=current_user.id,
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
-        phone=payload.phone,
+        phone=phone_normalized or payload.phone,
         phone_raw=payload.phone,
-        phone_normalized=phone_normalized,
         email=payload.email,
         tier=payload.tier,
         status="new",
@@ -723,6 +722,7 @@ def create_lead_manually(
         source_year=payload.source_year,
         source_file="manual",
         is_duplicate=is_dup,
+        notes=payload.notes,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
