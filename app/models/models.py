@@ -776,3 +776,43 @@ class VoiceCall(Base):
     started_at      = Column(DateTime, nullable=True)
     ended_at        = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+# ── Voice Call Campaign ───────────────────────────────────────────────────────
+# Bulk outbound call campaigns — fire AI calls to multiple leads at once.
+
+class VoiceCallCampaign(Base):
+    __tablename__ = "voice_call_campaigns"
+
+    id              = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+    advisor_id      = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+
+    # Campaign details
+    name            = Column(String, nullable=False)
+    description     = Column(String, nullable=True)
+    status          = Column(String, default="pending")  # pending | running | paused | completed | cancelled
+
+    # Lead targeting
+    lead_ids        = Column(Text, nullable=True)        # JSON array of lead IDs
+    tier_filter     = Column(String, nullable=True)      # e.g. "pre_need,at_need"
+    total_leads     = Column(Integer, default=0)
+
+    # Progress
+    calls_initiated = Column(Integer, default=0)
+    calls_completed = Column(Integer, default=0)
+    calls_answered  = Column(Integer, default=0)
+    calls_voicemail = Column(Integer, default=0)
+    calls_failed    = Column(Integer, default=0)
+    bookings_detected = Column(Integer, default=0)
+
+    # Config
+    concurrent_calls = Column(Integer, default=5)        # max simultaneous calls
+    call_window_start = Column(String, default="09:00")  # CST
+    call_window_end   = Column(String, default="17:00")  # CST
+
+    # Scheduling
+    scheduled_at    = Column(DateTime, nullable=True)    # null = run immediately
+    started_at      = Column(DateTime, nullable=True)
+    completed_at    = Column(DateTime, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)

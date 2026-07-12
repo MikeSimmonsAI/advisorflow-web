@@ -5,6 +5,7 @@ import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import MessageReview from '../components/MessageReview'
 import '../styles/shared.css'
 import './Leads.css'
+import VoiceCampaign from '../components/VoiceCampaign'
 
 const TIER_OPTIONS = [
   { value: 'pre_need', label: 'Pre-Need' },
@@ -81,6 +82,7 @@ export default function Leads() {
   const [bulkAssigning, setBulkAssigning] = useState(false)
   const [bulkAssignResult, setBulkAssignResult] = useState(null)
   const [bulkAssignError, setBulkAssignError] = useState('')
+  const [showVoiceCampaign, setShowVoiceCampaign] = useState(false)
 
   function loadLeads() {
     setLoading(true)
@@ -797,7 +799,23 @@ export default function Leads() {
           >
             ✨ AI Outreach ({selectedCount})
           </button>
+          <button
+            className="btn btn--primary"
+            style={{ background: '#16a34a', borderColor: '#16a34a' }}
+            onClick={() => setShowVoiceCampaign(true)}
+          >
+            📞 AI Call Campaign ({selectedCount})
+          </button>
         </div>
+      )}
+
+      {/* ── Voice Campaign Modal ── */}
+      {showVoiceCampaign && (
+        <VoiceCampaign
+          selectedLeads={leads.filter(l => selected.has(l.id))}
+          onClose={() => setShowVoiceCampaign(false)}
+          onSuccess={() => { setShowVoiceCampaign(false); setSelected(new Set()) }}
+        />
       )}
 
       {reviewLeadIds && (
