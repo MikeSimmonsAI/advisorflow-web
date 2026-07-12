@@ -662,6 +662,14 @@ class PipelineConversation(Base):
     flagged_at = Column(DateTime, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
 
+    # Cadence schedule — Day 1(x2), 2, 4, 6, 8, 10, 12, 14
+    touch_number = Column(Integer, default=0)          # which touch we're on (0=not started)
+    next_send_at = Column(DateTime, nullable=True)     # when to send next touch
+    paused = Column(Boolean, default=False)            # advisor paused AI
+    paused_reason = Column(String, nullable=True)      # why paused
+    started_at = Column(DateTime, nullable=True)       # when conversation started
+    completed_at = Column(DateTime, nullable=True)     # when sequence finished
+
     # Engagement tracking
     messages_sent = Column(Integer, default=0)
     replies_received = Column(Integer, default=0)

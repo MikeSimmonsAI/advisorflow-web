@@ -223,6 +223,9 @@ export default function LeadDetail() {
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const [aiConvStatus, setAiConvStatus] = useState(null)
+  const [aiConvLoading, setAiConvLoading] = useState(false)
+  const [aiConvChannel, setAiConvChannel] = useState('email')
   const [tone, setTone] = useState(1) // 0=cold 1=warm 2=hot 3=urgent
   const [aiDirection, setAiDirection] = useState('')
   // Appointment type: auto-detected from tier, manually overridable
@@ -236,6 +239,10 @@ export default function LeadDetail() {
 
   function load() {
     setLoading(true)
+    // Also load AI conversation status
+    api.get(`/ai-conversation/status/${leadId}`)
+      .then(s => setAiConvStatus(s))
+      .catch(() => {})
     api.get(`/leads/${leadId}/timeline`)
       .then((d) => {
         setData(d)
@@ -279,6 +286,43 @@ export default function LeadDetail() {
       )
       .catch((err) => setAssignmentError(err.message))
   }, [canReassignLead])
+
+  async function handleStartAiConversation() {
+    setAiConvLoading(true)
+    try {
+      const result = await api.post('/ai-conversation/start', { lead_id: leadId, channel: aiConvChannel })
+      if (result.success) {
+        setAiConvStatus({ active: true, stage: 'outreach_sent', touch_number: 1, messages_sent: 1 })
+        load()
+      } else if (result.already_active) {
+        alert('AI conversation is already active for this lead.')
+      } else {
+        alert(result.error || 'Failed to start AI conversation')
+      }
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setAiConvLoading(false)
+    }
+  }
+
+  async function handlePauseAiConversation() {
+    try {
+      await api.post('/ai-conversation/pause', { lead_id: leadId })
+      setAiConvStatus(s => ({ ...s, active: false, paused: true }))
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
+  async function handleResumeAiConversation() {
+    try {
+      await api.post('/ai-conversation/resume', { lead_id: leadId })
+      setAiConvStatus(s => ({ ...s, active: true, paused: false }))
+    } catch (err) {
+      alert(err.message)
+    }
+  }
 
   async function handleSuggestReply() {
     setSuggestingReply(true)
@@ -661,6 +705,84 @@ export default function LeadDetail() {
         </div>
 
         <div className="lead-detail-right">
+          {/* ── AI Conversation ── */}
+          <section className="panel lead-detail-panel">
+            <div className="panel-header">
+              <h2 className="panel-title">🤖 AI Conversation</h2>
+              {aiConvStatus?.active && (
+                <span className="badge badge--green" style={{ fontSize: 10 }}>ACTIVE</span>
+              )}
+              {aiConvStatus?.paused && (
+                <span className="badge badge--amber" style={{ fontSize: 10 }}>PAUSED</span>
+              )}
+              {aiConvStatus?.flagged && (
+                <span className="badge badge--red" style={{ fontSize: 10 }}>⚠️ NEEDS YOU</span>
+              )}
+            </div>
+
+            {aiConvStatus?.flagged && (
+              <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--signal-red)' }}>
+                ⚠️ {aiConvStatus.flag_reason || 'Human response needed'}
+              </div>
+            )}
+
+            {aiConvStatus?.active && !aiConvStatus?.flagged && (
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                Touch {aiConvStatus.touch_number || 0} of 8 · {aiConvStatus.messages_sent || 0} sent
+                {aiConvStatus.next_send_at && (
+                  <span style={{ color: 'var(--text-tertiary)', display: 'block', fontSize: 11, marginTop: 2 }}>
+                    Next: {new Date(aiConvStatus.next_send_at).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {!aiConvStatus?.active || aiConvStatus?.status === 'not_started' ? (
+              <div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  {['email', 'sms', 'both'].map(ch => (
+                    <button
+                      key={ch}
+                      onClick={() => setAiConvChannel(ch)}
+                      style={{
+                        padding: '6px 14px', borderRadius: 20, border: '1px solid',
+                        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        borderColor: aiConvChannel === ch ? 'var(--accent)' : 'var(--border-subtle)',
+                        background: aiConvChannel === ch ? 'var(--accent)' : 'transparent',
+                        color: aiConvChannel === ch ? '#fff' : 'var(--text-secondary)',
+                      }}
+                    >
+                      {ch === 'email' ? '✉️ Email' : ch === 'sms' ? '💬 SMS' : '⚡ Both'}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="btn btn--primary"
+                  style={{ width: '100%', fontSize: 14, padding: '12px' }}
+                  onClick={handleStartAiConversation}
+                  disabled={aiConvLoading || lead.status === 'dnc' || lead.is_duplicate}
+                >
+                  {aiConvLoading ? '⏳ Starting…' : '🤖 Start AI Conversation'}
+                </button>
+                <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, textAlign: 'center' }}>
+                  AI sends 8 emails over 14 days. Responds to replies 24/7. Pauses on escalation.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                {aiConvStatus?.paused || aiConvStatus?.flagged ? (
+                  <button className="btn btn--primary" style={{ flex: 1 }} onClick={handleResumeAiConversation}>
+                    ▶️ Resume AI
+                  </button>
+                ) : (
+                  <button className="btn btn--secondary" style={{ flex: 1 }} onClick={handlePauseAiConversation}>
+                    ⏸️ Pause AI
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+
           {booking && (
             <section className="panel lead-detail-panel">
               <div className="panel-header">

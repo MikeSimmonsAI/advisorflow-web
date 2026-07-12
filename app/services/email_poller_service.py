@@ -181,11 +181,21 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             if lead.status in ("new", "sent"):
                 lead.status = "replied"
 
-            # Trigger the full AI pipeline — same path as inbound SMS reply
+            # Trigger AI conversation handler if active, else fall back to pipeline
             try:
-                process_inbound_reply(db, lead, advisor, reply)
+                from app.services.ai_conversation_service import handle_inbound_reply as ai_handle
+                ai_result = ai_handle(db, lead, advisor, body_text)
+                if ai_result.get("action") == "no_active_conversation":
+                    # No AI conversation active — use standard pipeline
+                    process_inbound_reply(db, lead, advisor, reply)
+                else:
+                    logger.info("AI conversation handled reply: %s action=%s", lead.id, ai_result.get("action"))
             except Exception as pe:
-                logger.error("Pipeline error for email reply lead=%s: %s", lead.id, pe)
+                logger.error("Pipeline/AI error for email reply lead=%s: %s", lead.id, pe)
+                try:
+                    process_inbound_reply(db, lead, advisor, reply)
+                except Exception:
+                    pass
 
             # Fire alert email if reply is hot
             if reply.is_hot:

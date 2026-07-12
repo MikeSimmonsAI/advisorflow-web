@@ -114,3 +114,30 @@ services:
         sync: false
       - key: MICROSOFT_CLIENT_SECRET
         sync: false
+
+  # ── AI Conversation scheduler — runs every 15 minutes ─────────────────────
+  - type: cron
+    name: advisorflow-ai-conversation
+    runtime: python
+    schedule: "*/15 * * * *"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app/jobs/run_ai_conversation_job.py"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: advisorflow-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: BOOKING_BASE_URL
+        value: https://advisorflow-booking.vercel.app
+      - key: FRONTEND_URL
+        value: https://advisorflow-frontend.onrender.com

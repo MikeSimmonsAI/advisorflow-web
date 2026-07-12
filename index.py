@@ -238,15 +238,26 @@ class handler(BaseHTTPRequestHandler):
             first = str(lead.get("First Name", "") or "").strip() or "there"
             last  = str(lead.get("Last Name",  "") or "").strip()
             display_time = slot_id
+            appt_label = data.get("appt_label") or data.get("appt_type") or "Family Services Appointment"
             try:
-                dt = datetime.strptime(slot_id.split("_")[0], "%Y%m%d")
+                raw_date = slot_id.split("_")[0]
+                raw_time = slot_id.split("_")[1] if "_" in slot_id else ""
+                dt = datetime.strptime(raw_date, "%Y%m%d")
                 display_date = dt.strftime("%A, %B %d, %Y")
-                for s in _generate_slots():
-                    if s["slot_id"] == slot_id:
-                        display_time = f"{display_date} at {s['time']}"; break
+                # Parse time from HHMM format (e.g. 0900, 0930, 1300)
+                if raw_time and len(raw_time) >= 4:
+                    try:
+                        t = datetime.strptime(raw_time[:4], "%H%M")
+                        hour = t.hour % 12 or 12
+                        minute = t.strftime("%M")
+                        ampm = "AM" if t.hour < 12 else "PM"
+                        display_time = f"{display_date} at {hour}:{minute} {ampm}"
+                    except Exception:
+                        display_time = f"{display_date} at {raw_time}"
+                else:
+                    display_time = display_date
             except Exception as e:
                 print(f"[booking] Slot parse error {slot_id!r}: {e}", file=sys.stderr)
-            appt_label = data.get("appt_label") or data.get("appt_type") or "Family Services Appointment"
             confirmation = {
                 "full_display": display_time, "appt_label": appt_label, "duration": data.get("duration", "20-30"),
                 "advisor_name": ADVISOR["name"], "advisor_phone": ADVISOR["phone"],
