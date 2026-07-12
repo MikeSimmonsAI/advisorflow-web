@@ -386,11 +386,18 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
             "is_hot": r.is_hot,
         })
     for e in email_messages:
+        import re as _re
+        raw_html = e.body_html or ""
+        plain_body = _re.sub(r'<[^>]+>', ' ', raw_html)
+        plain_body = _re.sub(r'\s+', ' ', plain_body).strip()
+        if len(plain_body) > 600:
+            plain_body = plain_body[:600] + "\u2026"
         events.append({
             "type": "outbound",
             "channel": "email",
-            "body": e.subject,
-            "body_preview": e.body_html[:200] if e.body_html else "",
+            "subject": e.subject,
+            "body": plain_body,
+            "body_preview": plain_body[:120] if plain_body else "",
             "timestamp": e.sent_at,
             "status": e.status,
         })
