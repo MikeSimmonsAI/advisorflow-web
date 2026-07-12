@@ -141,3 +141,36 @@ services:
         value: https://advisorflow-booking.vercel.app
       - key: FRONTEND_URL
         value: https://advisorflow-frontend.onrender.com
+
+  # ── AI Voice WebSocket service ─────────────────────────────────────────────
+  # Handles Twilio Media Stream WebSocket connections for AI voice calls.
+  # Must be a persistent web service (not cron) to maintain WebSocket connections.
+  - type: web
+    name: advisorflow-voice
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: advisorflow-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: BOOKING_BASE_URL
+        value: https://advisorflow-booking.vercel.app
+      - key: FRONTEND_URL
+        value: https://advisorflow-frontend.onrender.com
+      - key: BACKEND_URL
+        value: https://advisorflow-backend.onrender.com
+      - key: TWILIO_AUTH_TOKEN
+        sync: false

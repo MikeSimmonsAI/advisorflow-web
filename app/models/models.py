@@ -729,3 +729,50 @@ class AdvisorAvailabilityBlock(Base):
 
     created_at      = Column(DateTime, default=datetime.utcnow)
     created_by_id   = Column(String, ForeignKey("users.id"), nullable=True)
+
+
+# ── Voice Calls ───────────────────────────────────────────────────────────────
+# Records every AI voice call — outbound, voicemail, recording, transcript.
+
+class VoiceCall(Base):
+    __tablename__ = "voice_calls"
+
+    id              = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    lead_id         = Column(String, ForeignKey("leads.id"), nullable=False, index=True)
+    advisor_id      = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Call details
+    call_sid        = Column(String, nullable=True)          # Twilio call SID
+    to_phone        = Column(String, nullable=False)
+    from_phone      = Column(String, nullable=True)
+    call_number     = Column(Integer, default=1)             # 1, 2, or 3 (max 3 attempts)
+    status          = Column(String, default="initiating")   # initiating | ringing | in_progress | completed | failed
+    twilio_status   = Column(String, nullable=True)          # Twilio's raw status
+
+    # Outcome
+    outcome         = Column(String, nullable=True)          # booked | no_answer | not_interested | completed | escalated | failed | booking_requested
+    escalation_reason = Column(String, nullable=True)
+
+    # Recording
+    recording_url   = Column(String, nullable=True)
+    recording_sid   = Column(String, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+
+    # Transcript
+    transcript      = Column(Text, nullable=True)
+
+    # Booking
+    booking_url_sent = Column(Boolean, default=False)
+
+    # Voicemail
+    voicemail_left  = Column(Boolean, default=False)
+    voicemail_transcript = Column(Text, nullable=True)
+
+    # Error
+    error_message   = Column(String, nullable=True)
+
+    # Timing
+    started_at      = Column(DateTime, nullable=True)
+    ended_at        = Column(DateTime, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)

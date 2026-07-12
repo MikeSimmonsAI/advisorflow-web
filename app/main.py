@@ -20,7 +20,7 @@ from app.routers import (
     settings_router, templates_router, ai_router, outcomes_router, microsoft_router,
     compliance_router, audit_log_router, sample_data_router,
     health_router, workqueue_router, campaign_router,
-    google_contacts_router, availability_router,
+    google_contacts_router, availability_router, voice_router,
 )
 from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
@@ -245,6 +245,7 @@ app.include_router(cadence_template_router.router)
 app.include_router(auto_send_router.router)
 app.include_router(org_settings_router.router)
 app.include_router(availability_router.router)
+app.include_router(voice_router.router)
 
 
 @app.on_event("startup")

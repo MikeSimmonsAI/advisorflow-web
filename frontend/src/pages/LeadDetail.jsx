@@ -226,6 +226,8 @@ export default function LeadDetail() {
   const [aiConvStatus, setAiConvStatus] = useState(null)
   const [aiConvLoading, setAiConvLoading] = useState(false)
   const [aiConvChannel, setAiConvChannel] = useState('email')
+  const [calling, setCalling] = useState(false)
+  const [callResult, setCallResult] = useState(null)
   const [tone, setTone] = useState(1) // 0=cold 1=warm 2=hot 3=urgent
   const [aiDirection, setAiDirection] = useState('')
   // Appointment type: auto-detected from tier, manually overridable
@@ -286,6 +288,22 @@ export default function LeadDetail() {
       )
       .catch((err) => setAssignmentError(err.message))
   }, [canReassignLead])
+
+  async function handleCall() {
+    if (!lead.phone) { alert('This lead has no phone number.'); return }
+    if (!confirm(`Call ${lead.first_name || 'this lead'} at ${lead.phone}?`)) return
+    setCalling(true)
+    setCallResult(null)
+    try {
+      const result = await api.post(`/voice/call/${leadId}`, {})
+      setCallResult(result)
+      setTimeout(() => load(), 3000)
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setCalling(false)
+    }
+  }
 
   async function handleStartAiConversation() {
     setAiConvLoading(true)
@@ -782,6 +800,31 @@ export default function LeadDetail() {
               </div>
             )}
           </section>
+
+          {/* ── Voice Call ── */}
+          {lead.phone && (
+            <section className="panel lead-detail-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">📞 AI Voice Call</h2>
+              </div>
+              {callResult && (
+                <div style={{ background: 'rgba(30,240,168,0.1)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: 'var(--signal-green, #1ef0a8)' }}>
+                  ✅ Call initiated — Call #{callResult.call_number} to {callResult.lead_name}
+                </div>
+              )}
+              <button
+                className="btn btn--primary"
+                style={{ width: '100%', fontSize: 14, padding: '12px' }}
+                onClick={handleCall}
+                disabled={calling || lead.status === 'dnc' || lead.is_duplicate}
+              >
+                {calling ? '⏳ Calling…' : '📞 Call with AI'}
+              </button>
+              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, textAlign: 'center' }}>
+                AI calls lead, discloses it's AI, books if they say yes. Records call. Max 3 attempts.
+              </p>
+            </section>
+          )}
 
           {booking && (
             <section className="panel lead-detail-panel">

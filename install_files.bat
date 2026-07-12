@@ -1,88 +1,46 @@
 @echo off
 REM ============================================================
-REM  BookaBoost — install_files.bat v2.3.0
-REM  Double-click to copy all build outputs to correct locations.
-REM
-REM  Main repo:   C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web
-REM  Vercel app:  C:\Users\simmo\OneDrive\Desktop\advisorflow_complete
+REM  BookaBoost v2.6.0 Install Files
+REM  Run from the folder where you extracted the zip.
+REM  Then run deploy.bat to push to GitHub / Render.
 REM ============================================================
 
 SET REPO=C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web
-SET VERCEL=C:\Users\simmo\OneDrive\Desktop\advisorflow_complete
 
 echo.
-echo ============================================================
-echo  BookaBoost File Installer v2.3.0
-echo ============================================================
+echo ===================================
+echo   BookaBoost v2.6.0 Install
+echo ===================================
 echo.
 
-IF NOT EXIST "%REPO%" (
-    echo ERROR: Repo folder not found: %REPO%
-    pause & exit /b 1
-)
-IF NOT EXIST "%VERCEL%" (
-    echo ERROR: Vercel app folder not found: %VERCEL%
-    pause & exit /b 1
-)
+echo Copying backend files...
+copy /Y "app\models\models.py"                       "%REPO%\app\models\models.py"
+copy /Y "app\services\voice_service.py"              "%REPO%\app\services\voice_service.py"
+copy /Y "app\routers\voice_router.py"                "%REPO%\app\routers\voice_router.py"
+copy /Y "app\services\ai_conversation_service.py"    "%REPO%\app\services\ai_conversation_service.py"
+copy /Y "app\routers\ai_conversation_router.py"      "%REPO%\app\routers\ai_conversation_router.py"
+copy /Y "app\routers\calendar_router.py"             "%REPO%\app\routers\calendar_router.py"
+copy /Y "app\routers\leads_router.py"                "%REPO%\app\routers\leads_router.py"
+copy /Y "app\routers\availability_router.py"         "%REPO%\app\routers\availability_router.py"
+copy /Y "app\services\email_poller_service.py"       "%REPO%\app\services\email_poller_service.py"
+copy /Y "app\jobs\run_ai_conversation_job.py"        "%REPO%\app\jobs\run_ai_conversation_job.py"
+copy /Y "app\main.py"                                "%REPO%\app\main.py"
+copy /Y "render.yaml"                                "%REPO%\render.yaml"
+copy /Y "requirements.txt"                           "%REPO%\requirements.txt"
 
-echo Copying main repo files...
-echo.
-
-echo   [1/8] LeadDetail.jsx  ^>  frontend/src/pages/
-copy /Y "LeadDetail.jsx" "%REPO%\frontend\src\pages\LeadDetail.jsx"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [2/8] leads_router.py  ^>  app/routers/
-copy /Y "leads_router.py" "%REPO%\app\routers\leads_router.py"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [3/8] calendar_router.py  ^>  app/routers/
-copy /Y "calendar_router.py" "%REPO%\app\routers\calendar_router.py"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [4/8] email_router.py  ^>  app/routers/
-copy /Y "email_router.py" "%REPO%\app\routers\email_router.py"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [5/8] email_poller_service.py  ^>  app/services/
-copy /Y "email_poller_service.py" "%REPO%\app\services\email_poller_service.py"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [6/8] run_email_poller.py  ^>  app/jobs/
-copy /Y "run_email_poller.py" "%REPO%\app\jobs\run_email_poller.py"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [7/8] render.yaml  ^>  repo root
-copy /Y "render.yaml" "%REPO%\render.yaml"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [8/8] leads_router.py  ^>  app/routers/ (sms-optin endpoint)
-REM Already copied above as step 2
+echo Copying frontend files...
+copy /Y "frontend\src\App.jsx"                       "%REPO%\frontend\src\App.jsx"
+copy /Y "frontend\src\components\Layout.jsx"         "%REPO%\frontend\src\components\Layout.jsx"
+copy /Y "frontend\src\pages\LeadDetail.jsx"          "%REPO%\frontend\src\pages\LeadDetail.jsx"
+copy /Y "frontend\src\pages\AIHub.jsx"               "%REPO%\frontend\src\pages\AIHub.jsx"
+copy /Y "frontend\src\pages\AIHub.css"               "%REPO%\frontend\src\pages\AIHub.css"
+copy /Y "frontend\package.json"                      "%REPO%\frontend\package.json"
 
 echo.
-echo Copying Vercel booking app files...
+echo ===================================
+echo   Install complete!
+echo ===================================
 echo.
-
-echo   [V1] optin.html  ^>  advisorflow_complete/
-copy /Y "optin.html" "%VERCEL%\optin.html"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo   [V2] index.py  ^>  advisorflow_complete/api/
-copy /Y "index.py" "%VERCEL%\api\index.py"
-IF ERRORLEVEL 1 ( echo   FAILED && pause && exit /b 1 )
-
-echo.
-echo ============================================================
-echo  All files installed successfully.
-echo ============================================================
-echo.
-echo  AZURE CREDENTIALS (BookaBoost app - SIMMONSSTRONG tenant):
-echo    Client ID:     0370359c-6156-49c6-9bbf-696a991ba868
-echo    Client Secret: 9Xp8Q~OcyjZfmQPJGEcySSICdDjqiYoV4S~DLbhV
-echo.
-echo  Next steps:
-echo    1. Run deploy.bat
-echo    2. cd advisorflow_complete ^&^& vercel deploy --prod
-echo    3. Twilio A2P: submit https://advisorflow-booking.vercel.app/optin
+echo Next: run deploy.bat
 echo.
 pause

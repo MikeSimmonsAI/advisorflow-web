@@ -27,6 +27,7 @@ import Settings from './pages/Settings'
 import Templates from './pages/Templates'
 import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
+import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { getCurrentUser } from './api/client'
 
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="/templates" element={<ProtectedRoute requireAdmin><Templates /></ProtectedRoute>} />
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
+        <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
         <Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
