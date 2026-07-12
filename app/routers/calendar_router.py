@@ -444,8 +444,9 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
 </body>
 </html>"""
 
-    notification_to = NOTIFICATION_EMAIL
-    httpx.post(
+    notification_to = getattr(advisor, 'notification_email', None) or NOTIFICATION_EMAIL
+    logger.info("Sending booking notification email to %s", notification_to)
+    resp = httpx.post(
         "https://graph.microsoft.com/v1.0/me/sendMail",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
         json={
@@ -458,6 +459,10 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
         },
         timeout=15,
     )
+    if resp.status_code not in (200, 201, 202):
+        logger.error("sendMail failed status=%s body=%s", resp.status_code, resp.text[:500])
+        raise Exception(f"Graph sendMail failed: {resp.status_code} {resp.text[:200]}")
+    logger.info("Booking notification email sent successfully to %s", notification_to)
     logger.info("Notification email sent to %s subject=%r", notification_to, subject)
 
 
