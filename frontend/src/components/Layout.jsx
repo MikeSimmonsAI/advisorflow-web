@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
   { to: '/system-health', label: 'System Health', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
+  { to: '/availability', label: 'Availability', icon: 'calendar' },
 ]
 
 const ADMIN_NAV_ITEMS = [

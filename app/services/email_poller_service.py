@@ -187,6 +187,13 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             except Exception as pe:
                 logger.error("Pipeline error for email reply lead=%s: %s", lead.id, pe)
 
+            # Fire alert email if reply is hot
+            if reply.is_hot:
+                try:
+                    _send_hot_reply_alert(advisor, lead, body_text)
+                except Exception as he:
+                    logger.error("Hot reply alert email error lead=%s: %s", lead.id, he)
+
             # Tag email so we skip it on the next poll cycle
             _mark_email_processed(access_token, email["id"])
 
@@ -252,3 +259,144 @@ def poll_all_orgs(db: Session) -> dict:
         total["advisors_polled"], total["checked"], total["matched"], total["errors"],
     )
     return total
+
+
+NOTIFICATION_EMAIL = "michael.simmons@nsmg.com"
+URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
+
+
+def _send_hot_reply_alert(advisor, lead, reply_body: str):
+    """
+    Send a 🔥 fire alert email to the advisor when a hot reply comes in.
+    Fired on every hot reply — not just the first one.
+    """
+    import httpx
+    import os
+
+    if not advisor.microsoft_365_connected or not advisor.microsoft_oauth_refresh_token_encrypted:
+        return
+
+    from app.utils.crypto import decrypt_value
+    import httpx as _httpx
+
+    client_id     = os.environ.get("MICROSOFT_CLIENT_ID")
+    client_secret = os.environ.get("MICROSOFT_CLIENT_SECRET")
+    refresh_token = decrypt_value(advisor.microsoft_oauth_refresh_token_encrypted)
+
+    token_resp = _httpx.post(
+        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+            "scope": "offline_access Mail.Read Mail.Send User.Read",
+        },
+        timeout=15,
+    )
+    if token_resp.status_code != 200:
+        logger.error("Hot reply alert: token refresh failed %s", token_resp.text[:200])
+        return
+
+    access_token = token_resp.json()["access_token"]
+
+    tier = (lead.tier or "").lower()
+    lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "A lead"
+    lead_url = f"{os.environ.get('FRONTEND_URL', 'https://advisorflow-frontend.onrender.com')}/leads/{lead.id}"
+    is_urgent = tier in URGENT_TIERS
+
+    subject = f"🔥 HOT REPLY — {lead_name} Just Responded!"
+    if is_urgent:
+        subject = f"🔥🔥 URGENT HOT REPLY — {lead_name} ({tier.upper()}) Needs You NOW"
+
+    body_html = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#1a0505;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+
+      <!-- Fire header -->
+      <tr>
+        <td style="background:linear-gradient(135deg,#c0392b,#e74c3c);padding:28px 32px;text-align:center;">
+          <p style="margin:0;color:#ffd700;font-size:32px;">🔥</p>
+          <h1 style="margin:8px 0 0;color:#ffffff;font-size:26px;font-weight:900;letter-spacing:-0.02em;">
+            Hot Reply Alert
+          </h1>
+          <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">
+            {lead_name} just replied to your outreach. Strike while it's hot.
+          </p>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr><td style="padding:32px;">
+
+        <!-- Lead details -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:2px solid #e74c3c;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+          <tr style="background:#fff5f5;">
+            <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;width:140px;">Lead</td>
+            <td style="padding:12px 16px;color:#1a2a4a;font-weight:700;font-size:16px;">{lead_name}</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #fecaca;">Phone</td>
+            <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #fecaca;">{lead.phone or 'N/A'}</td>
+          </tr>
+          <tr style="background:#fff5f5;">
+            <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #fecaca;">Lead Type</td>
+            <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #fecaca;">{(lead.tier or 'Unknown').replace('_',' ').title()}</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #fecaca;">Their Reply</td>
+            <td style="padding:12px 16px;color:#1a2a4a;font-style:italic;border-top:1px solid #fecaca;">"{reply_body[:300]}{"..." if len(reply_body) > 300 else ""}"</td>
+          </tr>
+        </table>
+
+        <!-- CTA -->
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="text-align:center;padding-bottom:20px;">
+            <a href="{lead_url}"
+               style="display:inline-block;background:#c0392b;color:#ffffff;padding:16px 40px;border-radius:8px;text-decoration:none;font-weight:800;font-size:16px;letter-spacing:-0.01em;">
+              🔥 Open Lead Now →
+            </a>
+          </td></tr>
+          <tr><td style="text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:13px;">
+              The AI has already drafted a reply. Log in and send it before they go cold.
+            </p>
+          </td></tr>
+        </table>
+
+      </td></tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">
+            BookaBoost · Automated Hot Reply Alert · Do not reply to this email.
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>"""
+
+    _httpx.post(
+        "https://graph.microsoft.com/v1.0/me/sendMail",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        json={
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "HTML", "content": body_html},
+                "toRecipients": [{"emailAddress": {"address": NOTIFICATION_EMAIL}}],
+            },
+            "saveToSentItems": False,
+        },
+        timeout=15,
+    )
+    logger.info("Hot reply alert sent to %s for lead %s", NOTIFICATION_EMAIL, lead.id)

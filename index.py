@@ -66,18 +66,53 @@ def _decode_token(token: str):
         return None, "invalid"
 
 
+def _fetch_slots_from_backend(advisor_id: str) -> list:
+    """
+    Fetch real available slots from BookaBoost backend.
+    Backend checks Outlook calendar, existing bookings, and advisor blocks.
+    Returns slots with urgency indicators (🔥 1 spot left).
+    Falls back to local generation if backend unreachable.
+    """
+    backend_url = _get_backend_url()
+    try:
+        import urllib.request as _ur
+        req = _ur.Request(
+            f"{backend_url}/availability/slots/{advisor_id}",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with _ur.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            slots = data.get("slots", [])
+            print(f"[booking] Got {len(slots)} real slots from backend", file=sys.stderr)
+            return slots
+    except Exception as e:
+        print(f"[booking] Backend slot fetch failed ({e}), using local generation", file=sys.stderr)
+        return _generate_slots()
+
+
 def _generate_slots():
+    """Fallback local slot generation — used when backend is unreachable."""
+    slot_times = [
+        "9:00 AM", "9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM",
+        "12:00 PM", "12:30 PM", "1:00 PM", "1:30 PM", "2:00 PM", "2:30 PM",
+        "3:00 PM", "3:30 PM", "4:00 PM", "4:30 PM", "5:00 PM",
+    ]
     slots = []
     today = datetime.now()
-    days_added = 0
     check_day = today + timedelta(days=1)
-    while days_added < SLOTS_DAYS_AHEAD:
-        if check_day.weekday() not in SKIP_DAYS:
-            day_label = check_day.strftime("%A, %b %d").replace(" 0", " ")
-            for t in SLOT_TIMES:
-                slot_id = f"{check_day.strftime('%Y%m%d')}_{t.replace(':', '').replace(' ', '')}"
-                slots.append({"slot_id": slot_id, "label": f"{day_label} at {t}", "date": check_day.strftime("%m/%d/%Y"), "time": t})
-            days_added += 1
+    for _ in range(14):
+        day_label = check_day.strftime("%A, %b %d").replace(" 0", " ")
+        for t in slot_times:
+            slot_id = f"{check_day.strftime('%Y%m%d')}_{t.replace(':', '').replace(' ', '')}"
+            slots.append({
+                "slot_id": slot_id,
+                "label": f"{day_label} at {t}",
+                "date": check_day.strftime("%m/%d/%Y"),
+                "time": t,
+                "spots_left": 2,
+                "urgency": None,
+            })
         check_day += timedelta(days=1)
     return slots
 
@@ -174,7 +209,7 @@ class handler(BaseHTTPRequestHandler):
                 "customer_name": f"{first} {last}".strip(), "customer_first": first,
                 "appt_label": data.get("appt_label") or data.get("appt_type") or "Family Services Appointment",
                 "appt_type": data.get("appt_type", "general"), "duration": data.get("duration", "20-30"),
-                "advisor": ADVISOR, "slots": _generate_slots(), "token": token,
+                "advisor": ADVISOR, "slots": _fetch_slots_from_backend(data.get("advisor_id", "")), "token": token,
             }); return
         self._send_json(404, {"error": "not_found"})
 

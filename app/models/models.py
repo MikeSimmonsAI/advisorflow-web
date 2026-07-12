@@ -16,7 +16,7 @@ Architecture notes:
 """
 
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, ForeignKey, Text,
+    Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint, Index, Enum as SAEnum, Numeric
 )
 from sqlalchemy.orm import relationship, declarative_base
@@ -683,3 +683,41 @@ class PipelineConversation(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── Advisor Availability Blocks ───────────────────────────────────────────────
+# Stores date/time blocks when an advisor is unavailable for bookings.
+# Checked by /calendar/available-slots before returning slots to booking app.
+
+class BlockType(str, enum.Enum):
+    DATE_RANGE = "date_range"   # vacation / full days off
+    SLOT       = "slot"         # specific day+time blocked
+    RECURRING  = "recurring"    # e.g. every Friday after 3pm
+
+
+class AdvisorAvailabilityBlock(Base):
+    __tablename__ = "advisor_availability_blocks"
+
+    id              = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    advisor_id      = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+    block_type      = Column(SAEnum(BlockType), nullable=False)
+
+    # Date range block (vacation)
+    start_date      = Column(Date, nullable=True)
+    end_date        = Column(Date, nullable=True)
+
+    # Specific slot block
+    block_date      = Column(Date, nullable=True)
+    block_time      = Column(String, nullable=True)   # "09:00", "09:30", etc.
+
+    # Recurring block
+    recur_day_of_week = Column(Integer, nullable=True)    # 0=Mon … 6=Sun
+    recur_after_time  = Column(String, nullable=True)     # block slots >= this time
+    recur_before_time = Column(String, nullable=True)     # block slots <= this time
+
+    reason          = Column(String, nullable=True)
+    cancel_existing = Column(Boolean, default=False)
+
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    created_by_id   = Column(String, ForeignKey("users.id"), nullable=True)

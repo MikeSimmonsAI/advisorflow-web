@@ -283,17 +283,182 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             logger.exception("booking-confirmed: SMS error: %s", e)
             sms_result = {"success": False, "error": str(e)}
 
+    # ── Send advisor notification email ──────────────────────────────────────
+    email_result = {"success": False}
+    if advisor and lead:
+        try:
+            _send_booking_notification_email(advisor, lead, appt_label, slot_display)
+            email_result = {"success": True}
+            logger.info("booking-confirmed: notification email sent")
+        except Exception as e:
+            logger.exception("booking-confirmed: notification email error: %s", e)
+            email_result = {"success": False, "error": str(e)}
+
     db.commit()
 
     response_payload = {
         "received": True,
         "calendar": calendar_result,
         "sms": sms_result,
+        "email": email_result,
         "lead_name": lead_name,
         "slot": slot_display,
     }
     logger.info("booking-confirmed response: %s", response_payload)
     return response_payload
+
+
+URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
+NOTIFICATION_EMAIL = "michael.simmons@nsmg.com"  # advisor notification address
+
+
+def _send_booking_notification_email(advisor, lead, appt_label: str, slot_display: str):
+    """
+    Send a professional booking notification email to the advisor.
+    Uses 🔥 urgent subject for hot/at-need/imminent tiers.
+    Sends via Microsoft Graph using the connected bookaboost@outlook.com inbox.
+    """
+    import httpx
+    import os
+    from app.services.microsoft_email_service import _get_fresh_access_token
+
+    if not advisor.microsoft_365_connected or not advisor.microsoft_oauth_refresh_token_encrypted:
+        logger.warning("Cannot send notification email — M365 not connected")
+        return
+
+    access_token = _get_fresh_access_token(advisor)
+
+    # Determine urgency
+    tier = (lead.tier or "").lower()
+    is_urgent = tier in URGENT_TIERS
+    lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "A lead"
+    lead_url = f"{os.environ.get('FRONTEND_URL', 'https://advisorflow-frontend.onrender.com')}/leads/{lead.id}"
+
+    if is_urgent:
+        subject = f"🔥 URGENT Booking — {lead_name} Needs Immediate Attention"
+        header_color = "#c0392b"
+        urgency_banner = f"""
+        <tr>
+          <td style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:12px 16px;margin-bottom:16px;">
+            <strong style="color:#856404;">⚡ URGENT:</strong> This lead is flagged as <strong>{tier.upper()}</strong>.
+            Respond immediately.
+          </td>
+        </tr>"""
+    else:
+        subject = f"📅 New Booking Confirmed — {lead_name}"
+        header_color = "#1a5fa8"
+        urgency_banner = ""
+
+    body_html = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:{header_color};padding:28px 32px;">
+          <p style="margin:0;color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;opacity:0.8;">BookaBoost</p>
+          <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:800;letter-spacing:-0.02em;">
+            {'🔥 Urgent Booking Alert' if is_urgent else '📅 New Booking Confirmed'}
+          </h1>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr><td style="padding:32px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+
+          {urgency_banner}
+
+          <!-- Lead info -->
+          <tr><td style="padding-bottom:24px;">
+            <h2 style="margin:0 0 16px;font-size:18px;color:#1a2a4a;">Appointment Details</h2>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+              <tr style="background:#f8fafc;">
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;width:140px;">Lead</td>
+                <td style="padding:12px 16px;color:#1a2a4a;font-weight:600;">{lead_name}</td>
+              </tr>
+              <tr>
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #e2e8f0;">Phone</td>
+                <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #e2e8f0;">{lead.phone or 'N/A'}</td>
+              </tr>
+              <tr style="background:#f8fafc;">
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #e2e8f0;">Email</td>
+                <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #e2e8f0;">{lead.email or 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #e2e8f0;">Appointment</td>
+                <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #e2e8f0;">{appt_label}</td>
+              </tr>
+              <tr style="background:#f8fafc;">
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #e2e8f0;">Date & Time</td>
+                <td style="padding:12px 16px;color:#1a2a4a;font-weight:700;border-top:1px solid #e2e8f0;">{slot_display}</td>
+              </tr>
+              <tr>
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #e2e8f0;">Lead Type</td>
+                <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #e2e8f0;">{(lead.tier or 'Unknown').replace('_', ' ').title()}</td>
+              </tr>
+              <tr style="background:#f8fafc;">
+                <td style="padding:12px 16px;font-weight:700;color:#64748b;font-size:12px;text-transform:uppercase;border-top:1px solid #e2e8f0;">Source</td>
+                <td style="padding:12px 16px;color:#1a2a4a;border-top:1px solid #e2e8f0;">{lead.source_file or 'N/A'} {('(' + str(lead.source_year) + ')') if lead.source_year else ''}</td>
+              </tr>
+            </table>
+          </td></tr>
+
+          <!-- CTA button -->
+          <tr><td style="padding-bottom:24px;text-align:center;">
+            <a href="{lead_url}"
+               style="display:inline-block;background:{header_color};color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">
+              View Lead in BookaBoost →
+            </a>
+          </td></tr>
+
+          <!-- Calendar reminder -->
+          <tr><td style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:16px;">
+            <p style="margin:0;color:#0369a1;font-size:13px;">
+              📅 <strong>Check your Outlook calendar</strong> — the appointment has been added automatically.
+              Make sure there are no conflicts for <strong>{slot_display}</strong>.
+            </p>
+          </td></tr>
+
+        </table>
+      </td></tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">
+            BookaBoost · Appointment Scheduling Platform · Dallas, TX<br>
+            This is an automated notification. Do not reply to this email.
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>"""
+
+    notification_to = NOTIFICATION_EMAIL
+    httpx.post(
+        "https://graph.microsoft.com/v1.0/me/sendMail",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        json={
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "HTML", "content": body_html},
+                "toRecipients": [{"emailAddress": {"address": notification_to}}],
+            },
+            "saveToSentItems": False,
+        },
+        timeout=15,
+    )
+    logger.info("Notification email sent to %s subject=%r", notification_to, subject)
 
 
 @router.post("/confirm-booking")
