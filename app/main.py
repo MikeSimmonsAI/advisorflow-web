@@ -30,6 +30,7 @@ app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
     "https://bookaboost.com",
+    "https://bookaboost.live",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
@@ -227,6 +228,7 @@ app.include_router(notification_router.router)
 app.include_router(settings_router.router)
 app.include_router(templates_router.router)
 app.include_router(ai_router.router)
+app.include_router(concierge_router.router)
 app.include_router(outcomes_router.router)
 app.include_router(microsoft_router.router)
 app.include_router(compliance_router.router)
