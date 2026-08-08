@@ -21,7 +21,7 @@ from typing import Any
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from app.models.models import Lead, Message, Reply, User, BookingLink, PipelineConversation, EmailMessage
+from app.models.models import Lead, Message, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ ESCALATION_KEYWORDS = [
 
 URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 
-SMART_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor at Restland Cemetery & Funeral Home in Dallas, TX manage email conversations with families.
+SMART_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor manage email conversations with families on behalf of {org_name}.
 
 Your job: generate the next outbound email to move this family toward booking a {appt_label} appointment.
 
@@ -66,21 +66,23 @@ CRITICAL RULES:
 - Keep emails SHORT — 2-3 sentences max for the body. No filler.
 - Reference the previous outreach naturally if this is a follow-up.
 - Personalize using the lead's name, tier, and history.
+- Do NOT include any sign-off, closing line, or signature. End with the last sentence of the body only.
 
 TONE: {tone_instruction}
 TOUCH ANGLE: {touch_angle_instruction}
 
-ADVISOR: {advisor_name} at Restland Cemetery & Funeral Home
+ADVISOR: {advisor_name}
+ORGANIZATION: {org_name}
 LEAD: {first_name} {last_name}
 APPOINTMENT TYPE: {appt_label}
 LEAD TIER: {tier}
 SOURCE: {source} {source_year}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
-{{"subject": "email subject line", "body": "2-3 sentence email body, no URLs", "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
+{{"subject": "email subject line", "body": "2-3 sentence email body only, no sign-off, no URLs", "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
 """
 
-REPLY_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor at Restland Cemetery & Funeral Home respond to a lead's email reply.
+REPLY_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor respond to a lead's email reply on behalf of {org_name}.
 
 The lead replied. Generate the ideal response to keep the conversation moving toward booking.
 
@@ -92,13 +94,15 @@ CRITICAL RULES:
 - If they show ANY interest → offer to book immediately.
 - If they ask a question → answer it and gently ask if they'd like to schedule.
 - Never reveal you are AI.
+- Do NOT include any sign-off, closing line, or signature. End with the last sentence of the body only.
 
 ADVISOR: {advisor_name}
+ORGANIZATION: {org_name}
 LEAD: {first_name} {last_name}
 APPOINTMENT TYPE: {appt_label}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
-{{"subject": "reply subject", "body": "your reply body, 2-3 sentences, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
+{{"subject": "reply subject", "body": "your reply body, 2-3 sentences, no sign-off, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
 """
 
 TONE_MAP = {
@@ -110,7 +114,7 @@ TONE_MAP = {
 
 TOUCH_ANGLE_MAP = {
     "warm_intro": "Introduce yourself warmly. Explain why you're reaching out specifically for them. Make it personal.",
-    "value_proposition": "Focus on what Restland can do for them. What peace of mind looks like. Don't ask yet.",
+    "value_proposition": "Focus on what your organization can do for them. What peace of mind looks like. Don't ask yet.",
     "soft_reference": "Reference your previous email naturally ('I reached out a few days ago...'). Try a completely different angle.",
     "checkin": "Simple, low-pressure check-in. Just making sure they got your message. No ask.",
     "useful_info": "Share something genuinely useful — a question to think about, something families often don't know. Build trust.",
@@ -148,6 +152,24 @@ def _get_client() -> OpenAI:
 def _get_appt_label(lead: Lead) -> str:
     tier = (lead.tier or "").lower().strip()
     return APPT_LABEL_MAP.get(tier, "Family Services Appointment")
+
+def _get_org_name(db: Session, advisor: User) -> str:
+    """Look up the organization name from DB — never hardcoded."""
+    org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+    return org.name if org else "our organization"
+
+
+def _build_email_html(body: str, advisor_name: str, org_name: str) -> str:
+    """Wrap AI body text with a clean HTML signature block."""
+    body_html = body.replace("\n", "<br>")
+    return f"""{body_html}<br><br>
+<span style="color:#555;font-size:14px;line-height:1.6;">
+Best regards,<br>
+<strong>{advisor_name}</strong><br>
+{org_name}
+</span>"""
+
+
 
 
 def _get_booking_url(db: Session, lead: Lead, advisor: User) -> str:
@@ -303,11 +325,13 @@ def generate_touch_email(db: Session, lead: Lead, advisor: User, touch_number: i
     appt_label = _get_appt_label(lead)
     history = _get_conversation_history(db, lead)
 
+    org_name = _get_org_name(db, advisor)
     system = SMART_SYSTEM_PROMPT.format(
         appt_label=appt_label,
         tone_instruction=TONE_MAP.get(tone, TONE_MAP["warm"]),
         touch_angle_instruction=TOUCH_ANGLE_MAP.get(angle, ""),
         advisor_name=advisor.full_name or "Your Advisor",
+        org_name=org_name,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         tier=lead.tier or "unknown",
@@ -358,8 +382,10 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
     appt_label = _get_appt_label(lead)
     history = _get_conversation_history(db, lead)
 
+    org_name = _get_org_name(db, advisor)
     system = REPLY_SYSTEM_PROMPT.format(
         advisor_name=advisor.full_name or "Your Advisor",
+        org_name=org_name,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         appt_label=appt_label,
@@ -416,14 +442,16 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
         if not lead.email:
             return {"success": False, "error": "Lead has no email address"}
 
-        _send_email_via_graph(advisor, lead.email, email_data["subject"], email_data["body"])
+        org_name = _get_org_name(db, advisor)
+        html_body = _build_email_html(email_data["body"], advisor.full_name or "Your Advisor", org_name)
+        _send_email_via_graph(advisor, lead.email, email_data["subject"], html_body)
 
         msg = EmailMessage(
             id=str(uuid.uuid4()),
             lead_id=lead.id,
             sender_id=advisor.id,
             subject=email_data["subject"],
-            body_html=email_data["body"].replace('\n', '<br>'),
+            body_html=html_body,
             status="sent",
             sent_at=datetime.utcnow(),
         )
@@ -621,9 +649,11 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
 
     if result.get("should_book"):
         booking_url = _get_booking_url(db, lead, advisor)
+        org_name = _get_org_name(db, advisor)
         body_with_booking = result["body"] + f"\n\nHere's my booking link to pick a time: {booking_url}"
+        html_booking = _build_email_html(body_with_booking, advisor.full_name or "Your Advisor", org_name)
         try:
-            _send_email_via_graph(advisor, lead.email, result["subject"], body_with_booking)
+            _send_email_via_graph(advisor, lead.email, result["subject"], html_booking)
             conv.stage = "booking_sent"
             conv.booking_link_sent_at = datetime.utcnow()
             db.commit()
@@ -633,13 +663,15 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
             return {"action": "error", "error": str(e)}
 
     try:
-        _send_email_via_graph(advisor, lead.email, result["subject"], result["body"])
+        org_name = _get_org_name(db, advisor)
+        html_reply = _build_email_html(result["body"], advisor.full_name or "Your Advisor", org_name)
+        _send_email_via_graph(advisor, lead.email, result["subject"], html_reply)
         msg = EmailMessage(
             id=str(uuid.uuid4()),
             lead_id=lead.id,
             sender_id=advisor.id,
             subject=result["subject"],
-            body_html=result["body"].replace('\n', '<br>'),
+            body_html=html_reply,
             status="sent",
             sent_at=datetime.utcnow(),
         )

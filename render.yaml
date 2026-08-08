@@ -114,6 +114,8 @@ services:
         sync: false
       - key: MICROSOFT_CLIENT_SECRET
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
 
   # ── AI Conversation scheduler — runs every 15 minutes ─────────────────────
   - type: cron
