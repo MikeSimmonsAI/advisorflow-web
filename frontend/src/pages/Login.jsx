@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login } from '../api/client'
+import { login, fetchAndStoreBranding } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import './Login.css'
 
@@ -17,6 +17,7 @@ export default function Login() {
     setLoading(true)
     try {
       await login(email, password)
+      await fetchAndStoreBranding()
       navigate('/')
     } catch (err) {
       setError(err.message)

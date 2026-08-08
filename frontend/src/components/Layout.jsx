@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { getCurrentUser, logout } from '../api/client'
+import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding } from '../api/client'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import './Layout.css'
@@ -109,6 +109,14 @@ export default function Layout({ children }) {
   const user = getCurrentUser()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [branding, setBranding] = useState(() => getBranding())
+
+  useEffect(() => {
+    // Apply stored branding immediately, then refresh from API
+    const stored = getBranding()
+    if (stored) applyBrandingCSS(stored)
+    fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
+  }, [])
 
   function closeSidebar() { setSidebarOpen(false) }
 
@@ -116,6 +124,9 @@ export default function Layout({ children }) {
     logout()
     window.location.href = '/login'
   }
+
+  const brandName = branding?.brand_name || 'BookaBoost'
+  const logoUrl = branding?.brand_logo_url || null
 
   return (
     <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
@@ -126,8 +137,10 @@ export default function Layout({ children }) {
 
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <SignalPulse color="blue" size={9} />
-          <span className="brand-mark">Booka<span className="brand-accent">Boost</span></span>
+          {logoUrl
+            ? <img src={logoUrl} alt={brandName} style={{ height: 32, maxWidth: 120, objectFit: 'contain', borderRadius: 4 }} />
+            : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
+          }
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
         </div>
 

@@ -88,4 +88,40 @@ export function getCurrentUser() {
 export function logout() {
   clearToken()
   localStorage.removeItem('bookaboost_user')
+  localStorage.removeItem('bb_branding')
+}
+
+// ── Branding ─────────────────────────────────────────────────────────────────
+
+export async function fetchAndStoreBranding() {
+  try {
+    const data = await api.get('/org-settings/')
+    const branding = {
+      brand_name: data.brand_name || data.name || 'BookaBoost',
+      brand_logo_url: data.brand_logo_url || null,
+      brand_color_primary: data.brand_color_primary || null,
+      brand_color_accent: data.brand_color_accent || null,
+      industry: data.industry || 'funeral',
+    }
+    localStorage.setItem('bb_branding', JSON.stringify(branding))
+    applyBrandingCSS(branding)
+    return branding
+  } catch { return null }
+}
+
+export function getBranding() {
+  const raw = localStorage.getItem('bb_branding')
+  return raw ? JSON.parse(raw) : null
+}
+
+export function applyBrandingCSS(branding) {
+  if (!branding) return
+  const root = document.documentElement
+  if (branding.brand_color_primary) {
+    root.style.setProperty('--accent', branding.brand_color_primary)
+    root.style.setProperty('--brand-primary', branding.brand_color_primary)
+  }
+  if (branding.brand_color_accent) {
+    root.style.setProperty('--brand-accent', branding.brand_color_accent)
+  }
 }

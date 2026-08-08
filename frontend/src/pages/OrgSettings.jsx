@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api, fetchAndStoreBranding } from '../api/client'
 import '../styles/shared.css'
 import './OrgSettings.css'
 
@@ -72,9 +72,8 @@ export default function OrgSettings() {
         brand_color_accent: brandColorAccent,
       })
       setSuccess('Branding saved.')
-      // Apply colors live
-      document.documentElement.style.setProperty('--signal-blue', brandColorPrimary)
-      document.documentElement.style.setProperty('--signal-green', brandColorAccent)
+      // Refresh localStorage + apply CSS vars live so changes appear immediately
+      await fetchAndStoreBranding()
     } catch (err) {
       setError(err.message)
     } finally {
