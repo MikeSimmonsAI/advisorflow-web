@@ -17,15 +17,8 @@ const CONTACT_HISTORY_OPTIONS = [
   { value: 'replied_not_booked', label: 'Replied but not booked' },
 ]
 
-const TIER_OPTIONS = [
-  { value: '', label: 'Any tier' },
-  { value: 'pre_need', label: 'Pre-Need' },
-  { value: 'at_need', label: 'At-Need' },
-  { value: 'imminent', label: 'Imminent' },
-  { value: 'contract_sold', label: 'Contract Sold' },
-  { value: 'email_only', label: 'Email Only' },
-  { value: 'partial', label: 'Partial / Needs Review' },
-]
+// Tier options loaded dynamically from org settings — see useEffect below
+const DEFAULT_TIER_OPTIONS = [{ value: '', label: 'Any tier' }]
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
@@ -51,6 +44,7 @@ export default function Campaigns() {
   const [campaigns, setCampaigns] = useState([])
   const [advisors, setAdvisors] = useState([])
   const [cadenceTemplates, setCadenceTemplates] = useState([])
+  const [tierOptions, setTierOptions] = useState(DEFAULT_TIER_OPTIONS)
   const [loading, setLoading] = useState(true)
 
   // Step 1 — Purpose
@@ -88,11 +82,19 @@ export default function Campaigns() {
       api.get('/campaigns').catch(() => []),
       api.get('/admin/users').catch(() => []),
       api.get('/cadence-templates/').catch(() => []),
-    ]).then(([purposeData, campaignData, userData, templateData]) => {
+      api.get('/org-settings/').catch(() => null),
+    ]).then(([purposeData, campaignData, userData, templateData, orgSettings]) => {
       setPurposes(purposeData)
       setCampaigns(campaignData)
       setAdvisors(userData.filter(u => u.role === 'advisor' || u.role === 'org_admin'))
       setCadenceTemplates(templateData)
+      // Build tier options from the org's actual configured tiers
+      if (orgSettings?.tier_config?.length) {
+        setTierOptions([
+          { value: '', label: 'Any tier' },
+          ...orgSettings.tier_config.map(t => ({ value: t.value, label: t.label })),
+        ])
+      }
       setLoading(false)
     })
   }, [])
@@ -255,7 +257,7 @@ export default function Campaigns() {
           <div className="campaign-filters-grid">
             <label className="campaign-label">Tier
               <select className="campaign-input" value={tier} onChange={(e) => setTier(e.target.value)}>
-                {TIER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {tierOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
             <label className="campaign-label">Status

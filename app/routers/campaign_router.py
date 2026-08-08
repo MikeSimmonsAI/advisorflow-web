@@ -26,17 +26,67 @@ from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
-# ── Campaign purpose types ────────────────────────────────────────────────────
+# ── Campaign purpose types — by industry ─────────────────────────────────────
 
-CAMPAIGN_PURPOSES = [
-    {"value": "memorial_sales", "label": "Memorial Sales", "desc": "Target leads who may be interested in pre-arranged memorial services"},
-    {"value": "pre_need_outreach", "label": "Pre-Need Outreach", "desc": "First contact with pre-need leads who haven't been reached yet"},
-    {"value": "at_need_followup", "label": "At-Need Follow-up", "desc": "Follow up with at-need families after initial contact"},
-    {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
-    {"value": "upsell_existing", "label": "Upsell Existing", "desc": "Reach existing customers with upgrades or additional services"},
-    {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind booked leads of upcoming appointments"},
-    {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
-]
+CAMPAIGN_PURPOSES_BY_INDUSTRY = {
+    "funeral": [
+        {"value": "pre_need_outreach", "label": "Pre-Need Outreach", "desc": "First contact with pre-need leads who haven't been reached yet"},
+        {"value": "at_need_followup", "label": "At-Need Follow-up", "desc": "Follow up with at-need families after initial contact"},
+        {"value": "memorial_sales", "label": "Memorial Sales", "desc": "Target leads interested in pre-arranged memorial services"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
+        {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind booked leads of upcoming appointments"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+    "roofing": [
+        {"value": "storm_damage", "label": "Storm Damage Outreach", "desc": "Reach out to leads in storm-affected areas"},
+        {"value": "estimate_followup", "label": "Estimate Follow-up", "desc": "Follow up on quotes that haven't converted yet"},
+        {"value": "referral_outreach", "label": "Referral Campaign", "desc": "Ask satisfied customers for referrals"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
+        {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind leads of scheduled inspections or estimates"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+    "insurance": [
+        {"value": "policy_review", "label": "Policy Review", "desc": "Invite existing clients to review and update their coverage"},
+        {"value": "new_client_outreach", "label": "New Client Outreach", "desc": "First contact with fresh prospects"},
+        {"value": "referral_outreach", "label": "Referral Campaign", "desc": "Ask satisfied clients for referrals"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
+        {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind leads of upcoming consultations"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+    "real_estate": [
+        {"value": "buyer_outreach", "label": "Buyer Outreach", "desc": "Reach leads looking to purchase a home"},
+        {"value": "seller_outreach", "label": "Seller Outreach", "desc": "Target homeowners who may want to list"},
+        {"value": "listing_followup", "label": "Listing Follow-up", "desc": "Follow up on leads who viewed a listing"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
+        {"value": "appointment_reminder", "label": "Showing Reminder", "desc": "Remind leads of upcoming showings"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+    "dental": [
+        {"value": "new_patient", "label": "New Patient Outreach", "desc": "Welcome new patient leads and invite them in"},
+        {"value": "recall", "label": "Recall Campaign", "desc": "Bring back patients overdue for a cleaning or checkup"},
+        {"value": "treatment_followup", "label": "Treatment Follow-up", "desc": "Follow up on patients with pending treatment plans"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back patients who haven't visited in 12+ months"},
+        {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind patients of upcoming appointments"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+    "home_services": [
+        {"value": "seasonal_outreach", "label": "Seasonal Outreach", "desc": "Promote seasonal services to your lead list"},
+        {"value": "estimate_followup", "label": "Estimate Follow-up", "desc": "Follow up on quotes that haven't converted"},
+        {"value": "referral_outreach", "label": "Referral Campaign", "desc": "Ask satisfied customers for referrals"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
+        {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind leads of upcoming service visits"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+    "custom": [
+        {"value": "general_outreach", "label": "General Outreach", "desc": "Reach out to leads with a custom message"},
+        {"value": "re_engagement", "label": "Re-engagement", "desc": "Win back leads who went cold — no reply in 30+ days"},
+        {"value": "appointment_reminder", "label": "Appointment Reminder", "desc": "Remind leads of upcoming appointments"},
+        {"value": "custom", "label": "Custom Campaign", "desc": "Define your own targeting and message"},
+    ],
+}
+
+# Fallback (used if industry not recognized)
+CAMPAIGN_PURPOSES = CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"]
 
 # ── Rich filter helper ────────────────────────────────────────────────────────
 
@@ -194,8 +244,14 @@ class GenerateMessageRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/purposes")
-def get_purposes():
-    return CAMPAIGN_PURPOSES
+def get_purposes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.models import Organization
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    industry = (org.industry if org else None) or "funeral"
+    return CAMPAIGN_PURPOSES_BY_INDUSTRY.get(industry, CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"])
 
 
 @router.post("/generate-message")
