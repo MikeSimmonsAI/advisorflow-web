@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+class TokenExpiredError(Exception):
+    """Raised when Microsoft rejects the refresh token (400) — advisor must re-connect."""
+    pass
+
+
 def _get_fresh_access_token(advisor) -> str:
     """Get fresh Microsoft Graph access token from stored refresh token."""
     from app.utils.crypto import decrypt_value
@@ -39,6 +44,10 @@ def _get_fresh_access_token(advisor) -> str:
         },
         timeout=15,
     )
+    if response.status_code == 400:
+        # Token expired or revoked — raise a typed exception so callers can
+        # auto-disconnect the advisor rather than counting it as a hard error.
+        raise TokenExpiredError(f"Refresh token rejected for advisor {advisor.id}: {response.text[:200]}")
     response.raise_for_status()
     return response.json()["access_token"]
 
@@ -108,6 +117,16 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
 
     try:
         access_token = _get_fresh_access_token(advisor)
+    except TokenExpiredError as e:
+        # Refresh token was rejected by Microsoft — it expired or was revoked.
+        # Auto-disconnect the advisor so they stop being polled and get the
+        # re-connect prompt next time they open the app.
+        logger.warning("Token expired for advisor %s — disconnecting M365. %s", advisor_id, e)
+        advisor.microsoft_365_connected = False
+        advisor.microsoft_oauth_refresh_token_encrypted = None
+        db.commit()
+        return {"checked": 0, "matched": 0, "errors": 0, "auth_errors": 1,
+                "note": "Token expired — advisor disconnected, re-connect required"}
     except Exception as e:
         logger.error("Failed to get access token for advisor %s: %s", advisor_id, e)
         return {"checked": 0, "matched": 0, "errors": 1, "error": str(e)}
@@ -251,12 +270,13 @@ def poll_all_advisors(db: Session, organization_id: str) -> dict:
         User.is_active == True,
     ).all()
 
-    total = {"checked": 0, "matched": 0, "errors": 0}
+    total = {"checked": 0, "matched": 0, "errors": 0, "auth_errors": 0}
     for advisor in advisors:
         result = poll_inbox_for_replies(db, advisor.id)
         total["checked"] += result.get("checked", 0)
         total["matched"] += result.get("matched", 0)
         total["errors"] += result.get("errors", 0)
+        total["auth_errors"] += result.get("auth_errors", 0)
 
     return {**total, "advisors_polled": len(advisors)}
 
@@ -275,13 +295,14 @@ def poll_all_orgs(db: Session) -> dict:
         User.microsoft_oauth_refresh_token_encrypted.isnot(None),
     ).all()
 
-    total = {"checked": 0, "matched": 0, "errors": 0, "advisors_polled": 0}
+    total = {"checked": 0, "matched": 0, "errors": 0, "auth_errors": 0, "advisors_polled": 0}
     for advisor in advisors:
         try:
             result = poll_inbox_for_replies(db, advisor.id)
             total["checked"] += result.get("checked", 0)
             total["matched"] += result.get("matched", 0)
             total["errors"] += result.get("errors", 0)
+            total["auth_errors"] += result.get("auth_errors", 0)
             total["advisors_polled"] += 1
         except Exception as e:
             logger.error("poll_all_orgs: error on advisor %s: %s", advisor.id, e)

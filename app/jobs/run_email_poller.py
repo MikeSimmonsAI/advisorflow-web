@@ -71,4 +71,7 @@ def main():
 
 if __name__ == "__main__":
     summary = main()
+    # auth_errors (expired/revoked tokens) are expected operational events —
+    # they auto-disconnect the advisor and don't fail the job. Only hard
+    # errors (DB failures, unexpected exceptions) cause a non-zero exit.
     sys.exit(1 if summary.get("errors", 0) > 0 else 0)
