@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from app.deps import SessionLocal
-from app.models.models import User, Lead, Message, Reply, LeadOutcome, Organization
+from app.models.models import User, Lead, Message, Reply, LeadOutcome, Organization, ReplyClassification
 from app.services.auth_service import hash_password
 
 random.seed(42)
@@ -140,9 +140,9 @@ def seed(db, org_id: str, num_leads: int = 120):
             )
             msg = Message(
                 lead_id=lead.id, sender_id=adv.id,
-                body=body, channel="sms",
+                body=body,
                 sent_at=sent_at,
-                status="delivered",
+                twilio_status="delivered",
             )
             db.add(msg)
             sent_at += timedelta(days=random.randint(3, 14))
@@ -162,11 +162,17 @@ def seed(db, org_id: str, num_leads: int = 120):
             body = random.choice(NEG_REPLIES)
         else:
             body = random.choice(NEUTRAL_REPLIES)
+        classification = (
+            ReplyClassification.INTERESTED if is_hot else
+            ReplyClassification.NOT_INTERESTED if is_neg else
+            ReplyClassification.NEUTRAL
+        )
         r = Reply(
             lead_id=lead.id, body=body,
             source="sms",
             received_at=lead.created_at + timedelta(days=random.randint(2, 20)),
             is_hot=is_hot,
+            classification=classification,
         )
         db.add(r)
         reply_count += 1
@@ -178,11 +184,16 @@ def seed(db, org_id: str, num_leads: int = 120):
     outcome_count = 0
     for lead in booked_leads:
         sold = random.random() < 0.6
+        adv = next((a for a in advisors if a.id == lead.assigned_to_id), advisors[0])
         outcome = LeadOutcome(
             lead_id=lead.id,
+            recorded_by_id=adv.id,
             resulted_in_sale=sold,
+            has_funeral_arrangement=random.choice([True, False, None]),
+            has_cemetery_property=random.choice([True, False, None]),
+            has_marker=random.choice([True, False, None]),
             notes="Demo outcome — seeded automatically.",
-            created_at=lead.created_at + timedelta(days=random.randint(5, 30)),
+            appointment_date=lead.created_at + timedelta(days=random.randint(3, 20)),
         )
         db.add(outcome)
         outcome_count += 1
