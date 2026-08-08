@@ -327,8 +327,52 @@ export default function OrgSettings() {
               {savingTiers ? 'Saving…' : 'Save tier configuration'}
             </button>
           </section>
-        </>
+        {/* ── Demo Data Seed (super admin only) ── */}
+        {isSuperAdmin && selectedOrgId && (
+          <section className="panel os-section" style={{ marginTop: 16, borderColor: 'rgba(217,119,6,0.3)' }}>
+            <div className="panel-header">
+              <h2 className="panel-title" style={{ color: '#f59e0b' }}>🧪 Demo data</h2>
+            </div>
+            <p className="os-hint">
+              Seed this organization with 120 leads, messages, replies, and booked outcomes so charts and reports show real-looking data.
+              <strong style={{ color: '#f59e0b' }}> This adds data — it does not clear existing records first.</strong>
+            </p>
+            <SeedDemoButton orgId={selectedOrgId} />
+          </section>
+        )}
+      </>
       )}
+    </div>
+  )
+}
+
+function SeedDemoButton({ orgId }) {
+  const [status, setStatus] = useState(null)   // null | 'loading' | 'done' | 'error'
+  const [result, setResult] = useState(null)
+  const [err, setErr] = useState('')
+
+  const run = async () => {
+    if (!window.confirm('Seed demo data into this org? This will add ~120 leads and related records.')) return
+    setStatus('loading'); setErr(''); setResult(null)
+    try {
+      const r = await api.post(`/admin/demo/seed/${orgId}`)
+      setResult(r); setStatus('done')
+    } catch (e) {
+      setErr(e.message || 'Seed failed'); setStatus('error')
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+      <button className="btn btn--secondary" onClick={run} disabled={status === 'loading'} style={{ alignSelf: 'flex-start', borderColor: 'rgba(217,119,6,0.4)', color: '#f59e0b' }}>
+        {status === 'loading' ? 'Seeding…' : '🌱 Seed demo data'}
+      </button>
+      {status === 'done' && result && (
+        <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--signal-green)' }}>
+          ✓ Seeded <strong>{result.org}</strong> — {result.leads} leads · {result.messages} messages · {result.replies} replies · {result.outcomes} outcomes
+        </div>
+      )}
+      {status === 'error' && <div style={{ color: '#f87171', fontSize: 13 }}>{err}</div>}
     </div>
   )
 }

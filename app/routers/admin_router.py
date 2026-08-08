@@ -1455,3 +1455,130 @@ def list_organizations(
         }
         for o in orgs
     ]
+
+
+# ---------------------------------------------------------------------------
+# Demo data seed — super_admin only. Seeds a sub-org with realistic leads,
+# messages, and replies so charts/reports show meaningful data for demos.
+# ---------------------------------------------------------------------------
+
+@router.post("/demo/seed/{org_id}")
+def seed_demo_data(
+    org_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """Seed a sub-account with realistic demo data. Super admin only."""
+    import random, uuid as _uuid
+    from datetime import datetime, timedelta
+    from app.services.auth_service import hash_password
+    from app.models.models import ReplyClassification
+
+    target_org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not target_org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    random.seed(42)
+    FIRST = ["James","Maria","Robert","Patricia","Michael","Jennifer","William","Linda",
+             "David","Barbara","Richard","Elizabeth","Joseph","Susan","Thomas","Jessica",
+             "Charles","Sarah","Christopher","Karen","Daniel","Lisa","Matthew","Nancy"]
+    LAST  = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis",
+             "Wilson","Martinez","Anderson","Taylor","Thomas","Hernandez","Moore",
+             "Jackson","Martin","Lee","Thompson","White","Harris","Sanchez","Clark"]
+    TIERS = ["pre_need"]*4 + ["at_need"]*3 + ["imminent"]*2 + ["contract_sold"] + ["email_only"]*2
+    STATUSES = ["new"]*20 + ["sent"]*30 + ["replied"]*20 + ["hot"]*12 + ["booked"]*12 + ["dnc"]*3 + ["dead"]*3
+    ADVISOR_NAMES = ["Marcus Johnson","Diana Reyes","Kevin Park","Alicia Thompson","Brandon Wells"]
+    MESSAGES = [
+        "Hi {name}, this is {adv} reaching out about pre-need planning. Would you be open to a quick conversation?",
+        "Hello {name}, I'm {adv}. I help families plan ahead. Do you have 10 minutes?",
+        "Hi {name}, {adv} here. A quick chat now can really help your family later. Interested?",
+        "{name}, this is {adv}. Have you had a chance to review your planning options?",
+    ]
+    HOT = ["Yes I'm interested, when can we talk?","Please call me, I need to get this done soon.",
+           "I've been meaning to reach out. What are the next steps?","Can we meet this week?"]
+    NEUTRAL = ["Thank you. I'll think about it.","Not quite ready yet.","Please send info.",
+               "I'd like to learn more.","We have something but happy to review."]
+    NEG = ["Not interested, please remove me.","Already handled.","Do not contact me."]
+
+    def rdate(lo=30, hi=400):
+        return datetime.utcnow() - timedelta(days=random.randint(lo, hi))
+
+    # Advisors — create up to 5 if fewer exist
+    existing_advisors = db.query(User).filter(
+        User.organization_id == org_id, User.role == "advisor"
+    ).all()
+    advisors = list(existing_advisors)
+    for i in range(max(0, 5 - len(existing_advisors))):
+        name = ADVISOR_NAMES[i]
+        fn, ln = name.split(" ", 1)
+        adv = User(
+            id=str(_uuid.uuid4()), organization_id=org_id,
+            email=f"demo.{fn.lower()}.{ln.lower()}@demo-advisorflow.com",
+            password_hash=hash_password("Demo1234!"),
+            full_name=name, role="advisor", is_active=True, must_change_password=False,
+        )
+        db.add(adv); db.flush(); advisors.append(adv)
+
+    # Leads
+    leads, num_leads = [], 120
+    for i in range(num_leads):
+        adv = random.choice(advisors)
+        lead = Lead(
+            id=str(_uuid.uuid4()), organization_id=org_id,
+            first_name=random.choice(FIRST), last_name=random.choice(LAST),
+            phone=f"({random.randint(200,999)}) {random.randint(200,999)}-{random.randint(1000,9999)}",
+            email=f"demo{i}@example.com",
+            tier=random.choice(TIERS), status=random.choice(STATUSES),
+            source_year=random.randint(2017, 2025), assigned_to_id=adv.id,
+            created_at=rdate(60, 400),
+        )
+        db.add(lead); leads.append(lead)
+    db.flush()
+
+    # Messages (to non-new, non-dnc leads)
+    msg_count = 0
+    for lead in [l for l in leads if l.status not in ("new","dnc","dead")]:
+        adv = next((a for a in advisors if a.id == lead.assigned_to_id), advisors[0])
+        sent_at = lead.created_at + timedelta(days=random.randint(1,7))
+        for _ in range(random.choices([1,2,3], weights=[60,30,10])[0]):
+            body = random.choice(MESSAGES).format(name=lead.first_name, adv=adv.full_name or "your advisor")
+            db.add(Message(id=str(_uuid.uuid4()), lead_id=lead.id, sender_id=adv.id,
+                           body=body, twilio_status="delivered", sent_at=sent_at))
+            sent_at += timedelta(days=random.randint(3,14)); msg_count += 1
+    db.flush()
+
+    # Replies (for replied/hot/booked leads)
+    reply_count = 0
+    for lead in [l for l in leads if l.status in ("replied","hot","booked")]:
+        is_hot = lead.status in ("hot","booked") or random.random() < 0.3
+        is_neg = not is_hot and random.random() < 0.15
+        body = random.choice(HOT if is_hot else NEG if is_neg else NEUTRAL)
+        clf = ReplyClassification.INTERESTED if is_hot else (ReplyClassification.NOT_INTERESTED if is_neg else ReplyClassification.NEUTRAL)
+        db.add(Reply(id=str(_uuid.uuid4()), lead_id=lead.id, body=body, source="sms",
+                     received_at=lead.created_at + timedelta(days=random.randint(2,20)),
+                     is_hot=is_hot, classification=clf))
+        reply_count += 1
+    db.flush()
+
+    # Outcomes (booked leads)
+    outcome_count = 0
+    for lead in [l for l in leads if l.status == "booked"]:
+        adv = next((a for a in advisors if a.id == lead.assigned_to_id), advisors[0])
+        db.add(LeadOutcome(id=str(_uuid.uuid4()), lead_id=lead.id, recorded_by_id=adv.id,
+                           resulted_in_sale=random.random() < 0.6,
+                           has_funeral_arrangement=random.choice([True,False,None]),
+                           has_cemetery_property=random.choice([True,False,None]),
+                           appointment_date=lead.created_at + timedelta(days=random.randint(3,20)),
+                           notes="Demo outcome."))
+        outcome_count += 1
+
+    db.commit()
+    return {
+        "success": True,
+        "org": target_org.name,
+        "leads": num_leads,
+        "messages": msg_count,
+        "replies": reply_count,
+        "outcomes": outcome_count,
+        "advisors_created": max(0, 5 - len(existing_advisors)),
+    }
