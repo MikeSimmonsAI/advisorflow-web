@@ -19,7 +19,7 @@ SYSTEM_PROMPT = """You are the BookaBoost AI concierge on the BookaBoost website
 ABOUT BOOKABOOST:
 - Revives dormant leads and books appointments automatically through AI email, SMS, and voice calls
 - Built for established service businesses with 2,500+ leads: roofing, funeral services, insurance, medical, real estate, automotive, legal, home services
-- Live pilot client: Restland Cemetery & Funeral Home, Dallas TX
+- Currently in live pilot with an established funeral services client in the Dallas TX market
 - NOT a CRM, NOT a marketing tool — a complete AI revenue system connecting lead revival to booked appointment
 
 WHAT IS LIVE AND WORKING RIGHT NOW:

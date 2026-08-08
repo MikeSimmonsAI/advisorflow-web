@@ -21,6 +21,7 @@ from app.routers import (
     compliance_router, audit_log_router, sample_data_router,
     health_router, workqueue_router, campaign_router,
     google_contacts_router, availability_router, voice_router,
+    concierge_router,
 )
 from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
@@ -130,7 +131,7 @@ def sms_consent_evidence():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SMS Consent Evidence - Restland Cemetery &amp; Funeral Home</title>
+<title>SMS Consent Evidence - BookaBoost Pilot Client</title>
 <style>
   body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 24px;color:#222;line-height:1.7}
   h1{color:#0a0a1a}h2{color:#1a2a4a;margin-top:32px;border-bottom:2px solid #1565c0;padding-bottom:6px}
@@ -148,21 +149,21 @@ def sms_consent_evidence():
 </head>
 <body>
 <h1>SMS Consent Evidence</h1>
-<p><strong>Business:</strong> Restland Cemetery &amp; Funeral Home, Dallas, TX</p>
-<p><strong>SMS Program:</strong> Appointment scheduling and follow-up outreach via Restland Family Service Advisors</p>
+<p><strong>Business:</strong> BookaBoost Pilot Client — Funeral Services, Dallas, TX</p>
+<p><strong>SMS Program:</strong> Appointment scheduling and follow-up outreach via Family Service Advisors</p>
 <p><strong>Document purpose:</strong> This page documents all opt-in paths used for the A2P 10DLC SMS campaign and is provided for TCR campaign review purposes.</p>
 
 <h2>Opt-In Path 1 — Website Form</h2>
 <div class="box">
   <p class="label">How it works:</p>
-  <p>Prospective customers visit the Restland booking page and submit a contact form. The form includes an <strong>unchecked</strong> SMS consent checkbox that the user must actively check before submitting.</p>
+  <p>Prospective customers visit the booking page and submit a contact form. The form includes an <strong>unchecked</strong> SMS consent checkbox that the user must actively check before submitting.</p>
   <p class="label">Form URL:</p>
   <p><a href="https://advisorflow-backend.onrender.com/book">https://advisorflow-backend.onrender.com/book</a></p>
   <p class="label">Consent language displayed on the form:</p>
   <div class="consent-text">
     <div class="checkbox-row">
       <input type="checkbox" disabled>
-      <span>I agree to receive SMS text messages from Restland Cemetery &amp; Funeral Home regarding appointment scheduling and funeral or cemetery planning services. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time. Reply HELP for assistance. View our <a href="https://advisorflow-backend.onrender.com/privacy-policy">Privacy Policy</a> and <a href="https://advisorflow-backend.onrender.com/terms">Terms &amp; Conditions</a>.</span>
+      <span>I agree to receive SMS text messages from our scheduling team regarding appointment scheduling and related services. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time. Reply HELP for assistance. View our <a href="https://advisorflow-backend.onrender.com/privacy-policy">Privacy Policy</a> and <a href="https://advisorflow-backend.onrender.com/terms">Terms &amp; Conditions</a>.</span>
     </div>
   </div>
   <p><em>The checkbox is unchecked by default. The user must actively check it to provide consent. Form cannot be submitted without completing this field.</em></p>
@@ -171,7 +172,7 @@ def sms_consent_evidence():
 <h2>Opt-In Path 2 — Verbal Consent (In-Person or Phone)</h2>
 <div class="box">
   <p class="label">How it works:</p>
-  <p>Restland Family Service Advisors collect verbal consent from customers during in-person consultations, phone inquiries, or scheduled file review appointments.</p>
+  <p>Family Service Advisors collect verbal consent from customers during in-person consultations, phone inquiries, or scheduled file review appointments.</p>
   <p class="label">Verbal disclosure script used by advisors:</p>
   <div class="step">
     "With your permission, we'd like to send you follow-up text messages regarding your appointment and our services. These messages are sent by our scheduling system and message and data rates may apply. You can opt out at any time by replying STOP. Do you consent to receive these text messages?"
@@ -202,8 +203,8 @@ def sms_consent_evidence():
 
 <h2>Contact</h2>
 <div class="box">
-  <p><strong>Restland Cemetery &amp; Funeral Home</strong></p>
-  <p>13005 Greenville Ave, Dallas, TX 75243</p>
+  <p><strong>BookaBoost</strong></p>
+  <p>Dallas, TX</p>
   <p>Phone: 469-553-7417 | Email: info@bookaboost.com</p>
 </div>
 </body>
