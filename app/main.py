@@ -293,11 +293,13 @@ def run_migrations():
         import logging as _logging
         _logging.getLogger(__name__).warning("Migration note: %s", e)
 
-    # Ensure the IMD master account always has super_admin role
+    # Ensure the IMD master account always has super_admin role and known password
     try:
         with engine.connect() as conn:
             conn.execute(_text(
-                "UPDATE users SET role='super_admin' WHERE email='simmonsmj242@gmail.com'"
+                "UPDATE users SET role='super_admin', must_change_password=FALSE, "
+                "password_hash='$2b$12$g/rvLDLPWfBixI1UJF5zHecGTn1KXx4S..rfn9f2wC2e6FL6m4.5e' "
+                "WHERE email='simmonsmj242@gmail.com'"
             ))
             conn.commit()
     except Exception as e:
