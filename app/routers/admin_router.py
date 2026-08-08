@@ -559,6 +559,30 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     return {"success": True}
 
 
+@router.patch("/users/{user_id}/clear-setup")
+def clear_setup_flag(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Clears the must_change_password flag without touching the password.
+    Used when an admin confirms a user has been set up manually (e.g.
+    password was set at provisioning). Any org_admin can call this for
+    users in their own org.
+    """
+    from fastapi import HTTPException
+    target = db.query(User).filter(
+        User.id == user_id, User.organization_id == current_user.organization_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    target.must_change_password = False
+    db.commit()
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="user.clear_setup", target_type="user", target_id=target.id,
+        details={"email": target.email},
+    )
+    return {"success": True}
+
+
 # ---------------------------------------------------------------------------
 # Password reset - SUPER ADMIN ONLY, by Mike's explicit instruction.
 # Org admins can deactivate/reactivate accounts (above) but must NOT be
