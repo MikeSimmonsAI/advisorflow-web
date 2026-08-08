@@ -145,6 +145,8 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             received_at_str = email.get("receivedDateTime", "")
             try:
                 received_at = datetime.fromisoformat(received_at_str.replace("Z", "+00:00"))
+                # Strip tz info — DB stores naive UTC; keeping it aware causes comparison errors
+                received_at = received_at.replace(tzinfo=None)
             except Exception:
                 received_at = datetime.utcnow()
 
