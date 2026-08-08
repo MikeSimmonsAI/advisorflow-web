@@ -159,10 +159,10 @@ def _get_org_name(db: Session, advisor: User) -> str:
     return org.name if org else "our organization"
 
 
-def _build_email_html(body: str, advisor_name: str, org_name: str) -> str:
+def _build_email_html(body: str, advisor_name: str, org_name: str, extra_html: str = "") -> str:
     """Wrap AI body text with a clean HTML signature block."""
     body_html = body.replace("\n", "<br>")
-    return f"""{body_html}<br><br>
+    return f"""{body_html}{extra_html}<br><br>
 <span style="color:#555;font-size:14px;line-height:1.6;">
 Best regards,<br>
 <strong>{advisor_name}</strong><br>
@@ -668,8 +668,15 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
     if result.get("should_book"):
         booking_url = _get_booking_url(db, lead, advisor)
         org_name = _get_org_name(db, advisor)
-        body_with_booking = _strip_signoff(result["body"]) + f"\n\nHere's my booking link to pick a time: {booking_url}"
-        html_booking = _build_email_html(body_with_booking, advisor.full_name or "Your Advisor", org_name)
+        clean_booking_body = _strip_signoff(result["body"])
+        booking_btn = (
+            f'<br><br>'
+            f'<a href="{booking_url}" '
+            f'style="display:inline-block;background:#1a5fa8;color:#ffffff;padding:12px 28px;'
+            f'border-radius:6px;text-decoration:none;font-weight:700;font-size:15px;">'
+            f'Schedule Your Appointment &rarr;</a>'
+        )
+        html_booking = _build_email_html(clean_booking_body, advisor.full_name or "Your Advisor", org_name, extra_html=booking_btn)
         try:
             _send_email_via_graph(advisor, lead.email, result["subject"], html_booking)
             conv.stage = "booking_sent"
