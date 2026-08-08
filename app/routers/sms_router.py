@@ -351,7 +351,32 @@ def list_replies(
         query = query.filter(Reply.is_hot == True)
     if needs_attention:
         query = query.filter(Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]))
-    return query.order_by(Reply.received_at.desc()).limit(200).all()
+
+    results = (
+        query
+        .add_columns(Lead.first_name, Lead.last_name)
+        .order_by(Reply.received_at.desc())
+        .limit(200)
+        .all()
+    )
+
+    return [
+        {
+            "id": r.Reply.id,
+            "lead_id": r.Reply.lead_id,
+            "lead_name": f"{r.first_name or ''} {r.last_name or ''}".strip() or "Unknown lead",
+            "body": r.Reply.body,
+            "classification": r.Reply.classification.value if r.Reply.classification else None,
+            "is_hot": r.Reply.is_hot,
+            "source": r.Reply.source,
+            "reviewed_at": r.Reply.reviewed_at,
+            "received_at": r.Reply.received_at,
+            "hot_reason": r.Reply.hot_reason,
+            "classification_confidence": r.Reply.classification_confidence,
+            "classification_reasoning": r.Reply.classification_reasoning,
+        }
+        for r in results
+    ]
 
 
 # ── MMS (image/flyer) send ────────────────────────────────────────────────────

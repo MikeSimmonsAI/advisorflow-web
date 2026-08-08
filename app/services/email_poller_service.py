@@ -150,13 +150,34 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             except Exception:
                 received_at = datetime.utcnow()
 
-            # Extract plain text from body
+            # Extract plain text from body — strip HTML, entities, and quoted thread
             body_full = email.get("body", {}).get("content", email.get("bodyPreview", "")).strip()
             import re
-            body_text = re.sub(r'<[^>]+>', '', body_full).strip()
-            body_text = re.sub(r'\s+', ' ', body_text).strip()
-            if len(body_text) > 1000:
-                body_text = body_text[:1000] + "..."
+            from html.parser import HTMLParser
+            import html as _html
+
+            # Strip HTML tags
+            body_text = re.sub(r'<[^>]+>', ' ', body_full)
+            # Decode HTML entities (&amp; &lt; &nbsp; etc.)
+            body_text = _html.unescape(body_text)
+            # Normalize whitespace
+            body_text = re.sub(r'[ \t]+', ' ', body_text)
+            body_text = re.sub(r'\n{3,}', '\n\n', body_text).strip()
+
+            # Strip quoted reply thread — everything after common quote markers
+            quote_patterns = [
+                r'\n[- ]*On .{5,80}wrote:.*',          # "On Fri Aug 7... wrote:"
+                r'\n[- ]*From:.*?\n.*?To:.*?\n.*?Subject:',  # Outlook-style header
+                r'\n_{5,}.*',                             # _____ divider lines
+                r'\n-{5,}.*',                             # ----- divider lines
+                r'\n>.*',                                 # > quoted lines
+            ]
+            for pat in quote_patterns:
+                body_text = re.split(pat, body_text, maxsplit=1, flags=re.DOTALL | re.IGNORECASE)[0]
+
+            body_text = body_text.strip()
+            if len(body_text) > 800:
+                body_text = body_text[:800] + "..."
 
             # Deduplicate by body content
             existing = db.query(Reply).filter(
