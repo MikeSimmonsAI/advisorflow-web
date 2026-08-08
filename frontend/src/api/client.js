@@ -117,11 +117,37 @@ export function getBranding() {
 export function applyBrandingCSS(branding) {
   if (!branding) return
   const root = document.documentElement
-  if (branding.brand_color_primary) {
-    root.style.setProperty('--accent', branding.brand_color_primary)
-    root.style.setProperty('--brand-primary', branding.brand_color_primary)
+  const primary = branding.brand_color_primary
+  const accent = branding.brand_color_accent
+
+  if (primary) {
+    // Set the brand variable AND override the signal-blue that's used throughout the UI
+    root.style.setProperty('--accent', primary)
+    root.style.setProperty('--brand-primary', primary)
+    root.style.setProperty('--signal-blue', primary)
+    // Derive a dim version at ~15% opacity using the hex color
+    root.style.setProperty('--signal-blue-dim', hexToRgba(primary, 0.15))
+    root.style.setProperty('--border-subtle', hexToRgba(primary, 0.18))
+    root.style.setProperty('--border-strong', hexToRgba(primary, 0.42))
+    root.style.setProperty('--glow-blue-sm', `0 0 14px ${hexToRgba(primary, 0.28)}`)
+    root.style.setProperty('--glow-blue-md', `0 0 24px ${hexToRgba(primary, 0.30)}`)
+    root.style.setProperty('--glow-blue-lg', `0 0 52px ${hexToRgba(primary, 0.34)}`)
   }
-  if (branding.brand_color_accent) {
-    root.style.setProperty('--brand-accent', branding.brand_color_accent)
+  if (accent) {
+    root.style.setProperty('--brand-accent', accent)
+    root.style.setProperty('--signal-green', accent)
+    root.style.setProperty('--signal-green-dim', hexToRgba(accent, 0.15))
+    root.style.setProperty('--glow-green-sm', `0 0 14px ${hexToRgba(accent, 0.26)}`)
+    root.style.setProperty('--glow-green-md', `0 0 30px ${hexToRgba(accent, 0.30)}`)
   }
+}
+
+function hexToRgba(hex, alpha) {
+  // Handles #rrggbb and #rgb
+  let h = hex.replace('#', '')
+  if (h.length === 3) h = h.split('').map(c => c + c).join('')
+  const r = parseInt(h.substring(0, 2), 16)
+  const g = parseInt(h.substring(2, 4), 16)
+  const b = parseInt(h.substring(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }

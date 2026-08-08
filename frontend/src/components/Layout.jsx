@@ -23,6 +23,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/users', label: 'Users', icon: 'user-plus' },
   { to: '/campaigns', label: 'Campaigns', icon: 'target' },
   { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
+  { to: '/org-settings', label: 'Branding & Settings', icon: 'settings' },
 ]
 
 // Super admin only — platform-level tools not visible to org supervisors
@@ -30,7 +31,6 @@ const SUPER_ADMIN_NAV_ITEMS = [
   { to: '/provision-client', label: 'Provision Client', icon: 'user-plus' },
   { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
-  { to: '/org-settings', label: 'Org Settings', icon: 'settings' },
   { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
   { to: '/audit-log', label: 'Audit Log', icon: 'activity' },
 ]

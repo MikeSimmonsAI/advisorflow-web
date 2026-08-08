@@ -1378,7 +1378,8 @@ def provision_client(
         full_name=req.supervisor_full_name,
         role="org_admin",
         is_active=True,
-        must_change_password=True,
+        # Only force reset if we auto-generated the password; if you set it, it's ready to go
+        must_change_password=(generated_password is not None),
     )
     db.add(new_supervisor)
     db.commit()

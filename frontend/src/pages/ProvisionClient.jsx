@@ -174,15 +174,32 @@ export default function ProvisionClient() {
           </div>
 
           <div className="provision-field">
-            <label>Logo URL <span className="provision-hint">(optional)</span></label>
-            <input type="text" name="brand_logo_url" placeholder="https://yourdomain.com/logo.png"
-              value={form.brand_logo_url} onChange={handleChange} />
+            <label>Logo <span className="provision-hint">(optional)</span></label>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+              {form.brand_logo_url && (
+                <img src={form.brand_logo_url} alt="Logo preview"
+                  style={{ height: 36, maxWidth: 100, objectFit: 'contain', borderRadius: 4, background: 'rgba(255,255,255,0.08)', padding: 3 }}
+                  onError={(e) => e.target.style.display='none'} />
+              )}
+              <label style={{ cursor: 'pointer' }}>
+                <span className="provision-btn" style={{ fontSize: 13, padding: '6px 14px', display: 'inline-block', pointerEvents: 'none' }}>
+                  {form.brand_logo_url ? '🔄 Replace' : '📁 Upload logo'}
+                </span>
+                <input type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setForm(f => ({ ...f, brand_logo_url: ev.target.result }))
+                    reader.readAsDataURL(file)
+                  }} />
+              </label>
+              {form.brand_logo_url && (
+                <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}
+                  onClick={() => setForm(f => ({ ...f, brand_logo_url: '' }))}>Remove</button>
+              )}
+            </div>
           </div>
-          {form.brand_logo_url && (
-            <img src={form.brand_logo_url} alt="Logo preview"
-              style={{ height: 40, marginBottom: 8, borderRadius: 4, objectFit: 'contain' }}
-              onError={(e) => e.target.style.display='none'} />
-          )}
 
           <div className="provision-field">
             <label>Primary color</label>

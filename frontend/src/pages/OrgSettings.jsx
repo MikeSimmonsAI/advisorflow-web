@@ -207,13 +207,33 @@ export default function OrgSettings() {
               </label>
 
               <label className="os-label">
-                Logo URL
-                <input className="os-input" value={brandLogoUrl} onChange={(e) => setBrandLogoUrl(e.target.value)} placeholder="https://yourdomain.com/logo.png" />
+                Logo
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+                  {brandLogoUrl && (
+                    <img src={brandLogoUrl} alt="Logo preview"
+                      style={{ height: 40, maxWidth: 120, objectFit: 'contain', borderRadius: 4, background: 'rgba(255,255,255,0.08)', padding: 4 }}
+                      onError={(e) => e.target.style.display='none'} />
+                  )}
+                  <label style={{ cursor: 'pointer' }}>
+                    <span className="btn btn--secondary" style={{ fontSize: 13, padding: '6px 14px', pointerEvents: 'none' }}>
+                      {brandLogoUrl ? '🔄 Replace logo' : '📁 Upload logo'}
+                    </span>
+                    <input type="file" accept="image/*" style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files[0]
+                        if (!file) return
+                        const reader = new FileReader()
+                        reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
+                        reader.readAsDataURL(file)
+                      }} />
+                  </label>
+                  {brandLogoUrl && (
+                    <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--error, #ef4444)' }}
+                      onClick={() => setBrandLogoUrl('')}>Remove</button>
+                  )}
+                </div>
+                <span className="os-hint">PNG, JPG, or SVG — stored directly, no URL needed</span>
               </label>
-              {brandLogoUrl && (
-                <img src={brandLogoUrl} alt="Logo preview" className="os-logo-preview"
-                  onError={(e) => e.target.style.display='none'} />
-              )}
 
               <label className="os-label">
                 Primary color
