@@ -412,9 +412,37 @@ def _generate_temp_password() -> str:
     return secrets.token_urlsafe(9) + "!1"
 
 
-@router.get("/users", response_model=list[UserResponse])
+class UserResponseWithOrg(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    role: str
+    is_active: bool
+    must_change_password: bool
+    temp_password: str | None = None
+    organization_id: str | None = None
+    organization_name: str | None = None
+
+
+@router.get("/users")
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Lists every user in the current admin's organization - the real account management screen."""
+    """Lists users. Super admin sees ALL users across every org; org_admin sees their own org only."""
+    if current_user.role == "super_admin":
+        users = db.query(User).order_by(User.organization_id.asc(), User.created_at.asc()).all()
+        org_ids = {u.organization_id for u in users}
+        orgs_by_id = {
+            o.id: o.name
+            for o in db.query(Organization).filter(Organization.id.in_(org_ids)).all()
+        }
+        return [
+            {
+                "id": u.id, "email": u.email, "full_name": u.full_name, "role": u.role,
+                "is_active": u.is_active, "must_change_password": u.must_change_password,
+                "organization_id": u.organization_id,
+                "organization_name": orgs_by_id.get(u.organization_id, "Unknown"),
+            }
+            for u in users
+        ]
     users = (
         db.query(User)
         .filter(User.organization_id == current_user.organization_id)
@@ -563,16 +591,12 @@ def reset_user_password(
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Resets any user's password to a new temp password, forcing them to
-    set a real one on next login. Deliberately restricted to super_admin
-    only (see require_super_admin above) - an org_admin should never be
-    able to take over another advisor's account by resetting their
-    password, even within the same organization.
+    Resets any user's password. Super admin can reset across ALL orgs;
+    restricted to super_admin only.
     """
     from fastapi import HTTPException
-    target = db.query(User).filter(
-        User.id == user_id, User.organization_id == current_user.organization_id
-    ).first()
+    # Super admin can reset any user; org scoping removed for cross-org support
+    target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
