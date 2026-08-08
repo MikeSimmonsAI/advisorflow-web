@@ -62,7 +62,7 @@ services:
   - type: web
     name: advisorflow-frontend
     runtime: static
-    buildCommand: "cd frontend && npm install && npm run build"
+    buildCommand: "echo using pre-built dist"
     staticPublishPath: frontend/dist
     # Catch-all rewrite so React Router handles deep links on hard refresh.
     # Without this, Render's static server returns 404 for /leads/123, /settings, etc.
