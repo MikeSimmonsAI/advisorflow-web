@@ -254,6 +254,46 @@ app.include_router(voice_router.router)
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+# ---------------------------------------------------------------------------
+# Startup migration: add AI-conversation columns to pipeline_conversations
+# Uses IF NOT EXISTS so it is safe to run on every restart.
+# ---------------------------------------------------------------------------
+from sqlalchemy import text as _text
+
+@app.on_event("startup")
+def run_migrations():
+    migration_sql = """
+        ALTER TABLE pipeline_conversations
+            ADD COLUMN IF NOT EXISTS touch_number            INTEGER     DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS next_send_at            TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS paused                  BOOLEAN     DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS paused_reason           VARCHAR     NULL,
+            ADD COLUMN IF NOT EXISTS started_at              TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS completed_at            TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS messages_sent           INTEGER     DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS replies_received        INTEGER     DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS ai_responses_sent       INTEGER     DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS ai_responses_flagged    INTEGER     DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS last_outbound_at        TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS last_inbound_at         TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS booking_link_sent_at    TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS booked_at               TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS confirmed_at            TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS appointment_kept_at     TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS sale_recorded_at        TIMESTAMP   NULL,
+            ADD COLUMN IF NOT EXISTS booking_notification_sent      BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS confirmation_notification_sent BOOLEAN DEFAULT FALSE;
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(_text(migration_sql))
+            conn.commit()
+    except Exception as e:
+        # Columns may already exist on a fresh deploy — log and continue
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Migration note: %s", e)
+
+
 
 
 @app.get("/health")
