@@ -7,6 +7,16 @@ function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 }
 
+const COLOR_OPTIONS = [
+  { value: '#2fb6ff', label: 'Blue' },
+  { value: '#1ef0a8', label: 'Teal' },
+  { value: '#f59e0b', label: 'Amber' },
+  { value: '#ef4444', label: 'Red' },
+  { value: '#8b5cf6', label: 'Purple' },
+  { value: '#10b981', label: 'Green' },
+  { value: '#f97316', label: 'Orange' },
+]
+
 export default function ProvisionClient() {
   const [form, setForm] = useState({
     org_name: '',
@@ -16,7 +26,12 @@ export default function ProvisionClient() {
     supervisor_full_name: '',
     supervisor_email: '',
     supervisor_password: '',
+    brand_name: '',
+    brand_logo_url: '',
+    brand_color_primary: '#2fb6ff',
+    brand_color_accent: '#1ef0a8',
   })
+
   const [autoSlug, setAutoSlug] = useState(true)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
@@ -37,6 +52,7 @@ export default function ProvisionClient() {
       ...f,
       org_name: val,
       org_slug: autoSlug ? slugify(val) : f.org_slug,
+      brand_name: f.brand_name === '' || f.brand_name === f.org_name ? val : f.brand_name,
     }))
   }
 
@@ -50,10 +66,13 @@ export default function ProvisionClient() {
     setForm(f => ({ ...f, [name]: value }))
   }
 
+  function setColor(field, value) {
+    setForm(f => ({ ...f, [field]: value }))
+  }
+
   async function handleSubmit() {
     setError(null)
     setResult(null)
-
     if (!form.org_name.trim() || !form.org_slug.trim()) {
       setError('Organization name and slug are required.')
       return
@@ -62,7 +81,6 @@ export default function ProvisionClient() {
       setError('Supervisor name and email are required.')
       return
     }
-
     setLoading(true)
     try {
       const payload = {
@@ -72,24 +90,22 @@ export default function ProvisionClient() {
         plan: form.plan,
         supervisor_full_name: form.supervisor_full_name.trim(),
         supervisor_email: form.supervisor_email.trim(),
+        brand_name: form.brand_name.trim() || null,
+        brand_logo_url: form.brand_logo_url.trim() || null,
+        brand_color_primary: form.brand_color_primary || null,
+        brand_color_accent: form.brand_color_accent || null,
       }
       if (form.supervisor_password.trim()) {
         payload.supervisor_password = form.supervisor_password.trim()
       }
-
       const res = await api.post('/admin/provision-client', payload)
       setResult(res)
-      // Refresh org list
       api.get('/admin/organizations').then(setOrgs).catch(() => {})
-      // Reset form
       setForm({
-        org_name: '',
-        org_slug: '',
-        industry: 'funeral',
-        plan: 'trial',
-        supervisor_full_name: '',
-        supervisor_email: '',
-        supervisor_password: '',
+        org_name: '', org_slug: '', industry: 'funeral', plan: 'trial',
+        supervisor_full_name: '', supervisor_email: '', supervisor_password: '',
+        brand_name: '', brand_logo_url: '',
+        brand_color_primary: '#2fb6ff', brand_color_accent: '#1ef0a8',
       })
       setAutoSlug(true)
     } catch (err) {
@@ -112,22 +128,14 @@ export default function ProvisionClient() {
 
           <div className="provision-field">
             <label>Organization Name</label>
-            <input
-              type="text"
-              placeholder="e.g. Acme Funeral Home"
-              value={form.org_name}
-              onChange={handleOrgName}
-            />
+            <input type="text" placeholder="e.g. Acme Roofing Co."
+              value={form.org_name} onChange={handleOrgName} />
           </div>
 
           <div className="provision-field">
             <label>Slug <span className="provision-hint">(URL-safe identifier)</span></label>
-            <input
-              type="text"
-              placeholder="e.g. acme-funeral"
-              value={form.org_slug}
-              onChange={handleSlug}
-            />
+            <input type="text" placeholder="e.g. acme-roofing"
+              value={form.org_slug} onChange={handleSlug} />
           </div>
 
           <div className="provision-row">
@@ -153,6 +161,75 @@ export default function ProvisionClient() {
             </div>
           </div>
 
+          {/* Branding */}
+          <div className="provision-section-header" style={{ marginTop: '1.5rem' }}>
+            <span className="provision-section-icon">🎨</span>
+            <span>White Label Branding</span>
+          </div>
+
+          <div className="provision-field">
+            <label>Brand Name <span className="provision-hint">(shows in sidebar — auto-filled from org name)</span></label>
+            <input type="text" name="brand_name" placeholder="e.g. Acme Roofing Co."
+              value={form.brand_name} onChange={handleChange} />
+          </div>
+
+          <div className="provision-field">
+            <label>Logo URL <span className="provision-hint">(optional)</span></label>
+            <input type="text" name="brand_logo_url" placeholder="https://yourdomain.com/logo.png"
+              value={form.brand_logo_url} onChange={handleChange} />
+          </div>
+          {form.brand_logo_url && (
+            <img src={form.brand_logo_url} alt="Logo preview"
+              style={{ height: 40, marginBottom: 8, borderRadius: 4, objectFit: 'contain' }}
+              onError={(e) => e.target.style.display='none'} />
+          )}
+
+          <div className="provision-field">
+            <label>Primary color</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              {COLOR_OPTIONS.map(c => (
+                <button key={c.value} title={c.label}
+                  onClick={() => setColor('brand_color_primary', c.value)}
+                  style={{
+                    width: 28, height: 28, borderRadius: '50%', background: c.value, border: 'none',
+                    cursor: 'pointer', outline: form.brand_color_primary === c.value ? '2px solid white' : 'none',
+                    boxShadow: form.brand_color_primary === c.value ? `0 0 0 3px ${c.value}` : 'none',
+                  }} />
+              ))}
+              <input type="color" value={form.brand_color_primary}
+                onChange={(e) => setColor('brand_color_primary', e.target.value)}
+                style={{ width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }} />
+            </div>
+          </div>
+
+          <div className="provision-field">
+            <label>Accent color</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              {COLOR_OPTIONS.map(c => (
+                <button key={c.value} title={c.label}
+                  onClick={() => setColor('brand_color_accent', c.value)}
+                  style={{
+                    width: 28, height: 28, borderRadius: '50%', background: c.value, border: 'none',
+                    cursor: 'pointer', outline: form.brand_color_accent === c.value ? '2px solid white' : 'none',
+                    boxShadow: form.brand_color_accent === c.value ? `0 0 0 3px ${c.value}` : 'none',
+                  }} />
+              ))}
+              <input type="color" value={form.brand_color_accent}
+                onChange={(e) => setColor('brand_color_accent', e.target.value)}
+                style={{ width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }} />
+            </div>
+          </div>
+
+          {/* Live preview bar */}
+          <div style={{ background: form.brand_color_primary, borderRadius: 8, padding: '10px 16px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>
+              {form.brand_name || form.org_name || 'Brand Preview'}
+            </span>
+            <span style={{ color: form.brand_color_accent, fontWeight: 600, fontSize: 13 }}>● Live</span>
+          </div>
+
+          {/* Supervisor */}
           <div className="provision-section-header" style={{ marginTop: '1.5rem' }}>
             <span className="provision-section-icon">👤</span>
             <span>Supervisor Account</span>
@@ -160,74 +237,44 @@ export default function ProvisionClient() {
 
           <div className="provision-field">
             <label>Full Name</label>
-            <input
-              type="text"
-              name="supervisor_full_name"
-              placeholder="e.g. Jane Smith"
-              value={form.supervisor_full_name}
-              onChange={handleChange}
-            />
+            <input type="text" name="supervisor_full_name" placeholder="e.g. Jane Smith"
+              value={form.supervisor_full_name} onChange={handleChange} />
           </div>
 
           <div className="provision-field">
             <label>Email</label>
-            <input
-              type="email"
-              name="supervisor_email"
-              placeholder="jane@acmefuneral.com"
-              value={form.supervisor_email}
-              onChange={handleChange}
-            />
+            <input type="email" name="supervisor_email" placeholder="jane@acmeroofing.com"
+              value={form.supervisor_email} onChange={handleChange} />
           </div>
 
           <div className="provision-field">
             <label>Password <span className="provision-hint">(leave blank to auto-generate)</span></label>
-            <input
-              type="text"
-              name="supervisor_password"
-              placeholder="Auto-generate if empty"
-              value={form.supervisor_password}
-              onChange={handleChange}
-            />
+            <input type="text" name="supervisor_password" placeholder="Auto-generate if empty"
+              value={form.supervisor_password} onChange={handleChange} />
           </div>
 
           {error && <div className="provision-error">{error}</div>}
 
-          <button
-            className="provision-btn"
-            onClick={handleSubmit}
-            disabled={loading}
-          >
+          <button className="provision-btn" onClick={handleSubmit} disabled={loading}>
             {loading ? 'Provisioning…' : '🚀 Provision Client'}
           </button>
         </div>
 
         {/* RIGHT — Result + Org List */}
         <div className="provision-right">
-
           {result && (
             <div className="provision-result">
               <div className="provision-result-title">✅ Client Provisioned</div>
-              <div className="provision-result-row">
-                <span>Org</span>
-                <strong>{result.org_name}</strong>
-              </div>
-              <div className="provision-result-row">
-                <span>Org ID</span>
-                <code>{result.org_id}</code>
-              </div>
-              <div className="provision-result-row">
-                <span>Supervisor Email</span>
-                <strong>{result.supervisor_email}</strong>
-              </div>
+              <div className="provision-result-row"><span>Org</span><strong>{result.org_name}</strong></div>
+              <div className="provision-result-row"><span>Org ID</span><code>{result.org_id}</code></div>
+              <div className="provision-result-row"><span>Supervisor Email</span><strong>{result.supervisor_email}</strong></div>
               {result.temp_password && (
                 <div className="provision-result-row provision-result-password">
-                  <span>Temp Password</span>
-                  <strong>{result.temp_password}</strong>
+                  <span>Temp Password</span><strong>{result.temp_password}</strong>
                 </div>
               )}
               <div className="provision-result-note">
-                Share the email and password with the supervisor. They will be prompted to change their password on first login.
+                Share the email and password with the supervisor. They'll be prompted to change their password on first login.
               </div>
             </div>
           )}
@@ -241,12 +288,7 @@ export default function ProvisionClient() {
             ) : (
               <table className="provision-orgs-table">
                 <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Industry</th>
-                    <th>Plan</th>
-                    <th>Status</th>
-                  </tr>
+                  <tr><th>Name</th><th>Industry</th><th>Plan</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                   {orgs.map(org => (

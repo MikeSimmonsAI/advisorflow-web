@@ -1,12 +1,10 @@
 """
 Org Settings Router — white labeling, tier config, industry settings.
+Super admin can pass ?org_id= to manage any org's settings.
 """
 import json
-import uuid
-from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -62,6 +60,23 @@ DEFAULT_TIERS = {
 }
 
 
+def _resolve_org(current_user: User, org_id: Optional[str], db: Session) -> Organization:
+    """
+    Resolve which org to operate on.
+    Super admin can pass ?org_id= to manage any org's settings.
+    Everyone else always gets their own org.
+    """
+    if org_id and current_user.role == "super_admin":
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return org
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return org
+
+
 class BrandingUpdate(BaseModel):
     brand_name: Optional[str] = None
     brand_logo_url: Optional[str] = None
@@ -79,12 +94,11 @@ class TierConfigUpdate(BaseModel):
 
 @router.get("/")
 def get_org_settings(
+    org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = _resolve_org(current_user, org_id, db)
 
     tier_config = []
     if org.tier_config:
@@ -117,12 +131,11 @@ def get_default_tiers():
 @router.patch("/branding")
 def update_branding(
     req: BrandingUpdate,
+    org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = _resolve_org(current_user, org_id, db)
     if req.brand_name is not None: org.brand_name = req.brand_name
     if req.brand_logo_url is not None: org.brand_logo_url = req.brand_logo_url
     if req.brand_color_primary is not None: org.brand_color_primary = req.brand_color_primary
@@ -134,14 +147,12 @@ def update_branding(
 @router.patch("/industry")
 def update_industry(
     req: IndustryUpdate,
+    org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = _resolve_org(current_user, org_id, db)
     org.industry = req.industry
-    # Reset tier config to industry defaults
     org.tier_config = json.dumps(DEFAULT_TIERS.get(req.industry, DEFAULT_TIERS["custom"]))
     db.commit()
     return {"updated": True, "tiers": json.loads(org.tier_config)}
@@ -150,12 +161,11 @@ def update_industry(
 @router.patch("/tiers")
 def update_tier_config(
     req: TierConfigUpdate,
+    org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = _resolve_org(current_user, org_id, db)
     org.tier_config = json.dumps(req.tiers)
     db.commit()
     return {"updated": True, "tiers": req.tiers}

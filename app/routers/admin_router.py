@@ -1312,6 +1312,11 @@ class ProvisionClientRequest(BaseModel):
     supervisor_full_name: str
     supervisor_email: EmailStr
     supervisor_password: str | None = None  # if omitted, a temp password is generated
+    # Branding — optional at creation time
+    brand_name: str | None = None
+    brand_logo_url: str | None = None
+    brand_color_primary: str | None = None
+    brand_color_accent: str | None = None
 
 
 class ProvisionClientResponse(BaseModel):
@@ -1350,6 +1355,10 @@ def provision_client(
         industry=req.industry,
         plan=req.plan,
         is_active=True,
+        brand_name=req.brand_name,
+        brand_logo_url=req.brand_logo_url,
+        brand_color_primary=req.brand_color_primary,
+        brand_color_accent=req.brand_color_accent,
     )
     db.add(new_org)
     db.flush()  # get new_org.id before creating user

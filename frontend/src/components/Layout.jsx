@@ -109,14 +109,16 @@ export default function Layout({ children }) {
   const user = getCurrentUser()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [branding, setBranding] = useState(() => getBranding())
+  // Super admin always sees default BookaBoost branding — never a client org's branding
+  const isSuperAdmin = user?.role === 'super_admin'
+  const [branding, setBranding] = useState(() => isSuperAdmin ? null : getBranding())
 
   useEffect(() => {
-    // Apply stored branding immediately, then refresh from API
+    if (isSuperAdmin) return  // super admin: no org branding applied to their shell
     const stored = getBranding()
     if (stored) applyBrandingCSS(stored)
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
-  }, [])
+  }, [isSuperAdmin])
 
   function closeSidebar() { setSidebarOpen(false) }
 
@@ -125,8 +127,8 @@ export default function Layout({ children }) {
     window.location.href = '/login'
   }
 
-  const brandName = branding?.brand_name || 'BookaBoost'
-  const logoUrl = branding?.brand_logo_url || null
+  const brandName = isSuperAdmin ? 'BookaBoost' : (branding?.brand_name || 'BookaBoost')
+  const logoUrl = isSuperAdmin ? null : (branding?.brand_logo_url || null)
 
   return (
     <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
