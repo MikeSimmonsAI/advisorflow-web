@@ -58,6 +58,7 @@ export default function CampaignBuilder() {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [advisors, setAdvisors] = useState([])
   const [tierOptions, setTierOptions] = useState(DEFAULT_TIER_OPTIONS)
+  const [leadTypeOptions, setLeadTypeOptions] = useState([{ value: '', label: 'All lead types' }])
   const [previewLeads, setPreviewLeads] = useState([])
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState('')
@@ -84,6 +85,17 @@ export default function CampaignBuilder() {
           setTierOptions([
             { value: '', label: 'All tiers' },
             ...orgSettings.tier_config.map(t => ({ value: t.value, label: t.label })),
+          ])
+        }
+      })
+      .catch(() => {})
+
+    api.get('/campaigns/purposes')
+      .then(purposes => {
+        if (Array.isArray(purposes) && purposes.length) {
+          setLeadTypeOptions([
+            { value: '', label: 'All lead types' },
+            ...purposes.map(p => ({ value: p.value ?? p, label: p.label ?? p })),
           ])
         }
       })
@@ -262,7 +274,7 @@ export default function CampaignBuilder() {
               <label className="settings-label">
                 Lead type
                 <select className="filter-select" value={filters.lead_type} onChange={e => setFilter('lead_type', e.target.value)}>
-                  {LEAD_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {leadTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
 
@@ -395,7 +407,7 @@ export default function CampaignBuilder() {
                   rows={6}
                   value={messageText}
                   onChange={e => setMessageText(e.target.value)}
-                  placeholder="Hi {first_name}, this is {advisor_name} from Restland. I wanted to reach out personally…"
+                  placeholder="Hi {first_name}, this is {advisor_name}. I wanted to reach out personally…"
                 />
                 <div className="campaign-char-count">
                   {charCount} chars · {smsSegments} SMS segment{smsSegments !== 1 ? 's' : ''}

@@ -69,11 +69,12 @@
 .uc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
 .uc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-.uc-name { font-size: 15px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.uc-email { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.uc-org { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+.uc-name { font-size: 15px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.uc-email { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.uc-org { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
 
-.uc-badges { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; flex-shrink: 0; }
+.uc-badges { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; flex-shrink: 0; max-width: 120px; }
+.uc-badges .badge { white-space: nowrap; }
 
 /* ── Stats ── */
 .uc-stats {
