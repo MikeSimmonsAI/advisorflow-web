@@ -11,10 +11,10 @@ const TONE_OPTIONS = [
 ]
 
 const STATUS_CONFIG = {
-  new:     { label: 'Cold',   color: 'var(--signal-blue)',  dim: 'var(--signal-blue-dim)' },
-  sent:    { label: 'Warm',   color: 'var(--signal-amber)', dim: 'var(--signal-amber-dim)' },
-  replied: { label: 'Hot',    color: 'var(--signal-red)',   dim: 'var(--signal-red-dim)' },
-  booked:  { label: 'Booked', color: 'var(--signal-green)', dim: 'var(--signal-green-dim)' },
+  new:     { label: 'Not contacted', color: 'var(--signal-blue)',  dim: 'var(--signal-blue-dim)' },
+  sent:    { label: 'Emailed',       color: 'var(--signal-amber)', dim: 'var(--signal-amber-dim)' },
+  replied: { label: 'Replied',       color: 'var(--signal-green)', dim: 'var(--signal-green-dim)' },
+  booked:  { label: 'Booked',        color: 'var(--signal-green)', dim: 'var(--signal-green-dim)' },
 }
 
 export default function EmailQueue() {

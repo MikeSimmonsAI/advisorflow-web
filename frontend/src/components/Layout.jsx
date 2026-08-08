@@ -120,7 +120,7 @@ export default function Layout({ children }) {
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
   }, [isSuperAdmin])
 
-  function closeSidebar() { setSidebarOpen(false) }
+  function closeSidebar() { if (window.innerWidth <= 1024) setSidebarOpen(false) }
 
   function handleLogout() {
     logout()

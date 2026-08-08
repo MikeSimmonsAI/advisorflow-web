@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, VoiceCall
+from app.models.models import User, Lead, VoiceCall, Organization
 from app.services.voice_service import (
     build_twilio_twiml_outbound,
     build_twilio_twiml_voicemail,
@@ -221,9 +221,12 @@ async def voice_stream(
         "booking_url": booking_url,
     }
 
+    _org = db.query(Organization).filter_by(id=advisor.organization_id).first() if advisor else None
+    _org_name = (_org.brand_name or _org.name) if _org else (advisor.full_name if advisor else "our team")
+
     advisor_info = {
-        "name": advisor.full_name or "Mike Simmons",
-        "org": "Restland Cemetery and Funeral Home",
+        "name": advisor.full_name or "your advisor",
+        "org": _org_name,
         "phone": advisor.twilio_phone_number or "",
     }
 
@@ -245,7 +248,7 @@ async def voice_stream(
                 body = (
                     f"Hi {lead.first_name or 'there'},\n\n"
                     f"As promised during our call, here's your booking link to schedule your "
-                    f"{_get_appt_label(lead)} with {advisor.full_name} at Restland Cemetery & Funeral Home:\n\n"
+                    f"{_get_appt_label(lead)} with {advisor.full_name} at {_org_name}:\n\n"
                     f"{booking_url}\n\n"
                     f"We look forward to connecting with you.\n\n"
                     f"Best,\n{advisor.full_name}"
@@ -263,7 +266,7 @@ async def voice_stream(
             db.commit()
 
         # Notify advisor
-        notification_email = getattr(advisor, 'notification_email', None) or "michael.simmons@nsmg.com"
+        notification_email = getattr(advisor, 'notification_email', None) or getattr(advisor, 'email', None) or "admin@bookaboost.com"
         lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
         try:
             from app.services.ai_conversation_service import _send_email_via_graph
@@ -366,9 +369,11 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
             booking_link = create_booking_link(db, lead, advisor)
             booking_url = f"{BOOKING_BASE_URL}/book/{booking_link.token}"
 
+            _vm_org = db.query(Organization).filter_by(id=advisor.organization_id).first() if advisor else None
+            _vm_org_name = (_vm_org.brand_name or _vm_org.name) if _vm_org else (advisor.full_name if advisor else "our team")
             voicemail_msg = (
                 f"Hi {lead.first_name or 'there'}, this is an AI assistant calling on behalf of "
-                f"{advisor.full_name or 'Mike Simmons'} at Restland Cemetery and Funeral Home. "
+                f"{advisor.full_name or 'your advisor'} at {_vm_org_name}. "
                 f"I'm reaching out regarding a {appt_label}. "
                 f"Please feel free to give us a call back or visit our website to schedule a convenient time. "
                 f"We look forward to connecting with you. Have a wonderful day."

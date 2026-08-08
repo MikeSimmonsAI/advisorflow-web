@@ -31,6 +31,44 @@ from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 
 logger = logging.getLogger(__name__)
 
+INDUSTRY_CONTEXT = {
+    "funeral": (
+        "This is a funeral home/cemetery. Use compassionate, sensitive language. "
+        "Terminology: 'family', 'arrangements', 'services', 'memorial', 'pre-need planning', 'at-need'. "
+        "Never be pushy — these families may be going through a difficult time."
+    ),
+    "roofing": (
+        "This is a roofing company. Leads are homeowners who may need roof work. "
+        "Terminology: 'homeowner', 'estimate', 'inspection', 'project', 'storm damage', 'replacement'. "
+        "Be helpful and direct about scheduling a free estimate."
+    ),
+    "insurance": (
+        "This is an insurance agency. Leads are prospects or existing policyholders. "
+        "Terminology: 'coverage', 'policy', 'premium', 'quote', 'review', 'protection'. "
+        "Focus on understanding their needs and providing value."
+    ),
+    "real_estate": (
+        "This is a real estate agency. Leads are buyers or sellers. "
+        "Terminology: 'buyer', 'seller', 'property', 'listing', 'offer', 'showing', 'market value'. "
+        "Be knowledgeable and responsive to their timeline."
+    ),
+    "dental": (
+        "This is a dental practice. Leads are patients or prospective patients. "
+        "Terminology: 'patient', 'treatment', 'consultation', 'appointment', 'dental care'. "
+        "Be friendly and reassuring."
+    ),
+    "legal": (
+        "This is a law firm. Leads are potential clients seeking legal help. "
+        "Terminology: 'client', 'consultation', 'case', 'legal matter', 'representation'. "
+        "Be professional, clear, and empathetic."
+    ),
+    "home_services": (
+        "This is a home services company. Leads are homeowners needing services. "
+        "Terminology: 'homeowner', 'estimate', 'project', 'service call', 'job'. "
+        "Be responsive and clear about scheduling."
+    ),
+}
+
 CONFIDENCE_THRESHOLD = 85  # below this → flag for human review
 MIN_DELAY_SECONDS = 120    # 2 minutes
 MAX_DELAY_SECONDS = 300    # 5 minutes
@@ -98,6 +136,7 @@ Your goal is to move leads toward booking an appointment through natural, human 
 
 Advisor: {advisor_name}
 Business: {org_name}
+Industry: {industry_context}
 Lead type/context: {lead_type}
 Tone instruction: {tone}
 AI direction: {ai_direction}
@@ -148,9 +187,12 @@ def analyze_and_respond(
     try:
         from app.models.models import Organization
         org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
-        org_name = org.name if org else "our organization"
+        org_name = (org.brand_name or org.name) if org else "our organization"
+        industry = (org.industry or "general") if org else "general"
     except Exception:
         org_name = "our organization"
+        industry = "general"
+    industry_context = INDUSTRY_CONTEXT.get(industry, "This is a professional services business. Be helpful and goal-oriented.")
 
     existing_booking = db.query(BookingLink).filter(
         BookingLink.lead_id == lead.id, BookingLink.status == "pending"
@@ -171,6 +213,7 @@ def analyze_and_respond(
     prompt = PIPELINE_PROMPT.format(
         advisor_name=advisor.full_name or "your advisor",
         org_name=org_name,
+        industry_context=industry_context,
         lead_type=pipeline.lead_type or lead.message_track or lead.tier or "general outreach",
         tone=tone_desc,
         ai_direction=pipeline.ai_direction or "move conversation toward booking appointment",
