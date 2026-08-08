@@ -34,16 +34,17 @@ TONE_INSTRUCTIONS = {
 DRAFT_REPLY_PROMPT = """You are drafting a short SMS reply from a service business advisor to a lead.
 
 Advisor: {advisor_name}
+Organization: {org_name}
 Tone instruction: {tone_instruction}
 Lead type: {lead_type}
 AI direction: {ai_direction}
 
-Rules:
+CRITICAL RULES:
 - Respond with ONLY JSON, no markdown and no preamble.
 - JSON shape: {{"suggested_reply": "..."}}
 - Keep it under 320 characters.
 - Sound human and respectful.
-- Sign as {advisor_name} if the message includes a sign-off.
+- When signing or introducing yourself, use ONLY "{advisor_name}" and "{org_name}" — never use any other organization name, even if a different name appears in the conversation history below.
 - Do not claim anything not shown in the conversation.
 - If AI direction is provided, use it to shape the message purpose and context.
 - Include this booking link exactly once if relevant and not already in your draft: {booking_url}
@@ -138,8 +139,17 @@ def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm", ai_d
     latest_reply_text = latest_reply.body if latest_reply else "No inbound reply yet."
     advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
 
+    # Look up org name so GPT never falls back to anything in the conversation history
+    try:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+        org_name = org.name if org else "our organization"
+    except Exception:
+        org_name = "our organization"
+
     prompt = DRAFT_REPLY_PROMPT.format(
         advisor_name=advisor_name,
+        org_name=org_name,
         tone_instruction=TONE_INSTRUCTIONS[tone],
         lead_type=lead.message_track or lead.tier or "not specified",
         ai_direction=ai_direction or "general reconnection outreach",
