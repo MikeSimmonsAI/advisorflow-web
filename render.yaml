@@ -98,7 +98,7 @@ services:
   - type: cron
     name: advisorflow-email-poller
     runtime: python
-    schedule: "*/2 * * * *"  # Every 2 minutes
+    schedule: "* * * * *"   # Every 1 minute
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app/jobs/run_email_poller.py"
     envVars:

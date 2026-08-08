@@ -66,7 +66,7 @@ CRITICAL RULES:
 - Keep emails SHORT — 2-3 sentences max for the body. No filler.
 - Reference the previous outreach naturally if this is a follow-up.
 - Personalize using the lead's name, tier, and history.
-- Do NOT include any sign-off, closing line, or signature. End with the last sentence of the body only.
+- CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
 
 TONE: {tone_instruction}
 TOUCH ANGLE: {touch_angle_instruction}
@@ -94,7 +94,7 @@ CRITICAL RULES:
 - If they show ANY interest → offer to book immediately.
 - If they ask a question → answer it and gently ask if they'd like to schedule.
 - Never reveal you are AI.
-- Do NOT include any sign-off, closing line, or signature. End with the last sentence of the body only.
+- CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
 
 ADVISOR: {advisor_name}
 ORGANIZATION: {org_name}
@@ -168,6 +168,23 @@ Best regards,<br>
 <strong>{advisor_name}</strong><br>
 {org_name}
 </span>"""
+
+def _strip_signoff(body: str) -> str:
+    """Remove any AI-generated sign-off from the email body.
+    GPT sometimes adds closings despite being told not to — strip them here."""
+    import re
+    signoff_patterns = [
+        r'\n+\s*(best regards|warm regards|kind regards|sincerely|take care|'
+        r'thanks|thank you|looking forward|yours truly|respectfully|with care|'
+        r'cordially|cheers)[,.]?.*',
+    ]
+    for pat in signoff_patterns:
+        body = re.sub(pat, '', body, flags=re.IGNORECASE | re.DOTALL)
+    # Also strip trailing [Your Name], [Name], placeholder lines
+    body = re.sub(r'\n+\s*\[.*?\].*', '', body, flags=re.DOTALL)
+    return body.strip()
+
+
 
 
 
@@ -443,7 +460,8 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
             return {"success": False, "error": "Lead has no email address"}
 
         org_name = _get_org_name(db, advisor)
-        html_body = _build_email_html(email_data["body"], advisor.full_name or "Your Advisor", org_name)
+        clean_body = _strip_signoff(email_data["body"])
+        html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name)
         _send_email_via_graph(advisor, lead.email, email_data["subject"], html_body)
 
         msg = EmailMessage(
@@ -650,7 +668,7 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
     if result.get("should_book"):
         booking_url = _get_booking_url(db, lead, advisor)
         org_name = _get_org_name(db, advisor)
-        body_with_booking = result["body"] + f"\n\nHere's my booking link to pick a time: {booking_url}"
+        body_with_booking = _strip_signoff(result["body"]) + f"\n\nHere's my booking link to pick a time: {booking_url}"
         html_booking = _build_email_html(body_with_booking, advisor.full_name or "Your Advisor", org_name)
         try:
             _send_email_via_graph(advisor, lead.email, result["subject"], html_booking)
@@ -664,7 +682,8 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
 
     try:
         org_name = _get_org_name(db, advisor)
-        html_reply = _build_email_html(result["body"], advisor.full_name or "Your Advisor", org_name)
+        clean_reply = _strip_signoff(result["body"])
+        html_reply = _build_email_html(clean_reply, advisor.full_name or "Your Advisor", org_name)
         _send_email_via_graph(advisor, lead.email, result["subject"], html_reply)
         msg = EmailMessage(
             id=str(uuid.uuid4()),
