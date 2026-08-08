@@ -16,24 +16,8 @@ const STATUS_OPTIONS = [
   { value: 'booked', label: 'Booked' },
 ]
 
-const TIER_OPTIONS = [
-  { value: '', label: 'All tiers' },
-  { value: 'pre_need', label: 'Pre-Need' },
-  { value: 'at_need', label: 'At-Need' },
-  { value: 'imminent', label: 'Imminent' },
-  { value: 'contract_sold', label: 'Contract Sold' },
-]
-
-const LEAD_TYPE_OPTIONS = [
-  { value: '', label: 'All lead types' },
-  { value: 'file_check', label: 'File Check' },
-  { value: 'code_lead', label: 'Code Lead' },
-  { value: 'new_inquiry', label: 'New Inquiry' },
-  { value: 'referral', label: 'Referral' },
-  { value: 'web_lead', label: 'Web Lead' },
-  { value: 'at_need', label: 'At-Need Contact' },
-  { value: 'pre_need', label: 'Pre-Need Interest' },
-]
+// Loaded dynamically from org settings — see useEffect
+const DEFAULT_TIER_OPTIONS = [{ value: '', label: 'All tiers' }]
 
 const ENGAGEMENT_OPTIONS = [
   { value: '', label: 'All engagement levels' },
@@ -73,6 +57,7 @@ export default function CampaignBuilder() {
   // Step 1 — filters
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [advisors, setAdvisors] = useState([])
+  const [tierOptions, setTierOptions] = useState(DEFAULT_TIER_OPTIONS)
   const [previewLeads, setPreviewLeads] = useState([])
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState('')
@@ -92,6 +77,16 @@ export default function CampaignBuilder() {
   useEffect(() => {
     api.get('/admin/users')
       .then(users => setAdvisors(users.filter(u => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))))
+      .catch(() => {})
+    api.get('/org-settings/')
+      .then(orgSettings => {
+        if (orgSettings?.tier_config?.length) {
+          setTierOptions([
+            { value: '', label: 'All tiers' },
+            ...orgSettings.tier_config.map(t => ({ value: t.value, label: t.label })),
+          ])
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -210,7 +205,7 @@ export default function CampaignBuilder() {
               <label className="settings-label">
                 Tier
                 <select className="filter-select" value={filters.tier} onChange={e => setFilter('tier', e.target.value)}>
-                  {TIER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {tierOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
 
