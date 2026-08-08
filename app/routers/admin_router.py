@@ -584,25 +584,35 @@ def require_super_admin(current_user: User = Depends(require_admin)) -> User:
     return current_user
 
 
+class ResetPasswordRequest(BaseModel):
+    new_password: str | None = None  # if provided, set this; otherwise auto-generate
+
+
 @router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
 def reset_user_password(
     user_id: str,
+    req: ResetPasswordRequest = ResetPasswordRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Resets any user's password. Super admin can reset across ALL orgs;
-    restricted to super_admin only.
+    Resets any user's password. If new_password is provided, sets it directly.
+    Otherwise auto-generates a temp password. Super admin only, cross-org.
     """
     from fastapi import HTTPException
-    # Super admin can reset any user; org scoping removed for cross-org support
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    temp_password = _generate_temp_password()
+    if req.new_password:
+        if len(req.new_password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+        temp_password = req.new_password
+        target.must_change_password = False
+    else:
+        temp_password = _generate_temp_password()
+        target.must_change_password = True
     target.password_hash = hash_password(temp_password)
-    target.must_change_password = True
     db.commit()
 
     # CRITICAL: never include temp_password in the audit details - the

@@ -28,6 +28,12 @@ export default function Users() {
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
+  // Reset password modal
+  const [resetTarget, setResetTarget] = useState(null) // { id, name, email }
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetError, setResetError] = useState('')
+
   function load() {
     setLoading(true)
     api.get('/admin/users').then(setUsers).finally(() => setLoading(false))
@@ -74,13 +80,28 @@ export default function Users() {
     }
   }
 
-  async function handleResetPassword(userId, userName) {
-    if (!confirm(`Reset ${userName}'s password? They will need to set a new one on their next login.`)) return
+  function handleResetPassword(userId, userName, userEmail) {
+    setResetTarget({ id: userId, name: userName, email: userEmail })
+    setResetPassword('')
+    setResetError('')
+  }
+
+  async function handleConfirmReset() {
+    if (!resetPassword || resetPassword.length < 6) {
+      setResetError('Password must be at least 6 characters.')
+      return
+    }
+    setResetBusy(true)
+    setResetError('')
     try {
-      const result = await api.post(`/admin/users/${userId}/reset-password`, {})
-      setJustCreated({ email: result.email, temp_password: result.temp_password, isReset: true })
+      await api.post(`/admin/users/${resetTarget.id}/reset-password`, { new_password: resetPassword })
+      setJustCreated({ email: resetTarget.email, temp_password: resetPassword, isReset: true })
+      setResetTarget(null)
+      setResetPassword('')
     } catch (err) {
-      alert(`Failed: ${err.message}`)
+      setResetError(err.message || 'Failed to reset password.')
+    } finally {
+      setResetBusy(false)
     }
   }
 
@@ -151,6 +172,41 @@ export default function Users() {
           + Create advisor
         </button>
       </header>
+
+      {/* Reset Password Modal */}
+      {resetTarget && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 32, width: 400, maxWidth: '90vw'
+          }}>
+            <h2 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Set Password</h2>
+            <p style={{ margin: '0 0 20px', color: 'var(--text-muted)', fontSize: 14 }}>
+              Setting password for <strong>{resetTarget.name}</strong> ({resetTarget.email})
+            </p>
+            <input
+              type="text"
+              className="settings-input"
+              placeholder="Enter new password"
+              value={resetPassword}
+              onChange={e => setResetPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleConfirmReset()}
+              autoFocus
+              style={{ width: '100%', marginBottom: 12, boxSizing: 'border-box' }}
+            />
+            {resetError && <p style={{ color: 'var(--signal-red)', fontSize: 13, margin: '0 0 12px' }}>{resetError}</p>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn--secondary" onClick={() => setResetTarget(null)} disabled={resetBusy}>Cancel</button>
+              <button className="btn btn--primary" onClick={handleConfirmReset} disabled={resetBusy}>
+                {resetBusy ? 'Saving…' : 'Set Password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {justCreated && (
         <section className="panel users-created-banner">
@@ -299,7 +355,7 @@ export default function Users() {
                               <button className="btn btn--secondary" onClick={() => handleReactivate(u.id)}>Reactivate</button>
                             )}
                             {isSuperAdmin && (
-                              <button className="btn btn--secondary" onClick={() => handleResetPassword(u.id, u.full_name)}>
+                              <button className="btn btn--secondary" onClick={() => handleResetPassword(u.id, u.full_name, u.email)}>
                                 Reset password
                               </button>
                             )}
