@@ -43,28 +43,27 @@ SEND_IMMEDIATELY_ON_DAY_1 = True
 # carrier flagging" from Mike's original AHK-era requirement.
 TRACK_BASE_TEMPLATES = {
     "pre_need_lock_price": (
-        "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
+        "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "Lock in today's pricing before it changes - here's my booking link: {booking_link}"
     ),
     "at_need_support": (
-        "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
+        "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "I'm here to help with any arrangements you need. Reach out anytime: {advisor_cell} "
         "or book a time here: {booking_link}"
     ),
     "imminent_support": (
-        "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
+        "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "Please call me directly at {advisor_cell} - I want to make sure you have support right now."
     ),
     "upsell_existing": (
-        "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
-        "We have options for memorials, markers, and additional services for your family. "
+        "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
+        "We have options available for your family. "
         "Let's chat: {booking_link}"
     ),
     "new_inquiry_intro": (
-        "Hi {first_name}, this is {advisor_name} with Restland. {tone_phrase} "
-        "I help families with cemetery and funeral planning in the area - happy to "
-        "answer any questions, no pressure at all. You can reach me at {advisor_cell} "
-        "or grab a time here: {booking_link}"
+        "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
+        "I'd love to help answer any questions, no pressure at all. "
+        "You can reach me at {advisor_cell} or grab a time here: {booking_link}"
     ),
 }
 
@@ -201,6 +200,10 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
         )
 
     from app.services.template_service import get_sms_template
+    from app.models.models import Organization
+    org = db.query(Organization).filter_by(id=lead.organization_id).first()
+    org_name = (org.brand_name or org.name) if org else "our team"
+
     custom_template = get_sms_template(db, lead.organization_id, lead.message_track)
     template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES["pre_need_lock_price"])
     tone_phrase = TOUCH_TONE_VARIANTS.get(touch_number, TOUCH_TONE_VARIANTS[9])
@@ -208,6 +211,7 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
         template
         .replace("{first_name}", lead.first_name or "there")
         .replace("{advisor_name}", advisor.full_name)
+        .replace("{org_name}", org_name)
         .replace("{tone_phrase}", tone_phrase)
         .replace("{booking_link}", booking_url)
         .replace("{advisor_cell}", advisor.twilio_phone_number or "")

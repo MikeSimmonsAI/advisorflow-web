@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.models import Lead, User, EmailMessage, MessageTrack
 
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
-FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@restland-advisorflow.com")
+FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")
 
 # One subject+body template per track, matching the same tier-based
 # message-track logic used for SMS, so email-only leads still get the
@@ -30,9 +30,8 @@ EMAIL_TEMPLATES = {
         "subject": "Lock in today's pricing - {first_name}, let's talk",
         "body_html": """
             <p>Hi {first_name},</p>
-            <p>This is {advisor_name} with Restland Cemetery & Funeral Home. I wanted to reach out
-            because planning ahead lets you lock in today's pricing on cemetery and funeral
-            arrangements, before future increases.</p>
+            <p>This is {advisor_name} with {org_name}. I wanted to reach out
+            because planning ahead lets you lock in today's pricing before future increases.</p>
             <p>If you'd like to learn more or book a time to talk, here's my booking link:
             <a href="{booking_link}">{booking_link}</a></p>
             <p>Best,<br>{advisor_name}</p>
@@ -42,9 +41,8 @@ EMAIL_TEMPLATES = {
         "subject": "{first_name}, I'm here to help",
         "body_html": """
             <p>Hi {first_name},</p>
-            <p>This is {advisor_name} with Restland. I wanted to reach out in case your family
-            needs support with arrangements right now. I'm happy to help walk through your options
-            whenever is convenient.</p>
+            <p>This is {advisor_name} with {org_name}. I wanted to reach out in case your family
+            needs support right now. I'm happy to help walk through your options whenever is convenient.</p>
             <p>You can reach me directly at {advisor_cell}, or book a time here:
             <a href="{booking_link}">{booking_link}</a></p>
             <p>Best,<br>{advisor_name}</p>
@@ -54,7 +52,7 @@ EMAIL_TEMPLATES = {
         "subject": "{first_name}, please reach out",
         "body_html": """
             <p>Hi {first_name},</p>
-            <p>This is {advisor_name} with Restland. Please don't hesitate to call me directly
+            <p>This is {advisor_name} with {org_name}. Please don't hesitate to call me directly
             at {advisor_cell} - I want to make sure your family has the support you need right now.</p>
             <p>Best,<br>{advisor_name}</p>
         """,
@@ -63,33 +61,30 @@ EMAIL_TEMPLATES = {
         "subject": "Additional options for your family, {first_name}",
         "body_html": """
             <p>Hi {first_name},</p>
-            <p>This is {advisor_name} with Restland. Since you've already worked with us, I wanted
-            to let you know about additional options available - memorials, markers, and added plots
-            or services for your family.</p>
+            <p>This is {advisor_name} with {org_name}. I wanted to let you know about additional
+            options available for your family.</p>
             <p>Let's talk: <a href="{booking_link}">{booking_link}</a></p>
             <p>Best,<br>{advisor_name}</p>
         """,
     },
     "email_only_nurture": {
-        "subject": "{first_name}, a quick note from Restland",
+        "subject": "{first_name}, a quick note from {org_name}",
         "body_html": """
             <p>Hi {first_name},</p>
-            <p>This is {advisor_name} with Restland Cemetery & Funeral Home. I wanted to introduce
-            myself and let you know I'm available if you ever have questions about cemetery or
-            funeral planning - no pressure, just here when you need me.</p>
+            <p>This is {advisor_name} with {org_name}. I wanted to introduce myself and let you
+            know I'm available if you ever have questions - no pressure, just here when you need me.</p>
             <p>Feel free to reach out: <a href="{booking_link}">{booking_link}</a></p>
             <p>Best,<br>{advisor_name}</p>
         """,
     },
     "new_inquiry_intro": {
-        "subject": "Hi {first_name}, a note from Restland",
+        "subject": "Hi {first_name}, a note from {org_name}",
         "body_html": """
             <p>Hi {first_name},</p>
-            <p>My name is {advisor_name} with Restland Cemetery & Funeral Home here in the Dallas
-            area. I noticed you'd shown some interest in learning more, so I wanted to reach out
-            directly and introduce myself.</p>
+            <p>My name is {advisor_name} with {org_name}. I noticed you'd shown some interest
+            in learning more, so I wanted to reach out and introduce myself.</p>
             <p>There's no obligation here - I'm just available if and when you'd like to talk
-            through options or have any questions, whenever that might be.</p>
+            through options or have any questions.</p>
             <p>You're welcome to reach out anytime: <a href="{booking_link}">{booking_link}</a></p>
             <p>Best,<br>{advisor_name}</p>
         """,
@@ -104,6 +99,10 @@ def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url
     the same override pattern used for SMS in cadence_service.py.
     """
     from app.services.template_service import get_email_template
+    from app.models.models import Organization
+    org = db.query(Organization).filter_by(id=lead.organization_id).first()
+    org_name = (org.brand_name or org.name) if org else "our team"
+
     custom = get_email_template(db, lead.organization_id, track)
     if custom:
         template = {"subject": custom["subject"], "body_html": custom["body_html"]}
@@ -115,6 +114,7 @@ def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url
         "{advisor_name}": advisor.full_name,
         "{advisor_cell}": advisor.twilio_phone_number or "",
         "{booking_link}": booking_url,
+        "{org_name}": org_name,
     }
     subject = template["subject"]
     body = template["body_html"]

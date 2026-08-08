@@ -23,6 +23,7 @@ class ProfileResponse(BaseModel):
     google_calendar_connected: bool = False
     microsoft_365_connected: bool = False
     microsoft_email_address: Optional[str] = None
+    booking_page_url: Optional[str] = None
 
 
 class TwilioConfigRequest(BaseModel):
@@ -42,6 +43,10 @@ class AdminTwilioAssignRequest(BaseModel):
 class NotificationConfigRequest(BaseModel):
     notification_email: Optional[str] = None
     notify_on_hot_reply: bool = True
+
+
+class BookingPageRequest(BaseModel):
+    booking_page_url: Optional[str] = None
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -64,6 +69,7 @@ def get_profile(current_user: User = Depends(get_current_user)):
         google_calendar_connected=current_user.google_calendar_connected,
         microsoft_365_connected=current_user.microsoft_365_connected,
         microsoft_email_address=current_user.microsoft_email_address,
+        booking_page_url=getattr(current_user, 'booking_page_url', None),
     )
 
 
@@ -141,5 +147,17 @@ def update_notification_config(
 ):
     current_user.notification_email = req.notification_email
     current_user.notify_on_hot_reply = req.notify_on_hot_reply
+    db.commit()
+    return {"success": True}
+
+
+@router.put("/booking-page")
+def update_booking_page(
+    req: BookingPageRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save the advisor's personal booking page URL."""
+    current_user.booking_page_url = req.booking_page_url or None
     db.commit()
     return {"success": True}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import { api } from '../api/client'
 import '../styles/shared.css'
 import './EmailQueue.css'
@@ -259,8 +259,8 @@ export default function EmailQueue() {
                 const cfg = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new
                 const isOpen = draftLead?.id === lead.id
                 return (
-                  <>
-                    <tr key={lead.id} className={selected.has(lead.id) ? 'eq-row--selected' : ''} style={{ borderBottom: isOpen ? 'none' : undefined }}>
+                  <Fragment key={lead.id}>
+                    <tr className={selected.has(lead.id) ? 'eq-row--selected' : ''} style={{ borderBottom: isOpen ? 'none' : undefined }}>
                       <td><input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggle(lead.id)} /></td>
                       <td>
                         <span className="eq-lead-name" onClick={() => handleOpenDraft(lead)} style={{ cursor: 'pointer', fontWeight: 600 }}>
@@ -285,7 +285,7 @@ export default function EmailQueue() {
 
                     {/* Inline AI Draft Panel */}
                     {isOpen && (
-                      <tr key={`${lead.id}-draft`}>
+                      <tr>
                         <td colSpan={8} style={{ padding: 0 }}>
                           <div className="eq-draft-panel">
                             <div className="eq-draft-header">
@@ -371,7 +371,7 @@ export default function EmailQueue() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>

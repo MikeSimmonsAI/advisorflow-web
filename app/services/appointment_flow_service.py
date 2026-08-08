@@ -53,7 +53,9 @@ def on_booking_confirmed(db: Session, lead: Lead, advisor: User, booking_link: B
     appt_time = booking_link.booked_time.strftime("%A, %B %d at %I:%M %p") if booking_link.booked_time else "your scheduled time"
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "there"
     advisor_name = advisor.full_name or "your advisor"
-    org_name = "Restland Cemetery & Funeral Home"  # TODO: pull from org
+    from app.models.models import Organization
+    _org = db.query(Organization).filter_by(id=lead.organization_id).first()
+    org_name = (_org.brand_name or _org.name) if _org else advisor_name
 
     # 1. Confirmation SMS to lead
     if lead.phone:

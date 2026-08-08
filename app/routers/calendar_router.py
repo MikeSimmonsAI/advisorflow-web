@@ -100,9 +100,9 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
         "booking_id": booking.id,
         "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Guest",
         "advisor_name": advisor.full_name if advisor else "Your Advisor",
-        "org_name": org.name if org else "Restland Cemetery & Funeral Home",
-        "org_address": "13005 Greenville Ave, Dallas, TX 75243",
-        "org_phone": "214-550-1234",
+        "org_name": org.name if org else "",
+        "org_address": org.org_address if org and hasattr(org, 'org_address') else "",
+        "org_phone": org.org_phone if org and hasattr(org, 'org_phone') else "",
         "status": booking.status,
         "created_at": booking.created_at,
     }

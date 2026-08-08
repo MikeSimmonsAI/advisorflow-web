@@ -70,6 +70,9 @@ COLUMNS_TO_ADD = [
     ("lead_outcomes", "has_insurance_funding", "BOOLEAN"),
     ("lead_outcomes", "is_veteran", "BOOLEAN"),
     ("lead_outcomes", "next_step", "TEXT"),
+    ("users", "booking_page_url", "VARCHAR"),
+    ("organizations", "org_address", "VARCHAR"),
+    ("organizations", "org_phone", "VARCHAR"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

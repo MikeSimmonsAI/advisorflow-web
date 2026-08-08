@@ -18,6 +18,12 @@ export default function Settings() {
   const [savingTwilio, setSavingTwilio] = useState(false)
   const [twilioSaved, setTwilioSaved] = useState(false)
 
+  // Booking page URL
+  const [bookingUrl, setBookingUrl] = useState('')
+  const [savingBooking, setSavingBooking] = useState(false)
+  const [bookingSaved, setBookingSaved] = useState(false)
+  const [bookingCopied, setBookingCopied] = useState(false)
+
   // Notifications
   const [notifyEmail, setNotifyEmail] = useState('')
   const [notifyOnHot, setNotifyOnHot] = useState(true)
@@ -46,6 +52,7 @@ export default function Settings() {
       setCallerIdName(p.twilio_caller_id_name || '')
       setNotifyEmail(p.notification_email || '')
       setNotifyOnHot(p.notify_on_hot_reply)
+      setBookingUrl(p.booking_page_url || '')
       setLoading(false)
     })
 
@@ -73,6 +80,28 @@ export default function Settings() {
       .catch(() => {})
       .finally(() => setAdvisorsLoading(false))
   }, [isAdmin])
+
+  async function saveBookingPage(e) {
+    e.preventDefault()
+    setSavingBooking(true)
+    setBookingSaved(false)
+    try {
+      await api.put('/settings/booking-page', { booking_page_url: bookingUrl || null })
+      setBookingSaved(true)
+    } catch (err) {
+      alert(`Failed to save: ${err.message}`)
+    } finally {
+      setSavingBooking(false)
+    }
+  }
+
+  function copyBookingUrl() {
+    if (!bookingUrl) return
+    navigator.clipboard.writeText(bookingUrl).then(() => {
+      setBookingCopied(true)
+      setTimeout(() => setBookingCopied(false), 2000)
+    })
+  }
 
   async function saveTwilio(e) {
     e.preventDefault()
@@ -288,7 +317,7 @@ export default function Settings() {
                                     className="settings-input"
                                     value={assignForm.callerIdName}
                                     onChange={e => setAssignForm(f => ({ ...f, callerIdName: e.target.value }))}
-                                    placeholder="Restland Cemetery"
+                                    placeholder="Your Organization Name"
                                   />
                                 </label>
                               </div>
@@ -362,7 +391,7 @@ export default function Settings() {
           </label>
           <label className="settings-label">
             Caller ID name <span className="settings-optional">optional</span>
-            <input className="settings-input" value={callerIdName} onChange={(e) => setCallerIdName(e.target.value)} placeholder="Restland Cemetery" />
+            <input className="settings-input" value={callerIdName} onChange={(e) => setCallerIdName(e.target.value)} placeholder="Your Organization Name" />
           </label>
           <div className="settings-actions">
             {twilioSaved && <span className="settings-saved">Saved</span>}
@@ -414,6 +443,49 @@ export default function Settings() {
             {connectingMicrosoft ? 'Redirecting…' : profile.microsoft_365_connected ? 'Reconnect Microsoft 365' : 'Connect Microsoft 365'}
           </button>
         </div>
+      </section>
+
+      {/* ── Booking Link ── */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">🔗 Your Booking Link</h2>
+          {profile.booking_page_url && <span className="badge badge--green">Set</span>}
+        </div>
+        <p className="settings-help">
+          Your personal booking page URL — paste this into SMS/email templates so leads can book directly with you.
+          Can be a Calendly link, Google booking page, or your BookaBoost scheduling URL.
+        </p>
+        <form onSubmit={saveBookingPage} className="settings-form">
+          <label className="settings-label">
+            Booking page URL
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                className="settings-input"
+                type="url"
+                value={bookingUrl}
+                onChange={(e) => setBookingUrl(e.target.value)}
+                placeholder="https://calendly.com/yourname or https://book.bookaboost.com/..."
+                style={{ flex: 1 }}
+              />
+              {bookingUrl && (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  style={{ fontSize: 12, padding: '8px 14px', flexShrink: 0 }}
+                  onClick={copyBookingUrl}
+                >
+                  {bookingCopied ? '✓ Copied' : 'Copy'}
+                </button>
+              )}
+            </div>
+          </label>
+          <div className="settings-actions">
+            {bookingSaved && <span className="settings-saved">Saved</span>}
+            <button className="btn btn--primary" type="submit" disabled={savingBooking}>
+              {savingBooking ? 'Saving…' : 'Save booking link'}
+            </button>
+          </div>
+        </form>
       </section>
 
       {/* ── Notifications ── */}

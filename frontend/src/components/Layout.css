@@ -124,6 +124,15 @@
   margin: 14px 4px;
 }
 
+.nav-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-tertiary);
+  padding: 4px 13px 6px;
+}
+
 .sidebar-footer {
   position: relative;
   z-index: 1;

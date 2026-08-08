@@ -31,7 +31,7 @@ export default function Login() {
       <div className="login-card">
         <div className="login-brand">
           <SignalPulse color="blue" size={10} />
-          <span className="login-brand-mark">Advisor<span className="login-brand-accent">Flow</span></span>
+          <span className="login-brand-mark">Booka<span className="login-brand-accent">Boost</span></span>
         </div>
         <p className="login-subtitle">Sign in to your outreach console</p>
 
@@ -45,7 +45,7 @@ export default function Login() {
               required
               autoFocus
               className="login-input"
-              placeholder="you@restland.com"
+              placeholder="you@company.com"
             />
           </label>
           <label className="login-label">

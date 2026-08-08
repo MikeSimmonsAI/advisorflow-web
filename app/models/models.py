@@ -145,6 +145,10 @@ class Organization(Base):
     brand_color_accent = Column(String, nullable=True)    # hex e.g. "#1ef0a8"
     industry = Column(String, default="funeral")          # funeral, roofing, insurance, etc.
 
+    # Org contact details — shown on public booking pages instead of hardcoded values
+    org_address = Column(String, nullable=True)
+    org_phone = Column(String, nullable=True)
+
     # Industry-agnostic tier config — JSON array of tier definitions
     # e.g. [{"value": "pre_need", "label": "Pre-Need", "color": "blue"}, ...]
     tier_config = Column(Text, nullable=True)
@@ -190,6 +194,9 @@ class User(Base):
     microsoft_oauth_refresh_token_encrypted = Column(String, nullable=True)
     microsoft_email_address = Column(String, nullable=True)  # the real Outlook address mail gets sent FROM
     microsoft_365_connected = Column(Boolean, default=False)
+
+    # Personal booking page — advisor's shareable booking URL (Calendly, Google, or BookaBoost)
+    booking_page_url = Column(String, nullable=True)
 
     # Notification preferences
     notification_email = Column(String, nullable=True)  # where HOT reply alerts go

@@ -140,7 +140,7 @@ export default function Layout({ children }) {
       <aside className="sidebar">
         <div className="sidebar-brand">
           {logoUrl
-            ? <img src={logoUrl} alt={brandName} style={{ height: 32, maxWidth: 120, objectFit: 'contain', borderRadius: 4 }} />
+            ? <img src={logoUrl} alt={brandName} style={{ height: 44, maxWidth: 150, objectFit: 'contain', borderRadius: 4, display: 'block', margin: '0 auto' }} />
             : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
           }
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
