@@ -211,6 +211,7 @@ Rules:
 - Each option should have a different angle/hook
 - Never be pushy or desperate
 - Always give them an easy out
+- CRITICAL: Use the EXACT advisor name "{advisor_name}" — NEVER write [Your Name], [Name], or any bracket placeholder. The real name is already provided above — use it directly.
 
 Respond ONLY with valid JSON, no markdown:
 {{
@@ -290,6 +291,17 @@ def draft_email_options(
         notes=(lead.notes or "none")[:200],
     )
 
+    def _clean_body(body: str, real_name: str) -> str:
+        """Replace any [Your Name] / [Name] bracket placeholders with the real advisor name."""
+        import re
+        body = re.sub(r'\[Your Name\]', real_name, body, flags=re.IGNORECASE)
+        body = re.sub(r'\[Name\]', real_name, body, flags=re.IGNORECASE)
+        body = re.sub(r'\[Advisor Name\]', real_name, body, flags=re.IGNORECASE)
+        body = re.sub(r'\[[^\]]*name[^\]]*\]', real_name, body, flags=re.IGNORECASE)
+        return body
+
+    advisor_name_str = advisor.full_name or "your advisor"
+
     try:
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         response = client.chat.completions.create(
@@ -301,9 +313,13 @@ def draft_email_options(
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         result = json.loads(raw)
+        cleaned_options = [
+            {**opt, "body": _clean_body(opt.get("body", ""), advisor_name_str)}
+            for opt in result.get("options", [])
+        ]
         return {
             "talking_points": result.get("talking_points", []),
-            "options": result.get("options", []),
+            "options": cleaned_options,
             "lead_context": {
                 "tier": lead.tier,
                 "source_year": lead.source_year,
