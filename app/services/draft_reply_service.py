@@ -333,7 +333,7 @@ def draft_email_options(
         advisor_name = advisor.full_name or "your advisor"
         return {
             "talking_points": [
-                f"{first_name} was last contacted in {last_contact}" if last_contact != "unknown" else f"Re-engaging {first} after a gap",
+                f"{first} was last contacted in {last_contact}" if last_contact != "unknown" else f"Re-engaging {first} after a gap",
                 f"Tier: {lead.tier or 'unassigned'} — tailor the message to their situation",
                 "Keep it short, personal, and low pressure",
             ],
