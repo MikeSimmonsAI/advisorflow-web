@@ -19,7 +19,7 @@ function avatarColor(name) {
 }
 
 // ── User Card ──────────────────────────────────────────────────────────────
-function UserCard({ u, isSuperAdmin, stats, onDeactivate, onReactivate, onEdit, onResetPw, onClearSetup }) {
+function UserCard({ u, isSuperAdmin, stats, onDeactivate, onReactivate, onEdit, onResetPw, onClearSetup, onSetupLink }) {
   const leads = stats?.leads_owned ?? stats?.total_leads ?? null
   const msgs  = stats?.messages_sent ?? null
   const color = avatarColor(u.full_name)
@@ -72,6 +72,13 @@ function UserCard({ u, isSuperAdmin, stats, onDeactivate, onReactivate, onEdit, 
             </button>
           )}
           <button className="btn btn--secondary btn--sm" onClick={() => onResetPw(u)}>Set password</button>
+          <button
+            className="btn btn--secondary btn--sm"
+            title="Generate a 48-hour link the advisor can use to connect Google Calendar or Microsoft 365"
+            onClick={() => onSetupLink(u.id, u.full_name)}
+          >
+            📅 Setup link
+          </button>
           {inactive
             ? <button className="btn btn--secondary btn--sm" onClick={() => onReactivate(u.id)}>Reactivate</button>
             : <button className="btn btn--danger btn--sm" onClick={() => onDeactivate(u.id)}>Deactivate</button>}
@@ -253,6 +260,17 @@ export default function Users() {
     }
   }
 
+  // ── Setup link (Google Calendar / Microsoft 365) ─────────────────────────
+  const handleGetSetupLink = async (userId, advisorName) => {
+    try {
+      const result = await api.post(`/admin/setup-link/${userId}`, {})
+      await navigator.clipboard.writeText(result.link)
+      alert(`Setup link for ${advisorName} copied to clipboard!\n\nSend it to them via email or SMS. It expires in 48 hours.`)
+    } catch (err) {
+      alert(`Failed to generate setup link: ${err.message}`)
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="page-wrap">
@@ -307,6 +325,7 @@ export default function Users() {
               onEdit={usr => { setEditUser(usr); setEditForm({ full_name: usr.full_name, email: usr.email, role: usr.role }); setEditError('') }}
               onResetPw={u => { setResetUser(u); setPwForm({ password: '', confirm: '' }); setPwError('') }}
               onClearSetup={clearSetup}
+              onSetupLink={handleGetSetupLink}
             />
           ))}
         </div>

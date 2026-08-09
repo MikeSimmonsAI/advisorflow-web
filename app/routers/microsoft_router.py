@@ -13,6 +13,7 @@ router = APIRouter(prefix="/microsoft", tags=["microsoft"])
 # since that's where both "Connect Google Calendar" and "Connect
 # Microsoft 365" buttons live, as two independent connection options.
 FRONTEND_SETTINGS_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/settings"
+FRONTEND_SETUP_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/setup-integrations"
 
 
 @router.get("/connect")
@@ -44,15 +45,20 @@ def microsoft_oauth_callback(
     `code` query parameter directly - passed straight through to
     handle_microsoft_oauth_callback below.
     """
+    # Detect setup-link flow ("setup:{user_id}") vs normal logged-in flow.
+    is_setup_flow = isinstance(state, str) and state.startswith("setup:")
+    real_user_id = state[6:] if is_setup_flow else state
+    redirect_base = FRONTEND_SETUP_URL if is_setup_flow else FRONTEND_SETTINGS_URL
+
     if error:
-        return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?microsoft_error={error}")
+        return RedirectResponse(url=f"{redirect_base}?microsoft_error={error}")
 
     if not code:
-        return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?microsoft_error=missing_code")
+        return RedirectResponse(url=f"{redirect_base}?microsoft_error=missing_code")
 
     try:
-        handle_microsoft_oauth_callback(db, advisor_user_id=state, authorization_code=code)
+        handle_microsoft_oauth_callback(db, advisor_user_id=real_user_id, authorization_code=code)
     except Exception as e:
-        return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?microsoft_error={str(e)}")
+        return RedirectResponse(url=f"{redirect_base}?microsoft_error={str(e)}")
 
-    return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?microsoft_connected=true")
+    return RedirectResponse(url=f"{redirect_base}?microsoft_connected=true")

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Where to send the advisor back to in the frontend once OAuth completes -
 # the Settings page, since that's where the "Connect Google Calendar" button lives.
 FRONTEND_SETTINGS_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/settings"
+FRONTEND_SETUP_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/setup-integrations"
 
 
 @router.get("/connect")
@@ -52,23 +53,29 @@ def oauth_callback(
     page so the advisor sees a clear confirmation in the UI, rather than
     a bare JSON response on a page they didn't navigate to themselves.
     """
+    # Detect the flow type early so error redirects also land on the right page.
+    is_setup_flow = isinstance(state, str) and state.startswith("setup:")
+    redirect_base = FRONTEND_SETUP_URL if is_setup_flow else FRONTEND_SETTINGS_URL
+
     if error:
         # Advisor denied access or something went wrong on Google's side -
         # redirect back with a query param the frontend can show as an error toast.
-        return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?calendar_error={error}")
+        return RedirectResponse(url=f"{redirect_base}?calendar_error={error}")
 
     if not code:
-        return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?calendar_error=missing_code")
+        return RedirectResponse(url=f"{redirect_base}?calendar_error=missing_code")
+
+    real_user_id = state[6:] if is_setup_flow else state
 
     try:
         # Pass the full incoming URL (including ?code=...&state=...) to the
         # OAuth flow, which is what google-auth-oauthlib's fetch_token expects.
         full_callback_url = str(request.url)
-        handle_oauth_callback(db, advisor_user_id=state, authorization_response_url=full_callback_url)
+        handle_oauth_callback(db, advisor_user_id=real_user_id, authorization_response_url=full_callback_url)
     except Exception as e:
-        return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?calendar_error={str(e)}")
+        return RedirectResponse(url=f"{redirect_base}?calendar_error={str(e)}")
 
-    return RedirectResponse(url=f"{FRONTEND_SETTINGS_URL}?calendar_connected=true")
+    return RedirectResponse(url=f"{redirect_base}?calendar_connected=true")
 
 
 class BookingConfirmRequest(BaseModel):

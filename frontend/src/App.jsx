@@ -34,6 +34,7 @@ import DLCRegistration from './pages/DLCRegistration'
 import FiberLeadCapture from './pages/FiberLeadCapture'
 import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
+import SetupIntegrations from './pages/SetupIntegrations'
 import { getCurrentUser } from './api/client'
 
 function isAuthenticated() {
@@ -70,6 +71,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/setup-integrations" element={<SetupIntegrations />} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route

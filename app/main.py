@@ -36,6 +36,7 @@ from app.routers.dlc_router import router as dlc_router
 from app.routers.case_file_router import router as case_file_router
 from app.routers.social_webhooks_router import router as social_webhooks_router
 from app.routers.fiber_leads_router import router as fiber_leads_router
+from app.routers.setup_router import router as setup_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -43,6 +44,7 @@ ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
     "https://bookaboost.com",
     "https://bookaboost.live",
+    "https://app.bookaboost.live",
     "https://evosyspro.live",
     "http://localhost:5173",
     "http://localhost:3000",
@@ -268,6 +270,7 @@ app.include_router(dlc_router)
 app.include_router(case_file_router)
 app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
+app.include_router(setup_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
