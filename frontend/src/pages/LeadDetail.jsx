@@ -373,8 +373,10 @@ export default function LeadDetail() {
         tone: TONES[tone].key,
         ai_direction: aiDirection || null,
       })
-      setMessageText(draft.suggested_reply || '')
-      if (draft.booking_url) setIncludeBookingLink(false)
+      // Strip raw booking URLs from the text — the link is appended cleanly at send time
+      const cleanReply = (draft.suggested_reply || '').replace(/https?:\/\/\S+/g, '').trim()
+      setMessageText(cleanReply)
+      // Keep includeBookingLink checked so the link is added cleanly on send
     } catch (err) {
       setSendError(err.message)
     } finally {
