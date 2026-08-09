@@ -21,7 +21,6 @@ import UserDetail from './pages/UserDetail'
 import Compliance from './pages/Compliance'
 import AuditLog from './pages/AuditLog'
 import SystemHealth from './pages/SystemHealth'
-import Campaigns from './pages/Campaigns'
 import LeadCleanup from './pages/LeadCleanup'
 import Settings from './pages/Settings'
 import Templates from './pages/Templates'
@@ -92,7 +91,6 @@ export default function App() {
         <Route path="/compliance" element={<ProtectedRoute requireAdmin><Compliance /></ProtectedRoute>} />
         <Route path="/audit-log" element={<ProtectedRoute requireAdmin><AuditLog /></ProtectedRoute>} />
         <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
-        <Route path="/campaigns" element={<ProtectedRoute requireAdmin><Campaigns /></ProtectedRoute>} />
         <Route path="/lead-cleanup" element={<ProtectedRoute requireAdmin><LeadCleanup /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute requireAdmin><Templates /></ProtectedRoute>} />
