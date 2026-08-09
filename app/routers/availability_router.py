@@ -4,7 +4,7 @@ Manages when advisors are available for bookings.
 Advisors and org_admins can block dates, slots, and recurring times.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -206,16 +206,30 @@ class RecurringBlockRequest(BaseModel):
     reason: Optional[str] = None
 
 
+def _resolve_advisor(db: Session, current_user: User, advisor_id: Optional[str]) -> User:
+    """Return the target advisor. Admins may pass advisor_id to manage another advisor."""
+    if advisor_id and current_user.role in ("org_admin", "super_admin"):
+        target = db.query(User).filter(
+            User.id == advisor_id,
+            User.organization_id == current_user.organization_id,
+        ).first()
+        if target:
+            return target
+    return current_user
+
+
 @router.post("/block/date-range")
 def block_date_range(
     req: DateRangeBlockRequest,
+    advisor_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Block a date range (vacation, days off). Optionally cancel existing bookings."""
+    """Block a date range (vacation, days off). Admins can pass advisor_id to manage other advisors."""
+    target = _resolve_advisor(db, current_user, advisor_id)
     block = AdvisorAvailabilityBlock(
-        advisor_id=current_user.id,
-        organization_id=current_user.organization_id,
+        advisor_id=target.id,
+        organization_id=target.organization_id,
         block_type=BlockType.DATE_RANGE,
         start_date=req.start_date,
         end_date=req.end_date,
@@ -236,13 +250,15 @@ def block_date_range(
 @router.post("/block/slot")
 def block_slot(
     req: SlotBlockRequest,
+    advisor_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Block a specific date+time slot."""
+    """Block a specific date+time slot. Admins can pass advisor_id."""
+    target = _resolve_advisor(db, current_user, advisor_id)
     block = AdvisorAvailabilityBlock(
-        advisor_id=current_user.id,
-        organization_id=current_user.organization_id,
+        advisor_id=target.id,
+        organization_id=target.organization_id,
         block_type=BlockType.SLOT,
         block_date=req.block_date,
         block_time=req.block_time,
@@ -257,13 +273,15 @@ def block_slot(
 @router.post("/block/recurring")
 def block_recurring(
     req: RecurringBlockRequest,
+    advisor_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Block recurring times (e.g. every Friday after 3pm)."""
+    """Block recurring times. Admins can pass advisor_id."""
+    target = _resolve_advisor(db, current_user, advisor_id)
     block = AdvisorAvailabilityBlock(
-        advisor_id=current_user.id,
-        organization_id=current_user.organization_id,
+        advisor_id=target.id,
+        organization_id=target.organization_id,
         block_type=BlockType.RECURRING,
         recur_day_of_week=req.recur_day_of_week,
         recur_after_time=req.recur_after_time,
@@ -278,12 +296,14 @@ def block_recurring(
 
 @router.get("/blocks")
 def list_blocks(
+    advisor_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all availability blocks for the current advisor."""
+    """List availability blocks. Admins can pass advisor_id to view another advisor's blocks."""
+    target = _resolve_advisor(db, current_user, advisor_id)
     blocks = db.query(AdvisorAvailabilityBlock).filter(
-        AdvisorAvailabilityBlock.advisor_id == current_user.id,
+        AdvisorAvailabilityBlock.advisor_id == target.id,
     ).order_by(AdvisorAvailabilityBlock.created_at.desc()).all()
     return blocks
 
@@ -308,15 +328,17 @@ def delete_block(
 
 @router.get("/upcoming")
 def get_upcoming_appointments(
+    advisor_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return upcoming booked appointments for the current advisor (next 30 days)."""
+    """Return upcoming booked appointments. Admins can pass advisor_id."""
     from datetime import datetime as dt
+    target = _resolve_advisor(db, current_user, advisor_id)
     now = dt.now()
 
     bookings = db.query(BookingLink).filter(
-        BookingLink.user_id == current_user.id,
+        BookingLink.user_id == target.id,
         BookingLink.status == "booked",
         BookingLink.booked_time >= now,
     ).order_by(BookingLink.booked_time.asc()).limit(20).all()

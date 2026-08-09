@@ -47,11 +47,20 @@ function fmtBlock(b) {
 
 export default function Availability() {
   const user = getCurrentUser()
+  const isSuperAdmin = user?.role === 'super_admin'
   const navigate = useNavigate()
+
+  // ── Team picker ──────────────────────────────────────────────────────────
+  const [team, setTeam] = useState([])
+  const [selectedAdvisor, setSelectedAdvisor] = useState(null) // {id, full_name}
+
+  // ── Data ─────────────────────────────────────────────────────────────────
   const [blocks, setBlocks] = useState([])
   const [upcoming, setUpcoming] = useState([])
   const [openSlots, setOpenSlots] = useState(null)
   const [loading, setLoading] = useState(true)
+
+  // ── UI state ─────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('vacation')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -74,12 +83,37 @@ export default function Availability() {
   const [recurBefore, setRecurBefore] = useState('')
   const [recurReason, setRecurReason] = useState('')
 
+  // ── Load team list on mount ──────────────────────────────────────────────
+  useEffect(() => {
+    api.get('/admin/users').then(users => {
+      const advisors = (users || []).filter(u => u.is_active !== false)
+      setTeam(advisors)
+      // Default to current user if they're in the list, else first advisor
+      const me = advisors.find(u => u.id === user?.id)
+      setSelectedAdvisor(me || advisors[0] || null)
+    }).catch(() => {
+      // Fallback: treat current user as the only advisor
+      setSelectedAdvisor({ id: user?.id, full_name: user?.full_name || 'You' })
+    })
+  }, [])
+
+  // ── Helper: advisor_id query param ───────────────────────────────────────
+  const aqp = (extra = '') => {
+    if (!selectedAdvisor || selectedAdvisor.id === user?.id) return extra
+    const sep = extra.includes('?') ? '&' : '?'
+    return `${extra}${sep}advisor_id=${selectedAdvisor.id}`
+  }
+
+  // ── Load availability data whenever selected advisor changes ────────────
   function load() {
+    if (!selectedAdvisor) return
     setLoading(true)
+    const adv = selectedAdvisor
+    const advisorParam = adv.id !== user?.id ? `?advisor_id=${adv.id}` : ''
     Promise.all([
-      api.get('/availability/blocks').catch(() => []),
-      api.get('/availability/upcoming').catch(() => []),
-      user?.id ? api.get(`/availability/slots/${user.id}`).catch(() => null) : Promise.resolve(null),
+      api.get(`/availability/blocks${advisorParam}`).catch(() => []),
+      api.get(`/availability/upcoming${advisorParam}`).catch(() => []),
+      api.get(`/availability/slots/${adv.id}`).catch(() => null),
     ]).then(([blocksData, upcomingData, slotsData]) => {
       setBlocks(blocksData || [])
       setUpcoming(upcomingData || [])
@@ -88,7 +122,7 @@ export default function Availability() {
     })
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { if (selectedAdvisor) load() }, [selectedAdvisor?.id])
 
   async function handleDeleteBlock(id) {
     if (!window.confirm('Remove this availability block?')) return
@@ -103,8 +137,10 @@ export default function Availability() {
   async function handleSaveVacation() {
     if (!vacStart || !vacEnd) { setError('Start and end date required'); return }
     setSaving(true); setError(''); setSuccess('')
+    const adv = selectedAdvisor
+    const advisorParam = adv && adv.id !== user?.id ? `?advisor_id=${adv.id}` : ''
     try {
-      await api.post('/availability/block/date-range', {
+      await api.post(`/availability/block/date-range${advisorParam}`, {
         start_date: vacStart, end_date: vacEnd,
         reason: vacReason || null, cancel_existing: vacCancel,
       })
@@ -117,8 +153,10 @@ export default function Availability() {
   async function handleSaveSlot() {
     if (!slotDate || !slotTime) { setError('Date and time required'); return }
     setSaving(true); setError(''); setSuccess('')
+    const adv = selectedAdvisor
+    const advisorParam = adv && adv.id !== user?.id ? `?advisor_id=${adv.id}` : ''
     try {
-      await api.post('/availability/block/slot', {
+      await api.post(`/availability/block/slot${advisorParam}`, {
         block_date: slotDate, block_time: slotTime, reason: slotReason || null,
       })
       setSuccess('Slot blocked.')
@@ -130,8 +168,10 @@ export default function Availability() {
   async function handleSaveRecurring() {
     if (!recurAfter && !recurBefore) { setError('Set at least one time boundary'); return }
     setSaving(true); setError(''); setSuccess('')
+    const adv = selectedAdvisor
+    const advisorParam = adv && adv.id !== user?.id ? `?advisor_id=${adv.id}` : ''
     try {
-      await api.post('/availability/block/recurring', {
+      await api.post(`/availability/block/recurring${advisorParam}`, {
         recur_day_of_week: recurDay !== '' ? parseInt(recurDay) : null,
         recur_after_time: recurAfter || null,
         recur_before_time: recurBefore || null,
@@ -148,10 +188,35 @@ export default function Availability() {
 
       {/* HEADER */}
       <div className="availability-header">
-        <h1 className="availability-title">Availability</h1>
-        <p className="availability-subtitle">
-          Manage your schedule. Leads can only book during your open slots (9:00 AM - 5:00 PM daily, minus any blocks you set below).
-        </p>
+        <div>
+          <h1 className="availability-title">Availability</h1>
+          <p className="availability-subtitle">
+            Set working hours and block time for each advisor. Leads book only during open slots (9 AM–5 PM minus any blocks).
+          </p>
+        </div>
+        {/* ADVISOR SELECTOR */}
+        {team.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              Viewing advisor:
+            </label>
+            <select
+              className="filter-select"
+              value={selectedAdvisor?.id || ''}
+              onChange={e => {
+                const adv = team.find(u => u.id === e.target.value)
+                if (adv) setSelectedAdvisor(adv)
+              }}
+              style={{ minWidth: 180 }}
+            >
+              {team.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name}{u.id === user?.id ? ' (you)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* STATS ROW */}
@@ -184,7 +249,7 @@ export default function Availability() {
           </div>
           <div className="av-stat-body">
             <strong className="av-stat-value" style={{ color: '#a78bfa', fontSize: 14 }}>
-              9:00 AM - 5:00 PM
+              9:00 AM – 5:00 PM
             </strong>
             <span className="av-stat-label">Working hours, 7 days</span>
           </div>
@@ -205,7 +270,14 @@ export default function Availability() {
       {/* UPCOMING APPOINTMENTS */}
       <section className="panel av-upcoming-panel">
         <div className="panel-header">
-          <h2 className="panel-title">Upcoming appointments</h2>
+          <h2 className="panel-title">
+            &#128197; Upcoming appointments
+            {selectedAdvisor && selectedAdvisor.id !== user?.id && (
+              <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
+                — {selectedAdvisor.full_name}
+              </span>
+            )}
+          </h2>
           <span className="panel-count">{upcoming.length}</span>
         </div>
         {loading ? (
@@ -224,16 +296,11 @@ export default function Availability() {
                 </div>
                 <div className="av-upcoming-lead-info">
                   <span className="av-upcoming-name">{appt.lead_name}</span>
-                  {appt.lead_phone && (
-                    <span className="av-upcoming-phone">{appt.lead_phone}</span>
-                  )}
+                  {appt.lead_phone && <span className="av-upcoming-phone">{appt.lead_phone}</span>}
                 </div>
                 {appt.lead_id && (
-                  <button
-                    className="btn btn--secondary"
-                    style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
-                    onClick={() => navigate(`/leads/${appt.lead_id}`)}
-                  >
+                  <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
+                    onClick={() => navigate(`/leads/${appt.lead_id}`)}>
                     View lead
                   </button>
                 )}
@@ -249,7 +316,13 @@ export default function Availability() {
         {/* BLOCK TIME */}
         <section className="panel">
           <div className="panel-header">
-            <h2 className="panel-title">Block time</h2>
+            <h2 className="panel-title">Block time
+              {selectedAdvisor && selectedAdvisor.id !== user?.id && (
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
+                  for {selectedAdvisor.full_name}
+                </span>
+              )}
+            </h2>
           </div>
           <div className="availability-tabs">
             {[
@@ -257,8 +330,7 @@ export default function Availability() {
               { key: 'slot',      label: 'Specific Slot' },
               { key: 'recurring', label: 'Recurring' },
             ].map(t => (
-              <button
-                key={t.key}
+              <button key={t.key}
                 className={`availability-tab ${activeTab === t.key ? 'availability-tab--active' : ''}`}
                 onClick={() => setActiveTab(t.key)}
               >{t.label}</button>
@@ -283,7 +355,7 @@ export default function Availability() {
               <div className="availability-field">
                 <label>REASON (OPTIONAL)</label>
                 <input type="text" value={vacReason} onChange={e => setVacReason(e.target.value)}
-                  placeholder="e.g. Family vacation" className="compose-subject" />
+                  placeholder="e.g. Training week" className="compose-subject" />
               </div>
               <label className="compose-checkbox" style={{ marginBottom: 8 }}>
                 <input type="checkbox" checked={vacCancel} onChange={e => setVacCancel(e.target.checked)} />
@@ -305,9 +377,7 @@ export default function Availability() {
                 <div className="availability-field">
                   <label>TIME</label>
                   <select value={slotTime} onChange={e => setSlotTime(e.target.value)} className="filter-select">
-                    {SLOT_TIMES.map(t => (
-                      <option key={t} value={t}>{fmtTime(t)}</option>
-                    ))}
+                    {SLOT_TIMES.map(t => <option key={t} value={t}>{fmtTime(t)}</option>)}
                   </select>
                 </div>
               </div>
@@ -328,9 +398,7 @@ export default function Availability() {
                 <label>DAY OF WEEK (LEAVE BLANK FOR EVERY DAY)</label>
                 <select value={recurDay} onChange={e => setRecurDay(e.target.value)} className="filter-select">
                   <option value="">Every day</option>
-                  {DAY_NAMES.map((d, i) => (
-                    <option key={i} value={i}>{d}</option>
-                  ))}
+                  {DAY_NAMES.map((d, i) => <option key={i} value={i}>{d}</option>)}
                 </select>
               </div>
               <div className="availability-field-row">
@@ -338,18 +406,14 @@ export default function Availability() {
                   <label>BLOCK SLOTS AFTER</label>
                   <select value={recurAfter} onChange={e => setRecurAfter(e.target.value)} className="filter-select">
                     <option value="">No limit</option>
-                    {SLOT_TIMES.map(t => (
-                      <option key={t} value={t}>{fmtTime(t)}</option>
-                    ))}
+                    {SLOT_TIMES.map(t => <option key={t} value={t}>{fmtTime(t)}</option>)}
                   </select>
                 </div>
                 <div className="availability-field">
                   <label>BLOCK SLOTS BEFORE</label>
                   <select value={recurBefore} onChange={e => setRecurBefore(e.target.value)} className="filter-select">
                     <option value="">No limit</option>
-                    {SLOT_TIMES.map(t => (
-                      <option key={t} value={t}>{fmtTime(t)}</option>
-                    ))}
+                    {SLOT_TIMES.map(t => <option key={t} value={t}>{fmtTime(t)}</option>)}
                   </select>
                 </div>
               </div>
@@ -383,20 +447,16 @@ export default function Availability() {
               {blocks.map(b => (
                 <div key={b.id} className={`availability-block-item availability-block-item--${b.block_type}`}>
                   <div className="availability-block-icon">
-                    {b.block_type === 'date_range' ? '🏖️' : b.block_type === 'slot' ? '🕐' : '🔁'}
+                    {b.block_type === 'date_range' ? '&#127958;&#65039;' : b.block_type === 'slot' ? '&#128336;' : '&#128260;'}
                   </div>
                   <div className="availability-block-info">
                     <span className="availability-block-type">{b.block_type.replace('_', ' ')}</span>
                     <span className="availability-block-detail">{fmtBlock(b)}</span>
-                    {b.cancel_existing && (
-                      <span className="availability-block-tag">Bookings cancelled</span>
-                    )}
+                    {b.cancel_existing && <span className="availability-block-tag">Bookings cancelled</span>}
                   </div>
-                  <button
-                    className="availability-block-delete"
-                    onClick={() => handleDeleteBlock(b.id)}
-                    title="Remove block"
-                  >x</button>
+                  <button className="availability-block-delete" onClick={() => handleDeleteBlock(b.id)} title="Remove block">
+                    &#10005;
+                  </button>
                 </div>
               ))}
             </div>

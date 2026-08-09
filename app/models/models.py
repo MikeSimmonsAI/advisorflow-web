@@ -382,6 +382,7 @@ class BookingLink(Base):
 
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)
+    review_request_sent_at = Column(DateTime, nullable=True)  # set by review_request_cron
 
 
 # ---------------------------------------------------------------------------
