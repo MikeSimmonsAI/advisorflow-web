@@ -110,6 +110,13 @@ COLUMNS_TO_ADD = [
     ("organizations", "twilio_a2p_registered_at", "TIMESTAMP"),
     # Post-appointment case file — lead-level case status
     ("leads", "case_status", "VARCHAR DEFAULT 'open'"),
+    # Post-appointment review request — track that we've sent the Google review SMS
+    ("booking_links", "review_request_sent_at", "TIMESTAMP"),
+    # Social media lead capture — org-level webhook credentials + token
+    ("organizations", "social_webhook_token", "VARCHAR"),
+    ("organizations", "meta_page_access_token", "VARCHAR"),
+    ("organizations", "meta_webhook_verify_token", "VARCHAR"),
+    ("organizations", "tiktok_webhook_secret", "VARCHAR"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

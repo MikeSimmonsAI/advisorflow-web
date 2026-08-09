@@ -8,6 +8,8 @@ Deploy target: Render or Railway (see DEPLOY.md)
 Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 """
 
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -32,6 +34,7 @@ from app.routers.pipeline_router import router as pipeline_router
 from app.routers.tier_definitions_router import router as tier_definitions_router
 from app.routers.dlc_router import router as dlc_router
 from app.routers.case_file_router import router as case_file_router
+from app.routers.social_webhooks_router import router as social_webhooks_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -262,10 +265,48 @@ app.include_router(survey_router)
 app.include_router(tier_definitions_router)
 app.include_router(dlc_router)
 app.include_router(case_file_router)
+app.include_router(social_webhooks_router)
+
+
+# ── Background asyncio loops ──────────────────────────────────────────────────
+
+async def _review_request_loop():
+    """Send Google review request SMS after appointments end. Runs every 30 min."""
+    from app.crons.review_request_cron import run_review_request_cron
+    import logging as _log
+    _logger = _log.getLogger("review_request_cron")
+    await asyncio.sleep(60)  # brief startup delay
+    while True:
+        try:
+            sent = run_review_request_cron(engine)
+            if sent:
+                _logger.info("review_request_cron: sent %d messages", sent)
+        except Exception as exc:
+            _logger.error("review_request_cron error: %s", exc)
+        await asyncio.sleep(1800)  # 30 minutes
+
+
+async def _ai_conversation_loop():
+    """Process AI conversation touches every 2 min for sub-60-second lead response."""
+    from app.routers.ai_conversation_router import process_scheduled_touches
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("ai_conversation_loop")
+    await asyncio.sleep(30)  # brief startup delay
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                process_scheduled_touches(db)
+            finally:
+                db.close()
+        except Exception as exc:
+            _logger.error("ai_conversation_loop error: %s", exc)
+        await asyncio.sleep(120)  # 2 minutes
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     # 1. Create any brand-new tables
     Base.metadata.create_all(bind=engine)
 
@@ -318,7 +359,9 @@ def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("Super admin role migration note: %s", e)
 
-
+    # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
+    asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
+    asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
 
 
 @app.get("/health")

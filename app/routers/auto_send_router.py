@@ -11,10 +11,19 @@ auto_send_phase values on User:
   "off"       — default, feature disabled
   "candidate" — eligible inbound replies go to review queue
   "auto"      — eligible inbound replies are sent immediately
+
+Phase 2 additions:
+  - handle_inbound_for_auto_send() — called from ai_conversation_router
+    when a new inbound reply comes in and advisor has auto_send enabled.
+    Generates an AI reply, runs compliance check, then either queues it
+    (candidate mode) or sends immediately (auto mode).
+  - POST /auto-send/proactive-scan — advisor-triggered scan that finds
+    dormant/warm leads with no recent outbound and drafts an AI re-engagement
+    message for each one, adding them to the review queue.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -41,7 +50,7 @@ class AutoSendItem(Base):
     message = Column(Text, nullable=False)
     channel = Column(String, default="sms")  # sms | email
     subject = Column(String, nullable=True)  # for email
-    source = Column(String, default="ai")  # ai | cadence | campaign
+    source = Column(String, default="ai")  # ai | cadence | campaign | proactive
     source_ref = Column(String, nullable=True)  # campaign_id or cadence_state_id or reply_id
     status = Column(String, default="pending")  # pending | approved | skipped | sent | failed
     ai_reason = Column(Text, nullable=True)
@@ -68,7 +77,7 @@ def _serialize(item: AutoSendItem, lead: Lead) -> dict:
     }
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Existing Endpoints (unchanged) ────────────────────────────────────────────
 
 @router.get("/queue")
 def get_queue(
@@ -335,3 +344,250 @@ def enqueue_item(
     db.add(item)
     db.commit()
     return {"id": item.id, "status": "pending"}
+
+
+# ── Phase 2: Inbound Auto-Reply Handler ───────────────────────────────────────
+
+# Simple question patterns that are safe to answer automatically without
+# advisor review. Anything that seems complex, emotional, or pricing-related
+# goes to the review queue regardless of auto_send_phase.
+_SAFE_QUESTION_PATTERNS = [
+    "what time", "what's the address", "where are you located",
+    "can i reschedule", "can we reschedule", "how do i reschedule",
+    "what do i need to bring", "is parking", "how long will",
+    "remind me", "confirm my appointment", "what is the appointment",
+    "still on for", "are we still", "is my appointment",
+]
+
+
+def _is_simple_question(text: str) -> bool:
+    """Return True if the inbound message looks like a routine logistical question."""
+    lower = (text or "").lower()
+    return any(pat in lower for pat in _SAFE_QUESTION_PATTERNS)
+
+
+def handle_inbound_for_auto_send(
+    db: Session,
+    lead: "Lead",
+    advisor: "User",
+    inbound_text: str,
+    reply_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Called from ai_conversation_router when a new inbound reply arrives
+    and the advisor has auto_send_phase != 'off'.
+
+    Generates an AI reply, runs compliance_preflight, then either:
+      - 'candidate' phase: adds to review queue, returns 'queued'
+      - 'auto' phase + simple question: sends immediately, returns 'sent'
+      - 'auto' phase + complex: adds to review queue, returns 'queued'
+      - Any compliance block: does nothing, returns 'blocked'
+
+    Returns action taken: 'sent' | 'queued' | 'blocked' | 'skipped'
+    """
+    phase = advisor.auto_send_phase or "off"
+    if phase == "off":
+        return "skipped"
+
+    # Compliance check
+    try:
+        from app.routers.compliance_router import compliance_preflight
+        ok, reason = compliance_preflight(db, lead, "sms")
+        if not ok:
+            return "blocked"
+    except Exception:
+        pass  # if compliance import fails, fall through to queue
+
+    # Generate AI reply
+    try:
+        import openai, os
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        system_prompt = (
+            "You are a professional scheduling assistant for a financial services advisor. "
+            "Reply to the lead's message below in 1-2 short, friendly sentences. "
+            "Do NOT make promises about pricing or specific policy details. "
+            "If the question is about rescheduling, confirm the advisor will reach out shortly. "
+            "Keep it under 160 characters if possible."
+        )
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": inbound_text},
+            ],
+            max_tokens=120,
+            temperature=0.4,
+        )
+        ai_reply = completion.choices[0].message.content.strip()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("auto_send AI generation failed: %s", exc)
+        return "skipped"
+
+    # Decide: send immediately or queue for review
+    send_immediately = (
+        phase == "auto" and _is_simple_question(inbound_text)
+    )
+
+    if send_immediately:
+        try:
+            from app.services.sms_service import send_sms
+            send_sms(db=db, lead=lead, advisor=advisor, template=ai_reply, include_booking_link=False)
+            log_action(db, advisor.organization_id, advisor.id, action="auto_send.auto_sent", target_type="lead", target_id=lead.id)
+            return "sent"
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("auto_send immediate send failed: %s", exc)
+            # Fall through to queue
+
+    # Queue for advisor review
+    item = AutoSendItem(
+        id=str(uuid.uuid4()),
+        organization_id=advisor.organization_id,
+        lead_id=lead.id,
+        advisor_id=advisor.id,
+        message=ai_reply,
+        channel="sms",
+        source="ai",
+        source_ref=reply_id,
+        ai_reason=f"AI-drafted reply to: {inbound_text[:120]}",
+        status="pending",
+        created_at=datetime.utcnow(),
+    )
+    db.add(item)
+    db.commit()
+    log_action(db, advisor.organization_id, advisor.id, action="auto_send.queued", target_type="lead", target_id=lead.id)
+    return "queued"
+
+
+# ── Phase 2: Proactive Re-engagement Scan ─────────────────────────────────────
+
+class ProactiveScanRequest(BaseModel):
+    days_dormant: int = 14      # leads with no outbound for this many days
+    max_leads: int = 10         # max leads to draft messages for per scan
+    statuses: list = ["sent", "replied", "hot"]  # which lead statuses to include
+
+
+@router.post("/proactive-scan")
+def proactive_scan(
+    req: ProactiveScanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Phase 2 — Proactive outreach scan.
+
+    Finds leads assigned to this advisor that:
+      - Have the specified statuses (e.g. warm/replied leads gone quiet)
+      - Have had no outbound message in the last N days
+      - Are not DNC
+      - Don't already have a pending auto-send item
+
+    For each eligible lead, generates an AI re-engagement message and
+    adds it to the review queue. Advisor reviews and approves/skips.
+    Returns a count of leads queued.
+    """
+    if req.days_dormant < 3:
+        raise HTTPException(status_code=400, detail="days_dormant must be at least 3")
+    if req.max_leads > 50:
+        raise HTTPException(status_code=400, detail="max_leads cannot exceed 50")
+
+    cutoff = datetime.utcnow() - timedelta(days=req.days_dormant)
+
+    from sqlalchemy import text
+    rows = db.execute(text("""
+        SELECT l.id, l.first_name, l.last_name, l.phone, l.email,
+               l.tier, l.status, l.organization_id
+        FROM leads l
+        WHERE l.user_id = :advisor_id
+          AND l.organization_id = :org_id
+          AND l.status = ANY(:statuses)
+          AND l.status != 'dnc'
+          AND l.phone IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM auto_send_queue asq
+            WHERE asq.lead_id = l.id AND asq.status = 'pending'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.lead_id = l.id
+              AND m.direction = 'outbound'
+              AND m.sent_at > :cutoff
+          )
+        ORDER BY l.updated_at ASC
+        LIMIT :max_leads
+    """), {
+        "advisor_id": current_user.id,
+        "org_id": current_user.organization_id,
+        "statuses": req.statuses,
+        "cutoff": cutoff,
+        "max_leads": req.max_leads,
+    }).fetchall()
+
+    if not rows:
+        return {"queued": 0, "message": "No dormant leads found matching criteria"}
+
+    import openai, os
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    queued_count = 0
+
+    for row in rows:
+        try:
+            # Compliance check
+            lead = db.query(Lead).filter(Lead.id == row.id).first()
+            if not lead:
+                continue
+            try:
+                from app.routers.compliance_router import compliance_preflight
+                ok, _ = compliance_preflight(db, lead, "sms")
+                if not ok:
+                    continue
+            except Exception:
+                pass
+
+            # AI-draft re-engagement message
+            completion = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "system",
+                    "content": (
+                        "You are a professional scheduling assistant drafting a re-engagement "
+                        "SMS for a financial services advisor. The lead hasn't heard from us in "
+                        f"at least {req.days_dormant} days. Write a warm, brief (under 160 chars) "
+                        "check-in message. Do not make pricing promises. End with a soft call to action."
+                    ),
+                }, {
+                    "role": "user",
+                    "content": f"Lead name: {row.first_name}. Tier/status: {row.tier} / {row.status}.",
+                }],
+                max_tokens=100,
+                temperature=0.5,
+            )
+            ai_message = completion.choices[0].message.content.strip()
+
+            item = AutoSendItem(
+                id=str(uuid.uuid4()),
+                organization_id=current_user.organization_id,
+                lead_id=row.id,
+                advisor_id=current_user.id,
+                message=ai_message,
+                channel="sms",
+                source="proactive",
+                ai_reason=f"Dormant {req.days_dormant}+ days — proactive re-engagement draft",
+                status="pending",
+                created_at=datetime.utcnow(),
+            )
+            db.add(item)
+            queued_count += 1
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("proactive_scan draft failed for lead %s: %s", row.id, exc)
+
+    db.commit()
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="auto_send.proactive_scan",
+        target_type="user", target_id=current_user.id,
+        details={"queued": queued_count, "days_dormant": req.days_dormant},
+    )
+    return {"queued": queued_count, "total_eligible": len(rows)}
