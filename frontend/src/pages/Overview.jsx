@@ -12,6 +12,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected arrangements',
     confirmLabel: 'arrangements confirmed',
     weeklyLabel: 'arrangements this week',
+    recordedVisits: 'Recorded visits',
   },
   fiber: {
     appointments: 'Installs scheduled',
@@ -20,6 +21,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected installs',
     confirmLabel: 'installs confirmed',
     weeklyLabel: 'installs this week',
+    recordedVisits: 'Completed installs',
   },
   solar: {
     appointments: 'Assessments',
@@ -28,6 +30,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected assessments',
     confirmLabel: 'assessments confirmed',
     weeklyLabel: 'assessments this week',
+    recordedVisits: 'Completed assessments',
   },
   roofing: {
     appointments: 'Inspections',
@@ -36,6 +39,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected inspections',
     confirmLabel: 'inspections confirmed',
     weeklyLabel: 'inspections this week',
+    recordedVisits: 'Completed inspections',
   },
   insurance: {
     appointments: 'Consultations',
@@ -44,6 +48,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected consultations',
     confirmLabel: 'consultations confirmed',
     weeklyLabel: 'consultations this week',
+    recordedVisits: 'Completed consultations',
   },
   real_estate: {
     appointments: 'Showings',
@@ -52,6 +57,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected showings',
     confirmLabel: 'showings confirmed',
     weeklyLabel: 'showings this week',
+    recordedVisits: 'Completed showings',
   },
   home_services: {
     appointments: 'Appointments',
@@ -60,6 +66,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected bookings',
     confirmLabel: 'appointments confirmed',
     weeklyLabel: 'bookings this week',
+    recordedVisits: 'Completed appointments',
   },
   sales: {
     appointments: 'Demos',
@@ -68,6 +75,7 @@ const INDUSTRY_LABELS = {
     projectedBookings: 'Projected demos',
     confirmLabel: 'demos confirmed',
     weeklyLabel: 'demos this week',
+    recordedVisits: 'Completed demos',
   },
 }
 const DEFAULT_LABELS = INDUSTRY_LABELS.funeral
@@ -154,15 +162,15 @@ export default function Overview() {
       {/* ── KPI ROW ── */}
       <div className="ov-kpi-row">
         {[
-          { label: 'Total leads',        value: totalLeads,        accent: '#2fb6ff', path: '/leads',   icon: '👥' },
-          { label: 'New — uncontacted',  value: newLeads,          accent: '#2fb6ff', path: '/leads',   icon: '📋' },
-          { label: 'Hot replies',        value: hotReplies,        accent: '#ff4d4d', path: '/replies', icon: '🔥' },
-          { label: IL.appointments,      value: bookedLeads,       accent: '#1ef0a8', path: '/leads',   icon: '📅' },
-          { label: 'Reply rate',         value: `${replyRate}%`,   accent: '#f0c040', path: '/reports', icon: '📊' },
-          { label: IL.bookingRate,       value: `${bookingRate}%`, accent: '#a78bfa', path: '/reports', icon: '🎯' },
+          { label: 'Total leads',        value: totalLeads,        accent: '#2fb6ff', path: '/leads',   icon: '&#128101;' },
+          { label: 'New — uncontacted',  value: newLeads,          accent: '#2fb6ff', path: '/leads',   icon: '&#128203;' },
+          { label: 'Hot replies',        value: hotReplies,        accent: '#ff4d4d', path: '/replies', icon: '&#128293;' },
+          { label: IL.appointments,      value: bookedLeads,       accent: '#1ef0a8', path: '/leads',   icon: '&#128197;' },
+          { label: 'Reply rate',         value: `${replyRate}%`,   accent: '#f0c040', path: '/reports', icon: '&#128202;' },
+          { label: IL.bookingRate,       value: `${bookingRate}%`, accent: '#a78bfa', path: '/reports', icon: '&#127919;' },
         ].map(card => (
           <button key={card.label} className="ov-kpi-card" onClick={() => navigate(card.path)}>
-            <span className="ov-kpi-icon">{card.icon}</span>
+            <span className="ov-kpi-icon" dangerouslySetInnerHTML={{ __html: card.icon }} />
             <strong className="ov-kpi-value" style={{ color: card.accent }}>
               {loading ? '—' : card.value}
             </strong>
@@ -184,11 +192,11 @@ export default function Overview() {
           ) : dailyBriefing ? (
             <div className="ov-action-list">
               {[
-                { count: dailyBriefing.replies_needing_attention,    label: 'hot replies need your response',    path: '/replies',  accent: '#ff4d4d', urgent: true },
-                { count: dailyBriefing.cadence_touches_due_today,    label: 'cadence touches due today',         path: '/cadence',  accent: '#2fb6ff' },
-                { count: dailyBriefing.certified_appointments_waiting, label: IL.confirmLabel,                  path: '/leads',    accent: '#1ef0a8' },
-                { count: dailyBriefing.leads_imported_last_24h,      label: 'leads imported in the last 24h',   path: '/leads',    accent: '#f0c040' },
-                { count: dailyBriefing.bookings_last_7_days,         label: IL.weeklyLabel,                      path: '/leads',    accent: '#a78bfa' },
+                { count: dailyBriefing.replies_needing_attention,      label: 'hot replies need your response',  path: '/replies',  accent: '#ff4d4d', urgent: true },
+                { count: dailyBriefing.cadence_touches_due_today,      label: 'cadence touches due today',       path: '/cadence',  accent: '#2fb6ff' },
+                { count: dailyBriefing.certified_appointments_waiting, label: IL.confirmLabel,                   path: '/leads',    accent: '#1ef0a8' },
+                { count: dailyBriefing.leads_imported_last_24h,        label: 'leads imported in the last 24h', path: '/leads',    accent: '#f0c040' },
+                { count: dailyBriefing.bookings_last_7_days,           label: IL.weeklyLabel,                    path: '/leads',    accent: '#a78bfa' },
               ].map((item, i) => (
                 <button key={i} className={`ov-action-row ${item.urgent && item.count > 0 ? 'ov-action-row--urgent' : ''}`} onClick={() => navigate(item.path)}>
                   <span className="ov-action-count" style={{ color: item.accent }}>{item.count}</span>
@@ -312,7 +320,7 @@ export default function Overview() {
           <div className="ov-revenue-grid">
             {[
               { label: 'In pipeline', value: bookedLeads,                              sub: IL.bookedSub,          color: '#2fb6ff' },
-              { label: 'Outcomes',    value: outcomesSummary?.total_appointments ?? 0, sub: 'Recorded visits',     color: '#1ef0a8' },
+              { label: 'Outcomes',    value: outcomesSummary?.total_appointments ?? 0, sub: IL.recordedVisits,     color: '#1ef0a8' },
               { label: 'Sales',       value: outcomesSummary?.sales_count ?? 0,        sub: outcomesSummary?.conversion_rate != null ? `${outcomesSummary.conversion_rate}% close rate` : 'No outcomes yet', color: '#a78bfa' },
               { label: 'DNC',         value: dncLeads,                                 sub: 'Opted out — suppressed', color: '#ff4d4d' },
             ].map(item => (
@@ -341,10 +349,10 @@ export default function Overview() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
             {[
-              { label: 'Active conversations',  value: pipelineForecast.active_conversations,            color: '#2fb6ff' },
-              { label: 'Reply rate',            value: `${pipelineForecast.reply_rate}%`,                color: '#1ef0a8' },
-              { label: 'Need your review',      value: pipelineForecast.flagged_count,                   color: '#ff4d4d' },
-              { label: IL.projectedBookings,    value: pipelineForecast.projected_bookings_this_week,    color: '#ffd700' },
+              { label: 'Active conversations',  value: pipelineForecast.active_conversations,         color: '#2fb6ff' },
+              { label: 'Reply rate',            value: `${pipelineForecast.reply_rate}%`,             color: '#1ef0a8' },
+              { label: 'Need your review',      value: pipelineForecast.flagged_count,                color: '#ff4d4d' },
+              { label: IL.projectedBookings,    value: pipelineForecast.projected_bookings_this_week, color: '#ffd700' },
             ].map(item => (
               <div key={item.label} className="ov-revenue-cell">
                 <strong className="ov-revenue-value" style={{ color: item.color }}>{item.value}</strong>
@@ -359,7 +367,7 @@ export default function Overview() {
               background: alert.type === 'urgent' ? 'rgba(255,77,77,0.07)' : 'rgba(47,182,255,0.05)',
               border: `1px solid ${alert.type === 'urgent' ? 'rgba(255,77,77,0.18)' : 'rgba(47,182,255,0.12)'}`,
             }} onClick={() => window.location.href = alert.path}>
-              <span>{alert.type === 'urgent' ? '&#9888;&#65039;' : '&#128161;'}</span>
+              <span dangerouslySetInnerHTML={{ __html: alert.type === 'urgent' ? '&#9888;&#65039;' : '&#128161;' }} />
               <span style={{ flex: 1, fontSize: 13 }}>{alert.message}</span>
               <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{alert.action} &#8594;</span>
             </div>
