@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, getCurrentUser } from '../api/client'
+import { api, getCurrentUser, getBranding } from '../api/client'
+import { getMemberLabel } from '../utils/labels'
 import '../styles/shared.css'
 import './Settings.css'
 
@@ -324,14 +325,14 @@ export default function Settings() {
       {isAdmin && (
         <section className="panel" style={{ marginBottom: 16 }}>
           <div className="panel-header">
-            <h2 className="panel-title">📱 Advisor Twilio Numbers</h2>
+            <h2 className="panel-title">📱 {getMemberLabel(getBranding(), true)} Twilio Numbers</h2>
             <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              Assign a Twilio number to each advisor so cadence fires from their number
+              Assign a Twilio number to each {getMemberLabel(getBranding(), false).toLowerCase()} so cadence fires from their number
             </span>
           </div>
           <p className="settings-help" style={{ marginBottom: 16 }}>
-            Cadence messages skip advisors without a Twilio number configured. Assign numbers here to unblock sending.
-            Each advisor can also set their own in their personal settings below.
+            Cadence messages skip {getMemberLabel(getBranding(), true).toLowerCase()} without a Twilio number configured. Assign numbers here to unblock sending.
+            Each {getMemberLabel(getBranding(), false).toLowerCase()} can also set their own in their personal settings below.
           </p>
 
           {advisorsLoading ? (
@@ -340,7 +341,7 @@ export default function Settings() {
             <table className="data-table" style={{ marginBottom: 16 }}>
               <thead>
                 <tr>
-                  <th>Advisor</th>
+                  <th>{getMemberLabel(getBranding(), false)}</th>
                   <th>Role</th>
                   <th>Phone number</th>
                   <th>Status</th>

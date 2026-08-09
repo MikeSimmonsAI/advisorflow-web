@@ -81,6 +81,8 @@ export default function OrgSettings() {
   const [brandLogoUrl, setBrandLogoUrl] = useState('')
   const [brandColorPrimary, setBrandColorPrimary] = useState('#2fb6ff')
   const [brandColorAccent, setBrandColorAccent] = useState('#1ef0a8')
+  const [memberLabel, setMemberLabel] = useState('')
+  const [membersLabel, setMembersLabel] = useState('')
 
   // Industry
   const [industry, setIndustry] = useState('funeral')
@@ -125,6 +127,8 @@ export default function OrgSettings() {
         setBrandLogoUrl(data.brand_logo_url || '')
         setBrandColorPrimary(data.brand_color_primary || '#2fb6ff')
         setBrandColorAccent(data.brand_color_accent || '#1ef0a8')
+        setMemberLabel(data.member_label || '')
+        setMembersLabel(data.members_label || '')
         setIndustry(data.industry || 'funeral')
         setTiers(data.tier_config || [])
         setFacebookUrl(data.facebook_url || '')
@@ -146,6 +150,8 @@ export default function OrgSettings() {
         brand_logo_url: brandLogoUrl || null,
         brand_color_primary: brandColorPrimary,
         brand_color_accent: brandColorAccent,
+        member_label: memberLabel || null,
+        members_label: membersLabel || null,
       })
       setSuccess('Branding saved.')
       // Only update localStorage/CSS for the logged-in user's own org
@@ -331,6 +337,28 @@ export default function OrgSettings() {
                   ))}
                   <input type="color" value={brandColorAccent} onChange={(e) => setBrandColorAccent(e.target.value)} className="os-color-input" />
                 </div>
+              </label>
+
+              <label className="os-label" style={{ marginTop: 8 }}>
+                Member role label (singular)
+                <input
+                  className="os-input"
+                  value={memberLabel}
+                  onChange={(e) => setMemberLabel(e.target.value)}
+                  placeholder={`e.g. Agent, Rep, Tech, Advisor (leave blank for industry default)`}
+                />
+                <span className="os-hint">How this org refers to a single non-admin user. Leave blank to use the industry default.</span>
+              </label>
+
+              <label className="os-label">
+                Member role label (plural)
+                <input
+                  className="os-input"
+                  value={membersLabel}
+                  onChange={(e) => setMembersLabel(e.target.value)}
+                  placeholder={`e.g. Agents, Reps, Techs, Advisors`}
+                />
+                <span className="os-hint">Plural form shown in headings like "Advisor Twilio Numbers".</span>
               </label>
 
               <div className="os-preview-bar" style={{ background: brandColorPrimary }}>

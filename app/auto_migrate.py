@@ -123,6 +123,9 @@ COLUMNS_TO_ADD = [
     ("leads", "extra_data", "TEXT"),
     # Profile headshot — base64 data URL stored in DB (no external storage needed)
     ("users", "profile_photo_url", "TEXT"),
+    # Dynamic member role label — what this org calls their staff (Agent, Rep, Advisor, etc.)
+    ("organizations", "member_label", "VARCHAR(100)"),
+    ("organizations", "members_label", "VARCHAR(100)"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

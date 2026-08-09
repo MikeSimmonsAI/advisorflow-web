@@ -105,6 +105,8 @@ export async function fetchAndStoreBranding() {
       brand_color_accent: data.brand_color_accent || null,
       industry: data.industry || 'funeral',
       enabled_features: data.enabled_features || null,
+      member_label: data.member_label || null,
+      members_label: data.members_label || null,
     }
     localStorage.setItem('bb_branding', JSON.stringify(branding))
     applyBrandingCSS(branding)

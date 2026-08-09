@@ -1,10 +1,16 @@
 import { useEffect, useState, useMemo } from 'react'
-import { api, getCurrentUser } from '../api/client'
+import { api, getCurrentUser, getBranding } from '../api/client'
+import { getMemberLabel } from '../utils/labels'
 import '../styles/shared.css'
 import './Users.css'
 
-const ROLE_LABELS = { advisor: 'Advisor', org_admin: 'Org Admin', super_admin: 'Super Admin' }
 const ROLE_COLORS = { advisor: 'blue', org_admin: 'purple', super_admin: 'amber' }
+
+function getRoleLabels() {
+  const branding = getBranding()
+  const memberSingular = getMemberLabel(branding, false)
+  return { advisor: memberSingular, org_admin: 'Org Admin', super_admin: 'Super Admin' }
+}
 
 function initials(name) {
   if (!name) return '?'
@@ -41,7 +47,7 @@ function UserCard({ u, isSuperAdmin, stats, onDeactivate, onReactivate, onEdit, 
             )}
           </div>
           <div className="uc-badges">
-            <span className={`badge badge--${ROLE_COLORS[u.role] || 'blue'}`}>{ROLE_LABELS[u.role] || u.role}</span>
+            <span className={`badge badge--${ROLE_COLORS[u.role] || 'blue'}`}>{getRoleLabels()[u.role] || u.role}</span>
             {inactive
               ? <span className="badge badge--neutral">Inactive</span>
               : <span className="badge badge--green">Active</span>}

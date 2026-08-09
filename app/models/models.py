@@ -164,6 +164,11 @@ class Organization(Base):
     # [] = no optional features. ["campaigns", "reports", ...] = explicit allow-list.
     enabled_features = Column(Text, nullable=True)
 
+    # What this org calls their non-admin users (e.g. "Agent", "Rep", "Advisor", "FSA").
+    # Null = use industry default. Overrides the hardcoded "Advisor" label throughout the UI.
+    member_label = Column(String(100), nullable=True)   # singular e.g. "Agent"
+    members_label = Column(String(100), nullable=True)  # plural   e.g. "Agents"
+
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")

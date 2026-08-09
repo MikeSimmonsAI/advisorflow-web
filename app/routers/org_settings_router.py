@@ -97,6 +97,8 @@ class BrandingUpdate(BaseModel):
     brand_logo_url: Optional[str] = None
     brand_color_primary: Optional[str] = None
     brand_color_accent: Optional[str] = None
+    member_label: Optional[str] = None   # singular e.g. "Agent"
+    members_label: Optional[str] = None  # plural   e.g. "Agents"
 
 
 class IndustryUpdate(BaseModel):
@@ -134,6 +136,8 @@ def get_org_settings(
         "brand_logo_url": org.brand_logo_url,
         "brand_color_primary": org.brand_color_primary,
         "brand_color_accent": org.brand_color_accent,
+        "member_label": getattr(org, "member_label", None),
+        "members_label": getattr(org, "members_label", None),
         "tier_config": tier_config,
         "facebook_url": getattr(org, "facebook_url", None),
         "google_review_url": getattr(org, "google_review_url", None),
@@ -160,6 +164,9 @@ def update_branding(
     if req.brand_logo_url is not None: org.brand_logo_url = req.brand_logo_url
     if req.brand_color_primary is not None: org.brand_color_primary = req.brand_color_primary
     if req.brand_color_accent is not None: org.brand_color_accent = req.brand_color_accent
+    # Empty string = clear the override (fall back to industry default in the UI)
+    if req.member_label is not None: org.member_label = req.member_label or None
+    if req.members_label is not None: org.members_label = req.members_label or None
     db.commit()
     return {"updated": True}
 
