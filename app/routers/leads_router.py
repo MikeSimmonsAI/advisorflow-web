@@ -747,6 +747,69 @@ def create_lead_manually(
     }
 
 
+# ── Edit basic lead fields ────────────────────────────────────────────────────
+
+class LeadFieldUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    tier: Optional[str] = None
+
+
+@router.patch("/{lead_id}")
+def update_lead_fields(
+    lead_id: str,
+    payload: LeadFieldUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Edit basic contact fields on a lead. Advisors can edit their own; admins can edit any."""
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if current_user.role == "advisor" and lead.assigned_to_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only edit your own leads")
+
+    if payload.first_name is not None:
+        lead.first_name = payload.first_name.strip() or lead.first_name
+    if payload.last_name is not None:
+        lead.last_name = payload.last_name.strip() or lead.last_name
+    if payload.phone is not None:
+        normalized = normalize_phone(payload.phone.strip())
+        lead.phone = normalized or payload.phone.strip() or None
+        lead.phone_raw = payload.phone.strip() or None
+        lead.contact_channel = "sms" if lead.phone else ("email_only" if lead.email else "unknown")
+    if payload.email is not None:
+        lead.email = payload.email.strip() or None
+    if payload.notes is not None:
+        lead.notes = payload.notes
+    if payload.tier is not None:
+        lead.tier = payload.tier
+
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(lead)
+
+    log_action(db, current_user.organization_id, current_user.id,
+               action="lead.update", target_type="lead", target_id=lead_id)
+
+    return {
+        "id": lead.id,
+        "first_name": lead.first_name,
+        "last_name": lead.last_name,
+        "phone": lead.phone,
+        "email": lead.email,
+        "notes": lead.notes,
+        "tier": lead.tier,
+    }
+
+
 # ── Delete a single lead ──────────────────────────────────────────────────────
 
 @router.delete("/{lead_id}")

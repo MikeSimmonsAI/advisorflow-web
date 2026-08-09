@@ -17,6 +17,156 @@ const COLOR_OPTIONS = [
   { value: '#f97316', label: 'Orange' },
 ]
 
+function ColorPicker({ field, value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      {COLOR_OPTIONS.map(c => (
+        <button key={c.value} title={c.label}
+          onClick={() => onChange(field, c.value)}
+          style={{
+            width: 28, height: 28, borderRadius: '50%', background: c.value, border: 'none',
+            cursor: 'pointer',
+            outline: value === c.value ? '2px solid white' : 'none',
+            boxShadow: value === c.value ? `0 0 0 3px ${c.value}` : 'none',
+          }} />
+      ))}
+      <input type="color" value={value || '#2fb6ff'}
+        onChange={e => onChange(field, e.target.value)}
+        style={{ width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }} />
+    </div>
+  )
+}
+
+// ── Edit Org Modal ─────────────────────────────────────────────────────────
+function EditOrgModal({ org, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: org.name || '',
+    industry: org.industry || 'funeral',
+    plan: org.plan || 'trial',
+    is_active: org.is_active !== false,
+    brand_name: org.brand_name || '',
+    brand_color_primary: org.brand_color_primary || '#2fb6ff',
+    brand_color_accent: org.brand_color_accent || '#1ef0a8',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  function setColor(field, value) {
+    setForm(f => ({ ...f, [field]: value }))
+  }
+
+  async function handleSave() {
+    setError('')
+    if (!form.name.trim()) { setError('Name is required'); return }
+    setSaving(true)
+    try {
+      const updated = await api.put(`/admin/organizations/${org.id}`, {
+        name: form.name.trim(),
+        industry: form.industry,
+        plan: form.plan,
+        is_active: form.is_active,
+        brand_name: form.brand_name.trim() || null,
+        brand_color_primary: form.brand_color_primary || null,
+        brand_color_accent: form.brand_color_accent || null,
+      })
+      onSaved(updated)
+    } catch (err) {
+      setError(err.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box" style={{ maxWidth: 520 }}>
+        <div className="modal-header">
+          <h3>Edit — {org.name}</h3>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="modal-form">
+
+            <label>Organization Name
+              <input value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="Acme Roofing Co." />
+            </label>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label>Industry
+                <select value={form.industry}
+                  onChange={e => setForm(f => ({ ...f, industry: e.target.value }))}>
+                  <option value="funeral">Funeral</option>
+                  <option value="roofing">Roofing</option>
+                  <option value="insurance">Insurance</option>
+                  <option value="real_estate">Real Estate</option>
+                  <option value="dental">Dental</option>
+                  <option value="legal">Legal</option>
+                  <option value="home_services">Home Services</option>
+                </select>
+              </label>
+              <label>Plan
+                <select value={form.plan}
+                  onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}>
+                  <option value="trial">Trial</option>
+                  <option value="standard">Standard ($299/mo)</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              </label>
+            </div>
+
+            <label>Brand Name <span style={{ color: 'var(--text-tertiary)', fontWeight: 400, fontSize: 12 }}>(shows in sidebar)</span>
+              <input value={form.brand_name}
+                onChange={e => setForm(f => ({ ...f, brand_name: e.target.value }))}
+                placeholder={form.name} />
+            </label>
+
+            <label>Primary color
+              <div style={{ marginTop: 6 }}>
+                <ColorPicker field="brand_color_primary" value={form.brand_color_primary} onChange={setColor} />
+              </div>
+            </label>
+
+            <label>Accent color
+              <div style={{ marginTop: 6 }}>
+                <ColorPicker field="brand_color_accent" value={form.brand_color_accent} onChange={setColor} />
+              </div>
+            </label>
+
+            {/* Live preview */}
+            <div style={{
+              background: form.brand_color_primary, borderRadius: 8, padding: '10px 16px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>
+                {form.brand_name || form.name || 'Brand Preview'}
+              </span>
+              <span style={{ color: form.brand_color_accent, fontWeight: 600, fontSize: 13 }}>● Live</span>
+            </div>
+
+            <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.is_active}
+                onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
+              <span>Active (uncheck to deactivate)</span>
+            </label>
+
+            {error && <div className="form-error">{error}</div>}
+
+            <div className="modal-actions">
+              <button className="btn btn--secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────
 export default function ProvisionClient() {
   const [form, setForm] = useState({
     org_name: '',
@@ -38,13 +188,16 @@ export default function ProvisionClient() {
   const [error, setError] = useState(null)
   const [orgs, setOrgs] = useState([])
   const [orgsLoading, setOrgsLoading] = useState(true)
+  const [editOrg, setEditOrg] = useState(null)
 
-  useEffect(() => {
+  function loadOrgs() {
     api.get('/admin/organizations')
       .then(setOrgs)
       .catch(() => {})
       .finally(() => setOrgsLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadOrgs() }, [])
 
   function handleOrgName(e) {
     const val = e.target.value
@@ -100,7 +253,7 @@ export default function ProvisionClient() {
       }
       const res = await api.post('/admin/provision-client', payload)
       setResult(res)
-      api.get('/admin/organizations').then(setOrgs).catch(() => {})
+      loadOrgs()
       setForm({
         org_name: '', org_slug: '', industry: 'funeral', plan: 'trial',
         supervisor_full_name: '', supervisor_email: '', supervisor_password: '',
@@ -203,38 +356,12 @@ export default function ProvisionClient() {
 
           <div className="provision-field">
             <label>Primary color</label>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-              {COLOR_OPTIONS.map(c => (
-                <button key={c.value} title={c.label}
-                  onClick={() => setColor('brand_color_primary', c.value)}
-                  style={{
-                    width: 28, height: 28, borderRadius: '50%', background: c.value, border: 'none',
-                    cursor: 'pointer', outline: form.brand_color_primary === c.value ? '2px solid white' : 'none',
-                    boxShadow: form.brand_color_primary === c.value ? `0 0 0 3px ${c.value}` : 'none',
-                  }} />
-              ))}
-              <input type="color" value={form.brand_color_primary}
-                onChange={(e) => setColor('brand_color_primary', e.target.value)}
-                style={{ width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }} />
-            </div>
+            <ColorPicker field="brand_color_primary" value={form.brand_color_primary} onChange={setColor} />
           </div>
 
           <div className="provision-field">
             <label>Accent color</label>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-              {COLOR_OPTIONS.map(c => (
-                <button key={c.value} title={c.label}
-                  onClick={() => setColor('brand_color_accent', c.value)}
-                  style={{
-                    width: 28, height: 28, borderRadius: '50%', background: c.value, border: 'none',
-                    cursor: 'pointer', outline: form.brand_color_accent === c.value ? '2px solid white' : 'none',
-                    boxShadow: form.brand_color_accent === c.value ? `0 0 0 3px ${c.value}` : 'none',
-                  }} />
-              ))}
-              <input type="color" value={form.brand_color_accent}
-                onChange={(e) => setColor('brand_color_accent', e.target.value)}
-                style={{ width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }} />
-            </div>
+            <ColorPicker field="brand_color_accent" value={form.brand_color_accent} onChange={setColor} />
           </div>
 
           {/* Live preview bar */}
@@ -297,7 +424,12 @@ export default function ProvisionClient() {
           )}
 
           <div className="provision-orgs-panel">
-            <div className="provision-orgs-title">Active Organizations</div>
+            <div className="provision-orgs-title">
+              Active Organizations
+              <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontWeight: 400, marginLeft: 8 }}>
+                Click a row to edit
+              </span>
+            </div>
             {orgsLoading ? (
               <div className="provision-orgs-loading">Loading…</div>
             ) : orgs.length === 0 ? (
@@ -305,11 +437,12 @@ export default function ProvisionClient() {
             ) : (
               <table className="provision-orgs-table">
                 <thead>
-                  <tr><th>Name</th><th>Industry</th><th>Plan</th><th>Status</th></tr>
+                  <tr><th>Name</th><th>Industry</th><th>Plan</th><th>Status</th><th>Colors</th></tr>
                 </thead>
                 <tbody>
                   {orgs.map(org => (
-                    <tr key={org.id}>
+                    <tr key={org.id} onClick={() => setEditOrg(org)} style={{ cursor: 'pointer' }}
+                      className="provision-orgs-row">
                       <td>
                         <div className="org-name">{org.name}</div>
                         <div className="org-slug">{org.slug}</div>
@@ -321,6 +454,19 @@ export default function ProvisionClient() {
                           {org.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          {org.brand_color_primary && (
+                            <span style={{ width: 14, height: 14, borderRadius: '50%', background: org.brand_color_primary, display: 'inline-block', border: '1px solid rgba(255,255,255,0.2)' }} title={`Primary: ${org.brand_color_primary}`} />
+                          )}
+                          {org.brand_color_accent && (
+                            <span style={{ width: 14, height: 14, borderRadius: '50%', background: org.brand_color_accent, display: 'inline-block', border: '1px solid rgba(255,255,255,0.2)' }} title={`Accent: ${org.brand_color_accent}`} />
+                          )}
+                          {!org.brand_color_primary && !org.brand_color_accent && (
+                            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -329,6 +475,18 @@ export default function ProvisionClient() {
           </div>
         </div>
       </div>
+
+      {/* Edit org modal */}
+      {editOrg && (
+        <EditOrgModal
+          org={editOrg}
+          onClose={() => setEditOrg(null)}
+          onSaved={(updated) => {
+            setOrgs(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o))
+            setEditOrg(null)
+          }}
+        />
+      )}
     </PageShell>
   )
 }

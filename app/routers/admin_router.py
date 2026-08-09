@@ -1451,10 +1451,86 @@ def list_organizations(
             "industry": o.industry,
             "plan": o.plan,
             "is_active": o.is_active,
+            "brand_name": getattr(o, "brand_name", None),
+            "brand_logo_url": getattr(o, "brand_logo_url", None),
+            "brand_color_primary": getattr(o, "brand_color_primary", None),
+            "brand_color_accent": getattr(o, "brand_color_accent", None),
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }
         for o in orgs
     ]
+
+
+class OrgUpdate(BaseModel):
+    name: Optional[str] = None
+    industry: Optional[str] = None
+    plan: Optional[str] = None
+    is_active: Optional[bool] = None
+    brand_name: Optional[str] = None
+    brand_logo_url: Optional[str] = None
+    brand_color_primary: Optional[str] = None
+    brand_color_accent: Optional[str] = None
+
+
+@router.put("/organizations/{org_id}")
+def update_organization(
+    org_id: str,
+    payload: OrgUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """Update an existing organization's details — super_admin only."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    if payload.name is not None:
+        org.name = payload.name.strip()
+    if payload.industry is not None:
+        org.industry = payload.industry
+    if payload.plan is not None:
+        org.plan = payload.plan
+    if payload.is_active is not None:
+        org.is_active = payload.is_active
+    if payload.brand_name is not None:
+        if hasattr(org, "brand_name"):
+            org.brand_name = payload.brand_name.strip() or None
+    if payload.brand_logo_url is not None:
+        if hasattr(org, "brand_logo_url"):
+            org.brand_logo_url = payload.brand_logo_url.strip() or None
+    if payload.brand_color_primary is not None:
+        if hasattr(org, "brand_color_primary"):
+            org.brand_color_primary = payload.brand_color_primary
+    if payload.brand_color_accent is not None:
+        if hasattr(org, "brand_color_accent"):
+            org.brand_color_accent = payload.brand_color_accent
+
+    try:
+        log_action(
+            db, current_user.organization_id, current_user.id,
+            action="org.update",
+            target_type="organization",
+            target_id=org_id,
+            details={"updated_by": current_user.full_name, "org_name": org.name},
+        )
+    except Exception:
+        pass
+
+    db.commit()
+    db.refresh(org)
+
+    return {
+        "id": org.id,
+        "name": org.name,
+        "slug": org.slug,
+        "industry": org.industry,
+        "plan": org.plan,
+        "is_active": org.is_active,
+        "brand_name": getattr(org, "brand_name", None),
+        "brand_logo_url": getattr(org, "brand_logo_url", None),
+        "brand_color_primary": getattr(org, "brand_color_primary", None),
+        "brand_color_accent": getattr(org, "brand_color_accent", None),
+    }
 
 
 # ---------------------------------------------------------------------------

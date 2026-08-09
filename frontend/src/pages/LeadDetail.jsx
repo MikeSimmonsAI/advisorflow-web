@@ -232,6 +232,12 @@ export default function LeadDetail() {
   const [aiDirection, setAiDirection] = useState('')
   // Appointment type: auto-detected from tier, manually overridable
   const [apptLabel, setApptLabel] = useState('')
+  // Lead editing
+  const [showEdit, setShowEdit] = useState(false)
+  const [editForm, setEditForm] = useState({})
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [editSuccess, setEditSuccess] = useState(false)
   const currentUser = getCurrentUser()
   const canReassignLead = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
   const [assignableUsers, setAssignableUsers] = useState([])
@@ -288,6 +294,23 @@ export default function LeadDetail() {
       )
       .catch((err) => setAssignmentError(err.message))
   }, [canReassignLead])
+
+  async function handleSaveEdit() {
+    setEditError('')
+    setEditSaving(true)
+    setEditSuccess(false)
+    try {
+      await api.patch(`/leads/${leadId}`, editForm)
+      setEditSuccess(true)
+      setShowEdit(false)
+      load()
+      setTimeout(() => setEditSuccess(false), 3000)
+    } catch (err) {
+      setEditError(err.message || 'Save failed')
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   async function handleCall() {
     if (!lead.phone) { alert('This lead has no phone number.'); return }
@@ -497,7 +520,21 @@ export default function LeadDetail() {
         <div className="lead-detail-hero-left">
           <div className="lead-detail-avatar">{initials}</div>
           <div>
-            <h1 className="lead-detail-name">{lead.first_name} {lead.last_name}</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h1 className="lead-detail-name">{lead.first_name} {lead.last_name}</h1>
+              <button
+                className="btn btn--secondary btn--sm"
+                style={{ fontSize: 11, padding: '3px 10px' }}
+                onClick={() => {
+                  setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '' })
+                  setEditError('')
+                  setShowEdit(e => !e)
+                }}
+              >
+                {showEdit ? '✕ Cancel' : '✏️ Edit'}
+              </button>
+              {editSuccess && <span style={{ fontSize: 12, color: 'var(--signal-green)' }}>✓ Saved</span>}
+            </div>
             <div className="lead-detail-contact">
               {lead.phone && <span className="mono">📱 {lead.phone}</span>}
               {lead.email && <span className="mono">✉️ {lead.email}</span>}
@@ -526,6 +563,44 @@ export default function LeadDetail() {
           </div>
         )}
       </div>
+
+      {/* ── Inline Lead Edit Panel ── */}
+      {showEdit && (
+        <section className="panel" style={{ marginBottom: 16, padding: '16px 20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <label className="leads-add-label">First name
+              <input className="search-input" value={editForm.first_name || ''}
+                onChange={e => setEditForm(f => ({ ...f, first_name: e.target.value }))} />
+            </label>
+            <label className="leads-add-label">Last name
+              <input className="search-input" value={editForm.last_name || ''}
+                onChange={e => setEditForm(f => ({ ...f, last_name: e.target.value }))} />
+            </label>
+            <label className="leads-add-label">Phone
+              <input className="search-input" value={editForm.phone || ''}
+                onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                placeholder="e.g. 214-555-0199" />
+            </label>
+            <label className="leads-add-label">Email
+              <input className="search-input" value={editForm.email || ''}
+                onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="email@example.com" />
+            </label>
+          </div>
+          <label className="leads-add-label" style={{ marginBottom: 12 }}>Notes
+            <textarea className="search-input" rows={2} value={editForm.notes || ''}
+              onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+              style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }} />
+          </label>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button className="btn btn--primary" onClick={handleSaveEdit} disabled={editSaving}>
+              {editSaving ? 'Saving…' : 'Save changes'}
+            </button>
+            <button className="btn btn--secondary" onClick={() => setShowEdit(false)}>Cancel</button>
+            {editError && <span style={{ color: 'var(--signal-red)', fontSize: 12 }}>{editError}</span>}
+          </div>
+        </section>
+      )}
 
       {assignmentError && <div className="compose-error">{assignmentError}</div>}
 

@@ -80,6 +80,7 @@
 .uc-stats {
   display: flex; gap: 16px;
   background: var(--surface-2); border-radius: 8px; padding: 10px 14px;
+  margin-top: auto;
 }
 .uc-stat { display: flex; flex-direction: column; gap: 1px; }
 .uc-stat-n { font-size: 18px; font-weight: 700; color: var(--text-primary); line-height: 1; }

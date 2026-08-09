@@ -242,6 +242,43 @@
   border-bottom: none;
 }
 
+.provision-orgs-row:hover td {
+  background: rgba(47, 182, 255, 0.06);
+}
+
+/* Modal styles (shared with Users page) */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 20px;
+}
+.modal-box {
+  background: var(--surface-1, #161b27); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 16px; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.modal-header h3 { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.modal-close { background: none; border: none; color: rgba(255,255,255,0.4); font-size: 18px; cursor: pointer; padding: 4px; }
+.modal-close:hover { color: #fff; }
+.modal-body { padding: 20px 24px 24px; }
+.modal-form { display: flex; flex-direction: column; gap: 14px; }
+.modal-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.6); }
+.modal-form input, .modal-form select {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; padding: 9px 12px; color: var(--text-primary, #e8eaf0); font-size: 14px;
+}
+.modal-form input:focus, .modal-form select:focus { outline: none; border-color: #2fb6ff; }
+.form-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); border-radius: 8px; padding: 10px 14px; color: #f87171; font-size: 13px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+.btn { border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; }
+.btn--primary { background: #2fb6ff; color: #fff; border-color: #2fb6ff; }
+.btn--primary:hover { filter: brightness(1.1); }
+.btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn--secondary { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.1); }
+.btn--secondary:hover { border-color: #2fb6ff; color: #fff; }
+
 .org-name {
   font-weight: 600;
 }
