@@ -25,6 +25,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
   { to: '/crm', label: 'CRM Integration', icon: 'link' },
   { to: '/tier-definitions', label: 'Tier Config', icon: 'layers' },
+  { to: '/10dlc', label: 'A2P 10DLC', icon: 'shield-check' },
   { to: '/org-settings', label: 'Branding & Settings', icon: 'settings' },
 ]
 

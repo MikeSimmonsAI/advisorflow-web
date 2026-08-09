@@ -31,6 +31,7 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import CRMIntegration from './pages/CRMIntegration'
 import TierDefinitions from './pages/TierDefinitions'
+import DLCRegistration from './pages/DLCRegistration'
 import { getCurrentUser } from './api/client'
 
 function isAuthenticated() {
@@ -99,6 +100,7 @@ export default function App() {
         <Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />
         <Route path="/crm" element={<ProtectedRoute requireAdmin><CRMIntegration /></ProtectedRoute>} />
         <Route path="/tier-definitions" element={<ProtectedRoute requireAdmin><TierDefinitions /></ProtectedRoute>} />
+        <Route path="/10dlc" element={<ProtectedRoute requireAdmin><DLCRegistration /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

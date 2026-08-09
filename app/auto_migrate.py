@@ -100,6 +100,14 @@ COLUMNS_TO_ADD = [
     ("users", "google_oauth_refresh_token_encrypted", "VARCHAR"),
     ("users", "google_calendar_id", "VARCHAR"),
     ("users", "google_calendar_connected", "BOOLEAN DEFAULT FALSE"),
+    # Twilio A2P 10DLC registration state per organization
+    ("organizations", "twilio_messaging_service_sid", "VARCHAR"),
+    ("organizations", "twilio_a2p_brand_sid", "VARCHAR"),
+    ("organizations", "twilio_a2p_brand_status", "VARCHAR"),
+    ("organizations", "twilio_a2p_campaign_sid", "VARCHAR"),
+    ("organizations", "twilio_a2p_campaign_status", "VARCHAR"),
+    ("organizations", "twilio_a2p_campaign_use_case", "VARCHAR"),
+    ("organizations", "twilio_a2p_registered_at", "TIMESTAMP"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes
