@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 import secrets
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from app.deps import get_db, require_admin
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry, Organization
