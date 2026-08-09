@@ -1,0 +1,290 @@
+.org-manager {
+  padding: 24px;
+  max-width: 1200px;
+}
+
+.org-manager-loading,
+.org-manager-error,
+.org-manager-empty {
+  padding: 48px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.org-manager-error { color: var(--signal-red, #f55); }
+
+.org-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+
+.org-manager-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.org-manager-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.org-manager-search {
+  padding: 9px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  min-width: 240px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.org-manager-search:focus { border-color: var(--signal-blue); }
+
+/* Grid */
+.org-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+/* Card */
+.org-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.org-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--glow-blue-sm);
+}
+.org-card--inactive {
+  opacity: 0.6;
+}
+
+.org-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.org-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.org-card-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.org-card-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Badges */
+.org-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.org-badge--plan { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.org-badge--trial { background: rgba(120,120,120,0.12); color: var(--text-secondary); }
+.org-badge--standard { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.org-badge--enterprise { background: rgba(120,220,100,0.12); color: #5ce87c; }
+.org-badge--industry { background: rgba(255,200,80,0.1); color: #c8a020; }
+.org-badge--inactive { background: rgba(240,80,80,0.12); color: #f55; }
+.org-badge--warn { background: rgba(255,170,0,0.12); color: #fa0; }
+
+/* Stats row */
+.org-card-stats {
+  display: flex;
+  gap: 20px;
+}
+.org-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.org-stat-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.org-stat-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.org-card-slug {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+/* Actions row */
+.org-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.org-expand-toggle {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+.org-expand-toggle:hover { color: var(--signal-blue); }
+
+.org-enter-btn {
+  padding: 7px 14px;
+  background: var(--signal-blue);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.org-enter-btn:hover { opacity: 0.85; }
+
+/* User list */
+.org-user-list {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.org-user-empty {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 8px 0;
+}
+
+.org-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.org-user-row--inactive { opacity: 0.5; }
+
+.org-user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--signal-blue-dim);
+  color: var(--signal-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.org-user-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.org-user-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.org-user-email {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.org-user-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.role-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.role-tag--advisor { background: rgba(80,180,255,0.1); color: var(--signal-blue); }
+.role-tag--org_admin { background: rgba(120,220,100,0.1); color: #5ce87c; }
+.role-tag--super_admin { background: rgba(255,180,50,0.12); color: #fa0; }
+
+/* Org context banner (rendered in Layout) */
+.org-context-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: rgba(255, 170, 0, 0.1);
+  border-bottom: 1px solid rgba(255, 170, 0, 0.3);
+  font-size: 0.85rem;
+  color: #c89000;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.org-context-banner strong { color: #e0a800; }
+.org-context-exit {
+  padding: 4px 12px;
+  border: 1px solid rgba(255,170,0,0.5);
+  border-radius: 6px;
+  background: transparent;
+  color: #c89000;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.org-context-exit:hover { background: rgba(255,170,0,0.15); }

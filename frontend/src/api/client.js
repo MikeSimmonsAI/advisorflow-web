@@ -16,6 +16,8 @@ async function request(path, options = {}) {
   const token = getToken()
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = `Bearer ${token}`
+  const orgCtx = getOrgContext()
+  if (orgCtx) headers['X-Org-Override'] = orgCtx.orgId
   if (!(options.body instanceof FormData) && options.body) {
     headers['Content-Type'] = 'application/json'
   }
@@ -150,4 +152,25 @@ function hexToRgba(hex, alpha) {
   const g = parseInt(h.substring(2, 4), 16)
   const b = parseInt(h.substring(4, 6), 16)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+// ── Org Context (super admin only) ───────────────────────────────────────────
+// Lets the super admin "enter" any org's context and see their data.
+// The stored orgId is sent as X-Org-Override on every API request; deps.py
+// reads this header and safely overrides the user's organization_id for
+// that request only (via db.expunge + in-memory mutation, no DB write).
+
+const ORG_CONTEXT_KEY = 'bb_org_context'
+
+export function setOrgContext(orgId, orgName) {
+  localStorage.setItem(ORG_CONTEXT_KEY, JSON.stringify({ orgId, orgName }))
+}
+
+export function getOrgContext() {
+  const raw = localStorage.getItem(ORG_CONTEXT_KEY)
+  return raw ? JSON.parse(raw) : null
+}
+
+export function clearOrgContext() {
+  localStorage.removeItem(ORG_CONTEXT_KEY)
 }

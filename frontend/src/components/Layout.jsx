@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding } from '../api/client'
+import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext } from '../api/client'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import './Layout.css'
@@ -37,6 +37,7 @@ const SUPER_ADMIN_NAV_ITEMS = [
   { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
   { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
   { to: '/audit-log', label: 'Audit Log', icon: 'activity' },
+  { to: '/orgs', label: 'Org Manager', icon: 'building' },
 ]
 
 function Icon({ name }) {
@@ -62,6 +63,7 @@ function Icon({ name }) {
     sun: <><circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></>,
     moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />,
     link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
+    building: <><rect x="2" y="7" width="20" height="15" rx="1" /><line x1="16" y1="22" x2="16" y2="7" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M7 22v-5h4v5" /><polyline points="2 7 2 5 22 5 22 7" /></>,
     layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
   }
   return (
@@ -117,6 +119,13 @@ export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   // Super admin always sees default BookaBoost branding — never a client org's branding
   const isSuperAdmin = user?.role === 'super_admin'
+  const [orgContext, setOrgCtx] = useState(() => isSuperAdmin ? getOrgContext() : null)
+
+  function handleExitOrg() {
+    clearOrgContext()
+    setOrgCtx(null)
+    window.location.href = '/'
+  }
   const [branding, setBranding] = useState(() => isSuperAdmin ? null : getBranding())
 
   useEffect(() => {
@@ -212,6 +221,12 @@ export default function Layout({ children }) {
             <NotificationBell />
           </div>
         </header>
+        {orgContext && (
+          <div className="org-context-banner">
+            <span>👁 Viewing as <strong>{orgContext.orgName}</strong> — all data is scoped to this org</span>
+            <button type="button" className="org-context-exit" onClick={handleExitOrg}>Exit Org View</button>
+          </div>
+        )}
         <main className="main-content">{children}</main>
       </div>
     </div>

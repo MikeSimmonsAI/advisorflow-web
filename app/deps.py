@@ -3,13 +3,13 @@ Shared FastAPI dependencies: DB session injection and auth guard.
 """
 
 import os
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.services.auth_service import decode_access_token
-from app.models.models import User
+from app.models.models import User, Organization
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./advisorflow.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
@@ -26,7 +26,7 @@ def get_db():
         db.close()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     try:
         payload = decode_access_token(token)
     except ValueError as e:
@@ -35,6 +35,20 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.id == payload["sub"]).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    # Super admin context override: allows the platform owner to "enter" any
+    # org's data without logging in as that org's user.
+    # expunge() detaches the user object from SQLAlchemy's session BEFORE we
+    # mutate organization_id, so the change is never tracked as a pending DB
+    # write - the real row in the users table stays untouched.
+    if user.role == "super_admin":
+        org_override = request.headers.get("X-Org-Override")
+        if org_override:
+            target_org = db.query(Organization).filter(Organization.id == org_override).first()
+            if target_org:
+                db.expunge(user)
+                user.organization_id = org_override
+
     return user
 
 

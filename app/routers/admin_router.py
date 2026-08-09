@@ -1658,3 +1658,42 @@ def seed_demo_data(
         "outcomes": outcome_count,
         "advisors_created": max(0, 5 - len(existing_advisors)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Org list — super admin only. Used by OrgManager.jsx to display all orgs
+# with user counts. Org-admin-scoped data is handled by all other /admin/*
+# endpoints via the standard require_admin filter on organization_id.
+# ---------------------------------------------------------------------------
+
+@router.get("/orgs")
+def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(require_super_admin)):
+    """Returns all organizations with user counts. Super admin only."""
+    from sqlalchemy import func as sqlfunc
+    orgs = db.query(Organization).order_by(Organization.name.asc()).all()
+    org_ids = [o.id for o in orgs]
+
+    user_counts = {}
+    if org_ids:
+        rows = (
+            db.query(User.organization_id, sqlfunc.count(User.id).label("cnt"))
+            .filter(User.organization_id.in_(org_ids))
+            .group_by(User.organization_id)
+            .all()
+        )
+        user_counts = {row.organization_id: row.cnt for row in rows}
+
+    return [
+        {
+            "id": o.id,
+            "name": o.name,
+            "slug": o.slug,
+            "plan": o.plan if o.plan else None,
+            "industry": o.industry if o.industry else None,
+            "is_active": o.is_active,
+            "brand_name": o.brand_name,
+            "created_at": o.created_at,
+            "user_count": user_counts.get(o.id, 0),
+        }
+        for o in orgs
+    ]
