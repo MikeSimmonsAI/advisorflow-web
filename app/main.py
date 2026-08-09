@@ -35,6 +35,7 @@ from app.routers.tier_definitions_router import router as tier_definitions_route
 from app.routers.dlc_router import router as dlc_router
 from app.routers.case_file_router import router as case_file_router
 from app.routers.social_webhooks_router import router as social_webhooks_router
+from app.routers.fiber_intake_router import router as fiber_intake_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -266,6 +267,7 @@ app.include_router(tier_definitions_router)
 app.include_router(dlc_router)
 app.include_router(case_file_router)
 app.include_router(social_webhooks_router)
+app.include_router(fiber_intake_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

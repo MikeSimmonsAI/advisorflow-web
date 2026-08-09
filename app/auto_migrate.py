@@ -117,6 +117,9 @@ COLUMNS_TO_ADD = [
     ("organizations", "meta_page_access_token", "VARCHAR"),
     ("organizations", "meta_webhook_verify_token", "VARCHAR"),
     ("organizations", "tiktok_webhook_secret", "VARCHAR"),
+    # Fiber + generic intake form — service address and JSON blob for industry-specific fields
+    ("leads", "service_address", "VARCHAR"),
+    ("leads", "extra_data", "TEXT"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

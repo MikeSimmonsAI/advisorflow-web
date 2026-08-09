@@ -57,6 +57,14 @@ DEFAULT_TIERS = {
         {"value": "tier_3", "label": "Tier 3", "color": "green", "description": ""},
         {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
     ],
+    "fiber": [
+        {"value": "prospect", "label": "Prospect", "color": "blue", "description": "New inquiry, not yet contacted"},
+        {"value": "quoted", "label": "Quoted", "color": "amber", "description": "Service options presented"},
+        {"value": "scheduled_install", "label": "Scheduled Install", "color": "orange", "description": "Install date set"},
+        {"value": "active_customer", "label": "Active Customer", "color": "green", "description": "Service live"},
+        {"value": "churned", "label": "Churned", "color": "red", "description": "Cancelled or lost"},
+        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
+    ],
 }
 
 
