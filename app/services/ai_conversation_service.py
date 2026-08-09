@@ -654,14 +654,18 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
 
 Their message: "{reply_body}"
 
+IMPORTANT CONTEXT: This person already has an appointment booked. Do NOT ask them to schedule or book anything.
+
 Your job:
 - Answer their question warmly and helpfully
 - If they ask who will be in the meeting, say it will be you ({advisor_name}) — a personal, one-on-one conversation
+- If they ask if someone else (mom, spouse, family member) can come, say absolutely yes, they are welcome to bring anyone they'd like
 - If they ask what to bring, suggest any relevant documents (existing policies, contracts, paperwork) and say there's no pressure — just come as you are
-- Confirm you're looking forward to meeting them
+- Close warmly, e.g. "Looking forward to seeing you!" or "Can't wait to meet you both!" — NEVER end by asking to schedule or asking if they'd like to set a time
 - Keep it SHORT (3-5 sentences max) and conversational
 - Do NOT use [Your Name] or any placeholder — use "{advisor_name}" directly
 - Do NOT include a sign-off/closing — the system adds one automatically
+- Do NOT ask them to book, schedule, or set up a time — they are already booked
 
 Respond ONLY with valid JSON, no markdown:
 {{"subject": "Re: Your Upcoming Appointment", "body": "..."}}"""

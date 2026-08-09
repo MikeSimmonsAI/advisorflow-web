@@ -72,6 +72,11 @@ COLUMNS_TO_ADD = [
     ("users", "booking_page_url", "VARCHAR"),
     ("organizations", "org_address", "VARCHAR"),
     ("organizations", "org_phone", "VARCHAR"),
+    # Org social links
+    ("organizations", "facebook_url", "VARCHAR"),
+    ("organizations", "google_review_url", "VARCHAR"),
+    ("organizations", "instagram_url", "VARCHAR"),
+    ("organizations", "linkedin_url", "VARCHAR"),
     # Lead physical address
     ("leads", "street_address", "VARCHAR"),
     ("leads", "city", "VARCHAR"),

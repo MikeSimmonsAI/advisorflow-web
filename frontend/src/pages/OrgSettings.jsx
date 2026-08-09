@@ -52,6 +52,14 @@ export default function OrgSettings() {
   const [tiers, setTiers] = useState([])
   const [savingTiers, setSavingTiers] = useState(false)
 
+  // Social links
+  const [facebookUrl, setFacebookUrl] = useState('')
+  const [googleReviewUrl, setGoogleReviewUrl] = useState('')
+  const [instagramUrl, setInstagramUrl] = useState('')
+  const [linkedinUrl, setLinkedinUrl] = useState('')
+  const [savingSocial, setSavingSocial] = useState(false)
+  const [socialSaved, setSocialSaved] = useState(false)
+
   // Load all orgs for super admin selector
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -81,6 +89,10 @@ export default function OrgSettings() {
         setBrandColorAccent(data.brand_color_accent || '#1ef0a8')
         setIndustry(data.industry || 'funeral')
         setTiers(data.tier_config || [])
+        setFacebookUrl(data.facebook_url || '')
+        setGoogleReviewUrl(data.google_review_url || '')
+        setInstagramUrl(data.instagram_url || '')
+        setLinkedinUrl(data.linkedin_url || '')
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -132,6 +144,26 @@ export default function OrgSettings() {
       setError(err.message)
     } finally {
       setSavingTiers(false)
+    }
+  }
+
+  async function saveSocialLinks() {
+    setSavingSocial(true)
+    setSocialSaved(false)
+    setError('')
+    try {
+      await api.patch(`/org-settings/social-links${orgQuery}`, {
+        facebook_url: facebookUrl || null,
+        google_review_url: googleReviewUrl || null,
+        instagram_url: instagramUrl || null,
+        linkedin_url: linkedinUrl || null,
+      })
+      setSocialSaved(true)
+      setTimeout(() => setSocialSaved(false), 3000)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingSocial(false)
     }
   }
 
@@ -327,6 +359,33 @@ export default function OrgSettings() {
               {savingTiers ? 'Saving…' : 'Save tier configuration'}
             </button>
           </section>
+          {/* ── Social & Review Links ── */}
+          <section className="panel os-section" style={{ marginTop: 16 }}>
+            <div className="panel-header"><h2 className="panel-title">📣 Social &amp; Review Links</h2></div>
+            <p className="os-hint">These links appear on the post-appointment survey page sent to leads.</p>
+
+            <label className="os-label">
+              Facebook
+              <input className="os-input" value={facebookUrl} onChange={(e) => setFacebookUrl(e.target.value)} placeholder="https://facebook.com/yourpage" />
+            </label>
+            <label className="os-label">
+              Google Review
+              <input className="os-input" value={googleReviewUrl} onChange={(e) => setGoogleReviewUrl(e.target.value)} placeholder="https://g.page/r/..." />
+            </label>
+            <label className="os-label">
+              Instagram
+              <input className="os-input" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} placeholder="https://instagram.com/yourhandle" />
+            </label>
+            <label className="os-label">
+              LinkedIn
+              <input className="os-input" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/company/..." />
+            </label>
+
+            <button className="btn btn--primary" onClick={saveSocialLinks} disabled={savingSocial} style={{ marginTop: 8 }}>
+              {savingSocial ? 'Saving…' : socialSaved ? '✓ Saved' : 'Save social links'}
+            </button>
+          </section>
+
         {/* ── Demo Data Seed (super admin only) ── */}
         {isSuperAdmin && selectedOrgId && (
           <section className="panel os-section" style={{ marginTop: 16, borderColor: 'rgba(217,119,6,0.3)' }}>

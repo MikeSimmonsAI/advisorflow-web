@@ -52,30 +52,32 @@ def _already_submitted(db: Session, followup_id: str) -> bool:
     ).first() is not None
 
 
-def _social_links_html(advisor: User) -> str:
-    """Build social links row for the survey page."""
+def _social_links_html(org: Organization) -> str:
+    """Build social links row using org-level social URLs."""
+    if not org:
+        return ""
     links = []
-    if getattr(advisor, "facebook_url", None):
+    if getattr(org, "facebook_url", None):
         links.append(
-            f'<a href="{advisor.facebook_url}" target="_blank" style="'
+            f'<a href="{org.facebook_url}" target="_blank" style="'
             'display:inline-block;margin:0 8px;padding:10px 20px;background:#1877f2;'
             'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">👍 Facebook</a>'
         )
-    if getattr(advisor, "google_review_url", None):
+    if getattr(org, "google_review_url", None):
         links.append(
-            f'<a href="{advisor.google_review_url}" target="_blank" style="'
+            f'<a href="{org.google_review_url}" target="_blank" style="'
             'display:inline-block;margin:0 8px;padding:10px 20px;background:#ea4335;'
             'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">⭐ Google Review</a>'
         )
-    if getattr(advisor, "instagram_url", None):
+    if getattr(org, "instagram_url", None):
         links.append(
-            f'<a href="{advisor.instagram_url}" target="_blank" style="'
+            f'<a href="{org.instagram_url}" target="_blank" style="'
             'display:inline-block;margin:0 8px;padding:10px 20px;background:#e1306c;'
             'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">📸 Instagram</a>'
         )
-    if getattr(advisor, "linkedin_url", None):
+    if getattr(org, "linkedin_url", None):
         links.append(
-            f'<a href="{advisor.linkedin_url}" target="_blank" style="'
+            f'<a href="{org.linkedin_url}" target="_blank" style="'
             'display:inline-block;margin:0 8px;padding:10px 20px;background:#0a66c2;'
             'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">💼 LinkedIn</a>'
         )
@@ -99,7 +101,7 @@ def get_survey_page(token: str, db: Session = Depends(get_db)):
     advisor_name = advisor.full_name if advisor else "Your Advisor"
     first_name = lead.first_name if lead else "there"
     primary_color = (org.brand_color_primary if org else None) or "#2fb6ff"
-    social_html = _social_links_html(advisor) if advisor else ""
+    social_html = _social_links_html(org)
 
     if already_done:
         body_content = f"""

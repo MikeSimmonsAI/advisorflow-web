@@ -77,6 +77,13 @@ def _resolve_org(current_user: User, org_id: Optional[str], db: Session) -> Orga
     return org
 
 
+class SocialLinksUpdate(BaseModel):
+    facebook_url: Optional[str] = None
+    google_review_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
 class BrandingUpdate(BaseModel):
     brand_name: Optional[str] = None
     brand_logo_url: Optional[str] = None
@@ -120,6 +127,10 @@ def get_org_settings(
         "brand_color_primary": org.brand_color_primary,
         "brand_color_accent": org.brand_color_accent,
         "tier_config": tier_config,
+        "facebook_url": getattr(org, "facebook_url", None),
+        "google_review_url": getattr(org, "google_review_url", None),
+        "instagram_url": getattr(org, "instagram_url", None),
+        "linkedin_url": getattr(org, "linkedin_url", None),
     }
 
 
@@ -169,3 +180,20 @@ def update_tier_config(
     org.tier_config = json.dumps(req.tiers)
     db.commit()
     return {"updated": True, "tiers": req.tiers}
+
+
+@router.patch("/social-links")
+def update_social_links(
+    req: SocialLinksUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Save organization-level social media / review page URLs."""
+    org = _resolve_org(current_user, org_id, db)
+    org.facebook_url = req.facebook_url or None
+    org.google_review_url = req.google_review_url or None
+    org.instagram_url = req.instagram_url or None
+    org.linkedin_url = req.linkedin_url or None
+    db.commit()
+    return {"updated": True}

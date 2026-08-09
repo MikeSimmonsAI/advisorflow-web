@@ -149,6 +149,12 @@ class Organization(Base):
     org_address = Column(String, nullable=True)
     org_phone = Column(String, nullable=True)
 
+    # Social media links — shown in post-appointment survey
+    facebook_url = Column(String, nullable=True)
+    google_review_url = Column(String, nullable=True)
+    instagram_url = Column(String, nullable=True)
+    linkedin_url = Column(String, nullable=True)
+
     # Industry-agnostic tier config — JSON array of tier definitions
     # e.g. [{"value": "pre_need", "label": "Pre-Need", "color": "blue"}, ...]
     tier_config = Column(Text, nullable=True)
