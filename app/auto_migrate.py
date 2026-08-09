@@ -87,6 +87,15 @@ COLUMNS_TO_ADD = [
     ("users", "google_review_url", "VARCHAR"),
     ("users", "instagram_url", "VARCHAR"),
     ("users", "linkedin_url", "VARCHAR"),
+    # Campaign stats — added for Campaign Builder overhaul so history shows results
+    ("campaigns", "purpose", "VARCHAR"),
+    ("campaigns", "tone", "VARCHAR"),
+    ("campaigns", "sent_count", "INTEGER DEFAULT 0"),
+    ("campaigns", "skipped_count", "INTEGER DEFAULT 0"),
+    ("campaigns", "error_count", "INTEGER DEFAULT 0"),
+    ("campaigns", "status", "VARCHAR DEFAULT 'draft'"),
+    ("campaigns", "ai_direction", "TEXT"),
+    ("campaigns", "sent_at", "TIMESTAMP"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

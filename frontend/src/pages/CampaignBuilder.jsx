@@ -7,6 +7,13 @@ import './CampaignBuilder.css'
 
 const STEP_LABELS = ['Build list', 'Write message', 'Review & send']
 
+const TONES = [
+  { value: 'cold', label: '❄️ Cold', desc: 'Soft intro, low pressure' },
+  { value: 'warm', label: '☀️ Warm', desc: 'Friendly, invite a conversation' },
+  { value: 'hot', label: '🔥 Direct', desc: 'Confident, clear ask' },
+  { value: 'urgent', label: '⚡ Urgent', desc: 'Brief, time-sensitive' },
+]
+
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'new', label: 'New' },
@@ -16,11 +23,8 @@ const STATUS_OPTIONS = [
   { value: 'booked', label: 'Booked' },
 ]
 
-// Loaded dynamically from org settings — see useEffect
-const DEFAULT_TIER_OPTIONS = [{ value: '', label: 'All tiers' }]
-
 const ENGAGEMENT_OPTIONS = [
-  { value: '', label: 'All engagement levels' },
+  { value: '', label: 'All engagement' },
   { value: 'hot', label: '🔥 Hot' },
   { value: 'warm', label: '☀️ Warm' },
   { value: 'cold', label: '❄️ Cold' },
@@ -44,67 +48,102 @@ const EMPTY_FILTERS = {
   lead_type: '',
   engagement_temperature: '',
   contact_history: '',
-  ai_direction: '',
   has_phone: true,
   exclude_dnc: true,
   exclude_duplicates: true,
 }
 
+function previewMessage(template, advisorName) {
+  return (template || '')
+    .replace(/{first_name}/g, 'Jane')
+    .replace(/{advisor_name}/g, advisorName || 'your advisor')
+    .replace(/{booking_url}/g, 'https://book.example.com/xyz')
+}
+
 export default function CampaignBuilder() {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
+  const [activeTab, setActiveTab] = useState('builder') // 'builder' | 'history'
 
   // Step 1 — filters
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [advisors, setAdvisors] = useState([])
-  const [tierOptions, setTierOptions] = useState(DEFAULT_TIER_OPTIONS)
-  const [leadTypeOptions, setLeadTypeOptions] = useState([{ value: '', label: 'All lead types' }])
+  const [tierOptions, setTierOptions] = useState([{ value: '', label: 'All tiers' }])
+  const [purposeOptions, setPurposeOptions] = useState([])
   const [previewLeads, setPreviewLeads] = useState([])
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState('')
 
   // Step 2 — message
   const [campaignName, setCampaignName] = useState('')
+  const [purpose, setPurpose] = useState('custom')
+  const [tone, setTone] = useState('warm')
   const [messageText, setMessageText] = useState('')
+  const [aiDirection, setAiDirection] = useState('')
   const [includeBookingLink, setIncludeBookingLink] = useState(true)
-  const [scheduleType, setScheduleType] = useState('now') // 'now' | 'scheduled'
-  const [scheduledAt, setScheduledAt] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [advisorName, setAdvisorName] = useState('')
 
   // Step 3 — send
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState(null)
   const [sendError, setSendError] = useState('')
 
+  // History tab
+  const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+
   useEffect(() => {
+    // Load advisors
     api.get('/admin/users')
-      .then(users => setAdvisors(users.filter(u => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))))
+      .then(users => {
+        const active = users.filter(u => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))
+        setAdvisors(active)
+      })
       .catch(() => {})
-    api.get('/org-settings/')
-      .then(orgSettings => {
-        if (orgSettings?.tier_config?.length) {
+
+    // Load tiers from TierDefinitions (not org-settings)
+    api.get('/tier-definitions')
+      .then(tiers => {
+        if (Array.isArray(tiers) && tiers.length) {
           setTierOptions([
             { value: '', label: 'All tiers' },
-            ...orgSettings.tier_config.map(t => ({ value: t.value, label: t.label })),
+            ...tiers.filter(t => t.is_active).sort((a, b) => a.sort_order - b.sort_order).map(t => ({
+              value: t.tier_key,
+              label: t.tier_label,
+            })),
           ])
         }
       })
       .catch(() => {})
 
+    // Load campaign purposes for this org's industry
     api.get('/campaigns/purposes')
       .then(purposes => {
-        if (Array.isArray(purposes) && purposes.length) {
-          setLeadTypeOptions([
-            { value: '', label: 'All lead types' },
-            ...purposes.map(p => ({ value: p.value ?? p, label: p.label ?? p })),
-          ])
+        if (Array.isArray(purposes)) {
+          setPurposeOptions(purposes)
+          if (purposes.length) setPurpose(purposes[0].value)
         }
       })
       .catch(() => {})
+
+    // Get advisor name for message preview
+    const raw = localStorage.getItem('bookaboost_user')
+    if (raw) {
+      try { setAdvisorName(JSON.parse(raw).full_name || '') } catch {}
+    }
   }, [])
+
+  function loadHistory() {
+    setHistoryLoading(true)
+    api.get('/campaigns/history')
+      .then(data => setHistory(data || []))
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false))
+  }
 
   function setFilter(key, value) {
     setFilters(f => ({ ...f, [key]: value }))
-    // Reset preview when filters change
     setPreviewLeads([])
     setPreviewError('')
   }
@@ -136,19 +175,36 @@ export default function CampaignBuilder() {
     }
   }
 
+  async function handleGenerateMessage() {
+    setGenerating(true)
+    try {
+      const result = await api.post('/campaigns/generate-message', {
+        purpose,
+        tone,
+        lead_type: filters.lead_type || null,
+        ai_direction: aiDirection || null,
+      })
+      if (result.message) setMessageText(result.message)
+    } catch (err) {
+      setSendError('AI generation failed: ' + (err.message || 'unknown error'))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   async function handleSend() {
     if (!messageText.trim()) return
     setSending(true)
     setSendError('')
     setSendResult(null)
     try {
-      const payload = {
+      const result = await api.post('/campaigns/builder/send', {
         name: campaignName.trim() || `Campaign ${new Date().toLocaleDateString()}`,
+        purpose,
+        tone,
         message_template: messageText.trim(),
         include_booking_link: includeBookingLink,
         lead_ids: previewLeads.map(l => l.id),
-        schedule_type: scheduleType,
-        scheduled_at: scheduleType === 'scheduled' ? scheduledAt : null,
         filters: {
           tier: filters.tier || null,
           status: filters.status || null,
@@ -163,9 +219,8 @@ export default function CampaignBuilder() {
           engagement_temperature: filters.engagement_temperature || null,
           contact_history: filters.contact_history || null,
         },
-        ai_direction: filters.ai_direction || null,
-      }
-      const result = await api.post('/campaigns/builder/send', payload)
+        ai_direction: aiDirection || null,
+      })
       setSendResult(result)
     } catch (err) {
       setSendError(err.message || 'Campaign send failed.')
@@ -174,9 +229,23 @@ export default function CampaignBuilder() {
     }
   }
 
+  function resetAll() {
+    setStep(0)
+    setFilters(EMPTY_FILTERS)
+    setCampaignName('')
+    setMessageText('')
+    setAiDirection('')
+    setTone('warm')
+    setPreviewLeads([])
+    setSendResult(null)
+    setSendError('')
+    if (purposeOptions.length) setPurpose(purposeOptions[0].value)
+  }
+
   const eligibleCount = previewLeads.length
   const charCount = messageText.length
   const smsSegments = Math.ceil(charCount / 160) || 1
+  const previewText = previewMessage(messageText, advisorName)
 
   return (
     <div className="campaign-page">
@@ -188,409 +257,478 @@ export default function CampaignBuilder() {
         </div>
       </header>
 
-      {/* Step indicator */}
-      <div className="campaign-steps">
-        {STEP_LABELS.map((label, i) => (
-          <div
-            key={i}
-            className={`campaign-step ${i === step ? 'campaign-step--active' : ''} ${i < step ? 'campaign-step--done' : ''}`}
-            onClick={() => i < step && setStep(i)}
-            style={{ cursor: i < step ? 'pointer' : 'default' }}
-          >
-            <div className="campaign-step-num">{i < step ? '✓' : i + 1}</div>
-            <span>{label}</span>
-          </div>
-        ))}
-        <div className="campaign-step-line" />
+      {/* Tab bar */}
+      <div className="asq-tabs" style={{ marginBottom: 20 }}>
+        <button
+          className={`tab ${activeTab === 'builder' ? 'tab--active' : ''}`}
+          onClick={() => setActiveTab('builder')}
+        >
+          New Campaign
+        </button>
+        <button
+          className={`tab ${activeTab === 'history' ? 'tab--active' : ''}`}
+          onClick={() => { setActiveTab('history'); if (!history.length) loadHistory() }}
+        >
+          History
+        </button>
       </div>
 
-      {/* ── Step 1: Build list ── */}
-      {step === 0 && (
-        <div className="campaign-body">
-          <section className="panel campaign-filter-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">Filter leads</h2>
-              <button className="btn btn--secondary" onClick={() => setFilters(EMPTY_FILTERS)}>Reset</button>
-            </div>
-
-            <div className="campaign-filter-grid">
-              <label className="settings-label">
-                Tier
-                <select className="filter-select" value={filters.tier} onChange={e => setFilter('tier', e.target.value)}>
-                  {tierOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
-
-              <label className="settings-label">
-                Status
-                <select className="filter-select" value={filters.status} onChange={e => setFilter('status', e.target.value)}>
-                  {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
-
-              <label className="settings-label">
-                Advisor
-                <select className="filter-select" value={filters.assigned_to_id} onChange={e => setFilter('assigned_to_id', e.target.value)}>
-                  <option value="">All advisors</option>
-                  <option value="unassigned">Unassigned only</option>
-                  {advisors.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
-                </select>
-              </label>
-
-              <label className="settings-label">
-                No contact for (days)
-                <input
-                  className="settings-input"
-                  type="number"
-                  min="1"
-                  placeholder="e.g. 30"
-                  value={filters.no_contact_days}
-                  onChange={e => setFilter('no_contact_days', e.target.value)}
-                />
-              </label>
-
-              <label className="settings-label">
-                Source year from
-                <input
-                  className="settings-input"
-                  type="number"
-                  placeholder="e.g. 2018"
-                  value={filters.source_year_min}
-                  onChange={e => setFilter('source_year_min', e.target.value)}
-                />
-              </label>
-
-              <label className="settings-label">
-                Source year to
-                <input
-                  className="settings-input"
-                  type="number"
-                  placeholder="e.g. 2022"
-                  value={filters.source_year_max}
-                  onChange={e => setFilter('source_year_max', e.target.value)}
-                />
-              </label>
-
-              <label className="settings-label">
-                Lead type
-                <select className="filter-select" value={filters.lead_type} onChange={e => setFilter('lead_type', e.target.value)}>
-                  {leadTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
-
-              <label className="settings-label">
-                Engagement level
-                <select className="filter-select" value={filters.engagement_temperature} onChange={e => setFilter('engagement_temperature', e.target.value)}>
-                  {ENGAGEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
-
-              <label className="settings-label">
-                Contact history
-                <select className="filter-select" value={filters.contact_history} onChange={e => setFilter('contact_history', e.target.value)}>
-                  {CONTACT_HISTORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
-            </div>
-
-            <div className="campaign-checkbox-row">
-              <label className="compose-checkbox">
-                <input type="checkbox" checked={filters.has_phone} onChange={e => setFilter('has_phone', e.target.checked)} />
-                Has phone number
-              </label>
-              <label className="compose-checkbox">
-                <input type="checkbox" checked={filters.exclude_dnc} onChange={e => setFilter('exclude_dnc', e.target.checked)} />
-                Exclude DNC
-              </label>
-              <label className="compose-checkbox">
-                <input type="checkbox" checked={filters.exclude_duplicates} onChange={e => setFilter('exclude_duplicates', e.target.checked)} />
-                Exclude duplicates
-              </label>
-            </div>
-
-            <div className="campaign-preview-actions">
-              <button className="btn btn--primary" onClick={handlePreview} disabled={previewing}>
-                {previewing ? 'Loading…' : 'Preview matching leads'}
-              </button>
-              {previewLeads.length > 0 && (
-                <span className="campaign-match-count">
-                  <strong>{eligibleCount}</strong> leads match
-                </span>
-              )}
-            </div>
-
-            {previewError && <div className="compose-error" style={{ marginTop: 8 }}>{previewError}</div>}
-          </section>
-
-          {/* Preview table */}
-          {previewLeads.length > 0 && (
-            <section className="panel">
-              <div className="panel-header">
-                <h2 className="panel-title">Matching leads</h2>
-                <span className="panel-count mono">{eligibleCount} total</span>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Phone</th>
-                    <th>Tier</th>
-                    <th>Status</th>
-                    <th>Advisor</th>
-                    <th>Source year</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewLeads.slice(0, 100).map(lead => (
-                    <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} style={{ cursor: 'pointer' }}>
-                      <td>{lead.first_name} {lead.last_name}</td>
-                      <td className="mono">{lead.phone || '–'}</td>
-                      <td><TierBadge tier={lead.tier} /></td>
-                      <td><StatusBadge status={lead.status} /></td>
-                      <td style={{ fontSize: 12 }}>{lead.assigned_to_name || '–'}</td>
-                      <td className="mono" style={{ fontSize: 12 }}>{lead.source_year || '–'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {eligibleCount > 100 && (
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '8px 0', textAlign: 'center' }}>
-                  Showing first 100 of {eligibleCount} — all {eligibleCount} will be included in the campaign.
-                </p>
-              )}
-              <div style={{ padding: '16px 0 0', display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="btn btn--primary" onClick={() => setStep(1)} disabled={eligibleCount === 0}>
-                  Next: Write message →
-                </button>
-              </div>
-            </section>
-          )}
-        </div>
-      )}
-
-      {/* ── Step 2: Write message ── */}
-      {step === 1 && (
-        <div className="campaign-body">
+      {/* ── History tab ── */}
+      {activeTab === 'history' && (
+        historyLoading ? (
+          <div className="empty-state">Loading history…</div>
+        ) : history.length === 0 ? (
+          <div className="panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            No campaigns sent yet. Run your first campaign to see results here.
+          </div>
+        ) : (
           <section className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">Campaign message</h2>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <label className="settings-label">
-                Campaign name (internal only)
-                <input
-                  className="settings-input"
-                  value={campaignName}
-                  onChange={e => setCampaignName(e.target.value)}
-                  placeholder={`Campaign ${new Date().toLocaleDateString()}`}
-                />
-              </label>
-
-              <label className="settings-label">
-                AI Direction (optional)
-                <input
-                  className="settings-input"
-                  value={filters.ai_direction}
-                  onChange={e => setFilter('ai_direction', e.target.value)}
-                  placeholder="e.g. This is a file check campaign — ask if they still need pre-need planning"
-                />
-                <span className="settings-help" style={{ fontSize: 11 }}>
-                  Tell the AI what this campaign is about. The more specific, the better the message.
-                </span>
-              </label>
-
-              <label className="settings-label">
-                Message
-                <textarea
-                  className="compose-textarea"
-                  rows={6}
-                  value={messageText}
-                  onChange={e => setMessageText(e.target.value)}
-                  placeholder="Hi {first_name}, this is {advisor_name}. I wanted to reach out personally…"
-                />
-                <div className="campaign-char-count">
-                  {charCount} chars · {smsSegments} SMS segment{smsSegments !== 1 ? 's' : ''}
-                  {charCount > 160 && <span className="campaign-char-warn"> · Keep under 160 for single segment</span>}
-                </div>
-              </label>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  className="btn btn--secondary"
-                  style={{ fontSize: 13 }}
-                  onClick={async () => {
-                    try {
-                      const result = await api.post('/campaigns/generate-message', {
-                        purpose: filters.lead_type || 'custom',
-                        tone: filters.engagement_temperature === 'hot' ? 'direct' : filters.engagement_temperature === 'cold' ? 'soft' : 'warm',
-                        lead_type: filters.lead_type || null,
-                        ai_direction: filters.ai_direction || null,
-                      })
-                      if (result.message) setMessageText(result.message)
-                    } catch (err) {
-                      alert('AI generation failed: ' + err.message)
-                    }
-                  }}
-                >
-                  ✨ AI Write Message
-                </button>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', alignSelf: 'center' }}>
-                  Uses your lead type and direction above
-                </span>
-              </div>
-
-              <p className="settings-help">
-                Placeholders: <code>&#123;first_name&#125;</code>, <code>&#123;advisor_name&#125;</code>, <code>&#123;booking_link&#125;</code> — filled in per lead at send time.
-              </p>
-
-              <label className="compose-checkbox">
-                <input type="checkbox" checked={includeBookingLink} onChange={e => setIncludeBookingLink(e.target.checked)} />
-                Append booking link to each message
-              </label>
-
-              <div className="campaign-schedule-row">
-                <label className="compose-checkbox">
-                  <input type="radio" name="schedule" checked={scheduleType === 'now'} onChange={() => setScheduleType('now')} />
-                  Send immediately
-                </label>
-                <label className="compose-checkbox">
-                  <input type="radio" name="schedule" checked={scheduleType === 'scheduled'} onChange={() => setScheduleType('scheduled')} />
-                  Schedule for later
-                </label>
-                {scheduleType === 'scheduled' && (
-                  <input
-                    className="settings-input"
-                    type="datetime-local"
-                    value={scheduledAt}
-                    onChange={e => setScheduledAt(e.target.value)}
-                    style={{ maxWidth: 240 }}
-                  />
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', marginTop: 24 }}>
-              <button className="btn btn--secondary" onClick={() => setStep(0)}>← Back</button>
-              <button
-                className="btn btn--primary"
-                onClick={() => setStep(2)}
-                disabled={!messageText.trim()}
-              >
-                Next: Review & send →
-              </button>
-            </div>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Date</th>
+                  <th>Purpose</th>
+                  <th style={{ textAlign: 'right' }}>Sent</th>
+                  <th style={{ textAlign: 'right' }}>Skipped</th>
+                  <th style={{ textAlign: 'right' }}>Errors</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(c => (
+                  <tr key={c.id}>
+                    <td style={{ fontWeight: 600 }}>{c.name}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {c.sent_at
+                        ? new Date(c.sent_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                        : c.created_at
+                          ? new Date(c.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                          : '—'}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.purpose?.replaceAll('_', ' ') || '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--signal-green)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                      {c.sent_count ?? '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+                      {c.skipped_count ?? '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: c.error_count > 0 ? 'var(--signal-red)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+                      {c.error_count ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </section>
-        </div>
+        )
       )}
 
-      {/* ── Step 3: Review & send ── */}
-      {step === 2 && (
-        <div className="campaign-body">
-          {sendResult ? (
-            <section className="panel campaign-success">
-              <div className="campaign-success-icon">✓</div>
-              <h2>Campaign {scheduleType === 'scheduled' ? 'scheduled' : 'sent'}!</h2>
-              <div className="campaign-result-stats">
-                <div className="campaign-result-stat">
-                  <strong>{sendResult.sent_count ?? sendResult.queued_count ?? eligibleCount}</strong>
-                  <span>{scheduleType === 'scheduled' ? 'Queued' : 'Sent'}</span>
-                </div>
-                {sendResult.skipped_count > 0 && (
-                  <div className="campaign-result-stat">
-                    <strong>{sendResult.skipped_count}</strong>
-                    <span>Skipped</span>
-                  </div>
-                )}
-                {sendResult.failed_count > 0 && (
-                  <div className="campaign-result-stat campaign-result-stat--warn">
-                    <strong>{sendResult.failed_count}</strong>
-                    <span>Failed</span>
-                  </div>
-                )}
+      {/* ── Builder tab ── */}
+      {activeTab === 'builder' && (
+        <>
+          {/* Step indicator */}
+          <div className="campaign-steps">
+            {STEP_LABELS.map((label, i) => (
+              <div
+                key={i}
+                className={`campaign-step ${i === step ? 'campaign-step--active' : ''} ${i < step ? 'campaign-step--done' : ''}`}
+                onClick={() => i < step && setStep(i)}
+                style={{ cursor: i < step ? 'pointer' : 'default' }}
+              >
+                <div className="campaign-step-num">{i < step ? '✓' : i + 1}</div>
+                <span>{label}</span>
               </div>
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
-                <button className="btn btn--secondary" onClick={() => navigate('/leads')}>View leads</button>
-                <button className="btn btn--primary" onClick={() => { setStep(0); setFilters(EMPTY_FILTERS); setMessageText(''); setCampaignName(''); setSendResult(null) }}>
-                  New campaign
-                </button>
-              </div>
-            </section>
-          ) : (
-            <section className="panel">
-              <div className="panel-header">
-                <h2 className="panel-title">Review & confirm</h2>
-              </div>
+            ))}
+            <div className="campaign-step-line" />
+          </div>
 
-              <div className="campaign-review-grid">
-                <div className="campaign-review-card">
-                  <span className="campaign-review-label">Recipients</span>
-                  <strong className="campaign-review-value">{eligibleCount}</strong>
-                  <span className="campaign-review-sub">leads matched your filters</span>
+          {/* ── Step 1: Build list ── */}
+          {step === 0 && (
+            <div className="campaign-body">
+              <section className="panel campaign-filter-panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">Filter leads</h2>
+                  <button className="btn btn--secondary" onClick={() => { setFilters(EMPTY_FILTERS); setPreviewLeads([]) }}>Reset</button>
                 </div>
-                <div className="campaign-review-card">
-                  <span className="campaign-review-label">Message length</span>
-                  <strong className="campaign-review-value">{charCount}</strong>
-                  <span className="campaign-review-sub">{smsSegments} SMS segment{smsSegments !== 1 ? 's' : ''}</span>
-                </div>
-                <div className="campaign-review-card">
-                  <span className="campaign-review-label">Send time</span>
-                  <strong className="campaign-review-value">{scheduleType === 'now' ? 'Now' : 'Scheduled'}</strong>
-                  <span className="campaign-review-sub">{scheduleType === 'scheduled' && scheduledAt ? new Date(scheduledAt).toLocaleString() : scheduleType === 'now' ? 'Immediately on confirm' : 'No time set'}</span>
-                </div>
-                <div className="campaign-review-card">
-                  <span className="campaign-review-label">Booking link</span>
-                  <strong className="campaign-review-value">{includeBookingLink ? 'Yes' : 'No'}</strong>
-                  <span className="campaign-review-sub">appended to each message</span>
-                </div>
-              </div>
 
-              <div className="campaign-review-message">
-                <p className="campaign-review-label">Message preview</p>
-                <div className="campaign-message-preview">
-                  <p>{messageText}</p>
-                  {includeBookingLink && <p style={{ opacity: 0.5, fontSize: 12, marginTop: 8 }}>[booking link appended]</p>}
-                </div>
-              </div>
+                <div className="campaign-filter-grid">
+                  <label className="settings-label">
+                    Tier
+                    <select className="filter-select" value={filters.tier} onChange={e => setFilter('tier', e.target.value)}>
+                      {tierOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
 
-              {/* Filter summary */}
-              <div className="campaign-filter-summary">
-                <p className="campaign-review-label">Filters applied</p>
-                <div className="campaign-filter-tags">
-                  {filters.tier && <span className="campaign-filter-tag">Tier: {filters.tier.replaceAll('_', ' ')}</span>}
-                  {filters.status && <span className="campaign-filter-tag">Status: {filters.status}</span>}
-                  {filters.assigned_to_id && <span className="campaign-filter-tag">Advisor filtered</span>}
-                  {filters.source_year_min && <span className="campaign-filter-tag">Year ≥ {filters.source_year_min}</span>}
-                  {filters.source_year_max && <span className="campaign-filter-tag">Year ≤ {filters.source_year_max}</span>}
-                  {filters.no_contact_days && <span className="campaign-filter-tag">No contact {filters.no_contact_days}+ days</span>}
-                  {filters.exclude_dnc && <span className="campaign-filter-tag">DNC excluded</span>}
-                  {filters.exclude_duplicates && <span className="campaign-filter-tag">Dupes excluded</span>}
-                  {!filters.tier && !filters.status && !filters.assigned_to_id && !filters.source_year_min && !filters.source_year_max && !filters.no_contact_days && (
-                    <span className="campaign-filter-tag">All leads (filtered by checkboxes only)</span>
+                  <label className="settings-label">
+                    Status
+                    <select className="filter-select" value={filters.status} onChange={e => setFilter('status', e.target.value)}>
+                      {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="settings-label">
+                    Engagement level
+                    <select className="filter-select" value={filters.engagement_temperature} onChange={e => setFilter('engagement_temperature', e.target.value)}>
+                      {ENGAGEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="settings-label">
+                    Contact history
+                    <select className="filter-select" value={filters.contact_history} onChange={e => setFilter('contact_history', e.target.value)}>
+                      {CONTACT_HISTORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="settings-label">
+                    Advisor
+                    <select className="filter-select" value={filters.assigned_to_id} onChange={e => setFilter('assigned_to_id', e.target.value)}>
+                      <option value="">All advisors</option>
+                      {advisors.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="settings-label">
+                    No contact for (days)
+                    <input
+                      className="settings-input"
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 30"
+                      value={filters.no_contact_days}
+                      onChange={e => setFilter('no_contact_days', e.target.value)}
+                    />
+                  </label>
+
+                  <label className="settings-label">
+                    Source year from
+                    <input
+                      className="settings-input"
+                      type="number"
+                      placeholder="e.g. 2018"
+                      value={filters.source_year_min}
+                      onChange={e => setFilter('source_year_min', e.target.value)}
+                    />
+                  </label>
+
+                  <label className="settings-label">
+                    Source year to
+                    <input
+                      className="settings-input"
+                      type="number"
+                      placeholder="e.g. 2022"
+                      value={filters.source_year_max}
+                      onChange={e => setFilter('source_year_max', e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="campaign-checkbox-row">
+                  <label className="compose-checkbox">
+                    <input type="checkbox" checked={filters.has_phone} onChange={e => setFilter('has_phone', e.target.checked)} />
+                    Has phone number
+                  </label>
+                  <label className="compose-checkbox">
+                    <input type="checkbox" checked={filters.exclude_dnc} onChange={e => setFilter('exclude_dnc', e.target.checked)} />
+                    Exclude DNC
+                  </label>
+                  <label className="compose-checkbox">
+                    <input type="checkbox" checked={filters.exclude_duplicates} onChange={e => setFilter('exclude_duplicates', e.target.checked)} />
+                    Exclude duplicates
+                  </label>
+                </div>
+
+                <div className="campaign-preview-actions">
+                  <button className="btn btn--primary" onClick={handlePreview} disabled={previewing}>
+                    {previewing ? 'Loading…' : 'Preview matching leads'}
+                  </button>
+                  {previewLeads.length > 0 && (
+                    <span className="campaign-match-count">
+                      <strong>{eligibleCount.toLocaleString()}</strong> leads match
+                    </span>
                   )}
                 </div>
-              </div>
+                {previewError && <div className="compose-error" style={{ marginTop: 8 }}>{previewError}</div>}
+              </section>
 
-              {sendError && <div className="compose-error" style={{ marginTop: 12 }}>{sendError}</div>}
-
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', marginTop: 24 }}>
-                <button className="btn btn--secondary" onClick={() => setStep(1)}>← Back</button>
-                <button
-                  className="btn btn--primary"
-                  onClick={handleSend}
-                  disabled={sending || eligibleCount === 0 || (scheduleType === 'scheduled' && !scheduledAt)}
-                  style={{ minWidth: 180 }}
-                >
-                  {sending
-                    ? 'Sending…'
-                    : scheduleType === 'scheduled'
-                    ? `Schedule to ${eligibleCount} leads`
-                    : `Send to ${eligibleCount} leads now`}
-                </button>
-              </div>
-            </section>
+              {previewLeads.length > 0 && (
+                <section className="panel">
+                  <div className="panel-header">
+                    <h2 className="panel-title">Matching leads</h2>
+                    <span className="panel-count mono">{eligibleCount.toLocaleString()} total</span>
+                  </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Tier</th>
+                        <th>Status</th>
+                        <th>Advisor</th>
+                        <th>Year</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewLeads.slice(0, 100).map(lead => (
+                        <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} style={{ cursor: 'pointer' }}>
+                          <td>{lead.first_name} {lead.last_name}</td>
+                          <td className="mono">{lead.phone || '–'}</td>
+                          <td><TierBadge tier={lead.tier} /></td>
+                          <td><StatusBadge status={lead.status} /></td>
+                          <td style={{ fontSize: 12 }}>{lead.assigned_to_name || '–'}</td>
+                          <td className="mono" style={{ fontSize: 12 }}>{lead.source_year || '–'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {eligibleCount > 100 && (
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '8px 0', textAlign: 'center' }}>
+                      Showing first 100 of {eligibleCount.toLocaleString()} — all {eligibleCount.toLocaleString()} will be included.
+                    </p>
+                  )}
+                  <div style={{ padding: '16px 0 0', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button className="btn btn--primary" onClick={() => setStep(1)}>
+                      Next: Write message →
+                    </button>
+                  </div>
+                </section>
+              )}
+            </div>
           )}
-        </div>
+
+          {/* ── Step 2: Write message ── */}
+          {step === 1 && (
+            <div className="campaign-body">
+              <section className="panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">Campaign message</h2>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  <div className="campaign-filter-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                    <label className="settings-label">
+                      Campaign name (internal)
+                      <input
+                        className="settings-input"
+                        value={campaignName}
+                        onChange={e => setCampaignName(e.target.value)}
+                        placeholder={`Campaign ${new Date().toLocaleDateString()}`}
+                      />
+                    </label>
+                    <label className="settings-label">
+                      Campaign type
+                      <select
+                        className="filter-select"
+                        value={purpose}
+                        onChange={e => setPurpose(e.target.value)}
+                      >
+                        {purposeOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {/* Tone selector */}
+                  <div>
+                    <div className="settings-label" style={{ marginBottom: 8 }}>Tone</div>
+                    <div className="campaign-tone-row">
+                      {TONES.map(t => (
+                        <button
+                          key={t.value}
+                          className={`campaign-tone-btn ${tone === t.value ? 'campaign-tone-btn--active' : ''}`}
+                          onClick={() => setTone(t.value)}
+                          title={t.desc}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="settings-label">
+                    AI direction (optional)
+                    <input
+                      className="settings-input"
+                      value={aiDirection}
+                      onChange={e => setAiDirection(e.target.value)}
+                      placeholder="e.g. This is a file check campaign — ask if they still need pre-need planning"
+                    />
+                    <span className="settings-help" style={{ fontSize: 11 }}>
+                      The more specific you are, the better the AI message.
+                    </span>
+                  </label>
+
+                  <div>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                      <button
+                        className="btn btn--secondary"
+                        style={{ fontSize: 13 }}
+                        onClick={handleGenerateMessage}
+                        disabled={generating}
+                      >
+                        {generating ? '⏳ Writing…' : '✨ AI Write Message'}
+                      </button>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        Uses your campaign type, tone, and direction above
+                      </span>
+                    </div>
+                    <textarea
+                      className="compose-textarea"
+                      rows={5}
+                      value={messageText}
+                      onChange={e => setMessageText(e.target.value)}
+                      placeholder="Hi {first_name}, this is {advisor_name}…   Use {first_name}, {advisor_name}, {booking_url} as placeholders."
+                    />
+                    <div className="campaign-char-count">
+                      {charCount} chars · {smsSegments} SMS segment{smsSegments !== 1 ? 's' : ''}
+                      {charCount > 160 && <span className="campaign-char-warn"> · Keep under 160 for a single segment</span>}
+                    </div>
+                  </div>
+
+                  {/* Live preview */}
+                  {messageText.trim() && (
+                    <div className="cb-preview-wrap">
+                      <div className="cb-preview-label">Preview — as Jane will see it</div>
+                      <div className="cb-preview-bubble">
+                        {previewText}
+                        {includeBookingLink && !/{booking_url}/i.test(messageText) && (
+                          <span style={{ opacity: 0.55, fontSize: 12 }}> https://book.example.com/xyz</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="compose-checkbox">
+                    <input type="checkbox" checked={includeBookingLink} onChange={e => setIncludeBookingLink(e.target.checked)} />
+                    Append booking link if not already in message
+                  </label>
+                </div>
+
+                {sendError && <div className="compose-error" style={{ marginTop: 12 }}>{sendError}</div>}
+
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', marginTop: 24 }}>
+                  <button className="btn btn--secondary" onClick={() => setStep(0)}>← Back</button>
+                  <button
+                    className="btn btn--primary"
+                    onClick={() => setStep(2)}
+                    disabled={!messageText.trim()}
+                  >
+                    Next: Review & send →
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* ── Step 3: Review & send ── */}
+          {step === 2 && (
+            <div className="campaign-body">
+              {sendResult ? (
+                <section className="panel campaign-success">
+                  <div className="campaign-success-icon">🚀</div>
+                  <h2>Campaign sent!</h2>
+                  <div className="campaign-result-stats">
+                    <div className="campaign-result-stat">
+                      <strong style={{ color: 'var(--signal-green)' }}>{sendResult.sent}</strong>
+                      <span>Sent</span>
+                    </div>
+                    {sendResult.skipped > 0 && (
+                      <div className="campaign-result-stat">
+                        <strong style={{ color: 'var(--signal-amber)' }}>{sendResult.skipped}</strong>
+                        <span>Skipped</span>
+                      </div>
+                    )}
+                    {sendResult.errors > 0 && (
+                      <div className="campaign-result-stat campaign-result-stat--warn">
+                        <strong>{sendResult.errors}</strong>
+                        <span>Errors</span>
+                      </div>
+                    )}
+                    <div className="campaign-result-stat">
+                      <strong>{sendResult.total}</strong>
+                      <span>Total leads</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
+                    <button className="btn btn--secondary" onClick={() => navigate('/leads')}>View leads</button>
+                    <button className="btn btn--primary" onClick={resetAll}>New campaign</button>
+                  </div>
+                </section>
+              ) : (
+                <section className="panel">
+                  <div className="panel-header">
+                    <h2 className="panel-title">Review & confirm</h2>
+                  </div>
+
+                  <div className="campaign-review-grid">
+                    <div className="campaign-review-card">
+                      <span className="campaign-review-label">Recipients</span>
+                      <strong className="campaign-review-value">{eligibleCount.toLocaleString()}</strong>
+                      <span className="campaign-review-sub">leads matched your filters</span>
+                    </div>
+                    <div className="campaign-review-card">
+                      <span className="campaign-review-label">Message length</span>
+                      <strong className="campaign-review-value">{charCount}</strong>
+                      <span className="campaign-review-sub">{smsSegments} SMS segment{smsSegments !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="campaign-review-card">
+                      <span className="campaign-review-label">Tone</span>
+                      <strong className="campaign-review-value">{TONES.find(t => t.value === tone)?.label || tone}</strong>
+                      <span className="campaign-review-sub">{purposeOptions.find(p => p.value === purpose)?.label || purpose}</span>
+                    </div>
+                    <div className="campaign-review-card">
+                      <span className="campaign-review-label">Booking link</span>
+                      <strong className="campaign-review-value">{includeBookingLink ? 'Yes' : 'No'}</strong>
+                      <span className="campaign-review-sub">appended per message</span>
+                    </div>
+                  </div>
+
+                  {/* Message preview */}
+                  <div className="campaign-review-message" style={{ marginTop: 20 }}>
+                    <p className="campaign-review-label">Message preview</p>
+                    <div className="cb-preview-bubble" style={{ marginTop: 8 }}>
+                      {previewText}
+                      {includeBookingLink && !/{booking_url}/i.test(messageText) && (
+                        <span style={{ opacity: 0.55, fontSize: 12 }}> https://book.example.com/xyz</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Filter summary */}
+                  <div className="campaign-filter-summary" style={{ marginTop: 16 }}>
+                    <p className="campaign-review-label">Filters applied</p>
+                    <div className="campaign-filter-tags">
+                      {filters.tier && <span className="campaign-filter-tag">Tier: {tierOptions.find(t => t.value === filters.tier)?.label || filters.tier}</span>}
+                      {filters.status && <span className="campaign-filter-tag">Status: {filters.status}</span>}
+                      {filters.engagement_temperature && <span className="campaign-filter-tag">Engagement: {filters.engagement_temperature}</span>}
+                      {filters.contact_history && <span className="campaign-filter-tag">{CONTACT_HISTORY_OPTIONS.find(o => o.value === filters.contact_history)?.label}</span>}
+                      {filters.assigned_to_id && <span className="campaign-filter-tag">Advisor filtered</span>}
+                      {filters.source_year_min && <span className="campaign-filter-tag">Year ≥ {filters.source_year_min}</span>}
+                      {filters.source_year_max && <span className="campaign-filter-tag">Year ≤ {filters.source_year_max}</span>}
+                      {filters.no_contact_days && <span className="campaign-filter-tag">No contact {filters.no_contact_days}+ days</span>}
+                      {filters.exclude_dnc && <span className="campaign-filter-tag">DNC excluded</span>}
+                      {filters.exclude_duplicates && <span className="campaign-filter-tag">Dupes excluded</span>}
+                    </div>
+                  </div>
+
+                  {sendError && <div className="compose-error" style={{ marginTop: 12 }}>{sendError}</div>}
+
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', marginTop: 24 }}>
+                    <button className="btn btn--secondary" onClick={() => setStep(1)}>← Back</button>
+                    <button
+                      className="btn btn--primary"
+                      onClick={handleSend}
+                      disabled={sending || eligibleCount === 0}
+                      style={{ minWidth: 200 }}
+                    >
+                      {sending ? 'Sending…' : `🚀 Send to ${eligibleCount.toLocaleString()} leads`}
+                    </button>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

@@ -84,8 +84,8 @@ CAMPAIGN_PURPOSES_BY_INDUSTRY = {
     ],
 }
 
-# Fallback (used if industry not recognized)
 CAMPAIGN_PURPOSES = CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"]
+
 
 # ── Rich filter helper ────────────────────────────────────────────────────────
 
@@ -137,30 +137,51 @@ def _apply_filters(query, organization_id: str, criteria: dict):
         has_reply_ids = query.session.query(Reply.lead_id).distinct()
         query = query.filter(Lead.id.in_(has_reply_ids), Lead.status != "booked")
 
-    # Exclude DNC always
+    # Always exclude DNC
     query = query.filter(Lead.status != "dnc")
 
     return query
 
 
+def _compliance_check(lead: Lead) -> tuple[bool, str]:
+    """
+    Inline compliance gate — returns (ok, reason).
+    A lead that fails this must never be sent to, no exceptions.
+    """
+    if lead.status == "dnc":
+        return False, "DNC"
+    if lead.is_duplicate:
+        return False, "duplicate"
+    if not lead.phone or lead.phone.strip() == "":
+        return False, "no phone"
+    if lead.contact_channel == "email_only":
+        return False, "email_only channel"
+    return True, ""
+
+
 # ── AI message generation ─────────────────────────────────────────────────────
 
-def _generate_campaign_message(purpose: str, tone: str, org_name: str, advisor_name: str, lead_type: str = None, ai_direction: str = None) -> str:
+def _generate_campaign_message(
+    purpose: str, tone: str, org_name: str, advisor_name: str,
+    lead_type: str = None, ai_direction: str = None, industry: str = "funeral",
+) -> str:
     """Generate an AI opening message for this campaign."""
     from openai import OpenAI
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    purpose_label = next((p["label"] for p in CAMPAIGN_PURPOSES if p["value"] == purpose), purpose)
+    all_purposes = CAMPAIGN_PURPOSES_BY_INDUSTRY.get(industry, CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"])
+    purpose_label = next((p["label"] for p in all_purposes if p["value"] == purpose), purpose)
+
     tone_map = {
-        "cold": "soft and low-pressure, just an introduction",
+        "cold": "soft and low-pressure, this is likely a first introduction",
         "warm": "friendly and inviting, suggest a conversation",
         "hot": "direct and confident, clear call to action",
-        "urgent": "brief and urgent, time-sensitive",
+        "urgent": "brief and time-sensitive, make it clear this needs a response soon",
     }
     tone_desc = tone_map.get(tone, "warm and professional")
 
-    lead_type_line = f"\nLead type: {lead_type}" if lead_type else ""
-    direction_line = f"\nSpecific direction: {ai_direction}" if ai_direction else ""
+    lead_type_line = f"\nLead type/track: {lead_type}" if lead_type else ""
+    direction_line = f"\nSpecific direction from advisor: {ai_direction}" if ai_direction else ""
 
     prompt = f"""Write a short SMS outreach message for a campaign.
 
@@ -170,11 +191,11 @@ Campaign type: {purpose_label}
 Tone: {tone_desc}{lead_type_line}{direction_line}
 
 Rules:
-- Under 320 characters
-- Sound human, not like a template
-- Use {{first_name}} as a placeholder for the lead's first name
-- End with {{booking_url}} if asking for an appointment
-- No hashtags, no all-caps, no emojis unless natural
+- Under 320 characters total
+- Sound human, not like a mass template
+- Use {{first_name}} as the lead's first name placeholder
+- If it makes sense for this campaign type, end with {{booking_url}}
+- No hashtags, no all-caps, no emojis unless completely natural
 - Respond with ONLY the message text, nothing else
 
 Write the message:"""
@@ -183,12 +204,12 @@ Write the message:"""
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
-            max_tokens=120,
+            temperature=0.65,
+            max_tokens=130,
         )
         return response.choices[0].message.content.strip()
     except Exception:
-        return f"Hi {{first_name}}, this is {advisor_name} with {org_name}. I'd love to connect and see how we can help. {{booking_url}}"
+        return f"Hi {{first_name}}, this is {advisor_name} with {org_name}. I'd love to connect and see how I can help. {{booking_url}}"
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -197,16 +218,16 @@ class CampaignFilterCriteria(BaseModel):
     tier: Optional[str] = None
     status: Optional[str] = None
     source_year: Optional[int] = None
-    source_year_min: Optional[int] = None   # year range start
-    source_year_max: Optional[int] = None   # year range end
+    source_year_min: Optional[int] = None
+    source_year_max: Optional[int] = None
     source_file: Optional[str] = None
     channel: Optional[str] = None
     advisor_id: Optional[str] = None
-    contact_history: Optional[str] = None  # never_contacted | contacted_no_reply | replied_not_booked
-    message_track: Optional[str] = None    # file_check | code_lead | new_inquiry | referral | web_lead
-    engagement_temperature: Optional[str] = None  # hot | warm | cold | unknown
-    lead_type: Optional[str] = None        # alias for message_track - used in UI
-    contractor_type: Optional[str] = None  # for non-funeral orgs: roofing, insurance, etc.
+    contact_history: Optional[str] = None
+    message_track: Optional[str] = None
+    engagement_temperature: Optional[str] = None
+    lead_type: Optional[str] = None
+    contractor_type: Optional[str] = None
 
 
 class CampaignCreate(BaseModel):
@@ -240,7 +261,7 @@ class GenerateMessageRequest(BaseModel):
     ai_direction: Optional[str] = None
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints — specific before wildcard ──────────────────────────────────────
 
 @router.get("/purposes")
 def get_purposes(
@@ -263,9 +284,13 @@ def generate_message(
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     org_name = org.name if org else "our organization"
+    industry = (org.industry if org else None) or "funeral"
     advisor_name = current_user.full_name or "your advisor"
 
-    message = _generate_campaign_message(req.purpose, req.tone, org_name, advisor_name, lead_type=req.lead_type, ai_direction=req.ai_direction)
+    message = _generate_campaign_message(
+        req.purpose, req.tone, org_name, advisor_name,
+        lead_type=req.lead_type, ai_direction=req.ai_direction, industry=industry,
+    )
     return {"message": message, "purpose": req.purpose, "tone": req.tone}
 
 
@@ -297,6 +322,37 @@ def preview_campaign_leads(
             for l in sample
         ],
     }
+
+
+@router.get("/history")
+def get_campaign_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return past campaigns with stats for the Campaign Builder history tab."""
+    campaigns = (
+        db.query(Campaign)
+        .filter(Campaign.organization_id == current_user.organization_id)
+        .order_by(Campaign.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "purpose": getattr(c, "purpose", None),
+            "tone": getattr(c, "tone", None),
+            "status": getattr(c, "status", "draft"),
+            "sent_count": getattr(c, "sent_count", 0) or 0,
+            "skipped_count": getattr(c, "skipped_count", 0) or 0,
+            "error_count": getattr(c, "error_count", 0) or 0,
+            "sent_at": getattr(c, "sent_at", None),
+            "created_at": c.created_at,
+            "filter_criteria": json.loads(c.filter_criteria) if c.filter_criteria else {},
+        }
+        for c in campaigns
+    ]
 
 
 @router.post("")
@@ -371,11 +427,11 @@ def send_campaign(
     errors = 0
 
     for lead in leads:
+        ok, reason = _compliance_check(lead)
+        if not ok:
+            skipped += 1
+            continue
         try:
-            if lead.contact_channel == "email_only" or not lead.phone:
-                skipped += 1
-                continue
-            # Personalize message
             name = lead.first_name or "there"
             personalized = req.message.replace("{first_name}", name)
             send_sms(db=db, lead=lead, advisor=current_user, template=personalized, include_booking_link=True)
@@ -389,9 +445,7 @@ def send_campaign(
     return {"sent": sent, "skipped": skipped, "errors": errors, "total": len(leads)}
 
 
-# ── Campaign Builder endpoints (used by CampaignBuilder.jsx) ─────────────────
-# The builder UI calls /campaigns/builder/preview and /campaigns/builder/send.
-# These are the entry points that actually power the Campaign Builder wizard.
+# ── Campaign Builder endpoints ────────────────────────────────────────────────
 
 class BuilderPreviewRequest(BaseModel):
     tier: Optional[str] = None
@@ -410,6 +464,8 @@ class BuilderPreviewRequest(BaseModel):
 
 class BuilderSendRequest(BaseModel):
     name: str
+    purpose: Optional[str] = "custom"
+    tone: Optional[str] = "warm"
     message_template: str
     include_booking_link: bool = True
     lead_ids: list[str]
@@ -489,9 +545,12 @@ def builder_send(
 ):
     """
     Execute Campaign Builder send — any advisor can run this.
-    Creates a campaign record, then sends to all lead_ids provided.
+    Creates a campaign record, sends to all lead_ids provided,
+    and writes the results back to the campaign row for history.
     """
     from app.services.sms_service import send_sms
+
+    now = datetime.utcnow()
 
     # Create campaign record for history
     campaign = Campaign(
@@ -500,8 +559,19 @@ def builder_send(
         name=req.name,
         created_by_id=current_user.id,
         filter_criteria=json.dumps(req.filters or {}),
-        created_at=datetime.utcnow(),
+        created_at=now,
     )
+    # Set extra stats columns if they exist (added by auto_migrate)
+    for attr, val in [
+        ("purpose", req.purpose or "custom"),
+        ("tone", req.tone or "warm"),
+        ("ai_direction", req.ai_direction),
+        ("status", "sending"),
+        ("sent_at", now),
+    ]:
+        if hasattr(campaign, attr):
+            setattr(campaign, attr, val)
+
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
@@ -510,8 +580,6 @@ def builder_send(
     leads = db.query(Lead).filter(
         Lead.id.in_(req.lead_ids),
         Lead.organization_id == current_user.organization_id,
-        Lead.is_duplicate == False,
-        Lead.status != "dnc",
     ).all()
 
     sent = 0
@@ -520,15 +588,11 @@ def builder_send(
     error_details = []
 
     for lead in leads:
+        ok, reason = _compliance_check(lead)
+        if not ok:
+            skipped += 1
+            continue
         try:
-            if not lead.phone and lead.contact_channel != "email_only":
-                skipped += 1
-                continue
-            if lead.contact_channel == "email_only":
-                skipped += 1
-                continue
-
-            # Personalize
             name = lead.first_name or "there"
             personalized = (req.message_template
                 .replace("{first_name}", name)
@@ -547,6 +611,17 @@ def builder_send(
             errors += 1
             error_details.append({"lead_id": lead.id, "error": str(e)})
 
+    # Write results back to campaign row
+    for attr, val in [
+        ("sent_count", sent),
+        ("skipped_count", skipped),
+        ("error_count", errors),
+        ("status", "sent"),
+    ]:
+        if hasattr(campaign, attr):
+            setattr(campaign, attr, val)
+    db.commit()
+
     log_action(db, current_user.organization_id, current_user.id, action="campaign.builder_send", target_type="campaign", target_id=campaign.id)
 
     return {
@@ -555,5 +630,5 @@ def builder_send(
         "skipped": skipped,
         "errors": errors,
         "total": len(leads),
-        "error_details": error_details[:5],  # first 5 errors for debugging
+        "error_details": error_details[:5],
     }
