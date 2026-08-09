@@ -142,8 +142,24 @@ def inbound_webhook(
     from app.services.reply_classification_service import classify_reply, contains_hard_stop_language
     from app.models.models import CadenceStatus, ReplyClassification
     lead_phone = normalize_phone(From)
+    twilio_to = normalize_phone(To)  # the advisor Twilio number that received this message
 
-    lead = db.query(Lead).filter(Lead.phone == lead_phone).order_by(Lead.updated_at.desc()).first()
+    # Multi-tenant safety: find the advisor who owns this Twilio number first,
+    # then scope the lead lookup to their org. Without this, a lead in Org A with
+    # the same phone as a lead in Org B would match the wrong record when Org B's
+    # Twilio number receives the message.
+    advisor = db.query(User).filter(User.twilio_phone_number == twilio_to).first()
+    if advisor:
+        lead = db.query(Lead).filter(
+            Lead.phone == lead_phone,
+            Lead.organization_id == advisor.organization_id,
+        ).order_by(Lead.updated_at.desc()).first()
+    else:
+        # No advisor owns this Twilio number (misconfigured / shared number) -
+        # fall back to unscoped lookup so the webhook still works rather than
+        # silently dropping replies.
+        lead = db.query(Lead).filter(Lead.phone == lead_phone).order_by(Lead.updated_at.desc()).first()
+
     if not lead:
         # Unknown sender - log nothing actionable, just acknowledge Twilio
         return {"status": "no_matching_lead"}
@@ -169,15 +185,24 @@ def inbound_webhook(
     db.add(reply)
     db.flush()  # get reply.id before pipeline processing
 
-    # Fire pipeline auto-conversation if active
+    # Route to the correct AI handler:
+    #   booked leads  → post-booking concierge (gpt-4o, intent detection, escalate on reschedule/cancel)
+    #   all others    → pipeline auto-conversation (pre-booking cadence)
+    # Both handlers are wrapped so a failure never breaks the Twilio webhook response.
     try:
-        from app.services.pipeline_service import process_inbound_reply
-        advisor = db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
-        if advisor:
-            process_inbound_reply(db, lead, advisor, reply)
+        _reply_advisor = advisor or (
+            db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
+        )
+        if _reply_advisor:
+            if lead.status == "booked":
+                from app.services.ai_conversation_service import handle_inbound_reply
+                handle_inbound_reply(db, lead, _reply_advisor, Body)
+            else:
+                from app.services.pipeline_service import process_inbound_reply
+                process_inbound_reply(db, lead, _reply_advisor, reply)
     except Exception as _pe:
         import logging
-        logging.getLogger(__name__).error("Pipeline processing error: %s", _pe)
+        logging.getLogger(__name__).error("AI/pipeline processing error: %s", _pe)
 
     if classification == ReplyClassification.DNC:
         lead.status = "dnc"

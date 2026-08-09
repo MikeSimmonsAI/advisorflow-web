@@ -700,7 +700,7 @@ def create_lead_manually(
     from app.services.dedup_service import normalize_phone, normalize_last_name
 
     phone_normalized = normalize_phone(payload.phone or "")
-    normalize_last_name(payload.last_name or "")
+    last_name_normalized = normalize_last_name(payload.last_name or "")  # was: return value discarded
 
     # Check for duplicate by phone
     is_dup = False

@@ -184,7 +184,12 @@ def update_social_links(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Save advisor's social media / review page URLs."""
+    """
+    DEPRECATED — social links have moved to the org level (PATCH /org-settings/social-links).
+    The org-level links are what gets pushed out in surveys and outreach.
+    This advisor-level endpoint is kept for backwards compatibility but is no longer
+    wired up in the frontend Settings page. Will be removed in a future cleanup.
+    """
     current_user.facebook_url = req.facebook_url or None
     current_user.google_review_url = req.google_review_url or None
     current_user.instagram_url = req.instagram_url or None
