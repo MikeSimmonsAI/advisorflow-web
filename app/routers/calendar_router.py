@@ -253,6 +253,47 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 bool(advisor.microsoft_oauth_refresh_token_encrypted),
             )
 
+    # ── Create Google Calendar event (if advisor has Google Calendar connected) ─
+    google_calendar_result = {"success": False, "note": "Not connected"}
+    if advisor and getattr(advisor, 'google_calendar_connected', False) and getattr(advisor, 'google_oauth_refresh_token_encrypted', None):
+        try:
+            # Reuse the datetime we already parsed for the MS365 block above.
+            # If that block didn't run (MS365 not connected), parse now.
+            if 'event_start' not in dir() or event_start is None:
+                event_start = None
+                for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+                    try:
+                        event_start = datetime.strptime(slot_display.strip(), fmt)
+                        break
+                    except Exception:
+                        continue
+                if not event_start:
+                    for fmt in ["%A, %B %d, %Y at %I:%M %p", "%A, %B %d, %Y at %I:%M%p",
+                                "%B %d, %Y at %I:%M %p", "%B %d, %Y %I:%M %p",
+                                "%m/%d/%Y at %I:%M %p", "%m/%d/%Y %I:%M %p"]:
+                        try:
+                            cleaned = slot_display.replace(" at ", " at ").strip()
+                            event_start = datetime.strptime(cleaned, fmt)
+                            if event_start.year == 1900:
+                                event_start = event_start.replace(year=datetime.now().year)
+                            break
+                        except Exception:
+                            continue
+
+            if event_start and booking:
+                from app.services.calendar_service import create_calendar_event_for_booking as _gcal_create
+                gcal_result = _gcal_create(db, booking, event_start, 30)
+                google_calendar_result = gcal_result
+                logger.info("booking-confirmed: Google Calendar result=%s", gcal_result)
+            else:
+                google_calendar_result = {"success": False, "error": f"Could not parse slot time: {slot_display!r}"}
+        except Exception as e:
+            logger.exception("booking-confirmed: Google Calendar error: %s", e)
+            google_calendar_result = {"success": False, "error": str(e)}
+    else:
+        if advisor and not getattr(advisor, 'google_calendar_connected', False):
+            logger.info("booking-confirmed: advisor=%s Google Calendar not connected — skipping", advisor.id if advisor else "none")
+
     # ── Send FSA SMS notification ─────────────────────────────────────────────
     sms_result = {"success": False}
     if advisor:
@@ -297,6 +338,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     response_payload = {
         "received": True,
         "calendar": calendar_result,
+        "google_calendar": google_calendar_result,
         "sms": sms_result,
         "email": email_result,
         "lead_name": lead_name,

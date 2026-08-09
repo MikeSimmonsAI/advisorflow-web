@@ -96,6 +96,10 @@ COLUMNS_TO_ADD = [
     ("campaigns", "status", "VARCHAR DEFAULT 'draft'"),
     ("campaigns", "ai_direction", "TEXT"),
     ("campaigns", "sent_at", "TIMESTAMP"),
+    # Google Calendar — advisor OAuth + calendar integration
+    ("users", "google_oauth_refresh_token_encrypted", "VARCHAR"),
+    ("users", "google_calendar_id", "VARCHAR"),
+    ("users", "google_calendar_connected", "BOOLEAN DEFAULT FALSE"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes
