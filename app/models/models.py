@@ -159,6 +159,11 @@ class Organization(Base):
     # e.g. [{"value": "pre_need", "label": "Pre-Need", "color": "blue"}, ...]
     tier_config = Column(Text, nullable=True)
 
+    # Per-org feature flags (super admin only). JSON array of feature keys.
+    # null = all features enabled (backward-compatible default).
+    # [] = no optional features. ["campaigns", "reports", ...] = explicit allow-list.
+    enabled_features = Column(Text, nullable=True)
+
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")
