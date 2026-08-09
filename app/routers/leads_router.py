@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, time, timezone
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, LeadStatus, Reply, ReplyClassification, CadenceState, CadenceStatus, BookingLink, EngagementTemperature
 from app.services.import_service import import_leads_from_excel, parse_excel_file
-from app.services.dedup_service import bulk_dedup_check
+from app.services.dedup_service import bulk_dedup_check, normalize_phone
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/leads", tags=["leads"])
