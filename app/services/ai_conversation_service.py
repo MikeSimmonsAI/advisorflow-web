@@ -639,13 +639,88 @@ def process_scheduled_touches(db: Session) -> dict:
     return {"processed": len(due), "sent": sent, "skipped": skipped, "errors": errors}
 
 
+def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_body: str, conv) -> dict:
+    """
+    Respond to a reply from a lead who has already booked.
+    Uses appointment-concierge mode — answers their questions, confirms details,
+    expresses enthusiasm. Does NOT re-engage the sales pipeline.
+    """
+    org_name = _get_org_name(db, advisor)
+    advisor_name = advisor.full_name or "Your Advisor"
+    appt_label = _get_appt_label(lead)
+    first_name = lead.first_name or "there"
+
+    prompt = f"""You are {advisor_name} at {org_name}, responding to a message from {first_name} who has already booked a {appt_label}.
+
+Their message: "{reply_body}"
+
+Your job:
+- Answer their question warmly and helpfully
+- If they ask who will be in the meeting, say it will be you ({advisor_name}) — a personal, one-on-one conversation
+- If they ask what to bring, suggest any relevant documents (existing policies, contracts, paperwork) and say there's no pressure — just come as you are
+- Confirm you're looking forward to meeting them
+- Keep it SHORT (3-5 sentences max) and conversational
+- Do NOT use [Your Name] or any placeholder — use "{advisor_name}" directly
+- Do NOT include a sign-off/closing — the system adds one automatically
+
+Respond ONLY with valid JSON, no markdown:
+{{"subject": "Re: Your Upcoming Appointment", "body": "..."}}"""
+
+    try:
+        client = _get_client()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4,
+            max_tokens=300,
+        )
+        import json as _json
+        raw = response.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
+        result = _json.loads(raw)
+        body = result.get("body", f"Hi {first_name}, great question! I'm looking forward to our appointment. Feel free to bring any documents you have — and don't worry if you don't have everything. We'll go through everything together.")
+        subject = result.get("subject", f"Re: Your {appt_label}")
+    except Exception as e:
+        logger.error("_handle_post_booking_reply AI error: %s", e)
+        body = f"Hi {first_name}, great question! I'm looking forward to our appointment. Feel free to bring any documents you have — we'll go through everything together."
+        subject = f"Re: Your {appt_label}"
+
+    try:
+        clean_body = _strip_signoff(body)
+        html_body = _build_email_html(clean_body, advisor_name, org_name)
+        _send_email_via_graph(advisor, lead.email, subject, html_body)
+        msg = EmailMessage(
+            id=str(uuid.uuid4()),
+            lead_id=lead.id,
+            sender_id=advisor.id,
+            subject=subject,
+            body_html=html_body,
+            status="sent",
+            sent_at=datetime.utcnow(),
+        )
+        db.add(msg)
+        conv.ai_responses_sent = (conv.ai_responses_sent or 0) + 1
+        conv.last_outbound_at = datetime.utcnow()
+        db.commit()
+        logger.info("Post-booking reply sent to lead %s", lead.id)
+        return {"action": "post_booking_replied", "subject": subject}
+    except Exception as e:
+        logger.error("_handle_post_booking_reply send error: %s", e)
+        return {"action": "error", "error": str(e)}
+
+
 def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str) -> dict:
     conv = db.query(PipelineConversation).filter(
         PipelineConversation.lead_id == lead.id,
         PipelineConversation.advisor_id == advisor.id,
     ).first()
 
-    if not conv or conv.paused or conv.stage in ("stopped", "completed", "booked"):
+    if not conv or conv.paused or conv.stage in ("stopped", "completed"):
+        return {"action": "no_active_conversation"}
+
+    # Post-booking: answer their questions in concierge mode, not sales mode
+    if conv.stage == "booked":
+        if lead.email and advisor.microsoft_365_connected:
+            return _handle_post_booking_reply(db, lead, advisor, reply_body, conv)
         return {"action": "no_active_conversation"}
 
     conv.replies_received = (conv.replies_received or 0) + 1

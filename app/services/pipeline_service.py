@@ -327,29 +327,69 @@ def process_inbound_reply(
         pipeline.last_outbound_at = datetime.utcnow()
         db.commit()
 
-        # Send the response
-        try:
-            from app.services.sms_service import send_sms
-            send_sms(
-                db=db,
-                lead=lead,
-                advisor=advisor,
-                template=analysis["reply"],
-                include_booking_link=analysis["include_booking_link"],
-            )
+        # Send the response — prefer SMS if lead has a phone, fall back to email
+        sent_ok = False
+        channel_used = None
+
+        if lead.phone and advisor.twilio_phone_number:
+            try:
+                from app.services.sms_service import send_sms
+                send_sms(
+                    db=db,
+                    lead=lead,
+                    advisor=advisor,
+                    template=analysis["reply"],
+                    include_booking_link=analysis["include_booking_link"],
+                )
+                sent_ok = True
+                channel_used = "sms"
+            except Exception as sms_err:
+                logger.warning("Pipeline SMS auto-send failed, trying email: %s", sms_err)
+
+        if not sent_ok and lead.email and advisor.microsoft_365_connected:
+            try:
+                from app.services.ai_conversation_service import (
+                    _strip_signoff, _build_email_html, _send_email_via_graph,
+                    _get_org_name
+                )
+                from app.models.models import EmailMessage
+                import uuid as _uuid
+                org_name = _get_org_name(db, advisor)
+                advisor_name = advisor.full_name or "Your Advisor"
+                subject = f"Following up, {lead.first_name or 'there'}"
+                clean = _strip_signoff(analysis["reply"])
+                html_body = _build_email_html(clean, advisor_name, org_name)
+                _send_email_via_graph(advisor, lead.email, subject, html_body)
+                msg = EmailMessage(
+                    id=str(_uuid.uuid4()),
+                    lead_id=lead.id,
+                    sender_id=advisor.id,
+                    subject=subject,
+                    body_html=html_body,
+                    status="sent",
+                    sent_at=datetime.utcnow(),
+                )
+                db.add(msg)
+                sent_ok = True
+                channel_used = "email"
+            except Exception as email_err:
+                logger.error("Pipeline email auto-send failed: %s", email_err)
+
+        if sent_ok:
             pipeline.messages_sent = (pipeline.messages_sent or 0) + 1
             if analysis["stage"]:
                 pipeline.stage = analysis["stage"]
             db.commit()
             return {
                 "action": "auto_sent",
+                "channel": channel_used,
                 "confidence": confidence,
                 "reply": analysis["reply"],
                 "pipeline_id": pipeline.id,
             }
-        except Exception as e:
-            logger.error("Pipeline auto-send failed: %s", e)
-            return {"action": "error", "error": str(e), "pipeline_id": pipeline.id}
+        else:
+            logger.error("Pipeline auto-send failed on all channels for lead %s", lead.id)
+            return {"action": "error", "error": "No channel available for auto-reply", "pipeline_id": pipeline.id}
     else:
         # Flag for human review
         pipeline.flagged = True
