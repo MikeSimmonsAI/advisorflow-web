@@ -3,13 +3,86 @@ import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser, getBranding } from '../api/client'
 import './Overview.css'
 
+// ── Industry-aware labels ─────────────────────────────────────────────────────
+const INDUSTRY_LABELS = {
+  funeral: {
+    appointments: 'Arrangements',
+    bookingRate: 'Arrangement rate',
+    bookedSub: 'Booked arrangements',
+    projectedBookings: 'Projected arrangements',
+    confirmLabel: 'arrangements confirmed',
+    weeklyLabel: 'arrangements this week',
+  },
+  fiber: {
+    appointments: 'Installs scheduled',
+    bookingRate: 'Install rate',
+    bookedSub: 'Scheduled installs',
+    projectedBookings: 'Projected installs',
+    confirmLabel: 'installs confirmed',
+    weeklyLabel: 'installs this week',
+  },
+  solar: {
+    appointments: 'Assessments',
+    bookingRate: 'Assessment rate',
+    bookedSub: 'Scheduled assessments',
+    projectedBookings: 'Projected assessments',
+    confirmLabel: 'assessments confirmed',
+    weeklyLabel: 'assessments this week',
+  },
+  roofing: {
+    appointments: 'Inspections',
+    bookingRate: 'Inspection rate',
+    bookedSub: 'Scheduled inspections',
+    projectedBookings: 'Projected inspections',
+    confirmLabel: 'inspections confirmed',
+    weeklyLabel: 'inspections this week',
+  },
+  insurance: {
+    appointments: 'Consultations',
+    bookingRate: 'Consultation rate',
+    bookedSub: 'Booked consultations',
+    projectedBookings: 'Projected consultations',
+    confirmLabel: 'consultations confirmed',
+    weeklyLabel: 'consultations this week',
+  },
+  real_estate: {
+    appointments: 'Showings',
+    bookingRate: 'Showing rate',
+    bookedSub: 'Scheduled showings',
+    projectedBookings: 'Projected showings',
+    confirmLabel: 'showings confirmed',
+    weeklyLabel: 'showings this week',
+  },
+  home_services: {
+    appointments: 'Appointments',
+    bookingRate: 'Booking rate',
+    bookedSub: 'Booked appointments',
+    projectedBookings: 'Projected bookings',
+    confirmLabel: 'appointments confirmed',
+    weeklyLabel: 'bookings this week',
+  },
+  sales: {
+    appointments: 'Demos',
+    bookingRate: 'Demo rate',
+    bookedSub: 'Scheduled demos',
+    projectedBookings: 'Projected demos',
+    confirmLabel: 'demos confirmed',
+    weeklyLabel: 'demos this week',
+  },
+}
+const DEFAULT_LABELS = INDUSTRY_LABELS.funeral
+
 export default function Overview() {
   const user = getCurrentUser()
   const navigate = useNavigate()
-  // Respect per-org feature flags set by super admin
+
+  // Branding — industry + feature flags
   const _branding = getBranding()
   const _enabledFeatures = _branding?.enabled_features ?? null
   const _isEnabled = (key) => !_enabledFeatures || _enabledFeatures.includes(key)
+  const industry = _branding?.industry || 'funeral'
+  const IL = INDUSTRY_LABELS[industry] || DEFAULT_LABELS
+
   const [leads, setLeads] = useState([])
   const [replies, setReplies] = useState([])
   const [dailyBriefing, setDailyBriefing] = useState(null)
@@ -81,12 +154,12 @@ export default function Overview() {
       {/* ── KPI ROW ── */}
       <div className="ov-kpi-row">
         {[
-          { label: 'Total leads',   value: totalLeads,  accent: '#2fb6ff', path: '/leads',   icon: '👥' },
-          { label: 'New — uncontacted', value: newLeads, accent: '#2fb6ff', path: '/leads', icon: '📋' },
-          { label: 'Hot replies',   value: hotReplies,  accent: '#ff4d4d', path: '/replies', icon: '🔥' },
-          { label: 'Appointments',  value: bookedLeads, accent: '#1ef0a8', path: '/leads',   icon: '📅' },
-          { label: 'Reply rate',    value: `${replyRate}%`, accent: '#f0c040', path: '/reports', icon: '📊' },
-          { label: 'Booking rate',  value: `${bookingRate}%`, accent: '#a78bfa', path: '/reports', icon: '🎯' },
+          { label: 'Total leads',        value: totalLeads,        accent: '#2fb6ff', path: '/leads',   icon: '👥' },
+          { label: 'New — uncontacted',  value: newLeads,          accent: '#2fb6ff', path: '/leads',   icon: '📋' },
+          { label: 'Hot replies',        value: hotReplies,        accent: '#ff4d4d', path: '/replies', icon: '🔥' },
+          { label: IL.appointments,      value: bookedLeads,       accent: '#1ef0a8', path: '/leads',   icon: '📅' },
+          { label: 'Reply rate',         value: `${replyRate}%`,   accent: '#f0c040', path: '/reports', icon: '📊' },
+          { label: IL.bookingRate,       value: `${bookingRate}%`, accent: '#a78bfa', path: '/reports', icon: '🎯' },
         ].map(card => (
           <button key={card.label} className="ov-kpi-card" onClick={() => navigate(card.path)}>
             <span className="ov-kpi-icon">{card.icon}</span>
@@ -104,23 +177,23 @@ export default function Overview() {
         {/* TODAY'S BRIEFING */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">⚡ Today's action items</h2>
+            <h2 className="panel-title">&#9889; Today's action items</h2>
           </div>
           {loading ? (
-            <div className="empty-state">Loading…</div>
+            <div className="empty-state">Loading&#8230;</div>
           ) : dailyBriefing ? (
             <div className="ov-action-list">
               {[
-                { count: dailyBriefing.replies_needing_attention, label: 'hot replies need your response', path: '/replies', accent: '#ff4d4d', urgent: true },
-                { count: dailyBriefing.cadence_touches_due_today, label: 'cadence touches due today', path: '/cadence', accent: '#2fb6ff' },
-                { count: dailyBriefing.certified_appointments_waiting, label: 'appointments confirmed', path: '/leads', accent: '#1ef0a8' },
-                { count: dailyBriefing.leads_imported_last_24h, label: 'leads imported in the last 24h', path: '/leads', accent: '#f0c040' },
-                { count: dailyBriefing.bookings_last_7_days, label: 'bookings this week', path: '/leads', accent: '#a78bfa' },
+                { count: dailyBriefing.replies_needing_attention,    label: 'hot replies need your response',    path: '/replies',  accent: '#ff4d4d', urgent: true },
+                { count: dailyBriefing.cadence_touches_due_today,    label: 'cadence touches due today',         path: '/cadence',  accent: '#2fb6ff' },
+                { count: dailyBriefing.certified_appointments_waiting, label: IL.confirmLabel,                  path: '/leads',    accent: '#1ef0a8' },
+                { count: dailyBriefing.leads_imported_last_24h,      label: 'leads imported in the last 24h',   path: '/leads',    accent: '#f0c040' },
+                { count: dailyBriefing.bookings_last_7_days,         label: IL.weeklyLabel,                      path: '/leads',    accent: '#a78bfa' },
               ].map((item, i) => (
                 <button key={i} className={`ov-action-row ${item.urgent && item.count > 0 ? 'ov-action-row--urgent' : ''}`} onClick={() => navigate(item.path)}>
                   <span className="ov-action-count" style={{ color: item.accent }}>{item.count}</span>
                   <span className="ov-action-label">{item.label}</span>
-                  <span className="ov-action-arrow">→</span>
+                  <span className="ov-action-arrow">&#8594;</span>
                 </button>
               ))}
             </div>
@@ -132,7 +205,7 @@ export default function Overview() {
         {/* HOT REPLIES */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">🔥 Hot replies</h2>
+            <h2 className="panel-title">&#128293; Hot replies</h2>
             <span className="panel-count">{replies.length}</span>
           </div>
           {replies.length === 0 ? (
@@ -143,12 +216,12 @@ export default function Overview() {
                 <button key={r.id} className="ov-reply-row" onClick={() => r.lead_id && navigate(`/leads/${r.lead_id}`)}>
                   <span className="ov-reply-dot" />
                   <span className="ov-reply-body">{r.body}</span>
-                  <span className="ov-reply-arrow">→</span>
+                  <span className="ov-reply-arrow">&#8594;</span>
                 </button>
               ))}
               {replies.length > 6 && (
                 <button className="ov-see-all" onClick={() => navigate('/replies')}>
-                  See all {replies.length} replies →
+                  See all {replies.length} replies &#8594;
                 </button>
               )}
             </div>
@@ -158,7 +231,7 @@ export default function Overview() {
         {/* REPLY ACTIVITY SPARKLINE */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">📈 Reply activity</h2>
+            <h2 className="panel-title">&#128200; Reply activity</h2>
             <span className="panel-count">14 days</span>
           </div>
           {replyActivity.length === 0 ? (
@@ -186,7 +259,7 @@ export default function Overview() {
         {/* STATUS FUNNEL */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">🏆 Pipeline funnel</h2>
+            <h2 className="panel-title">&#127942; Pipeline funnel</h2>
           </div>
           {statusFunnel.length === 0 ? (
             <div className="empty-state">No funnel data yet.</div>
@@ -211,19 +284,19 @@ export default function Overview() {
         {/* QUICK ACTIONS */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">⚙️ Quick actions</h2>
+            <h2 className="panel-title">&#9881;&#65039; Quick actions</h2>
           </div>
           <div className="ov-quick-grid">
             {[
-              { label: 'Import leads',     icon: '📥', path: '/leads',          desc: 'Upload CSV or Excel' },
-              ...(_isEnabled('campaigns') ? [{ label: 'Send campaign', icon: '📣', path: '/campaigns', desc: 'AI-powered outreach' }] : []),
-              { label: 'Review replies',   icon: '💬', path: '/replies',        desc: `${hotReplies} waiting` },
-              { label: 'Email queue',      icon: '📧', path: '/email-queue',    desc: 'Draft & send emails' },
-              { label: 'Work queue',       icon: '✅', path: '/work-queue',     desc: 'Today\'s action items' },
-              ...(_isEnabled('lead_cleanup') ? [{ label: 'Lead cleanup', icon: '🧹', path: '/lead-cleanup', desc: 'Merge duplicates' }] : []),
+              { label: 'Import leads',   icon: '&#128229;', path: '/leads',       desc: 'Upload CSV or Excel' },
+              ...(_isEnabled('campaigns')    ? [{ label: 'Send campaign',  icon: '&#128227;', path: '/campaigns',   desc: 'AI-powered outreach' }] : []),
+              { label: 'Review replies', icon: '&#128172;', path: '/replies',     desc: `${hotReplies} waiting` },
+              { label: 'Email queue',    icon: '&#128231;', path: '/email-queue', desc: 'Draft & send emails' },
+              { label: 'Work queue',     icon: '&#9989;',   path: '/work-queue',  desc: "Today's action items" },
+              ...(_isEnabled('lead_cleanup') ? [{ label: 'Lead cleanup',   icon: '&#129529;', path: '/lead-cleanup', desc: 'Merge duplicates' }] : []),
             ].map(item => (
               <button key={item.label} className="ov-quick-btn" onClick={() => navigate(item.path)}>
-                <span className="ov-quick-icon">{item.icon}</span>
+                <span className="ov-quick-icon" dangerouslySetInnerHTML={{ __html: item.icon }} />
                 <span className="ov-quick-label">{item.label}</span>
                 <span className="ov-quick-desc">{item.desc}</span>
               </button>
@@ -234,14 +307,14 @@ export default function Overview() {
         {/* REVENUE SUMMARY */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">💰 Revenue activity</h2>
+            <h2 className="panel-title">&#128176; Revenue activity</h2>
           </div>
           <div className="ov-revenue-grid">
             {[
-              { label: 'In pipeline',  value: bookedLeads,                             sub: 'Booked appointments',     color: '#2fb6ff' },
-              { label: 'Outcomes',     value: outcomesSummary?.total_appointments ?? 0, sub: 'Recorded visits',        color: '#1ef0a8' },
-              { label: 'Sales',        value: outcomesSummary?.sales_count ?? 0,        sub: outcomesSummary?.conversion_rate != null ? `${outcomesSummary.conversion_rate}% close rate` : 'No outcomes yet', color: '#a78bfa' },
-              { label: 'DNC',          value: dncLeads,                                sub: 'Opted out — suppressed',  color: '#ff4d4d' },
+              { label: 'In pipeline', value: bookedLeads,                              sub: IL.bookedSub,          color: '#2fb6ff' },
+              { label: 'Outcomes',    value: outcomesSummary?.total_appointments ?? 0, sub: 'Recorded visits',     color: '#1ef0a8' },
+              { label: 'Sales',       value: outcomesSummary?.sales_count ?? 0,        sub: outcomesSummary?.conversion_rate != null ? `${outcomesSummary.conversion_rate}% close rate` : 'No outcomes yet', color: '#a78bfa' },
+              { label: 'DNC',         value: dncLeads,                                 sub: 'Opted out — suppressed', color: '#ff4d4d' },
             ].map(item => (
               <div key={item.label} className="ov-revenue-cell">
                 <strong className="ov-revenue-value" style={{ color: item.color }}>
@@ -255,22 +328,23 @@ export default function Overview() {
         </section>
 
       </div>
+
       {/* AI Forecast + Pipeline Summary */}
       {pipelineForecast && (
         <div className="panel" style={{ marginTop: 0 }}>
           <div className="panel-header">
-            <h2 className="panel-title">🤖 AI Forecast</h2>
+            <h2 className="panel-title">&#129302; AI Forecast</h2>
             <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 12px' }}
               onClick={() => window.location.href = '/pipeline'}>
-              Open pipeline →
+              Open pipeline &#8594;
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
             {[
-              { label: 'Active conversations', value: pipelineForecast.active_conversations, color: '#2fb6ff' },
-              { label: 'Reply rate', value: `${pipelineForecast.reply_rate}%`, color: '#1ef0a8' },
-              { label: 'Need your review', value: pipelineForecast.flagged_count, color: '#ff4d4d' },
-              { label: 'Projected bookings', value: pipelineForecast.projected_bookings_this_week, color: '#ffd700' },
+              { label: 'Active conversations',  value: pipelineForecast.active_conversations,            color: '#2fb6ff' },
+              { label: 'Reply rate',            value: `${pipelineForecast.reply_rate}%`,                color: '#1ef0a8' },
+              { label: 'Need your review',      value: pipelineForecast.flagged_count,                   color: '#ff4d4d' },
+              { label: IL.projectedBookings,    value: pipelineForecast.projected_bookings_this_week,    color: '#ffd700' },
             ].map(item => (
               <div key={item.label} className="ov-revenue-cell">
                 <strong className="ov-revenue-value" style={{ color: item.color }}>{item.value}</strong>
@@ -285,9 +359,9 @@ export default function Overview() {
               background: alert.type === 'urgent' ? 'rgba(255,77,77,0.07)' : 'rgba(47,182,255,0.05)',
               border: `1px solid ${alert.type === 'urgent' ? 'rgba(255,77,77,0.18)' : 'rgba(47,182,255,0.12)'}`,
             }} onClick={() => window.location.href = alert.path}>
-              <span>{alert.type === 'urgent' ? '⚠️' : '💡'}</span>
+              <span>{alert.type === 'urgent' ? '&#9888;&#65039;' : '&#128161;'}</span>
               <span style={{ flex: 1, fontSize: 13 }}>{alert.message}</span>
-              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{alert.action} →</span>
+              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{alert.action} &#8594;</span>
             </div>
           ))}
         </div>
