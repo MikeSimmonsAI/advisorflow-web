@@ -118,9 +118,10 @@ export default function CaseFile({ lead, onClose, onSaved }) {
     if (!lead?.id) return
     api.get(`/case-file/lead/${lead.id}`)
       .then(r => {
-        setExistingFiles(r.data)
-        if (r.data.length > 0) {
-          loadFile(r.data[0])
+        const files = Array.isArray(r) ? r : []
+        setExistingFiles(files)
+        if (files.length > 0) {
+          loadFile(files[0])
         }
       })
       .catch(() => {})
@@ -192,13 +193,13 @@ export default function CaseFile({ lead, onClose, onSaved }) {
         saved = await api.patch(`/case-file/${selectedFileId}`, payload)
       } else {
         saved = await api.post(`/case-file/lead/${lead.id}`, payload)
-        setSelectedFileId(saved.data.id)
-        setExistingFiles(prev => [saved.data, ...prev])
+        setSelectedFileId(saved.id)
+        setExistingFiles(prev => [saved, ...prev])
       }
       showToast('Case file saved ✓')
-      if (onSaved) onSaved(saved.data)
+      if (onSaved) onSaved(saved)
     } catch (e) {
-      showToast(e?.response?.data?.detail || 'Save failed', 'error')
+      showToast(e?.message || 'Save failed', 'error')
     } finally {
       setSaving(false)
     }
@@ -209,10 +210,10 @@ export default function CaseFile({ lead, onClose, onSaved }) {
     setCrmPushing(true)
     try {
       const r = await api.post(`/case-file/${selectedFileId}/crm-push`)
-      const ok = r.data.results?.filter(x => x.ok).length
+      const ok = r?.results?.filter(x => x.ok).length
       showToast(ok ? `Pushed to ${ok} CRM connection(s) ✓` : 'No active CRM connections found')
     } catch (e) {
-      showToast(e?.response?.data?.detail || 'CRM push failed', 'error')
+      showToast(e?.message || 'CRM push failed', 'error')
     } finally {
       setCrmPushing(false)
     }
@@ -228,7 +229,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
       showToast(`Case closed as ${CASE_STATUS_LABELS[closeOutcome]} ✓`)
       if (onSaved) onSaved({ case_status: closeOutcome })
     } catch (e) {
-      showToast(e?.response?.data?.detail || 'Close failed', 'error')
+      showToast(e?.message || 'Close failed', 'error')
     } finally {
       setClosing(false)
     }
@@ -239,6 +240,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
     setForm(EMPTY_FORM)
   }
 
+  const safeFiles = Array.isArray(existingFiles) ? existingFiles : []
   const checkedCount = CHECKLIST_ITEMS.filter(i => form[i.key]).length
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -260,15 +262,15 @@ export default function CaseFile({ lead, onClose, onSaved }) {
               {CASE_STATUS_LABELS[form.case_status] || form.case_status}
             </span>
             <div className="cf-header-actions">
-              {existingFiles.length > 0 && (
+              {safeFiles.length > 0 && (
                 <select className="cf-file-picker" onChange={e => {
                   if (e.target.value === '__new__') { startNew() }
-                  else { const f = existingFiles.find(x => x.id === e.target.value); if (f) loadFile(f) }
+                  else { const f = safeFiles.find(x => x.id === e.target.value); if (f) loadFile(f) }
                 }} value={selectedFileId || '__new__'}>
                   <option value="__new__">+ New Entry</option>
-                  {existingFiles.map((f, i) => (
+                  {safeFiles.map((f, i) => (
                     <option key={f.id} value={f.id}>
-                      {f.appointment_date ? new Date(f.appointment_date).toLocaleDateString() : `Entry ${existingFiles.length - i}`}
+                      {f.appointment_date ? new Date(f.appointment_date).toLocaleDateString() : `Entry ${safeFiles.length - i}`}
                       {f.outcome_type ? ` — ${OUTCOME_LABELS[f.outcome_type] || f.outcome_type}` : ''}
                     </option>
                   ))}
