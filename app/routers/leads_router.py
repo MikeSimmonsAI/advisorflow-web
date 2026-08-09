@@ -108,14 +108,14 @@ def list_leads(
     status_filter: Optional[str] = Query(None, alias="status"),
     tier: Optional[str] = Query(None),
     message_track: Optional[str] = Query(None),
+    temperature: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Advisors see only their own leads. org_admin/super_admin (Mike) can
     use /admin/leads instead for the cross-advisor view.
-    Filter by tier or message_track to work one queue at a time, e.g.
-    ?message_track=upsell_existing to pull just the Contract Sold upsell list.
+    Filter by tier, message_track, or temperature (hot/warm/cold/unknown).
     """
     query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
@@ -127,6 +127,8 @@ def list_leads(
         query = query.filter(Lead.tier == tier)
     if message_track:
         query = query.filter(Lead.message_track == message_track)
+    if temperature:
+        query = query.filter(Lead.engagement_temperature == temperature)
     leads = query.order_by(Lead.created_at.desc()).all()
     return leads
 

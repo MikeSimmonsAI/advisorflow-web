@@ -12,10 +12,15 @@ const NAV_ITEMS = [
   { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
   { to: '/cadence', label: 'Cadence', icon: 'repeat' },
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
+  { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
   { to: '/system-health', label: 'System Health', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
-  { to: '/availability', label: 'Availability', icon: 'calendar' },
   { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
+]
+
+// Admin-only nav items that don't need a feature flag
+const ADMIN_ONLY_NAV_ITEMS = [
+  { to: '/availability', label: 'Availability', icon: 'calendar' },
 ]
 
 // featureKey: which enabled_features key controls this item.
@@ -68,6 +73,7 @@ function Icon({ name }) {
     link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
     building: <><rect x="2" y="7" width="20" height="15" rx="1" /><line x1="16" y1="22" x2="16" y2="7" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M7 22v-5h4v5" /><polyline points="2 7 2 5 22 5 22 7" /></>,
     layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
+    thermometer: <><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -186,6 +192,14 @@ export default function Layout({ children }) {
           {(user?.role === 'org_admin' || user?.role === 'super_admin') && (
             <>
               <div className="nav-divider" />
+              {ADMIN_ONLY_NAV_ITEMS.map((item) => (
+                <NavLink key={item.to} to={item.to}
+                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                  onClick={closeSidebar}
+                >
+                  <Icon name={item.icon} />{item.label}
+                </NavLink>
+              ))}
               {ADMIN_NAV_ITEMS.filter(item => isFeatureEnabled(item.featureKey)).map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
