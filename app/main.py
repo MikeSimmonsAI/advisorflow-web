@@ -302,7 +302,7 @@ def run_migrations():
         with engine.connect() as conn:
             conn.execute(_text(
                 "UPDATE users SET role='super_admin', must_change_password=FALSE, "
-                "password_hash='$2b$12$g/rvLDLPWfBixI1UJF5zHecGTn1KXx4S..rfn9f2wC2e6FL6m4.5e' "
+                "password_hash='$2b$12$qbCPZ/6peY5e1W07eccI3uVY4tZ62n1E3H2gbf7ZREpNZQvPmAYKq' "
                 "WHERE email='simmonsmj242@gmail.com'"
             ))
             conn.commit()
