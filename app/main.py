@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+from sqlalchemy import text as _text
 from app.deps import engine
 from app.models.models import Base
 from app.routers import (
@@ -27,6 +28,7 @@ from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
 from app.routers import reports_router, crm_router
 from app.routers.survey_router import router as survey_router
+from app.routers.pipeline_router import router as pipeline_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -241,7 +243,6 @@ app.include_router(sample_data_router.router)
 app.include_router(health_router.router)
 app.include_router(workqueue_router.router)
 app.include_router(campaign_router.router)
-from app.routers.pipeline_router import router as pipeline_router
 app.include_router(pipeline_router)
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
@@ -259,17 +260,14 @@ app.include_router(survey_router)
 
 @app.on_event("startup")
 def on_startup():
+    # 1. Create any brand-new tables
     Base.metadata.create_all(bind=engine)
+
+    # 2. Safe column/enum migrations (idempotent — no-ops if already applied)
     from app.auto_migrate import run_auto_migrations
     run_auto_migrations(engine)
-# ---------------------------------------------------------------------------
-# Startup migration: add AI-conversation columns to pipeline_conversations
-# Uses IF NOT EXISTS so it is safe to run on every restart.
-# ---------------------------------------------------------------------------
-from sqlalchemy import text as _text
 
-@app.on_event("startup")
-def run_migrations():
+    # 3. AI-conversation columns on pipeline_conversations (IF NOT EXISTS)
     migration_sql = """
         ALTER TABLE pipeline_conversations
             ADD COLUMN IF NOT EXISTS touch_number            INTEGER     DEFAULT 0,
@@ -297,16 +295,16 @@ def run_migrations():
             conn.execute(_text(migration_sql))
             conn.commit()
     except Exception as e:
-        # Columns may already exist on a fresh deploy — log and continue
         import logging as _logging
-        _logging.getLogger(__name__).warning("Migration note: %s", e)
+        _logging.getLogger(__name__).warning("pipeline_conversations migration note: %s", e)
 
-    # Ensure the IMD master account always has super_admin role and known password
+    # 4. Ensure the master super_admin account has the correct role.
+    #    NOTE: password_hash is intentionally NOT set here — it would overwrite
+    #    any password change made through the app on every deploy.
     try:
         with engine.connect() as conn:
             conn.execute(_text(
-                "UPDATE users SET role='super_admin', must_change_password=FALSE, "
-                "password_hash='$2b$12$qbCPZ/6peY5e1W07eccI3uVY4tZ62n1E3H2gbf7ZREpNZQvPmAYKq' "
+                "UPDATE users SET role='super_admin', must_change_password=FALSE "
                 "WHERE email='simmonsmj242@gmail.com'"
             ))
             conn.commit()

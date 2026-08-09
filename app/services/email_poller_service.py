@@ -237,6 +237,12 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
                 except Exception:
                     pass
 
+            # Refresh reply from DB — pipeline/AI handler may have set is_hot=True
+            try:
+                db.refresh(reply)
+            except Exception:
+                pass
+
             # Fire alert email if reply is hot
             if reply.is_hot:
                 try:
@@ -330,11 +336,9 @@ URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 def _send_hot_reply_alert(advisor, lead, reply_body: str):
     """
     Send a 🔥 fire alert email to the advisor when a hot reply comes in.
+    Sends to advisor.notification_email if set, otherwise falls back to NOTIFICATION_EMAIL.
     Fired on every hot reply — not just the first one.
     """
-    import httpx
-    import os
-
     if not advisor.microsoft_365_connected or not advisor.microsoft_oauth_refresh_token_encrypted:
         return
 
@@ -448,6 +452,7 @@ def _send_hot_reply_alert(advisor, lead, reply_body: str):
 </body>
 </html>"""
 
+    alert_to = getattr(advisor, "notification_email", None) or NOTIFICATION_EMAIL
     _httpx.post(
         "https://graph.microsoft.com/v1.0/me/sendMail",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
@@ -455,10 +460,10 @@ def _send_hot_reply_alert(advisor, lead, reply_body: str):
             "message": {
                 "subject": subject,
                 "body": {"contentType": "HTML", "content": body_html},
-                "toRecipients": [{"emailAddress": {"address": NOTIFICATION_EMAIL}}],
+                "toRecipients": [{"emailAddress": {"address": alert_to}}],
             },
             "saveToSentItems": False,
         },
         timeout=15,
     )
-    logger.info("Hot reply alert sent to %s for lead %s", NOTIFICATION_EMAIL, lead.id)
+    logger.info("Hot reply alert sent to %s for lead %s", alert_to, lead.id)

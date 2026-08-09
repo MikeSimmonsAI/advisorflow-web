@@ -91,6 +91,43 @@ def _social_links_html(org: Organization) -> str:
     )
 
 
+@router.get("/results/{lead_id}")
+def get_survey_results(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all survey responses for a lead. Advisor auth required."""
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    responses = (
+        db.query(SurveyResponse)
+        .filter(SurveyResponse.lead_id == lead_id)
+        .order_by(SurveyResponse.submitted_at.desc())
+        .all()
+    )
+
+    return {
+        "lead_id": lead_id,
+        "responses": [
+            {
+                "id": r.id,
+                "rating": r.rating,
+                "feedback": r.feedback,
+                "facebook_handle": r.facebook_handle,
+                "instagram_handle": r.instagram_handle,
+                "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            }
+            for r in responses
+        ],
+    }
+
+
 @router.get("/{token}", response_class=HTMLResponse)
 def get_survey_page(token: str, db: Session = Depends(get_db)):
     """Serve the branded survey HTML page to the lead."""
@@ -257,40 +294,3 @@ def submit_survey(token: str, payload: SurveySubmission, db: Session = Depends(g
     db.commit()
     logger.info("Survey submitted lead=%s rating=%s", followup.lead_id, payload.rating)
     return {"success": True}
-
-
-@router.get("/results/{lead_id}")
-def get_survey_results(
-    lead_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Return all survey responses for a lead. Advisor auth required."""
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    responses = (
-        db.query(SurveyResponse)
-        .filter(SurveyResponse.lead_id == lead_id)
-        .order_by(SurveyResponse.submitted_at.desc())
-        .all()
-    )
-
-    return {
-        "lead_id": lead_id,
-        "responses": [
-            {
-                "id": r.id,
-                "rating": r.rating,
-                "feedback": r.feedback,
-                "facebook_handle": r.facebook_handle,
-                "instagram_handle": r.instagram_handle,
-                "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
-            }
-            for r in responses
-        ],
-    }
