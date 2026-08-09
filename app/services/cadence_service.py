@@ -25,9 +25,8 @@ How it works:
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.models.models import (
-    Lead, LeadStatus, CadenceState, CadenceStatus, MessageTrack, User
+    Lead, CadenceState, User
 )
-from app.services.sms_service import send_sms
 
 # Day offsets since cadence start - the actual 9-touch spec.
 CADENCE_SCHEDULE_DAYS = [1, 3, 7, 10, 14, 21, 30, 45, 60]

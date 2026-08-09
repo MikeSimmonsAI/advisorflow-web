@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, AdvisorAvailabilityBlock, BlockType, BookingLink, Lead
@@ -116,7 +116,6 @@ def get_available_slots(advisor_id: str, db: Session = Depends(get_db)):
     Called by Vercel booking app to show available times.
     """
     from datetime import date as date_cls, datetime as dt
-    import os
 
     advisor = db.query(User).filter(User.id == advisor_id).first()
     if not advisor:

@@ -34,8 +34,8 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_admin
 from app.models.models import (
-    User, Lead, LeadStatus, Message, Reply, ReplyClassification,
-    BookingLink, LeadOutcome,
+    User, Lead, Message, Reply, ReplyClassification, BookingLink,
+    LeadOutcome,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])

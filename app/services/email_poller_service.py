@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 class TokenExpiredError(Exception):
     """Raised when Microsoft rejects the refresh token (400) — advisor must re-connect."""
-    pass
 
 
 def _get_fresh_access_token(advisor) -> str:
@@ -105,7 +104,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
 
     Returns: {"checked": int, "matched": int, "errors": int}
     """
-    from app.models.models import User, Lead, Reply, Organization
+    from app.models.models import User, Lead, Reply
     from app.services.pipeline_service import process_inbound_reply
 
     advisor = db.query(User).filter(User.id == advisor_id).first()
@@ -172,7 +171,6 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             # Extract plain text from body — strip HTML, entities, and quoted thread
             body_full = email.get("body", {}).get("content", email.get("bodyPreview", "")).strip()
             import re
-            from html.parser import HTMLParser
             import html as _html
 
             # Strip HTML tags
@@ -286,7 +284,7 @@ def poll_all_orgs(db: Session) -> dict:
     Poll inbox for all M365-connected advisors across ALL organizations.
     Called by the Render cron job every 2 minutes via POST /email/poll-inbox/all.
     """
-    from app.models.models import User, Organization
+    from app.models.models import User
 
     # Get all active advisors with M365 connected across every org
     advisors = db.query(User).filter(

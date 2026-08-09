@@ -185,7 +185,7 @@ def send_sms(
     body = render_template(template, lead, advisor, booking_url)
 
     client = get_twilio_client(advisor)
-    twilio_msg = client.messages.create(
+    client.messages.create(
         body=body,
         from_=advisor.twilio_phone_number,
         to=lead.phone,
@@ -264,7 +264,7 @@ def configure_caller_id_name(advisor: User) -> None:
     """
     if not advisor.twilio_caller_id_name:
         return
-    client = get_twilio_client(advisor)
+    get_twilio_client(advisor)
     # Twilio CNAM registration is account-level via Messaging Service or
     # via the Trust Hub for A2P 10DLC - actual API call depends on which
     # Twilio product is in use. Placeholder for the real call:
@@ -274,7 +274,6 @@ def configure_caller_id_name(advisor: User) -> None:
     # For now we store the desired name on the User record and surface it
     # in the dashboard so Mike can complete this in the Twilio console,
     # since CNAM setup typically requires identity verification.
-    pass
 
 
 def send_batch(
@@ -294,6 +293,6 @@ def send_batch(
         try:
             msg = send_sms(db, advisor, lead, template, include_booking_link)
             sent.append(msg.id)
-        except Exception as e:
+        except Exception:
             skipped.append(lead.id)
     return {"sent_count": len(sent), "skipped_count": len(skipped), "sent_ids": sent, "skipped_ids": skipped}

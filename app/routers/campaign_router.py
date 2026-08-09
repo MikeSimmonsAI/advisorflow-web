@@ -13,12 +13,11 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.deps import get_db, get_current_user, require_admin
 from app.models.models import Campaign, Lead, Message, Reply, User

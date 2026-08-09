@@ -25,9 +25,9 @@ correct classification for THAT MOMENT, rather than trying to track
 incremental state transitions that could drift out of sync.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from app.models.models import Lead, LeadStatus, LeadTier, EngagementTemperature, Reply, CadenceState, CadenceStatus
+from app.models.models import Lead, EngagementTemperature, Reply
 
 COLD_AFTER_DAYS_NO_REPLY = 30
 

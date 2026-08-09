@@ -167,7 +167,7 @@ Respond ONLY with valid JSON, no markdown:
             talking_points=result.get("talking_points", []),
         )
 
-    except Exception as e:
+    except Exception:
         # Fallback to keyword classifier + scripted response
         objection_type = _classify_simple(reply.body)
         return ObjectionReplyResponse(

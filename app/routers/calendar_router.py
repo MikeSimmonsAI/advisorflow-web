@@ -125,8 +125,6 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     lead_name = body.get("lead_name", "")
     lead_phone = body.get("lead_phone", "")
     appt_label = body.get("appt_label", "Family File Review")
-    advisor_name = body.get("advisor_name", "")
-
     if not token:
         logger.error("booking-confirmed: no booking_token in payload")
         raise HTTPException(status_code=400, detail="booking_token is required")

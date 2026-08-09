@@ -26,7 +26,6 @@ from app.models.models import User, Lead, VoiceCall, Organization
 from app.services.voice_service import (
     build_twilio_twiml_outbound,
     build_twilio_twiml_voicemail,
-    build_voice_system_prompt,
     initiate_outbound_call,
     handle_realtime_session,
 )
@@ -170,7 +169,6 @@ async def get_twiml(
     advisor_id = request.query_params.get("advisor_id", "")
 
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    advisor = db.query(User).filter(User.id == advisor_id).first() if advisor_id else None
 
     if not lead:
         twiml = build_twilio_twiml_voicemail("Sorry, we were unable to connect this call. Goodbye.")
@@ -366,8 +364,7 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
 
         if lead and advisor:
             appt_label = _get_appt_label(lead)
-            booking_link = create_booking_link(db, lead, advisor)
-            booking_url = f"{BOOKING_BASE_URL}/book/{booking_link.token}"
+            create_booking_link(db, lead, advisor)
 
             _vm_org = db.query(Organization).filter_by(id=advisor.organization_id).first() if advisor else None
             _vm_org_name = (_vm_org.brand_name or _vm_org.name) if _vm_org else (advisor.full_name if advisor else "our team")
@@ -512,7 +509,7 @@ async def handle_inbound_call(request: Request, db: Session = Depends(get_db)):
 
     if not lead or not advisor:
         # Unknown caller — greet generically and offer to connect
-        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="Polly.Joanna" rate="95%">
         Thank you for calling. This is an AI assistant with BookaBoost.

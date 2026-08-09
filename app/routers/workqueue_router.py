@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db

@@ -41,7 +41,7 @@ Last Activity/Note, Street Address, City, State, ZIP Code, etc.
 
 import pandas as pd
 from sqlalchemy.orm import Session
-from app.models.models import Lead, LeadTier, LeadStatus, MessageTrack
+from app.models.models import Lead, LeadTier
 from app.services.dedup_service import check_and_register, normalize_phone
 
 HEADER_MAP = {

@@ -115,7 +115,7 @@ def register_org(
 
     try:
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Could not create account. Please try again.")
 

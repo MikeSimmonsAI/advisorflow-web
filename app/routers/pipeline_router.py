@@ -10,7 +10,7 @@ from datetime import datetime
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, PipelineConversation
 from app.services.pipeline_service import (
-    launch_pipeline, get_pipeline_stats, get_ai_forecast, analyze_and_respond
+    launch_pipeline, get_pipeline_stats, get_ai_forecast
 )
 from app.routers.audit_log_router import log_action
 

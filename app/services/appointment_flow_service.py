@@ -106,7 +106,7 @@ def on_booking_cancelled(db: Session, lead: Lead, advisor: User, booking_link: B
 
     # Reopen cadence if it was paused/stopped due to booking
     try:
-        from app.models.models import CadenceState, CadenceStatus
+        from app.models.models import CadenceState
         cadence = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
         if cadence and cadence.status in ("completed", "booked"):
             cadence.status = "active"

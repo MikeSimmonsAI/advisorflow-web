@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import (
     Lead, User, Reply, Message, BookingLink,
-    PipelineConversation, Notification
+    PipelineConversation
 )
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 
@@ -444,7 +444,6 @@ def launch_pipeline(
 
 def get_pipeline_stats(db: Session, organization_id: str) -> dict:
     """Returns pipeline engagement stats for the overview dashboard."""
-    from sqlalchemy import func
 
     pipelines = db.query(PipelineConversation).filter(
         PipelineConversation.organization_id == organization_id

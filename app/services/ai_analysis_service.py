@@ -22,7 +22,6 @@ platform.openai.com, so batch calls and handle 429 gracefully).
 
 import os
 import json
-from datetime import datetime
 from openai import OpenAI
 from sqlalchemy.orm import Session
 from app.models.models import Lead

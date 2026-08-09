@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db
 from app.models.models import (
     User, Lead, LeadTier, LeadStatus, MessageTrack, EngagementTemperature,
-    Reply, ReplyClassification, CadenceState, CadenceStatus, Message,
+    Reply, ReplyClassification, CadenceState, Message,
 )
 from app.routers.admin_router import require_super_admin
 from app.routers.audit_log_router import log_action

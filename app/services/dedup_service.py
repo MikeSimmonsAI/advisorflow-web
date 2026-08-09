@@ -19,7 +19,7 @@ Last name normalization: lowercase, strip whitespace, strip punctuation.
 
 import re
 from sqlalchemy.orm import Session
-from app.models.models import ContactRegistry, Lead
+from app.models.models import ContactRegistry
 
 # Used by scripts/seed_registry_from_sent_log.py to register historical
 # phone numbers (from the old desktop ADB pipeline's sent log) that have

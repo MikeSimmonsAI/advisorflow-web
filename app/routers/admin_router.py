@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.deps import get_db, require_admin
-from app.models.models import User, Lead, Message, Reply, LeadOutcome, LeadStatus, ReplyClassification, CadenceState, ContactRegistry, Organization
+from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization
 from app.services.auth_service import hash_password
 from app.services.dedup_service import normalize_phone, normalize_last_name
 from app.routers.audit_log_router import log_action

@@ -16,8 +16,6 @@ import asyncio
 import json
 import logging
 import os
-import base64
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,6 @@ URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 def build_voice_system_prompt(lead_info: dict, advisor_info: dict, call_number: int = 1) -> str:
     """Build the AI system prompt for the voice call."""
     first_name = lead_info.get("first_name", "there")
-    last_name = lead_info.get("last_name", "")
     tier = (lead_info.get("tier") or "").lower()
     appt_label = lead_info.get("appt_label", "Family Services Appointment")
     advisor_name = advisor_info.get("name", "Mike Simmons")

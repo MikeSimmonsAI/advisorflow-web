@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, Reply, Message, ReplyClassification, BookingLink
+from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
 
 router = APIRouter(prefix="/sms", tags=["sms"])

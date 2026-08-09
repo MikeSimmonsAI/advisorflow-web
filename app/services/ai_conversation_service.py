@@ -16,12 +16,11 @@ import os
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Any
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from app.models.models import Lead, Message, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
+from app.models.models import Lead, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 
 logger = logging.getLogger(__name__)

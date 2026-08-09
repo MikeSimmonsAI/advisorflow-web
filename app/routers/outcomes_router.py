@@ -169,8 +169,7 @@ def get_outcomes_summary(
     What it DOES show is genuinely useful: how many appointments
     happened, how many resulted in sales, and what items were sold most.
     """
-    from sqlalchemy import func
-    from app.models.models import Lead, LeadStatus
+    from app.models.models import Lead
 
     org_outcomes = (
         db.query(LeadOutcome)

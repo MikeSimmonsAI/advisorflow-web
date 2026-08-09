@@ -327,7 +327,7 @@ def draft_email_options(
                 "last_contact": last_contact,
             }
         }
-    except Exception as e:
+    except Exception:
         # Fallback — generic options
         first = lead.first_name or "there"
         advisor_name = advisor.full_name or "your advisor"

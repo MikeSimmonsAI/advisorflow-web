@@ -17,7 +17,6 @@ The business logic itself held up well and is preserved; only the
 structural/integration assumptions needed fixing.
 """
 
-import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field

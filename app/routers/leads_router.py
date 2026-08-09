@@ -10,9 +10,9 @@ from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, LeadStatus, Reply, ReplyClassification, CadenceState, CadenceStatus, BookingLink, EngagementTemperature
-from app.services.import_service import import_leads_from_excel, parse_excel_file
-from app.services.dedup_service import bulk_dedup_check, normalize_phone
+from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature
+from app.services.import_service import import_leads_from_excel
+from app.services.dedup_service import normalize_phone
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -594,7 +594,6 @@ def bulk_delete_duplicate_leads(
 
     Requires org_admin or super_admin role - advisors cannot bulk delete.
     """
-    from app.deps import require_admin
     if current_user.role not in ("org_admin", "super_admin"):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Admin role required to bulk delete leads.")
@@ -701,7 +700,7 @@ def create_lead_manually(
     from app.services.dedup_service import normalize_phone, normalize_last_name
 
     phone_normalized = normalize_phone(payload.phone or "")
-    last_normalized = normalize_last_name(payload.last_name or "")
+    normalize_last_name(payload.last_name or "")
 
     # Check for duplicate by phone
     is_dup = False

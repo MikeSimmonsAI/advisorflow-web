@@ -14,7 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import Column, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user

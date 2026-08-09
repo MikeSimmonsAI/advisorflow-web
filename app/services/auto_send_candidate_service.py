@@ -25,7 +25,7 @@ implementation.
 
 from sqlalchemy.orm import Session
 
-from app.models.models import Reply, Lead, User, AutoSendCandidate
+from app.models.models import Reply, Lead, AutoSendCandidate
 
 
 def maybe_create_candidate(db: Session, reply: Reply, lead: Lead):

@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import base64
+import os
+import re
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import Optional
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, EmailMessage
@@ -37,14 +42,12 @@ def send_single_email(
     if req and req.body:
         # Strip any raw booking URLs that may have been included in the AI body text.
         # The booking button is appended exactly once below as an HTML element.
-        import re
         clean_body = re.sub(r'https?://advisorflow-booking\.vercel\.app\S*', '', req.body).strip()
         body_html = clean_body.replace('\n', '<br>')
 
         # Append a single HTML booking button when requested
         if req.include_booking_link:
             from app.services.sms_service import create_booking_link
-            import os
             booking_link = create_booking_link(db, lead, current_user)
             booking_url = f"{os.environ.get('BOOKING_BASE_URL', 'https://advisorflow-booking.vercel.app')}/book/{booking_link.token}"
             btn_label = req.appt_label or "Schedule Your Appointment"
@@ -70,8 +73,6 @@ def send_single_email(
         if not result["success"]:
             raise HTTPException(status_code=500, detail=result.get("error", "Email send failed. Check your Microsoft 365 connection in Settings."))
 
-        from app.models.models import EmailMessage
-        from datetime import datetime
         msg = EmailMessage(
             lead_id=lead.id,
             sender_id=current_user.id,
@@ -140,9 +141,6 @@ def email_only_queue(
 
 # ── Email with flyer/attachment ───────────────────────────────────────────────
 
-from fastapi import UploadFile, File, Form
-import base64, os
-
 class EmailWithAttachmentRequest(BaseModel):
     lead_id: str
     subject: str
@@ -187,8 +185,6 @@ async def send_email_with_attachment(
         raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
 
     # Log it
-    from app.models.models import EmailMessage
-    from datetime import datetime
     msg = EmailMessage(
         lead_id=lead.id,
         sender_id=current_user.id,

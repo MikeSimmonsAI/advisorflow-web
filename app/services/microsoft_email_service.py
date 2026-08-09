@@ -37,7 +37,6 @@ of once.
 import os
 import httpx
 from urllib.parse import urlencode
-from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models.models import User
 from app.utils.crypto import encrypt_value, decrypt_value

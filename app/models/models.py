@@ -17,7 +17,7 @@ Architecture notes:
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
-    UniqueConstraint, Index, Enum as SAEnum, Numeric
+    UniqueConstraint, Index, Enum as SAEnum
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
