@@ -4,6 +4,7 @@ import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
 import OutcomeTracker from '../components/OutcomeTracker'
+import CaseFile from './CaseFile'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
@@ -243,6 +244,7 @@ export default function LeadDetail() {
   const [assignableUsers, setAssignableUsers] = useState([])
   const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [assignmentError, setAssignmentError] = useState('')
+  const [showCaseFile, setShowCaseFile] = useState(false)
   const timelineRef = useRef(null)
 
   function load() {
@@ -948,13 +950,22 @@ export default function LeadDetail() {
                 <p className="lead-detail-info-text">Link sent — waiting for lead to pick a time.</p>
               )}
               {booking.status === 'booked' && (
-                <button
-                  className="btn btn--danger"
-                  onClick={() => handleCancelBooking(booking.id)}
-                  disabled={cancelling}
-                >
-                  {cancelling ? 'Cancelling…' : 'Cancel booking'}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button
+                    className="btn btn--primary"
+                    style={{ width: '100%', fontSize: 13 }}
+                    onClick={() => setShowCaseFile(true)}
+                  >
+                    📁 Open Case File
+                  </button>
+                  <button
+                    className="btn btn--danger"
+                    onClick={() => handleCancelBooking(booking.id)}
+                    disabled={cancelling}
+                  >
+                    {cancelling ? 'Cancelling…' : 'Cancel booking'}
+                  </button>
+                </div>
               )}
             </section>
           )}
@@ -988,6 +999,25 @@ export default function LeadDetail() {
             {analysisError && <div className="compose-error">{analysisError}</div>}
           </section>
 
+          {/* ── Case File (always accessible, not just booked) ── */}
+          {!booking && (
+            <section className="panel lead-detail-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">📁 Case File</h2>
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
+                Record appointment outcomes, products discussed, policy details, and next steps.
+              </p>
+              <button
+                className="btn btn--primary"
+                style={{ width: '100%', fontSize: 13 }}
+                onClick={() => setShowCaseFile(true)}
+              >
+                📁 Open Case File
+              </button>
+            </section>
+          )}
+
           <OutcomeTracker leadId={leadId} />
 
           <section className="panel lead-detail-panel">
@@ -1010,6 +1040,14 @@ export default function LeadDetail() {
           </section>
         </div>
       </div>
+
+      {showCaseFile && (
+        <CaseFile
+          lead={lead}
+          onClose={() => setShowCaseFile(false)}
+          onSaved={() => {}}
+        />
+      )}
     </div>
   )
 }

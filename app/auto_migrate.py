@@ -108,6 +108,8 @@ COLUMNS_TO_ADD = [
     ("organizations", "twilio_a2p_campaign_status", "VARCHAR"),
     ("organizations", "twilio_a2p_campaign_use_case", "VARCHAR"),
     ("organizations", "twilio_a2p_registered_at", "TIMESTAMP"),
+    # Post-appointment case file — lead-level case status
+    ("leads", "case_status", "VARCHAR DEFAULT 'open'"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes
@@ -306,3 +308,58 @@ def run_auto_migrations(engine) -> None:
         except (OperationalError, ProgrammingError) as e:
             conn.rollback()
             print(f"[auto_migrate] survey_responses table note: {e}")
+
+    # ── appointment_case_files table ──────────────────────────────────────────
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS appointment_case_files (
+                    id                          VARCHAR PRIMARY KEY,
+                    lead_id                     VARCHAR NOT NULL,
+                    organization_id             VARCHAR NOT NULL,
+                    recorded_by_id              VARCHAR NOT NULL,
+                    booking_link_id             VARCHAR,
+                    appointment_date            TIMESTAMP,
+                    appointment_type            VARCHAR,
+                    outcome_type                VARCHAR,
+                    products_discussed          TEXT,
+                    products_sold               TEXT,
+                    policy_carrier              VARCHAR,
+                    policy_number               VARCHAR,
+                    coverage_amount             VARCHAR,
+                    premium_monthly             VARCHAR,
+                    premium_annual              VARCHAR,
+                    application_date            TIMESTAMP,
+                    issue_date                  TIMESTAMP,
+                    chk_id_verified             BOOLEAN DEFAULT FALSE,
+                    chk_beneficiary_named       BOOLEAN DEFAULT FALSE,
+                    chk_app_signed              BOOLEAN DEFAULT FALSE,
+                    chk_payment_collected       BOOLEAN DEFAULT FALSE,
+                    chk_illustrations_reviewed  BOOLEAN DEFAULT FALSE,
+                    chk_medical_history         BOOLEAN DEFAULT FALSE,
+                    chk_hipaa_signed            BOOLEAN DEFAULT FALSE,
+                    chk_replacement_form        BOOLEAN DEFAULT FALSE,
+                    chk_beneficiary_reviewed    BOOLEAN DEFAULT FALSE,
+                    chk_riders_explained        BOOLEAN DEFAULT FALSE,
+                    advisor_notes               TEXT,
+                    objections_raised           TEXT,
+                    client_concerns             TEXT,
+                    referral_potential          BOOLEAN DEFAULT FALSE,
+                    referral_notes              TEXT,
+                    case_status                 VARCHAR DEFAULT 'open',
+                    next_action                 VARCHAR,
+                    next_action_date            TIMESTAMP,
+                    next_action_notes           TEXT,
+                    crm_synced_at               TIMESTAMP,
+                    crm_sync_status             VARCHAR,
+                    crm_external_id             VARCHAR,
+                    crm_error                   TEXT,
+                    created_at                  TIMESTAMP DEFAULT NOW(),
+                    updated_at                  TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+            print("[auto_migrate] appointment_case_files table ensured.")
+        except (OperationalError, ProgrammingError) as e:
+            conn.rollback()
+            print(f"[auto_migrate] appointment_case_files table note: {e}")
