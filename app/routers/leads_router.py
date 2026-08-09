@@ -783,8 +783,14 @@ def update_lead_fields(
     if payload.phone is not None:
         normalized = normalize_phone(payload.phone.strip())
         lead.phone = normalized or payload.phone.strip() or None
-        lead.phone_raw = payload.phone.strip() or None
-        lead.contact_channel = "sms" if lead.phone else ("email_only" if lead.email else "unknown")
+        try:
+            lead.phone_raw = payload.phone.strip() or None
+        except Exception:
+            pass
+        try:
+            lead.contact_channel = "sms" if lead.phone else ("email_only" if lead.email else "unknown")
+        except Exception:
+            pass
     if payload.email is not None:
         lead.email = payload.email.strip() or None
     if payload.notes is not None:
@@ -792,12 +798,19 @@ def update_lead_fields(
     if payload.tier is not None:
         lead.tier = payload.tier
 
-    lead.updated_at = datetime.utcnow()
+    try:
+        lead.updated_at = datetime.utcnow()
+    except Exception:
+        pass
+
     db.commit()
     db.refresh(lead)
 
-    log_action(db, current_user.organization_id, current_user.id,
-               action="lead.update", target_type="lead", target_id=lead_id)
+    try:
+        log_action(db, current_user.organization_id, current_user.id,
+                   action="lead.update", target_type="lead", target_id=lead_id)
+    except Exception:
+        pass
 
     return {
         "id": lead.id,
@@ -805,7 +818,7 @@ def update_lead_fields(
         "last_name": lead.last_name,
         "phone": lead.phone,
         "email": lead.email,
-        "notes": lead.notes,
+        "notes": getattr(lead, "notes", None),
         "tier": lead.tier,
     }
 
