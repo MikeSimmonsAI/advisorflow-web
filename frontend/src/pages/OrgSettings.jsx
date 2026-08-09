@@ -158,13 +158,17 @@ export default function OrgSettings() {
   }
 
   async function changeIndustry(newIndustry) {
-    if (!confirm(`Switching to ${newIndustry} will reset tier labels to defaults. Continue?`)) return
+    const isReset = newIndustry === industry
+    const msg = isReset
+      ? `Reset tier configuration to ${newIndustry} defaults? Current tiers will be replaced.`
+      : `Switching to ${newIndustry} will reset tier labels to defaults. Continue?`
+    if (!window.confirm(msg)) return
     setChangingIndustry(true)
     try {
       const result = await api.patch(`/org-settings/industry${orgQuery}`, { industry: newIndustry })
       setIndustry(newIndustry)
       setTiers(result.tiers || [])
-      setSuccess('Industry updated and tiers reset to defaults.')
+      setSuccess(isReset ? 'Tiers reset to industry defaults.' : 'Industry updated and tiers reset to defaults.')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -342,25 +346,55 @@ export default function OrgSettings() {
             <section className="panel os-section">
               <div className="panel-header"><h2 className="panel-title">Industry</h2></div>
               <p className="os-hint">Determines default tier labels and cadence templates.</p>
-              <div className="os-industry-grid">
-                {INDUSTRIES.map((ind) => (
-                  <button key={ind.value}
-                    className={`os-industry-btn ${industry === ind.value ? 'os-industry-btn--active' : ''}`}
-                    onClick={() => industry !== ind.value && changeIndustry(ind.value)}
-                    disabled={changingIndustry}
-                  >
-                    {ind.label}
-                    {industry === ind.value && <span className="os-industry-current">Current</span>}
-                  </button>
-                ))}
-              </div>
+
+              {isSuperAdmin ? (
+                // Super admin only — org admins cannot change their own industry
+                <div className="os-industry-grid">
+                  {INDUSTRIES.map((ind) => (
+                    <button key={ind.value}
+                      className={`os-industry-btn ${industry === ind.value ? 'os-industry-btn--active' : ''}`}
+                      onClick={() => industry !== ind.value && changeIndustry(ind.value)}
+                      disabled={changingIndustry}
+                    >
+                      {ind.label}
+                      {industry === ind.value && <span className="os-industry-current">Current</span>}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                // Org admin: read-only display
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
+                  <span style={{
+                    padding: '10px 22px',
+                    borderRadius: 10,
+                    background: 'rgba(47,182,255,0.1)',
+                    border: '1px solid rgba(47,182,255,0.3)',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: 'var(--accent)',
+                    letterSpacing: '0.01em',
+                  }}>
+                    {INDUSTRIES.find(i => i.value === industry)?.label || industry}
+                  </span>
+                  <span style={{ fontSize: 13, opacity: 0.5 }}>Set by your platform administrator</span>
+                </div>
+              )}
             </section>
           </div>
 
           <section className="panel os-section" style={{ marginTop: 16 }}>
             <div className="panel-header">
               <h2 className="panel-title">Tier configuration</h2>
-              <button className="btn btn--secondary" onClick={addTier} style={{ fontSize: 12, padding: '4px 12px' }}>+ Add tier</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {isSuperAdmin && (
+                  <button className="btn btn--secondary" onClick={() => changeIndustry(industry)}
+                    disabled={changingIndustry} style={{ fontSize: 12, padding: '4px 12px', color: '#f0c040', borderColor: 'rgba(240,192,64,0.4)' }}
+                    title="Reset tiers to industry defaults">
+                    {changingIndustry ? 'Resetting…' : '↺ Reset to industry defaults'}
+                  </button>
+                )}
+                <button className="btn btn--secondary" onClick={addTier} style={{ fontSize: 12, padding: '4px 12px' }}>+ Add tier</button>
+              </div>
             </div>
             <p className="os-hint">Define lead tiers for this organization.</p>
             <div className="os-tier-list">
