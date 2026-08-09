@@ -214,6 +214,12 @@ class User(Base):
     notification_email = Column(String, nullable=True)  # where HOT reply alerts go
     notify_on_hot_reply = Column(Boolean, default=True)
 
+    # Auto-send phase — controls inbound-reply AI auto-draft behavior
+    # "off"       (default) — feature disabled, normal inbox only
+    # "candidate" — eligible inbound replies go to /auto-send review queue
+    # "auto"      — eligible simple replies sent immediately, no human review
+    auto_send_phase = Column(String, default="off")
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 

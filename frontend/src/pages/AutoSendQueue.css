@@ -30,3 +30,34 @@
 .asq-message { background: var(--bg-field); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 14px; color: var(--text-primary); line-height: 1.6; margin-bottom: 8px; }
 .asq-reason { font-size: 11px; color: var(--text-tertiary); margin-bottom: 12px; font-style: italic; }
 .asq-item-actions { display: flex; gap: 8px; }
+
+/* Phase 2: inline edit fields */
+.asq-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-field);
+  border: 1.5px solid var(--accent-gold, #b8892a);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-family: inherit;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+.asq-edit-textarea:focus { border-color: var(--accent-gold, #b8892a); box-shadow: 0 0 0 3px var(--accent-gold-dim, rgba(184,137,42,0.15)); }
+.asq-edit-subject {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-field);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+  margin-bottom: 8px;
+}
+.asq-edit-subject:focus { border-color: var(--accent-gold, #b8892a); }

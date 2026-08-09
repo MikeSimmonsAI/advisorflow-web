@@ -29,6 +29,7 @@ from app.routers import onboarding_router, ai_conversation_router, cadence_templ
 from app.routers import reports_router, crm_router
 from app.routers.survey_router import router as survey_router
 from app.routers.pipeline_router import router as pipeline_router
+from app.routers.tier_definitions_router import router as tier_definitions_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -256,6 +257,7 @@ app.include_router(voice_router.router)
 app.include_router(reports_router.router)
 app.include_router(crm_router.router)
 app.include_router(survey_router)
+app.include_router(tier_definitions_router)
 
 
 @app.on_event("startup")

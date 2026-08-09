@@ -6,6 +6,11 @@ before sending. When auto_send=True on a campaign or cadence, messages
 go here first unless the advisor has enabled fully automatic mode.
 
 Queue states: pending | approved | skipped | sent | failed
+
+auto_send_phase values on User:
+  "off"       — default, feature disabled
+  "candidate" — eligible inbound replies go to review queue
+  "auto"      — eligible inbound replies are sent immediately
 """
 
 import uuid
@@ -37,7 +42,7 @@ class AutoSendItem(Base):
     channel = Column(String, default="sms")  # sms | email
     subject = Column(String, nullable=True)  # for email
     source = Column(String, default="ai")  # ai | cadence | campaign
-    source_ref = Column(String, nullable=True)  # campaign_id or cadence_state_id
+    source_ref = Column(String, nullable=True)  # campaign_id or cadence_state_id or reply_id
     status = Column(String, default="pending")  # pending | approved | skipped | sent | failed
     ai_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -59,6 +64,7 @@ def _serialize(item: AutoSendItem, lead: Lead) -> dict:
         "status": item.status,
         "ai_reason": item.ai_reason,
         "created_at": item.created_at,
+        "actioned_at": item.actioned_at,
     }
 
 
@@ -109,6 +115,84 @@ def get_history(
         lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
         result.append(_serialize(item, lead))
     return result
+
+
+@router.get("/settings")
+def get_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get current advisor's auto-send phase setting."""
+    return {
+        "auto_send_phase": current_user.auto_send_phase or "off",
+        "display": {
+            "off": "Off — inbound replies handled manually",
+            "candidate": "Review queue — AI drafts replies, you approve before sending",
+            "auto": "Full auto — eligible simple replies sent immediately",
+        }.get(current_user.auto_send_phase or "off", "Off"),
+    }
+
+
+class SettingsRequest(BaseModel):
+    auto_send_phase: str  # "off" | "candidate" | "auto"
+
+
+@router.post("/settings")
+def update_settings(
+    req: SettingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update the advisor's auto-send phase setting."""
+    valid_phases = {"off", "candidate", "auto"}
+    if req.auto_send_phase not in valid_phases:
+        raise HTTPException(status_code=400, detail=f"auto_send_phase must be one of: {', '.join(valid_phases)}")
+
+    current_user.auto_send_phase = req.auto_send_phase
+    db.commit()
+    log_action(
+        db,
+        current_user.organization_id,
+        current_user.id,
+        action="auto_send.settings_updated",
+        target_type="user",
+        target_id=current_user.id,
+        details={"auto_send_phase": req.auto_send_phase},
+    )
+    return {"auto_send_phase": req.auto_send_phase}
+
+
+class EditRequest(BaseModel):
+    message: str
+    subject: Optional[str] = None
+
+
+@router.patch("/{item_id}/edit")
+def edit_item(
+    item_id: str,
+    req: EditRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Edit the message body of a pending item before approving."""
+    item = db.query(AutoSendItem).filter(
+        AutoSendItem.id == item_id,
+        AutoSendItem.organization_id == current_user.organization_id,
+        AutoSendItem.status == "pending",
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found or already actioned")
+
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message body cannot be empty")
+
+    item.message = req.message.strip()
+    if req.subject is not None:
+        item.subject = req.subject
+    db.commit()
+    db.refresh(item)
+    lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
+    return _serialize(item, lead)
 
 
 @router.post("/{item_id}/approve")
