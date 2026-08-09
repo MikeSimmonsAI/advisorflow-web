@@ -28,6 +28,7 @@ class ProfileResponse(BaseModel):
     google_review_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+    profile_photo_url: Optional[str] = None
 
 
 class TwilioConfigRequest(BaseModel):
@@ -85,6 +86,7 @@ def get_profile(current_user: User = Depends(get_current_user)):
         google_review_url=getattr(current_user, 'google_review_url', None),
         instagram_url=getattr(current_user, 'instagram_url', None),
         linkedin_url=getattr(current_user, 'linkedin_url', None),
+        profile_photo_url=getattr(current_user, 'profile_photo_url', None),
     )
 
 
@@ -194,5 +196,46 @@ def update_social_links(
     current_user.google_review_url = req.google_review_url or None
     current_user.instagram_url = req.instagram_url or None
     current_user.linkedin_url = req.linkedin_url or None
+    db.commit()
+    return {"success": True}
+
+
+class ProfilePhotoRequest(BaseModel):
+    # base64 data URL from the browser — e.g. "data:image/jpeg;base64,/9j/..."
+    # The frontend encodes it via FileReader.readAsDataURL() so no multipart
+    # upload is needed. Max size enforced in frontend (< 2MB before encoding).
+    photo_data_url: str
+
+
+@router.patch("/profile-photo")
+def update_profile_photo(
+    req: ProfilePhotoRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Store the advisor's profile headshot as a base64 data URL.
+    Encoded in the browser before sending so no file storage / S3 is needed.
+    The data URL is served directly as the <img> src everywhere the avatar appears.
+    """
+    # Basic sanity check — must be a data URL with an image MIME type
+    if not req.photo_data_url.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="photo_data_url must be a valid image data URL.")
+    # Rough size guard — base64 of a 2MB file is ~2.7MB of text
+    if len(req.photo_data_url) > 3_000_000:
+        raise HTTPException(status_code=400, detail="Photo too large. Please use an image under 2MB.")
+    current_user.profile_photo_url = req.photo_data_url
+    db.commit()
+    db.refresh(current_user)
+    return {"success": True, "profile_photo_url": current_user.profile_photo_url}
+
+
+@router.delete("/profile-photo")
+def delete_profile_photo(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove the advisor's profile photo, reverting to the initials avatar."""
+    current_user.profile_photo_url = None
     db.commit()
     return {"success": True}

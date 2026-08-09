@@ -225,6 +225,10 @@ class User(Base):
     # "auto"      — eligible simple replies sent immediately, no human review
     auto_send_phase = Column(String, default="off")
 
+    # Profile photo — stored as base64 data URL (e.g. "data:image/jpeg;base64,...")
+    # so it's self-contained with no external storage dependency.
+    profile_photo_url = Column(Text, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 

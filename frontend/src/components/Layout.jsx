@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext } from '../api/client'
+import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext, api } from '../api/client'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import './Layout.css'
@@ -127,6 +127,7 @@ export default function Layout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [profilePhoto, setProfilePhoto] = useState(null)
   // Super admin always sees default BookaBoost branding — never a client org's branding
   const isSuperAdmin = user?.role === 'super_admin'
   const [orgContext, setOrgCtx] = useState(() => isSuperAdmin ? getOrgContext() : null)
@@ -152,6 +153,13 @@ export default function Layout({ children }) {
     if (stored) applyBrandingCSS(stored)
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
   }, [isSuperAdmin, location.pathname])
+
+  // Fetch profile photo once on mount so avatar shows headshot if set.
+  useEffect(() => {
+    api.get('/settings/profile').then(p => {
+      if (p?.profile_photo_url) setProfilePhoto(p.profile_photo_url)
+    }).catch(() => {})
+  }, [])
 
   function closeSidebar() { if (window.innerWidth <= 1024) setSidebarOpen(false) }
 
@@ -229,7 +237,12 @@ export default function Layout({ children }) {
 
         <div className="sidebar-footer">
           <div className="user-chip">
-            <div className="user-avatar">{(user?.full_name || '?')[0]}</div>
+            <div className="user-avatar">
+              {profilePhoto
+                ? <img src={profilePhoto} alt={user?.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                : (user?.full_name || '?')[0]
+              }
+            </div>
             <div>
               <div className="user-name">{user?.full_name || 'Unknown'}</div>
               <div className="user-role">{user?.role?.replace('_', ' ')}</div>

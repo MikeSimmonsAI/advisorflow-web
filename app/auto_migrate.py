@@ -121,6 +121,8 @@ COLUMNS_TO_ADD = [
     # Fiber + generic intake form — service address and JSON blob for industry-specific fields
     ("leads", "service_address", "VARCHAR"),
     ("leads", "extra_data", "TEXT"),
+    # Profile headshot — base64 data URL stored in DB (no external storage needed)
+    ("users", "profile_photo_url", "TEXT"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

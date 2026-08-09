@@ -36,6 +36,11 @@ export default function Settings() {
   const [connectingMicrosoft, setConnectingMicrosoft] = useState(false)
   const [microsoftMessage, setMicrosoftMessage] = useState(null)
 
+  // Profile photo
+  const [photoPreview, setPhotoPreview] = useState(null)
+  const [photoSaving, setPhotoSaving] = useState(false)
+  const [photoSaved, setPhotoSaved] = useState(false)
+
   // Admin — advisor Twilio assignment
   const [advisors, setAdvisors] = useState([])
   const [advisorsLoading, setAdvisorsLoading] = useState(false)
@@ -53,6 +58,7 @@ export default function Settings() {
       setNotifyEmail(p.notification_email || '')
       setNotifyOnHot(p.notify_on_hot_reply)
       setBookingUrl(p.booking_page_url || '')
+      setPhotoPreview(p.profile_photo_url || null)
       setLoading(false)
     })
 
@@ -200,6 +206,44 @@ export default function Settings() {
     }
   }
 
+  function handlePhotoChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Photo must be under 2MB.')
+      e.target.value = ''
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (ev) => setPhotoPreview(ev.target.result)
+    reader.readAsDataURL(file)
+  }
+
+  async function savePhoto() {
+    if (!photoPreview) return
+    setPhotoSaving(true)
+    setPhotoSaved(false)
+    try {
+      await api.patch('/settings/profile-photo', { photo_data_url: photoPreview })
+      setPhotoSaved(true)
+      setTimeout(() => setPhotoSaved(false), 2500)
+    } catch (err) {
+      alert(`Failed to save photo: ${err.message}`)
+    } finally {
+      setPhotoSaving(false)
+    }
+  }
+
+  async function removePhoto() {
+    if (!window.confirm('Remove your profile photo?')) return
+    try {
+      await api.delete('/settings/profile-photo')
+      setPhotoPreview(null)
+    } catch (err) {
+      alert(`Failed to remove photo: ${err.message}`)
+    }
+  }
+
   if (loading) return <div className="empty-state">Loading settings…</div>
 
   return (
@@ -210,6 +254,65 @@ export default function Settings() {
           <p className="page-subtitle">Your Twilio connection, calendar, and notification preferences.</p>
         </div>
       </header>
+
+      {/* ── Profile Photo ── */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">🖼️ Profile Photo</h2>
+        </div>
+        <p className="settings-help">
+          Your headshot appears in your sidebar and on your booking page. Upload a square photo under 2MB.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginBottom: 16 }}>
+          {/* Avatar preview */}
+          <div style={{
+            width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
+            background: 'var(--bg-card)', border: '2px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 28, color: 'var(--text-secondary)', fontWeight: 700,
+          }}>
+            {photoPreview
+              ? <img src={photoPreview} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : (profile?.full_name || currentUser?.full_name || '?')[0].toUpperCase()
+            }
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label
+              style={{
+                display: 'inline-block', padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+                background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600,
+              }}
+            >
+              Choose photo
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handlePhotoChange}
+              />
+            </label>
+            {photoPreview && (
+              <button
+                className="btn btn--secondary"
+                style={{ fontSize: 12, padding: '6px 14px' }}
+                onClick={removePhoto}
+              >
+                Remove photo
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="settings-actions" style={{ justifyContent: 'flex-start' }}>
+          {photoSaved && <span className="settings-saved">Photo saved ✓</span>}
+          <button
+            className="btn btn--primary"
+            disabled={!photoPreview || photoSaving}
+            onClick={savePhoto}
+          >
+            {photoSaving ? 'Saving…' : 'Save photo'}
+          </button>
+        </div>
+      </section>
 
       {calendarMessage && (
         <div className={calendarMessage.type === 'success' ? 'settings-banner settings-banner--success' : 'settings-banner settings-banner--error'}>
