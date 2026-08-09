@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { api, getCurrentUser } from '../api/client'
+import { api, getCurrentUser, getBranding } from '../api/client'
 import '../styles/shared.css'
 import './TierDefinitions.css'
 
@@ -21,6 +21,7 @@ export default function TierDefinitions() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
 
@@ -143,14 +144,38 @@ export default function TierDefinitions() {
   async function seedDefaults() {
     setSeeding(true)
     try {
-      const params = isSuperAdmin && orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
-      const result = await api.post(`/tier-definitions/seed-defaults${params}`, {})
+      const branding = getBranding()
+      const industry = branding?.industry || 'funeral'
+      const params = new URLSearchParams()
+      if (isSuperAdmin && orgId) params.set('org_id', orgId)
+      params.set('industry', industry)
+      const result = await api.post(`/tier-definitions/seed-defaults?${params}`, {})
       flash(result.message || 'Defaults seeded.')
       load()
     } catch (e) {
       flash(e.message || 'Seed failed', true)
     } finally {
       setSeeding(false)
+    }
+  }
+
+  async function resetDefaults() {
+    const branding = getBranding()
+    const industry = branding?.industry || 'funeral'
+    const label = industry.replace(/_/g, ' ')
+    if (!window.confirm(`This will DELETE all current tiers and replace them with ${label} industry defaults. Are you sure?`)) return
+    setResetting(true)
+    try {
+      const params = new URLSearchParams()
+      if (isSuperAdmin && orgId) params.set('org_id', orgId)
+      params.set('industry', industry)
+      const result = await api.post(`/tier-definitions/reset-defaults?${params}`, {})
+      flash(result.message || 'Tiers reset.')
+      load()
+    } catch (e) {
+      flash(e.message || 'Reset failed', true)
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -174,6 +199,13 @@ export default function TierDefinitions() {
             onClick={seedDefaults}
           >
             {seeding ? 'Seeding…' : '⟳ Seed Defaults'}
+          </div>
+          <div
+            className={`td-btn td-btn--danger ${resetting ? 'td-btn--disabled' : ''}`}
+            onClick={resetDefaults}
+            title="Delete all tiers and reseed from industry defaults"
+          >
+            {resetting ? 'Resetting…' : '↺ Reset to Industry Defaults'}
           </div>
         </div>
       </div>

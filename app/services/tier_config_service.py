@@ -89,6 +89,272 @@ def validate_manually_selectable_tier_key(db: Session, organization_id: str, tie
     return definition
 
 
+
+# ---------------------------------------------------------------------------
+# Industry-specific tier sets. Each industry gets tiers that match its
+# real sales/service workflow rather than defaulting to funeral terminology.
+# ---------------------------------------------------------------------------
+
+FIBER_DEFAULT_TIERS = [
+    {
+        "tier_key": "prospect", "tier_label": "Prospect", "sort_order": 0,
+        "track_key": "fiber_prospect", "track_label": "Fiber Prospect Intro",
+        "is_manual_selectable": True,
+        "ai_tone_context": (
+            "Prospect: a door-knocker just captured this lead as a verbal yes. "
+            "Tone is warm and welcoming — confirm their interest, give a sense of "
+            "next steps (scheduling the install), and keep it brief."
+        ),
+    },
+    {
+        "tier_key": "warm_lead", "tier_label": "Warm Lead", "sort_order": 1,
+        "track_key": "fiber_warm", "track_label": "Fiber Warm Outreach",
+        "is_manual_selectable": True,
+        "ai_tone_context": (
+            "Warm Lead: the customer has been contacted and showed interest. "
+            "Move them toward scheduling an install appointment."
+        ),
+    },
+    {
+        "tier_key": "appt_set", "tier_label": "Appt Scheduled", "sort_order": 2,
+        "track_key": "fiber_appt", "track_label": "Fiber Appt Reminder",
+        "is_manual_selectable": True,
+        "ai_tone_context": (
+            "Appointment Scheduled: install date is confirmed. Tone is excited "
+            "and reassuring — remind them of the date/time and what to expect."
+        ),
+    },
+    {
+        "tier_key": "installed", "tier_label": "Installed", "sort_order": 3,
+        "track_key": "fiber_post_install", "track_label": "Post-Install Follow-up",
+        "is_manual_selectable": True,
+        "ai_tone_context": (
+            "Installed: service is live. Tone is celebratory — check in on "
+            "satisfaction, ask for a review if they are happy."
+        ),
+    },
+    {
+        "tier_key": "upsell", "tier_label": "Upsell / Referral", "sort_order": 4,
+        "track_key": "fiber_upsell", "track_label": "Fiber Upsell",
+        "is_manual_selectable": True,
+        "ai_tone_context": (
+            "Upsell: existing customer eligible for a speed upgrade or referral "
+            "program. Tone is friendly and value-focused."
+        ),
+    },
+    {
+        "tier_key": "not_home", "tier_label": "Not Home / Revisit", "sort_order": 5,
+        "track_key": "fiber_revisit", "track_label": "Fiber Re-knock",
+        "is_manual_selectable": False,
+        "ai_tone_context": (
+            "Not Home: rep knocked but no answer. Brief, friendly message "
+            "introducing Fiber Cartel and inviting them to reach out."
+        ),
+    },
+]
+
+SALES_DEFAULT_TIERS = [
+    {
+        "tier_key": "prospect", "tier_label": "Prospect", "sort_order": 0,
+        "track_key": "sales_prospect", "track_label": "Initial Outreach",
+        "ai_tone_context": "New prospect — warm, friendly intro. Focus on value and next step.",
+    },
+    {
+        "tier_key": "warm", "tier_label": "Warm Lead", "sort_order": 1,
+        "track_key": "sales_warm", "track_label": "Warm Follow-up",
+        "ai_tone_context": "Engaged lead showing interest. Move toward scheduling a demo or call.",
+    },
+    {
+        "tier_key": "hot", "tier_label": "Hot Lead", "sort_order": 2,
+        "track_key": "sales_hot", "track_label": "Hot Close",
+        "ai_tone_context": "High-intent lead ready to commit. Be direct, remove friction, guide to next step.",
+    },
+    {
+        "tier_key": "customer", "tier_label": "Customer", "sort_order": 3,
+        "track_key": "sales_upsell", "track_label": "Customer Upsell",
+        "ai_tone_context": "Existing customer. Tone is warm and relationship-focused — upsell or referral ask.",
+    },
+    {
+        "tier_key": "lost", "tier_label": "Lost / Not Now", "sort_order": 4,
+        "track_key": "sales_nurture", "track_label": "Long-term Nurture",
+        "is_manual_selectable": False,
+        "ai_tone_context": "Passed for now — gentle long-cycle nurture to stay top of mind.",
+    },
+]
+
+ROOFING_DEFAULT_TIERS = [
+    {
+        "tier_key": "new_lead", "tier_label": "New Lead", "sort_order": 0,
+        "track_key": "roof_intro", "track_label": "Roofing Intro",
+        "ai_tone_context": "New roofing inquiry. Friendly intro — offer a free inspection.",
+    },
+    {
+        "tier_key": "inspection_set", "tier_label": "Inspection Scheduled", "sort_order": 1,
+        "track_key": "roof_inspection", "track_label": "Inspection Reminder",
+        "ai_tone_context": "Inspection is booked. Remind them of date/time and what to expect.",
+    },
+    {
+        "tier_key": "estimate_sent", "tier_label": "Estimate Sent", "sort_order": 2,
+        "track_key": "roof_estimate", "track_label": "Estimate Follow-up",
+        "ai_tone_context": "Quote is out. Follow up warmly — address objections, keep urgency low.",
+    },
+    {
+        "tier_key": "job_booked", "tier_label": "Job Booked", "sort_order": 3,
+        "track_key": "roof_booked", "track_label": "Job Confirmation",
+        "ai_tone_context": "Project accepted. Confirm start date, set expectations.",
+    },
+    {
+        "tier_key": "job_complete", "tier_label": "Job Complete", "sort_order": 4,
+        "track_key": "roof_complete", "track_label": "Post-Job Follow-up",
+        "ai_tone_context": "Job done — check satisfaction, ask for review/referral.",
+    },
+]
+
+INSURANCE_DEFAULT_TIERS = [
+    {
+        "tier_key": "prospect", "tier_label": "Prospect", "sort_order": 0,
+        "track_key": "ins_intro", "track_label": "Insurance Intro",
+        "ai_tone_context": "New insurance prospect. Warm intro — focus on peace of mind and protection.",
+    },
+    {
+        "tier_key": "qualified", "tier_label": "Qualified", "sort_order": 1,
+        "track_key": "ins_qualified", "track_label": "Qualified Follow-up",
+        "ai_tone_context": "Lead is qualified. Move toward getting a quote on the books.",
+    },
+    {
+        "tier_key": "quote_sent", "tier_label": "Quote Sent", "sort_order": 2,
+        "track_key": "ins_quote", "track_label": "Quote Follow-up",
+        "ai_tone_context": "Quote has been delivered. Follow up — answer questions, handle objections.",
+    },
+    {
+        "tier_key": "app_in_progress", "tier_label": "App In Progress", "sort_order": 3,
+        "track_key": "ins_app", "track_label": "Application Support",
+        "ai_tone_context": "Application submitted or in progress. Support and keep moving forward.",
+    },
+    {
+        "tier_key": "active", "tier_label": "Active Policy", "sort_order": 4,
+        "track_key": "ins_active", "track_label": "Policy Holder Retention",
+        "ai_tone_context": "Active policyholder. Renewal touch, referral ask, upsell opportunity.",
+    },
+]
+
+HOME_SERVICES_DEFAULT_TIERS = [
+    {
+        "tier_key": "new_lead", "tier_label": "New Lead", "sort_order": 0,
+        "track_key": "hs_intro", "track_label": "Home Services Intro",
+        "ai_tone_context": "New home services inquiry. Friendly, helpful — book an estimate or consultation.",
+    },
+    {
+        "tier_key": "estimate_scheduled", "tier_label": "Estimate Scheduled", "sort_order": 1,
+        "track_key": "hs_estimate", "track_label": "Estimate Reminder",
+        "ai_tone_context": "Estimate appointment is set. Remind them and build excitement.",
+    },
+    {
+        "tier_key": "proposal_sent", "tier_label": "Proposal Sent", "sort_order": 2,
+        "track_key": "hs_proposal", "track_label": "Proposal Follow-up",
+        "ai_tone_context": "Proposal is out. Warm follow-up — answer questions and handle objections gently.",
+    },
+    {
+        "tier_key": "job_won", "tier_label": "Job Won", "sort_order": 3,
+        "track_key": "hs_job_won", "track_label": "Job Kickoff",
+        "ai_tone_context": "Project awarded. Confirm details, set expectations, build confidence.",
+    },
+    {
+        "tier_key": "complete", "tier_label": "Job Complete", "sort_order": 4,
+        "track_key": "hs_complete", "track_label": "Post-Job Follow-up",
+        "ai_tone_context": "Job done. Check satisfaction, ask for a review and referral.",
+    },
+]
+
+REAL_ESTATE_DEFAULT_TIERS = [
+    {
+        "tier_key": "buyer_lead", "tier_label": "Buyer Lead", "sort_order": 0,
+        "track_key": "re_buyer", "track_label": "Buyer Outreach",
+        "ai_tone_context": "Prospective buyer. Friendly — understand their needs and offer to show listings.",
+    },
+    {
+        "tier_key": "seller_lead", "tier_label": "Seller Lead", "sort_order": 1,
+        "track_key": "re_seller", "track_label": "Seller Outreach",
+        "ai_tone_context": "Homeowner interested in selling. Friendly — offer a CMA and guide next steps.",
+    },
+    {
+        "tier_key": "showing_set", "tier_label": "Showing Scheduled", "sort_order": 2,
+        "track_key": "re_showing", "track_label": "Showing Reminder",
+        "ai_tone_context": "Showing is scheduled. Remind them and build excitement about the property.",
+    },
+    {
+        "tier_key": "under_contract", "tier_label": "Under Contract", "sort_order": 3,
+        "track_key": "re_contract", "track_label": "Contract Support",
+        "ai_tone_context": "Under contract. Keep them informed and calm through the closing process.",
+    },
+    {
+        "tier_key": "closed", "tier_label": "Closed", "sort_order": 4,
+        "track_key": "re_closed", "track_label": "Post-Close Follow-up",
+        "ai_tone_context": "Closed! Congratulate them and ask for reviews / referrals.",
+    },
+]
+
+# Map industry values → their tier set. Fall back to SALES_DEFAULT_TIERS for
+# any industry not explicitly listed here — it's generic enough to work.
+INDUSTRY_TIER_SETS = {
+    "fiber": FIBER_DEFAULT_TIERS,
+    "fiber_internet": FIBER_DEFAULT_TIERS,
+    "door_to_door": FIBER_DEFAULT_TIERS,
+    "direct_sales": SALES_DEFAULT_TIERS,
+    "solar": SALES_DEFAULT_TIERS,
+    "telecom": SALES_DEFAULT_TIERS,
+    "security": SALES_DEFAULT_TIERS,
+    "roofing": ROOFING_DEFAULT_TIERS,
+    "hvac": HOME_SERVICES_DEFAULT_TIERS,
+    "plumbing": HOME_SERVICES_DEFAULT_TIERS,
+    "electrical": HOME_SERVICES_DEFAULT_TIERS,
+    "pest_control": HOME_SERVICES_DEFAULT_TIERS,
+    "landscaping": HOME_SERVICES_DEFAULT_TIERS,
+    "windows_doors": HOME_SERVICES_DEFAULT_TIERS,
+    "painting": HOME_SERVICES_DEFAULT_TIERS,
+    "flooring": HOME_SERVICES_DEFAULT_TIERS,
+    "cleaning": HOME_SERVICES_DEFAULT_TIERS,
+    "pool_spa": HOME_SERVICES_DEFAULT_TIERS,
+    "tree_service": HOME_SERVICES_DEFAULT_TIERS,
+    "water_treatment": HOME_SERVICES_DEFAULT_TIERS,
+    "home_services": HOME_SERVICES_DEFAULT_TIERS,
+    "insurance": INSURANCE_DEFAULT_TIERS,
+    "life_insurance": INSURANCE_DEFAULT_TIERS,
+    "health_insurance": INSURANCE_DEFAULT_TIERS,
+    "medicare": INSURANCE_DEFAULT_TIERS,
+    "annuities": INSURANCE_DEFAULT_TIERS,
+    "real_estate": REAL_ESTATE_DEFAULT_TIERS,
+    "mortgage": INSURANCE_DEFAULT_TIERS,  # quote-based flow similar to insurance
+}
+
+
+def get_tier_set_for_industry(industry: str) -> list:
+    """Returns the appropriate default tier set for the given industry string."""
+    if not industry:
+        return RESTLAND_DEFAULT_TIERS
+    key = industry.lower().strip().replace("-", "_").replace(" ", "_")
+    if key in ("funeral", "cemetery", "funeral_cemetery"):
+        return RESTLAND_DEFAULT_TIERS
+    return INDUSTRY_TIER_SETS.get(key, SALES_DEFAULT_TIERS)
+
+
+def clear_and_reseed_tier_definitions(db: Session, organization_id: str, industry: str) -> list[TierDefinition]:
+    """
+    Wipes ALL existing TierDefinition rows for this org and reseeds from
+    the industry-appropriate defaults. Intentionally destructive — callers
+    must confirm with the user before calling this.
+    """
+    db.query(TierDefinition).filter(TierDefinition.organization_id == organization_id).delete()
+    db.commit()
+    tier_set = get_tier_set_for_industry(industry)
+    created = []
+    for spec in tier_set:
+        row = TierDefinition(organization_id=organization_id, **spec)
+        db.add(row)
+        created.append(row)
+    db.commit()
+    return created
+
 # ---------------------------------------------------------------------------
 # Restland's default tier set - exactly matching the original, hardcoded
 # LeadTier + MessageTrack + TIER_TO_TRACK (import_service.py) +
@@ -180,7 +446,7 @@ RESTLAND_DEFAULT_TIERS = [
 ]
 
 
-def seed_default_tier_definitions(db: Session, organization_id: str) -> list[TierDefinition]:
+def seed_default_tier_definitions(db: Session, organization_id: str, industry: str = "funeral") -> list[TierDefinition]:
     """
     Creates Restland's default 8 tier definitions for one organization.
     Idempotent - if this org already has any tier_definitions rows at
@@ -193,7 +459,8 @@ def seed_default_tier_definitions(db: Session, organization_id: str) -> list[Tie
         return []
 
     created = []
-    for spec in RESTLAND_DEFAULT_TIERS:
+    tier_set = get_tier_set_for_industry(industry)
+    for spec in tier_set:
         definition = TierDefinition(organization_id=organization_id, **spec)
         db.add(definition)
         created.append(definition)

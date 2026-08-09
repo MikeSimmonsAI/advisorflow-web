@@ -4,12 +4,50 @@ import '../styles/shared.css'
 import './OrgSettings.css'
 
 const INDUSTRIES = [
-  { value: 'funeral', label: '⚰️ Funeral & Cemetery' },
-  { value: 'roofing', label: '🏠 Roofing' },
-  { value: 'insurance', label: '🛡 Insurance' },
-  { value: 'real_estate', label: '🏡 Real Estate' },
-  { value: 'dental', label: '🦷 Dental' },
-  { value: 'custom', label: '⚙️ Custom' },
+  // Field Sales / D2D
+  { value: 'fiber', label: '⚡ Fiber Internet', group: 'Field Sales / D2D' },
+  { value: 'door_to_door', label: '🚪 Door-to-Door', group: 'Field Sales / D2D' },
+  { value: 'direct_sales', label: '💼 Direct Sales', group: 'Field Sales / D2D' },
+  { value: 'solar', label: '☀️ Solar', group: 'Field Sales / D2D' },
+  { value: 'telecom', label: '📡 Telecom', group: 'Field Sales / D2D' },
+  { value: 'security', label: '🔒 Security Systems', group: 'Field Sales / D2D' },
+  // Insurance
+  { value: 'insurance', label: '🛡 Life Insurance', group: 'Insurance' },
+  { value: 'health_insurance', label: '🏥 Health Insurance', group: 'Insurance' },
+  { value: 'medicare', label: '💊 Medicare', group: 'Insurance' },
+  { value: 'annuities', label: '📈 Annuities', group: 'Insurance' },
+  // Home Services
+  { value: 'roofing', label: '🏠 Roofing', group: 'Home Services' },
+  { value: 'hvac', label: '❄️ HVAC', group: 'Home Services' },
+  { value: 'plumbing', label: '🔧 Plumbing', group: 'Home Services' },
+  { value: 'electrical', label: '⚡ Electrical', group: 'Home Services' },
+  { value: 'pest_control', label: '🐛 Pest Control', group: 'Home Services' },
+  { value: 'landscaping', label: '🌿 Landscaping', group: 'Home Services' },
+  { value: 'windows_doors', label: '🪟 Windows & Doors', group: 'Home Services' },
+  { value: 'painting', label: '🎨 Painting', group: 'Home Services' },
+  { value: 'flooring', label: '🏡 Flooring', group: 'Home Services' },
+  { value: 'cleaning', label: '🧹 Cleaning', group: 'Home Services' },
+  { value: 'pool_spa', label: '🏊 Pool & Spa', group: 'Home Services' },
+  { value: 'tree_service', label: '🌲 Tree Service', group: 'Home Services' },
+  { value: 'water_treatment', label: '💧 Water Treatment', group: 'Home Services' },
+  // Healthcare
+  { value: 'dental', label: '🦷 Dental', group: 'Healthcare' },
+  { value: 'medical', label: '🏥 Medical', group: 'Healthcare' },
+  { value: 'chiropractic', label: '🦴 Chiropractic', group: 'Healthcare' },
+  { value: 'physical_therapy', label: '🏋️ Physical Therapy', group: 'Healthcare' },
+  { value: 'veterinary', label: '🐾 Veterinary', group: 'Healthcare' },
+  // Real Estate & Finance
+  { value: 'real_estate', label: '🏡 Real Estate', group: 'Real Estate & Finance' },
+  { value: 'mortgage', label: '🏦 Mortgage', group: 'Real Estate & Finance' },
+  { value: 'financial_services', label: '💰 Financial Services', group: 'Real Estate & Finance' },
+  // Funeral & Cemetery
+  { value: 'funeral', label: '⚰️ Funeral & Cemetery', group: 'Funeral & Cemetery' },
+  // Other
+  { value: 'legal', label: '⚖️ Legal', group: 'Other' },
+  { value: 'fitness', label: '💪 Fitness', group: 'Other' },
+  { value: 'education', label: '📚 Education', group: 'Other' },
+  { value: 'auto_repair', label: '🚗 Auto Repair', group: 'Other' },
+  { value: 'custom', label: '⚙️ Custom / Other', group: 'Other' },
 ]
 
 const COLOR_OPTIONS = [

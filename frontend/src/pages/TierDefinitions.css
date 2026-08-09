@@ -398,3 +398,13 @@
   .td-field-row--sm { grid-template-columns: 1fr; }
   .td-header { flex-direction: column; }
 }
+
+.td-btn--danger {
+  background: rgba(240, 80, 80, 0.08);
+  color: #f55;
+  border: 1px solid rgba(240, 80, 80, 0.3);
+}
+.td-btn--danger:hover {
+  background: rgba(240, 80, 80, 0.18);
+  border-color: rgba(240, 80, 80, 0.6);
+}

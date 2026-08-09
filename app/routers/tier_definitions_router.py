@@ -13,7 +13,7 @@ from typing import Optional
 
 from app.deps import get_db, get_current_user, require_admin
 from app.models.models import TierDefinition, User
-from app.services.tier_config_service import seed_default_tier_definitions
+from app.services.tier_config_service import seed_default_tier_definitions, clear_and_reseed_tier_definitions
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/tier-definitions", tags=["tier-definitions"])
@@ -172,15 +172,41 @@ def delete_tier_definition(
 @router.post("/seed-defaults")
 def seed_default_tiers(
     org_id: Optional[str] = None,
+    industry: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Seed Restland default tiers for an org. Idempotent — no-op if tiers already exist."""
+    """Seed industry-appropriate default tiers. Idempotent — no-op if tiers already exist."""
     target_org_id = (
         org_id if (current_user.role == "super_admin" and org_id)
         else current_user.organization_id
     )
-    created = seed_default_tier_definitions(db, target_org_id)
+    # Resolve industry: caller can pass it explicitly; otherwise fall back to org settings
+    if not industry:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == target_org_id).first()
+        industry = org.industry if org else "funeral"
+    created = seed_default_tier_definitions(db, target_org_id, industry=industry or "funeral")
     if created:
-        return {"seeded": len(created), "message": f"Created {len(created)} default tier definitions."}
+        return {"seeded": len(created), "message": f"Created {len(created)} {industry} tier definitions."}
     return {"seeded": 0, "message": "Tiers already configured — no changes made."}
+
+
+@router.post("/reset-defaults")
+def reset_default_tiers(
+    org_id: Optional[str] = None,
+    industry: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """DESTRUCTIVE: wipes all tiers for the org and reseeds from industry defaults."""
+    target_org_id = (
+        org_id if (current_user.role == "super_admin" and org_id)
+        else current_user.organization_id
+    )
+    if not industry:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == target_org_id).first()
+        industry = org.industry if org else "funeral"
+    created = clear_and_reseed_tier_definitions(db, target_org_id, industry or "funeral")
+    return {"reset": len(created), "industry": industry, "message": f"Reset to {len(created)} {industry} industry defaults."}
