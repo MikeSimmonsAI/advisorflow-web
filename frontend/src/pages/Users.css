@@ -66,7 +66,7 @@
   flex-shrink: 0; font-size: 18px; font-weight: 700;
 }
 
-.uc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.uc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; justify-content: space-between; }
 
 .uc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .uc-name { font-size: 15px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
@@ -80,7 +80,6 @@
 .uc-stats {
   display: flex; gap: 16px;
   background: var(--surface-2); border-radius: 8px; padding: 10px 14px;
-  margin-top: auto;
 }
 .uc-stat { display: flex; flex-direction: column; gap: 1px; }
 .uc-stat-n { font-size: 18px; font-weight: 700; color: var(--text-primary); line-height: 1; }
