@@ -25,6 +25,7 @@ from app.routers import (
 )
 from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
+from app.routers import reports_router, crm_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -32,6 +33,7 @@ ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
     "https://bookaboost.com",
     "https://bookaboost.live",
+    "https://evosyspro.live",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
@@ -249,6 +251,8 @@ app.include_router(auto_send_router.router)
 app.include_router(org_settings_router.router)
 app.include_router(availability_router.router)
 app.include_router(voice_router.router)
+app.include_router(reports_router.router)
+app.include_router(crm_router.router)
 
 
 @app.on_event("startup")

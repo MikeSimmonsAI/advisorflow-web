@@ -4,7 +4,19 @@ import { login, fetchAndStoreBranding } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import './Login.css'
 
+const PLATFORMS = {
+  evosyspro: { brand: 'EVO', accent: 'Syspro', tagline: 'Sign in to your outreach console' },
+  default:    { brand: 'Booka', accent: 'Boost',  tagline: 'Sign in to your outreach console' },
+}
+
+function getPlatform() {
+  const host = window.location.hostname
+  if (host.includes('evosyspro')) return PLATFORMS.evosyspro
+  return PLATFORMS.default
+}
+
 export default function Login() {
+  const platform = getPlatform()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -31,9 +43,9 @@ export default function Login() {
       <div className="login-card">
         <div className="login-brand">
           <SignalPulse color="blue" size={10} />
-          <span className="login-brand-mark">Booka<span className="login-brand-accent">Boost</span></span>
+          <span className="login-brand-mark">{platform.brand}<span className="login-brand-accent">{platform.accent}</span></span>
         </div>
-        <p className="login-subtitle">Sign in to your outreach console</p>
+        <p className="login-subtitle">{platform.tagline}</p>
 
         <form onSubmit={handleSubmit} className="login-form">
           <label className="login-label">

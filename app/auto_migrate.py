@@ -190,3 +190,36 @@ def run_auto_migrations(engine) -> None:
                     print(f"[auto_migrate] Skipped enum {enum_type}.{value}: {e}")
 
     print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values checked).")
+
+    # ── CRM connections table ─────────────────────────────────────────────────
+    # Not managed via SQLAlchemy models — created here so it's always present
+    # without requiring a manual migration step.
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS crm_connections (
+                    id                  VARCHAR PRIMARY KEY,
+                    organization_id     VARCHAR NOT NULL,
+                    name                VARCHAR NOT NULL,
+                    crm_type            VARCHAR NOT NULL DEFAULT 'webhook',
+                    webhook_url         VARCHAR,
+                    webhook_secret      VARCHAR,
+                    api_key_encrypted   VARCHAR,
+                    api_base_url        VARCHAR,
+                    sync_mode           VARCHAR DEFAULT 'push_only',
+                    push_events         TEXT    DEFAULT '["booking","status_change"]',
+                    annotation_tag      VARCHAR DEFAULT 'BookaBoost',
+                    field_mapping       TEXT,
+                    active              BOOLEAN DEFAULT TRUE,
+                    last_push_at        TIMESTAMP,
+                    last_pull_at        TIMESTAMP,
+                    total_pushed        INTEGER DEFAULT 0,
+                    total_pulled        INTEGER DEFAULT 0,
+                    created_at          TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+            print("[auto_migrate] crm_connections table ensured.")
+        except (OperationalError, ProgrammingError) as e:
+            conn.rollback()
+            print(f"[auto_migrate] crm_connections table note: {e}")
