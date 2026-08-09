@@ -36,6 +36,14 @@ export default function Settings() {
   const [connectingMicrosoft, setConnectingMicrosoft] = useState(false)
   const [microsoftMessage, setMicrosoftMessage] = useState(null)
 
+  // Social links
+  const [facebookUrl, setFacebookUrl] = useState('')
+  const [googleReviewUrl, setGoogleReviewUrl] = useState('')
+  const [instagramUrl, setInstagramUrl] = useState('')
+  const [linkedinUrl, setLinkedinUrl] = useState('')
+  const [savingSocial, setSavingSocial] = useState(false)
+  const [socialSaved, setSocialSaved] = useState(false)
+
   // Admin — advisor Twilio assignment
   const [advisors, setAdvisors] = useState([])
   const [advisorsLoading, setAdvisorsLoading] = useState(false)
@@ -53,6 +61,10 @@ export default function Settings() {
       setNotifyEmail(p.notification_email || '')
       setNotifyOnHot(p.notify_on_hot_reply)
       setBookingUrl(p.booking_page_url || '')
+      setFacebookUrl(p.facebook_url || '')
+      setGoogleReviewUrl(p.google_review_url || '')
+      setInstagramUrl(p.instagram_url || '')
+      setLinkedinUrl(p.linkedin_url || '')
       setLoading(false)
     })
 
@@ -80,6 +92,26 @@ export default function Settings() {
       .catch(() => {})
       .finally(() => setAdvisorsLoading(false))
   }, [isAdmin])
+
+  async function saveSocialLinks(e) {
+    e.preventDefault()
+    setSavingSocial(true)
+    setSocialSaved(false)
+    try {
+      await api.put('/settings/social-links', {
+        facebook_url: facebookUrl || null,
+        google_review_url: googleReviewUrl || null,
+        instagram_url: instagramUrl || null,
+        linkedin_url: linkedinUrl || null,
+      })
+      setSocialSaved(true)
+      setTimeout(() => setSocialSaved(false), 3000)
+    } catch (err) {
+      alert(`Failed to save: ${err.message}`)
+    } finally {
+      setSavingSocial(false)
+    }
+  }
 
   async function saveBookingPage(e) {
     e.preventDefault()
@@ -483,6 +515,49 @@ export default function Settings() {
             {bookingSaved && <span className="settings-saved">Saved</span>}
             <button className="btn btn--primary" type="submit" disabled={savingBooking}>
               {savingBooking ? 'Saving…' : 'Save booking link'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* ── Social Links ── */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">📣 Social &amp; Review Links</h2>
+          {(facebookUrl || googleReviewUrl || instagramUrl || linkedinUrl) && <span className="badge badge--green">Set</span>}
+        </div>
+        <p className="settings-help">
+          These links appear in the post-appointment thank-you message and survey so leads can follow you or leave a review.
+        </p>
+        <form onSubmit={saveSocialLinks} className="settings-form">
+          <label className="settings-label">
+            Facebook page URL
+            <input className="settings-input" type="url" value={facebookUrl}
+              onChange={(e) => setFacebookUrl(e.target.value)}
+              placeholder="https://facebook.com/yourpage" />
+          </label>
+          <label className="settings-label">
+            Google Review link
+            <input className="settings-input" type="url" value={googleReviewUrl}
+              onChange={(e) => setGoogleReviewUrl(e.target.value)}
+              placeholder="https://g.page/r/..." />
+          </label>
+          <label className="settings-label">
+            Instagram profile URL
+            <input className="settings-input" type="url" value={instagramUrl}
+              onChange={(e) => setInstagramUrl(e.target.value)}
+              placeholder="https://instagram.com/yourhandle" />
+          </label>
+          <label className="settings-label">
+            LinkedIn profile URL
+            <input className="settings-input" type="url" value={linkedinUrl}
+              onChange={(e) => setLinkedinUrl(e.target.value)}
+              placeholder="https://linkedin.com/in/yourname" />
+          </label>
+          <div className="settings-actions">
+            {socialSaved && <span className="settings-saved">✓ Saved</span>}
+            <button className="btn btn--primary" type="submit" disabled={savingSocial}>
+              {savingSocial ? 'Saving…' : 'Save social links'}
             </button>
           </div>
         </form>

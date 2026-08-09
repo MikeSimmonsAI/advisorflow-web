@@ -38,7 +38,6 @@ dev/test environments stay consistent with production without needing
 a different code path.
 """
 
-import os
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -73,6 +72,16 @@ COLUMNS_TO_ADD = [
     ("users", "booking_page_url", "VARCHAR"),
     ("organizations", "org_address", "VARCHAR"),
     ("organizations", "org_phone", "VARCHAR"),
+    # Lead physical address
+    ("leads", "street_address", "VARCHAR"),
+    ("leads", "city", "VARCHAR"),
+    ("leads", "state", "VARCHAR"),
+    ("leads", "zip_code", "VARCHAR"),
+    # Advisor social links
+    ("users", "facebook_url", "VARCHAR"),
+    ("users", "google_review_url", "VARCHAR"),
+    ("users", "instagram_url", "VARCHAR"),
+    ("users", "linkedin_url", "VARCHAR"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes
@@ -223,3 +232,51 @@ def run_auto_migrations(engine) -> None:
         except (OperationalError, ProgrammingError) as e:
             conn.rollback()
             print(f"[auto_migrate] crm_connections table note: {e}")
+
+
+    # ── booking_followups table ───────────────────────────────────────────────
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS booking_followups (
+                    id                  VARCHAR PRIMARY KEY,
+                    booking_link_id     VARCHAR NOT NULL,
+                    lead_id             VARCHAR NOT NULL,
+                    advisor_id          VARCHAR NOT NULL,
+                    channel             VARCHAR DEFAULT 'sms',
+                    sent_at             TIMESTAMP DEFAULT NOW(),
+                    survey_token        VARCHAR UNIQUE,
+                    thank_you_sent      BOOLEAN DEFAULT FALSE,
+                    survey_link_sent    BOOLEAN DEFAULT FALSE,
+                    error               VARCHAR,
+                    created_at          TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+            print("[auto_migrate] booking_followups table ensured.")
+        except (OperationalError, ProgrammingError) as e:
+            conn.rollback()
+            print(f"[auto_migrate] booking_followups table note: {e}")
+
+    # ── survey_responses table ────────────────────────────────────────────────
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS survey_responses (
+                    id                      VARCHAR PRIMARY KEY,
+                    booking_followup_id     VARCHAR NOT NULL,
+                    lead_id                 VARCHAR NOT NULL,
+                    advisor_id              VARCHAR NOT NULL,
+                    rating                  INTEGER,
+                    feedback                TEXT,
+                    facebook_handle         VARCHAR,
+                    instagram_handle        VARCHAR,
+                    submitted_at            TIMESTAMP DEFAULT NOW(),
+                    created_at              TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+            print("[auto_migrate] survey_responses table ensured.")
+        except (OperationalError, ProgrammingError) as e:
+            conn.rollback()
+            print(f"[auto_migrate] survey_responses table note: {e}")

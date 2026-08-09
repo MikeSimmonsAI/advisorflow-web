@@ -528,7 +528,7 @@ export default function LeadDetail() {
                 className="btn btn--secondary btn--sm"
                 style={{ fontSize: 11, padding: '3px 10px' }}
                 onClick={() => {
-                  setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '' })
+                  setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', street_address: lead.street_address || '', city: lead.city || '', state: lead.state || '', zip_code: lead.zip_code || '' })
                   setEditError('')
                   setShowEdit(e => !e)
                 }}
@@ -540,6 +540,11 @@ export default function LeadDetail() {
             <div className="lead-detail-contact">
               {lead.phone && <span className="mono">📱 {lead.phone}</span>}
               {lead.email && <span className="mono">✉️ {lead.email}</span>}
+              {(lead.city || lead.street_address) && (
+                <span className="mono" style={{ color: 'var(--text-secondary)' }}>
+                  📍 {[lead.street_address, lead.city, lead.state, lead.zip_code].filter(Boolean).join(', ')}
+                </span>
+              )}
             </div>
             <div className="lead-detail-badges">
               <TierBadge tier={lead.tier} />
@@ -587,6 +592,25 @@ export default function LeadDetail() {
               <input className="search-input" value={editForm.email || ''}
                 onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
                 placeholder="email@example.com" />
+            </label>
+            <label className="leads-add-label">Street address
+              <input className="search-input" value={editForm.street_address || ''}
+                onChange={e => setEditForm(f => ({ ...f, street_address: e.target.value }))}
+                placeholder="123 Main St" />
+            </label>
+            <label className="leads-add-label">City
+              <input className="search-input" value={editForm.city || ''}
+                onChange={e => setEditForm(f => ({ ...f, city: e.target.value }))} />
+            </label>
+            <label className="leads-add-label">State
+              <input className="search-input" value={editForm.state || ''}
+                onChange={e => setEditForm(f => ({ ...f, state: e.target.value }))}
+                placeholder="TX" style={{ maxWidth: 80 }} />
+            </label>
+            <label className="leads-add-label">ZIP
+              <input className="search-input" value={editForm.zip_code || ''}
+                onChange={e => setEditForm(f => ({ ...f, zip_code: e.target.value }))}
+                placeholder="75001" style={{ maxWidth: 120 }} />
             </label>
           </div>
           <label className="leads-add-label" style={{ marginBottom: 12 }}>Notes

@@ -198,6 +198,12 @@ class User(Base):
     # Personal booking page — advisor's shareable booking URL (Calendly, Google, or BookaBoost)
     booking_page_url = Column(String, nullable=True)
 
+    # Social media links — shown in post-appointment survey and outreach
+    facebook_url = Column(String, nullable=True)
+    google_review_url = Column(String, nullable=True)
+    instagram_url = Column(String, nullable=True)
+    linkedin_url = Column(String, nullable=True)
+
     # Notification preferences
     notification_email = Column(String, nullable=True)  # where HOT reply alerts go
     notify_on_hot_reply = Column(Boolean, default=True)
@@ -272,6 +278,12 @@ class Lead(Base):
 
     is_duplicate = Column(Boolean, default=False)  # true if matched existing registry entry
     duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+
+    # Physical address — collected at import or via lead edit
+    street_address = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    zip_code = Column(String, nullable=True)
 
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -822,4 +834,53 @@ class VoiceCallCampaign(Base):
     scheduled_at    = Column(DateTime, nullable=True)    # null = run immediately
     started_at      = Column(DateTime, nullable=True)
     completed_at    = Column(DateTime, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+# ── BookingFollowup — tracks post-appointment thank you + survey sends ────────
+# One row per booking followup attempt. Prevents duplicate sends on every
+# cron tick after the appointment time passes.
+
+class BookingFollowup(Base):
+    __tablename__ = "booking_followups"
+
+    id              = Column(String, primary_key=True, default=gen_uuid)
+    booking_link_id = Column(String, ForeignKey("booking_links.id"), nullable=False)
+    lead_id         = Column(String, ForeignKey("leads.id"), nullable=False, index=True)
+    advisor_id      = Column(String, ForeignKey("users.id"), nullable=False)
+
+    # Which channel was used
+    channel         = Column(String, default="sms")   # sms | email
+    sent_at         = Column(DateTime, default=datetime.utcnow)
+
+    # Survey token so we can look up the booking from the survey link
+    survey_token    = Column(String, unique=True, default=gen_uuid)
+
+    # Status
+    thank_you_sent  = Column(Boolean, default=False)
+    survey_link_sent = Column(Boolean, default=False)
+    error           = Column(String, nullable=True)
+
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+# ── SurveyResponse — lead's answers to the post-appointment survey ────────────
+
+class SurveyResponse(Base):
+    __tablename__ = "survey_responses"
+
+    id              = Column(String, primary_key=True, default=gen_uuid)
+    booking_followup_id = Column(String, ForeignKey("booking_followups.id"), nullable=False)
+    lead_id         = Column(String, ForeignKey("leads.id"), nullable=False, index=True)
+    advisor_id      = Column(String, ForeignKey("users.id"), nullable=False)
+
+    # Core satisfaction rating (1-5 stars)
+    rating          = Column(Integer, nullable=True)
+    # Open text feedback
+    feedback        = Column(Text, nullable=True)
+    # Lead's social handles (optional, soft ask)
+    facebook_handle = Column(String, nullable=True)
+    instagram_handle = Column(String, nullable=True)
+
+    submitted_at    = Column(DateTime, default=datetime.utcnow)
     created_at      = Column(DateTime, default=datetime.utcnow)

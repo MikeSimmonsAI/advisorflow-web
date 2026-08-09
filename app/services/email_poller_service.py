@@ -310,6 +310,16 @@ def poll_all_orgs(db: Session) -> dict:
         "Email poll complete — advisors=%d checked=%d matched=%d errors=%d",
         total["advisors_polled"], total["checked"], total["matched"], total["errors"],
     )
+
+    # Post-appointment follow-ups — runs every poll cycle, no-op when nothing is due
+    try:
+        from app.services.post_appointment_service import check_and_send_followups
+        followups_sent = check_and_send_followups(db)
+        total["followups_sent"] = followups_sent
+    except Exception as e:
+        logger.error("post_appointment check failed: %s", e)
+        total["followups_sent"] = 0
+
     return total
 
 

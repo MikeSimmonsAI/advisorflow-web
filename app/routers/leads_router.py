@@ -755,6 +755,10 @@ class LeadFieldUpdate(BaseModel):
     email: Optional[str] = None
     notes: Optional[str] = None
     tier: Optional[str] = None
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
 
 
 @router.patch("/{lead_id}")
@@ -796,6 +800,14 @@ def update_lead_fields(
         lead.notes = payload.notes
     if payload.tier is not None:
         lead.tier = payload.tier
+    if payload.street_address is not None:
+        lead.street_address = payload.street_address.strip() or None
+    if payload.city is not None:
+        lead.city = payload.city.strip() or None
+    if payload.state is not None:
+        lead.state = payload.state.strip() or None
+    if payload.zip_code is not None:
+        lead.zip_code = payload.zip_code.strip() or None
 
     try:
         lead.updated_at = datetime.utcnow()
@@ -819,6 +831,10 @@ def update_lead_fields(
         "email": lead.email,
         "notes": getattr(lead, "notes", None),
         "tier": lead.tier,
+        "street_address": getattr(lead, "street_address", None),
+        "city": getattr(lead, "city", None),
+        "state": getattr(lead, "state", None),
+        "zip_code": getattr(lead, "zip_code", None),
     }
 
 

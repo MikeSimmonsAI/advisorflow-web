@@ -24,6 +24,10 @@ class ProfileResponse(BaseModel):
     microsoft_365_connected: bool = False
     microsoft_email_address: Optional[str] = None
     booking_page_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+    google_review_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
 
 
 class TwilioConfigRequest(BaseModel):
@@ -49,6 +53,13 @@ class BookingPageRequest(BaseModel):
     booking_page_url: Optional[str] = None
 
 
+class SocialLinksRequest(BaseModel):
+    facebook_url: Optional[str] = None
+    google_review_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
 @router.get("/profile", response_model=ProfileResponse)
 def get_profile(current_user: User = Depends(get_current_user)):
     """
@@ -70,6 +81,10 @@ def get_profile(current_user: User = Depends(get_current_user)):
         microsoft_365_connected=current_user.microsoft_365_connected,
         microsoft_email_address=current_user.microsoft_email_address,
         booking_page_url=getattr(current_user, 'booking_page_url', None),
+        facebook_url=getattr(current_user, 'facebook_url', None),
+        google_review_url=getattr(current_user, 'google_review_url', None),
+        instagram_url=getattr(current_user, 'instagram_url', None),
+        linkedin_url=getattr(current_user, 'linkedin_url', None),
     )
 
 
@@ -159,5 +174,20 @@ def update_booking_page(
 ):
     """Save the advisor's personal booking page URL."""
     current_user.booking_page_url = req.booking_page_url or None
+    db.commit()
+    return {"success": True}
+
+
+@router.put("/social-links")
+def update_social_links(
+    req: SocialLinksRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save advisor's social media / review page URLs."""
+    current_user.facebook_url = req.facebook_url or None
+    current_user.google_review_url = req.google_review_url or None
+    current_user.instagram_url = req.instagram_url or None
+    current_user.linkedin_url = req.linkedin_url or None
     db.commit()
     return {"success": True}
