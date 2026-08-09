@@ -258,6 +258,8 @@ app.include_router(crm_router.router)
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+    from app.auto_migrate import run_auto_migrations
+    run_auto_migrations(engine)
 # ---------------------------------------------------------------------------
 # Startup migration: add AI-conversation columns to pipeline_conversations
 # Uses IF NOT EXISTS so it is safe to run on every restart.
