@@ -896,3 +896,43 @@ class SurveyResponse(Base):
 
     submitted_at    = Column(DateTime, default=datetime.utcnow)
     created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+# ── TierDefinition — per-org tier/track configuration ─────────────────────────
+# Replaces the old hardcoded LeadTier + MessageTrack Python enums with
+# database-driven rows so each org can define its own tier names, track
+# keys, and AI tone context without requiring a code change.
+#
+# create_all() creates this table fresh on any environment that doesn't
+# have it yet; existing orgs get their defaults seeded via /tier-definitions/seed-defaults.
+
+class TierDefinition(Base):
+    __tablename__ = "tier_definitions"
+
+    id                   = Column(String, primary_key=True, default=gen_uuid)
+    organization_id      = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Lowercase key used in code / DB matching (e.g. "pre_need", "at_need")
+    tier_key             = Column(String, nullable=False)
+    # Human-readable label shown in the UI (e.g. "Pre-Need", "At-Need")
+    tier_label           = Column(String, nullable=False)
+
+    # Which cadence track drives messaging for this tier
+    track_key            = Column(String, nullable=False)   # e.g. "pre_need_lock_price"
+    track_label          = Column(String, nullable=False)   # e.g. "Pre-Need Lock Price"
+
+    # Optional prompt hint injected into AI message generation for this tier
+    ai_tone_context      = Column(Text, nullable=True)
+
+    # Whether advisors can manually assign this tier to a lead in the UI
+    is_manual_selectable = Column(Boolean, default=True)
+
+    # Soft-delete: inactive tiers are hidden from pickers but preserved historically
+    is_active            = Column(Boolean, default=True)
+
+    # Display order in the UI — lower numbers appear first
+    sort_order           = Column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "tier_key", name="uq_org_tier_key"),
+    )
