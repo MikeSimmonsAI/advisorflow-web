@@ -1,9 +1,14 @@
 """
 Survey router — post-appointment satisfaction survey.
 
-GET  /survey/{token}  → Returns a branded HTML survey page (no auth needed)
-POST /survey/{token}  → Stores the lead's responses in survey_responses table
-GET  /survey/results/{lead_id} → Returns survey results for a lead (advisor auth required)
+GET  /survey/{token}              → Branded HTML survey page (no auth)
+POST /survey/{token}              → Store rating + feedback
+GET  /survey/results/{lead_id}    → Survey results for a lead (auth required)
+
+Success page logic:
+  4-5 stars → "Thank you! Here's how to spread the word" + Google/social links
+  1-3 stars → "We're sorry — we'll reach out to make it right"
+  No rating → generic thank-you
 """
 
 import logging
@@ -23,26 +28,23 @@ router = APIRouter(prefix="/survey", tags=["survey"])
 
 
 class SurveySubmission(BaseModel):
-    rating: Optional[int] = None          # 1-5
+    rating: Optional[int] = None
     feedback: Optional[str] = None
     facebook_handle: Optional[str] = None
     instagram_handle: Optional[str] = None
 
 
 def _get_survey_context(db: Session, token: str):
-    """Resolve token → followup, lead, advisor, org. Raises 404 if invalid."""
     followup = db.query(BookingFollowup).filter(
         BookingFollowup.survey_token == token
     ).first()
     if not followup:
         raise HTTPException(status_code=404, detail="Survey not found")
-
     lead = db.query(Lead).filter(Lead.id == followup.lead_id).first()
     advisor = db.query(User).filter(User.id == followup.advisor_id).first()
     org = db.query(Organization).filter(
         Organization.id == (advisor.organization_id if advisor else None)
     ).first() if advisor else None
-
     return followup, lead, advisor, org
 
 
@@ -52,42 +54,36 @@ def _already_submitted(db: Session, followup_id: str) -> bool:
     ).first() is not None
 
 
-def _social_links_html(org: Organization) -> str:
-    """Build social links row using org-level social URLs."""
+def _review_links_html(org: Organization) -> str:
+    """High-rating: show Google + social links."""
     if not org:
         return ""
     links = []
-    if getattr(org, "facebook_url", None):
-        links.append(
-            f'<a href="{org.facebook_url}" target="_blank" style="'
-            'display:inline-block;margin:0 8px;padding:10px 20px;background:#1877f2;'
-            'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">👍 Facebook</a>'
-        )
     if getattr(org, "google_review_url", None):
         links.append(
             f'<a href="{org.google_review_url}" target="_blank" style="'
-            'display:inline-block;margin:0 8px;padding:10px 20px;background:#ea4335;'
-            'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">⭐ Google Review</a>'
+            'display:inline-block;margin:6px;padding:12px 22px;background:#ea4335;'
+            'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">⭐ Leave a Google Review</a>'
+        )
+    if getattr(org, "facebook_url", None):
+        links.append(
+            f'<a href="{org.facebook_url}" target="_blank" style="'
+            'display:inline-block;margin:6px;padding:12px 22px;background:#1877f2;'
+            'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;">👍 Facebook</a>'
         )
     if getattr(org, "instagram_url", None):
         links.append(
             f'<a href="{org.instagram_url}" target="_blank" style="'
-            'display:inline-block;margin:0 8px;padding:10px 20px;background:#e1306c;'
-            'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">📸 Instagram</a>'
-        )
-    if getattr(org, "linkedin_url", None):
-        links.append(
-            f'<a href="{org.linkedin_url}" target="_blank" style="'
-            'display:inline-block;margin:0 8px;padding:10px 20px;background:#0a66c2;'
-            'color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">💼 LinkedIn</a>'
+            'display:inline-block;margin:6px;padding:12px 22px;background:#e1306c;'
+            'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;">📸 Instagram</a>'
         )
     if not links:
         return ""
     return (
-        '<div style="margin:24px 0;text-align:center;">'
-        '<p style="color:#64748b;font-size:14px;margin-bottom:12px;">Connect with us:</p>'
-        + "".join(links) +
-        "</div>"
+        '<div style="margin-top:20px;text-align:center;">'
+        '<p style="color:#64748b;font-size:14px;margin-bottom:12px;">'
+        'Help others find us — it only takes a second:</p>'
+        + "".join(links) + "</div>"
     )
 
 
@@ -97,21 +93,18 @@ def get_survey_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return all survey responses for a lead. Advisor auth required."""
     lead = db.query(Lead).filter(
         Lead.id == lead_id,
         Lead.organization_id == current_user.organization_id,
     ).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-
     responses = (
         db.query(SurveyResponse)
         .filter(SurveyResponse.lead_id == lead_id)
         .order_by(SurveyResponse.submitted_at.desc())
         .all()
     )
-
     return {
         "lead_id": lead_id,
         "responses": [
@@ -119,8 +112,6 @@ def get_survey_results(
                 "id": r.id,
                 "rating": r.rating,
                 "feedback": r.feedback,
-                "facebook_handle": r.facebook_handle,
-                "instagram_handle": r.instagram_handle,
                 "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
             }
             for r in responses
@@ -130,15 +121,13 @@ def get_survey_results(
 
 @router.get("/{token}", response_class=HTMLResponse)
 def get_survey_page(token: str, db: Session = Depends(get_db)):
-    """Serve the branded survey HTML page to the lead."""
     followup, lead, advisor, org = _get_survey_context(db, token)
     already_done = _already_submitted(db, followup.id)
 
     org_name = org.name if org else "our team"
-    advisor_name = advisor.full_name if advisor else "Your Advisor"
     first_name = lead.first_name if lead else "there"
-    primary_color = (org.brand_color_primary if org else None) or "#2fb6ff"
-    social_html = _social_links_html(org)
+    primary_color = (getattr(org, "brand_color_primary", None) or "#2fb6ff") if org else "#2fb6ff"
+    review_links = _review_links_html(org)
 
     if already_done:
         body_content = f"""
@@ -146,73 +135,58 @@ def get_survey_page(token: str, db: Session = Depends(get_db)):
           <div style="font-size:48px;margin-bottom:16px;">✅</div>
           <h2 style="color:#1e293b;">Thanks, {first_name}!</h2>
           <p style="color:#64748b;">Your feedback has already been submitted. We really appreciate it!</p>
-          {social_html}
+          {review_links}
         </div>"""
     else:
         body_content = f"""
         <h2 style="color:#1e293b;margin-bottom:4px;">How did we do, {first_name}?</h2>
         <p style="color:#64748b;margin-bottom:28px;font-size:15px;">
-          Your feedback helps {advisor_name} and {org_name} serve families better.
-          It only takes 30 seconds.
+          Your feedback helps {org_name} serve you better. Takes 30 seconds.
         </p>
-
-        <form id="survey-form" action="/survey/{token}" method="POST" onsubmit="submitSurvey(event)">
-
-          <!-- Star rating -->
+        <div id="survey-form">
           <div style="margin-bottom:24px;">
             <label style="display:block;font-weight:600;color:#1e293b;margin-bottom:10px;">
               Overall experience
             </label>
-            <div id="stars" style="font-size:36px;cursor:pointer;letter-spacing:4px;">
-              <span onclick="setRating(1)">☆</span>
-              <span onclick="setRating(2)">☆</span>
-              <span onclick="setRating(3)">☆</span>
-              <span onclick="setRating(4)">☆</span>
-              <span onclick="setRating(5)">☆</span>
+            <div id="stars" style="font-size:40px;cursor:pointer;letter-spacing:6px;user-select:none;">
+              <span onclick="setRating(1)" onmouseover="hoverRating(1)" onmouseout="hoverRating(0)">☆</span>
+              <span onclick="setRating(2)" onmouseover="hoverRating(2)" onmouseout="hoverRating(0)">☆</span>
+              <span onclick="setRating(3)" onmouseover="hoverRating(3)" onmouseout="hoverRating(0)">☆</span>
+              <span onclick="setRating(4)" onmouseover="hoverRating(4)" onmouseout="hoverRating(0)">☆</span>
+              <span onclick="setRating(5)" onmouseover="hoverRating(5)" onmouseout="hoverRating(0)">☆</span>
             </div>
-            <input type="hidden" id="rating-input" name="rating" value="">
           </div>
-
-          <!-- Feedback -->
           <div style="margin-bottom:24px;">
             <label style="display:block;font-weight:600;color:#1e293b;margin-bottom:8px;">
-              Any comments? (optional)
+              Comments? (optional)
             </label>
-            <textarea name="feedback" rows="3" placeholder="Tell us about your experience..."
+            <textarea id="feedback-box" rows="3" placeholder="Tell us about your experience..."
               style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;
               font-size:14px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
           </div>
-
-          <!-- Social handles (soft ask) -->
-          <div style="margin-bottom:24px;background:#f8fafc;border-radius:10px;padding:16px;">
-            <p style="margin:0 0 12px;font-size:14px;color:#64748b;">
-              Want to stay connected? Drop your social handle and we'll follow you back! (totally optional)
-            </p>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;">
-              <input type="text" name="facebook_handle" placeholder="Facebook name"
-                style="flex:1;min-width:140px;padding:8px 12px;border:1px solid #e2e8f0;
-                border-radius:6px;font-size:13px;" />
-              <input type="text" name="instagram_handle" placeholder="@instagram"
-                style="flex:1;min-width:140px;padding:8px 12px;border:1px solid #e2e8f0;
-                border-radius:6px;font-size:13px;" />
-            </div>
-          </div>
-
-          {social_html}
-
-          <button type="submit" style="width:100%;padding:14px;background:{primary_color};
+          <button onclick="submitSurvey()" style="width:100%;padding:14px;background:{primary_color};
             color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;
             cursor:pointer;transition:opacity .2s;" onmouseover="this.style.opacity='.85'"
             onmouseout="this.style.opacity='1'">
             Submit Feedback
           </button>
-        </form>
-
-        <div id="success-msg" style="display:none;text-align:center;padding:32px 0;">
-          <div style="font-size:48px;margin-bottom:16px;">🙏</div>
+        </div>
+        <div id="success-high" style="display:none;text-align:center;padding:32px 0;">
+          <div style="font-size:48px;margin-bottom:12px;">🙏</div>
           <h2 style="color:#1e293b;">Thank you, {first_name}!</h2>
-          <p style="color:#64748b;">Your feedback means the world to us.</p>
-          {social_html}
+          <p style="color:#64748b;margin-bottom:8px;">We're so glad you had a great experience.</p>
+          {review_links}
+        </div>
+        <div id="success-low" style="display:none;text-align:center;padding:32px 0;">
+          <div style="font-size:48px;margin-bottom:12px;">😔</div>
+          <h2 style="color:#1e293b;">We're sorry to hear that, {first_name}.</h2>
+          <p style="color:#64748b;">Your feedback means a lot to us. A member of our team
+          will follow up with you shortly to make things right.</p>
+        </div>
+        <div id="success-any" style="display:none;text-align:center;padding:32px 0;">
+          <div style="font-size:48px;margin-bottom:12px;">✅</div>
+          <h2 style="color:#1e293b;">Thanks, {first_name}!</h2>
+          <p style="color:#64748b;">Your feedback has been received. We appreciate you!</p>
         </div>"""
 
     html = f"""<!DOCTYPE html>
@@ -222,7 +196,7 @@ def get_survey_page(token: str, db: Session = Depends(get_db)):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>How did we do? — {org_name}</title>
 <style>
-  * {{ box-sizing: border-box; }}
+  * {{ box-sizing:border-box; }}
   body {{ margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
          background:#f1f5f9;min-height:100vh;display:flex;align-items:flex-start;
          justify-content:center;padding:32px 16px; }}
@@ -239,29 +213,35 @@ def get_survey_page(token: str, db: Session = Depends(get_db)):
 </div>
 <script>
 let currentRating = 0;
-function setRating(n) {{
-  currentRating = n;
-  document.getElementById('rating-input').value = n;
+function hoverRating(n) {{
+  if (currentRating > 0) return;
   const stars = document.querySelectorAll('#stars span');
   stars.forEach((s, i) => s.textContent = i < n ? '★' : '☆');
 }}
-async function submitSurvey(e) {{
-  e.preventDefault();
-  const form = e.target;
-  const data = new FormData(form);
-  const payload = {{
-    rating: parseInt(data.get('rating')) || null,
-    feedback: data.get('feedback') || null,
-    facebook_handle: data.get('facebook_handle') || null,
-    instagram_handle: data.get('instagram_handle') || null,
-  }};
-  await fetch('/survey/{token}', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify(payload),
-  }});
-  form.style.display = 'none';
-  document.getElementById('success-msg').style.display = 'block';
+function setRating(n) {{
+  currentRating = n;
+  const stars = document.querySelectorAll('#stars span');
+  stars.forEach((s, i) => s.textContent = i < n ? '★' : '☆');
+}}
+async function submitSurvey() {{
+  const rating = currentRating;
+  const feedback = document.getElementById('feedback-box')?.value || null;
+  const payload = {{ rating: rating || null, feedback: feedback || null }};
+  try {{
+    await fetch('/survey/{token}', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(payload),
+    }});
+  }} catch(e) {{}}
+  document.getElementById('survey-form').style.display = 'none';
+  if (rating >= 4) {{
+    document.getElementById('success-high').style.display = 'block';
+  }} else if (rating > 0) {{
+    document.getElementById('success-low').style.display = 'block';
+  }} else {{
+    document.getElementById('success-any').style.display = 'block';
+  }}
 }}
 </script>
 </body>
@@ -271,7 +251,7 @@ async function submitSurvey(e) {{
 
 @router.post("/{token}")
 def submit_survey(token: str, payload: SurveySubmission, db: Session = Depends(get_db)):
-    """Store survey response from a lead. Idempotent — silently ignores duplicates."""
+    """Store survey response. Idempotent — silently ignores duplicates."""
     followup, lead, advisor, _ = _get_survey_context(db, token)
 
     if _already_submitted(db, followup.id):

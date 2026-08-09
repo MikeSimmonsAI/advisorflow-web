@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/system-health', label: 'System Health', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
   { to: '/availability', label: 'Availability', icon: 'calendar' },
+  { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
 ]
 
 const ADMIN_NAV_ITEMS = [
@@ -152,7 +153,7 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter(item => !item.fiberOnly || (branding && branding.industry === 'fiber')).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.to === '/'}
               className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
               onClick={closeSidebar}
