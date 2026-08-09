@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext } from '../api/client'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
@@ -119,13 +119,17 @@ function ThemeToggle() {
 export default function Layout({ children }) {
   const user = getCurrentUser()
   const navigate = useNavigate()
+  const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   // Super admin always sees default BookaBoost branding — never a client org's branding
   const isSuperAdmin = user?.role === 'super_admin'
   const [orgContext, setOrgCtx] = useState(() => isSuperAdmin ? getOrgContext() : null)
-  // Feature gates: null enabled_features = all features on (backward-compatible)
+  const [branding, setBranding] = useState(() => isSuperAdmin ? null : getBranding())
+
+  // Feature gates: derive from branding STATE so the nav re-renders when flags update.
+  // null enabled_features = all features on (backward-compatible).
   // Super admin always bypasses — they control the flags, so they see everything.
-  const enabledFeatures = isSuperAdmin ? null : (getBranding()?.enabled_features ?? null)
+  const enabledFeatures = isSuperAdmin ? null : (branding?.enabled_features ?? null)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
 
   function handleExitOrg() {
@@ -133,14 +137,15 @@ export default function Layout({ children }) {
     setOrgCtx(null)
     window.location.href = '/'
   }
-  const [branding, setBranding] = useState(() => isSuperAdmin ? null : getBranding())
 
+  // Re-fetch branding on every navigation so feature flag changes made by super admin
+  // are picked up without requiring a manual page reload.
   useEffect(() => {
     if (isSuperAdmin) return  // super admin: no org branding applied to their shell
     const stored = getBranding()
     if (stored) applyBrandingCSS(stored)
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
-  }, [isSuperAdmin])
+  }, [isSuperAdmin, location.pathname])
 
   function closeSidebar() { if (window.innerWidth <= 1024) setSidebarOpen(false) }
 
