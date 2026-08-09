@@ -306,6 +306,41 @@ def delete_block(
     return {"deleted": True}
 
 
+@router.get("/upcoming")
+def get_upcoming_appointments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return upcoming booked appointments for the current advisor (next 30 days)."""
+    from datetime import datetime as dt
+    now = dt.now()
+
+    bookings = db.query(BookingLink).filter(
+        BookingLink.user_id == current_user.id,
+        BookingLink.status == "booked",
+        BookingLink.booked_time >= now,
+    ).order_by(BookingLink.booked_time.asc()).limit(20).all()
+
+    result = []
+    for b in bookings:
+        lead_name = "Unknown"
+        lead_phone = None
+        if b.lead_id:
+            lead = db.query(Lead).filter(Lead.id == b.lead_id).first()
+            if lead:
+                parts = [lead.first_name or "", lead.last_name or ""]
+                lead_name = " ".join(p for p in parts if p).strip() or "Unknown"
+                lead_phone = lead.phone
+        result.append({
+            "id": b.id,
+            "lead_id": b.lead_id,
+            "lead_name": lead_name,
+            "lead_phone": lead_phone,
+            "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+        })
+    return result
+
+
 def _cancel_bookings_in_range(db: Session, advisor: User, start: date, end: date) -> list:
     """Cancel all bookings in a date range and notify leads via email/SMS."""
     from datetime import datetime as dt

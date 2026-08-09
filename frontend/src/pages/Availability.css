@@ -5,7 +5,7 @@
 }
 
 .availability-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .availability-title {
@@ -20,8 +20,138 @@
   font-size: 13px;
   color: var(--text-tertiary);
   margin: 0;
+  max-width: 560px;
+  line-height: 1.5;
 }
 
+/* ── STATS ROW ─────────────────────────────────────────────────────────────── */
+.av-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .av-stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .av-stats-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.av-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+
+.av-stat-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.av-stat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.av-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.av-stat-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── UPCOMING APPOINTMENTS ─────────────────────────────────────────────────── */
+.av-upcoming-panel {
+  margin-bottom: 20px;
+}
+
+.av-empty-upcoming {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.av-upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.av-upcoming-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.av-upcoming-row:last-child {
+  border-bottom: none;
+}
+
+.av-upcoming-time-block {
+  flex-shrink: 0;
+  min-width: 200px;
+}
+
+.av-upcoming-datetime {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.av-upcoming-lead-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.av-upcoming-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.av-upcoming-phone {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ── MAIN GRID ─────────────────────────────────────────────────────────────── */
 .availability-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -34,6 +164,7 @@
   }
 }
 
+/* ── TABS ──────────────────────────────────────────────────────────────────── */
 .availability-tabs {
   display: flex;
   gap: 6px;
@@ -64,6 +195,7 @@
   color: #fff !important;
 }
 
+/* ── FORM ──────────────────────────────────────────────────────────────────── */
 .availability-form {
   display: flex;
   flex-direction: column;
@@ -100,6 +232,7 @@
   margin-bottom: 8px;
 }
 
+/* ── BLOCK LIST ────────────────────────────────────────────────────────────── */
 .availability-block-list {
   display: flex;
   flex-direction: column;

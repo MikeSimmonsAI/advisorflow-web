@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './Availability.css'
@@ -19,9 +20,18 @@ function fmtTime(t) {
   return `${hr}:${m.toString().padStart(2, '0')} ${ampm}`
 }
 
+function fmtDateTime(iso) {
+  if (!iso) return '--'
+  const d = new Date(iso)
+  return d.toLocaleString([], {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
 function fmtBlock(b) {
   if (b.block_type === 'date_range') {
-    return `${b.start_date} → ${b.end_date}${b.reason ? ` (${b.reason})` : ''}`
+    return `${b.start_date} to ${b.end_date}${b.reason ? ` (${b.reason})` : ''}`
   }
   if (b.block_type === 'slot') {
     return `${b.block_date} at ${fmtTime(b.block_time)}${b.reason ? ` (${b.reason})` : ''}`
@@ -36,9 +46,13 @@ function fmtBlock(b) {
 }
 
 export default function Availability() {
+  const user = getCurrentUser()
+  const navigate = useNavigate()
   const [blocks, setBlocks] = useState([])
+  const [upcoming, setUpcoming] = useState([])
+  const [openSlots, setOpenSlots] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('vacation') // vacation | slot | recurring
+  const [activeTab, setActiveTab] = useState('vacation')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -62,16 +76,22 @@ export default function Availability() {
 
   function load() {
     setLoading(true)
-    api.get('/availability/blocks')
-      .then(setBlocks)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
+    Promise.all([
+      api.get('/availability/blocks').catch(() => []),
+      api.get('/availability/upcoming').catch(() => []),
+      user?.id ? api.get(`/availability/slots/${user.id}`).catch(() => null) : Promise.resolve(null),
+    ]).then(([blocksData, upcomingData, slotsData]) => {
+      setBlocks(blocksData || [])
+      setUpcoming(upcomingData || [])
+      setOpenSlots(slotsData?.slots?.length ?? null)
+      setLoading(false)
+    })
   }
 
   useEffect(() => { load() }, [])
 
   async function handleDeleteBlock(id) {
-    if (!confirm('Remove this availability block?')) return
+    if (!window.confirm('Remove this availability block?')) return
     try {
       await api.delete(`/availability/block/${id}`)
       setBlocks(blocks.filter(b => b.id !== id))
@@ -125,169 +145,264 @@ export default function Availability() {
 
   return (
     <div className="availability-page">
+
+      {/* HEADER */}
       <div className="availability-header">
-        <h1 className="availability-title">📅 Availability</h1>
+        <h1 className="availability-title">Availability</h1>
         <p className="availability-subtitle">
-          Block dates, times, or recurring slots. Leads won't be able to book during blocked times.
+          Manage your schedule. Leads can only book during your open slots (9:00 AM - 5:00 PM daily, minus any blocks you set below).
         </p>
       </div>
 
+      {/* STATS ROW */}
+      <div className="av-stats-row">
+        <div className="av-stat-card">
+          <div className="av-stat-icon-wrap" style={{ background: 'rgba(47,182,255,0.12)' }}>
+            <span style={{ fontSize: 20 }}>&#128338;</span>
+          </div>
+          <div className="av-stat-body">
+            <strong className="av-stat-value" style={{ color: '#2fb6ff' }}>
+              {loading ? '--' : (openSlots ?? '--')}
+            </strong>
+            <span className="av-stat-label">Open slots next 14 days</span>
+          </div>
+        </div>
+        <div className="av-stat-card">
+          <div className="av-stat-icon-wrap" style={{ background: 'rgba(30,240,168,0.12)' }}>
+            <span style={{ fontSize: 20 }}>&#128197;</span>
+          </div>
+          <div className="av-stat-body">
+            <strong className="av-stat-value" style={{ color: '#1ef0a8' }}>
+              {loading ? '--' : upcoming.length}
+            </strong>
+            <span className="av-stat-label">Upcoming appointments</span>
+          </div>
+        </div>
+        <div className="av-stat-card">
+          <div className="av-stat-icon-wrap" style={{ background: 'rgba(167,139,250,0.12)' }}>
+            <span style={{ fontSize: 20 }}>&#128336;</span>
+          </div>
+          <div className="av-stat-body">
+            <strong className="av-stat-value" style={{ color: '#a78bfa', fontSize: 14 }}>
+              9:00 AM - 5:00 PM
+            </strong>
+            <span className="av-stat-label">Working hours, 7 days</span>
+          </div>
+        </div>
+        <div className="av-stat-card">
+          <div className="av-stat-icon-wrap" style={{ background: 'rgba(248,113,113,0.12)' }}>
+            <span style={{ fontSize: 20 }}>&#128683;</span>
+          </div>
+          <div className="av-stat-body">
+            <strong className="av-stat-value" style={{ color: '#f87171' }}>
+              {loading ? '--' : blocks.length}
+            </strong>
+            <span className="av-stat-label">Active time blocks</span>
+          </div>
+        </div>
+      </div>
+
+      {/* UPCOMING APPOINTMENTS */}
+      <section className="panel av-upcoming-panel">
+        <div className="panel-header">
+          <h2 className="panel-title">Upcoming appointments</h2>
+          <span className="panel-count">{upcoming.length}</span>
+        </div>
+        {loading ? (
+          <div className="empty-state">Loading...</div>
+        ) : upcoming.length === 0 ? (
+          <div className="av-empty-upcoming">
+            <span style={{ fontSize: 28, opacity: 0.4 }}>&#128197;</span>
+            <span>No upcoming appointments booked yet.</span>
+          </div>
+        ) : (
+          <div className="av-upcoming-list">
+            {upcoming.map(appt => (
+              <div key={appt.id} className="av-upcoming-row">
+                <div className="av-upcoming-time-block">
+                  <span className="av-upcoming-datetime">{fmtDateTime(appt.booked_time)}</span>
+                </div>
+                <div className="av-upcoming-lead-info">
+                  <span className="av-upcoming-name">{appt.lead_name}</span>
+                  {appt.lead_phone && (
+                    <span className="av-upcoming-phone">{appt.lead_phone}</span>
+                  )}
+                </div>
+                {appt.lead_id && (
+                  <button
+                    className="btn btn--secondary"
+                    style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
+                    onClick={() => navigate(`/leads/${appt.lead_id}`)}
+                  >
+                    View lead
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* BLOCK TIME + ACTIVE BLOCKS */}
       <div className="availability-grid">
-        <div className="availability-left">
-          <section className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">Block time</h2>
-            </div>
-            <div className="availability-tabs">
-              {[
-                { key: 'vacation', label: '🏖️ Vacation / Days Off' },
-                { key: 'slot', label: '🕐 Specific Slot' },
-                { key: 'recurring', label: '🔁 Recurring' },
-              ].map(t => (
-                <button
-                  key={t.key}
-                  className={`availability-tab ${activeTab === t.key ? 'availability-tab--active' : ''}`}
-                  onClick={() => setActiveTab(t.key)}
-                >{t.label}</button>
-              ))}
-            </div>
 
-            {error && <div className="compose-error" style={{ margin: '12px 0' }}>{error}</div>}
-            {success && <div className="availability-success">{success}</div>}
+        {/* BLOCK TIME */}
+        <section className="panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Block time</h2>
+          </div>
+          <div className="availability-tabs">
+            {[
+              { key: 'vacation',  label: 'Vacation / Days Off' },
+              { key: 'slot',      label: 'Specific Slot' },
+              { key: 'recurring', label: 'Recurring' },
+            ].map(t => (
+              <button
+                key={t.key}
+                className={`availability-tab ${activeTab === t.key ? 'availability-tab--active' : ''}`}
+                onClick={() => setActiveTab(t.key)}
+              >{t.label}</button>
+            ))}
+          </div>
 
-            {activeTab === 'vacation' && (
-              <div className="availability-form">
-                <div className="availability-field-row">
-                  <div className="availability-field">
-                    <label>Start date</label>
-                    <input type="date" value={vacStart} onChange={e => setVacStart(e.target.value)} className="compose-subject" />
-                  </div>
-                  <div className="availability-field">
-                    <label>End date</label>
-                    <input type="date" value={vacEnd} onChange={e => setVacEnd(e.target.value)} className="compose-subject" />
-                  </div>
+          {error && <div className="compose-error" style={{ margin: '12px 0' }}>{error}</div>}
+          {success && <div className="availability-success">{success}</div>}
+
+          {activeTab === 'vacation' && (
+            <div className="availability-form">
+              <div className="availability-field-row">
+                <div className="availability-field">
+                  <label>START DATE</label>
+                  <input type="date" value={vacStart} onChange={e => setVacStart(e.target.value)} className="compose-subject" />
                 </div>
                 <div className="availability-field">
-                  <label>Reason (optional)</label>
-                  <input type="text" value={vacReason} onChange={e => setVacReason(e.target.value)}
-                    placeholder="e.g. Family vacation" className="compose-subject" />
+                  <label>END DATE</label>
+                  <input type="date" value={vacEnd} onChange={e => setVacEnd(e.target.value)} className="compose-subject" />
                 </div>
-                <label className="compose-checkbox" style={{ marginBottom: 16 }}>
-                  <input type="checkbox" checked={vacCancel} onChange={e => setVacCancel(e.target.checked)} />
-                  Cancel existing bookings in this range and notify leads via SMS
-                </label>
-                <button className="btn btn--primary" onClick={handleSaveVacation} disabled={saving}>
-                  {saving ? 'Saving…' : 'Block dates'}
-                </button>
               </div>
-            )}
-
-            {activeTab === 'slot' && (
-              <div className="availability-form">
-                <div className="availability-field-row">
-                  <div className="availability-field">
-                    <label>Date</label>
-                    <input type="date" value={slotDate} onChange={e => setSlotDate(e.target.value)} className="compose-subject" />
-                  </div>
-                  <div className="availability-field">
-                    <label>Time</label>
-                    <select value={slotTime} onChange={e => setSlotTime(e.target.value)} className="filter-select">
-                      {SLOT_TIMES.map(t => (
-                        <option key={t} value={t}>{fmtTime(t)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="availability-field">
-                  <label>Reason (optional)</label>
-                  <input type="text" value={slotReason} onChange={e => setSlotReason(e.target.value)}
-                    placeholder="e.g. Team meeting" className="compose-subject" />
-                </div>
-                <button className="btn btn--primary" onClick={handleSaveSlot} disabled={saving}>
-                  {saving ? 'Saving…' : 'Block slot'}
-                </button>
+              <div className="availability-field">
+                <label>REASON (OPTIONAL)</label>
+                <input type="text" value={vacReason} onChange={e => setVacReason(e.target.value)}
+                  placeholder="e.g. Family vacation" className="compose-subject" />
               </div>
-            )}
+              <label className="compose-checkbox" style={{ marginBottom: 8 }}>
+                <input type="checkbox" checked={vacCancel} onChange={e => setVacCancel(e.target.checked)} />
+                Cancel existing bookings in this range and notify leads via SMS
+              </label>
+              <button className="btn btn--primary" onClick={handleSaveVacation} disabled={saving}>
+                {saving ? 'Saving...' : 'Block dates'}
+              </button>
+            </div>
+          )}
 
-            {activeTab === 'recurring' && (
-              <div className="availability-form">
+          {activeTab === 'slot' && (
+            <div className="availability-form">
+              <div className="availability-field-row">
                 <div className="availability-field">
-                  <label>Day of week (leave blank for every day)</label>
-                  <select value={recurDay} onChange={e => setRecurDay(e.target.value)} className="filter-select">
-                    <option value="">Every day</option>
-                    {DAY_NAMES.map((d, i) => (
-                      <option key={i} value={i}>{d}</option>
+                  <label>DATE</label>
+                  <input type="date" value={slotDate} onChange={e => setSlotDate(e.target.value)} className="compose-subject" />
+                </div>
+                <div className="availability-field">
+                  <label>TIME</label>
+                  <select value={slotTime} onChange={e => setSlotTime(e.target.value)} className="filter-select">
+                    {SLOT_TIMES.map(t => (
+                      <option key={t} value={t}>{fmtTime(t)}</option>
                     ))}
                   </select>
                 </div>
-                <div className="availability-field-row">
-                  <div className="availability-field">
-                    <label>Block slots after</label>
-                    <select value={recurAfter} onChange={e => setRecurAfter(e.target.value)} className="filter-select">
-                      <option value="">No limit</option>
-                      {SLOT_TIMES.map(t => (
-                        <option key={t} value={t}>{fmtTime(t)}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="availability-field">
-                    <label>Block slots before</label>
-                    <select value={recurBefore} onChange={e => setRecurBefore(e.target.value)} className="filter-select">
-                      <option value="">No limit</option>
-                      {SLOT_TIMES.map(t => (
-                        <option key={t} value={t}>{fmtTime(t)}</option>
-                      ))}
-                    </select>
-                  </div>
+              </div>
+              <div className="availability-field">
+                <label>REASON (OPTIONAL)</label>
+                <input type="text" value={slotReason} onChange={e => setSlotReason(e.target.value)}
+                  placeholder="e.g. Team meeting" className="compose-subject" />
+              </div>
+              <button className="btn btn--primary" onClick={handleSaveSlot} disabled={saving}>
+                {saving ? 'Saving...' : 'Block slot'}
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'recurring' && (
+            <div className="availability-form">
+              <div className="availability-field">
+                <label>DAY OF WEEK (LEAVE BLANK FOR EVERY DAY)</label>
+                <select value={recurDay} onChange={e => setRecurDay(e.target.value)} className="filter-select">
+                  <option value="">Every day</option>
+                  {DAY_NAMES.map((d, i) => (
+                    <option key={i} value={i}>{d}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="availability-field-row">
+                <div className="availability-field">
+                  <label>BLOCK SLOTS AFTER</label>
+                  <select value={recurAfter} onChange={e => setRecurAfter(e.target.value)} className="filter-select">
+                    <option value="">No limit</option>
+                    {SLOT_TIMES.map(t => (
+                      <option key={t} value={t}>{fmtTime(t)}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="availability-field">
-                  <label>Reason (optional)</label>
-                  <input type="text" value={recurReason} onChange={e => setRecurReason(e.target.value)}
-                    placeholder="e.g. No late afternoon slots" className="compose-subject" />
+                  <label>BLOCK SLOTS BEFORE</label>
+                  <select value={recurBefore} onChange={e => setRecurBefore(e.target.value)} className="filter-select">
+                    <option value="">No limit</option>
+                    {SLOT_TIMES.map(t => (
+                      <option key={t} value={t}>{fmtTime(t)}</option>
+                    ))}
+                  </select>
                 </div>
-                <button className="btn btn--primary" onClick={handleSaveRecurring} disabled={saving}>
-                  {saving ? 'Saving…' : 'Save recurring block'}
-                </button>
               </div>
-            )}
-          </section>
-        </div>
-
-        <div className="availability-right">
-          <section className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">Active blocks</h2>
-              <span className="panel-count">{blocks.length}</span>
+              <div className="availability-field">
+                <label>REASON (OPTIONAL)</label>
+                <input type="text" value={recurReason} onChange={e => setRecurReason(e.target.value)}
+                  placeholder="e.g. No late afternoon slots" className="compose-subject" />
+              </div>
+              <button className="btn btn--primary" onClick={handleSaveRecurring} disabled={saving}>
+                {saving ? 'Saving...' : 'Save recurring block'}
+              </button>
             </div>
-            {loading ? (
-              <div className="empty-state">Loading…</div>
-            ) : blocks.length === 0 ? (
-              <div className="empty-state">No blocks set. You're open for bookings.</div>
-            ) : (
-              <div className="availability-block-list">
-                {blocks.map(b => (
-                  <div key={b.id} className={`availability-block-item availability-block-item--${b.block_type}`}>
-                    <div className="availability-block-icon">
-                      {b.block_type === 'date_range' ? '🏖️' : b.block_type === 'slot' ? '🕐' : '🔁'}
-                    </div>
-                    <div className="availability-block-info">
-                      <span className="availability-block-type">{b.block_type.replace('_', ' ')}</span>
-                      <span className="availability-block-detail">{fmtBlock(b)}</span>
-                      {b.cancel_existing && (
-                        <span className="availability-block-tag">Bookings cancelled</span>
-                      )}
-                    </div>
-                    <button
-                      className="availability-block-delete"
-                      onClick={() => handleDeleteBlock(b.id)}
-                      title="Remove block"
-                    >×</button>
+          )}
+        </section>
+
+        {/* ACTIVE BLOCKS */}
+        <section className="panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Active blocks</h2>
+            <span className="panel-count">{blocks.length}</span>
+          </div>
+          {loading ? (
+            <div className="empty-state">Loading...</div>
+          ) : blocks.length === 0 ? (
+            <div className="av-empty-upcoming" style={{ padding: '24px 0' }}>
+              <span style={{ fontSize: 28, opacity: 0.4 }}>&#9989;</span>
+              <span>No blocks set — fully open for bookings.</span>
+            </div>
+          ) : (
+            <div className="availability-block-list">
+              {blocks.map(b => (
+                <div key={b.id} className={`availability-block-item availability-block-item--${b.block_type}`}>
+                  <div className="availability-block-icon">
+                    {b.block_type === 'date_range' ? '🏖️' : b.block_type === 'slot' ? '🕐' : '🔁'}
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+                  <div className="availability-block-info">
+                    <span className="availability-block-type">{b.block_type.replace('_', ' ')}</span>
+                    <span className="availability-block-detail">{fmtBlock(b)}</span>
+                    {b.cancel_existing && (
+                      <span className="availability-block-tag">Bookings cancelled</span>
+                    )}
+                  </div>
+                  <button
+                    className="availability-block-delete"
+                    onClick={() => handleDeleteBlock(b.id)}
+                    title="Remove block"
+                  >x</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
       </div>
     </div>
   )
