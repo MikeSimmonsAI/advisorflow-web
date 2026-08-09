@@ -288,3 +288,96 @@
   white-space: nowrap;
 }
 .org-context-exit:hover { background: rgba(255,170,0,0.15); }
+
+/* Feature toggle section */
+.org-features-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.org-features-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.org-features-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.org-features-status {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-surface, rgba(255,255,255,0.04));
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.org-features-status--all {
+  color: #5ce87c;
+  background: rgba(92,232,124,0.08);
+  border-color: rgba(92,232,124,0.25);
+}
+
+.org-features-grant-all {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--signal-blue);
+  background: transparent;
+  border: 1px solid var(--signal-blue);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.org-features-grant-all:hover { background: var(--signal-blue-dim); }
+
+.org-features-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.org-feature-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+.org-feature-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--signal-blue);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.org-features-save {
+  align-self: flex-end;
+  padding: 7px 16px;
+  background: var(--signal-blue);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.org-features-save:hover { opacity: 0.85; }
+.org-features-save:disabled { opacity: 0.5; cursor: not-allowed; }

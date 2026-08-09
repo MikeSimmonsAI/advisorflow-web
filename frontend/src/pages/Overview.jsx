@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, getCurrentUser } from '../api/client'
+import { api, getCurrentUser, getBranding } from '../api/client'
 import './Overview.css'
 
 export default function Overview() {
   const user = getCurrentUser()
   const navigate = useNavigate()
+  // Respect per-org feature flags set by super admin
+  const _branding = getBranding()
+  const _enabledFeatures = _branding?.enabled_features ?? null
+  const _isEnabled = (key) => !_enabledFeatures || _enabledFeatures.includes(key)
   const [leads, setLeads] = useState([])
   const [replies, setReplies] = useState([])
   const [dailyBriefing, setDailyBriefing] = useState(null)
@@ -212,11 +216,11 @@ export default function Overview() {
           <div className="ov-quick-grid">
             {[
               { label: 'Import leads',     icon: '📥', path: '/leads',          desc: 'Upload CSV or Excel' },
-              { label: 'Send campaign',    icon: '📣', path: '/campaigns',      desc: 'AI-powered outreach' },
+              ...(_isEnabled('campaigns') ? [{ label: 'Send campaign', icon: '📣', path: '/campaigns', desc: 'AI-powered outreach' }] : []),
               { label: 'Review replies',   icon: '💬', path: '/replies',        desc: `${hotReplies} waiting` },
               { label: 'Email queue',      icon: '📧', path: '/email-queue',    desc: 'Draft & send emails' },
               { label: 'Work queue',       icon: '✅', path: '/work-queue',     desc: 'Today\'s action items' },
-              { label: 'Lead cleanup',     icon: '🧹', path: '/lead-cleanup',   desc: 'Merge duplicates' },
+              ...(_isEnabled('lead_cleanup') ? [{ label: 'Lead cleanup', icon: '🧹', path: '/lead-cleanup', desc: 'Merge duplicates' }] : []),
             ].map(item => (
               <button key={item.label} className="ov-quick-btn" onClick={() => navigate(item.path)}>
                 <span className="ov-quick-icon">{item.icon}</span>

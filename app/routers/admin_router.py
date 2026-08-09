@@ -1694,6 +1694,7 @@ def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(re
             "brand_name": o.brand_name,
             "created_at": o.created_at,
             "user_count": user_counts.get(o.id, 0),
+            "enabled_features": __import__("json").loads(o.enabled_features) if getattr(o, "enabled_features", None) else None,
         }
         for o in orgs
     ]

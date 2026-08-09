@@ -3,6 +3,19 @@ import { useNavigate } from 'react-router-dom'
 import { api, setOrgContext } from '../api/client'
 import './OrgManager.css'
 
+const ALL_FEATURES = [
+  { key: 'master_dashboard', label: 'Master Dashboard' },
+  { key: 'reports',          label: 'Reports' },
+  { key: 'users',            label: 'Users' },
+  { key: 'campaigns',        label: 'Campaigns' },
+  { key: 'lead_cleanup',     label: 'Lead Cleanup' },
+  { key: 'crm_integration',  label: 'CRM Integration' },
+  { key: 'tier_config',      label: 'Tier Config' },
+  { key: 'a2p_10dlc',        label: 'A2P 10DLC' },
+  { key: 'branding_settings',label: 'Branding & Settings' },
+  { key: 'compliance',       label: 'Compliance' },
+  { key: 'audit_log',        label: 'Audit Log' },
+]
 export default function OrgManager() {
   const [orgs, setOrgs] = useState([])
   const [users, setUsers] = useState([])
@@ -10,6 +23,9 @@ export default function OrgManager() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState({})
+  const [featuresExpanded, setFeaturesExpanded] = useState({})
+  const [orgFeatures, setOrgFeatures] = useState({})
+  const [saving, setSaving] = useState({})
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -21,6 +37,12 @@ export default function OrgManager() {
         ])
         setOrgs(orgsData)
         setUsers(usersData)
+        const featInit = {}
+        orgsData.forEach(o => {
+          featInit[o.id] = (o.enabled_features !== undefined && o.enabled_features !== null)
+            ? o.enabled_features : null
+        })
+        setOrgFeatures(featInit)
       } catch (e) {
         setError(e.message)
       } finally {
@@ -39,6 +61,37 @@ export default function OrgManager() {
     setExpanded(prev => ({ ...prev, [orgId]: !prev[orgId] }))
   }
 
+  function toggleFeaturesExpand(orgId) {
+    setFeaturesExpanded(prev => ({ ...prev, [orgId]: !prev[orgId] }))
+  }
+
+  function toggleFeature(orgId, key) {
+    setOrgFeatures(prev => {
+      const current = prev[orgId]
+      const asList = current === null ? ALL_FEATURES.map(f => f.key) : [...current]
+      const idx = asList.indexOf(key)
+      if (idx === -1) asList.push(key)
+      else asList.splice(idx, 1)
+      return { ...prev, [orgId]: asList }
+    })
+  }
+
+  function grantAll(orgId) {
+    setOrgFeatures(prev => ({ ...prev, [orgId]: null }))
+  }
+
+  async function saveFeatures(orgId) {
+    setSaving(prev => ({ ...prev, [orgId]: true }))
+    try {
+      await api.patch(`/org-settings/features?org_id=${orgId}`, {
+        enabled_features: orgFeatures[orgId],
+      })
+    } catch (e) {
+      alert('Failed to save: ' + e.message)
+    } finally {
+      setSaving(prev => ({ ...prev, [orgId]: false }))
+    }
+  }
   const usersByOrg = users.reduce((acc, u) => {
     if (!acc[u.organization_id]) acc[u.organization_id] = []
     acc[u.organization_id].push(u)
@@ -75,8 +128,10 @@ export default function OrgManager() {
         {filtered.map(org => {
           const orgUsers = usersByOrg[org.id] || []
           const isExpanded = expanded[org.id]
+          const isFeatExpanded = featuresExpanded[org.id]
           const adminCount = orgUsers.filter(u => u.role === 'org_admin').length
           const advisorCount = orgUsers.filter(u => u.role === 'advisor').length
+          const features = orgFeatures[org.id]
 
           return (
             <div key={org.id} className={`org-card ${!org.is_active ? 'org-card--inactive' : ''}`}>
@@ -107,15 +162,14 @@ export default function OrgManager() {
                   <span className="org-stat-label">advisors</span>
                 </div>
               </div>
-
               <div className="org-card-slug">/{org.slug}</div>
 
               <div className="org-card-actions">
-                <div
-                  className="org-expand-toggle"
-                  onClick={() => toggleExpand(org.id)}
-                >
-                  {isExpanded ? '▾ Hide team' : `▸ Team (${orgUsers.length})`}
+                <div className="org-expand-toggle" onClick={() => toggleExpand(org.id)}>
+                  {isExpanded ? '\u25be Hide team' : `\u25b8 Team (${orgUsers.length})`}
+                </div>
+                <div className="org-expand-toggle" onClick={() => toggleFeaturesExpand(org.id)}>
+                  {isFeatExpanded ? '\u25be Hide features' : '\u2699\ufe0f Features'}
                 </div>
                 <button
                   type="button"
@@ -123,9 +177,45 @@ export default function OrgManager() {
                   onClick={() => handleEnterOrg(org)}
                   title={`View BookaBoost as ${org.name}`}
                 >
-                  Enter Org →
+                  Enter Org \u2192
                 </button>
               </div>
+
+              {isFeatExpanded && (
+                <div className="org-features-section">
+                  <div className="org-features-header">
+                    <span className="org-features-title">
+                      Admin Feature Access{' '}
+                      {features === null
+                        ? <span className="org-features-status org-features-status--all">All enabled</span>
+                        : <span className="org-features-status">{features.length}/{ALL_FEATURES.length} enabled</span>
+                      }
+                    </span>
+                    <button type="button" className="org-features-grant-all" onClick={() => grantAll(org.id)}>
+                      Grant All
+                    </button>
+                  </div>
+                  <div className="org-features-grid">
+                    {ALL_FEATURES.map(f => {
+                      const checked = features === null || features.includes(f.key)
+                      return (
+                        <label key={f.key} className="org-feature-checkbox">
+                          <input type="checkbox" checked={checked} onChange={() => toggleFeature(org.id, f.key)} />
+                          <span>{f.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    className="org-features-save"
+                    onClick={() => saveFeatures(org.id)}
+                    disabled={saving[org.id]}
+                  >
+                    {saving[org.id] ? 'Saving...' : 'Save Features'}
+                  </button>
+                </div>
+              )}
 
               {isExpanded && (
                 <div className="org-user-list">

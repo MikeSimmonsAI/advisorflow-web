@@ -139,6 +139,7 @@ def get_org_settings(
         "google_review_url": getattr(org, "google_review_url", None),
         "instagram_url": getattr(org, "instagram_url", None),
         "linkedin_url": getattr(org, "linkedin_url", None),
+        "enabled_features": json.loads(org.enabled_features) if getattr(org, "enabled_features", None) else None,
     }
 
 
@@ -205,3 +206,32 @@ def update_social_links(
     org.linkedin_url = req.linkedin_url or None
     db.commit()
     return {"updated": True}
+
+
+class FeaturesUpdate(BaseModel):
+    enabled_features: list[str] | None = None  # None = all enabled; [] = none
+
+
+@router.patch("/features")
+def update_enabled_features(
+    req: FeaturesUpdate,
+    org_id: str = Query(..., description="Organization ID (required, super admin only)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Super admin only: set which admin features an org can access.
+    Pass enabled_features=null to restore all-enabled state.
+    Pass enabled_features=[] to disable all optional features.
+    Pass enabled_features=["campaigns","reports",...] to restrict to a subset.
+    """
+    if current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Super admin only")
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if req.enabled_features is None:
+        org.enabled_features = None
+    else:
+        org.enabled_features = json.dumps(req.enabled_features)
+    db.commit()
+    return {"updated": True, "enabled_features": req.enabled_features}

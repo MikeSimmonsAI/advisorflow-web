@@ -18,25 +18,28 @@ const NAV_ITEMS = [
   { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
 ]
 
+// featureKey: which enabled_features key controls this item.
+// null = always visible to any admin. super_admin always bypasses all flags.
 const ADMIN_NAV_ITEMS = [
-  { to: '/admin', label: 'Master Dashboard', icon: 'shield' },
-  { to: '/reports', label: 'Reports', icon: 'activity' },
-  { to: '/users', label: 'Users', icon: 'user-plus' },
-  { to: '/campaigns', label: 'Campaigns', icon: 'target' },
-  { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users' },
-  { to: '/crm', label: 'CRM Integration', icon: 'link' },
-  { to: '/tier-definitions', label: 'Tier Config', icon: 'layers' },
-  { to: '/10dlc', label: 'A2P 10DLC', icon: 'shield-check' },
-  { to: '/org-settings', label: 'Branding & Settings', icon: 'settings' },
+  { to: '/admin',            label: 'Master Dashboard',   icon: 'shield',       featureKey: 'master_dashboard' },
+  { to: '/reports',          label: 'Reports',            icon: 'activity',     featureKey: 'reports' },
+  { to: '/users',            label: 'Users',              icon: 'user-plus',    featureKey: 'users' },
+  { to: '/campaigns',        label: 'Campaigns',          icon: 'target',       featureKey: 'campaigns' },
+  { to: '/lead-cleanup',     label: 'Lead Cleanup',       icon: 'users',        featureKey: 'lead_cleanup' },
+  { to: '/crm',              label: 'CRM Integration',    icon: 'link',         featureKey: 'crm_integration' },
+  { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
+  { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
+  { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
+  { to: '/compliance',       label: 'Compliance',         icon: 'shield-check', featureKey: 'compliance' },
+  { to: '/audit-log',        label: 'Audit Log',          icon: 'activity',     featureKey: 'audit_log' },
 ]
 
-// Super admin only — platform-level tools not visible to org supervisors
+// Platform Admin — super admin only, always visible (no feature-key restrictions)
+// Compliance and Audit Log moved to ADMIN_NAV_ITEMS so super admin can grant them per org
 const SUPER_ADMIN_NAV_ITEMS = [
   { to: '/provision-client', label: 'Provision Client', icon: 'user-plus' },
   { to: '/templates', label: 'Templates', icon: 'file-text' },
   { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
-  { to: '/compliance', label: 'Compliance', icon: 'shield-check' },
-  { to: '/audit-log', label: 'Audit Log', icon: 'activity' },
   { to: '/orgs', label: 'Org Manager', icon: 'building' },
 ]
 
@@ -120,6 +123,10 @@ export default function Layout({ children }) {
   // Super admin always sees default BookaBoost branding — never a client org's branding
   const isSuperAdmin = user?.role === 'super_admin'
   const [orgContext, setOrgCtx] = useState(() => isSuperAdmin ? getOrgContext() : null)
+  // Feature gates: null enabled_features = all features on (backward-compatible)
+  // Super admin always bypasses — they control the flags, so they see everything.
+  const enabledFeatures = isSuperAdmin ? null : (getBranding()?.enabled_features ?? null)
+  const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
 
   function handleExitOrg() {
     clearOrgContext()
@@ -174,7 +181,7 @@ export default function Layout({ children }) {
           {(user?.role === 'org_admin' || user?.role === 'super_admin') && (
             <>
               <div className="nav-divider" />
-              {ADMIN_NAV_ITEMS.map((item) => (
+              {ADMIN_NAV_ITEMS.filter(item => isFeatureEnabled(item.featureKey)).map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
