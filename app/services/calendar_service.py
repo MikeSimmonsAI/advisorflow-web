@@ -157,17 +157,37 @@ def create_calendar_event_for_booking(
 
 
 def cancel_calendar_event(db: Session, booking: BookingLink) -> dict:
-    """Cancels a previously created calendar event (e.g. lead reschedules/cancels)."""
-    if not booking.calendar_event_id:
-        return {"success": False, "error": "No calendar event associated with this booking."}
+    """
+    Cancels a previously created calendar event (best-effort) and marks the
+    booking as cancelled. The booking cancellation always succeeds — a missing
+    or already-deleted calendar event is not a blocker.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
 
-    advisor = db.query(User).filter(User.id == booking.user_id).first()
-    service = _get_calendar_service(advisor)
+    # Always mark the booking cancelled regardless of calendar outcome.
+    booking.status = "cancelled"
+    calendar_note = "No calendar event ID stored"
 
-    try:
-        service.events().delete(calendarId=advisor.google_calendar_id, eventId=booking.calendar_event_id).execute()
-        booking.status = "cancelled"
-        db.commit()
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    if booking.calendar_event_id:
+        try:
+            advisor = db.query(User).filter(User.id == booking.user_id).first()
+            if advisor and getattr(advisor, "google_calendar_connected", False):
+                service = _get_calendar_service(advisor)
+                cal_id = getattr(advisor, "google_calendar_id", None) or "primary"
+                service.events().delete(calendarId=cal_id, eventId=booking.calendar_event_id).execute()
+                calendar_note = "Calendar event deleted"
+            else:
+                calendar_note = "Advisor Google Calendar not connected — skipped"
+        except Exception as e:
+            err_str = str(e)
+            if "404" in err_str or "notFound" in err_str.lower():
+                # Event was already deleted from Google Calendar — that's fine.
+                calendar_note = "Calendar event already deleted"
+                _log.info("cancel_calendar_event: event %s already gone (404) — continuing", booking.calendar_event_id)
+            else:
+                _log.warning("cancel_calendar_event: could not delete event %s: %s", booking.calendar_event_id, err_str)
+                calendar_note = f"Calendar deletion skipped ({err_str[:120]})"
+
+    db.commit()
+    return {"success": True, "note": calendar_note}

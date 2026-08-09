@@ -554,9 +554,9 @@ def cancel_booking(booking_id: str, db: Session = Depends(get_db), current_user:
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
+    # cancel_calendar_event always returns success=True — it marks the booking
+    # cancelled and handles a missing/already-deleted calendar event gracefully.
     result = cancel_calendar_event(db, booking)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
 
     try:
         lead = db.query(LeadModel).filter(LeadModel.id == booking.lead_id).first()

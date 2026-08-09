@@ -490,8 +490,10 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
 
 
 def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str = "email") -> dict:
-    if lead.status in ("dnc", "booked") or lead.is_duplicate:
-        return {"success": False, "error": "Lead is DNC, booked, or duplicate"}
+    # "booked" is intentionally NOT blocked here — a booked lead may still need
+    # AI follow-up if they want to reschedule or have pre-appointment questions.
+    if lead.status == "dnc" or lead.is_duplicate:
+        return {"success": False, "error": "Lead is DNC or duplicate"}
 
     if not lead.email:
         return {"success": False, "error": "Lead has no email address"}
