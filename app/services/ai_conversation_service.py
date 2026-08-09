@@ -639,59 +639,108 @@ def process_scheduled_touches(db: Session) -> dict:
     return {"processed": len(due), "sent": sent, "skipped": skipped, "errors": errors}
 
 
+POST_BOOKING_SYSTEM_PROMPT = """You are {advisor_name} at {org_name}, personally responding to a message from {first_name}, who has already booked a {appt_label} with you.
+
+Your role is appointment concierge — warm, calm, and reassuring. This person is already committed. Your job is to make them feel great about their upcoming visit.
+
+INTENT — classify the lead's message as exactly one of:
+- "reschedule"  — they want to change or move the appointment time
+- "cancel"      — they explicitly want to cancel or not come
+- "question"    — they have a logistical or informational question
+- "confirm"     — just confirming, saying thanks, or expressing they'll be there
+- "emotional"   — they sound nervous, sad, overwhelmed, or are sharing grief
+- "other"       — anything that doesn't fit above
+
+RULES (non-negotiable):
+- NEVER ask them to schedule, book, or set a time — they are already booked
+- NEVER use placeholders like [Your Name] — use your name directly: {advisor_name}
+- Keep replies SHORT (2-4 sentences max) — warm, direct, human
+- No sign-off or closing — the system adds one automatically
+- If intent is "reschedule" or "cancel": set escalate=true so the human advisor can handle it personally
+- If intent is "emotional": open with empathy first, practicalities second
+
+HOW TO ANSWER COMMON QUESTIONS:
+- What should I bring? → Bring any existing policies, contracts, or paperwork you have. No pressure if you don't — we'll go through everything together.
+- Can someone come with me? → Absolutely — family is always welcome. Bring anyone you'd like.
+- How long does it take? → Usually about an hour, sometimes a little less depending on what we cover.
+- Where do I go / what's the address? → Check the booking confirmation you received for the location. If you need it resent, just let me know.
+- Who will I be meeting? → You'll be meeting directly with me, {advisor_name} — a personal, one-on-one conversation.
+
+Respond ONLY with valid JSON, no markdown, no backticks:
+{{"intent": "question", "subject": "Re: Your Upcoming Appointment", "body": "2-4 sentence response here", "escalate": false, "escalate_reason": ""}}"""
+
+
 def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_body: str, conv) -> dict:
     """
     Respond to a reply from a lead who has already booked.
-    Uses appointment-concierge mode — answers their questions, confirms details,
-    expresses enthusiasm. Does NOT re-engage the sales pipeline.
+    Concierge mode: answers questions, detects reschedule/cancel and escalates,
+    handles emotional replies with extra care. Never re-engages the sales pipeline.
     """
+    # Step 1 — hard escalation keywords (legal, anger, harassment) always win
+    should_escalate, esc_reason = _check_escalation(reply_body)
+    if should_escalate:
+        _escalate_conversation(db, conv, lead, advisor, esc_reason, reply_body)
+        return {"action": "escalated", "reason": esc_reason}
+
     org_name = _get_org_name(db, advisor)
     advisor_name = advisor.full_name or "Your Advisor"
     appt_label = _get_appt_label(lead)
     first_name = lead.first_name or "there"
+    history = _get_conversation_history(db, lead)
 
-    prompt = f"""You are {advisor_name} at {org_name}, responding to a message from {first_name} who has already booked a {appt_label}.
+    system = POST_BOOKING_SYSTEM_PROMPT.format(
+        advisor_name=advisor_name,
+        org_name=org_name,
+        first_name=first_name,
+        appt_label=appt_label,
+    )
+    user_msg = (
+        f"Conversation so far:\n{history}\n\n"
+        f"{first_name}'s latest message: \"{reply_body}\"\n\n"
+        f"Classify the intent and write your response now."
+    )
 
-Their message: "{reply_body}"
-
-IMPORTANT CONTEXT: This person already has an appointment booked. Do NOT ask them to schedule or book anything.
-
-Your job:
-- Answer their question warmly and helpfully
-- If they ask who will be in the meeting, say it will be you ({advisor_name}) — a personal, one-on-one conversation
-- If they ask if someone else (mom, spouse, family member) can come, say absolutely yes, they are welcome to bring anyone they'd like
-- If they ask what to bring, suggest any relevant documents (existing policies, contracts, paperwork) and say there's no pressure — just come as you are
-- Close warmly, e.g. "Looking forward to seeing you!" or "Can't wait to meet you both!" — NEVER end by asking to schedule or asking if they'd like to set a time
-- Keep it SHORT (3-5 sentences max) and conversational
-- Do NOT use [Your Name] or any placeholder — use "{advisor_name}" directly
-- Do NOT include a sign-off/closing — the system adds one automatically
-- Do NOT ask them to book, schedule, or set up a time — they are already booked
-
-Respond ONLY with valid JSON, no markdown:
-{{"subject": "Re: Your Upcoming Appointment", "body": "..."}}"""
+    intent = "other"
+    subject = f"Re: Your {appt_label}"
+    body = (
+        f"Hi {first_name}, thanks for reaching out! I'm looking forward to our appointment. "
+        f"Don't hesitate to ask if you need anything else before we meet."
+    )
+    ai_wants_escalate = False
+    escalate_reason = ""
 
     try:
-        client = _get_client()
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            max_tokens=300,
+        response = _get_client().chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=350,
         )
-        import json as _json
-        raw = response.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
-        result = _json.loads(raw)
-        body = result.get("body", f"Hi {first_name}, great question! I'm looking forward to our appointment. Feel free to bring any documents you have — and don't worry if you don't have everything. We'll go through everything together.")
-        subject = result.get("subject", f"Re: Your {appt_label}")
+        raw = response.choices[0].message.content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        result = json.loads(raw)
+        intent = result.get("intent", "other")
+        body = result.get("body", body)
+        subject = result.get("subject", subject)
+        ai_wants_escalate = bool(result.get("escalate", False))
+        escalate_reason = result.get("escalate_reason", "")
     except Exception as e:
         logger.error("_handle_post_booking_reply AI error: %s", e)
-        body = f"Hi {first_name}, great question! I'm looking forward to our appointment. Feel free to bring any documents you have — we'll go through everything together."
-        subject = f"Re: Your {appt_label}"
 
+    # Step 2 — escalate reschedule / cancel to advisor; do NOT auto-reply
+    if ai_wants_escalate or intent in ("reschedule", "cancel"):
+        reason = escalate_reason or f"Lead sent a '{intent}' request for their booked appointment"
+        _escalate_conversation(db, conv, lead, advisor, reason, reply_body)
+        return {"action": "escalated", "reason": reason, "intent": intent}
+
+    # Step 3 — send the concierge reply
     try:
         clean_body = _strip_signoff(body)
         html_body = _build_email_html(clean_body, advisor_name, org_name)
         _send_email_via_graph(advisor, lead.email, subject, html_body)
+
         msg = EmailMessage(
             id=str(uuid.uuid4()),
             lead_id=lead.id,
@@ -705,8 +754,8 @@ Respond ONLY with valid JSON, no markdown:
         conv.ai_responses_sent = (conv.ai_responses_sent or 0) + 1
         conv.last_outbound_at = datetime.utcnow()
         db.commit()
-        logger.info("Post-booking reply sent to lead %s", lead.id)
-        return {"action": "post_booking_replied", "subject": subject}
+        logger.info("Post-booking concierge reply sent (intent=%s) to lead %s", intent, lead.id)
+        return {"action": "post_booking_replied", "intent": intent, "subject": subject}
     except Exception as e:
         logger.error("_handle_post_booking_reply send error: %s", e)
         return {"action": "error", "error": str(e)}
@@ -718,13 +767,35 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         PipelineConversation.advisor_id == advisor.id,
     ).first()
 
-    if not conv or conv.paused or conv.stage in ("stopped", "completed"):
-        return {"action": "no_active_conversation"}
+    # ── Post-booking concierge ──────────────────────────────────────────────
+    # lead.status is the authoritative source of truth — conv.stage may lag.
+    if lead.status == "booked":
+        # Sync conv stage so future checks are consistent
+        if conv and conv.stage not in ("booked", "stopped", "completed"):
+            conv.stage = "booked"
+            conv.next_send_at = None   # halt any pending cadence touches
+            db.commit()
 
-    # Post-booking: answer their questions in concierge mode, not sales mode
-    if conv.stage == "booked":
-        if lead.email and advisor.microsoft_365_connected:
-            return _handle_post_booking_reply(db, lead, advisor, reply_body, conv)
+        if not conv:
+            # No conv record yet — create a minimal one so logging works
+            conv = _get_or_create_conversation(db, lead, advisor)
+            conv.stage = "booked"
+            db.commit()
+
+        if not lead.email:
+            logger.warning("Post-booking reply from lead %s but no email on file — escalating", lead.id)
+            _escalate_conversation(db, conv, lead, advisor, "Lead replied but has no email address on file", reply_body)
+            return {"action": "escalated", "reason": "no_email"}
+
+        if not advisor.microsoft_365_connected:
+            logger.warning("Post-booking reply for lead %s but advisor email not connected — escalating", lead.id)
+            _escalate_conversation(db, conv, lead, advisor, "Post-booking reply received but advisor email not connected", reply_body)
+            return {"action": "escalated", "reason": "email_not_connected"}
+
+        return _handle_post_booking_reply(db, lead, advisor, reply_body, conv)
+    # ────────────────────────────────────────────────────────────────────────
+
+    if not conv or conv.paused or conv.stage in ("stopped", "completed"):
         return {"action": "no_active_conversation"}
 
     conv.replies_received = (conv.replies_received or 0) + 1
