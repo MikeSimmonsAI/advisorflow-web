@@ -97,7 +97,12 @@ export default function CampaignBuilder() {
     // Load advisors
     api.get('/admin/users')
       .then(users => {
-        const active = users.filter(u => u.is_active && (u.role === 'advisor' || u.role === 'org_admin'))
+        const me = getCurrentUser()
+        const active = users.filter(u =>
+          u.is_active &&
+          (u.role === 'advisor' || u.role === 'org_admin') &&
+          u.organization_id === me?.organization_id
+        )
         setAdvisors(active)
       })
       .catch(() => {})
