@@ -1983,6 +1983,50 @@ def seed_demo_data(
         "days_span": days_span,
     }
 
+
+@router.delete("/demo/wipe/{org_id}")
+def wipe_demo_data(
+    org_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """Delete all seeded leads, messages, replies, outcomes, and demo advisors for an org."""
+    from sqlalchemy import delete as sql_delete
+    from app.models.models import Message, Reply, LeadOutcome, CadenceState
+
+    target_org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not target_org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # Get all lead IDs for the org
+    lead_ids = [r[0] for r in db.query(Lead.id).filter(Lead.organization_id == org_id).all()]
+
+    if lead_ids:
+        db.execute(sql_delete(LeadOutcome).where(LeadOutcome.lead_id.in_(lead_ids)))
+        db.execute(sql_delete(Reply).where(Reply.lead_id.in_(lead_ids)))
+        db.execute(sql_delete(Message).where(Message.lead_id.in_(lead_ids)))
+        try:
+            db.execute(sql_delete(CadenceState).where(CadenceState.lead_id.in_(lead_ids)))
+        except Exception:
+            pass
+        db.execute(sql_delete(Lead).where(Lead.organization_id == org_id))
+
+    # Remove demo advisors (not org_admin, not super_admin)
+    demo_advisors_deleted = (
+        db.query(User)
+        .filter(User.organization_id == org_id, User.role == "advisor")
+        .delete(synchronize_session=False)
+    )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "org": target_org.name,
+        "leads_deleted": len(lead_ids),
+        "demo_advisors_deleted": demo_advisors_deleted,
+    }
+
 # ---------------------------------------------------------------------------
 # Org list — super admin only. Used by OrgManager.jsx to display all orgs
 # with user counts. Org-admin-scoped data is handled by all other /admin/*
