@@ -4,15 +4,22 @@ import { api, setOrgContext } from '../api/client'
 import './OrgManager.css'
 
 const ALL_FEATURES = [
+  // Core admin tools
   { key: 'master_dashboard', label: 'Master Dashboard' },
   { key: 'reports',          label: 'Reports' },
   { key: 'users',            label: 'Users' },
+  { key: 'availability',     label: 'Availability' },
   { key: 'campaigns',        label: 'Campaigns' },
+  // CRM
+  { key: 'crm',              label: 'CRM (Contact Management)' },
+  { key: 'crm_connectors',   label: 'CRM Connectors (GoHighLevel / HubSpot)' },
+  // Lead tools
   { key: 'lead_cleanup',     label: 'Lead Cleanup' },
-  { key: 'crm_integration',  label: 'CRM Integration' },
+  // System config
   { key: 'tier_config',      label: 'Tier Config' },
-  { key: 'a2p_10dlc',        label: 'A2P 10DLC' },
+  { key: 'a2p_10dlc',        label: 'A2P 10DLC Registration' },
   { key: 'branding_settings',label: 'Branding & Settings' },
+  // Compliance
   { key: 'compliance',       label: 'Compliance' },
   { key: 'audit_log',        label: 'Audit Log' },
 ]

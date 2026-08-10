@@ -18,10 +18,8 @@ const NAV_ITEMS = [
   { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
 ]
 
-// Admin-only nav items that don't need a feature flag
-const ADMIN_ONLY_NAV_ITEMS = [
-  { to: '/availability', label: 'Availability', icon: 'calendar' },
-]
+// Admin-only nav items that don't need a feature flag (always visible to any admin)
+const ADMIN_ONLY_NAV_ITEMS = []
 
 // featureKey: which enabled_features key controls this item.
 // null = always visible to any admin. super_admin always bypasses all flags.
@@ -29,9 +27,11 @@ const ADMIN_NAV_ITEMS = [
   { to: '/admin',            label: 'Master Dashboard',   icon: 'shield',       featureKey: 'master_dashboard' },
   { to: '/reports',          label: 'Reports',            icon: 'activity',     featureKey: 'reports' },
   { to: '/users',            label: 'Users',              icon: 'user-plus',    featureKey: 'users' },
+  { to: '/availability',     label: 'Availability',       icon: 'calendar',     featureKey: 'availability' },
   { to: '/campaigns',        label: 'Campaigns',          icon: 'target',       featureKey: 'campaigns' },
+  { to: '/crm',              label: 'CRM',                icon: 'database',     featureKey: 'crm' },
+  { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: 'crm_connectors' },
   { to: '/lead-cleanup',     label: 'Lead Cleanup',       icon: 'users',        featureKey: 'lead_cleanup' },
-  { to: '/crm',              label: 'CRM Integration',    icon: 'link',         featureKey: 'crm_integration' },
   { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
   { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
   { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
@@ -74,6 +74,7 @@ function Icon({ name }) {
     building: <><rect x="2" y="7" width="20" height="15" rx="1" /><line x1="16" y1="22" x2="16" y2="7" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M7 22v-5h4v5" /><polyline points="2 7 2 5 22 5 22 7" /></>,
     layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
     thermometer: <><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" /></>,
+    database: <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -181,7 +182,7 @@ export default function Layout({ children }) {
       <aside className="sidebar">
         <div className="sidebar-brand">
           {logoUrl
-            ? <img src={logoUrl} alt={brandName} style={{ height: 44, maxWidth: 150, objectFit: 'contain', borderRadius: 4, display: 'block', margin: '0 auto' }} />
+            ? <img src={logoUrl} alt={brandName} style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }} />
             : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
           }
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>

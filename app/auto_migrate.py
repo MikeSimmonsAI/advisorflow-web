@@ -126,6 +126,37 @@ COLUMNS_TO_ADD = [
     # Dynamic member role label — what this org calls their staff (Agent, Rep, Advisor, etc.)
     ("organizations", "member_label", "VARCHAR(100)"),
     ("organizations", "members_label", "VARCHAR(100)"),
+    # CRM contacts — pipeline stage for contacts table
+    ("crm_contacts", "pipeline_stage", "VARCHAR DEFAULT 'new'"),
+    ("crm_contacts", "company", "VARCHAR"),
+    ("crm_contacts", "last_contact_at", "TIMESTAMP"),
+]
+
+# New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
+TABLES_TO_CREATE = [
+    """
+    CREATE TABLE IF NOT EXISTS crm_contacts (
+        id VARCHAR PRIMARY KEY,
+        organization_id VARCHAR NOT NULL REFERENCES organizations(id),
+        created_by_id VARCHAR REFERENCES users(id),
+        full_name VARCHAR,
+        phone VARCHAR,
+        email VARCHAR,
+        company VARCHAR,
+        pipeline_stage VARCHAR DEFAULT 'new',
+        last_contact_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS crm_contact_notes (
+        id VARCHAR PRIMARY KEY,
+        contact_id VARCHAR NOT NULL REFERENCES crm_contacts(id) ON DELETE CASCADE,
+        created_by_id VARCHAR REFERENCES users(id),
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+    )
+    """,
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes
@@ -171,6 +202,16 @@ def run_auto_migrations(engine) -> None:
     is_sqlite = str(engine.url).startswith("sqlite")
 
     with engine.connect() as conn:
+        # Create any new whole tables first (before column adds, since COLUMNS_TO_ADD
+        # may reference columns in these new tables).
+        for create_sql in TABLES_TO_CREATE:
+            try:
+                conn.execute(text(create_sql))
+                conn.commit()
+            except (OperationalError, ProgrammingError) as e:
+                conn.rollback()
+                print(f"[auto_migrate] Table create skipped: {e}")
+
         for table, column, definition in COLUMNS_TO_ADD:
             try:
                 if is_sqlite:

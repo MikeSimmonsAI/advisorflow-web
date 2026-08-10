@@ -207,13 +207,32 @@ export default function Availability() {
                 const adv = team.find(u => u.id === e.target.value)
                 if (adv) setSelectedAdvisor(adv)
               }}
-              style={{ minWidth: 180 }}
+              style={{ minWidth: 200 }}
             >
-              {team.map(u => (
-                <option key={u.id} value={u.id}>
-                  {u.full_name}{u.id === user?.id ? ' (you)' : ''}
-                </option>
-              ))}
+              {isSuperAdmin ? (
+                Object.entries(
+                  team.reduce((acc, u) => {
+                    const org = u.organization_name || 'Unknown Org'
+                    if (!acc[org]) acc[org] = []
+                    acc[org].push(u)
+                    return acc
+                  }, {})
+                ).sort(([a], [b]) => a.localeCompare(b)).map(([orgName, orgUsers]) => (
+                  <optgroup key={orgName} label={orgName}>
+                    {orgUsers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.full_name}{u.id === user?.id ? ' (you)' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))
+              ) : (
+                team.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name}{u.id === user?.id ? ' (you)' : ''}
+                  </option>
+                ))
+              )}
             </select>
           </div>
         )}

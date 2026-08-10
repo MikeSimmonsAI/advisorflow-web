@@ -50,6 +50,23 @@
 .users-state { text-align: center; color: var(--text-tertiary); padding: 60px 20px; font-size: 15px; }
 .users-state--error { color: #f87171; }
 
+/* ── Org grouping (super admin view) ── */
+.users-org-group { margin-bottom: 32px; }
+.users-org-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; padding-bottom: 10px;
+  border-bottom: 2px solid var(--border-subtle);
+}
+.users-org-name {
+  font-size: 17px; font-weight: 700; color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.users-org-count {
+  font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+  background: var(--surface-2); border: 1px solid var(--border-subtle);
+  border-radius: 20px; padding: 3px 12px;
+}
+
 /* ── User card ── */
 .uc {
   background: var(--surface-1); border: 1px solid var(--border-subtle);

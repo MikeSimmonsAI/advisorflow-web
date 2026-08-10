@@ -320,21 +320,54 @@ export default function Users() {
         <div className="users-state">No members match this filter.</div>
       )}
       {!loading && !error && filtered.length > 0 && (
-        <div className="users-grid">
-          {filtered.map(u => (
-            <UserCard
-              key={u.id} u={u}
-              isSuperAdmin={isSuperAdmin}
-              stats={stats[u.id]}
-              onDeactivate={deactivate}
-              onReactivate={reactivate}
-              onEdit={usr => { setEditUser(usr); setEditForm({ full_name: usr.full_name, email: usr.email, role: usr.role }); setEditError('') }}
-              onResetPw={u => { setResetUser(u); setPwForm({ password: '', confirm: '' }); setPwError('') }}
-              onClearSetup={clearSetup}
-              onSetupLink={handleGetSetupLink}
-            />
-          ))}
-        </div>
+        isSuperAdmin ? (
+          Object.entries(
+            filtered.reduce((acc, u) => {
+              const org = u.organization_name || 'Unknown Organization'
+              if (!acc[org]) acc[org] = []
+              acc[org].push(u)
+              return acc
+            }, {})
+          ).sort(([a], [b]) => a.localeCompare(b)).map(([orgName, orgUsers]) => (
+            <div key={orgName} className="users-org-group">
+              <div className="users-org-header">
+                <span className="users-org-name">{orgName}</span>
+                <span className="users-org-count">{orgUsers.length} member{orgUsers.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="users-grid">
+                {orgUsers.map(u => (
+                  <UserCard
+                    key={u.id} u={u}
+                    isSuperAdmin={isSuperAdmin}
+                    stats={stats[u.id]}
+                    onDeactivate={deactivate}
+                    onReactivate={reactivate}
+                    onEdit={usr => { setEditUser(usr); setEditForm({ full_name: usr.full_name, email: usr.email, role: usr.role }); setEditError('') }}
+                    onResetPw={u => { setResetUser(u); setPwForm({ password: '', confirm: '' }); setPwError('') }}
+                    onClearSetup={clearSetup}
+                    onSetupLink={handleGetSetupLink}
+                  />
+                ))}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="users-grid">
+            {filtered.map(u => (
+              <UserCard
+                key={u.id} u={u}
+                isSuperAdmin={isSuperAdmin}
+                stats={stats[u.id]}
+                onDeactivate={deactivate}
+                onReactivate={reactivate}
+                onEdit={usr => { setEditUser(usr); setEditForm({ full_name: usr.full_name, email: usr.email, role: usr.role }); setEditError('') }}
+                onResetPw={u => { setResetUser(u); setPwForm({ password: '', confirm: '' }); setPwError('') }}
+                onClearSetup={clearSetup}
+                onSetupLink={handleGetSetupLink}
+              />
+            ))}
+          </div>
+        )
       )}
 
       {/* ── Create Modal ── */}

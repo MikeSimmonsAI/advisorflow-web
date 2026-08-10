@@ -29,6 +29,7 @@ import Pipeline from './pages/Pipeline'
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import CRMIntegration from './pages/CRMIntegration'
+import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
 import DLCRegistration from './pages/DLCRegistration'
 import FiberLeadCapture from './pages/FiberLeadCapture'
@@ -101,7 +102,8 @@ export default function App() {
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
         <Route path="/availability" element={<ProtectedRoute requireAdmin><Availability /></ProtectedRoute>} />
-        <Route path="/crm" element={<ProtectedRoute requireAdmin><CRMIntegration /></ProtectedRoute>} />
+        <Route path="/crm" element={<ProtectedRoute requireAdmin><CRM /></ProtectedRoute>} />
+        <Route path="/crm-connectors" element={<ProtectedRoute requireAdmin><CRMIntegration /></ProtectedRoute>} />
         <Route path="/tier-definitions" element={<ProtectedRoute requireAdmin><TierDefinitions /></ProtectedRoute>} />
         <Route path="/10dlc" element={<ProtectedRoute requireAdmin><DLCRegistration /></ProtectedRoute>} />
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
