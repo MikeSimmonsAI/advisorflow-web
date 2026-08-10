@@ -48,7 +48,7 @@ def _generate_token(user_id: int) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def _verify_token(token: str) -> int:
+def _verify_token(token: str) -> str:
     """Returns user_id or raises HTTPException."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -58,14 +58,14 @@ def _verify_token(token: str) -> int:
         raise HTTPException(status_code=400, detail="Invalid setup link.")
     if payload.get("purpose") != TOKEN_PURPOSE:
         raise HTTPException(status_code=400, detail="Invalid setup link.")
-    return int(payload["sub"])
+    return str(payload["sub"])
 
 
 # ── Admin: generate a setup link ─────────────────────────────────────────────
 
 @router.post("/admin/setup-link/{user_id}")
 def generate_setup_link(
-    user_id: int,
+    user_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

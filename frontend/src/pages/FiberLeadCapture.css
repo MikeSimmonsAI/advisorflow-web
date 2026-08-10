@@ -69,7 +69,25 @@
   box-shadow: 0 0 0 3px rgba(47,182,255,.12);
 }
 
+/* ── Autofill override: prevent browser from painting light bg on dark-theme inputs ── */
+.fiber-field input:-webkit-autofill,
+.fiber-field input:-webkit-autofill:hover,
+.fiber-field input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px var(--surface, #1a2233) inset !important;
+  -webkit-text-fill-color: var(--text-primary, #e2e8f0) !important;
+  caret-color: var(--text-primary, #e2e8f0);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 .fiber-field textarea { resize: vertical; min-height: 80px; }
+
+/* ── City / State / ZIP row ── */
+.fiber-row--addr { grid-template-columns: 1fr 60px 100px; }
+.fiber-field--state input { text-transform: uppercase; letter-spacing: 0.05em; }
+
+@media (max-width: 480px) {
+  .fiber-row--addr { grid-template-columns: 1fr 52px 90px; }
+}
 
 .fiber-consent {
   display: flex;

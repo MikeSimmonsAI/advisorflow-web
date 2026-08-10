@@ -23,7 +23,8 @@ const TIER_OPTIONS = [
 export default function FiberLeadCapture() {
   const [form, setForm] = useState({
     first_name: '', last_name: '', phone: '', email: '',
-    service_address: '', current_provider: '', current_speed: '',
+    service_address: '', city: '', state: '', zip_code: '',
+    current_provider: '', current_speed: '',
     interested_tier: '', notes: '', verbal_sms_consent: false,
   })
   const [submitting, setSubmitting] = useState(false)
@@ -50,6 +51,9 @@ export default function FiberLeadCapture() {
         phone: form.phone.trim(),
         email: form.email.trim() || null,
         service_address: form.service_address.trim() || null,
+        city: form.city.trim() || null,
+        state: form.state.trim() || null,
+        zip_code: form.zip_code.trim() || null,
         current_provider: form.current_provider.trim() || null,
         current_speed: form.current_speed || null,
         interested_tier: form.interested_tier || null,
@@ -67,7 +71,8 @@ export default function FiberLeadCapture() {
   function reset() {
     setForm({
       first_name: '', last_name: '', phone: '', email: '',
-      service_address: '', current_provider: '', current_speed: '',
+      service_address: '', city: '', state: '', zip_code: '',
+      current_provider: '', current_speed: '',
       interested_tier: '', notes: '', verbal_sms_consent: false,
     })
     setResult(null)
@@ -149,13 +154,46 @@ export default function FiberLeadCapture() {
         </div>
 
         <div className="fiber-field">
-          <label>Service Address</label>
+          <label>Street Address</label>
           <input
-            type="text" placeholder="123 Main St, City, State ZIP"
+            type="text" placeholder="123 Main St"
             value={form.service_address}
             onChange={e => set('service_address', e.target.value)}
-            autoComplete="street-address"
+            autoComplete="address-line1"
           />
+        </div>
+
+        <div className="fiber-row fiber-row--addr">
+          <div className="fiber-field fiber-field--city">
+            <label>City</label>
+            <input
+              type="text" placeholder="City"
+              value={form.city}
+              onChange={e => set('city', e.target.value)}
+              autoComplete="address-level2"
+            />
+          </div>
+          <div className="fiber-field fiber-field--state">
+            <label>State</label>
+            <input
+              type="text" placeholder="TX"
+              value={form.state}
+              onChange={e => set('state', e.target.value.toUpperCase())}
+              autoComplete="address-level1"
+              maxLength={2}
+            />
+          </div>
+          <div className="fiber-field fiber-field--zip">
+            <label>ZIP</label>
+            <input
+              type="text" placeholder="75001"
+              value={form.zip_code}
+              onChange={e => set('zip_code', e.target.value)}
+              autoComplete="postal-code"
+              inputMode="numeric"
+              maxLength={10}
+            />
+          </div>
         </div>
 
         <div className="fiber-row">

@@ -32,6 +32,9 @@ class FiberLeadCreate(BaseModel):
     phone: str
     email: Optional[str] = None
     service_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
     current_provider: Optional[str] = None
     current_speed: Optional[str] = None
     interested_tier: Optional[str] = None
@@ -95,7 +98,10 @@ def create_fiber_lead(
         message_track="new_inquiry_intro",
         source="fiber_field",
         organization_id=current_user.organization_id,
-        service_address=payload.service_address,
+        street_address=payload.service_address,
+        city=payload.city.strip() if payload.city else None,
+        state=payload.state.strip() if payload.state else None,
+        zip_code=payload.zip_code.strip() if payload.zip_code else None,
         extra_data=json.dumps(extra),
     )
     db.add(lead)
