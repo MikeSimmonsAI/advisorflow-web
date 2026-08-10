@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './CRM.css'
@@ -60,19 +60,34 @@ function ContactCard({ contact, onClick }) {
 }
 
 // ── Detail Panel ───────────────────────────────────────────────────────────
-function ContactPanel({ contact, onClose, onSave }) {
+function ContactPanel({ contact, onClose, onSave, onDelete }) {
   const [form, setForm] = useState({ ...contact })
   const [note, setNote] = useState('')
-  const [notes, setNotes] = useState(contact.notes || [])
+  const [notes, setNotes] = useState([])
+  const [notesLoading, setNotesLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [err, setErr] = useState('')
+  const textareaRef = useRef(null)
+
+  // Load notes when panel opens
+  useEffect(() => {
+    let active = true
+    setNotesLoading(true)
+    api.get(`/crm/contacts/${contact.id}/notes`)
+      .then(data => { if (active) setNotes(Array.isArray(data) ? data : []) })
+      .catch(() => {})
+      .finally(() => { if (active) setNotesLoading(false) })
+    return () => { active = false }
+  }, [contact.id])
 
   const handleSave = async () => {
-    setSaving(true)
+    setSaving(true); setErr('')
     try {
       const updated = await api.patch(`/crm/contacts/${contact.id}`, form)
       onSave(updated)
     } catch (e) {
-      alert(e.message)
+      setErr(e.message || 'Save failed')
     } finally {
       setSaving(false)
     }
@@ -85,7 +100,20 @@ function ContactPanel({ contact, onClose, onSave }) {
       setNotes(prev => [res, ...prev])
       setNote('')
     } catch (e) {
-      alert(e.message)
+      setErr(e.message || 'Failed to add note')
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete ${contact.full_name || 'this contact'}? This cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      await api.delete(`/crm/contacts/${contact.id}`)
+      onDelete(contact.id)
+      onClose()
+    } catch (e) {
+      setErr(e.message || 'Delete failed')
+      setDeleting(false)
     }
   }
 
@@ -136,6 +164,7 @@ function ContactPanel({ contact, onClose, onSave }) {
             <h3 className="crm-section-title">Notes</h3>
             <div className="crm-note-input">
               <textarea
+                ref={textareaRef}
                 placeholder="Add a note…"
                 value={note}
                 onChange={e => setNote(e.target.value)}
@@ -146,9 +175,10 @@ function ContactPanel({ contact, onClose, onSave }) {
               </button>
             </div>
             <div className="crm-notes-list">
-              {notes.length === 0 && <div className="crm-empty-notes">No notes yet.</div>}
-              {notes.map((n, i) => (
-                <div key={i} className="crm-note">
+              {notesLoading && <div className="crm-empty-notes">Loading notes…</div>}
+              {!notesLoading && notes.length === 0 && <div className="crm-empty-notes">No notes yet.</div>}
+              {!notesLoading && notes.map((n, i) => (
+                <div key={n.id || i} className="crm-note">
                   <div className="crm-note-content">{n.content}</div>
                   <div className="crm-note-date">{fmtDate(n.created_at)}</div>
                 </div>
@@ -157,7 +187,12 @@ function ContactPanel({ contact, onClose, onSave }) {
           </section>
         </div>
 
+        {err && <div className="crm-error" style={{ margin: '0 20px 4px' }}>{err}</div>}
+
         <div className="crm-panel-footer">
+          <button className="btn btn--danger btn--sm" onClick={handleDelete} disabled={deleting} style={{ marginRight: 'auto' }}>
+            {deleting ? 'Deleting…' : 'Delete contact'}
+          </button>
           <button className="btn btn--secondary" onClick={onClose}>Cancel</button>
           <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving…' : 'Save Changes'}
@@ -280,6 +315,11 @@ export default function CRM() {
     setSelected(updated)
   }
 
+  const handleDelete = (deletedId) => {
+    setContacts(prev => prev.filter(c => c.id !== deletedId))
+    setSelected(null)
+  }
+
   const handleCreate = (created) => {
     setContacts(prev => [created, ...prev])
   }
@@ -376,6 +416,7 @@ export default function CRM() {
           contact={selected}
           onClose={() => setSelected(null)}
           onSave={handleSave}
+          onDelete={handleDelete}
         />
       )}
       {showCreate && (
