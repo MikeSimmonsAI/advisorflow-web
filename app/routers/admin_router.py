@@ -1533,6 +1533,8 @@ def update_organization(
     }
 
 
+
+
 # ---------------------------------------------------------------------------
 # Demo data seed — super_admin only. Seeds a sub-org with realistic leads,
 # messages, and replies so charts/reports show meaningful data for demos.
@@ -1559,7 +1561,6 @@ def seed_demo_data(
     if not target_org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # --- Config ---
     if body is None:
         body = DemoSeedRequest()
     num_leads = body.num_leads
@@ -1567,11 +1568,11 @@ def seed_demo_data(
     now = datetime.utcnow()
     random.seed(42)
 
-    # --- Funeral/cemetery-specific data tables ---
+    # --- Name pools (realistic US consumer demographics) ---
     FIRST = [
         "James","Mary","Robert","Patricia","Michael","Jennifer","William","Linda",
         "David","Barbara","Richard","Elizabeth","Joseph","Susan","Thomas","Dorothy",
-        "Charles","Helen","Christopher","Carol","Daniel","Ruth","Matthew","Sharon",
+        "Charles","Helen","Christopher","Carol","Daniel","Ruth","Sharon","Matthew",
         "Anthony","Margaret","Mark","Betty","Donald","Sandra","Steven","Ashley",
         "Kenneth","Carolyn","Paul","Kimberly","George","Emily","Edward","Donna",
         "Brian","Michelle","Ronald","Deborah","Timothy","Stephanie","Gary","Lisa",
@@ -1588,81 +1589,156 @@ def seed_demo_data(
         "Collins","Stewart","Sanchez","Morris","Rogers","Reed","Cook","Morgan",
         "Bell","Murphy","Bailey","Rivera","Cooper","Richardson","Cox","Howard",
     ]
+
+    # --- Cities with matching real area codes ---
     CITIES = [
-        ("Atlanta","GA"),("Houston","TX"),("Phoenix","AZ"),("Philadelphia","PA"),
-        ("San Antonio","TX"),("Dallas","TX"),("Jacksonville","FL"),("Columbus","OH"),
-        ("Charlotte","NC"),("Indianapolis","IN"),("Memphis","TN"),("Louisville","KY"),
-        ("Baltimore","MD"),("Milwaukee","WI"),("Albuquerque","NM"),("Tucson","AZ"),
-        ("Fresno","CA"),("Sacramento","CA"),("Mesa","AZ"),("Omaha","NE"),
-        ("Cleveland","OH"),("Raleigh","NC"),("Virginia Beach","VA"),("Colorado Springs","CO"),
-        ("Aurora","CO"),("Tampa","FL"),("New Orleans","LA"),("Wichita","KS"),
-        ("Arlington","TX"),("Bakersfield","CA"),("Anaheim","CA"),("Santa Ana","CA"),
-        ("Corpus Christi","TX"),("Riverside","CA"),("St. Louis","MO"),("Pittsburgh","PA"),
-        ("Cincinnati","OH"),("Greensboro","NC"),("Anchorage","AK"),("Plano","TX"),
+        ("Atlanta","GA",["404","678","470"]),
+        ("Houston","TX",["713","832","281"]),
+        ("Phoenix","AZ",["602","480","623"]),
+        ("Philadelphia","PA",["215","267"]),
+        ("San Antonio","TX",["210","726"]),
+        ("Dallas","TX",["214","972","469"]),
+        ("Jacksonville","FL",["904"]),
+        ("Columbus","OH",["614"]),
+        ("Charlotte","NC",["704","980"]),
+        ("Indianapolis","IN",["317"]),
+        ("Memphis","TN",["901"]),
+        ("Louisville","KY",["502"]),
+        ("Baltimore","MD",["410","443"]),
+        ("Milwaukee","WI",["414"]),
+        ("Albuquerque","NM",["505"]),
+        ("Tucson","AZ",["520"]),
+        ("Fresno","CA",["559"]),
+        ("Sacramento","CA",["916"]),
+        ("Mesa","AZ",["480"]),
+        ("Omaha","NE",["402"]),
+        ("Cleveland","OH",["216"]),
+        ("Raleigh","NC",["919"]),
+        ("Virginia Beach","VA",["757"]),
+        ("Colorado Springs","CO",["719"]),
+        ("Aurora","CO",["303","720"]),
+        ("Tampa","FL",["813"]),
+        ("New Orleans","LA",["504"]),
+        ("Wichita","KS",["316"]),
+        ("Arlington","TX",["817"]),
+        ("Bakersfield","CA",["661"]),
+        ("Anaheim","CA",["714"]),
+        ("Santa Ana","CA",["714"]),
+        ("Corpus Christi","TX",["361"]),
+        ("Riverside","CA",["951"]),
+        ("St. Louis","MO",["314"]),
+        ("Pittsburgh","PA",["412"]),
+        ("Cincinnati","OH",["513"]),
+        ("Greensboro","NC",["336"]),
+        ("Anchorage","AK",["907"]),
+        ("Plano","TX",["972","469"]),
     ]
-    # Funeral industry tier distribution: pre_need 55%, at_need 18%, imminent 10%,
-    # contract_sold 7%, email_only 7%, partial 3%
+
+    # --- Realistic email generation ---
+    EMAIL_DOMAINS = [
+        "gmail.com","gmail.com","gmail.com",
+        "yahoo.com","yahoo.com",
+        "hotmail.com","outlook.com",
+        "aol.com","comcast.net","sbcglobal.net","icloud.com","bellsouth.net",
+    ]
+
+    def make_email(fn, ln, seed_i):
+        domain = random.choice(EMAIL_DOMAINS)
+        p = seed_i % 7
+        fn_l, ln_l = fn.lower(), ln.lower()
+        if p == 0: return f"{fn_l}.{ln_l}@{domain}"
+        if p == 1: return f"{fn_l}{ln_l[:3]}@{domain}"
+        if p == 2: return f"{fn_l[0]}{ln_l}@{domain}"
+        if p == 3: return f"{ln_l}{fn_l[0]}@{domain}"
+        if p == 4: return f"{fn_l}{random.randint(1945, 1985)}@{domain}"
+        if p == 5: return f"{fn_l}_{ln_l}@{domain}"
+        return f"{fn_l}.{ln_l}{random.randint(2, 99)}@{domain}"
+
+    def make_phone(area_codes):
+        area = random.choice(area_codes)
+        exchange = random.randint(200, 989)
+        subscriber = random.randint(1000, 9999)
+        return f"({area}) {exchange}-{subscriber}"
+
+    # Funeral industry tier distribution
     TIERS = (
         ["pre_need"]*55 + ["at_need"]*18 + ["imminent"]*10 +
         ["contract_sold"]*7 + ["email_only"]*10
     )
-    # Status distribution (out of 100 slots)
+    # Realistic funnel shape
     STATUSES = (
-        ["new"]*15 + ["sent"]*30 + ["replied"]*20 +
-        ["hot"]*12 + ["booked"]*8 + ["dnc"]*8 + ["dead"]*7
+        ["new"]*12 + ["sent"]*32 + ["replied"]*22 +
+        ["hot"]*14 + ["booked"]*8 + ["dnc"]*7 + ["dead"]*5
     )
     ADVISOR_NAMES = [
         "Sarah Mitchell","James Crawford","Diana Reyes","Robert Okafor","Michelle Torres",
     ]
-    # Funeral/cemetery outbound SMS templates
+
+    # --- SMS templates (funeral/pre-need specific) ---
     MESSAGES = [
-        "Hi {name}, I'm {adv} with EVOSYSPRO. Have you had a chance to review pre-need options for your family?",
-        "Hello {name}, this is {adv}. Planning ahead protects your family from difficult decisions later — do you have 10 minutes this week?",
-        "{name}, {adv} here from EVOSYSPRO. We help families secure meaningful arrangements before the need arises. Interested in learning more?",
-        "Hi {name}, {adv} with EVOSYSPRO. Many families are surprised how affordable pre-need planning can be. Would you like a free overview?",
-        "{name}, this is {adv}. Securing cemetery property early locks in today's pricing. Can I send you some information?",
-        "Hello {name}, I'm {adv} reaching out about final expense and pre-arrangement options available in your area. Is this a good time?",
-        "Hi {name}, {adv} with EVOSYSPRO. We have an at-need family counselor available this week. Would a brief call help? No pressure.",
-        "{name}, this is {adv}. Our pre-need program lets families pay today's prices for future services. Would you like details?",
-        "Hi {name}, {adv} here. Thinking ahead now is one of the greatest gifts you can give your family. 10 minutes this week?",
-        "Hello {name}, I'm {adv} with EVOSYSPRO Pre-Planning. We'd love to walk you through your options — completely free consultation.",
+        "Hi {name}, I'm {adv} with EVOSYSPRO. Have you had a chance to think about pre-need planning for your family?",
+        "Hello {name}, this is {adv} from EVOSYSPRO. Planning ahead protects your family from making difficult decisions under pressure — do you have 10 minutes this week?",
+        "Hi {name}, {adv} here. We help families secure meaningful arrangements before the need arises. I'd love to share what's available in your area.",
+        "Hello {name}, this is {adv} with EVOSYSPRO Pre-Planning. Many families are surprised how affordable it is to plan ahead — would you like a free overview?",
+        "{name}, this is {adv}. Securing cemetery property today locks in current pricing for the future. Can I send you some information?",
+        "Hi {name}, {adv} with EVOSYSPRO. I'm reaching out about final expense and pre-arrangement options available near you. Is now a good time?",
+        "Hello {name}, I'm {adv}. We have a family counselor available this week for a no-pressure consultation. Would a brief call be helpful?",
+        "{name}, this is {adv} from EVOSYSPRO. Our pre-need program lets you secure tomorrow's services at today's prices. Want to learn more?",
+        "Hi {name}, {adv} here. Pre-planning is one of the greatest gifts you can give your family. Could we set aside 10 minutes this week?",
+        "Hello {name}, I'm {adv} with EVOSYSPRO. We're offering complimentary pre-planning consultations this month — completely free, no obligation.",
     ]
-    # Follow-up messages (sent on 2nd/3rd touch)
     FOLLOWUPS = [
-        "Hi {name}, just following up. Did you get a chance to look over the pre-need information? Happy to answer any questions.",
-        "{name}, {adv} again. I know life gets busy — just wanted to make sure my message didn't get lost. Here for you when ready.",
-        "Hi {name}, checking back in. Planning ahead makes a real difference. Let me know if now is a better time to connect.",
-        "{name}, this is {adv}. Our spring pricing review is coming up — want to lock in current rates before any changes?",
+        "Hi {name}, just following up from last week. Did you have a chance to look over the information? Happy to answer any questions.",
+        "{name}, {adv} again. I know things get busy — just wanted to make sure my message didn't get lost. Here whenever you're ready.",
+        "Hi {name}, checking back in. A lot of families find that getting this handled brings real peace of mind. Is this a better time?",
+        "{name}, this is {adv}. Our current pricing holds through end of month — wanted to make sure you had a chance to review before any changes.",
+        "Hi {name}, one more quick follow-up from {adv}. No pressure at all — just want to make sure you have what you need to make a decision.",
+    ]
+    ADVISOR_HOT_REPLY = [
+        "That's wonderful to hear, {name}! I'd love to set something up. Are mornings or afternoons generally better for you?",
+        "So glad you reached out, {name}! I have availability Wednesday afternoon or Thursday morning — which works better?",
+        "Perfect timing, {name}! Let me send over our pre-planning packet and we can schedule a call at your convenience.",
+        "That's great news, {name}! I can give you a call tomorrow — does 2:00 PM work for you?",
+        "Excellent, {name}! I'll get a time on the calendar. Would this week or next week be better?",
+    ]
+    LEAD_CONFIRM = [
+        "Wednesday works great. See you then!",
+        "Tomorrow at 2 is perfect. Thank you!",
+        "Thursday morning works. 10am?",
+        "Anytime this week. I'll be home most days.",
+        "Next week is better. Please call Monday afternoon.",
+        "That works for us. Should we bring anything?",
     ]
     HOT = [
-        "Yes I'm interested, when can we talk?",
-        "Please call me, I need to get this done soon.",
-        "I've been meaning to reach out about this. What are the next steps?",
-        "Can we meet this week? My spouse and I want to get this taken care of.",
-        "We've been putting this off too long. What do you need from us?",
-        "Great timing — I was just talking to my kids about this. Set something up.",
+        "Yes, I'm definitely interested. When can we talk?",
+        "Please call me — I need to get this taken care of soon.",
+        "I've been meaning to do this for a while. What are the next steps?",
+        "My husband and I want to get this done this month. What do you need from us?",
+        "We've been putting this off too long. I'm ready to move forward.",
+        "Great timing — I was literally just talking to my kids about this. Can we set something up?",
         "How long does the process take? We want to get started right away.",
+        "Yes please. My mother-in-law just passed and we want to make sure we're prepared.",
+        "I've been thinking about this for a while. Can you call me?",
     ]
     NEUTRAL = [
         "Thank you, I'll think about it and get back to you.",
-        "Not quite ready yet but keep me in mind.",
-        "Please send some information and I'll review it.",
-        "I'd like to learn more. Can you email me the details?",
-        "We already have something in place but happy to review our options.",
-        "My sister handles this for the family. I'll pass your info along.",
+        "Not quite ready yet but please keep me in mind.",
+        "Could you send some information? I'll review it when I have time.",
+        "I'd like to learn more — can you email the details?",
+        "We already have something in place but I'm happy to take a look at our options.",
+        "My daughter usually handles these things for the family. I'll pass your information along.",
         "Maybe in the next few months. Thanks for reaching out.",
+        "I appreciate it. Let me talk to my wife and I'll get back to you.",
     ]
     NEG = [
         "Not interested, please remove me from your list.",
-        "Already handled, thank you.",
-        "Do not contact me again.",
-        "We have everything in place already.",
+        "We already have everything handled, thank you.",
+        "Please do not contact me again.",
+        "We have our arrangements made. Thank you.",
         "Please stop texting this number.",
     ]
 
     def rdate_span(span_days):
-        """Random date within span_days, weighted toward more recent (triangular dist)."""
-        # triangular: mode at 10% in (most leads are recent)
         days_ago = int(random.triangular(0, span_days, span_days * 0.10))
         return now - timedelta(days=days_ago)
 
@@ -1677,7 +1753,7 @@ def seed_demo_data(
         fn, ln = name.split(" ", 1)
         adv = User(
             id=str(_uuid.uuid4()), organization_id=org_id,
-            email=f"demo.{fn.lower()}.{ln.lower()}@demo-evosyspro.com",
+            email=f"{fn.lower()}.{ln.lower()}@evosyspro.com",
             password_hash=hash_password("Demo1234!"),
             full_name=name, role="advisor", is_active=True, must_change_password=False,
         )
@@ -1692,35 +1768,41 @@ def seed_demo_data(
     outcome_count = 0
     BATCH = 500
 
+    # Distribute leads evenly across advisors so charts look balanced
+    advisor_cycle = [advisors[i % len(advisors)] for i in range(num_leads)]
+    random.shuffle(advisor_cycle)
+
     for i in range(num_leads):
-        adv = random.choice(advisors)
-        city, state = random.choice(CITIES)
-        area = random.randint(200, 989)
-        exchange = random.randint(200, 989)
-        subscriber = random.randint(1000, 9999)
+        adv = advisor_cycle[i]
+        city, state, area_codes = random.choice(CITIES)
+        fn = random.choice(FIRST)
+        ln = random.choice(LAST)
         status = random.choice(STATUSES)
         tier = random.choice(TIERS)
         created_at = rdate_span(days_span)
+        last_contact = (
+            created_at + timedelta(days=random.randint(1, 14))
+            if status not in ("new",) else None
+        )
         lead = Lead(
             id=str(_uuid.uuid4()),
             organization_id=org_id,
-            first_name=random.choice(FIRST),
-            last_name=random.choice(LAST),
-            phone=f"({area}) {exchange}-{subscriber}",
-            email=f"demo.lead.{i}@example-evosyspro.com",
+            first_name=fn,
+            last_name=ln,
+            phone=make_phone(area_codes),
+            email=make_email(fn, ln, i),
             tier=tier,
             status=status,
-            source_year=random.randint(2019, 2025),
+            source_year=random.randint(2018, 2025),
             assigned_to_id=adv.id,
             city=city,
             state=state,
             created_at=created_at,
-            last_contact_date=created_at + timedelta(days=random.randint(1, 10)) if status not in ("new",) else None,
+            last_contact_date=last_contact,
         )
         db.add(lead)
         leads.append(lead)
 
-        # Flush + commit every BATCH leads so we don't blow memory / hit timeouts
         if (i + 1) % BATCH == 0:
             db.flush()
             db.commit()
@@ -1728,19 +1810,21 @@ def seed_demo_data(
     db.flush()
     db.commit()
 
-    # --- Messages ---
+    # --- Messages: outbound advisor touches ---
     msg_batch = []
     for lead in leads:
         if lead.status in ("new", "dnc", "dead"):
             continue
         adv = next((a for a in advisors if a.id == lead.assigned_to_id), advisors[0])
         adv_name = adv.full_name or "your advisor"
-        # 1–3 touches; hot/booked leads get more follow-up
         if lead.status in ("hot", "booked"):
-            n_msgs = random.choices([2, 3, 4], weights=[30, 50, 20])[0]
+            n_msgs = random.choices([2, 3, 4], weights=[25, 50, 25])[0]
+        elif lead.status == "replied":
+            n_msgs = random.choices([1, 2, 3], weights=[40, 45, 15])[0]
         else:
-            n_msgs = random.choices([1, 2, 3], weights=[55, 35, 10])[0]
-        sent_at = lead.created_at + timedelta(hours=random.randint(2, 48))
+            n_msgs = random.choices([1, 2, 3], weights=[60, 30, 10])[0]
+
+        sent_at = lead.created_at + timedelta(hours=random.randint(1, 36))
         for touch in range(n_msgs):
             tmpl = random.choice(FOLLOWUPS if touch > 0 else MESSAGES)
             body_text = tmpl.format(name=lead.first_name, adv=adv_name)
@@ -1752,31 +1836,35 @@ def seed_demo_data(
                 twilio_status="delivered",
                 sent_at=sent_at,
             ))
-            sent_at += timedelta(days=random.randint(3, 12))
+            sent_at += timedelta(days=random.randint(3, 10))
             msg_count += 1
+
         if len(msg_batch) >= BATCH:
             db.bulk_save_objects(msg_batch)
             db.commit()
             msg_batch = []
+
     if msg_batch:
         db.bulk_save_objects(msg_batch)
         db.commit()
         msg_batch = []
 
-    # --- Replies ---
+    # --- Replies: lead responses ---
     reply_batch = []
+    hot_leads_for_followup = []
+
     for lead in leads:
         if lead.status not in ("replied", "hot", "booked"):
             continue
-        is_hot = lead.status in ("hot", "booked") or random.random() < 0.28
-        is_neg = not is_hot and random.random() < 0.12
+        is_hot = lead.status in ("hot", "booked") or random.random() < 0.25
+        is_neg = not is_hot and random.random() < 0.10
         reply_text = random.choice(HOT if is_hot else NEG if is_neg else NEUTRAL)
         clf = (
             ReplyClassification.INTERESTED if is_hot
             else ReplyClassification.NOT_INTERESTED if is_neg
             else ReplyClassification.NEUTRAL
         )
-        received_at = lead.created_at + timedelta(days=random.randint(2, 18))
+        received_at = lead.created_at + timedelta(days=random.randint(1, 14))
         reply_batch.append(Reply(
             id=str(_uuid.uuid4()),
             lead_id=lead.id,
@@ -1787,14 +1875,63 @@ def seed_demo_data(
             classification=clf,
         ))
         reply_count += 1
+
+        if is_hot:
+            hot_leads_for_followup.append((lead, received_at))
+
         if len(reply_batch) >= BATCH:
             db.bulk_save_objects(reply_batch)
             db.commit()
             reply_batch = []
+
     if reply_batch:
         db.bulk_save_objects(reply_batch)
         db.commit()
         reply_batch = []
+
+    # --- Advisor follow-up messages after hot/booked replies (multi-turn threads) ---
+    followup_msg_batch = []
+    booked_second_reply_batch = []
+    for lead, reply_received_at in hot_leads_for_followup:
+        adv = next((a for a in advisors if a.id == lead.assigned_to_id), advisors[0])
+        advisor_reply_text = random.choice(ADVISOR_HOT_REPLY).format(name=lead.first_name)
+        advisor_reply_at = reply_received_at + timedelta(hours=random.randint(1, 6))
+        followup_msg_batch.append(Message(
+            id=str(_uuid.uuid4()),
+            lead_id=lead.id,
+            sender_id=adv.id,
+            body=advisor_reply_text,
+            twilio_status="delivered",
+            sent_at=advisor_reply_at,
+        ))
+        msg_count += 1
+
+        # Booked leads get a 2nd reply from the lead confirming the appointment
+        if lead.status == "booked":
+            confirm_text = random.choice(LEAD_CONFIRM)
+            confirm_at = advisor_reply_at + timedelta(hours=random.randint(1, 12))
+            booked_second_reply_batch.append(Reply(
+                id=str(_uuid.uuid4()),
+                lead_id=lead.id,
+                body=confirm_text,
+                source="sms",
+                received_at=confirm_at,
+                is_hot=True,
+                classification=ReplyClassification.INTERESTED,
+            ))
+            reply_count += 1
+
+        if len(followup_msg_batch) >= BATCH:
+            db.bulk_save_objects(followup_msg_batch)
+            db.commit()
+            followup_msg_batch = []
+
+    if followup_msg_batch:
+        db.bulk_save_objects(followup_msg_batch)
+        db.commit()
+    if booked_second_reply_batch:
+        db.bulk_save_objects(booked_second_reply_batch)
+        db.commit()
 
     # --- Outcomes (booked leads) ---
     outcome_batch = []
@@ -1802,11 +1939,23 @@ def seed_demo_data(
         if lead.status != "booked":
             continue
         adv = next((a for a in advisors if a.id == lead.assigned_to_id), advisors[0])
-        resulted_in_sale = random.random() < 0.62
-        # Funeral-specific outcome fields
-        has_arrangement = random.choices([True, False, None], weights=[55, 30, 15])[0]
-        has_cemetery = random.choices([True, False, None], weights=[45, 40, 15])[0]
-        appt_date = lead.created_at + timedelta(days=random.randint(4, 21))
+        resulted_in_sale = random.random() < 0.68
+        has_arrangement = random.choices([True, False, None], weights=[60, 25, 15])[0]
+        has_cemetery = random.choices([True, False, None], weights=[50, 35, 15])[0]
+        appt_date = lead.created_at + timedelta(days=random.randint(5, 21))
+        sale_notes = [
+            "Family selected full pre-need package. Signed and funded.",
+            "Couple purchased two spaces — cemetery property and arrangement package.",
+            "Single pre-need arrangement finalized. Payment plan established.",
+            "At-need family — services arranged within 48 hours of contact.",
+            "Pre-need conversion. Family very engaged throughout the process.",
+        ]
+        hold_notes = [
+            "Appointment held. Family reviewing package options — follow up in 2 weeks.",
+            "Consultation complete. Client requested time to discuss with adult children.",
+            "Good meeting. Price shopping — came in competitive. Decision pending.",
+            "Family wants to include a sibling in the next call. Rescheduled.",
+        ]
         outcome_batch.append(LeadOutcome(
             id=str(_uuid.uuid4()),
             lead_id=lead.id,
@@ -1815,10 +1964,10 @@ def seed_demo_data(
             has_funeral_arrangement=has_arrangement,
             has_cemetery_property=has_cemetery,
             appointment_date=appt_date,
-            notes="Demo outcome — EVOSYSPRO seed." if resulted_in_sale
-                  else "Appointment held; family reviewing options.",
+            notes=random.choice(sale_notes) if resulted_in_sale else random.choice(hold_notes),
         ))
         outcome_count += 1
+
     if outcome_batch:
         db.bulk_save_objects(outcome_batch)
         db.commit()
@@ -1833,7 +1982,6 @@ def seed_demo_data(
         "advisors_created": created_advisor_count,
         "days_span": days_span,
     }
-
 
 # ---------------------------------------------------------------------------
 # Org list — super admin only. Used by OrgManager.jsx to display all orgs
