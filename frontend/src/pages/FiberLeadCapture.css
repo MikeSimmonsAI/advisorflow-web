@@ -11,13 +11,13 @@
 .fiber-capture__title {
   font-size: 22px;
   font-weight: 700;
-  color: var(--text-primary, #1e293b);
+  color: var(--text-primary, #eef5ff);
   margin: 0 0 4px;
 }
 
 .fiber-capture__sub {
   font-size: 14px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-secondary, #9fb0cf);
   margin: 0;
 }
 
@@ -41,7 +41,7 @@
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary, #9fb0cf);
   margin-bottom: 5px;
 }
 
@@ -50,15 +50,25 @@
 .fiber-field textarea {
   width: 100%;
   padding: 11px 13px;
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1px solid var(--border-subtle, rgba(64,170,255,0.22));
   border-radius: 8px;
   font-size: 15px;
   font-family: inherit;
-  background: var(--surface, #fff);
-  color: var(--text-primary, #1e293b);
+  background: var(--bg-field, rgba(7,14,31,0.70));
+  color: var(--text-primary, #eef5ff);
   transition: border-color .15s;
   box-sizing: border-box;
   -webkit-appearance: none;
+}
+
+.fiber-field input::placeholder,
+.fiber-field textarea::placeholder {
+  color: var(--text-tertiary, #5e6f8f);
+}
+
+.fiber-field select option {
+  background: #0d1e3e;
+  color: #eef5ff;
 }
 
 .fiber-field input:focus,
@@ -93,8 +103,8 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  background: var(--surface-alt, #f8fafc);
-  border: 1px solid var(--border, #e2e8f0);
+  background: var(--bg-field, rgba(7,14,31,0.70));
+  border: 1px solid var(--border-subtle, rgba(64,170,255,0.22));
   border-radius: 8px;
   padding: 14px;
   cursor: pointer;
@@ -111,7 +121,7 @@
 
 .fiber-consent span {
   font-size: 13px;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary, #9fb0cf);
   line-height: 1.5;
 }
 
@@ -137,8 +147,8 @@
 }
 
 .fiber-success__icon { font-size: 56px; margin-bottom: 16px; }
-.fiber-success__name { font-size: 22px; font-weight: 700; color: var(--text-primary, #1e293b); margin: 0 0 8px; }
-.fiber-success__sub { color: var(--text-muted, #64748b); margin: 0 0 24px; }
+.fiber-success__name { font-size: 22px; font-weight: 700; color: var(--text-primary, #eef5ff); margin: 0 0 8px; }
+.fiber-success__sub { color: var(--text-secondary, #9fb0cf); margin: 0 0 24px; }
 
 .fiber-success__another {
   padding: 11px 24px;
