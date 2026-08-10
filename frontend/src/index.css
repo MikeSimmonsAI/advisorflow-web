@@ -55,6 +55,32 @@
   --panel-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --panel-shadow-strong: 0 34px 110px rgba(0, 0, 0, 0.58), 0 0 42px rgba(47, 182, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --corner-bracket-size: 34px;
+
+  /* ── Elevation scale ── */
+  --elevation-1: 0 2px 8px rgba(0,0,0,0.36), 0 1px 0 rgba(255,255,255,0.04);
+  --elevation-2: 0 8px 28px rgba(0,0,0,0.46), 0 1px 0 rgba(255,255,255,0.06);
+  --elevation-3: 0 24px 72px rgba(0,0,0,0.58), 0 1px 0 rgba(255,255,255,0.08), 0 0 40px rgba(47,182,255,0.07);
+  --elevation-4: 0 40px 120px rgba(0,0,0,0.72), 0 0 80px rgba(47,182,255,0.12), inset 0 1px 0 rgba(255,255,255,0.10);
+
+  /* ── Motion tokens ── */
+  --transition-fast:   0.14s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base:   0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 0.40s cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-smooth: 0.48s cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-exit:   0.18s cubic-bezier(0.4, 0, 1, 1);
+
+  /* ── Extended radii ── */
+  --radius-xs:   6px;
+  --radius-xl:   24px;
+  --radius-2xl:  32px;
+  --radius-pill: 999px;
+
+  /* ── Surface tokens ── */
+  --bg-elevated:    rgba(14, 26, 58, 0.90);
+  --bg-glass:       rgba(255, 255, 255, 0.04);
+  --bg-glass-mid:   rgba(255, 255, 255, 0.07);
+  --bg-glass-strong:rgba(255, 255, 255, 0.10);
+  --surface-inset:  rgba(0, 0, 0, 0.24);
 }
 
 
@@ -67,10 +93,12 @@ html, body {
   padding: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at 14% 0%, rgba(47, 182, 255, 0.16), transparent 30%),
-    radial-gradient(circle at 100% 14%, rgba(157, 109, 255, 0.14), transparent 28%),
-    radial-gradient(circle at 50% 100%, rgba(30, 240, 168, 0.06), transparent 36%),
-    linear-gradient(150deg, var(--bg-base) 0%, var(--bg-panel) 48%, var(--bg-base) 100%);
+    radial-gradient(ellipse 65% 45% at 10% 0%,    rgba(47, 182, 255, 0.22) 0%, transparent 60%),
+    radial-gradient(ellipse 55% 38% at 94% 8%,    rgba(157, 109, 255, 0.18) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 50% 108%,  rgba(30, 240, 168, 0.09) 0%, transparent 55%),
+    radial-gradient(ellipse 42% 32% at 100% 52%,  rgba(47, 182, 255, 0.07) 0%, transparent 50%),
+    radial-gradient(ellipse 35% 28% at 0% 78%,    rgba(157, 109, 255, 0.07) 0%, transparent 50%),
+    linear-gradient(165deg, #020409 0%, #040b1c 35%, #050c1f 65%, #020409 100%);
   color: var(--text-primary);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
@@ -83,11 +111,9 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: -1;
-  background-image:
-    linear-gradient(rgba(47, 182, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(47, 182, 255, 0.05) 1px, transparent 1px);
-  background-size: 46px 46px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.85), transparent 70%);
+  background-image: radial-gradient(circle, rgba(47, 182, 255, 0.13) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 72%);
 }
 
 #root {
@@ -120,6 +146,58 @@ select option {
   color: var(--text-primary);
 }
 
+/* ── Global keyframes ── */
+@keyframes fadeUpIn {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.90); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slideRightIn {
+  from { opacity: 0; transform: translateX(-14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to   { background-position:  200% center; }
+}
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1;   }
+}
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-4px); }
+}
+
+/* ── Animation utility classes ── */
+.animate-fade-up    { animation: fadeUpIn     var(--transition-smooth) both; }
+.animate-fade-in    { animation: fadeIn       var(--transition-base)   both; }
+.animate-scale-in   { animation: scaleIn      var(--transition-spring) both; }
+.animate-slide-in   { animation: slideRightIn var(--transition-smooth) both; }
+
+/* Global focus ring */
+:focus-visible {
+  outline: 2px solid var(--signal-blue);
+  outline-offset: 3px;
+  border-radius: var(--radius-xs);
+}
+
+/* Global input focus glow */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="color"]):focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--signal-blue) !important;
+  box-shadow: 0 0 0 3px var(--signal-blue-dim), var(--glow-blue-sm) !important;
+}
+
 ::selection {
   background: var(--signal-blue-dim);
   color: var(--text-primary);
@@ -131,11 +209,6 @@ select option {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-}
-
-:focus-visible {
-  outline: 2px solid var(--signal-blue);
-  outline-offset: 3px;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
