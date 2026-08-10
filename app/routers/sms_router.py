@@ -317,15 +317,18 @@ def reply_activity_by_day(
     start_date = (now.date() - timedelta(days=days - 1))
     start_at = datetime.combine(start_date, datetime.min.time())
 
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    activity_filters = [
+        Lead.organization_id == current_user.organization_id,
+        Reply.received_at.isnot(None),
+        Reply.received_at >= start_at,
+    ]
+    if not is_manager:
+        activity_filters.append(Lead.assigned_to_id == current_user.id)
     replies = (
         db.query(Reply.received_at)
         .join(Lead, Reply.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            Lead.assigned_to_id == current_user.id,
-            Reply.received_at.isnot(None),
-            Reply.received_at >= start_at,
-        )
+        .filter(*activity_filters)
         .all()
     )
 
@@ -366,12 +369,14 @@ def list_replies(
     """
     from app.models.models import ReplyClassification
 
+    is_manager = current_user.role in ("org_admin", "super_admin")
     query = (
         db.query(Reply)
         .join(Lead, Reply.lead_id == Lead.id)
         .filter(Lead.organization_id == current_user.organization_id)
-        .filter(Lead.assigned_to_id == current_user.id)
     )
+    if not is_manager:
+        query = query.filter(Lead.assigned_to_id == current_user.id)
     if hot_only:
         query = query.filter(Reply.is_hot == True)
     if needs_attention:

@@ -113,14 +113,13 @@ def list_leads(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Advisors see only their own leads. org_admin/super_admin (Mike) can
-    use /admin/leads instead for the cross-advisor view.
+    Advisors see only their own leads. org_admin/super_admin see all org leads.
     Filter by tier, message_track, or temperature (hot/warm/cold/unknown).
     """
-    query = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
-        Lead.assigned_to_id == current_user.id,
-    )
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    query = db.query(Lead).filter(Lead.organization_id == current_user.organization_id)
+    if not is_manager:
+        query = query.filter(Lead.assigned_to_id == current_user.id)
     if status_filter:
         query = query.filter(Lead.status == status_filter)
     if tier:
@@ -217,10 +216,10 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(g
     end_of_today = datetime.combine(now.date(), time.max)
     start_7d = now - timedelta(days=7)
 
-    base_lead_filters = (
-        Lead.organization_id == current_user.organization_id,
-        Lead.assigned_to_id == current_user.id,
-    )
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    base_lead_filters = [Lead.organization_id == current_user.organization_id]
+    if not is_manager:
+        base_lead_filters.append(Lead.assigned_to_id == current_user.id)
 
     replies_needing_attention = (
         db.query(func.count(Reply.id))
@@ -283,12 +282,13 @@ def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Dep
     Advisor-scoped engagement temperature counts for the Overview chart.
     Uses the real Lead.engagement_temperature field; no client-side guesses.
     """
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    eng_filters = [Lead.organization_id == current_user.organization_id]
+    if not is_manager:
+        eng_filters.append(Lead.assigned_to_id == current_user.id)
     rows = (
         db.query(Lead.engagement_temperature, func.count(Lead.id))
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            Lead.assigned_to_id == current_user.id,
-        )
+        .filter(*eng_filters)
         .group_by(Lead.engagement_temperature)
         .all()
     )
@@ -312,13 +312,16 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(ge
         "hot",
         "booked",
     ]
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    funnel_filters = [
+        Lead.organization_id == current_user.organization_id,
+        Lead.status.in_(stages),
+    ]
+    if not is_manager:
+        funnel_filters.append(Lead.assigned_to_id == current_user.id)
     rows = (
         db.query(Lead.status, func.count(Lead.id))
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            Lead.assigned_to_id == current_user.id,
-            Lead.status.in_(stages),
-        )
+        .filter(*funnel_filters)
         .group_by(Lead.status)
         .all()
     )
