@@ -25,7 +25,7 @@ function avatarColor(name) {
 }
 
 // ── User Card ──────────────────────────────────────────────────────────────
-function UserCard({ u, isSuperAdmin, stats, onDeactivate, onReactivate, onEdit, onResetPw, onClearSetup, onSetupLink }) {
+function UserCard({ u, isSuperAdmin, isAdmin, stats, onDeactivate, onReactivate, onEdit, onResetPw, onClearSetup, onSetupLink }) {
   const leads = stats?.leads_owned ?? stats?.total_leads ?? null
   const msgs  = stats?.messages_sent ?? null
   const color = avatarColor(u.full_name)
@@ -69,8 +69,8 @@ function UserCard({ u, isSuperAdmin, stats, onDeactivate, onReactivate, onEdit, 
         </div>
 
         <div className="uc-actions">
-          {isSuperAdmin && (
-            <button className="btn btn--secondary btn--sm" onClick={() => onEdit(u)}>Edit</button>
+          {isAdmin && (
+            <button className="btn btn--secondary btn--sm" onClick={() => onEdit(u)}>Edit profile</button>
           )}
           {u.must_change_password && !inactive && (
             <button className="btn btn--secondary btn--sm" title="Clear pending setup flag" onClick={() => onClearSetup(u.id)}>
@@ -109,6 +109,141 @@ function Modal({ title, onClose, children }) {
   )
 }
 
+// ── Profile Setup Panel ───────────────────────────────────────────────────
+function ProfilePanel({ user, data, loading, saving, error, onClose, onChange, onPhotoChange, onSave, isSuperAdmin }) {
+  const color = avatarColor(user?.full_name)
+  return (
+    <div className="pp-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="pp-panel">
+        <div className="pp-header">
+          <div>
+            <div className="pp-header-title">Edit Profile</div>
+            <div className="pp-header-sub">{user?.full_name || user?.email}</div>
+          </div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        {loading ? (
+          <div className="pp-loading">Loading profile…</div>
+        ) : (
+          <div className="pp-body">
+
+            {/* ── Photo ── */}
+            <section className="pp-section">
+              <div className="pp-section-title">Profile Photo</div>
+              <div className="pp-photo-row">
+                <div className="pp-photo-avatar" style={{ background: color + '22', borderColor: color + '55' }}>
+                  {data.profile_photo_url
+                    ? <img src={data.profile_photo_url} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                    : <span style={{ color, fontSize: 22, fontWeight: 700 }}>{initials(user?.full_name)}</span>}
+                </div>
+                <div className="pp-photo-side">
+                  <label className="btn btn--secondary btn--sm pp-upload-btn">
+                    Upload photo
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhotoChange} />
+                  </label>
+                  {data.profile_photo_url && (
+                    <button className="btn btn--secondary btn--sm" onClick={() => onChange('profile_photo_url', '')}>Remove</button>
+                  )}
+                  <div className="pp-photo-hint">JPG, PNG or GIF · max 2 MB</div>
+                </div>
+              </div>
+            </section>
+
+            {/* ── Basic info ── */}
+            <section className="pp-section">
+              <div className="pp-section-title">Basic Info</div>
+              <div className="pp-grid">
+                <label className="pp-field">
+                  <span>Full name</span>
+                  <input value={data.full_name || ''} onChange={e => onChange('full_name', e.target.value)} placeholder="Jane Smith" />
+                </label>
+                <label className="pp-field">
+                  <span>Email</span>
+                  <input type="email" value={data.email || ''} onChange={e => onChange('email', e.target.value)} placeholder="jane@example.com" />
+                </label>
+                <label className="pp-field">
+                  <span>Role</span>
+                  <select value={data.role || 'advisor'} onChange={e => onChange('role', e.target.value)}>
+                    <option value="advisor">Advisor</option>
+                    <option value="org_admin">Org Admin</option>
+                    {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+                  </select>
+                </label>
+                <label className="pp-field">
+                  <span>Booking page URL</span>
+                  <input value={data.booking_page_url || ''} onChange={e => onChange('booking_page_url', e.target.value)} placeholder="https://calendly.com/…" />
+                </label>
+              </div>
+            </section>
+
+            {/* ── Notifications ── */}
+            <section className="pp-section">
+              <div className="pp-section-title">Notifications</div>
+              <div className="pp-grid">
+                <label className="pp-field pp-field--full">
+                  <span>Notification email</span>
+                  <input type="email" value={data.notification_email || ''} onChange={e => onChange('notification_email', e.target.value)} placeholder="alerts@example.com" />
+                </label>
+              </div>
+              <label className="pp-toggle">
+                <input type="checkbox" checked={!!data.notify_on_hot_reply} onChange={e => onChange('notify_on_hot_reply', e.target.checked)} />
+                <span>Notify when a lead sends a hot reply</span>
+              </label>
+            </section>
+
+            {/* ── Twilio ── */}
+            <section className="pp-section">
+              <div className="pp-section-title">Twilio / SMS</div>
+              <div className="pp-grid">
+                <label className="pp-field">
+                  <span>Phone number</span>
+                  <input value={data.twilio_phone_number || ''} onChange={e => onChange('twilio_phone_number', e.target.value)} placeholder="+15550001234" />
+                </label>
+                <label className="pp-field">
+                  <span>Caller ID name</span>
+                  <input value={data.twilio_caller_id_name || ''} onChange={e => onChange('twilio_caller_id_name', e.target.value)} placeholder="Jane Smith" />
+                </label>
+                <label className="pp-field">
+                  <span>Account SID</span>
+                  <input value={data.twilio_account_sid || ''} onChange={e => onChange('twilio_account_sid', e.target.value)} placeholder="ACxxxxx…" />
+                </label>
+                <label className="pp-field">
+                  <span>Auth token <span className="pp-field-hint">(blank = keep current)</span></span>
+                  <input type="password" value={data.twilio_auth_token || ''} onChange={e => onChange('twilio_auth_token', e.target.value)} placeholder="••••••••" />
+                </label>
+              </div>
+            </section>
+
+            {/* ── Calendar status ── */}
+            <section className="pp-section">
+              <div className="pp-section-title">Calendar Connections <span className="pp-readonly-label">(read-only)</span></div>
+              <div className="pp-cal-row">
+                <div className={`pp-cal-badge ${data.google_calendar_connected ? 'pp-cal-badge--on' : 'pp-cal-badge--off'}`}>
+                  Google Calendar: {data.google_calendar_connected ? '✓ Connected' : '✗ Not connected'}
+                </div>
+                <div className={`pp-cal-badge ${data.microsoft_365_connected ? 'pp-cal-badge--on' : 'pp-cal-badge--off'}`}>
+                  Microsoft 365: {data.microsoft_365_connected ? '✓ Connected' : '✗ Not connected'}
+                </div>
+              </div>
+            </section>
+
+          </div>
+        )}
+
+        {error && <div className="pp-error">{error}</div>}
+
+        <div className="pp-footer">
+          <button className="btn btn--secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn--primary" onClick={onSave} disabled={saving || loading}>
+            {saving ? 'Saving…' : 'Save profile'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function Users() {
   const currentUser = getCurrentUser()
@@ -124,7 +259,6 @@ export default function Users() {
 
   // Modals
   const [showCreate, setShowCreate] = useState(false)
-  const [editUser, setEditUser]   = useState(null)
   const [resetUser, setResetUser] = useState(null)
 
   // Forms
@@ -133,13 +267,16 @@ export default function Users() {
   const [createError, setCreateError] = useState('')
   const [createLoading, setCreateLoading] = useState(false)
 
-  const [editForm, setEditForm]   = useState({})
-  const [editError, setEditError] = useState('')
-  const [editLoading, setEditLoading] = useState(false)
-
   const [pwForm, setPwForm]       = useState({ password: '', confirm: '' })
   const [pwError, setPwError]     = useState('')
   const [pwLoading, setPwLoading] = useState(false)
+
+  // Profile panel
+  const [profileUser, setProfileUser]     = useState(null)
+  const [profileData, setProfileData]     = useState({})
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving]  = useState(false)
+  const [profileError, setProfileError]    = useState('')
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchUsers = async () => {
@@ -233,21 +370,6 @@ export default function Users() {
     }
   }
 
-  const handleEdit = async (e) => {
-    e.preventDefault()
-    setEditError('')
-    setEditLoading(true)
-    try {
-      await api.patch(`/admin/users/${editUser.id}`, editForm)
-      setEditUser(null)
-      await fetchUsers()
-    } catch (err) {
-      setEditError(err.message || 'Failed to update user')
-    } finally {
-      setEditLoading(false)
-    }
-  }
-
   const handleResetPw = async (e) => {
     e.preventDefault()
     setPwError('')
@@ -274,6 +396,65 @@ export default function Users() {
       alert(`Setup link for ${advisorName} copied to clipboard!\n\nSend it to them via email or SMS. It expires in 48 hours.`)
     } catch (err) {
       alert(`Failed to generate setup link: ${err.message}`)
+    }
+  }
+
+  // ── Profile panel ────────────────────────────────────────────────────────
+  const openProfilePanel = async (usr) => {
+    setProfileUser(usr)
+    setProfileData({})
+    setProfileError('')
+    setProfileLoading(true)
+    try {
+      const data = await api.get(`/settings/admin/profile/${usr.id}`)
+      setProfileData({ ...data, twilio_auth_token: '' })
+    } catch (e) {
+      setProfileData({ full_name: usr.full_name, email: usr.email, role: usr.role })
+      setProfileError('Could not load full profile — showing basic info only.')
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  const handleProfileChange = (field, value) => {
+    setProfileData(d => ({ ...d, [field]: value }))
+    if (profileError) setProfileError('')
+  }
+
+  const handleProfilePhoto = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 3_000_000) { setProfileError('Photo must be under 2 MB.'); return }
+    const reader = new FileReader()
+    reader.onload = ev => handleProfileChange('profile_photo_url', ev.target.result)
+    reader.readAsDataURL(file)
+  }
+
+  const saveProfile = async () => {
+    setProfileSaving(true)
+    setProfileError('')
+    try {
+      const payload = {
+        full_name: profileData.full_name || undefined,
+        email: profileData.email || undefined,
+        role: profileData.role || undefined,
+        booking_page_url: profileData.booking_page_url ?? undefined,
+        notification_email: profileData.notification_email ?? undefined,
+        notify_on_hot_reply: profileData.notify_on_hot_reply ?? undefined,
+        profile_photo_url: profileData.profile_photo_url ?? undefined,
+        twilio_phone_number: profileData.twilio_phone_number ?? undefined,
+        twilio_caller_id_name: profileData.twilio_caller_id_name ?? undefined,
+        twilio_account_sid: profileData.twilio_account_sid ?? undefined,
+      }
+      // Only include auth token if user typed something new
+      if (profileData.twilio_auth_token) payload.twilio_auth_token = profileData.twilio_auth_token
+      await api.patch(`/settings/admin/profile/${profileUser.id}`, payload)
+      setProfileUser(null)
+      await fetchUsers()
+    } catch (e) {
+      setProfileError(e.message || 'Failed to save profile.')
+    } finally {
+      setProfileSaving(false)
     }
   }
 
@@ -339,10 +520,11 @@ export default function Users() {
                   <UserCard
                     key={u.id} u={u}
                     isSuperAdmin={isSuperAdmin}
+                    isAdmin={isAdmin}
                     stats={stats[u.id]}
                     onDeactivate={deactivate}
                     onReactivate={reactivate}
-                    onEdit={usr => { setEditUser(usr); setEditForm({ full_name: usr.full_name, email: usr.email, role: usr.role }); setEditError('') }}
+                    onEdit={openProfilePanel}
                     onResetPw={u => { setResetUser(u); setPwForm({ password: '', confirm: '' }); setPwError('') }}
                     onClearSetup={clearSetup}
                     onSetupLink={handleGetSetupLink}
@@ -357,10 +539,11 @@ export default function Users() {
               <UserCard
                 key={u.id} u={u}
                 isSuperAdmin={isSuperAdmin}
+                isAdmin={isAdmin}
                 stats={stats[u.id]}
                 onDeactivate={deactivate}
                 onReactivate={reactivate}
-                onEdit={usr => { setEditUser(usr); setEditForm({ full_name: usr.full_name, email: usr.email, role: usr.role }); setEditError('') }}
+                onEdit={openProfilePanel}
                 onResetPw={u => { setResetUser(u); setPwForm({ password: '', confirm: '' }); setPwError('') }}
                 onClearSetup={clearSetup}
                 onSetupLink={handleGetSetupLink}
@@ -399,30 +582,20 @@ export default function Users() {
         </Modal>
       )}
 
-      {/* ── Edit Modal (super admin only) ── */}
-      {editUser && (
-        <Modal title={`Edit — ${editUser.full_name || editUser.email}`} onClose={() => setEditUser(null)}>
-          <form onSubmit={handleEdit} className="modal-form">
-            <label>Full name
-              <input value={editForm.full_name || ''} onChange={e => setEditForm(f => ({...f, full_name: e.target.value}))} />
-            </label>
-            <label>Email
-              <input type="email" value={editForm.email || ''} onChange={e => setEditForm(f => ({...f, email: e.target.value}))} />
-            </label>
-            <label>Role
-              <select value={editForm.role || 'advisor'} onChange={e => setEditForm(f => ({...f, role: e.target.value}))}>
-                <option value="advisor">Advisor</option>
-                <option value="org_admin">Org Admin</option>
-                <option value="super_admin">Super Admin</option>
-              </select>
-            </label>
-            {editError && <div className="form-error">{editError}</div>}
-            <div className="modal-actions">
-              <button type="button" className="btn btn--secondary" onClick={() => setEditUser(null)}>Cancel</button>
-              <button type="submit" className="btn btn--primary" disabled={editLoading}>{editLoading ? 'Saving…' : 'Save changes'}</button>
-            </div>
-          </form>
-        </Modal>
+      {/* ── Profile Setup Panel ── */}
+      {profileUser && (
+        <ProfilePanel
+          user={profileUser}
+          data={profileData}
+          loading={profileLoading}
+          saving={profileSaving}
+          error={profileError}
+          isSuperAdmin={isSuperAdmin}
+          onClose={() => setProfileUser(null)}
+          onChange={handleProfileChange}
+          onPhotoChange={handleProfilePhoto}
+          onSave={saveProfile}
+        />
       )}
 
       {/* ── Reset Password Modal ── */}
