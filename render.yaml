@@ -46,7 +46,7 @@ services:
         value: https://advisorflow-backend.onrender.com/microsoft/oauth/callback
       - key: OPENAI_API_KEY
         sync: false
-      - key: SENDGRID_API_KEY
+      - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM_ADDRESS
         sync: false

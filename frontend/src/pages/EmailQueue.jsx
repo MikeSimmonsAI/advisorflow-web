@@ -3,6 +3,20 @@ import { api } from '../api/client'
 import '../styles/shared.css'
 import './EmailQueue.css'
 
+function detectMismatch(lead) {
+  if (!lead.email || (!lead.first_name && !lead.last_name)) return false
+  const username = lead.email.split('@')[0].toLowerCase()
+  const emailTokens = username.split(/[._\-+0-9]+/).filter((t) => t.length > 1)
+  const nameTokens = [lead.first_name, lead.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length > 1)
+  if (!emailTokens.length || !nameTokens.length) return false
+  return !emailTokens.some((et) => nameTokens.some((nt) => nt.includes(et) || et.includes(nt)))
+}
+
 const TONE_OPTIONS = [
   { key: 'cold',   label: '❄️ Cold',   desc: 'Soft intro, no pressure, just opening a door' },
   { key: 'warm',   label: '☀️ Warm',   desc: 'Friendly, suggest a conversation, low-key CTA' },
@@ -26,13 +40,14 @@ export default function EmailQueue() {
   const [tone, setTone]             = useState('warm')
   const [aiDirection, setAiDirection] = useState('')
   const [sendResult, setSendResult] = useState(null)
+  const [showMismatchOnly, setShowMismatchOnly] = useState(false)
 
   // Per-lead draft panel
   const [draftLead, setDraftLead]         = useState(null)
   const [drafting, setDrafting]           = useState(false)
   const [draftResult, setDraftResult]     = useState(null)
   const [draftError, setDraftError]       = useState('')
-  const [selectedOption, setSelectedOption] = useState(null)  // which of the 3 options
+  const [selectedOption, setSelectedOption] = useState(null)
   const [editedSubject, setEditedSubject] = useState('')
   const [editedBody, setEditedBody]       = useState('')
   const [sendingDraft, setSendingDraft]   = useState(false)
@@ -60,12 +75,25 @@ export default function EmailQueue() {
   }
 
   function toggleAll() {
-    if (leads.length > 0 && selected.size === leads.length) setSelected(new Set())
-    else setSelected(new Set(leads.map((l) => l.id)))
+    const visible = showMismatchOnly ? leads.filter(detectMismatch) : leads
+    if (visible.length > 0 && selected.size === visible.length) setSelected(new Set())
+    else setSelected(new Set(visible.map((l) => l.id)))
   }
 
   async function handleBatchSend() {
     if (selected.size === 0) return
+    const mismatchedSelected = Array.from(selected).filter((id) => {
+      const lead = leads.find((l) => l.id === id)
+      return lead && detectMismatch(lead)
+    })
+    if (mismatchedSelected.length > 0) {
+      const ok = window.confirm(
+        `⚠️ ${mismatchedSelected.length} of your selected leads have a name/email mismatch.\n\n` +
+        `In funeral home data, the email often belongs to a surviving family member, not the account holder shown.\n\n` +
+        `Do you still want to send to all ${selected.size} selected leads?`
+      )
+      if (!ok) return
+    }
     setSending(true)
     setSendResult(null)
     try {
@@ -140,11 +168,15 @@ export default function EmailQueue() {
     }
   }
 
+  const mismatchLeads = leads.filter(detectMismatch)
+  const visibleLeads  = showMismatchOnly ? mismatchLeads : leads
+
   const counts = {
-    total: leads.length,
-    cold:  leads.filter((l) => l.status === 'new').length,
-    warm:  leads.filter((l) => l.status === 'sent').length,
-    hot:   leads.filter((l) => l.status === 'replied' || l.status === 'booked').length,
+    total:    leads.length,
+    cold:     leads.filter((l) => l.status === 'new').length,
+    warm:     leads.filter((l) => l.status === 'sent').length,
+    hot:      leads.filter((l) => l.status === 'replied' || l.status === 'booked').length,
+    mismatch: mismatchLeads.length,
   }
 
   const currentTone = TONE_OPTIONS.find(t => t.key === tone) || TONE_OPTIONS[1]
@@ -174,6 +206,20 @@ export default function EmailQueue() {
             <strong className="eq-kpi-value" style={{ color }}>{loading ? '—' : value}</strong>
           </div>
         ))}
+        {!loading && counts.mismatch > 0 && (
+          <div
+            className="panel eq-kpi-card eq-kpi-card--mismatch"
+            onClick={() => setShowMismatchOnly((v) => !v)}
+            title="Click to filter to mismatched leads only"
+            style={{ cursor: 'pointer', borderColor: showMismatchOnly ? '#c0392b' : undefined }}
+          >
+            <span className="eq-kpi-label">⚠️ Name/email mismatch</span>
+            <strong className="eq-kpi-value" style={{ color: '#c0392b' }}>{counts.mismatch}</strong>
+            <span style={{ fontSize: 10, color: '#c0392b', marginTop: 2 }}>
+              {showMismatchOnly ? 'Showing mismatches · click to clear' : 'Click to review'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Tone + AI Direction controls */}
@@ -229,21 +275,29 @@ export default function EmailQueue() {
               className="search-input"
               style={{ width: 280 }}
             />
-            <span className="panel-count">{leads.length} shown</span>
+            {showMismatchOnly && (
+              <span style={{ fontSize: 12, color: '#c0392b', fontWeight: 600 }}>
+                ⚠️ Filtered: mismatches only ·{' '}
+                <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setShowMismatchOnly(false)}>
+                  clear
+                </span>
+              </span>
+            )}
+            <span className="panel-count">{visibleLeads.length} shown</span>
           </div>
           {selected.size > 0 && <span className="eq-selected-badge">{selected.size} selected</span>}
         </div>
 
         {loading ? (
           <div className="empty-state">Loading…</div>
-        ) : leads.length === 0 ? (
+        ) : visibleLeads.length === 0 ? (
           <div className="empty-state">No leads in email queue.</div>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
                 <th style={{ width: 40 }}>
-                  <input type="checkbox" checked={selected.size === leads.length && leads.length > 0} onChange={toggleAll} />
+                  <input type="checkbox" checked={selected.size === visibleLeads.length && visibleLeads.length > 0} onChange={toggleAll} />
                 </th>
                 <th>Name</th>
                 <th>Email</th>
@@ -255,9 +309,10 @@ export default function EmailQueue() {
               </tr>
             </thead>
             <tbody>
-              {leads.map((lead) => {
+              {visibleLeads.map((lead) => {
                 const cfg = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new
                 const isOpen = draftLead?.id === lead.id
+                const isMismatch = detectMismatch(lead)
                 return (
                   <Fragment key={lead.id}>
                     <tr className={selected.has(lead.id) ? 'eq-row--selected' : ''} style={{ borderBottom: isOpen ? 'none' : undefined }}>
@@ -267,7 +322,18 @@ export default function EmailQueue() {
                           {`${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'}
                         </span>
                       </td>
-                      <td className="mono" style={{ fontSize: 12 }}>{lead.email || '—'}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>
+                        {lead.email || '—'}
+                        {isMismatch && (
+                          <span
+                            title="Email username doesn't match lead name — may belong to a surviving family member."
+                            style={{ marginLeft: 6, fontSize: 11, background: '#fff3cd', color: '#856404',
+                              border: '1px solid #ffc107', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
+                          >
+                            ⚠️ mismatch
+                          </span>
+                        )}
+                      </td>
                       <td style={{ fontSize: 12 }}>{lead.tier || '—'}</td>
                       <td>
                         <span className="eq-status-pill" style={{ color: cfg.color, background: cfg.dim }}>{cfg.label}</span>
@@ -298,6 +364,15 @@ export default function EmailQueue() {
                                 {drafting ? '⏳ Generating…' : '✨ Generate options'}
                               </button>
                             </div>
+
+                            {isMismatch && (
+                              <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6,
+                                padding: '8px 12px', margin: '8px 0', fontSize: 13, color: '#856404' }}>
+                                ⚠️ <strong>Name/email mismatch:</strong> The email address doesn't match this lead's name.
+                                In funeral home records, this often means the email belongs to a surviving family member.
+                                Double-check before sending.
+                              </div>
+                            )}
 
                             {draftError && (
                               <div className="compose-error" style={{ margin: '8px 0' }}>⚠️ {draftError}</div>
