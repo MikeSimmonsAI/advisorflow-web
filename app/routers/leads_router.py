@@ -162,52 +162,85 @@ def delete_import_batch(
     if not lead_ids:
         raise HTTPException(status_code=404, detail="No leads found for that batch.")
 
-    # Use subquery deletes to avoid huge IN clauses on large batches
+    # Use subquery deletes to avoid huge IN clauses on large batches.
+    # ORDER MATTERS — children must be deleted before their parents.
+    # survey_responses.booking_followup_id → booking_followups (so surveys first)
+    # booking_followups.lead_id → leads
+    # booking_links.lead_id → leads (booking_followups also FK to booking_links, so links last)
     batch_subq = (
         "SELECT id FROM leads WHERE organization_id = :org AND source_file = :sf"
     )
     p = {"org": org_id, "sf": source_file}
 
-    dependents = [
+    # Correct FK-safe deletion order
+    dependents_by_lead_id = [
         "cadence_states",
         "email_messages",
         "messages",
         "replies",
         "pipeline_conversations",
-        "booking_followups",
         "lead_outcomes",
         "notifications",
         "voice_calls",
+        # survey_responses must come BEFORE booking_followups (FK: survey → followup)
         "survey_responses",
+        "booking_followups",
     ]
+
     deleted = {}
-    for table in dependents:
+
+    # NULL out duplicate_of_lead_id on any leads OUTSIDE this batch that
+    # point INTO it — otherwise the leads delete will hit a self-FK violation
+    try:
+        db.execute(
+            sa_text(
+                f"UPDATE leads SET duplicate_of_lead_id = NULL "
+                f"WHERE duplicate_of_lead_id IN ({batch_subq})"
+            ),
+            p,
+        )
+    except Exception:
+        pass  # column may not exist in older schemas
+
+    for table in dependents_by_lead_id:
+        try:
+            r = db.execute(
+                sa_text(f"DELETE FROM {table} WHERE lead_id IN ({batch_subq})"), p
+            )
+            if r.rowcount:
+                deleted[table] = r.rowcount
+        except Exception:
+            # Table may not exist yet in this deployment — skip and continue
+            db.rollback()
+            db.begin()
+
+    # booking_links last (booking_followups.booking_link_id → booking_links)
+    try:
         r = db.execute(
-            sa_text(f"DELETE FROM {table} WHERE lead_id IN ({batch_subq})"), p
+            sa_text(f"DELETE FROM booking_links WHERE lead_id IN ({batch_subq})"), p
         )
         if r.rowcount:
-            deleted[table] = r.rowcount
-
-    # booking_links: delete, but also clean booking_followups that reference them first
-    r = db.execute(
-        sa_text(f"DELETE FROM booking_links WHERE lead_id IN ({batch_subq})"), p
-    )
-    if r.rowcount:
-        deleted["booking_links"] = r.rowcount
+            deleted["booking_links"] = r.rowcount
+    except Exception:
+        db.rollback()
+        db.begin()
 
     # contact_registry: remove entries whose first_seen_lead_id is in this batch
     # so re-import doesn't flag every lead as a duplicate
-    r = db.execute(
-        sa_text(
-            f"DELETE FROM contact_registry WHERE organization_id = :org "
-            f"AND first_seen_lead_id IN ({batch_subq})"
-        ),
-        p,
-    )
-    if r.rowcount:
-        deleted["contact_registry"] = r.rowcount
+    try:
+        r = db.execute(
+            sa_text(
+                f"DELETE FROM contact_registry WHERE organization_id = :org "
+                f"AND first_seen_lead_id IN ({batch_subq})"
+            ),
+            p,
+        )
+        if r.rowcount:
+            deleted["contact_registry"] = r.rowcount
+    except Exception:
+        pass
 
-    # Finally delete the leads
+    # Finally delete the leads themselves
     r = db.execute(
         sa_text(
             "DELETE FROM leads WHERE organization_id = :org AND source_file = :sf"
