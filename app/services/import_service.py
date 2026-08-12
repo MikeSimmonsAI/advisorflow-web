@@ -54,6 +54,10 @@ HEADER_MAP = {
     "allow_calls": ["allow phone calls?", "allow phone calls", "do not call"],
     "last_action": ["last action"],
     "last_contact_date": ["last activity/note", "last activity", "last contact date", "open activity date"],
+    "street_address": ["street address", "address", "street", "addr", "address 1", "address1", "street addr", "mailing address", "home address"],
+    "city": ["city", "town", "municipality"],
+    "state": ["state", "st", "province", "state/province", "state abbr", "state abbreviation"],
+    "zip_code": ["zip", "zip code", "zipcode", "postal code", "zip/postal", "postal", "zip+4"],
 }
 
 # Internal NSMG/Restland distribution-list and system entries to exclude -
@@ -169,6 +173,10 @@ def parse_excel_file(file_path: str) -> list[dict]:
             "allow_calls_raw": row.get(lookup.get("allow_calls", ""), "").strip(),
             "last_action_raw": row.get(lookup.get("last_action", ""), "").strip(),
             "last_contact_date_raw": row.get(lookup.get("last_contact_date", ""), "").strip(),
+            "street_address": row.get(lookup.get("street_address", ""), "").strip(),
+            "city": row.get(lookup.get("city", ""), "").strip(),
+            "state": row.get(lookup.get("state", ""), "").strip(),
+            "zip_code": row.get(lookup.get("zip_code", ""), "").strip(),
         })
     return rows
 
@@ -259,6 +267,10 @@ def import_leads_from_excel(
             last_action_raw=row["last_action_raw"] or None,
             last_contact_date=last_contact_dt,
             status_reason_raw=row["status_reason_raw"] or None,
+            street_address=row.get("street_address") or None,
+            city=row.get("city") or None,
+            state=row.get("state") or None,
+            zip_code=row.get("zip_code") or None,
         )
         db.add(lead)
         db.flush()
