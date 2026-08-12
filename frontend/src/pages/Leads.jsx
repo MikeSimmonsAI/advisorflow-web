@@ -84,6 +84,33 @@ export default function Leads() {
   const [bulkAssignError, setBulkAssignError] = useState('')
   const [showVoiceCampaign, setShowVoiceCampaign] = useState(false)
 
+  // Import history
+  const [importBatches, setImportBatches] = useState([])
+  const [batchesLoading, setBatchesLoading] = useState(false)
+  const [deletingBatch, setDeletingBatch] = useState(null)   // source_file being deleted
+  const [deleteConfirm, setDeleteConfirm] = useState(null)   // batch object awaiting confirm
+  const canManageBatches = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+
+  function loadImportBatches() {
+    if (!canManageBatches) return
+    setBatchesLoading(true)
+    api.get('/leads/import-batches').then(setImportBatches).catch(() => {}).finally(() => setBatchesLoading(false))
+  }
+
+  async function handleDeleteBatch(batch) {
+    setDeletingBatch(batch.source_file)
+    setDeleteConfirm(null)
+    try {
+      await api.delete(`/leads/import-batches?source_file=${encodeURIComponent(batch.source_file)}`)
+      loadLeads()
+      loadImportBatches()
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`)
+    } finally {
+      setDeletingBatch(null)
+    }
+  }
+
   function loadLeads() {
     setLoading(true)
     Promise.all([
@@ -96,7 +123,7 @@ export default function Leads() {
     })
   }
 
-  useEffect(() => { loadLeads() }, [])
+  useEffect(() => { loadLeads(); loadImportBatches() }, [])
 
   async function handleGoogleContactsImport() {
     setGoogleImporting(true)
@@ -510,6 +537,69 @@ export default function Leads() {
                   {confirming ? 'Importing…' : `Confirm import of ${preview.imported} leads`}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* ── Import History ── */}
+          {canManageBatches && (
+            <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>📋 Import history</span>
+                <button className="btn btn--ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={loadImportBatches}>↻ Refresh</button>
+              </div>
+              {batchesLoading && <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading…</div>}
+              {!batchesLoading && importBatches.length === 0 && (
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No import batches found.</div>
+              )}
+              {!batchesLoading && importBatches.length > 0 && (
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-secondary)', textAlign: 'left' }}>
+                      <th style={{ padding: '4px 8px', fontWeight: 500 }}>File</th>
+                      <th style={{ padding: '4px 8px', fontWeight: 500, textAlign: 'right' }}>Leads</th>
+                      <th style={{ padding: '4px 8px', fontWeight: 500 }}>Imported</th>
+                      <th style={{ padding: '4px 8px' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importBatches.map((batch) => (
+                      <tr key={batch.source_file} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 8px', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={batch.source_file}>
+                          {batch.source_file}
+                        </td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{batch.lead_count.toLocaleString()}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>
+                          {batch.imported_at ? new Date(batch.imported_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          {deleteConfirm?.source_file === batch.source_file ? (
+                            <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <span style={{ fontSize: 12, color: 'var(--signal-red)' }}>Delete {batch.lead_count.toLocaleString()} leads?</span>
+                              <button
+                                className="btn btn--danger"
+                                style={{ fontSize: 12, padding: '2px 10px' }}
+                                disabled={deletingBatch === batch.source_file}
+                                onClick={() => handleDeleteBatch(batch)}
+                              >
+                                {deletingBatch === batch.source_file ? 'Deleting…' : 'Yes, delete'}
+                              </button>
+                              <button className="btn btn--ghost" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                            </span>
+                          ) : (
+                            <button
+                              className="btn btn--ghost"
+                              style={{ fontSize: 12, padding: '2px 10px', color: 'var(--signal-red)' }}
+                              onClick={() => setDeleteConfirm(batch)}
+                            >
+                              🗑 Delete batch
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
         </section>

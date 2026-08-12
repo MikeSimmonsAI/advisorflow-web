@@ -103,6 +103,134 @@ def confirm_upload(
     return result
 
 
+@router.get("/import-batches")
+def list_import_batches(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns all import batches for this org, newest first."""
+    rows = (
+        db.query(
+            Lead.source_file,
+            func.count(Lead.id).label("lead_count"),
+            func.min(Lead.created_at).label("imported_at"),
+        )
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.source_file.isnot(None),
+        )
+        .group_by(Lead.source_file)
+        .order_by(func.min(Lead.created_at).desc())
+        .all()
+    )
+    return [
+        {
+            "source_file": r.source_file,
+            "lead_count": r.lead_count,
+            "imported_at": r.imported_at.isoformat() if r.imported_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/import-batches")
+def delete_import_batch(
+    source_file: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Delete all leads from a specific import batch + every dependent record
+    + their contact registry entries so a clean re-import works without
+    duplicate flags. Restricted to org_admin / super_admin.
+    """
+    if current_user.role not in ("org_admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Only admins can delete import batches.")
+
+    org_id = current_user.organization_id
+
+    # Collect lead IDs for this batch using a subquery so we hit the DB once.
+    from sqlalchemy import text as sa_text
+    lead_ids_result = db.execute(
+        sa_text(
+            "SELECT id FROM leads WHERE organization_id = :org AND source_file = :sf"
+        ),
+        {"org": org_id, "sf": source_file},
+    ).fetchall()
+    lead_ids = [r[0] for r in lead_ids_result]
+
+    if not lead_ids:
+        raise HTTPException(status_code=404, detail="No leads found for that batch.")
+
+    # Use subquery deletes to avoid huge IN clauses on large batches
+    batch_subq = (
+        "SELECT id FROM leads WHERE organization_id = :org AND source_file = :sf"
+    )
+    p = {"org": org_id, "sf": source_file}
+
+    dependents = [
+        "cadence_states",
+        "email_messages",
+        "messages",
+        "replies",
+        "pipeline_conversations",
+        "booking_followups",
+        "lead_outcomes",
+        "notifications",
+        "voice_calls",
+        "survey_responses",
+    ]
+    deleted = {}
+    for table in dependents:
+        r = db.execute(
+            sa_text(f"DELETE FROM {table} WHERE lead_id IN ({batch_subq})"), p
+        )
+        if r.rowcount:
+            deleted[table] = r.rowcount
+
+    # booking_links: delete, but also clean booking_followups that reference them first
+    r = db.execute(
+        sa_text(f"DELETE FROM booking_links WHERE lead_id IN ({batch_subq})"), p
+    )
+    if r.rowcount:
+        deleted["booking_links"] = r.rowcount
+
+    # contact_registry: remove entries whose first_seen_lead_id is in this batch
+    # so re-import doesn't flag every lead as a duplicate
+    r = db.execute(
+        sa_text(
+            f"DELETE FROM contact_registry WHERE organization_id = :org "
+            f"AND first_seen_lead_id IN ({batch_subq})"
+        ),
+        p,
+    )
+    if r.rowcount:
+        deleted["contact_registry"] = r.rowcount
+
+    # Finally delete the leads
+    r = db.execute(
+        sa_text(
+            "DELETE FROM leads WHERE organization_id = :org AND source_file = :sf"
+        ),
+        p,
+    )
+    deleted["leads"] = r.rowcount
+
+    db.commit()
+
+    log_action(
+        db,
+        actor_user_id=current_user.id,
+        organization_id=org_id,
+        action="import_batch_deleted",
+        target_type="lead_batch",
+        target_id=source_file,
+        details=f"Deleted {deleted.get('leads', 0)} leads from batch '{source_file}'",
+    )
+
+    return {"deleted": deleted, "source_file": source_file}
+
+
 @router.get("/")
 def list_leads(
     status_filter: Optional[str] = Query(None, alias="status"),
