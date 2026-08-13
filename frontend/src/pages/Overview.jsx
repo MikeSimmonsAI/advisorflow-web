@@ -91,7 +91,6 @@ export default function Overview() {
   const industry = _branding?.industry || 'funeral'
   const IL = INDUSTRY_LABELS[industry] || DEFAULT_LABELS
 
-  const [leads, setLeads] = useState([])
   const [replies, setReplies] = useState([])
   const [dailyBriefing, setDailyBriefing] = useState(null)
   const [replyActivity, setReplyActivity] = useState([])
@@ -106,9 +105,12 @@ export default function Overview() {
     return () => clearInterval(t)
   }, [])
 
+  // totalLeads tracks the real count from the paginated envelope
+  const [totalLeads, setTotalLeads] = useState(0)
+
   useEffect(() => {
     Promise.all([
-      api.get('/leads/').catch(() => []),
+      api.get('/leads/?page=1&page_size=1').catch(() => null),  // lightweight — just need .total
       api.get('/sms/replies?needs_attention=true').catch(() => []),
       api.get('/leads/daily-briefing').catch(() => null),
       api.get('/sms/replies/activity-by-day?days=14').catch(() => []),
@@ -116,7 +118,9 @@ export default function Overview() {
       api.get('/outcomes/summary').catch(() => null),
       api.get('/pipeline/forecast').catch(() => null),
     ]).then(([leadsData, repliesData, briefingData, activityData, funnelData, outcomesData, forecastData]) => {
-      setLeads(leadsData || [])
+      // leadsData is a paginated envelope {items, total, page, page_size}
+      const total = leadsData?.total ?? (Array.isArray(leadsData) ? leadsData.length : 0)
+      setTotalLeads(total)
       setReplies(repliesData || [])
       setDailyBriefing(briefingData)
       setReplyActivity(activityData || [])
@@ -127,12 +131,16 @@ export default function Overview() {
     })
   }, [])
 
-  const totalLeads   = leads.length
-  const newLeads     = leads.filter(l => l.status === 'new').length
-  const sentLeads    = leads.filter(l => l.status === 'sent').length
-  const bookedLeads  = leads.filter(l => l.status === 'booked').length
+  // Pull status counts from funnel (accurate across all leads, not just 1 page)
+  const funnelCount = (status) => {
+    const stage = statusFunnel.find(s => s.status === status)
+    return stage?.count ?? 0
+  }
+  const newLeads     = funnelCount('new')
+  const sentLeads    = funnelCount('sent')
+  const bookedLeads  = funnelCount('booked')
+  const dncLeads     = funnelCount('dnc')
   const hotReplies   = replies.length
-  const dncLeads     = leads.filter(l => l.status === 'dnc').length
   const replyRate    = sentLeads > 0 ? Math.round((hotReplies / sentLeads) * 100) : 0
   const bookingRate  = sentLeads > 0 ? Math.round((bookedLeads / sentLeads) * 100) : 0
 
