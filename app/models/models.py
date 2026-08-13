@@ -338,6 +338,10 @@ class Lead(Base):
     import_list_name = Column(String, nullable=True)  # user-supplied label, e.g. "2024 Purchased List"
     source_category = Column(String, nullable=True)   # purchased, organic, referral, database, etc.
 
+    # Post-appointment case management — "open" until the appointment outcome is resolved
+    # Values: open, pending_outcome, sold, lost, follow_up, closed
+    case_status = Column(String, default="open", nullable=True)
+
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
