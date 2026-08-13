@@ -109,6 +109,30 @@ export default function EmailQueue() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showMismatchOnly, setShowMismatchOnly] = useState(false)
   const [showFlagged, setShowFlagged] = useState(false)
+  const [showManualFlagged, setShowManualFlagged] = useState(false)
+  const [manualFlaggedLeads, setManualFlaggedLeads] = useState([])
+  const [flagging, setFlagging] = useState(null)
+
+  function loadManualFlagged() {
+    api.get('/leads/flagged').then(setManualFlaggedLeads).catch(() => {})
+  }
+
+  async function handleFlagLead(lead, flagType) {
+    if (flagType) {
+      const label = flagType === 'bad_email' ? 'bad email' : 'remove from all outreach'
+      if (!window.confirm(`Flag "${lead.first_name} ${lead.last_name}" as ${label}?\n\nYou can unflag anytime to restore them.`)) return
+    }
+    setFlagging(lead.id)
+    try {
+      await api.patch(`/leads/${lead.id}/flag`, { flag_type: flagType || null })
+      load()
+      loadManualFlagged()
+    } catch (err) {
+      alert(`Flag failed: ${err.message}`)
+    } finally {
+      setFlagging(null)
+    }
+  }
 
   // ── Batch compose drawer ──────────────────────────────────────────────────
   const [composeOpen, setComposeOpen]       = useState(false)
@@ -147,6 +171,8 @@ export default function EmailQueue() {
     const timer = setTimeout(() => load(searchQuery), 250)
     return () => clearTimeout(timer)
   }, [searchQuery])
+
+  useEffect(() => { loadManualFlagged() }, [])
 
   function toggle(id) {
     const next = new Set(selected)
@@ -464,6 +490,7 @@ export default function EmailQueue() {
                 <th>Source year</th>
                 <th>Last action</th>
                 <th>AI draft</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -519,6 +546,19 @@ export default function EmailQueue() {
                         <button className="btn btn--secondary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={() => handleOpenDraft(lead)}>
                           {isOpen ? '✕ Close' : '✨ Draft'}
                         </button>
+                      </td>
+                      <td>
+                        <select
+                          style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 4 }}
+                          defaultValue=""
+                          onChange={(e) => { if (e.target.value) { handleFlagLead(lead, e.target.value); e.target.value = '' } }}
+                          disabled={flagging === lead.id}
+                          title="Flag this lead"
+                        >
+                          <option value="" disabled>⚑ Flag</option>
+                          <option value="bad_email">⚠ Bad email</option>
+                          <option value="remove_all">⛔ Remove from all outreach</option>
+                        </select>
                       </td>
                     </tr>
 
@@ -684,10 +724,75 @@ export default function EmailQueue() {
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '10px 8px' }}>
-                          <button className="btn btn--secondary" style={{ fontSize: 11, padding: '3px 10px' }}
+                        <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
+                          <button className="btn btn--secondary" style={{ fontSize: 11, padding: '3px 10px', marginRight: 6 }}
                             onClick={() => navigate(`/leads/${lead.id}`)}>
                             Open →
+                          </button>
+                          <button className="btn btn--ghost" style={{ fontSize: 11, padding: '3px 10px', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)' }}
+                            onClick={() => handleFlagLead(lead, 'bad_email')}
+                            disabled={flagging === lead.id}
+                            title="Confirm — flag this as a bad email address">
+                            ⚑ Flag
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Manually flagged leads section ────────────────────────────────── */}
+      {manualFlaggedLeads.length > 0 && (
+        <section style={{ margin: '0 0 16px 0' }}>
+          <button
+            onClick={() => setShowManualFlagged(v => !v)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              background: 'rgba(255,100,100,0.08)', border: '1px solid rgba(255,100,100,0.25)',
+              borderRadius: 8, padding: '10px 16px', cursor: 'pointer', color: '#ff6464',
+              fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <span>⛔ {manualFlaggedLeads.length} manually flagged lead{manualFlaggedLeads.length !== 1 ? 's' : ''} hidden from outreach</span>
+            <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>
+              {showManualFlagged ? '▲ Hide' : '▼ Show'}
+            </span>
+          </button>
+          {showManualFlagged && (
+            <div style={{ border: '1px solid rgba(255,100,100,0.25)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 16px', background: 'rgba(255,100,100,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,100,100,0.15)' }}>
+                These leads were manually flagged by an advisor. Unflag them to restore to all lists and email queue.
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  {manualFlaggedLeads.map((lead) => {
+                    const name = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'
+                    return (
+                      <tr key={lead.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, width: 180 }}>
+                          <span style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
+                            onClick={() => navigate(`/leads/${lead.id}`)}>
+                            {name}
+                          </span>
+                        </td>
+                        <td className="mono" style={{ padding: '10px 8px', fontSize: 12 }}>{lead.email || '—'}</td>
+                        <td style={{ padding: '10px 8px' }}>
+                          {lead.manual_flag === 'bad_email'
+                            ? <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '2px 6px' }}>⚠ bad email</span>
+                            : <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 4, padding: '2px 6px' }}>⛔ remove all</span>
+                          }
+                        </td>
+                        <td style={{ padding: '10px 8px', fontSize: 12, color: 'var(--text-secondary)' }}>{lead.manual_flag_reason || ''}</td>
+                        <td style={{ padding: '10px 8px' }}>
+                          <button className="btn btn--ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--signal-green)', border: '1px solid rgba(100,255,150,0.3)' }}
+                            onClick={() => handleFlagLead(lead, null)}
+                            disabled={flagging === lead.id}>
+                            ✓ Unflag
                           </button>
                         </td>
                       </tr>

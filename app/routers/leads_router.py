@@ -343,6 +343,7 @@ def list_leads(
         Lead.engagement_temperature, Lead.relationship_type,
         Lead.contact_channel, Lead.import_list_name, Lead.created_at,
         Lead.organization_id, Lead.case_status,
+        Lead.manual_flag, Lead.manual_flag_reason,
     ]
     COL_NAMES = [
         "id", "first_name", "last_name", "phone", "email",
@@ -351,6 +352,7 @@ def list_leads(
         "engagement_temperature", "relationship_type",
         "contact_channel", "import_list_name", "created_at",
         "organization_id", "case_status",
+        "manual_flag", "manual_flag_reason",
     ]
 
     query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)
@@ -366,6 +368,11 @@ def list_leads(
         query = query.filter(Lead.engagement_temperature == temperature)
     if import_list_name:
         query = query.filter(Lead.import_list_name == import_list_name)
+    # Default: exclude remove_all flagged leads from main list (they appear in flagged section)
+    # bad_email flagged leads remain in the main list (still contactable by SMS)
+    query = query.filter(
+        (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email")
+    )
 
     total = query.count()
     rows = (
@@ -384,6 +391,37 @@ def list_leads(
         items.append(d)
 
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/flagged")
+def list_flagged_leads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all manually flagged leads for this org (both bad_email and remove_all)."""
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    query = db.query(Lead).filter(
+        Lead.organization_id == current_user.organization_id,
+        Lead.manual_flag != None,
+    )
+    if not is_manager:
+        query = query.filter(Lead.assigned_to_id == current_user.id)
+    leads = query.order_by(Lead.updated_at.desc()).limit(500).all()
+    return [
+        {
+            "id": l.id,
+            "first_name": l.first_name,
+            "last_name": l.last_name,
+            "email": l.email,
+            "phone": l.phone,
+            "manual_flag": l.manual_flag,
+            "manual_flag_reason": l.manual_flag_reason,
+            "tier": l.tier,
+            "status": l.status,
+            "contact_channel": l.contact_channel,
+        }
+        for l in leads
+    ]
 
 
 @router.get("/needs-review")
@@ -1253,6 +1291,46 @@ def update_lead_type(
     db.commit()
     log_action(db, current_user.organization_id, current_user.id, action="lead.update_type", target_type="lead", target_id=lead_id)
     return {"updated": True}
+
+
+class FlagLeadRequest(BaseModel):
+    flag_type: Optional[str] = None   # "bad_email" | "remove_all" | null (unflag)
+    reason: Optional[str] = None      # optional note from advisor
+
+
+@router.patch("/{lead_id}/flag")
+def flag_lead(
+    lead_id: str,
+    payload: FlagLeadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Any advisor in any org can manually flag a lead the auto-detection missed.
+    flag_type = "bad_email"   → hide from email queue + email campaigns, SMS still ok
+    flag_type = "remove_all"  → hide from all outreach lists everywhere
+    flag_type = None          → unflag, fully restore to all lists
+    """
+    # Advisors can only flag leads in their own org for security
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    valid_flags = {None, "bad_email", "remove_all"}
+    if payload.flag_type not in valid_flags:
+        raise HTTPException(status_code=400, detail=f"flag_type must be one of: bad_email, remove_all, or null to unflag")
+
+    lead.manual_flag = payload.flag_type
+    lead.manual_flag_reason = payload.reason if payload.flag_type else None
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+
+    action = "lead.unflag" if not payload.flag_type else f"lead.flag.{payload.flag_type}"
+    log_action(db, current_user.organization_id, current_user.id, action=action, target_type="lead", target_id=lead_id)
+    return {"flagged": bool(payload.flag_type), "flag_type": payload.flag_type}
 
 
 # ── PUBLIC: SMS opt-in form submission (no auth required) ─────────────────────

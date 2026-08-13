@@ -148,6 +148,10 @@ COLUMNS_TO_ADD = [
     ("leads", "import_list_name", "VARCHAR"),
     # Source category — user-defined grouping (purchased, organic, referral, database, etc.)
     ("leads", "source_category", "VARCHAR"),
+    # Manual flag — advisor-set flag when auto-detection misses a bad contact
+    # Values: null (clean), "bad_email", "remove_all"
+    ("leads", "manual_flag", "VARCHAR"),
+    ("leads", "manual_flag_reason", "VARCHAR"),
     # Meta app secret for Meta webhook HMAC verification
     ("organizations", "meta_app_secret", "VARCHAR"),
 ]

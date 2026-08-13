@@ -254,6 +254,25 @@ export default function LeadDetail() {
   const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'timeline'
   const timelineRef = useRef(null)
 
+  // Manual flagging
+  const [flagging, setFlagging] = useState(false)
+
+  async function handleFlagLead(flagType) {
+    if (flagType) {
+      const label = flagType === 'bad_email' ? 'bad email' : 'remove from all outreach'
+      if (!window.confirm(`Flag "${lead.first_name} ${lead.last_name}" as ${label}?\n\nYou can unflag anytime to restore them to all lists.`)) return
+    }
+    setFlagging(true)
+    try {
+      await api.patch(`/leads/${leadId}/flag`, { flag_type: flagType || null })
+      load()
+    } catch (err) {
+      alert(`Flag failed: ${err.message}`)
+    } finally {
+      setFlagging(false)
+    }
+  }
+
   // Phase 4: media/flyer attachment for SMS/MMS
   const [mediaUrl, setMediaUrl] = useState('')
   const [mediaFileName, setMediaFileName] = useState('')
@@ -620,6 +639,30 @@ export default function LeadDetail() {
               >
                 {showEdit ? '✕ Cancel' : '✏️ Edit'}
               </button>
+              {/* Flag / Unflag button */}
+              {lead.manual_flag ? (
+                <button
+                  className="btn btn--ghost btn--sm"
+                  style={{ fontSize: 11, padding: '3px 10px', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.35)' }}
+                  onClick={() => handleFlagLead(null)}
+                  disabled={flagging}
+                  title="Unflag — restore to all lists"
+                >
+                  ⚑ Unflag
+                </button>
+              ) : (
+                <select
+                  style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}
+                  defaultValue=""
+                  onChange={(e) => { if (e.target.value) { handleFlagLead(e.target.value); e.target.value = '' } }}
+                  disabled={flagging}
+                  title="Flag this contact"
+                >
+                  <option value="" disabled>⚑ Flag</option>
+                  <option value="bad_email">⚠ Bad email</option>
+                  <option value="remove_all">⛔ Remove from all outreach</option>
+                </select>
+              )}
               {editSuccess && <span style={{ fontSize: 12, color: 'var(--signal-green)' }}>✓ Saved</span>}
             </div>
             <div className="lead-detail-contact">
@@ -646,6 +689,12 @@ export default function LeadDetail() {
                 </span>
               )}
               {lead.is_duplicate && <span className="badge badge--neutral-dim">Duplicate</span>}
+              {lead.manual_flag === 'bad_email' && (
+                <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 6, padding: '2px 8px' }}>⚠ bad email flagged</span>
+              )}
+              {lead.manual_flag === 'remove_all' && (
+                <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 6, padding: '2px 8px' }}>⛔ removed from all outreach</span>
+              )}
             </div>
           </div>
         </div>

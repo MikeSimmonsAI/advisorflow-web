@@ -338,6 +338,12 @@ class Lead(Base):
     import_list_name = Column(String, nullable=True)  # user-supplied label, e.g. "2024 Purchased List"
     source_category = Column(String, nullable=True)   # purchased, organic, referral, database, etc.
 
+    # Manual flag — set by any advisor when auto-detection misses a bad contact
+    # Values: null (clean), "bad_email" (hide from email/campaign but allow SMS),
+    #         "remove_all" (hide from all outreach lists everywhere)
+    manual_flag = Column(String, nullable=True)
+    manual_flag_reason = Column(String, nullable=True)  # optional note from the advisor
+
     # Post-appointment case management — "open" until the appointment outcome is resolved
     # Values: open, pending_outcome, sold, lost, follow_up, closed
     case_status = Column(String, default="open", nullable=True)

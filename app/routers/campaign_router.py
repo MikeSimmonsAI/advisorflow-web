@@ -146,6 +146,18 @@ def _apply_filters(query, organization_id: str, criteria: dict):
     # Always exclude DNC
     query = query.filter(Lead.status != "dnc")
 
+    # Always exclude manually flagged leads from campaign targeting
+    # bad_email leads are excluded from email campaigns but allowed for SMS
+    channel = criteria.get("channel", "sms")
+    if channel == "email":
+        # Exclude both bad_email and remove_all flagged leads from email campaigns
+        query = query.filter(Lead.manual_flag == None)
+    else:
+        # For SMS/auto, only exclude remove_all flagged leads
+        query = query.filter(
+            (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email")
+        )
+
     return query
 
 
@@ -159,6 +171,11 @@ def _compliance_check(lead: Lead, channel: str = "sms") -> tuple[bool, str]:
         return False, "DNC"
     if lead.is_duplicate:
         return False, "duplicate"
+    # Manual flag gate — remove_all blocks all channels; bad_email blocks email only
+    if getattr(lead, "manual_flag", None) == "remove_all":
+        return False, "manually flagged — removed from all outreach"
+    if getattr(lead, "manual_flag", None) == "bad_email" and channel in ("email", "auto"):
+        return False, "manually flagged — bad email"
     # Channel-specific checks
     if channel in ("sms", "auto"):
         if lead.contact_channel != "email_only" and (not lead.phone or lead.phone.strip() == ""):

@@ -103,6 +103,38 @@ export default function Leads() {
   const [bulkAssignError, setBulkAssignError] = useState('')
   const [showVoiceCampaign, setShowVoiceCampaign] = useState(false)
 
+  // Manual flagging
+  const [flaggedLeads, setFlaggedLeads] = useState([])
+  const [flaggedVisible, setFlaggedVisible] = useState(false)
+  const [flagging, setFlagging] = useState(null)  // lead id currently being flagged
+
+  function loadFlaggedLeads() {
+    api.get('/leads/flagged').then(setFlaggedLeads).catch(() => {})
+  }
+
+  async function handleFlagLead(e, lead, flagType) {
+    e.stopPropagation()
+    if (!flagType) {
+      // Unflag — confirm not needed
+    } else {
+      const label = flagType === 'bad_email' ? 'Flag as bad email' : 'Remove from all outreach'
+      const msg = flagType === 'bad_email'
+        ? `Flag "${lead.first_name} ${lead.last_name}" as a bad email?\n\nThey'll be hidden from the Email Queue and email campaigns, but you can still contact them by SMS. You can unflag anytime.`
+        : `Remove "${lead.first_name} ${lead.last_name}" from all outreach?\n\nThey'll be hidden from the Leads list, Email Queue, and all campaigns. You can unflag anytime.`
+      if (!window.confirm(msg)) return
+    }
+    setFlagging(lead.id)
+    try {
+      await api.patch(`/leads/${lead.id}/flag`, { flag_type: flagType || null })
+      loadLeads()
+      loadFlaggedLeads()
+    } catch (err) {
+      alert(`Flag failed: ${err.message}`)
+    } finally {
+      setFlagging(null)
+    }
+  }
+
   // Import history
   const [importBatches, setImportBatches] = useState([])
   const [batchesLoading, setBatchesLoading] = useState(false)
@@ -175,7 +207,7 @@ export default function Leads() {
     })
   }
 
-  useEffect(() => { loadLeads(); loadImportBatches() }, [])
+  useEffect(() => { loadLeads(); loadImportBatches(); loadFlaggedLeads() }, [])
 
   async function handleGoogleContactsImport() {
     setGoogleImporting(true)
@@ -968,6 +1000,7 @@ export default function Leads() {
                 <th>Tier</th>
                 <th>Status</th>
                 <th>Source</th>
+                <th></th>
                 {view === 'review' && <th>Assign tier</th>}
               </tr>
             </thead>
@@ -991,6 +1024,9 @@ export default function Leads() {
                       <div className="leads-name-cell">
                         <div className="leads-avatar">{initials}</div>
                         <span>{lead.first_name} {lead.last_name}</span>
+                        {lead.manual_flag === 'bad_email' && (
+                          <span style={{ fontSize: 10, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>⚠ bad email</span>
+                        )}
                       </div>
                     </td>
                     <td className="mono leads-secondary">{lead.phone || '—'}</td>
@@ -1001,13 +1037,43 @@ export default function Leads() {
                       {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
                       {lead.source_year ? ` (${lead.source_year})` : ''}
                     </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="btn btn--ghost"
-                        style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-red)' }}
-                        onClick={(e) => handleDeleteLead(e, lead.id)}
-                        title="Delete lead"
-                      >🗑</button>
+                    <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                      {/* Flag dropdown */}
+                      <div style={{ display: 'inline-flex', gap: 4 }}>
+                        {lead.manual_flag ? (
+                          <button
+                            className="btn btn--ghost"
+                            style={{ fontSize: 11, padding: '2px 8px', color: '#ffaa00' }}
+                            onClick={(e) => handleFlagLead(e, lead, null)}
+                            disabled={flagging === lead.id}
+                            title="Unflag this lead"
+                          >⚑ Unflag</button>
+                        ) : (
+                          <div style={{ position: 'relative', display: 'inline-block' }}>
+                            <select
+                              className="btn btn--ghost"
+                              style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 4 }}
+                              defaultValue=""
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                if (e.target.value) handleFlagLead(e, lead, e.target.value)
+                                e.target.value = ''
+                              }}
+                              disabled={flagging === lead.id}
+                            >
+                              <option value="" disabled>⚑ Flag</option>
+                              <option value="bad_email">⚠ Bad email</option>
+                              <option value="remove_all">⛔ Remove from all outreach</option>
+                            </select>
+                          </div>
+                        )}
+                        <button
+                          className="btn btn--ghost"
+                          style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-red)' }}
+                          onClick={(e) => handleDeleteLead(e, lead.id)}
+                          title="Delete lead"
+                        >🗑</button>
+                      </div>
                     </td>
                     {view === 'review' && (
                       <td>
@@ -1031,6 +1097,68 @@ export default function Leads() {
           </table>
         )}
       </section>
+
+      {/* ── Manually Flagged Leads Section ── */}
+      {(flaggedLeads.length > 0 || flaggedVisible) && (
+        <section style={{ marginTop: 16, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,100,100,0.25)' }}>
+          <div
+            onClick={() => setFlaggedVisible(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: 'rgba(255,80,80,0.08)', cursor: 'pointer', userSelect: 'none' }}
+          >
+            <span style={{ color: '#ff6464', fontSize: 13, fontWeight: 600 }}>
+              ⛔ {flaggedLeads.length} manually flagged lead{flaggedLeads.length !== 1 ? 's' : ''} hidden from outreach
+            </span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+              {flaggedVisible ? '▲ Hide' : '▼ Show'}
+            </span>
+          </div>
+          {flaggedVisible && (
+            <div style={{ padding: '8px 0', background: 'var(--surface-card)' }}>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '4px 16px 12px' }}>
+                These leads were manually flagged by an advisor. Unflag them to restore to all lists.
+              </p>
+              <table className="data-table" style={{ margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Flag type</th>
+                    <th>Reason</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flaggedLeads.map(lead => (
+                    <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontWeight: 600 }}>{lead.first_name} {lead.last_name}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>{lead.email || '—'}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>{lead.phone || '—'}</td>
+                      <td>
+                        {lead.manual_flag === 'bad_email'
+                          ? <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '2px 6px' }}>⚠ bad email</span>
+                          : <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 4, padding: '2px 6px' }}>⛔ remove all</span>
+                        }
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{lead.manual_flag_reason || '—'}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="btn btn--ghost"
+                          style={{ fontSize: 11, padding: '2px 10px', color: 'var(--signal-green)', border: '1px solid rgba(100,255,150,0.3)' }}
+                          onClick={(e) => handleFlagLead(e, lead, null)}
+                          disabled={flagging === lead.id}
+                        >
+                          ✓ Unflag
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Bottom Batch Action System (Phase 3 + 4) ── */}
       {/* Hidden file input for bulk media upload */}
