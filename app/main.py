@@ -235,6 +235,7 @@ def demo_request_docs():
 
 # ── All app routers
 app.include_router(auth_router.router)
+app.include_router(timeline_router)   # must be before leads_router to avoid /{lead_id} catch-all conflict
 app.include_router(leads_router.router)
 app.include_router(sms_router.router)
 app.include_router(admin_router.router)
@@ -274,7 +275,6 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
-app.include_router(timeline_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

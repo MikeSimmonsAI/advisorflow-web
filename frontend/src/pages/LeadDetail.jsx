@@ -248,6 +248,7 @@ export default function LeadDetail() {
   const [showCaseFile, setShowCaseFile] = useState(false)
   const [activity, setActivity] = useState(null)
   const [activityLoading, setActivityLoading] = useState(false)
+  const [activityError, setActivityError] = useState('')
   const [showActivity, setShowActivity] = useState(false)
   const timelineRef = useRef(null)
 
@@ -506,12 +507,14 @@ export default function LeadDetail() {
   async function handleLoadActivity() {
     if (activity) { setShowActivity(a => !a); return }
     setActivityLoading(true)
+    setActivityError('')
     try {
       const d = await api.get(`/leads/${leadId}/activity`)
       setActivity(d)
       setShowActivity(true)
     } catch (err) {
       console.error('Activity load error:', err)
+      setActivityError(err.message || 'Failed to load activity — backend may still be deploying. Try again in a moment.')
     } finally {
       setActivityLoading(false)
     }
@@ -1093,6 +1096,12 @@ export default function LeadDetail() {
                 {activityLoading ? 'Loading…' : showActivity ? '▲ collapse' : '▼ expand'}
               </span>
             </div>
+            {activityError && (
+              <div style={{ fontSize: 12, color: 'var(--signal-red, #ff4444)', padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                ⚠️ {activityError}
+                <button onClick={handleLoadActivity} style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>
+              </div>
+            )}
             {showActivity && activity && (
               <div style={{ marginTop: 8 }}>
                 {activity.events.length === 0 ? (
