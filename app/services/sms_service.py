@@ -188,11 +188,22 @@ def send_sms(
     body = render_template(template, lead, advisor, booking_url)
 
     client = get_twilio_client(advisor)
-    twilio_msg = client.messages.create(
+    # StatusCallback: Twilio will POST delivery receipts to this endpoint.
+    # Only set it when the env var is configured — avoids noise in local dev.
+    status_callback_url = None
+    _api_base = os.environ.get("API_BASE_URL", "")
+    if _api_base:
+        status_callback_url = f"{_api_base.rstrip('/')}/sms/webhook/status-callback"
+
+    create_kwargs = dict(
         body=body,
         from_=advisor.twilio_phone_number,
         to=lead.phone,
     )
+    if status_callback_url:
+        create_kwargs["status_callback"] = status_callback_url
+
+    twilio_msg = client.messages.create(**create_kwargs)
 
     # Log the send so the message history tab has data and health checks have failure data
     message = Message(
@@ -201,10 +212,12 @@ def send_sms(
         body=body,
         twilio_sid=twilio_msg.sid,
         twilio_status=twilio_msg.status,
+        delivery_status="pending",
         booking_link_id=booking_link.id if booking_link else None,
     )
     db.add(message)
     lead.status = "sent"
+    lead.last_messaged_at = datetime.utcnow()
     db.commit()
     return message
 
@@ -238,12 +251,17 @@ def send_mms(
     body = render_template(template, lead, advisor, booking_url)
 
     client = get_twilio_client(advisor)
-    twilio_msg = client.messages.create(
+    _api_base = os.environ.get("API_BASE_URL", "")
+    mms_kwargs = dict(
         body=body,
         from_=advisor.twilio_phone_number,
         to=lead.phone,
         media_url=[media_url],
     )
+    if _api_base:
+        mms_kwargs["status_callback"] = f"{_api_base.rstrip('/')}/sms/webhook/status-callback"
+
+    twilio_msg = client.messages.create(**mms_kwargs)
 
     message = Message(
         lead_id=lead.id,
@@ -251,10 +269,12 @@ def send_mms(
         body=f"[MMS] {body}",
         twilio_sid=twilio_msg.sid,
         twilio_status=twilio_msg.status,
+        delivery_status="pending",
         booking_link_id=booking_link.id if booking_link else None,
     )
     db.add(message)
     lead.status = "sent"
+    lead.last_messaged_at = datetime.utcnow()
     db.commit()
     return message
 

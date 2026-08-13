@@ -86,6 +86,7 @@ def send_single_email(
         )
         db.add(msg)
         lead.status = "sent"
+        lead.last_messaged_at = datetime.utcnow()
         db.commit()
         return {"email_id": msg.id, "status": "sent"}
 
@@ -215,6 +216,7 @@ async def send_email_with_attachment(
     )
     db.add(msg)
     lead.status = "sent"
+    lead.last_messaged_at = datetime.utcnow()
     db.commit()
     return {"email_id": msg.id, "status": "sent", "has_attachment": bool(attachments)}
 

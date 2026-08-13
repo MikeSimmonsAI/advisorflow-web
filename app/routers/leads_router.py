@@ -344,6 +344,7 @@ def list_leads(
         Lead.contact_channel, Lead.import_list_name, Lead.created_at,
         Lead.organization_id, Lead.case_status,
         Lead.manual_flag, Lead.manual_flag_reason,
+        Lead.last_messaged_at,
     ]
     COL_NAMES = [
         "id", "first_name", "last_name", "phone", "email",
@@ -353,6 +354,7 @@ def list_leads(
         "contact_channel", "import_list_name", "created_at",
         "organization_id", "case_status",
         "manual_flag", "manual_flag_reason",
+        "last_messaged_at",
     ]
 
     query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)

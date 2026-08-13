@@ -1027,6 +1027,11 @@ export default function Leads() {
                         {lead.manual_flag === 'bad_email' && (
                           <span style={{ fontSize: 10, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>⚠ bad email</span>
                         )}
+                        {lead.last_messaged_at && new Date(lead.last_messaged_at).toDateString() === new Date().toDateString() && (
+                          <span style={{ fontSize: 10, background: 'rgba(30,240,168,0.15)', color: 'var(--signal-green)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 4, padding: '1px 5px', marginLeft: 6, fontWeight: 700 }}>
+                            ✓ sent today
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="mono leads-secondary">{lead.phone || '—'}</td>

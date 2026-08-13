@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
   { to: '/cadence', label: 'Cadence', icon: 'repeat' },
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
+  { to: '/activity', label: 'Activity', icon: 'send' },
   { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
   { to: '/system-health', label: 'System Health', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },

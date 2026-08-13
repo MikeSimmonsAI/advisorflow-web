@@ -154,6 +154,12 @@ COLUMNS_TO_ADD = [
     ("leads", "manual_flag_reason", "VARCHAR"),
     # Meta app secret for Meta webhook HMAC verification
     ("organizations", "meta_app_secret", "VARCHAR"),
+    # Twilio delivery receipts — updated by /sms/status-callback webhook
+    # Values: pending, sent, delivered, failed, undelivered
+    ("messages", "delivery_status", "VARCHAR DEFAULT 'pending'"),
+    ("messages", "delivery_status_at", "TIMESTAMP"),
+    # last_messaged_at on leads — denormalized for fast "sent today" badge in Leads list
+    ("leads", "last_messaged_at", "TIMESTAMP"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
