@@ -252,6 +252,13 @@ export default function LeadDetail() {
   const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'timeline'
   const timelineRef = useRef(null)
 
+  // Phase 4: media/flyer attachment for SMS/MMS
+  const [mediaUrl, setMediaUrl] = useState('')
+  const [mediaFileName, setMediaFileName] = useState('')
+  const [mediaUploading, setMediaUploading] = useState(false)
+  const [mediaError, setMediaError] = useState('')
+  const mediaInputRef = useRef(null)
+
   function loadActivity(silent = false) {
     if (!silent) setActivityLoading(true)
     setActivityError('')
@@ -433,16 +440,53 @@ export default function LeadDetail() {
     }
   }
 
+  async function handleMediaUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setMediaUploading(true)
+    setMediaError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await api.upload('/sms/upload-media', formData)
+      setMediaUrl(result.media_url)
+      setMediaFileName(result.filename)
+    } catch (err) {
+      setMediaError(err.message || 'Upload failed')
+    } finally {
+      setMediaUploading(false)
+      if (mediaInputRef.current) mediaInputRef.current.value = ''
+    }
+  }
+
+  function handleRemoveMedia() {
+    setMediaUrl('')
+    setMediaFileName('')
+    setMediaError('')
+  }
+
   async function handleSend() {
     if (!messageText.trim()) return
     setSending(true)
     setSendError('')
     try {
-      await api.post('/sms/send', {
-        lead_id: leadId,
-        template: messageText,
-        include_booking_link: includeBookingLink,
-      })
+      if (mediaUrl) {
+        // Send as MMS with media attachment
+        await api.post('/sms/send-mms', {
+          lead_id: leadId,
+          template: messageText,
+          media_url: mediaUrl,
+          include_booking_link: includeBookingLink,
+        })
+        setMediaUrl('')
+        setMediaFileName('')
+      } else {
+        await api.post('/sms/send', {
+          lead_id: leadId,
+          template: messageText,
+          include_booking_link: includeBookingLink,
+        })
+      }
       setMessageText('')
       load()
     } catch (err) {
@@ -905,6 +949,34 @@ export default function LeadDetail() {
                   onChange={(e) => setMessageText(e.target.value)}
                   rows={4}
                 />
+                {/* Hidden file input for MMS media */}
+                <input
+                  ref={mediaInputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.gif,.pdf"
+                  style={{ display: 'none' }}
+                  onChange={handleMediaUpload}
+                />
+                {/* Media preview strip */}
+                {mediaUrl && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: 'var(--signal-blue-dim, #e3f2fd)',
+                    border: '1px solid var(--signal-blue, #1565c0)',
+                    borderRadius: 6, padding: '6px 10px', fontSize: 12,
+                    color: 'var(--signal-blue, #1565c0)', marginBottom: 4,
+                  }}>
+                    <span>📎</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mediaFileName}</span>
+                    <span style={{ opacity: 0.6, fontSize: 11 }}>Will send as MMS</span>
+                    <button
+                      onClick={handleRemoveMedia}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: 0, color: 'inherit', opacity: 0.7 }}
+                      title="Remove attachment"
+                    >✕</button>
+                  </div>
+                )}
+                {mediaError && <div style={{ color: 'var(--signal-red)', fontSize: 12, marginBottom: 4 }}>{mediaError}</div>}
                 <div className="compose-footer">
                   <label className="compose-checkbox">
                     <input
@@ -915,11 +987,20 @@ export default function LeadDetail() {
                     Include booking link
                   </label>
                   <button
+                    className="btn btn--ghost"
+                    onClick={() => mediaInputRef.current?.click()}
+                    disabled={mediaUploading}
+                    title="Attach flyer or image (MMS)"
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  >
+                    {mediaUploading ? '⏳' : '📎 Flyer'}
+                  </button>
+                  <button
                     className="btn btn--primary"
                     onClick={handleSend}
                     disabled={sending || !messageText.trim()}
                   >
-                    {sending ? 'Sending…' : 'Send SMS'}
+                    {sending ? 'Sending…' : mediaUrl ? 'Send MMS 📎' : 'Send SMS'}
                   </button>
                 </div>
                 {sendError && <div className="compose-error">{sendError}</div>}
