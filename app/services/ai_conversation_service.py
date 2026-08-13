@@ -15,15 +15,13 @@ import json
 import os
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.models.models import Lead, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
-from app.exceptions import TokenExpiredError
 
 logger = logging.getLogger(__name__)
 
@@ -250,30 +248,19 @@ def _get_or_create_conversation(db: Session, lead: Lead, advisor: User, channel:
     return conv
 
 
-_CHICAGO = ZoneInfo('America/Chicago')
-
-
 def _next_send_time(touch_number: int, started_at: datetime) -> datetime:
     if touch_number >= len(CADENCE_HOURS):
         return None
     hours_offset = CADENCE_HOURS[touch_number]
     send_time = started_at + timedelta(hours=hours_offset)
-
-    # Convert naive UTC -> Chicago local (handles CST/CDT automatically)
-    local = send_time.replace(tzinfo=timezone.utc).astimezone(_CHICAGO)
-
-    # Clamp to business hours first
-    if local.hour < 9:
-        local = local.replace(hour=9, minute=0, second=0, microsecond=0)
-    elif local.hour >= 17:
-        local = (local + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-
-    # Skip weekends (Saturday=5, Sunday=6) -> advance to Monday 9am
-    while local.weekday() >= 5:
-        local = (local + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-
-    # Return as naive UTC to stay consistent with datetime.utcnow() elsewhere
-    return local.astimezone(timezone.utc).replace(tzinfo=None)
+    # Keep within 9am-5pm CST (UTC-6)
+    cst_hour = (send_time.hour - 6) % 24
+    if cst_hour < 9:
+        send_time = send_time.replace(hour=15, minute=0, second=0, microsecond=0)
+    elif cst_hour >= 17:
+        next_day = send_time + timedelta(days=1)
+        send_time = next_day.replace(hour=15, minute=0, second=0, microsecond=0)
+    return send_time
 
 
 def _check_escalation(text: str) -> tuple:
@@ -299,12 +286,6 @@ def _send_email_via_graph(advisor: User, to_email: str, subject: str, body: str)
         },
         timeout=15,
     )
-    if resp.status_code == 400:
-        # Token expired or revoked — raise typed error so callers can auto-disconnect
-        # the advisor rather than counting it as a transient error (mirrors email_poller_service).
-        raise TokenExpiredError(
-            f"Refresh token rejected for advisor {advisor.id}: {resp.text[:200]}"
-        )
     resp.raise_for_status()
     access_token = resp.json()["access_token"]
 
@@ -473,11 +454,10 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
         _escalate_conversation(db, conv, lead, advisor, email_data.get("escalate_reason", ""), "")
         return {"success": False, "error": "Escalated to advisor"}
 
-    # Permanent failure: lead never had an email address — stop immediately.
-    if not lead.email:
-        return {"success": False, "error": "Lead has no email address", "permanent": True}
-
     try:
+        if not lead.email:
+            return {"success": False, "error": "Lead has no email address"}
+
         org_name = _get_org_name(db, advisor)
         clean_body = _strip_signoff(email_data["body"])
         html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name)
@@ -504,12 +484,9 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
         db.commit()
         return {"success": True, "subject": email_data["subject"]}
 
-    except TokenExpiredError:
-        raise  # Let process_scheduled_touches disconnect advisor and pause all conversations
-
     except Exception as e:
         logger.error("_send_touch error: %s", e)
-        return {"success": False, "error": str(e), "permanent": False}
+        return {"success": False, "error": str(e)}
 
 
 def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str = "email") -> dict:
@@ -604,25 +581,22 @@ def get_conversation_status(db: Session, lead_id: str, advisor_id: str) -> dict:
 
 def process_scheduled_touches(db: Session) -> dict:
     now = datetime.utcnow()
-    due = (
-        db.query(PipelineConversation, Lead, User)
-        .join(Lead, Lead.id == PipelineConversation.lead_id)
-        .join(User, User.id == PipelineConversation.advisor_id)
-        .filter(
-            PipelineConversation.next_send_at <= now,
-            PipelineConversation.paused == False,
-            PipelineConversation.flagged == False,
-            PipelineConversation.auto_respond == True,
-            PipelineConversation.stage.notin_(["stopped", "completed", "booked"]),
-        ).with_for_update(skip_locked=True, of=PipelineConversation).yield_per(200)
-    )
+    due = db.query(PipelineConversation).filter(
+        PipelineConversation.next_send_at <= now,
+        PipelineConversation.paused == False,
+        PipelineConversation.flagged == False,
+        PipelineConversation.stage.notin_(["stopped", "completed", "booked"]),
+    ).all()
 
     sent = 0
     errors = 0
     skipped = 0
 
-    for conv, lead, advisor in due:
+    for conv in due:
         try:
+            lead = db.query(Lead).filter(Lead.id == conv.lead_id).first()
+            advisor = db.query(User).filter(User.id == conv.advisor_id).first()
+
             if not lead or not advisor:
                 skipped += 1
                 continue
@@ -659,54 +633,6 @@ def process_scheduled_touches(db: Session) -> dict:
                 sent += 1
             else:
                 errors += 1
-                if result.get("permanent"):
-                    # Permanent failure (no email, expired OAuth token, etc.) — stop
-                    # the conversation so it is never retried.
-                    conv.stage = "stopped"
-                    conv.next_send_at = None
-                    db.commit()
-                    logger.warning(
-                        "process_scheduled_touches: permanently stopped conv=%s reason=%s",
-                        conv.id, result.get("error"),
-                    )
-                else:
-                    # Transient failure — back off by 2 hours, cap at 5 retries then stop.
-                    retry_count = getattr(conv, "retry_count", None) or 0
-                    retry_count += 1
-                    if retry_count >= 5:
-                        conv.stage = "stopped"
-                        conv.next_send_at = None
-                        logger.warning(
-                            "process_scheduled_touches: max retries reached, stopping conv=%s",
-                            conv.id,
-                        )
-                    else:
-                        backoff_hours = min(2 ** retry_count, 24)
-                        conv.next_send_at = now + timedelta(hours=backoff_hours)
-                        logger.warning(
-                            "process_scheduled_touches: transient error conv=%s retry=%d backoff=%dh reason=%s",
-                            conv.id, retry_count, backoff_hours, result.get("error"),
-                        )
-                    if hasattr(conv, "retry_count"):
-                        conv.retry_count = retry_count
-                    db.commit()
-
-        except TokenExpiredError:
-            logger.warning(
-                "Token expired for advisor %s — disconnecting M365 and pausing all conversations",
-                advisor.id if advisor else conv.advisor_id,
-            )
-            if advisor:
-                advisor.microsoft_365_connected = False
-                # Pause every active conversation for this advisor so the retry loop stops
-                db.query(PipelineConversation).filter(
-                    PipelineConversation.advisor_id == advisor.id,
-                    PipelineConversation.paused == False,
-                ).update({"paused": True, "paused_reason": "Token expired — reconnect Microsoft 365"})
-            conv.paused = True
-            conv.paused_reason = "Token expired — reconnect Microsoft 365"
-            db.commit()
-            errors += 1
 
         except Exception as e:
             logger.error("process_scheduled_touches error conv=%s: %s", conv.id, e)
