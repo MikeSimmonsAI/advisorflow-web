@@ -258,20 +258,6 @@ def send_mms(
     db.commit()
     return message
 
-    message = Message(
-        lead_id=lead.id,
-        sender_id=advisor.id,
-        body=body,
-        twilio_sid=twilio_msg.sid,
-        twilio_status=twilio_msg.status,
-        booking_link_id=booking_link.id if booking_link else None,
-    )
-    db.add(message)
-
-    lead.status = "sent"
-    db.commit()
-    return message
-
 
 def configure_caller_id_name(advisor: User) -> None:
     """

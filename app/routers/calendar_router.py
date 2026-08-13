@@ -141,18 +141,23 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     advisor = None
     lead = None
 
+    org = None
     if booking:
         advisor = db.query(User).filter(User.id == booking.user_id).first()
         lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
         booking.status = "booked"
         if lead:
             lead.status = "booked"
+        if advisor:
+            from app.models.models import Organization
+            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
         logger.info("booking-confirmed: found booking=%s advisor=%s lead=%s", booking.id, advisor.id if advisor else None, lead.id if lead else None)
     else:
         logger.warning("booking-confirmed: no booking found for token=%s", token)
 
     # ── Create Microsoft 365 Outlook calendar event ──────────────────────────
     calendar_result = {"success": False, "note": "No advisor found"}
+    event_start = None  # shared between MS365 and Google Calendar blocks
 
     if advisor and advisor.microsoft_365_connected and advisor.microsoft_oauth_refresh_token_encrypted:
         try:
@@ -225,7 +230,11 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                         "timeZone": "America/Chicago",
                     },
                     "location": {
-                        "displayName": "13005 Greenville Ave, Dallas, TX 75243",
+                        "displayName": (
+                            org.org_address
+                            if (org and getattr(org, "org_address", None))
+                            else "13005 Greenville Ave, Dallas, TX 75243"
+                        ),
                     },
                 }
                 cal_response = httpx.post(
@@ -266,7 +275,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         try:
             # Reuse the datetime we already parsed for the MS365 block above.
             # If that block didn't run (MS365 not connected), parse now.
-            if 'event_start' not in dir() or event_start is None:
+            if event_start is None:
                 event_start = None
                 for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
                     try:

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Form, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Form, Query, Request, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -449,19 +449,50 @@ async def upload_media(
 ):
     """
     Upload a flyer/image to be used in MMS or email.
-    Returns a public URL. Files are stored in /tmp for now — 
+    Returns a public URL. Files are stored in /tmp for now —
     configure MEDIA_BASE_URL env var to point to your CDN/S3 bucket.
     In production, replace local storage with S3 or Cloudinary upload.
     """
-    import uuid, os, shutil
+    import uuid, os
+    ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".pdf"}
+    MAX_MEDIA_BYTES = 5 * 1024 * 1024  # 5 MB (Twilio MMS limit is ~5MB)
+
+    ext = os.path.splitext(file.filename or "upload")[1].lower() or ".jpg"
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Accepted: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
     media_base = os.environ.get("MEDIA_BASE_URL", "")
-    ext = os.path.splitext(file.filename or "upload")[1] or ".jpg"
     filename = f"{uuid.uuid4().hex}{ext}"
     upload_dir = "/tmp/bookaboost_media"
     os.makedirs(upload_dir, exist_ok=True)
     dest = os.path.join(upload_dir, filename)
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+
+    written = 0
+    chunk_size = 64 * 1024
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_MEDIA_BYTES:
+                    f.close()
+                    os.unlink(dest)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size is {MAX_MEDIA_BYTES // (1024*1024)} MB.",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        if os.path.exists(dest):
+            os.unlink(dest)
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     if media_base:
         public_url = f"{media_base.rstrip('/')}/{filename}"
@@ -471,6 +502,6 @@ async def upload_media(
     return {
         "filename": filename,
         "media_url": public_url,
-        "size_bytes": os.path.getsize(dest),
+        "size_bytes": written,
         "note": "Set MEDIA_BASE_URL env var to your CDN/S3 for public MMS delivery"
     }
