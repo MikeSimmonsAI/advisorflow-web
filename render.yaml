@@ -44,6 +44,10 @@ services:
         value: https://advisorflow-backend.onrender.com/calendar/oauth/callback
       - key: MICROSOFT_REDIRECT_URI
         value: https://advisorflow-backend.onrender.com/microsoft/oauth/callback
+      - key: SUPER_ADMIN_EMAIL
+        sync: false  # Set to simmonsmj242@gmail.com (or new super-admin email) in Render dashboard
+      - key: BOOKING_SECRET
+        generateValue: true  # cryptographic token for booking link signing
       - key: OPENAI_API_KEY
         sync: false
       - key: RESEND_API_KEY

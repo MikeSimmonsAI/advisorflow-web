@@ -32,6 +32,9 @@ def get_twilio_client(advisor: User) -> Client:
 
 
 BOOKING_SECRET = os.environ.get("BOOKING_SECRET", "advisorflow2026restland")
+# IMPORTANT: Set BOOKING_SECRET env var in production to a strong random value.
+# The fallback exists only for local dev/testing — any deployment without it
+# uses a publicly-known default, making booking tokens trivially forgeable.
 
 
 # Appointment type map — based on lead tier, message_track, or source
@@ -185,11 +188,25 @@ def send_sms(
     body = render_template(template, lead, advisor, booking_url)
 
     client = get_twilio_client(advisor)
-    client.messages.create(
+    twilio_msg = client.messages.create(
         body=body,
         from_=advisor.twilio_phone_number,
         to=lead.phone,
     )
+
+    # Log the send so the message history tab has data and health checks have failure data
+    message = Message(
+        lead_id=lead.id,
+        sender_id=advisor.id,
+        body=body,
+        twilio_sid=twilio_msg.sid,
+        twilio_status=twilio_msg.status,
+        booking_link_id=booking_link.id if booking_link else None,
+    )
+    db.add(message)
+    lead.status = "sent"
+    db.commit()
+    return message
 
 
 def send_mms(

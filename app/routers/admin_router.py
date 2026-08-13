@@ -629,8 +629,8 @@ def reset_user_password(
         raise HTTPException(status_code=404, detail="User not found")
 
     if req.new_password:
-        if len(req.new_password) < 6:
-            raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+        if len(req.new_password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
         temp_password = req.new_password
         target.must_change_password = False
     else:

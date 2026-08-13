@@ -325,6 +325,12 @@ class Lead(Base):
     __table_args__ = (
         Index("ix_leads_org_phone", "organization_id", "phone"),
         Index("ix_leads_org_status", "organization_id", "status"),
+        # Advisor's own lead view — most common non-admin query
+        Index("ix_leads_org_advisor", "organization_id", "assigned_to_id"),
+        # Import batch management (list + delete by source_file)
+        Index("ix_leads_org_source_file", "organization_id", "source_file"),
+        # Cadence job queries for active / due leads
+        Index("ix_leads_org_channel_status", "organization_id", "contact_channel", "status"),
     )
 
 

@@ -117,6 +117,7 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
 
 @router.post("/webhook/inbound")
 def inbound_webhook(
+    request: Request,
     From: str = Form(...),
     To: str = Form(...),
     Body: str = Form(...),

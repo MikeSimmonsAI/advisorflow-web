@@ -18,7 +18,18 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.models.models import User
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-production")
+_jwt_secret = os.environ.get("JWT_SECRET")
+if not _jwt_secret:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+if len(_jwt_secret) < 32:
+    raise RuntimeError(
+        "JWT_SECRET must be at least 32 characters long for security. "
+        "Generate a strong secret with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+JWT_SECRET = _jwt_secret
 JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRY_HOURS = 24 * 7  # 1 week
 

@@ -51,8 +51,24 @@ def preview_upload(
     """
     import os as _os
     original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
+    if original_ext not in (".xlsx", ".xls", ".csv"):
+        raise HTTPException(status_code=400, detail="Only .xlsx, .xls, and .csv files are accepted.")
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
-        shutil.copyfileobj(file.file, tmp)
+        # Stream with size cap — reject files over 50MB to protect against memory DoS
+        MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+        written = 0
+        chunk_size = 1024 * 64  # 64 KB
+        while True:
+            chunk = file.file.read(chunk_size)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(status_code=413, detail="File too large. Maximum upload size is 50 MB.")
+            tmp.write(chunk)
         tmp_path = tmp.name
 
     try:
@@ -83,8 +99,23 @@ def confirm_upload(
     """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
     import os as _os
     original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
+    if original_ext not in (".xlsx", ".xls", ".csv"):
+        raise HTTPException(status_code=400, detail="Only .xlsx, .xls, and .csv files are accepted.")
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
-        shutil.copyfileobj(file.file, tmp)
+        MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+        written = 0
+        chunk_size = 1024 * 64
+        while True:
+            chunk = file.file.read(chunk_size)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(status_code=413, detail="File too large. Maximum upload size is 50 MB.")
+            tmp.write(chunk)
         tmp_path = tmp.name
 
     try:

@@ -355,16 +355,26 @@ async def on_startup():
     # 4. Ensure the master super_admin account has the correct role.
     #    NOTE: password_hash is intentionally NOT set here — it would overwrite
     #    any password change made through the app on every deploy.
-    try:
-        with engine.connect() as conn:
-            conn.execute(_text(
-                "UPDATE users SET role='super_admin', must_change_password=FALSE "
-                "WHERE email='simmonsmj242@gmail.com'"
-            ))
-            conn.commit()
-    except Exception as e:
+    #    Email is read from SUPER_ADMIN_EMAIL env var (not hardcoded) so it
+    #    can be changed without a code deploy and never leaks in source.
+    import os as _os
+    _super_admin_email = _os.environ.get("SUPER_ADMIN_EMAIL", "")
+    if _super_admin_email:
+        try:
+            with engine.connect() as conn:
+                conn.execute(_text(
+                    "UPDATE users SET role='super_admin', must_change_password=FALSE "
+                    "WHERE email=:email"
+                ), {"email": _super_admin_email})
+                conn.commit()
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Super admin role migration note: %s", e)
+    else:
         import logging as _logging
-        _logging.getLogger(__name__).warning("Super admin role migration note: %s", e)
+        _logging.getLogger(__name__).warning(
+            "SUPER_ADMIN_EMAIL env var not set — skipping super_admin role grant on startup."
+        )
 
     # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
     asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min

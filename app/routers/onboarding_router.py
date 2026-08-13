@@ -119,7 +119,10 @@ def register_org(
         db.rollback()
         raise HTTPException(status_code=500, detail="Could not create account. Please try again.")
 
-    token = create_access_token({"sub": user_id})
+    # Refresh user from DB so SQLAlchemy populates all fields (id, role, etc.)
+    # before passing to create_access_token, which expects a User model object.
+    db.refresh(user)
+    token = create_access_token(user)
 
     return OnboardingRegisterResponse(
         access_token=token,
