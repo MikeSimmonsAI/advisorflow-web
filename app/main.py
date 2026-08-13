@@ -9,14 +9,10 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 """
 
 import asyncio
-import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from app.limiter import limiter
 
 from sqlalchemy import text as _text
 from app.deps import engine
@@ -44,10 +40,6 @@ from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
-
-# ── Rate-limiting (slowapi) ───────────────────────────────────────────────────
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
@@ -363,7 +355,6 @@ async def on_startup():
     # 4. Ensure the master super_admin account has the correct role.
     #    NOTE: password_hash is intentionally NOT set here — it would overwrite
     #    any password change made through the app on every deploy.
-<<<<<<< Updated upstream
     #    Email is read from SUPER_ADMIN_EMAIL env var (not hardcoded) so it
     #    can be changed without a code deploy and never leaks in source.
     import os as _os
@@ -380,16 +371,6 @@ async def on_startup():
             import logging as _logging
             _logging.getLogger(__name__).warning("Super admin role migration note: %s", e)
     else:
-=======
-    try:
-        with engine.connect() as conn:
-            conn.execute(
-                _text("UPDATE users SET role='super_admin', must_change_password=FALSE WHERE email=:e"),
-                {"e": os.environ["SUPER_ADMIN_EMAIL"]}
-            )
-            conn.commit()
-    except Exception as e:
->>>>>>> Stashed changes
         import logging as _logging
         _logging.getLogger(__name__).warning(
             "SUPER_ADMIN_EMAIL env var not set — skipping super_admin role grant on startup."
