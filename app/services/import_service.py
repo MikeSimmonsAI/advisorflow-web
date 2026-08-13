@@ -143,8 +143,13 @@ TIER_TO_TRACK = {
 }
 
 
-def _merge_custom_fields(existing_json: str | None, email_quality_issue: str | None) -> str | None:
-    """Merges an email_quality flag into the existing custom_fields JSON blob, if any."""
+def _merge_custom_fields(
+    existing_json: str | None,
+    email_quality_issue: str | None,
+    campaign_purpose: str | None = None,
+    offer_hook: str | None = None,
+) -> str | None:
+    """Merges campaign metadata and email quality flag into the existing custom_fields JSON blob."""
     base = {}
     if existing_json:
         try:
@@ -153,6 +158,10 @@ def _merge_custom_fields(existing_json: str | None, email_quality_issue: str | N
             base = {}
     if email_quality_issue:
         base["email_quality_issue"] = email_quality_issue
+    if campaign_purpose:
+        base["campaign_purpose"] = campaign_purpose
+    if offer_hook:
+        base["offer_hook"] = offer_hook
     return json.dumps(base) if base else None
 
 
@@ -291,6 +300,8 @@ def import_leads_from_excel(
     relationship_type: str = None,   # applied to every lead in this batch
     import_list_name: str = None,    # human-readable name for this import list
     source_category: str = None,     # e.g. "crm_export", "referral", "web_form"
+    campaign_purpose: str = None,    # e.g. "file_review", "markers", "pre_need", "event_invite"
+    offer_hook: str = None,          # e.g. "lunch_and_learn", "free_tour", "free_space", "custom"
 ) -> dict:
     """
     Full import pipeline: parse -> route by tier/channel -> dedup check
@@ -384,7 +395,12 @@ def import_leads_from_excel(
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name or None,
             source_category=source_category or None,
-            custom_fields=_merge_custom_fields(row.get("custom_fields"), email_quality_issue),
+            custom_fields=_merge_custom_fields(
+                row.get("custom_fields"),
+                email_quality_issue,
+                campaign_purpose=campaign_purpose,
+                offer_hook=offer_hook,
+            ),
         )
         db.add(lead)
         db.flush()

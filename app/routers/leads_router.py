@@ -31,6 +31,8 @@ def preview_upload(
     force_new_inquiry: bool = Form(False),
     relationship_type: Optional[str] = Form(None),  # applied to all leads in this import
     import_list_name: Optional[str] = Form(None),
+    campaign_purpose: Optional[str] = Form(None),   # why we're reaching out
+    offer_hook: Optional[str] = Form(None),          # what we're offering
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -85,6 +87,8 @@ def preview_upload(
             force_new_inquiry=force_new_inquiry,
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name,
+            campaign_purpose=campaign_purpose,
+            offer_hook=offer_hook,
         )
     finally:
         os.unlink(tmp_path)
@@ -99,6 +103,8 @@ def confirm_upload(
     force_new_inquiry: bool = Form(False),
     relationship_type: Optional[str] = Form(None),
     import_list_name: Optional[str] = Form(None),
+    campaign_purpose: Optional[str] = Form(None),
+    offer_hook: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -135,6 +141,8 @@ def confirm_upload(
             force_new_inquiry=force_new_inquiry,
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name,
+            campaign_purpose=campaign_purpose,
+            offer_hook=offer_hook,
         )
     finally:
         os.unlink(tmp_path)
@@ -147,10 +155,11 @@ def list_import_batches(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Returns all import batches for this org, newest first."""
+    """Returns all import batches for this org, newest first. Includes import_list_name for display."""
     rows = (
         db.query(
             Lead.source_file,
+            Lead.import_list_name,
             func.count(Lead.id).label("lead_count"),
             func.min(Lead.created_at).label("imported_at"),
         )
@@ -158,13 +167,14 @@ def list_import_batches(
             Lead.organization_id == current_user.organization_id,
             Lead.source_file.isnot(None),
         )
-        .group_by(Lead.source_file)
+        .group_by(Lead.source_file, Lead.import_list_name)
         .order_by(func.min(Lead.created_at).desc())
         .all()
     )
     return [
         {
             "source_file": r.source_file,
+            "import_list_name": r.import_list_name,
             "lead_count": r.lead_count,
             "imported_at": r.imported_at.isoformat() if r.imported_at else None,
         }
@@ -309,6 +319,7 @@ def list_leads(
     tier: Optional[str] = Query(None),
     message_track: Optional[str] = Query(None),
     temperature: Optional[str] = Query(None),
+    import_list_name: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
@@ -353,6 +364,8 @@ def list_leads(
         query = query.filter(Lead.message_track == message_track)
     if temperature:
         query = query.filter(Lead.engagement_temperature == temperature)
+    if import_list_name:
+        query = query.filter(Lead.import_list_name == import_list_name)
 
     total = query.count()
     rows = (

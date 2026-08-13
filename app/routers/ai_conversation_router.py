@@ -28,6 +28,11 @@ class StartConversationRequest(BaseModel):
     channel: str = "email"
 
 
+class BulkStartRequest(BaseModel):
+    lead_ids: list[str]
+    channel: str = "email"   # "sms", "email", or "auto" (picks by contact_channel)
+
+
 class PauseRequest(BaseModel):
     lead_id: str
     reason: Optional[str] = "Advisor paused"
@@ -73,6 +78,71 @@ def start_conversation(
     if result.get("success"):
         log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.started", target_type="lead", target_id=req.lead_id)
     return result
+
+
+@router.post("/bulk-start")
+def bulk_start_conversations(
+    req: BulkStartRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Start AI conversations on up to 500 leads at once.
+    channel="auto" routes each lead by its contact_channel field (sms vs email).
+    Returns a summary: started, skipped (already active or DNC), errors.
+    """
+    if len(req.lead_ids) > 500:
+        raise HTTPException(status_code=400, detail="Maximum 500 leads per bulk start request.")
+
+    leads = db.query(Lead).filter(
+        Lead.id.in_(req.lead_ids),
+        Lead.organization_id == current_user.organization_id,
+    ).all()
+
+    lead_map = {str(l.id): l for l in leads}
+
+    started = []
+    skipped = []
+    errors = []
+
+    for lead_id in req.lead_ids:
+        lead = lead_map.get(str(lead_id))
+        if not lead:
+            errors.append({"lead_id": lead_id, "reason": "Not found"})
+            continue
+
+        # Auto-channel: use lead's contact_channel if caller passes "auto"
+        if req.channel == "auto":
+            channel = lead.contact_channel if lead.contact_channel in ("sms", "email", "email_only") else "email"
+            if channel == "email_only":
+                channel = "email"
+        else:
+            channel = req.channel
+
+        try:
+            result = start_ai_conversation(db, lead, current_user, channel=channel)
+            if result.get("success"):
+                started.append(lead_id)
+                log_action(
+                    db, current_user.organization_id, current_user.id,
+                    action="ai_conversation.bulk_started",
+                    target_type="lead", target_id=str(lead_id),
+                )
+            elif result.get("already_active"):
+                skipped.append({"lead_id": lead_id, "reason": "Already active"})
+            else:
+                skipped.append({"lead_id": lead_id, "reason": result.get("error", "Skipped")})
+        except Exception as exc:
+            errors.append({"lead_id": lead_id, "reason": str(exc)})
+
+    return {
+        "started": len(started),
+        "skipped": len(skipped),
+        "errors": len(errors),
+        "started_ids": started,
+        "skipped_detail": skipped,
+        "error_detail": errors,
+    }
 
 
 @router.post("/pause")

@@ -118,6 +118,12 @@ def _apply_filters(query, organization_id: str, criteria: dict):
     if criteria.get("source_file"):
         query = query.filter(Lead.source_file.ilike(f"%{criteria['source_file']}%"))
 
+    if criteria.get("import_list_name"):
+        query = query.filter(Lead.import_list_name == criteria["import_list_name"])
+
+    if criteria.get("relationship_type"):
+        query = query.filter(Lead.relationship_type == criteria["relationship_type"])
+
     if criteria.get("channel"):
         query = query.filter(Lead.contact_channel == criteria["channel"])
 
@@ -143,27 +149,69 @@ def _apply_filters(query, organization_id: str, criteria: dict):
     return query
 
 
-def _compliance_check(lead: Lead) -> tuple[bool, str]:
+def _compliance_check(lead: Lead, channel: str = "sms") -> tuple[bool, str]:
     """
     Inline compliance gate — returns (ok, reason).
     A lead that fails this must never be sent to, no exceptions.
+    channel: "sms" | "email" | "auto"
     """
     if lead.status == "dnc":
         return False, "DNC"
     if lead.is_duplicate:
         return False, "duplicate"
-    if not lead.phone or lead.phone.strip() == "":
-        return False, "no phone"
-    if lead.contact_channel == "email_only":
-        return False, "email_only channel"
+    # Channel-specific checks
+    if channel in ("sms", "auto"):
+        if lead.contact_channel != "email_only" and (not lead.phone or lead.phone.strip() == ""):
+            return False, "no phone"
+    if channel == "sms" and lead.contact_channel == "email_only":
+        return False, "email_only lead — use email channel"
+    if channel == "email" and not lead.email:
+        return False, "no email"
     return True, ""
 
 
 # ── AI message generation ─────────────────────────────────────────────────────
 
+_OFFER_HOOK_LABELS = {
+    "lunch_and_learn": "Lunch & Learn event (invite them — no pressure, just educational)",
+    "free_tour": "Free funeral home tour (low-commitment, educational visit)",
+    "free_space": "Complimentary cemetery space consultation",
+    "family_service_consult": "Free Family Service consultation",
+}
+
+_RELATIONSHIP_TONE_GUIDANCE = {
+    "cold_lead": (
+        "This is a cold lead with no prior relationship. Open very softly — no pressure, "
+        "no assumptions. Introduce yourself briefly and make the ask feel like a gentle offer, "
+        "not a pitch. If there is an offer hook, present it as a low-key invitation."
+    ),
+    "warm_lead": (
+        "This is a warm lead who has shown some prior interest. Be friendly and direct. "
+        "You can reference their interest or the topic without being pushy."
+    ),
+    "re_engagement": (
+        "This lead has gone quiet. Acknowledge the gap lightly and offer a fresh, simple "
+        "reason to reconnect. Keep it easy and no-pressure."
+    ),
+    "previous_prospect": (
+        "This lead was a prospect before but didn't convert. Re-open the conversation "
+        "naturally — don't reference failure, just offer a new reason to reconnect."
+    ),
+    "past_customer": (
+        "This is a past customer. You can be warmer and more personal. Reference the prior "
+        "relationship naturally and invite them back or check in on how things are going."
+    ),
+    "existing_customer": (
+        "This is an active existing customer. The tone should be personal and appreciative. "
+        "This might be a check-in, an upgrade offer, or a referral ask — keep it warm."
+    ),
+}
+
+
 def _generate_campaign_message(
     purpose: str, tone: str, org_name: str, advisor_name: str,
     lead_type: str = None, ai_direction: str = None, industry: str = "funeral",
+    offer_hook: str = None, relationship_type: str = None,
 ) -> str:
     """Generate an AI opening message for this campaign."""
     from openai import OpenAI
@@ -183,12 +231,25 @@ def _generate_campaign_message(
     lead_type_line = f"\nLead type/track: {lead_type}" if lead_type else ""
     direction_line = f"\nSpecific direction from advisor: {ai_direction}" if ai_direction else ""
 
+    # Offer hook line
+    offer_desc = _OFFER_HOOK_LABELS.get(offer_hook) if offer_hook else None
+    if offer_desc:
+        offer_line = f"\nOffer hook (weave in naturally, low-pressure): {offer_desc}"
+    elif offer_hook and offer_hook not in ("", "none"):
+        offer_line = f"\nOffer hook: {offer_hook}"
+    else:
+        offer_line = ""
+
+    # Relationship-type tone calibration (Task 115)
+    rel_guidance = _RELATIONSHIP_TONE_GUIDANCE.get(relationship_type, "") if relationship_type else ""
+    rel_line = f"\nRelationship context: {rel_guidance}" if rel_guidance else ""
+
     prompt = f"""Write a short SMS outreach message for a campaign.
 
 Business: {org_name}
 Advisor: {advisor_name}
 Campaign type: {purpose_label}
-Tone: {tone_desc}{lead_type_line}{direction_line}
+Tone: {tone_desc}{lead_type_line}{direction_line}{offer_line}{rel_line}
 
 Rules:
 - Under 320 characters total
@@ -196,6 +257,7 @@ Rules:
 - Use {{first_name}} as the lead's first name placeholder
 - If it makes sense for this campaign type, end with {{booking_url}}
 - No hashtags, no all-caps, no emojis unless completely natural
+- If an offer hook is provided, weave it in as a soft option — don't make it the entire message
 - Respond with ONLY the message text, nothing else
 
 Write the message:"""
@@ -259,6 +321,7 @@ class GenerateMessageRequest(BaseModel):
     tone: str = "warm"
     lead_type: Optional[str] = None
     ai_direction: Optional[str] = None
+    offer_hook: Optional[str] = None
 
 
 # ── Endpoints — specific before wildcard ──────────────────────────────────────
@@ -290,6 +353,7 @@ def generate_message(
     message = _generate_campaign_message(
         req.purpose, req.tone, org_name, advisor_name,
         lead_type=req.lead_type, ai_direction=req.ai_direction, industry=industry,
+        offer_hook=req.offer_hook,
     )
     return {"message": message, "purpose": req.purpose, "tone": req.tone}
 
@@ -460,6 +524,9 @@ class BuilderPreviewRequest(BaseModel):
     lead_type: Optional[str] = None
     engagement_temperature: Optional[str] = None
     contact_history: Optional[str] = None
+    import_list_name: Optional[str] = None
+    relationship_type: Optional[str] = None
+    channel: Optional[str] = None  # "sms" | "email" | "auto"
 
 
 class BuilderSendRequest(BaseModel):
@@ -471,6 +538,8 @@ class BuilderSendRequest(BaseModel):
     lead_ids: list[str]
     filters: Optional[dict] = None
     ai_direction: Optional[str] = None
+    offer_hook: Optional[str] = None   # e.g. "lunch_and_learn", "free_tour", etc.
+    channel: Optional[str] = "sms"    # "sms" | "email" | "auto"
     schedule_type: str = "now"
     scheduled_at: Optional[str] = None
 
@@ -489,10 +558,14 @@ def builder_preview(
     lead_type: Optional[str] = None,
     engagement_temperature: Optional[str] = None,
     contact_history: Optional[str] = None,
+    import_list_name: Optional[str] = None,
+    relationship_type: Optional[str] = None,
+    channel: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Preview leads matching the Campaign Builder filters. Returns full lead list."""
+    """Preview leads matching the Campaign Builder filters. Returns full lead list. Open to all advisors."""
+    is_manager = current_user.role in ("org_admin", "super_admin")
     criteria = {}
     if tier: criteria["tier"] = tier
     if status: criteria["status"] = status
@@ -502,10 +575,17 @@ def builder_preview(
     if lead_type: criteria["lead_type"] = lead_type
     if engagement_temperature: criteria["engagement_temperature"] = engagement_temperature
     if contact_history: criteria["contact_history"] = contact_history
+    if import_list_name: criteria["import_list_name"] = import_list_name
+    if relationship_type: criteria["relationship_type"] = relationship_type
+    if channel and channel != "auto": criteria["channel"] = "email_only" if channel == "email" else channel
 
     query = _apply_filters(db.query(Lead), current_user.organization_id, criteria)
 
-    if has_phone:
+    # Advisors can only preview their own leads; managers see all
+    if not is_manager:
+        query = query.filter(Lead.assigned_to_id == current_user.id)
+
+    if has_phone and channel not in ("email", "email_only"):
         query = query.filter(Lead.phone.isnot(None), Lead.phone != "")
     if exclude_dnc:
         query = query.filter(Lead.status != "dnc")
@@ -541,12 +621,13 @@ def builder_preview(
 def builder_send(
     req: BuilderSendRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Execute Campaign Builder send — requires org_admin or super_admin.
+    Execute Campaign Builder send — open to all advisors.
     Creates a campaign record, sends to all lead_ids provided,
     and writes the results back to the campaign row for history.
+    Supports channel: "sms" (default), "email", or "auto" (routes by lead's contact_channel).
     """
     from app.services.sms_service import send_sms
 
@@ -587,8 +668,16 @@ def builder_send(
     errors = 0
     error_details = []
 
+    req_channel = req.channel or "sms"
+
     for lead in leads:
-        ok, reason = _compliance_check(lead)
+        # Determine effective channel for this lead
+        if req_channel == "auto":
+            effective_channel = "email" if lead.contact_channel == "email_only" else "sms"
+        else:
+            effective_channel = req_channel
+
+        ok, reason = _compliance_check(lead, channel=effective_channel)
         if not ok:
             skipped += 1
             continue
@@ -599,13 +688,39 @@ def builder_send(
                 .replace("{advisor_name}", current_user.full_name or "")
                 .replace("{booking_url}", ""))
 
-            send_sms(
-                db=db,
-                lead=lead,
-                advisor=current_user,
-                template=personalized,
-                include_booking_link=req.include_booking_link,
-            )
+            if effective_channel == "email":
+                # Send via email — use the same provider logic as email router
+                subject = f"Following up, {lead.first_name or 'there'}"
+                body_html = personalized.replace("\n", "<br>")
+                if current_user.microsoft_365_connected:
+                    from app.services.microsoft_email_service import send_email_via_microsoft_graph
+                    result = send_email_via_microsoft_graph(current_user, lead.email, subject, body_html)
+                else:
+                    from app.services.email_service import send_email_via_provider
+                    result = send_email_via_provider(lead.email, subject, body_html)
+                if not result.get("success"):
+                    raise Exception(result.get("error", "Email send failed"))
+                from app.models.models import EmailMessage
+                from datetime import datetime as _dt
+                db.add(EmailMessage(
+                    lead_id=lead.id,
+                    sender_id=current_user.id,
+                    subject=subject,
+                    body_html=body_html,
+                    status="sent",
+                    provider_message_id=result.get("provider_message_id"),
+                    sent_at=_dt.utcnow(),
+                ))
+                lead.status = "sent"
+                db.flush()
+            else:
+                send_sms(
+                    db=db,
+                    lead=lead,
+                    advisor=current_user,
+                    template=personalized,
+                    include_booking_link=req.include_booking_link,
+                )
             sent += 1
         except Exception as e:
             errors += 1

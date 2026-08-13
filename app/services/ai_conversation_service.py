@@ -101,6 +101,7 @@ CRITICAL RULES:
 
 TONE: {tone_instruction}
 TOUCH ANGLE: {touch_angle_instruction}
+{offer_hook_line}
 
 ADVISOR: {advisor_name}
 ORGANIZATION: {org_name}
@@ -386,6 +387,29 @@ def generate_touch_email(
 
     direction = ai_direction.strip() if ai_direction and ai_direction.strip() else "(none — follow relationship context and tone)"
 
+    # Pull offer/campaign context from lead's custom_fields if present
+    cf = {}
+    try:
+        cf = json.loads(lead.custom_fields or "{}") if lead.custom_fields else {}
+    except Exception:
+        cf = {}
+    offer_hook = cf.get("offer_hook")
+    campaign_purpose = cf.get("campaign_purpose")
+    OFFER_HOOK_LABELS = {
+        "lunch_and_learn": "Lunch & Learn event (invite them, no pressure)",
+        "free_tour": "Free funeral home tour (low-commitment, educational visit)",
+        "free_space": "Complimentary cemetery space consultation",
+        "family_service_consult": "Free Family Service consultation",
+        "custom": None,
+    }
+    offer_desc = OFFER_HOOK_LABELS.get(offer_hook) if offer_hook else None
+    if offer_desc:
+        offer_hook_line = f"OFFER HOOK: Weave this into the message naturally — {offer_desc}. Don't make it the entire email; just offer it as a low-pressure option."
+    elif offer_hook and offer_hook != "none":
+        offer_hook_line = f"OFFER HOOK: {offer_hook}"
+    else:
+        offer_hook_line = ""
+
     org_name = _get_org_name(db, advisor)
     system = SMART_SYSTEM_PROMPT.format(
         relationship_context=relationship_context,
@@ -393,6 +417,7 @@ def generate_touch_email(
         appt_label=appt_label,
         tone_instruction=TONE_MAP.get(tone, TONE_MAP["warm"]),
         touch_angle_instruction=TOUCH_ANGLE_MAP.get(angle, ""),
+        offer_hook_line=offer_hook_line,
         advisor_name=advisor.full_name or "Your Advisor",
         org_name=org_name,
         first_name=lead.first_name or "",

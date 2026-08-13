@@ -50,7 +50,12 @@ export default function Leads() {
   const [sourceYear, setSourceYear] = useState('')
   const [importRelationshipType, setImportRelationshipType] = useState('cold_lead')
   const [importListName, setImportListName] = useState('')
+  const [importCampaignPurpose, setImportCampaignPurpose] = useState('')
+  const [importOfferHook, setImportOfferHook] = useState('')
   const [forceNewInquiry, setForceNewInquiry] = useState(false)
+  const [batchFilter, setBatchFilter] = useState('')   // filter leads by import_list_name
+  const [bulkAiStarting, setBulkAiStarting] = useState(false)
+  const [bulkAiStartResult, setBulkAiStartResult] = useState(null)
   const [view, setView] = useState('all')
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
   const [showImport, setShowImport] = useState(false)
@@ -109,7 +114,7 @@ export default function Leads() {
   const [dedupeResult, setDedupeResult] = useState(null)
 
   function loadImportBatches() {
-    if (!canManageBatches) return
+    // All advisors load batches (needed for batch filter dropdown)
     setBatchesLoading(true)
     api.get('/leads/import-batches').then(setImportBatches).catch(() => {}).finally(() => setBatchesLoading(false))
   }
@@ -143,11 +148,14 @@ export default function Leads() {
     }
   }
 
-  function loadLeads() {
+  function loadLeads(filterBatch) {
     setLoading(true)
     setLoadError(null)
+    // filterBatch may be passed directly (e.g. from batch filter change); fall back to state
+    const activeBatch = filterBatch !== undefined ? filterBatch : batchFilter
+    const batchParam = activeBatch ? `&import_list_name=${encodeURIComponent(activeBatch)}` : ''
     Promise.all([
-      api.get('/leads/?page=1&page_size=500'),
+      api.get(`/leads/?page=1&page_size=500${batchParam}`),
       api.get('/leads/needs-review?page=1&page_size=500'),
     ]).then(([leadsData, reviewData]) => {
       // Both endpoints return a paginated envelope {items, total, page, page_size}.
@@ -196,6 +204,8 @@ export default function Leads() {
       if (sourceYear) formData.append('source_year', sourceYear)
       if (importRelationshipType) formData.append('relationship_type', importRelationshipType)
       if (importListName.trim()) formData.append('import_list_name', importListName.trim())
+      if (importCampaignPurpose) formData.append('campaign_purpose', importCampaignPurpose)
+      if (importOfferHook) formData.append('offer_hook', importOfferHook)
       if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/preview', formData)
       setPreview(result)
@@ -215,6 +225,8 @@ export default function Leads() {
       if (sourceYear) formData.append('source_year', sourceYear)
       if (importRelationshipType) formData.append('relationship_type', importRelationshipType)
       if (importListName.trim()) formData.append('import_list_name', importListName.trim())
+      if (importCampaignPurpose) formData.append('campaign_purpose', importCampaignPurpose)
+      if (importOfferHook) formData.append('offer_hook', importOfferHook)
       if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/confirm', formData)
       setPreview(null)
@@ -396,6 +408,27 @@ export default function Leads() {
       alert(`Bulk send failed: ${err.message}`)
     } finally {
       setBulkSending(false)
+    }
+  }
+
+  async function handleBulkAiStart() {
+    if (selected.size === 0) return
+    const count = selected.size
+    if (!window.confirm(`Start AI conversations on ${count} lead${count === 1 ? '' : 's'}?\n\nThis will send the first AI outreach message to each lead immediately. Leads that are already active or on DNC will be skipped.`)) return
+    setBulkAiStarting(true)
+    setBulkAiStartResult(null)
+    try {
+      const result = await api.post('/ai-conversation/bulk-start', {
+        lead_ids: Array.from(selected),
+        channel: 'auto',  // routes by each lead's contact_channel
+      })
+      setBulkAiStartResult(result)
+      setSelected(new Set())
+      loadLeads()
+    } catch (err) {
+      setBulkAiStartResult({ error: err.message || 'Bulk AI start failed.' })
+    } finally {
+      setBulkAiStarting(false)
     }
   }
 
@@ -614,6 +647,33 @@ export default function Leads() {
               <option value="past_customer">🤝 Past customers</option>
               <option value="existing_customer">⭐ Existing customers</option>
             </select>
+            <select
+              value={importCampaignPurpose}
+              onChange={(e) => setImportCampaignPurpose(e.target.value)}
+              className="filter-select"
+              title="Campaign purpose — AI uses this to set the right message goal"
+            >
+              <option value="">🎯 Campaign purpose (optional)</option>
+              <option value="file_review">📁 File review / reconnect</option>
+              <option value="markers">🪦 Markers / memorials</option>
+              <option value="pre_need">📋 Pre-need planning</option>
+              <option value="at_need_followup">💙 At-need follow-up</option>
+              <option value="upsell_existing">⭐ Existing client upsell</option>
+              <option value="event_invite">🎟 Event invitation</option>
+              <option value="re_engagement">🔄 Re-engagement / check-in</option>
+            </select>
+            <select
+              value={importOfferHook}
+              onChange={(e) => setImportOfferHook(e.target.value)}
+              className="filter-select"
+              title="Offer hook — AI will naturally weave this into outreach messages"
+            >
+              <option value="">🎁 Offer hook (optional)</option>
+              <option value="lunch_and_learn">🍽 Lunch & Learn event</option>
+              <option value="free_tour">🚪 Free funeral home tour</option>
+              <option value="free_space">🌿 Free space consultation</option>
+              <option value="family_service_consult">🤝 Free Family Service consult</option>
+            </select>
             <label className="compose-checkbox">
               <input
                 type="checkbox"
@@ -808,6 +868,23 @@ export default function Leads() {
           <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             {STATUS_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
+          {importBatches.length > 0 && (
+            <select
+              className="filter-select"
+              value={batchFilter}
+              onChange={(e) => { setBatchFilter(e.target.value); loadLeads(e.target.value) }}
+              title="Filter by import batch / list name"
+              style={{ maxWidth: 220 }}
+            >
+              <option value="">📦 All batches</option>
+              {importBatches.map((b) => (
+                <option key={b.source_file} value={b.import_list_name || b.source_file}>
+                  {b.import_list_name || b.source_file}
+                  {b.lead_count ? ` (${b.lead_count})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <span className="leads-count-pill">{filteredLeads.length} shown</span>
         </div>
       </div>
@@ -838,6 +915,21 @@ export default function Leads() {
         <div className="leads-bulk-result">
           ✓ Reassigned: {bulkAssignResult.reassigned_count}
           {bulkAssignResult.skipped_count > 0 && ` · Skipped: ${bulkAssignResult.skipped_count}`}
+        </div>
+      )}
+
+      {bulkAiStartResult && (
+        <div className={`leads-bulk-result`} style={{
+          background: bulkAiStartResult.error ? 'rgba(255,77,77,0.12)' : 'rgba(124,58,237,0.12)',
+          color: bulkAiStartResult.error ? 'var(--signal-red)' : '#7c3aed',
+          border: `1px solid ${bulkAiStartResult.error ? 'var(--signal-red)' : '#7c3aed'}`,
+          marginBottom: 8,
+        }}>
+          {bulkAiStartResult.error
+            ? `⚠️ ${bulkAiStartResult.error}`
+            : `🤖 AI started on ${bulkAiStartResult.started} lead${bulkAiStartResult.started === 1 ? '' : 's'}${bulkAiStartResult.skipped > 0 ? ` · ${bulkAiStartResult.skipped} skipped (already active or DNC)` : ''}${bulkAiStartResult.errors > 0 ? ` · ${bulkAiStartResult.errors} errors` : ''}`
+          }
+          <button style={{ marginLeft: 12, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, fontSize: 12 }} onClick={() => setBulkAiStartResult(null)}>✕</button>
         </div>
       )}
 
@@ -1144,6 +1236,15 @@ export default function Leads() {
               onClick={() => setShowVoiceCampaign(true)}
             >
               📞 AI Call Campaign
+            </button>
+            <button
+              className="btn btn--primary"
+              style={{ background: '#7c3aed', borderColor: '#7c3aed', fontSize: 12 }}
+              onClick={handleBulkAiStart}
+              disabled={bulkAiStarting}
+              title="Start AI email/SMS conversations on all selected leads at once (up to 500)"
+            >
+              {bulkAiStarting ? '⏳ Starting AI…' : `🤖 Start AI on ${selectedCount}`}
             </button>
             <button
               className={`btn ${showBulkCompose ? 'btn--secondary' : 'btn--primary'}`}
