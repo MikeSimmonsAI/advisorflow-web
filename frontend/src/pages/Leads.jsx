@@ -121,11 +121,11 @@ export default function Leads() {
     setLoading(true)
     setLoadError(null)
     Promise.all([
-      api.get('/leads/?page=1&page_size=100'),
-      api.get('/leads/needs-review?page=1&page_size=100'),
+      api.get('/leads/?page=1&page_size=500'),
+      api.get('/leads/needs-review?page=1&page_size=500'),
     ]).then(([leadsData, reviewData]) => {
-      // Both endpoints now return a paginated envelope {items, total, page, page_size}.
-      // Fall back to the raw value for backward-compatibility during deploys.
+      // Both endpoints return a paginated envelope {items, total, page, page_size}.
+      // Fall back to raw array for backward-compatibility during rolling deploys.
       setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items ?? []))
       setNeedsReview(Array.isArray(reviewData) ? reviewData : (reviewData.items ?? []))
       setLoading(false)

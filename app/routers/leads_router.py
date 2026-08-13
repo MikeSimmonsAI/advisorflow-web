@@ -309,15 +309,40 @@ def list_leads(
     tier: Optional[str] = Query(None),
     message_track: Optional[str] = Query(None),
     temperature: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Advisors see only their own leads. org_admin/super_admin see all org leads.
-    Filter by tier, message_track, or temperature (hot/warm/cold/unknown).
+    Returns a lean payload — only columns needed by the list view, no large
+    text blobs (notes, ai_quality_note, custom_fields). This keeps the Leads
+    page fast even with thousands of leads.
     """
     is_manager = current_user.role in ("org_admin", "super_admin")
-    query = db.query(Lead).filter(Lead.organization_id == current_user.organization_id)
+
+    # Select only the columns the list view needs — avoids loading large text
+    # fields (notes, ai_lead_quality_note, custom_fields, extra_data) and
+    # prevents SQLAlchemy lazy-loading relationships causing N+1 queries.
+    COLS = [
+        Lead.id, Lead.first_name, Lead.last_name, Lead.phone, Lead.email,
+        Lead.status, Lead.tier, Lead.message_track, Lead.source_file,
+        Lead.source_year, Lead.is_duplicate, Lead.assigned_to_id,
+        Lead.engagement_temperature, Lead.relationship_type,
+        Lead.contact_channel, Lead.import_list_name, Lead.created_at,
+        Lead.organization_id, Lead.case_status,
+    ]
+    COL_NAMES = [
+        "id", "first_name", "last_name", "phone", "email",
+        "status", "tier", "message_track", "source_file",
+        "source_year", "is_duplicate", "assigned_to_id",
+        "engagement_temperature", "relationship_type",
+        "contact_channel", "import_list_name", "created_at",
+        "organization_id", "case_status",
+    ]
+
+    query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)
     if not is_manager:
         query = query.filter(Lead.assigned_to_id == current_user.id)
     if status_filter:
@@ -328,12 +353,30 @@ def list_leads(
         query = query.filter(Lead.message_track == message_track)
     if temperature:
         query = query.filter(Lead.engagement_temperature == temperature)
-    leads = query.order_by(Lead.created_at.desc()).all()
-    return leads
+
+    total = query.count()
+    rows = (
+        query
+        .order_by(Lead.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = []
+    for row in rows:
+        d = dict(zip(COL_NAMES, row))
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        items.append(d)
+
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/needs-review")
 def leads_needing_tier_review(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -342,12 +385,36 @@ def leads_needing_tier_review(
     These are held out of any SMS queue until a real tier is assigned -
     they are NOT defaulted to Pre-Need.
     """
-    leads = db.query(Lead).filter(
+    COLS = [
+        Lead.id, Lead.first_name, Lead.last_name, Lead.phone, Lead.email,
+        Lead.status, Lead.tier, Lead.message_track, Lead.source_file,
+        Lead.source_year, Lead.is_duplicate, Lead.assigned_to_id,
+        Lead.engagement_temperature, Lead.relationship_type,
+        Lead.contact_channel, Lead.import_list_name, Lead.created_at,
+        Lead.organization_id, Lead.case_status,
+    ]
+    COL_NAMES = [
+        "id", "first_name", "last_name", "phone", "email",
+        "status", "tier", "message_track", "source_file",
+        "source_year", "is_duplicate", "assigned_to_id",
+        "engagement_temperature", "relationship_type",
+        "contact_channel", "import_list_name", "created_at",
+        "organization_id", "case_status",
+    ]
+    query = db.query(*COLS).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
         Lead.status == "needs_tier_review",
-    ).order_by(Lead.created_at.desc()).all()
-    return leads
+    )
+    total = query.count()
+    rows = query.order_by(Lead.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = []
+    for row in rows:
+        d = dict(zip(COL_NAMES, row))
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        items.append(d)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.patch("/{lead_id}/tier")
