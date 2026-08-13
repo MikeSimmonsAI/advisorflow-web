@@ -909,11 +909,12 @@ export default function Leads() {
 
       {selectedCount > 0 && (
         <div style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
+          position: 'fixed', bottom: 0, left: 240, right: 0, zIndex: 200,
           display: 'flex', flexDirection: 'column',
-          boxShadow: '0 -4px 24px rgba(0,0,0,0.18)',
-          background: 'var(--surface-raised, #1e2235)',
-          borderTop: '1px solid var(--border-subtle)',
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.35)',
+          background: 'linear-gradient(180deg, rgba(10,20,46,0.98) 0%, rgba(5,10,24,0.99) 100%)',
+          borderTop: '2px solid var(--signal-blue)',
+          backdropFilter: 'blur(20px)',
         }}>
           {/* Expanded compose drawer — unified panel (no tabs, mirrors individual lead compose) */}
           {showBulkCompose && (
@@ -1076,31 +1077,37 @@ export default function Leads() {
           )}
 
           {/* Bottom action bar (always visible when leads selected) */}
-          <div className="leads-bulk-bar" style={{ position: 'static', boxShadow: 'none', borderTop: 'none' }}>
-            <span className="leads-bulk-count">{selectedCount} selected</span>
-            <button className="btn btn--secondary leads-bulk-clear" onClick={() => { setSelected(new Set()); setShowBulkCompose(false) }}>Clear</button>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '12px 24px', flexWrap: 'wrap',
+          }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--signal-blue)', marginRight: 4 }}>
+              {selectedCount} selected
+            </span>
+            <button className="btn btn--secondary leads-bulk-clear" style={{ fontSize: 12 }} onClick={() => { setSelected(new Set()); setShowBulkCompose(false) }}>Deselect all</button>
             {canBulkAssign && (
-              <button className="btn btn--secondary" onClick={() => setShowBulkAssign(true)}>👤 Assign…</button>
+              <button className="btn btn--secondary" style={{ fontSize: 12 }} onClick={() => setShowBulkAssign(true)}>👤 Assign…</button>
             )}
             <button
               className="btn btn--danger"
-              style={{ background: 'var(--signal-red)', color: '#fff', border: 'none' }}
+              style={{ background: 'var(--signal-red)', color: '#fff', border: 'none', fontSize: 12 }}
               onClick={handleDeleteSelected}
             >
               🗑 Delete ({selectedCount})
             </button>
             <button
-              className={`btn ${showBulkCompose ? 'btn--secondary' : 'btn--primary'}`}
-              onClick={() => { setShowBulkCompose(v => !v); setAiResult(null); setBulkResult(null) }}
-            >
-              ✉️ {showBulkCompose ? '▼ Close compose' : '▲ Compose & Send'}
-            </button>
-            <button
               className="btn btn--primary"
-              style={{ background: '#16a34a', borderColor: '#16a34a' }}
+              style={{ background: '#16a34a', borderColor: '#16a34a', fontSize: 12 }}
               onClick={() => setShowVoiceCampaign(true)}
             >
               📞 AI Call Campaign
+            </button>
+            <button
+              className={`btn ${showBulkCompose ? 'btn--secondary' : 'btn--primary'}`}
+              style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 700, minWidth: 180 }}
+              onClick={() => { setShowBulkCompose(v => !v); setAiResult(null); setBulkResult(null) }}
+            >
+              ✉️ {showBulkCompose ? '▼ Close compose' : `▲ Compose & Send (${selectedCount})`}
             </button>
           </div>
         </div>

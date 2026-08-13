@@ -243,73 +243,90 @@ export default function EmailQueue() {
 
   const currentTone = TONE_OPTIONS.find(t => t.key === tone) || TONE_OPTIONS[1]
 
+  const STATS = [
+    { key: 'total', label: 'In queue',       value: counts.total, color: 'var(--text-primary)',   dot: 'rgba(255,255,255,0.3)', icon: '📬' },
+    { key: 'cold',  label: 'Cold',            value: counts.cold,  color: 'var(--signal-blue)',   dot: 'var(--signal-blue)',  icon: '❄️' },
+    { key: 'warm',  label: 'Warm',            value: counts.warm,  color: 'var(--signal-amber)',  dot: 'var(--signal-amber)', icon: '☀️' },
+    { key: 'hot',   label: 'Replied/Booked',  value: counts.hot,   color: 'var(--signal-green)',  dot: 'var(--signal-green)', icon: '🔥' },
+  ]
+
   return (
     <div style={{ paddingBottom: composeOpen ? 520 : selected.size > 0 ? 72 : 0 }}>
-      <header className="page-header">
-        <div>
-          <h1 className="page-title">Email queue</h1>
-          <p className="page-subtitle">
-            Select leads below, then click <strong>✉️ Compose & Send</strong> to write your message and send to the whole group.
-            Or use ✨ Draft on a single lead for AI-generated options.
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <div className="eq-page-header">
+        <div className="eq-page-header-left">
+          <div className="eq-page-title-row">
+            <h1 className="page-title" style={{ margin: 0 }}>Email queue</h1>
+            {!loading && (
+              <span className="eq-queue-badge">{counts.total} leads</span>
+            )}
+          </div>
+          <p className="page-subtitle" style={{ marginTop: 6 }}>
+            Check the boxes to select leads, then hit <span className="eq-inline-chip">✉️ Compose &amp; Send</span> to write and send your campaign.
+            For a single lead, use <span className="eq-inline-chip">✨ Draft</span> to get AI-personalized options.
           </p>
         </div>
-      </header>
+      </div>
 
-      {/* KPI row */}
-      <div className="eq-kpi-row">
-        {[
-          { label: 'Total in queue',          value: counts.total, color: 'var(--text-primary)' },
-          { label: 'Cold — never contacted',  value: counts.cold,  color: 'var(--signal-blue)' },
-          { label: 'Warm — emailed once',     value: counts.warm,  color: 'var(--signal-amber)' },
-          { label: 'Hot — replied or booked', value: counts.hot,   color: 'var(--signal-red)' },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="panel eq-kpi-card">
-            <span className="eq-kpi-label">{label}</span>
-            <strong className="eq-kpi-value" style={{ color }}>{loading ? '—' : value}</strong>
+      {/* ── Unified stats strip ───────────────────────────────────────── */}
+      <div className="panel eq-stats-strip">
+        {STATS.map((s, i) => (
+          <div key={s.key} className="eq-stat-segment" style={{ '--stat-color': s.color, '--stat-dot': s.dot }}>
+            <div className="eq-stat-icon">{s.icon}</div>
+            <strong className="eq-stat-value">{loading ? '—' : s.value}</strong>
+            <span className="eq-stat-label">{s.label}</span>
+            {i < STATS.length - 1 && <div className="eq-stat-divider" />}
           </div>
         ))}
+
+        {/* Mismatch segment — only when present */}
         {!loading && counts.mismatch > 0 && (
-          <div
-            className="panel eq-kpi-card eq-kpi-card--mismatch"
-            onClick={() => setShowMismatchOnly((v) => !v)}
-            title="Click to filter to mismatched leads only"
-            style={{ cursor: 'pointer', borderColor: showMismatchOnly ? '#c0392b' : undefined }}
-          >
-            <span className="eq-kpi-label">⚠️ Name/email mismatch</span>
-            <strong className="eq-kpi-value" style={{ color: '#c0392b' }}>{counts.mismatch}</strong>
-            <span style={{ fontSize: 10, color: '#c0392b', marginTop: 2 }}>
-              {showMismatchOnly ? 'Showing mismatches · click to clear' : 'Click to review'}
-            </span>
-          </div>
+          <>
+            <div className="eq-stat-divider eq-stat-divider--standalone" />
+            <div
+              className="eq-stat-segment eq-stat-segment--warn"
+              onClick={() => setShowMismatchOnly((v) => !v)}
+              title="Click to filter to mismatched leads only"
+              style={{ '--stat-color': 'var(--signal-red)', '--stat-dot': 'var(--signal-red)', cursor: 'pointer' }}
+            >
+              <div className="eq-stat-icon">⚠️</div>
+              <strong className="eq-stat-value">{counts.mismatch}</strong>
+              <span className="eq-stat-label" style={{ color: 'var(--signal-red)' }}>
+                {showMismatchOnly ? 'Mismatch · clear ×' : 'Mismatch'}
+              </span>
+            </div>
+          </>
         )}
       </div>
 
-      {/* AI settings panel (for per-lead drafts) */}
-      <div className="panel eq-tone-panel">
-        <div className="eq-tone-header">
-          <span className="eq-tone-title">AI message settings</span>
-          <span className="eq-tone-desc">Tone used for AI drafts (single-lead ✨ Draft and batch AI Draft)</span>
+      {/* ── AI controls bar ───────────────────────────────────────────── */}
+      <div className="panel eq-controls-bar">
+        <div className="eq-controls-left">
+          <span className="eq-controls-label">✨ AI tone</span>
+          <div className="eq-controls-pills">
+            {TONE_OPTIONS.map((t) => (
+              <button
+                key={t.key}
+                className={`lead-tone-pill ${tone === t.key ? 'lead-tone-pill--active' : ''}`}
+                onClick={() => setTone(t.key)}
+                title={t.desc}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <span className="eq-tone-hint">{currentTone.desc}</span>
         </div>
-        <div className="eq-tone-pills">
-          {TONE_OPTIONS.map((t) => (
-            <button
-              key={t.key}
-              className={`lead-tone-pill ${tone === t.key ? 'lead-tone-pill--active' : ''}`}
-              onClick={() => setTone(t.key)}
-              title={t.desc}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="eq-controls-right">
+          <span className="eq-controls-label">Campaign direction</span>
+          <input
+            className="settings-input eq-direction-input"
+            placeholder="e.g. file check — ask if they still need pre-need planning"
+            value={aiDirection}
+            onChange={(e) => setAiDirection(e.target.value)}
+          />
         </div>
-        <p className="settings-help" style={{ marginTop: 6 }}>{currentTone.desc}</p>
-        <input
-          className="settings-input"
-          style={{ marginTop: 10 }}
-          placeholder="AI direction (optional): e.g. file check — ask if they still need pre-need planning"
-          value={aiDirection}
-          onChange={(e) => setAiDirection(e.target.value)}
-        />
       </div>
 
       {batchResult && (
