@@ -884,6 +884,76 @@ def bulk_delete_duplicate_leads(
     return {"deleted": count, "message": f"Permanently deleted {count} duplicate leads."}
 
 
+# ── Deduplicate email-only leads that slipped past the original dedup ──────
+@router.post("/deduplicate-email-leads")
+def deduplicate_email_leads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    One-time (and safe to re-run) cleanup: finds email-only leads in this
+    org where the same (email + last_name) pair appears more than once, keeps
+    the oldest record, and marks all later duplicates as is_duplicate=True
+    with status=dnc — exactly what the importer now does on new uploads.
+
+    Does NOT delete anything — just flags. After reviewing, the advisor can
+    call DELETE /leads/duplicates/bulk-delete to permanently remove them.
+    Requires org_admin or super_admin.
+    """
+    if current_user.role not in ("org_admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Admin role required.")
+
+    from sqlalchemy import func as sqlfunc
+
+    # Pull all email-only leads for this org that have a real email and last name
+    email_leads = (
+        db.query(Lead)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.contact_channel == "email_only",
+            Lead.email.isnot(None),
+            Lead.last_name.isnot(None),
+        )
+        .order_by(Lead.created_at.asc())  # oldest first → we keep the first one
+        .all()
+    )
+
+    # Group by (normalized_email, normalized_last_name)
+    seen: dict = {}  # key -> first (oldest) lead id
+    flagged_ids = []
+
+    for lead in email_leads:
+        norm_email = (lead.email or "").strip().lower()
+        norm_last  = "".join(c for c in (lead.last_name or "").lower() if c.isalpha())
+        key = (norm_email, norm_last)
+
+        if not norm_email or not norm_last:
+            continue
+
+        if key in seen:
+            # This is a duplicate of the first record we saw for this key
+            if not lead.is_duplicate:
+                lead.is_duplicate = True
+                lead.duplicate_of_lead_id = seen[key]
+                lead.status = "dnc"
+                flagged_ids.append(lead.id)
+        else:
+            seen[key] = lead.id
+
+    db.commit()
+
+    return {
+        "scanned": len(email_leads),
+        "newly_flagged": len(flagged_ids),
+        "message": (
+            f"Flagged {len(flagged_ids)} email-only duplicate leads. "
+            "Call DELETE /leads/duplicates/bulk-delete to permanently remove them."
+            if flagged_ids else
+            "No new email-only duplicates found — list is already clean."
+        ),
+    }
+
+
 # ── PUBLIC: Landing page demo request (no auth required) ──────────────────
 class DemoRequestCreate(BaseModel):
     first_name: str

@@ -41,9 +41,10 @@ Last Activity/Note, Street Address, City, State, ZIP Code, etc.
 
 import json
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Lead, LeadTier
-from app.services.dedup_service import check_and_register, normalize_phone
+from app.services.dedup_service import check_and_register, normalize_phone, normalize_last_name
 
 HEADER_MAP = {
     "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name", "given name"],
@@ -237,6 +238,10 @@ def import_leads_from_excel(
     email_only_count = 0
     tier_counts = {}
 
+    # Within-batch dedup sets (catch duplicates inside the same uploaded file)
+    seen_phone_keys: set = set()   # (norm_phone, norm_last_name)
+    seen_email_keys: set = set()   # (norm_email, norm_last_name) for email-only leads
+
     for row in rows:
         phone_norm = normalize_phone(row["phone"])
         has_email = bool(row["email"])
@@ -304,31 +309,72 @@ def import_leads_from_excel(
 
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
-        # Dedup only applies to phone-based leads - email-only leads don't
-        # have a phone to check against the registry.
+        # ── Dedup: phone-based leads use ContactRegistry ──────────────────
         if phone_norm:
-            is_dup, registry_entry = check_and_register(
-                db,
-                organization_id=organization_id,
-                phone_raw=row["phone"],
-                last_name_raw=row["last_name"],
-                lead_id=lead.id,
-                user_id=uploading_user_id,
-            )
-            if call_restricted:
-                lead.status = "dnc"
-                flagged_call_restricted += 1
-            elif is_dup:
+            phone_key = (phone_norm, normalize_last_name(row["last_name"]))
+            if phone_key in seen_phone_keys:
+                # Duplicate within this same file — mark and skip
                 lead.is_duplicate = True
-                lead.duplicate_of_lead_id = registry_entry.first_seen_lead_id
-                lead.status = "dnc"  # someone already owns this relationship
+                lead.status = "dnc"
                 duplicate_count += 1
             else:
-                lead.status = (
-                    "needs_tier_review" if tier == "partial" else "new"
+                seen_phone_keys.add(phone_key)
+                is_dup, registry_entry = check_and_register(
+                    db,
+                    organization_id=organization_id,
+                    phone_raw=row["phone"],
+                    last_name_raw=row["last_name"],
+                    lead_id=lead.id,
+                    user_id=uploading_user_id,
                 )
+                if call_restricted:
+                    lead.status = "dnc"
+                    flagged_call_restricted += 1
+                elif is_dup:
+                    lead.is_duplicate = True
+                    lead.duplicate_of_lead_id = registry_entry.first_seen_lead_id
+                    lead.status = "dnc"  # someone already owns this relationship
+                    duplicate_count += 1
+                else:
+                    lead.status = (
+                        "needs_tier_review" if tier == "partial" else "new"
+                    )
+
+        # ── Dedup: email-only leads — check by normalized email + last name ─
         else:
-            lead.status = "new"  # queued for email outreach, not SMS
+            norm_email = (row["email"] or "").strip().lower()
+            norm_last  = normalize_last_name(row["last_name"])
+            email_key  = (norm_email, norm_last)
+
+            if norm_email and email_key in seen_email_keys:
+                # Duplicate within this same file
+                lead.is_duplicate = True
+                lead.status = "dnc"
+                duplicate_count += 1
+            elif norm_email:
+                seen_email_keys.add(email_key)
+                # Check the database for an existing lead with same email+last_name in this org
+                from app.models.models import Lead as LeadModel
+                existing_email_lead = (
+                    db.query(LeadModel)
+                    .filter(
+                        LeadModel.organization_id == organization_id,
+                        func.lower(LeadModel.email) == norm_email,
+                        func.lower(LeadModel.last_name) == norm_last,
+                        LeadModel.id != lead.id,  # exclude the row we just flushed
+                        LeadModel.is_duplicate.is_(False),
+                    )
+                    .first()
+                )
+                if existing_email_lead:
+                    lead.is_duplicate = True
+                    lead.duplicate_of_lead_id = existing_email_lead.id
+                    lead.status = "dnc"
+                    duplicate_count += 1
+                else:
+                    lead.status = "new"  # queued for email outreach
+            else:
+                lead.status = "new"  # no email either — unusual but let it through
 
         created_leads.append(lead)
 

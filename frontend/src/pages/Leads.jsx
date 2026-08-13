@@ -105,11 +105,28 @@ export default function Leads() {
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // batch object awaiting confirm
   const canManageBatches = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
   const [deletingLeads, setDeletingLeads] = useState(false)
+  const [dedupeRunning, setDedupeRunning] = useState(false)
+  const [dedupeResult, setDedupeResult] = useState(null)
 
   function loadImportBatches() {
     if (!canManageBatches) return
     setBatchesLoading(true)
     api.get('/leads/import-batches').then(setImportBatches).catch(() => {}).finally(() => setBatchesLoading(false))
+  }
+
+  async function handleDedupeEmailLeads() {
+    if (!window.confirm('Scan all email-only leads and flag duplicates (same name + email address)?\n\nThis is safe — nothing gets deleted, just flagged. You can review and then bulk-delete the flagged ones.')) return
+    setDedupeRunning(true)
+    setDedupeResult(null)
+    try {
+      const result = await api.post('/leads/deduplicate-email-leads', {})
+      setDedupeResult(result)
+      loadLeads()
+    } catch (err) {
+      setDedupeResult({ error: err.message })
+    } finally {
+      setDedupeRunning(false)
+    }
   }
 
   async function handleDeleteBatch(batch) {
@@ -673,8 +690,34 @@ export default function Leads() {
             <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>📋 Import history</span>
-                <button className="btn btn--ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={loadImportBatches}>↻ Refresh</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn--secondary"
+                    style={{ fontSize: 12, padding: '3px 12px' }}
+                    onClick={handleDedupeEmailLeads}
+                    disabled={dedupeRunning}
+                    title="Finds and flags email-only leads that share the same name + email address"
+                  >
+                    {dedupeRunning ? '⏳ Scanning…' : '🧹 Clean up email dupes'}
+                  </button>
+                  <button className="btn btn--ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={loadImportBatches}>↻ Refresh</button>
+                </div>
               </div>
+              {dedupeResult && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13,
+                  background: dedupeResult.error ? 'var(--signal-red-dim)' : 'var(--signal-green-dim)',
+                  color: dedupeResult.error ? 'var(--signal-red)' : 'var(--signal-green)',
+                  border: `1px solid ${dedupeResult.error ? 'var(--signal-red)' : 'var(--signal-green)'}`,
+                }}>
+                  {dedupeResult.error ? `⚠️ ${dedupeResult.error}` : `✓ ${dedupeResult.message}`}
+                  {!dedupeResult.error && dedupeResult.newly_flagged > 0 && (
+                    <span style={{ marginLeft: 12, fontSize: 12, opacity: 0.85 }}>
+                      Now use "Duplicates" tab to bulk-delete them.
+                    </span>
+                  )}
+                </div>
+              )}
               {batchesLoading && <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading…</div>}
               {!batchesLoading && importBatches.length === 0 && (
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No import batches found.</div>
