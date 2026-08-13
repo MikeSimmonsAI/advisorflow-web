@@ -76,9 +76,10 @@ export default function Leads() {
   const [aiActioning, setAiActioning] = useState(null) // null | 'queue' | 'send_sms' | 'send_email' | 'send_both'
   const [aiResult, setAiResult] = useState(null)
   const [showBulkCompose, setShowBulkCompose] = useState(false)
-  const [bulkComposeTab, setBulkComposeTab] = useState('ai') // 'ai' | 'manual'
   const [bulkAiDirection, setBulkAiDirection] = useState('')
   const [bulkRelationshipType, setBulkRelationshipType] = useState('')
+  const [bulkAiGenerating, setBulkAiGenerating] = useState(false)
+  const [bulkAiError, setBulkAiError] = useState('')
   // Phase 4: media attach for batch sends
   const [bulkMediaUrl, setBulkMediaUrl] = useState('')
   const [bulkMediaUploading, setBulkMediaUploading] = useState(false)
@@ -290,6 +291,30 @@ export default function Leads() {
       setAiResult({ error: err.message })
     } finally {
       setAiActioning(null)
+    }
+  }
+
+  // AI generate: preview from first selected lead → fills textarea for review/edit
+  async function handleBulkAiGenerate() {
+    const firstId = sendableSelectedIds[0]
+    if (!firstId) return
+    setBulkAiGenerating(true)
+    setBulkAiError('')
+    try {
+      const result = await api.post('/ai-conversation/preview', {
+        lead_id: firstId,
+        tone: aiTone,
+        ai_direction: bulkAiDirection.trim() || null,
+      })
+      if (result.message) {
+        setBulkMessage(result.message)
+      } else {
+        setBulkAiError('AI returned no message.')
+      }
+    } catch (err) {
+      setBulkAiError(err.message || 'AI generate failed')
+    } finally {
+      setBulkAiGenerating(false)
     }
   }
 
@@ -884,177 +909,163 @@ export default function Leads() {
           background: 'var(--surface-raised, #1e2235)',
           borderTop: '1px solid var(--border-subtle)',
         }}>
-          {/* Expanded compose drawer */}
+          {/* Expanded compose drawer — unified panel (no tabs, mirrors individual lead compose) */}
           {showBulkCompose && (
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', maxHeight: '60vh', overflowY: 'auto' }}>
-              {/* Tab switcher */}
-              <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
-                {[
-                  { key: 'ai', label: '✨ AI Message' },
-                  { key: 'manual', label: '📝 Write your own' },
-                ].map(tab => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setBulkComposeTab(tab.key)}
-                    style={{
-                      padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                      background: 'none', border: 'none',
-                      borderBottom: bulkComposeTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
-                      color: bulkComposeTab === tab.key ? 'var(--accent)' : 'var(--text-secondary)',
-                      marginBottom: -1,
-                    }}
-                  >{tab.label}</button>
-                ))}
-                <div style={{ flex: 1 }} />
-                <span style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 0', alignSelf: 'center' }}>
-                  {sendableSelectedIds.length} sendable of {selectedCount} selected
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', maxHeight: '65vh', overflowY: 'auto' }}>
+              {/* Header row */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>
+                  ✉️ Compose message — {sendableSelectedIds.length} sendable of {selectedCount} selected
                 </span>
+                <button
+                  onClick={() => setShowBulkCompose(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-tertiary)', lineHeight: 1 }}
+                >✕</button>
               </div>
 
-              {/* Branch 1: AI Message */}
-              {bulkComposeTab === 'ai' && (
-                <div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', alignSelf: 'center', minWidth: 80 }}>Relationship</span>
-                    {[
-                      { value: '', label: '🔵 Default' },
-                      { value: 'cold_lead', label: '❄️ Cold' },
-                      { value: 'warm_lead', label: '☀️ Warm' },
-                      { value: 're_engagement', label: '🔄 Re-engage' },
-                      { value: 'previous_prospect', label: '📋 Prev. prospect' },
-                      { value: 'past_customer', label: '🤝 Past customer' },
-                      { value: 'existing_customer', label: '⭐ Existing' },
-                    ].map(r => (
-                      <button key={r.value}
-                        className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
-                        onClick={() => setBulkRelationshipType(r.value)}
-                        style={{ fontSize: 11 }}
-                      >{r.label}</button>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', alignSelf: 'center', minWidth: 80 }}>Tone</span>
-                    {[
-                      { value: 'cold', label: '❄️ Cold' },
-                      { value: 'warm', label: '☀️ Warm' },
-                      { value: 'hot', label: '🔥 Hot' },
-                      { value: 'urgent', label: '⚡ Urgent' },
-                    ].map(t => (
-                      <button key={t.value}
-                        className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
-                        onClick={() => setAiTone(t.value)}
-                        style={{ fontSize: 11 }}
-                      >{t.label}</button>
-                    ))}
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', alignSelf: 'center', marginLeft: 12 }}>Channel</span>
-                    {[
-                      { value: 'sms', label: '💬 SMS' },
-                      { value: 'email', label: '✉️ Email' },
-                      { value: 'both', label: '📡 Both' },
-                    ].map(c => (
-                      <button key={c.value}
-                        className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
-                        onClick={() => setAiChannel(c.value)}
-                        style={{ fontSize: 11 }}
-                      >{c.label}</button>
-                    ))}
-                  </div>
-                  <textarea
-                    style={{
-                      width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '8px 10px',
-                      borderRadius: 6, border: '1px solid var(--border-default)', resize: 'vertical',
-                      fontFamily: 'inherit', lineHeight: 1.5, minHeight: 56, marginBottom: 10,
-                      background: 'var(--surface-base, #161929)', color: 'var(--text-primary)',
-                    }}
-                    placeholder="AI direction (optional) — e.g. 'File check lead — ask if they still need pre-need planning'"
-                    value={bulkAiDirection}
-                    onChange={e => setBulkAiDirection(e.target.value)}
-                  />
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button
-                      className="btn btn--secondary"
-                      onClick={() => handleAiAction('queue')}
-                      disabled={!!aiActioning}
-                      style={{ flex: '1 1 160px' }}
-                    >
-                      {aiActioning === 'queue' ? '⏳ Generating…' : '📥 AI Draft & Queue for review'}
-                    </button>
-                    <button
-                      className="btn btn--primary"
-                      onClick={() => handleAiAction(aiChannel === 'email' ? 'send_email' : aiChannel === 'both' ? 'send_both' : 'send_sms')}
-                      disabled={!!aiActioning || sendableSelectedIds.length === 0}
-                      style={{ flex: '1 1 180px' }}
-                    >
-                      {aiActioning && aiActioning !== 'queue' ? '⏳ Sending…' :
-                        aiChannel === 'email' ? `✉️ AI Send Email to ${sendableSelectedIds.length}` :
-                        aiChannel === 'both' ? `📡 AI Send Both to ${sendableSelectedIds.length}` :
-                        `💬 AI Send SMS to ${sendableSelectedIds.length}`}
-                    </button>
-                  </div>
-                  <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
-                    "Draft & Queue" saves to Auto-Send Queue for your review first. "Send" fires immediately.
-                  </p>
-                  {aiResult && !aiResult.error && (
-                    <div className="leads-ai-result" style={{ marginTop: 10 }}>
-                      {aiResult.mode === 'queue'
-                        ? `✓ ${aiResult.queued} messages queued for review`
-                        : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
-                    </div>
-                  )}
-                  {aiResult?.error && <div className="compose-error">{aiResult.error}</div>}
+              {/* Tone + Channel pills row */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', minWidth: 40 }}>Tone</span>
+                {[
+                  { value: 'cold', label: '❄️ Cold' },
+                  { value: 'warm', label: '☀️ Warm' },
+                  { value: 'hot', label: '🔥 Hot' },
+                  { value: 'urgent', label: '⚡ Urgent' },
+                ].map(t => (
+                  <button key={t.value}
+                    className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
+                    onClick={() => setAiTone(t.value)}
+                    style={{ fontSize: 11 }}
+                  >{t.label}</button>
+                ))}
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', marginLeft: 10, minWidth: 52 }}>Channel</span>
+                {[
+                  { value: 'sms', label: '💬 SMS' },
+                  { value: 'email', label: '✉️ Email' },
+                  { value: 'both', label: '📡 Both' },
+                ].map(c => (
+                  <button key={c.value}
+                    className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
+                    onClick={() => setAiChannel(c.value)}
+                    style={{ fontSize: 11 }}
+                  >{c.label}</button>
+                ))}
+              </div>
+
+              {/* Relationship type row */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', minWidth: 40 }}>Type</span>
+                {[
+                  { value: '', label: '🔵 Default' },
+                  { value: 'cold_lead', label: '❄️ Cold lead' },
+                  { value: 'warm_lead', label: '☀️ Warm lead' },
+                  { value: 're_engagement', label: '🔄 Re-engage' },
+                  { value: 'previous_prospect', label: '📋 Past prospect' },
+                  { value: 'past_customer', label: '🤝 Past customer' },
+                  { value: 'existing_customer', label: '⭐ Existing' },
+                ].map(r => (
+                  <button key={r.value}
+                    className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
+                    onClick={() => setBulkRelationshipType(r.value)}
+                    style={{ fontSize: 11 }}
+                  >{r.label}</button>
+                ))}
+              </div>
+
+              {/* AI direction + generate button */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <input
+                  style={{
+                    flex: 1, fontSize: 13, padding: '7px 10px', borderRadius: 6,
+                    border: '1px solid var(--border-default)', fontFamily: 'inherit',
+                    background: 'var(--surface-base, #161929)', color: 'var(--text-primary)',
+                  }}
+                  placeholder="AI direction (optional) — e.g. file check, ask if they still need pre-need planning"
+                  value={bulkAiDirection}
+                  onChange={e => setBulkAiDirection(e.target.value)}
+                />
+                <button
+                  className="btn btn--secondary"
+                  onClick={handleBulkAiGenerate}
+                  disabled={bulkAiGenerating || sendableSelectedIds.length === 0}
+                  style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                >
+                  {bulkAiGenerating ? '⏳ Drafting…' : '✨ AI Draft'}
+                </button>
+              </div>
+              {bulkAiError && <div className="compose-error" style={{ marginBottom: 8 }}>{bulkAiError}</div>}
+              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '0 0 8px' }}>
+                "AI Draft" fills the box below using your tone + direction. Review, edit, then send.
+              </p>
+
+              {/* Message textarea */}
+              <textarea
+                className="compose-textarea"
+                placeholder="Hi {first_name}, this is… (use {first_name} to personalize)"
+                value={bulkMessage}
+                onChange={e => setBulkMessage(e.target.value)}
+                rows={4}
+                style={{ marginBottom: 10 }}
+              />
+
+              {/* Media attachment preview */}
+              {bulkMediaFileName && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+                  padding: '6px 10px', background: 'rgba(30,200,168,0.08)', borderRadius: 6,
+                  border: '1px solid rgba(30,200,168,0.25)', fontSize: 12,
+                }}>
+                  <span>📎</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bulkMediaFileName}</span>
+                  <span style={{ opacity: 0.6, fontSize: 11 }}>Will send as MMS</span>
+                  <button
+                    onClick={() => { setBulkMediaUrl(''); setBulkMediaFileName('') }}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--signal-red)', fontSize: 14 }}
+                  >✕</button>
                 </div>
               )}
 
-              {/* Branch 2: Write your own */}
-              {bulkComposeTab === 'manual' && (
-                <div>
-                  <textarea
-                    className="compose-textarea"
-                    placeholder={`Hi {first_name}, this is…  (use {first_name} to personalize)`}
-                    value={bulkMessage}
-                    onChange={e => setBulkMessage(e.target.value)}
-                    rows={3}
-                    style={{ marginBottom: 10 }}
-                  />
-                  {/* Media attachment (Phase 4) */}
-                  {bulkMediaFileName && (
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
-                      padding: '6px 10px', background: 'rgba(30,200,168,0.08)', borderRadius: 6,
-                      border: '1px solid rgba(30,200,168,0.25)', fontSize: 12,
-                    }}>
-                      📎 {bulkMediaFileName}
-                      <button
-                        onClick={() => { setBulkMediaUrl(''); setBulkMediaFileName('') }}
-                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--signal-red)', fontSize: 14 }}
-                      >✕</button>
-                    </div>
-                  )}
-                  <div className="compose-footer">
-                    <label className="compose-checkbox">
-                      <input type="checkbox" checked={bulkIncludeBooking} onChange={e => setBulkIncludeBooking(e.target.checked)} />
-                      Include booking link
-                    </label>
-                    <button
-                      onClick={() => bulkMediaInputRef.current?.click()}
-                      disabled={bulkMediaUploading}
-                      style={{ fontSize: 12, padding: '5px 12px', background: 'none', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}
-                    >
-                      {bulkMediaUploading ? '⏳ Uploading…' : '📎 Attach flyer'}
-                    </button>
-                    <button
-                      className="btn btn--primary"
-                      onClick={handleBulkSend}
-                      disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
-                    >
-                      {bulkSending ? 'Sending…' : `${bulkMediaUrl ? '📸 Send MMS' : '💬 Send SMS'} to ${sendableSelectedIds.length}`}
-                    </button>
-                  </div>
-                  {bulkResult && (
-                    <div className="leads-bulk-result">✓ Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
-                  )}
+              {/* Compose footer: booking link | attach | queue | send */}
+              <div className="compose-footer">
+                <label className="compose-checkbox">
+                  <input type="checkbox" checked={bulkIncludeBooking} onChange={e => setBulkIncludeBooking(e.target.checked)} />
+                  Include booking link
+                </label>
+                <button
+                  onClick={() => bulkMediaInputRef.current?.click()}
+                  disabled={bulkMediaUploading}
+                  style={{ fontSize: 12, padding: '5px 12px', background: 'none', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}
+                >
+                  {bulkMediaUploading ? '⏳ Uploading…' : '📎 Attach flyer'}
+                </button>
+                <button
+                  className="btn btn--secondary"
+                  onClick={() => handleAiAction('queue')}
+                  disabled={!!aiActioning || sendableSelectedIds.length === 0}
+                >
+                  {aiActioning === 'queue' ? '⏳ Queuing…' : '📥 AI Queue for review'}
+                </button>
+                <button
+                  className="btn btn--primary"
+                  onClick={handleBulkSend}
+                  disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
+                >
+                  {bulkSending ? 'Sending…' : `${bulkMediaUrl ? '📸 Send MMS' : aiChannel === 'email' ? '✉️ Send Email' : '💬 Send SMS'} to ${sendableSelectedIds.length}`}
+                </button>
+              </div>
+
+              {/* Results */}
+              {bulkResult && (
+                <div className="leads-bulk-result" style={{ marginTop: 8 }}>✓ Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
+              )}
+              {aiResult && !aiResult.error && (
+                <div className="leads-ai-result" style={{ marginTop: 8 }}>
+                  {aiResult.mode === 'queue'
+                    ? `✓ ${aiResult.queued} messages queued for review`
+                    : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
                 </div>
               )}
+              {aiResult?.error && <div className="compose-error" style={{ marginTop: 8 }}>{aiResult.error}</div>}
             </div>
           )}
 
@@ -1073,16 +1084,10 @@ export default function Leads() {
               🗑 Delete ({selectedCount})
             </button>
             <button
-              className={`btn ${showBulkCompose && bulkComposeTab === 'manual' ? 'btn--secondary' : 'btn--primary'}`}
-              onClick={() => { setBulkComposeTab('manual'); setShowBulkCompose(v => bulkComposeTab === 'manual' ? !v : true) }}
+              className={`btn ${showBulkCompose ? 'btn--secondary' : 'btn--primary'}`}
+              onClick={() => { setShowBulkCompose(v => !v); setAiResult(null); setBulkResult(null) }}
             >
-              📝 {showBulkCompose && bulkComposeTab === 'manual' ? '▼ Close' : '▲ Write message'}
-            </button>
-            <button
-              className={`btn ${showBulkCompose && bulkComposeTab === 'ai' ? 'btn--secondary' : 'btn--primary'}`}
-              onClick={() => { setBulkComposeTab('ai'); setAiResult(null); setShowBulkCompose(v => bulkComposeTab === 'ai' ? !v : true) }}
-            >
-              ✨ {showBulkCompose && bulkComposeTab === 'ai' ? '▼ Close' : '▲ AI Outreach'}
+              ✉️ {showBulkCompose ? '▼ Close compose' : '▲ Compose & Send'}
             </button>
             <button
               className="btn btn--primary"
