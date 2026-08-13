@@ -18,6 +18,7 @@ Last name normalization: lowercase, strip whitespace, strip punctuation.
 """
 
 import re
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.models.models import ContactRegistry
 
@@ -38,6 +39,8 @@ def normalize_phone(raw_phone: str) -> str:
     digits = re.sub(r"\D", "", raw_phone)
     if len(digits) == 10:
         digits = "1" + digits
+    if len(digits) != 11 or not digits.startswith("1"):
+        return ""
     return digits
 
 
@@ -121,9 +124,25 @@ def check_and_register(
         first_seen_lead_id=lead_id,
         owning_user_id=user_id,
     )
-    db.add(new_entry)
-    db.flush()  # get it persisted within the current transaction without full commit
-    return False, new_entry
+    try:
+        db.add(new_entry)
+        db.flush()  # get it persisted within the current transaction without full commit
+        return False, new_entry
+    except IntegrityError:
+        # Another concurrent request inserted the same (org_id, phone, last_name)
+        # between our read and our write. Roll back and return the now-existing row
+        # as a confirmed duplicate so it is excluded from the SMS send queue.
+        db.rollback()
+        existing = (
+            db.query(ContactRegistry)
+            .filter(
+                ContactRegistry.organization_id == organization_id,
+                ContactRegistry.normalized_phone == norm_phone,
+                ContactRegistry.normalized_last_name == norm_last,
+            )
+            .first()
+        )
+        return True, existing
 
 
 def bulk_dedup_check(db: Session, organization_id: str, rows: list[dict]) -> dict:
@@ -147,7 +166,7 @@ def bulk_dedup_check(db: Session, organization_id: str, rows: list[dict]) -> dic
         key = (norm_phone, norm_last)
 
         if not norm_phone or not norm_last:
-            results.append({**row, "dedup_status": "missing_fields"})
+            results.append({**row, "dedup_status": "invalid_phone"})
             continue
 
         if key in seen_in_batch:
@@ -164,6 +183,17 @@ def bulk_dedup_check(db: Session, organization_id: str, rows: list[dict]) -> dic
             )
             .first()
         )
+
+        if not existing:
+            existing = (
+                db.query(ContactRegistry)
+                .filter(
+                    ContactRegistry.organization_id == organization_id,
+                    ContactRegistry.normalized_phone == norm_phone,
+                    ContactRegistry.normalized_last_name == PLACEHOLDER_LAST_NAME,
+                )
+                .first()
+            )
 
         if existing:
             results.append({**row, "dedup_status": "duplicate_existing"})

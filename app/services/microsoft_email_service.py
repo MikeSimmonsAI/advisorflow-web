@@ -151,7 +151,10 @@ def _get_fresh_access_token(advisor: User) -> str:
     return response.json()["access_token"]
 
 
-def send_email_via_microsoft_graph(advisor: User, to_email: str, subject: str, body_html: str) -> dict:
+def send_email_via_microsoft_graph(
+    advisor: User, to_email: str, subject: str, body_html: str,
+    attachments: list | None = None,
+) -> dict:
     """
     Sends an email through Microsoft Graph's /me/sendMail endpoint -
     this genuinely originates from the advisor's real Outlook mailbox,
@@ -162,17 +165,25 @@ def send_email_via_microsoft_graph(advisor: User, to_email: str, subject: str, b
     """
     try:
         access_token = _get_fresh_access_token(advisor)
+        message_payload = {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": body_html},
+            "toRecipients": [{"emailAddress": {"address": to_email}}],
+        }
+        if attachments:
+            message_payload["attachments"] = [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": a["filename"],
+                    "contentType": a["content_type"],
+                    "contentBytes": a["content"],  # already base64-encoded by the router
+                }
+                for a in attachments
+            ]
         response = httpx.post(
             "https://graph.microsoft.com/v1.0/me/sendMail",
             headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-            json={
-                "message": {
-                    "subject": subject,
-                    "body": {"contentType": "HTML", "content": body_html},
-                    "toRecipients": [{"emailAddress": {"address": to_email}}],
-                },
-                "saveToSentItems": True,
-            },
+            json={"message": message_payload, "saveToSentItems": True},
             timeout=20,
         )
         # Graph's sendMail returns 202 Accepted with an empty body on success -

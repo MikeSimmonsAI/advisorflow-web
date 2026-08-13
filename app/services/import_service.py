@@ -143,9 +143,15 @@ def parse_excel_file(file_path: str) -> list[dict]:
         try:
             df = pd.read_csv(file_path, dtype=str, encoding="utf-8-sig")
         except Exception:
-            df = pd.read_csv(file_path, dtype=str, encoding="latin-1")
+            try:
+                df = pd.read_csv(file_path, dtype=str, encoding="latin-1")
+            except Exception as exc:
+                raise ValueError(f"Could not read this file as CSV: {exc}") from exc
     else:
-        df = pd.read_excel(file_path, sheet_name=0, dtype=str)
+        try:
+            df = pd.read_excel(file_path, sheet_name=0, dtype=str)
+        except Exception as exc:
+            raise ValueError(f"Could not read this file as Excel: {exc}") from exc
     df = df.fillna("")
 
     lookup = _build_column_lookup(df.columns)

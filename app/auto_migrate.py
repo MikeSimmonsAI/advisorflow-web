@@ -130,6 +130,13 @@ COLUMNS_TO_ADD = [
     ("crm_contacts", "pipeline_stage", "VARCHAR DEFAULT 'new'"),
     ("crm_contacts", "company", "VARCHAR"),
     ("crm_contacts", "last_contact_at", "TIMESTAMP"),
+    # Brute-force / credential-stuffing protection — added alongside auth_router lockout logic.
+    # failed_login_attempts: resets to 0 on success, incremented on each bad password.
+    # lockout_until: non-null while the account is temporarily locked; NULL = not locked.
+    ("users", "failed_login_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "lockout_until", "TIMESTAMP"),
+    # SMS vs email-only queue routing — drives contact_channel logic in outreach scheduler
+    ("leads", "contact_channel", "VARCHAR DEFAULT 'sms'"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

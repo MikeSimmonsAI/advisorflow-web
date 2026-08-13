@@ -64,7 +64,10 @@ def test_admin_leads_includes_advisor_name_not_just_id(client, admin_auth_header
     response = client.get("/admin/leads", headers=admin_auth_headers)
     assert response.status_code == 200
     data = response.json()
-    matching = next((l for l in data if l["id"] == lead.id), None)
+    # Endpoint now returns a paginated envelope; items are in data["items"].
+    items = data["items"]
+    assert "total" in data
+    matching = next((l for l in items if l["id"] == lead.id), None)
     assert matching is not None
     assert matching["assigned_to_name"] == "Advisor One"  # sample_advisor.full_name
 
@@ -77,7 +80,8 @@ def test_admin_leads_shows_unassigned_for_leads_with_no_advisor(client, admin_au
 
     response = client.get("/admin/leads", headers=admin_auth_headers)
     data = response.json()
-    matching = next((l for l in data if l["id"] == unassigned_lead.id), None)
+    items = data["items"]
+    matching = next((l for l in items if l["id"] == unassigned_lead.id), None)
     assert matching["assigned_to_name"] == "Unassigned"
 
 

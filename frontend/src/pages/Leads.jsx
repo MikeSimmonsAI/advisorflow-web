@@ -41,6 +41,7 @@ export default function Leads() {
   const [leads, setLeads] = useState([])
   const [needsReview, setNeedsReview] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [preview, setPreview] = useState(null)
   const [previewing, setPreviewing] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -90,6 +91,7 @@ export default function Leads() {
   const [deletingBatch, setDeletingBatch] = useState(null)   // source_file being deleted
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // batch object awaiting confirm
   const canManageBatches = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const [deletingLeads, setDeletingLeads] = useState(false)
 
   function loadImportBatches() {
     if (!canManageBatches) return
@@ -99,9 +101,9 @@ export default function Leads() {
 
   async function handleDeleteBatch(batch) {
     setDeletingBatch(batch.source_file)
-    setDeleteConfirm(null)
     try {
       await api.delete(`/leads/import-batches?source_file=${encodeURIComponent(batch.source_file)}`)
+      setDeleteConfirm(null)
       loadLeads()
       loadImportBatches()
     } catch (err) {
@@ -113,12 +115,20 @@ export default function Leads() {
 
   function loadLeads() {
     setLoading(true)
+    setLoadError(null)
     Promise.all([
-      api.get('/leads/'),
-      api.get('/leads/needs-review'),
+      api.get('/leads/?page=1&page_size=100'),
+      api.get('/leads/needs-review?page=1&page_size=100'),
     ]).then(([leadsData, reviewData]) => {
-      setLeads(leadsData)
-      setNeedsReview(reviewData)
+      // Both endpoints now return a paginated envelope {items, total, page, page_size}.
+      // Fall back to the raw value for backward-compatibility during deploys.
+      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items ?? []))
+      setNeedsReview(Array.isArray(reviewData) ? reviewData : (reviewData.items ?? []))
+      setLoading(false)
+    }).catch((err) => {
+      setLeads([])
+      setNeedsReview([])
+      setLoadError(err?.message || 'Failed to load leads')
       setLoading(false)
     })
   }
@@ -351,23 +361,36 @@ export default function Leads() {
 
   async function handleDeleteLead(e, leadId) {
     e.stopPropagation()
+    if (deletingLeads) return
     if (!window.confirm('Permanently delete this lead? This cannot be undone.')) return
+    setDeletingLeads(true)
     try {
       await api.delete(`/leads/${leadId}`)
       loadLeads()
     } catch (err) {
       alert(`Delete failed: ${err.message}`)
+    } finally {
+      setDeletingLeads(false)
     }
   }
 
   async function handleDeleteSelected() {
+    if (deletingLeads) return
     if (!window.confirm(`Permanently delete ${selectedCount} leads? This cannot be undone.`)) return
+    setDeletingLeads(true)
     try {
-      await Promise.all([...selected].map(id => api.delete(`/leads/${id}`)))
-      setSelected(new Set())
+      const results = await Promise.allSettled([...selected].map(id => api.delete(`/leads/${id}`).then(() => id)))
+      const deletedIds = results.filter(r => r.status === 'fulfilled').map(r => r.value)
+      setSelected(prev => {
+        const next = new Set(prev)
+        deletedIds.forEach(id => next.delete(id))
+        return next
+      })
       loadLeads()
     } catch (err) {
       alert(`Delete failed: ${err.message}`)
+    } finally {
+      setDeletingLeads(false)
     }
   }
 
@@ -441,7 +464,7 @@ export default function Leads() {
         {[
           { label: 'TOTAL LEADS', value: stats.total, accent: 'blue', icon: '👥' },
           { label: 'SMS READY', value: stats.sendable, accent: 'green', icon: '📱', sub: 'Phone, not DNC, not duplicate' },
-          { label: 'NEEDS REVIEW', value: stats.needsReview, accent: 'amber', icon: '⚠️', sub: 'Assign tier before outreach', action: () => setView('review') },
+          { label: 'NEEDS REVIEW', value: stats.needsReview, accent: 'amber', icon: '⚠️', sub: 'Assign tier before outreach', action: () => { setView('review'); setSelected(new Set()); } },
           { label: 'BLOCKED', value: stats.dnc + stats.duplicates + stats.missingPhone, accent: 'red', icon: '🚫', sub: 'DNC, duplicate, or no phone' },
         ].map(({ label, value, accent, icon, sub, action }) => (
           <div key={label} className={`leads-kpi-card leads-kpi-card--${accent}`} onClick={action} style={{ cursor: action ? 'pointer' : 'default' }}>
@@ -608,7 +631,7 @@ export default function Leads() {
       {/* ── Tabs + Filter Bar ── */}
       <div className="leads-controls">
         <div className="leads-tabs">
-          <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => setView('all')}>
+          <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => { setView('all'); setSelected(new Set()); }}>
             All leads <span className="mono">{leads.filter(l => !l.is_duplicate).length}</span>
           </button>
           <button className={`tab ${view === 'review' ? 'tab--active' : ''}`} onClick={() => setView('review')}>
@@ -781,6 +804,12 @@ export default function Leads() {
       <section className="panel leads-table-panel">
         {loading ? (
           <div className="empty-state">Loading leads…</div>
+        ) : loadError ? (
+          <div className="empty-state" style={{ color: 'var(--signal-red)' }}>
+            ⚠️ {loadError}
+            <br />
+            <button className="btn btn--secondary" style={{ marginTop: 12 }} onClick={loadLeads}>Retry</button>
+          </div>
         ) : filteredLeads.length === 0 ? (
           <div className="empty-state">
             {view === 'review' ? 'Nothing needs review right now.' : 'No leads match your filters.'}

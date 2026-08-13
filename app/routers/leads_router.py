@@ -1,13 +1,22 @@
 import os
+import hashlib
+import secrets
 import shutil
 import tempfile
 import json as _json
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Annotated
 from datetime import datetime, timedelta, time, timezone
+
+# ---------------------------------------------------------------------------
+# Short-lived in-process store for preview tokens.
+# Maps token -> {file_hash, org_id, user_id, summary, expires_at}
+# TTL is 10 minutes; stale entries are purged on each preview call.
+# ---------------------------------------------------------------------------
+_preview_tokens: dict = {}
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature
@@ -48,13 +57,30 @@ def preview_upload(
     leads - tags every row as New Inquiry regardless of auto-detection
     from a source column. See import_service.import_leads_from_excel for
     the full reasoning.
+
+    Returns the dry-run summary plus a short-lived `preview_token`. The
+    frontend must pass this token back to confirm_upload so we can verify
+    the same file (and same user/org) is being confirmed, preventing both
+    the file-swap attack and surfacing any concurrent-import drift.
     """
     import os as _os
+
+    # Purge stale tokens on every preview call (dict stays tiny).
+    now_utc = datetime.now(timezone.utc)
+    expired_keys = [k for k, v in _preview_tokens.items() if v["expires_at"] < now_utc]
+    for k in expired_keys:
+        _preview_tokens.pop(k, None)
+
+    # Read the entire upload into memory so we can hash it before writing to disk.
+    file_bytes = file.file.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+
     original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
     if original_ext not in (".xlsx", ".xls", ".csv"):
         raise HTTPException(status_code=400, detail="Only .xlsx, .xls, and .csv files are accepted.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
+<<<<<<< Updated upstream
         # Stream with size cap — reject files over 50MB to protect against memory DoS
         MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
         written = 0
@@ -69,6 +95,9 @@ def preview_upload(
                 os.unlink(tmp.name)
                 raise HTTPException(status_code=413, detail="File too large. Maximum upload size is 50 MB.")
             tmp.write(chunk)
+=======
+        tmp.write(file_bytes)
+>>>>>>> Stashed changes
         tmp_path = tmp.name
 
     try:
@@ -82,27 +111,89 @@ def preview_upload(
             dry_run=True,
             force_new_inquiry=force_new_inquiry,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     finally:
         os.unlink(tmp_path)
 
-    return summary
+    # Issue a preview token tied to this file hash, user, and org.
+    preview_token = secrets.token_urlsafe(32)
+    _preview_tokens[preview_token] = {
+        "file_hash": file_hash,
+        "org_id": current_user.organization_id,
+        "user_id": current_user.id,
+        "summary": summary,
+        "expires_at": now_utc + timedelta(minutes=10),
+    }
+
+    result = dict(summary) if isinstance(summary, dict) else {"data": summary}
+    result["preview_token"] = preview_token
+    return result
 
 
 @router.post("/upload/confirm")
 def confirm_upload(
     file: UploadFile = File(...),
+    preview_token: str = Form(...),
     source_year: Optional[int] = Form(None),
     force_new_inquiry: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
+    """
+    Step 2: advisor confirms - actually import and persist the leads.
+
+    Requires `preview_token` (returned by preview_upload) to prevent two
+    failure modes:
+      1. File-swap: an advisor previews file_A then uploads a different
+         file_B at confirm time.  We SHA-256 the incoming bytes and reject
+         with HTTP 409 if the hash does not match the stored preview hash.
+      2. Concurrent-import drift: another advisor's import may have
+         changed the ContactRegistry between preview and confirm.  We re-run
+         dry_run and compare new_count / duplicate_count; if either differs
+         we include an `import_drift_warning` in the response so the UI can
+         surface it, but we still complete the import rather than blocking.
+
+    See preview_upload above for why source_year/force_new_inquiry use Form(...).
+    """
     import os as _os
+
+    now_utc = datetime.now(timezone.utc)
+
+    # --- Token validation ---------------------------------------------------
+    stored = _preview_tokens.get(preview_token)
+    if stored is None:
+        raise HTTPException(
+            status_code=409,
+            detail="preview_token not found or expired. Please re-upload the file for a fresh preview before confirming.",
+        )
+    if stored["expires_at"] < now_utc:
+        _preview_tokens.pop(preview_token, None)
+        raise HTTPException(
+            status_code=409,
+            detail="preview_token has expired (10-minute window). Please re-upload the file for a fresh preview.",
+        )
+    if stored["org_id"] != current_user.organization_id or stored["user_id"] != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="preview_token does not match the current user or organization.",
+        )
+
+    # --- File-hash verification ---------------------------------------------
+    file_bytes = file.file.read()
+    incoming_hash = hashlib.sha256(file_bytes).hexdigest()
+    if incoming_hash != stored["file_hash"]:
+        raise HTTPException(
+            status_code=409,
+            detail="The file uploaded for confirm does not match the file that was previewed. Please re-preview before confirming.",
+        )
+
     original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
     if original_ext not in (".xlsx", ".xls", ".csv"):
         raise HTTPException(status_code=400, detail="Only .xlsx, .xls, and .csv files are accepted.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
+<<<<<<< Updated upstream
         MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
         written = 0
         chunk_size = 1024 * 64
@@ -116,9 +207,43 @@ def confirm_upload(
                 os.unlink(tmp.name)
                 raise HTTPException(status_code=413, detail="File too large. Maximum upload size is 50 MB.")
             tmp.write(chunk)
+=======
+        tmp.write(file_bytes)
+>>>>>>> Stashed changes
         tmp_path = tmp.name
 
+    import_drift_warning: Optional[str] = None
+
     try:
+        # --- Concurrent-import drift check ----------------------------------
+        # Re-run dry_run now (with the validated file) to catch any registry
+        # changes that happened between preview and confirm.
+        try:
+            recheck_summary = import_leads_from_excel(
+                db,
+                file_path=tmp_path,
+                organization_id=current_user.organization_id,
+                uploading_user_id=current_user.id,
+                source_year=source_year,
+                source_filename=file.filename,
+                dry_run=True,
+                force_new_inquiry=force_new_inquiry,
+            )
+            prev = stored["summary"] or {}
+            prev_new = prev.get("new_count", prev.get("new", 0))
+            prev_dup = prev.get("duplicate_count", prev.get("duplicates", 0))
+            cur_new = recheck_summary.get("new_count", recheck_summary.get("new", 0)) if isinstance(recheck_summary, dict) else 0
+            cur_dup = recheck_summary.get("duplicate_count", recheck_summary.get("duplicates", 0)) if isinstance(recheck_summary, dict) else 0
+            if prev_new != cur_new or prev_dup != cur_dup:
+                import_drift_warning = (
+                    f"Import counts changed since preview (new: {prev_new} → {cur_new}, "
+                    f"duplicates: {prev_dup} → {cur_dup}). Another import may have run "
+                    f"concurrently. The numbers below reflect the actual import result."
+                )
+        except Exception:
+            pass  # Drift check failure is non-fatal; proceed with the real import.
+
+        # --- Real import ----------------------------------------------------
         result = import_leads_from_excel(
             db,
             file_path=tmp_path,
@@ -128,8 +253,19 @@ def confirm_upload(
             source_filename=file.filename,
             force_new_inquiry=force_new_inquiry,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     finally:
         os.unlink(tmp_path)
+
+    # Invalidate the token after one successful confirm.
+    _preview_tokens.pop(preview_token, None)
+
+    if import_drift_warning:
+        if isinstance(result, dict):
+            result["import_drift_warning"] = import_drift_warning
+        else:
+            result = {"data": result, "import_drift_warning": import_drift_warning}
 
     return result
 
@@ -235,30 +371,33 @@ def delete_import_batch(
 
     for table in dependents_by_lead_id:
         try:
+            sp = db.begin_nested()          # SAVEPOINT
             r = db.execute(
                 sa_text(f"DELETE FROM {table} WHERE lead_id IN ({batch_subq})"), p
             )
+            sp.commit()                     # RELEASE SAVEPOINT
             if r.rowcount:
                 deleted[table] = r.rowcount
         except Exception:
+            sp.rollback()                   # rolls back to this savepoint only
             # Table may not exist yet in this deployment — skip and continue
-            db.rollback()
-            db.begin()
 
     # booking_links last (booking_followups.booking_link_id → booking_links)
     try:
+        sp = db.begin_nested()          # SAVEPOINT
         r = db.execute(
             sa_text(f"DELETE FROM booking_links WHERE lead_id IN ({batch_subq})"), p
         )
+        sp.commit()                     # RELEASE SAVEPOINT
         if r.rowcount:
             deleted["booking_links"] = r.rowcount
     except Exception:
-        db.rollback()
-        db.begin()
+        sp.rollback()                   # rolls back to this savepoint only
 
     # contact_registry: remove entries whose first_seen_lead_id is in this batch
     # so re-import doesn't flag every lead as a duplicate
     try:
+        sp = db.begin_nested()          # SAVEPOINT
         r = db.execute(
             sa_text(
                 f"DELETE FROM contact_registry WHERE organization_id = :org "
@@ -266,10 +405,11 @@ def delete_import_batch(
             ),
             p,
         )
+        sp.commit()                     # RELEASE SAVEPOINT
         if r.rowcount:
             deleted["contact_registry"] = r.rowcount
     except Exception:
-        pass
+        sp.rollback()                   # rolls back to this savepoint only
 
     # Finally delete the leads themselves
     r = db.execute(
@@ -301,12 +441,15 @@ def list_leads(
     tier: Optional[str] = Query(None),
     message_track: Optional[str] = Query(None),
     temperature: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Advisors see only their own leads. org_admin/super_admin see all org leads.
     Filter by tier, message_track, or temperature (hot/warm/cold/unknown).
+    Returns a paginated envelope: {items, total, page, page_size}.
     """
     is_manager = current_user.role in ("org_admin", "super_admin")
     query = db.query(Lead).filter(Lead.organization_id == current_user.organization_id)
@@ -320,12 +463,20 @@ def list_leads(
         query = query.filter(Lead.message_track == message_track)
     if temperature:
         query = query.filter(Lead.engagement_temperature == temperature)
-    leads = query.order_by(Lead.created_at.desc()).all()
-    return leads
+    total = query.count()
+    leads = (
+        query.order_by(Lead.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {"items": leads, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/needs-review")
 def leads_needing_tier_review(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -333,13 +484,21 @@ def leads_needing_tier_review(
     Leads imported with no Lead Type set in the source file (untyped/blank).
     These are held out of any SMS queue until a real tier is assigned -
     they are NOT defaulted to Pre-Need.
+    Returns a paginated envelope: {items, total, page, page_size}.
     """
-    leads = db.query(Lead).filter(
+    query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
         Lead.status == "needs_tier_review",
-    ).order_by(Lead.created_at.desc()).all()
-    return leads
+    )
+    total = query.count()
+    leads = (
+        query.order_by(Lead.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {"items": leads, "total": total, "page": page, "page_size": page_size}
 
 
 @router.patch("/{lead_id}/tier")
@@ -653,7 +812,7 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
 # ---------------------------------------------------------------------------
 
 class MessagePreviewRequest(BaseModel):
-    lead_ids: list[str]
+    lead_ids: Annotated[list[str], Field(max_length=500)]
 
 
 class MessagePreviewItem(BaseModel):
@@ -736,7 +895,7 @@ class ConfirmSendItem(BaseModel):
 
 
 class ConfirmSendBatchRequest(BaseModel):
-    items: list[ConfirmSendItem]
+    items: Annotated[list[ConfirmSendItem], Field(max_length=500)]
     include_booking_link: bool = True
 
 
@@ -762,6 +921,21 @@ def confirm_send_batch(
         ).first()
         if not lead:
             skipped.append({"lead_id": item.lead_id, "reason": "not_found"})
+            continue
+        if lead.status == "dnc":
+            skipped.append({"lead_id": item.lead_id, "reason": "dnc"})
+            continue
+        if lead.is_duplicate:
+            skipped.append({"lead_id": item.lead_id, "reason": "duplicate"})
+            continue
+        if lead.contact_channel == "email_only":
+            skipped.append({"lead_id": item.lead_id, "reason": "email_only"})
+            continue
+        if not lead.phone:
+            skipped.append({"lead_id": item.lead_id, "reason": "no_phone"})
+            continue
+        if _is_suppressed(db, lead):
+            skipped.append({"lead_id": item.lead_id, "reason": "suppressed"})
             continue
         try:
             msg = send_sms(db, current_user, lead, item.message, include_booking_link=req.include_booking_link)

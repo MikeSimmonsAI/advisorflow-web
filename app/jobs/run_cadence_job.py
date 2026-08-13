@@ -93,6 +93,16 @@ def run_for_all_organizations():
         print(json.dumps(overall_summary, indent=2))
         return overall_summary
 
+    except Exception as e:
+        error_summary = {
+            "job": "cadence",
+            "started_at": started_at.isoformat(),
+            "error": f"Fatal error: {e}",
+            "total_errors": 1,
+        }
+        print(json.dumps(error_summary, indent=2))
+        return error_summary
+
     finally:
         db.close()
 
@@ -101,4 +111,4 @@ if __name__ == "__main__":
     summary = run_for_all_organizations()
     # Non-zero exit code if there were errors, so Render's Cron Job
     # dashboard flags the run as failed and you actually notice.
-    sys.exit(1 if summary["total_errors"] > 0 else 0)
+    sys.exit(1 if summary.get("total_errors", 0) > 0 else 0)

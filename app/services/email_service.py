@@ -145,12 +145,12 @@ def send_email_via_provider(to_email: str, subject: str, body_html: str, attachm
 
         if attachments:
             params["attachments"] = [
-                {"filename": att["filename"], "content": att["content"]}
+                {"filename": att["filename"], "content": att["content"], "content_type": att.get("content_type", "application/octet-stream")}
                 for att in attachments
             ]
 
-        response = resend.Emails.send(params)
-        message_id = response.get("id") if isinstance(response, dict) else None
+        response = resend.emails.send(params)
+        message_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", None)
         return {"success": True, "provider_message_id": message_id, "error": None}
     except Exception as e:
         return {"success": False, "provider_message_id": None, "error": str(e)}

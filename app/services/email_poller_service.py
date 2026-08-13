@@ -13,11 +13,9 @@ import os
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
+from app.exceptions import TokenExpiredError
+
 logger = logging.getLogger(__name__)
-
-
-class TokenExpiredError(Exception):
-    """Raised when Microsoft rejects the refresh token (400) — advisor must re-connect."""
 
 
 def _get_fresh_access_token(advisor) -> str:

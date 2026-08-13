@@ -121,6 +121,7 @@ class NotificationType(str, enum.Enum):
     HOT_REPLY = "hot_reply"
     BOOKING_CONFIRMED = "booking_confirmed"
     CADENCE_COMPLETED = "cadence_completed"
+    REPLY_RECEIVED = "reply_received"
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +235,15 @@ class User(Base):
     # so it's self-contained with no external storage dependency.
     profile_photo_url = Column(Text, nullable=True)
 
+    # Brute-force / credential-stuffing protection.
+    # Incremented on each failed password attempt; reset to 0 on success.
+    # When failed_login_attempts reaches LOGIN_LOCKOUT_THRESHOLD (10),
+    # lockout_until is set to now + 15 minutes and login is rejected until
+    # the timestamp passes. is_active is deliberately NOT modified so an
+    # attacker cannot permanently lock out an account with a handful of guesses.
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    lockout_until = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 
@@ -317,10 +327,11 @@ class Lead(Base):
 
     organization = relationship("Organization", back_populates="leads")
     assigned_to = relationship("User", back_populates="leads_owned")
-    messages = relationship("Message", back_populates="lead")
-    replies = relationship("Reply", back_populates="lead")
-    cadence_state = relationship("CadenceState", back_populates="lead", uselist=False)
-    email_messages = relationship("EmailMessage", back_populates="lead")
+    messages = relationship("Message", back_populates="lead", passive_deletes=True)
+    replies = relationship("Reply", back_populates="lead", passive_deletes=True)
+    cadence_state = relationship("CadenceState", back_populates="lead", uselist=False, passive_deletes=True)
+    email_messages = relationship("EmailMessage", back_populates="lead", passive_deletes=True)
+    outcomes = relationship("LeadOutcome", back_populates="lead", passive_deletes=True)
 
     __table_args__ = (
         Index("ix_leads_org_phone", "organization_id", "phone"),
@@ -341,13 +352,13 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     sender_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     body = Column(Text, nullable=False)
     twilio_sid = Column(String, nullable=True)  # Twilio's message SID for tracking
     twilio_status = Column(String, nullable=True)  # queued, sent, delivered, failed
-    booking_link_id = Column(String, ForeignKey("booking_links.id"), nullable=True)
+    booking_link_id = Column(String, ForeignKey("booking_links.id", ondelete="SET NULL"), nullable=True)
 
     sent_at = Column(DateTime, server_default=func.now())
 
@@ -362,7 +373,7 @@ class Reply(Base):
     __tablename__ = "replies"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
 
     body = Column(Text, nullable=False)
     source = Column(String, default="sms")  # sms | email
@@ -419,9 +430,9 @@ class LeadOutcome(Base):
     __tablename__ = "lead_outcomes"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     recorded_by_id = Column(String, ForeignKey("users.id"), nullable=False)
-    booking_link_id = Column(String, ForeignKey("booking_links.id"), nullable=True)  # which appointment this outcome is from, if any
+    booking_link_id = Column(String, ForeignKey("booking_links.id", ondelete="SET NULL"), nullable=True)  # which appointment this outcome is from, if any
 
     appointment_date = Column(DateTime, nullable=True)
 
@@ -448,7 +459,7 @@ class LeadOutcome(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    lead = relationship("Lead", backref="outcomes")
+    lead = relationship("Lead", back_populates="outcomes")
     recorded_by = relationship("User")
 
 
@@ -470,6 +481,7 @@ class LeadOutcome(Base):
 class SuppressionSource(str, enum.Enum):
     MANUAL = "manual"
     REPLY_STOP = "reply_stop"
+    ADVISOR_FLAGGED = "advisor_flagged"
 
 
 class SuppressionEntry(Base):
@@ -552,7 +564,7 @@ class CadenceState(Base):
     __tablename__ = "cadence_states"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False, unique=True)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, unique=True)
 
     status = Column(String, default="active")  # active, paused, completed, cancelled
     current_touch_number = Column(Integer, default=0)  # 0 = not yet sent touch 1
@@ -576,7 +588,7 @@ class EmailMessage(Base):
     __tablename__ = "email_messages"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     sender_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     subject = Column(String, nullable=False)
@@ -645,7 +657,7 @@ class MessageTemplate(Base):
 class CadenceTemplate(Base):
     __tablename__ = "cadence_templates"
 
-    id = Column(String, primary_key=True)
+    id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
@@ -663,7 +675,7 @@ class CadenceTemplate(Base):
 class CadenceTemplateTouch(Base):
     __tablename__ = "cadence_template_touches"
 
-    id = Column(String, primary_key=True)
+    id = Column(String, primary_key=True, default=gen_uuid)
     template_id = Column(String, ForeignKey("cadence_templates.id"), nullable=False)
     touch_number = Column(Integer, nullable=False)  # 1-based
     day_offset = Column(Integer, nullable=False)    # days after cadence start
@@ -878,8 +890,8 @@ class BookingFollowup(Base):
     __tablename__ = "booking_followups"
 
     id              = Column(String, primary_key=True, default=gen_uuid)
-    booking_link_id = Column(String, ForeignKey("booking_links.id"), nullable=False)
-    lead_id         = Column(String, ForeignKey("leads.id"), nullable=False, index=True)
+    booking_link_id = Column(String, ForeignKey("booking_links.id", ondelete="CASCADE"), nullable=False)
+    lead_id         = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
     advisor_id      = Column(String, ForeignKey("users.id"), nullable=False)
 
     # Which channel was used
@@ -903,8 +915,8 @@ class SurveyResponse(Base):
     __tablename__ = "survey_responses"
 
     id              = Column(String, primary_key=True, default=gen_uuid)
-    booking_followup_id = Column(String, ForeignKey("booking_followups.id"), nullable=False)
-    lead_id         = Column(String, ForeignKey("leads.id"), nullable=False, index=True)
+    booking_followup_id = Column(String, ForeignKey("booking_followups.id", ondelete="CASCADE"), nullable=False)
+    lead_id         = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
     advisor_id      = Column(String, ForeignKey("users.id"), nullable=False)
 
     # Core satisfaction rating (1-5 stars)
@@ -956,4 +968,24 @@ class TierDefinition(Base):
 
     __table_args__ = (
         UniqueConstraint("organization_id", "tier_key", name="uq_org_tier_key"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# RevokedToken - JWT deny-list for token revocation (logout / compromise).
+# When a token is revoked (logout, forced sign-out of a fired advisor, etc.)
+# its jti (JWT ID) is written here. decode_access_token checks this table
+# and rejects any token whose jti appears in the list.
+# Rows whose expires_at is in the past can be pruned safely — an already-
+# expired token is harmless whether its jti is here or not.
+# ---------------------------------------------------------------------------
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    jti = Column(String, primary_key=True)          # UUID from the token's jti claim
+    expires_at = Column(DateTime, nullable=False)   # natural expiry of the original token
+    revoked_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_revoked_tokens_expires_at", "expires_at"),
     )

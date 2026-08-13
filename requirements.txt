@@ -13,7 +13,7 @@ openpyxl==3.1.5
 python-multipart==0.0.12
 python-dotenv==1.0.1
 openai==1.54.3
-resend
+resend==2.36.0
 google-auth==2.35.0
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.149.0
@@ -25,3 +25,4 @@ passlib[bcrypt]==1.7.4
 stripe==11.1.1
 python-dateutil>=2.8.0
 websockets>=12.0
+slowapi==0.1.9

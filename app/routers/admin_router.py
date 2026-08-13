@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from pydantic import BaseModel, EmailStr, Field
@@ -61,18 +61,28 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
 
 
 @router.get("/leads")
-def all_org_leads(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def all_org_leads(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     """
     Full lead list across all advisors in the org - master view. Joins in
     the assigned advisor's name rather than returning a bare
     assigned_to_id, since a raw foreign key UUID is meaningless on the
     admin dashboard - Mike needs to see WHO owns each lead at a glance.
+    Returns a paginated envelope: {items, total, page, page_size}.
     """
-    leads = (
+    query = (
         db.query(Lead)
         .filter(Lead.organization_id == current_user.organization_id)
-        .order_by(Lead.created_at.desc())
-        .limit(1000)
+    )
+    total = query.count()
+    leads = (
+        query.order_by(Lead.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
 
@@ -97,7 +107,7 @@ def all_org_leads(db: Session = Depends(get_db), current_user: User = Depends(re
             "created_at": lead.created_at,
         }
         results.append(lead_dict)
-    return results
+    return {"items": results, "total": total, "page": page, "page_size": page_size}
 
 
 
@@ -826,7 +836,7 @@ def get_user_detail(
 # ---------------------------------------------------------------------------
 
 class ReassignLeadRequest(BaseModel):
-    lead_ids: list[str]
+    lead_ids: list[str] = Field(..., max_length=1000)
     new_assigned_to_id: str | None = None  # None = unassign, leave in the pool
 
 
@@ -938,7 +948,7 @@ class PotentialDuplicateGroup(BaseModel):
 
 class MergeLeadsRequest(BaseModel):
     keep_lead_id: str
-    merge_lead_ids: list[str]
+    merge_lead_ids: list[str] = Field(..., max_length=1000)
 
 
 class MergeLeadsResponse(BaseModel):

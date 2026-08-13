@@ -78,6 +78,9 @@ def _resolve_date_range(start_date: Optional[str], end_date: Optional[str]) -> t
     if start > end:
         raise HTTPException(status_code=400, detail="start_date must be before end_date")
 
+    if (end - start).days > 366:
+        raise HTTPException(status_code=400, detail="Date range cannot exceed 1 year")
+
     return start, end
 
 
@@ -198,52 +201,79 @@ def engagement_vs_conversion(
     org_id = current_user.organization_id
 
     advisors = db.query(User).filter(User.organization_id == org_id, User.role.in_(["advisor", "org_admin"])).all()
+    advisors_by_id = {a.id: a for a in advisors}
 
+    # --- 5 total DB queries regardless of advisor count ---
+
+    # 1. Messages sent per advisor: distinct leads contacted in the window
+    msg_counts = dict(
+        db.query(Message.sender_id, func.count(distinct(Message.lead_id)))
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == org_id,
+            Message.sent_at >= start, Message.sent_at <= end,
+        )
+        .group_by(Message.sender_id)
+        .all()
+    )
+
+    # 2. Subquery: (advisor_id, lead_id) pairs messaged in the window
+    lead_subq = (
+        db.query(Message.sender_id.label("advisor_id"), Message.lead_id)
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == org_id,
+            Message.sent_at >= start, Message.sent_at <= end,
+        )
+        .distinct()
+        .subquery()
+    )
+
+    # 3. Replied count per advisor
+    replied = dict(
+        db.query(lead_subq.c.advisor_id, func.count(distinct(Reply.lead_id)))
+        .join(Reply, Reply.lead_id == lead_subq.c.lead_id)
+        .group_by(lead_subq.c.advisor_id)
+        .all()
+    )
+
+    # 4. Hot-replied count per advisor
+    hot_replied = dict(
+        db.query(lead_subq.c.advisor_id, func.count(distinct(Reply.lead_id)))
+        .join(Reply, Reply.lead_id == lead_subq.c.lead_id)
+        .filter(
+            (Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)
+        )
+        .group_by(lead_subq.c.advisor_id)
+        .all()
+    )
+
+    # 5. Booked count per advisor
+    booked = dict(
+        db.query(lead_subq.c.advisor_id, func.count(distinct(BookingLink.lead_id)))
+        .join(BookingLink, BookingLink.lead_id == lead_subq.c.lead_id)
+        .filter(BookingLink.status == "booked")
+        .group_by(lead_subq.c.advisor_id)
+        .all()
+    )
+
+    # 6. Sold count per advisor
+    sold = dict(
+        db.query(lead_subq.c.advisor_id, func.count(distinct(LeadOutcome.lead_id)))
+        .join(LeadOutcome, LeadOutcome.lead_id == lead_subq.c.lead_id)
+        .filter(LeadOutcome.resulted_in_sale == True)
+        .group_by(lead_subq.c.advisor_id)
+        .all()
+    )
+
+    # Assemble rows from dicts — only advisors with activity get non-zero counts
     rows = []
     for advisor in advisors:
-        messaged_lead_ids = (
-            db.query(distinct(Message.lead_id))
-            .join(Lead, Message.lead_id == Lead.id)
-            .filter(Lead.organization_id == org_id, Message.sender_id == advisor.id,
-                     Message.sent_at >= start, Message.sent_at <= end)
-            .all()
-        )
-        messaged_lead_ids = [row[0] for row in messaged_lead_ids]
-        messaged_count = len(messaged_lead_ids)
-
-        if messaged_count == 0:
-            rows.append({
-                "advisor_id": advisor.id, "advisor_name": advisor.full_name,
-                "leads_messaged": 0, "replies": 0, "hot_replies": 0,
-                "booked": 0, "sold": 0,
-                "engagement_rate": 0.0, "conversion_rate": 0.0,
-            })
-            continue
-
-        replied_count = (
-            db.query(func.count(distinct(Reply.lead_id)))
-            .filter(Reply.lead_id.in_(messaged_lead_ids))
-            .scalar() or 0
-        )
-        hot_replied_count = (
-            db.query(func.count(distinct(Reply.lead_id)))
-            .filter(
-                Reply.lead_id.in_(messaged_lead_ids),
-                (Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True),
-            )
-            .scalar() or 0
-        )
-        booked_count = (
-            db.query(func.count(distinct(BookingLink.lead_id)))
-            .filter(BookingLink.lead_id.in_(messaged_lead_ids), BookingLink.status == "booked")
-            .scalar() or 0
-        )
-        sold_count = (
-            db.query(func.count(distinct(LeadOutcome.lead_id)))
-            .filter(LeadOutcome.lead_id.in_(messaged_lead_ids), LeadOutcome.resulted_in_sale == True)
-            .scalar() or 0
-        )
-
+        messaged_count = msg_counts.get(advisor.id, 0)
+        replied_count = replied.get(advisor.id, 0)
+        hot_replied_count = hot_replied.get(advisor.id, 0)
+        booked_count = booked.get(advisor.id, 0)
+        sold_count = sold.get(advisor.id, 0)
         rows.append({
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
@@ -252,8 +282,8 @@ def engagement_vs_conversion(
             "hot_replies": hot_replied_count,
             "booked": booked_count,
             "sold": sold_count,
-            "engagement_rate": round((replied_count / messaged_count) * 100, 1),
-            "conversion_rate": round((booked_count / messaged_count) * 100, 1),
+            "engagement_rate": round((replied_count / messaged_count) * 100, 1) if messaged_count else 0.0,
+            "conversion_rate": round((booked_count / messaged_count) * 100, 1) if messaged_count else 0.0,
         })
 
     rows.sort(key=lambda r: r["leads_messaged"], reverse=True)

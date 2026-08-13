@@ -172,12 +172,12 @@ def add_permanent_dnc(
         )
         db.add(entry)
 
-    lead = (
+    leads = (
         db.query(Lead)
         .filter(Lead.organization_id == current_user.organization_id, Lead.phone == normalized_phone)
-        .first()
+        .all()
     )
-    if lead:
+    for lead in leads:
         lead.status = "dnc"
 
     db.commit()
@@ -188,7 +188,7 @@ def add_permanent_dnc(
         details={
             "phone": normalized_phone,
             "reason": entry.reason,
-            "matched_lead_id": lead.id if lead else None,
+            "matched_lead_ids": [lead.id for lead in leads],
         },
     )
 

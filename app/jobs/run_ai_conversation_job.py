@@ -45,4 +45,4 @@ def main():
 
 if __name__ == "__main__":
     summary = main()
-    sys.exit(1 if summary.get("errors", 0) > 0 else 0)
+    sys.exit(1 if summary.get("errors", 0) > 0 or "error" in summary else 0)

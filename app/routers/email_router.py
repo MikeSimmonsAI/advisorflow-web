@@ -37,6 +37,8 @@ def send_single_email(
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.status == 'dnc':
+        raise HTTPException(status_code=400, detail='Lead is on the Do Not Contact list')
 
     # If custom body provided, use it directly
     if req and req.body:
@@ -101,6 +103,7 @@ def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_
         Lead.id.in_(req.lead_ids),
         Lead.organization_id == current_user.organization_id,
         Lead.contact_channel == "email_only",
+        Lead.status != "dnc",
     ).all()
     result = send_email_batch(db, current_user, leads)
     return result
@@ -168,6 +171,8 @@ async def send_email_with_attachment(
     ).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.status == 'dnc':
+        raise HTTPException(status_code=400, detail='Lead is on the Do Not Contact list')
     if not lead.email:
         raise HTTPException(status_code=400, detail="Lead has no email address")
 
@@ -180,7 +185,14 @@ async def send_email_with_attachment(
             "content_type": file.content_type or "application/octet-stream",
         })
 
-    result = send_email_via_provider(lead.email, subject, body_html, attachments=attachments or None)
+    if current_user.microsoft_365_connected:
+        from app.services.microsoft_email_service import send_email_via_microsoft_graph
+        result = send_email_via_microsoft_graph(
+            current_user, lead.email, subject, body_html,
+            attachments=attachments or None
+        )
+    else:
+        result = send_email_via_provider(lead.email, subject, body_html, attachments=attachments or None)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
 
@@ -195,6 +207,7 @@ async def send_email_with_attachment(
         sent_at=datetime.utcnow(),
     )
     db.add(msg)
+    lead.status = "sent"
     db.commit()
     return {"email_id": msg.id, "status": "sent", "has_attachment": bool(attachments)}
 

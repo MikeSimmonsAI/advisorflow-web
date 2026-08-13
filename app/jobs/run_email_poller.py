@@ -60,7 +60,7 @@ def main():
             "job": "email_poller",
             "started_at": started_at.isoformat(),
             "error": str(e),
-            "total_errors": 1,
+            "errors": 1,
         }
         print(json.dumps(error_summary, indent=2))
         return error_summary

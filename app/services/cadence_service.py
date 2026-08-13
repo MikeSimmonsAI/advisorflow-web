@@ -25,7 +25,7 @@ How it works:
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.models.models import (
-    Lead, CadenceState, User
+    Lead, CadenceState, User, Reply
 )
 
 # Day offsets since cadence start - the actual 9-touch spec.
@@ -87,7 +87,7 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
     in any active outreach cadence (DNC, duplicate, needs tier review,
     email-only - email has its own nurture flow, not this SMS cadence).
     """
-    if lead.status in ("dnc", "needs_tier_review"):
+    if lead.status in ("dnc", "needs_tier_review", "replied", "booked", "hot"):
         return None
     if lead.is_duplicate:
         return None
@@ -213,6 +213,7 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
         .replace("{org_name}", org_name)
         .replace("{tone_phrase}", tone_phrase)
         .replace("{booking_link}", booking_url)
+        .replace("{booking_url}", booking_url)
         .replace("{advisor_cell}", advisor.twilio_phone_number or "")
     )
 
@@ -227,12 +228,16 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
     for logging or an admin-facing "last cadence run" view.
     """
     now = datetime.now(timezone.utc)
-    query = db.query(CadenceState).filter(
-        CadenceState.status == "active",
-        CadenceState.next_touch_due_at <= now,
+    query = (
+        db.query(CadenceState)
+        .filter(
+            CadenceState.status == "active",
+            CadenceState.next_touch_due_at <= now,
+        )
     )
-
-    due_states = query.all()
+    if organization_id:
+        query = query.join(Lead).filter(Lead.organization_id == organization_id)
+    due_states = query.with_for_update(skip_locked=True).all()
     sent_count = 0
     completed_count = 0
     error_count = 0
@@ -240,16 +245,18 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
 
     for state in due_states:
         lead = state.lead
-        if organization_id and lead.organization_id != organization_id:
-            continue
 
-        # Defensive re-check - a lead could have replied/been flagged DNC
-        # between when it entered the queue and when this job runs.
+        # Defensive re-check: stop if status flag was set OR if any inbound reply
+        # record exists (self-healing in case the email poller failed to update status).
         if lead.status in ("dnc", "hot", "replied", "booked"):
             stop_cadence_for_lead(
                 db, lead.id,
                 "stopped_dnc" if lead.status == "dnc" else "stopped_replied",
             )
+            continue
+        has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
+        if has_reply:
+            stop_cadence_for_lead(db, lead.id, "stopped_replied")
             continue
 
         advisor = lead.assigned_to
@@ -281,18 +288,12 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             booking_url = f"{os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
             body = render_cadence_message(db, lead, advisor, touch_number, booking_url, touch_def.get("message_template"))
 
-            from app.services.sms_service import get_twilio_client
-            client = get_twilio_client(advisor)
-            twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=lead.phone)
-
-            from app.models.models import Message
-            message = Message(
-                lead_id=lead.id, sender_id=advisor.id, body=body,
-                twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
-                booking_link_id=booking.id,
-            )
-            db.add(message)
-
+            # Phase 1: advance state and commit BEFORE calling Twilio.
+            # If the process crashes after this commit but before the Twilio
+            # call, one touch is skipped (missed message) — acceptable.
+            # Without this ordering a crash after Twilio but before the old
+            # single commit would leave next_touch_due_at unchanged, causing
+            # the next cron run to re-send the same touch (duplicate SMS).
             state.current_touch_number = touch_number
             state.last_touch_sent_at = now
 
@@ -311,12 +312,33 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
                     completed_count += 1
 
             lead.status = "sent"
-            db.commit()
+            db.commit()  # Phase 1 commit — state is durable before Twilio call.
+
+            from app.services.sms_service import get_twilio_client
+            client = get_twilio_client(advisor)
+            twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=lead.phone)
             sent_count += 1
 
         except Exception as e:
             error_count += 1
             errors.append(f"Lead {lead.id}: {str(e)}")
+            db.rollback()
+            continue  # Skip Phase 2 — no twilio_msg to record.
+
+        try:
+            # Phase 2: write the audit Message row. If this commit fails the
+            # touch-number state is already correct, so there is no re-send on
+            # the next run — only the audit record is lost, which is acceptable.
+            from app.models.models import Message
+            message = Message(
+                lead_id=lead.id, sender_id=advisor.id, body=body,
+                twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
+                booking_link_id=booking.id,
+            )
+            db.add(message)
+            db.commit()  # Phase 2 commit — audit record only.
+        except Exception as e:
+            errors.append(f"Lead {lead.id}: audit record lost after send — {str(e)}")
             db.rollback()
 
     return {
