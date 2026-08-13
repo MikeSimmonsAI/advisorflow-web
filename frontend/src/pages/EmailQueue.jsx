@@ -113,6 +113,16 @@ export default function EmailQueue() {
   const [manualFlaggedLeads, setManualFlaggedLeads] = useState([])
   const [flagging, setFlagging] = useState(null)
 
+  // ── Recently Sent log ─────────────────────────────────────────────────────
+  const [sentLog, setSentLog]           = useState([])
+  const [sentLogVisible, setSentLogVisible] = useState(false)
+
+  function loadSentLog() {
+    api.get('/email/sent-log?limit=150')
+      .then(setSentLog)
+      .catch(() => {})
+  }
+
   function loadManualFlagged() {
     api.get('/leads/flagged').then(setManualFlaggedLeads).catch(() => {})
   }
@@ -173,6 +183,7 @@ export default function EmailQueue() {
   }, [searchQuery])
 
   useEffect(() => { loadManualFlagged() }, [])
+  useEffect(() => { loadSentLog() }, [])
 
   function toggle(id) {
     const next = new Set(selected)
@@ -256,6 +267,8 @@ export default function EmailQueue() {
       setBatchSubject('')
       setBatchBody('')
       load()
+      loadSentLog()
+      setSentLogVisible(true)  // auto-expand so they can see who was sent
     }
   }
 
@@ -313,6 +326,8 @@ export default function EmailQueue() {
       setDraftLead(null)
       setDraftResult(null)
       load()
+      loadSentLog()
+      setSentLogVisible(true)
     } catch (err) {
       setDraftSentMsg(`Failed: ${err.message}`)
     } finally {
@@ -443,6 +458,113 @@ export default function EmailQueue() {
           {draftSentMsg}
         </div>
       )}
+
+      {/* ── Recently Sent log ─────────────────────────────────────────────── */}
+      <section style={{ margin: '0 0 16px 0' }}>
+        <button
+          onClick={() => setSentLogVisible(v => !v)}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            background: sentLog.length > 0 ? 'rgba(30,240,168,0.08)' : 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(30,240,168,0.2)',
+            borderRadius: sentLogVisible ? '8px 8px 0 0' : 8,
+            padding: '10px 16px', cursor: 'pointer',
+            color: sentLog.length > 0 ? 'var(--signal-green)' : 'var(--text-secondary)',
+            fontSize: 13, fontWeight: 600,
+          }}
+        >
+          <span>
+            ✉️ Recently sent
+            {sentLog.length > 0 && (
+              <span style={{ marginLeft: 8, fontWeight: 400, opacity: 0.7 }}>
+                — {sentLog.length} email{sentLog.length !== 1 ? 's' : ''} logged
+              </span>
+            )}
+          </span>
+          <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.6 }}>
+            {sentLogVisible ? '▲ Hide' : '▼ Show who you\'ve emailed'}
+          </span>
+        </button>
+        {sentLogVisible && (
+          <div style={{ border: '1px solid rgba(30,240,168,0.2)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+            {sentLog.length === 0 ? (
+              <div style={{ padding: '20px 16px', fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                No emails sent yet. Sent emails will appear here immediately after sending.
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: '8px 16px', background: 'rgba(30,240,168,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(30,240,168,0.1)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Showing your {sentLog.length} most recent email sends — newest first.</span>
+                  <span
+                    style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent)' }}
+                    onClick={(e) => { e.stopPropagation(); loadSentLog() }}
+                  >
+                    ↻ Refresh
+                  </span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255,255,255,0.03)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '6px 16px', textAlign: 'left', fontWeight: 600 }}>Name</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Email</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Subject</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Sent at</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sentLog.map((entry) => {
+                      const sentDate = entry.sent_at ? new Date(entry.sent_at) : null
+                      const isToday = sentDate && new Date().toDateString() === sentDate.toDateString()
+                      const timeStr = sentDate
+                        ? isToday
+                          ? sentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : sentDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + sentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : '—'
+                      return (
+                        <tr key={entry.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <td style={{ padding: '9px 16px', fontSize: 13, fontWeight: 600 }}>
+                            <span
+                              style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
+                              onClick={() => navigate(`/leads/${entry.lead_id}`)}
+                            >
+                              {entry.lead_name}
+                            </span>
+                            {isToday && (
+                              <span style={{ marginLeft: 6, fontSize: 10, background: 'rgba(30,240,168,0.15)', color: 'var(--signal-green)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
+                                TODAY
+                              </span>
+                            )}
+                          </td>
+                          <td className="mono" style={{ padding: '9px 8px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {entry.lead_email || '—'}
+                          </td>
+                          <td style={{ padding: '9px 8px', fontSize: 12, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {entry.subject || '—'}
+                          </td>
+                          <td style={{ padding: '9px 8px', fontSize: 12, color: isToday ? 'var(--signal-green)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                            {timeStr}
+                          </td>
+                          <td style={{ padding: '9px 8px' }}>
+                            <span style={{
+                              fontSize: 11, borderRadius: 4, padding: '2px 6px',
+                              background: entry.status === 'sent' ? 'rgba(30,240,168,0.12)' : 'rgba(255,200,0,0.12)',
+                              color: entry.status === 'sent' ? 'var(--signal-green)' : 'var(--signal-amber)',
+                              border: `1px solid ${entry.status === 'sent' ? 'rgba(30,240,168,0.3)' : 'rgba(255,200,0,0.3)'}`,
+                            }}>
+                              {entry.status === 'sent' ? '✓ Sent' : entry.status}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="panel">
         <div className="panel-header">

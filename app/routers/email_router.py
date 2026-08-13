@@ -256,6 +256,43 @@ def draft_email(
     return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message)
 
 
+@router.get("/sent-log")
+def email_sent_log(
+    limit: int = Query(default=150, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Recent email sends by this advisor — ordered newest first.
+    Used by Email Queue's 'Recently Sent' panel so advisors always know
+    who they already emailed and don't accidentally double-send.
+    """
+    from sqlalchemy import desc
+    rows = (
+        db.query(EmailMessage, Lead)
+        .join(Lead, EmailMessage.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            EmailMessage.sender_id == current_user.id,
+        )
+        .order_by(desc(EmailMessage.sent_at))
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": msg.id,
+            "lead_id": lead.id,
+            "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() or lead.email or "—",
+            "lead_email": lead.email,
+            "subject": msg.subject,
+            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "status": msg.status,
+        }
+        for msg, lead in rows
+    ]
+
+
 @router.post("/poll-inbox")
 def poll_inbox(
     db: Session = Depends(get_db),
