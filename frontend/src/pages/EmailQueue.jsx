@@ -1,4 +1,4 @@
-import { useEffect, useState, Fragment } from 'react'
+import { useEffect, useState, Fragment, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import '../styles/shared.css'
@@ -34,17 +34,25 @@ const STATUS_CONFIG = {
 
 export default function EmailQueue() {
   const navigate = useNavigate()
-  const [leads, setLeads]           = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [selected, setSelected]     = useState(new Set())
-  const [sending, setSending]       = useState(false)
+  const [leads, setLeads]             = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [selected, setSelected]       = useState(new Set())
   const [searchQuery, setSearchQuery] = useState('')
-  const [tone, setTone]             = useState('warm')
-  const [aiDirection, setAiDirection] = useState('')
-  const [sendResult, setSendResult] = useState(null)
   const [showMismatchOnly, setShowMismatchOnly] = useState(false)
 
-  // Per-lead draft panel
+  // ── Batch compose drawer ──────────────────────────────────────────────────
+  const [composeOpen, setComposeOpen]       = useState(false)
+  const [tone, setTone]                     = useState('warm')
+  const [aiDirection, setAiDirection]       = useState('')
+  const [batchSubject, setBatchSubject]     = useState('')
+  const [batchBody, setBatchBody]           = useState('')
+  const [batchBookingLink, setBatchBookingLink] = useState(true)
+  const [batchDrafting, setBatchDrafting]   = useState(false)
+  const [batchDraftErr, setBatchDraftErr]   = useState('')
+  const [batchSending, setBatchSending]     = useState(false)
+  const [batchResult, setBatchResult]       = useState(null)
+
+  // ── Per-lead draft panel (single lead, still exists) ─────────────────────
   const [draftLead, setDraftLead]         = useState(null)
   const [drafting, setDrafting]           = useState(false)
   const [draftResult, setDraftResult]     = useState(null)
@@ -82,34 +90,81 @@ export default function EmailQueue() {
     else setSelected(new Set(visible.map((l) => l.id)))
   }
 
-  async function handleBatchSend() {
-    if (selected.size === 0) return
-    const mismatchedSelected = Array.from(selected).filter((id) => {
-      const lead = leads.find((l) => l.id === id)
-      return lead && detectMismatch(lead)
-    })
-    if (mismatchedSelected.length > 0) {
-      const ok = window.confirm(
-        `⚠️ ${mismatchedSelected.length} of your selected leads have a name/email mismatch.\n\n` +
-        `In funeral home data, the email often belongs to a surviving family member, not the account holder shown.\n\n` +
-        `Do you still want to send to all ${selected.size} selected leads?`
-      )
-      if (!ok) return
-    }
-    setSending(true)
-    setSendResult(null)
+  // ── Batch: AI-generate a draft from the first selected lead ──────────────
+  async function handleBatchAiDraft() {
+    const ids = Array.from(selected)
+    if (!ids.length) return
+    setBatchDrafting(true)
+    setBatchDraftErr('')
     try {
-      const result = await api.post('/email/send-batch', { lead_ids: Array.from(selected) })
-      setSendResult(result)
-      setSelected(new Set())
-      load()
+      const result = await api.post(`/email/draft/${ids[0]}`, {
+        tone,
+        ai_direction: aiDirection || null,
+      })
+      // Use the first option as a starting point
+      const opt = result.options?.[0]
+      if (opt) {
+        setBatchSubject(opt.subject || '')
+        setBatchBody(opt.body || '')
+      } else {
+        setBatchDraftErr('AI returned no options — try adjusting your direction.')
+      }
     } catch (err) {
-      setSendResult({ error: err.message })
+      setBatchDraftErr(err.message || 'AI draft failed.')
     } finally {
-      setSending(false)
+      setBatchDrafting(false)
     }
   }
 
+  // ── Batch: send custom message to all selected leads ─────────────────────
+  async function handleBatchComposeSend() {
+    if (!selected.size || !batchBody.trim()) return
+    const ids = Array.from(selected)
+
+    // Mismatch warning — now a non-blocking banner (we already show it in the drawer)
+    const mismatchCount = ids.filter((id) => {
+      const lead = leads.find((l) => l.id === id)
+      return lead && detectMismatch(lead)
+    }).length
+
+    if (mismatchCount > 0) {
+      const ok = window.confirm(
+        `⚠️ ${mismatchCount} of your selected leads have a name/email mismatch.\n\n` +
+        `In funeral home data, the email often belongs to a surviving family member.\n\n` +
+        `Continue sending to all ${ids.length} selected leads?`
+      )
+      if (!ok) return
+    }
+
+    setBatchSending(true)
+    setBatchResult(null)
+
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        api.post(`/email/send/${id}`, {
+          subject: batchSubject.trim() || 'Hi there',
+          body: batchBody.trim(),
+          include_booking_link: batchBookingLink,
+        })
+      )
+    )
+
+    const sent   = results.filter((r) => r.status === 'fulfilled').length
+    const failed = results.filter((r) => r.status === 'rejected').length
+
+    setBatchResult({ sent, failed, total: ids.length })
+    setBatchSending(false)
+
+    if (sent > 0) {
+      setSelected(new Set())
+      setComposeOpen(false)
+      setBatchSubject('')
+      setBatchBody('')
+      load()
+    }
+  }
+
+  // ── Per-lead draft ────────────────────────────────────────────────────────
   async function handleOpenDraft(lead) {
     if (draftLead?.id === lead.id) {
       setDraftLead(null)
@@ -170,8 +225,13 @@ export default function EmailQueue() {
     }
   }
 
-  const mismatchLeads = leads.filter(detectMismatch)
-  const visibleLeads  = showMismatchOnly ? mismatchLeads : leads
+  const mismatchLeads  = leads.filter(detectMismatch)
+  const visibleLeads   = showMismatchOnly ? mismatchLeads : leads
+  const selectedIds    = Array.from(selected)
+  const selectedMismatches = selectedIds.filter((id) => {
+    const lead = leads.find((l) => l.id === id)
+    return lead && detectMismatch(lead)
+  })
 
   const counts = {
     total:    leads.length,
@@ -184,24 +244,24 @@ export default function EmailQueue() {
   const currentTone = TONE_OPTIONS.find(t => t.key === tone) || TONE_OPTIONS[1]
 
   return (
-    <div>
+    <div style={{ paddingBottom: composeOpen ? 520 : selected.size > 0 ? 72 : 0 }}>
       <header className="page-header">
         <div>
           <h1 className="page-title">Email queue</h1>
-          <p className="page-subtitle">Leads routed to email outreach. Click a name to open the contact record, or use ✨ Draft to generate AI email options.</p>
+          <p className="page-subtitle">
+            Select leads below, then click <strong>✉️ Compose & Send</strong> to write your message and send to the whole group.
+            Or use ✨ Draft on a single lead for AI-generated options.
+          </p>
         </div>
-        <button className="btn btn--primary" onClick={handleBatchSend} disabled={sending || selected.size === 0}>
-          {sending ? 'Sending…' : selected.size > 0 ? `Batch send to ${selected.size}` : 'Select leads to batch send'}
-        </button>
       </header>
 
       {/* KPI row */}
       <div className="eq-kpi-row">
         {[
-          { label: 'Total in queue', value: counts.total, color: 'var(--text-primary)' },
-          { label: 'Cold — never contacted', value: counts.cold, color: 'var(--signal-blue)' },
-          { label: 'Warm — emailed once', value: counts.warm, color: 'var(--signal-amber)' },
-          { label: 'Hot — replied or booked', value: counts.hot, color: 'var(--signal-red)' },
+          { label: 'Total in queue',          value: counts.total, color: 'var(--text-primary)' },
+          { label: 'Cold — never contacted',  value: counts.cold,  color: 'var(--signal-blue)' },
+          { label: 'Warm — emailed once',     value: counts.warm,  color: 'var(--signal-amber)' },
+          { label: 'Hot — replied or booked', value: counts.hot,   color: 'var(--signal-red)' },
         ].map(({ label, value, color }) => (
           <div key={label} className="panel eq-kpi-card">
             <span className="eq-kpi-label">{label}</span>
@@ -224,11 +284,11 @@ export default function EmailQueue() {
         )}
       </div>
 
-      {/* Tone + AI Direction controls */}
+      {/* AI settings panel (for per-lead drafts) */}
       <div className="panel eq-tone-panel">
         <div className="eq-tone-header">
           <span className="eq-tone-title">AI message settings</span>
-          <span className="eq-tone-desc">These apply when you click ✨ Generate options on any lead</span>
+          <span className="eq-tone-desc">Tone used for AI drafts (single-lead ✨ Draft and batch AI Draft)</span>
         </div>
         <div className="eq-tone-pills">
           {TONE_OPTIONS.map((t) => (
@@ -252,11 +312,11 @@ export default function EmailQueue() {
         />
       </div>
 
-      {sendResult && (
-        <div className={`eq-send-result ${sendResult.error ? 'eq-send-result--error' : 'eq-send-result--success'}`}>
-          {sendResult.error
-            ? `Send failed: ${sendResult.error}`
-            : `Sent: ${sendResult.sent_count ?? 0} · Failed: ${sendResult.failed_count ?? 0} · Skipped: ${sendResult.skipped_count ?? 0}`}
+      {batchResult && (
+        <div className={`eq-send-result ${batchResult.failed === batchResult.total ? 'eq-send-result--error' : 'eq-send-result--success'}`}>
+          {batchResult.failed === batchResult.total
+            ? `All ${batchResult.total} sends failed — check the console or backend logs.`
+            : `✓ Sent to ${batchResult.sent} lead${batchResult.sent !== 1 ? 's' : ''}${batchResult.failed > 0 ? ` · ${batchResult.failed} failed` : ''}`}
         </div>
       )}
 
@@ -299,7 +359,11 @@ export default function EmailQueue() {
             <thead>
               <tr>
                 <th style={{ width: 40 }}>
-                  <input type="checkbox" checked={selected.size === visibleLeads.length && visibleLeads.length > 0} onChange={toggleAll} />
+                  <input
+                    type="checkbox"
+                    checked={selected.size === visibleLeads.length && visibleLeads.length > 0}
+                    onChange={toggleAll}
+                  />
                 </th>
                 <th>Name</th>
                 <th>Email</th>
@@ -312,8 +376,8 @@ export default function EmailQueue() {
             </thead>
             <tbody>
               {visibleLeads.map((lead) => {
-                const cfg = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new
-                const isOpen = draftLead?.id === lead.id
+                const cfg      = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new
+                const isOpen   = draftLead?.id === lead.id
                 const isMismatch = detectMismatch(lead)
                 return (
                   <Fragment key={lead.id}>
@@ -356,7 +420,7 @@ export default function EmailQueue() {
                       </td>
                     </tr>
 
-                    {/* Inline AI Draft Panel */}
+                    {/* Inline per-lead AI Draft Panel */}
                     {isOpen && (
                       <tr>
                         <td colSpan={8} style={{ padding: 0 }}>
@@ -387,7 +451,6 @@ export default function EmailQueue() {
 
                             {draftResult && (
                               <div className="eq-draft-body">
-                                {/* Talking points */}
                                 {draftResult.talking_points?.length > 0 && (
                                   <div className="eq-talking-points">
                                     <div className="eq-talking-label">💡 Talking points for this lead</div>
@@ -399,7 +462,6 @@ export default function EmailQueue() {
                                   </div>
                                 )}
 
-                                {/* 3 options */}
                                 <div className="eq-options-label">Choose a message to start from:</div>
                                 <div className="eq-options-grid">
                                   {draftResult.options?.map((opt, i) => (
@@ -415,7 +477,6 @@ export default function EmailQueue() {
                                   ))}
                                 </div>
 
-                                {/* Edit & send */}
                                 {selectedOption && (
                                   <div className="eq-edit-section">
                                     <div className="eq-edit-label">Edit before sending:</div>
@@ -460,6 +521,138 @@ export default function EmailQueue() {
           </table>
         )}
       </section>
+
+      {/* ── Fixed bottom bar + Compose Drawer ─────────────────────────────── */}
+      {selected.size > 0 && (
+        <div className="eq-batch-bar">
+          <div className="eq-batch-bar-inner">
+            <span className="eq-batch-count">
+              {selected.size} lead{selected.size !== 1 ? 's' : ''} selected
+            </span>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                className="btn btn--secondary"
+                style={{ fontSize: 13 }}
+                onClick={() => setSelected(new Set())}
+              >
+                Deselect all
+              </button>
+              <button
+                className="btn btn--primary"
+                style={{ fontSize: 14, fontWeight: 700 }}
+                onClick={() => setComposeOpen((v) => !v)}
+              >
+                {composeOpen ? '✕ Close compose' : `✉️ Compose & Send (${selected.size})`}
+              </button>
+            </div>
+          </div>
+
+          {/* Compose Drawer — slides up from the bar */}
+          {composeOpen && (
+            <div className="eq-compose-drawer">
+              <div className="eq-compose-drawer-header">
+                <div>
+                  <span className="eq-compose-drawer-title">Compose email campaign</span>
+                  <span className="eq-compose-drawer-sub">
+                    Will send to {selected.size} selected lead{selected.size !== 1 ? 's' : ''}
+                    {selectedMismatches.length > 0 && (
+                      <span style={{ color: '#c0392b', marginLeft: 8 }}>
+                        · ⚠️ {selectedMismatches.length} name/email mismatch{selectedMismatches.length !== 1 ? 'es' : ''}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* Tone + AI Direction */}
+              <div className="eq-compose-section">
+                <div className="eq-compose-label">Tone</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                  {TONE_OPTIONS.map((t) => (
+                    <button
+                      key={t.key}
+                      className={`lead-tone-pill ${tone === t.key ? 'lead-tone-pill--active' : ''}`}
+                      onClick={() => setTone(t.key)}
+                      title={t.desc}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  className="settings-input"
+                  placeholder="Campaign direction (optional): e.g. open enrollment reminder, file check, anniversary outreach"
+                  value={aiDirection}
+                  onChange={(e) => setAiDirection(e.target.value)}
+                  style={{ marginBottom: 10 }}
+                />
+                <button
+                  className="btn btn--secondary"
+                  style={{ fontSize: 13, alignSelf: 'flex-start' }}
+                  onClick={handleBatchAiDraft}
+                  disabled={batchDrafting}
+                >
+                  {batchDrafting ? '⏳ Drafting…' : '✨ AI Draft (fills below)'}
+                </button>
+                {batchDraftErr && (
+                  <div className="compose-error" style={{ marginTop: 8 }}>⚠️ {batchDraftErr}</div>
+                )}
+              </div>
+
+              {/* Subject + Body */}
+              <div className="eq-compose-section" style={{ flex: 1 }}>
+                <div className="eq-compose-label">Subject</div>
+                <input
+                  className="compose-subject"
+                  placeholder="Email subject line…"
+                  value={batchSubject}
+                  onChange={(e) => setBatchSubject(e.target.value)}
+                  style={{ marginBottom: 10 }}
+                />
+                <div className="eq-compose-label">Message</div>
+                <textarea
+                  className="compose-textarea"
+                  rows={6}
+                  placeholder="Write your message here, or click ✨ AI Draft to generate one. This message will go to all selected leads."
+                  value={batchBody}
+                  onChange={(e) => setBatchBody(e.target.value)}
+                />
+              </div>
+
+              {/* Footer controls */}
+              <div className="eq-compose-footer">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={batchBookingLink}
+                    onChange={(e) => setBatchBookingLink(e.target.checked)}
+                  />
+                  Include booking link
+                </label>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    className="btn btn--secondary"
+                    onClick={() => { setBatchSubject(''); setBatchBody(''); setBatchDraftErr('') }}
+                    style={{ fontSize: 13 }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    className="btn btn--primary"
+                    style={{ fontSize: 14, fontWeight: 700, minWidth: 180 }}
+                    onClick={handleBatchComposeSend}
+                    disabled={batchSending || !batchBody.trim()}
+                  >
+                    {batchSending
+                      ? `Sending… (${selected.size})`
+                      : `📤 Send to ${selected.size} lead${selected.size !== 1 ? 's' : ''}`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

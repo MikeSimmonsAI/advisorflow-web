@@ -135,3 +135,84 @@
   flex-wrap: wrap;
   margin-top: 10px;
 }
+
+/* ── Batch bottom bar ─────────────────────────────────────────────── */
+.eq-batch-bar {
+  position: fixed;
+  bottom: 0;
+  left: 240px; /* sidebar width */
+  right: 0;
+  z-index: 200;
+  background: var(--surface-1, #12152a);
+  border-top: 2px solid var(--accent, #2fb6ff);
+  box-shadow: 0 -8px 32px rgba(0,0,0,0.4);
+}
+
+.eq-batch-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+}
+
+.eq-batch-count {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent, #2fb6ff);
+  font-family: var(--font-mono);
+}
+
+/* ── Compose Drawer ───────────────────────────────────────────────── */
+.eq-compose-drawer {
+  background: var(--surface-2, #181c35);
+  border-top: 1px solid var(--border);
+  padding: 20px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 440px;
+  overflow-y: auto;
+}
+
+.eq-compose-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.eq-compose-drawer-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: block;
+}
+
+.eq-compose-drawer-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: block;
+  margin-top: 3px;
+}
+
+.eq-compose-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eq-compose-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+}
+
+.eq-compose-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
