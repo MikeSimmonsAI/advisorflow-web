@@ -246,6 +246,9 @@ export default function LeadDetail() {
   const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [assignmentError, setAssignmentError] = useState('')
   const [showCaseFile, setShowCaseFile] = useState(false)
+  const [activity, setActivity] = useState(null)
+  const [activityLoading, setActivityLoading] = useState(false)
+  const [showActivity, setShowActivity] = useState(false)
   const timelineRef = useRef(null)
 
   function load() {
@@ -497,6 +500,20 @@ export default function LeadDetail() {
       setAssignmentError(err.message)
     } finally {
       setAssignmentSaving(false)
+    }
+  }
+
+  async function handleLoadActivity() {
+    if (activity) { setShowActivity(a => !a); return }
+    setActivityLoading(true)
+    try {
+      const d = await api.get(`/leads/${leadId}/activity`)
+      setActivity(d)
+      setShowActivity(true)
+    } catch (err) {
+      console.error('Activity load error:', err)
+    } finally {
+      setActivityLoading(false)
     }
   }
 
@@ -1067,6 +1084,60 @@ export default function LeadDetail() {
           )}
 
           <OutcomeTracker leadId={leadId} />
+
+          {/* ── Full Activity Log ── */}
+          <section className="panel lead-detail-panel">
+            <div className="panel-header" style={{ cursor: 'pointer' }} onClick={handleLoadActivity}>
+              <h2 className="panel-title">🗂️ Activity Log</h2>
+              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                {activityLoading ? 'Loading…' : showActivity ? '▲ collapse' : '▼ expand'}
+              </span>
+            </div>
+            {showActivity && activity && (
+              <div style={{ marginTop: 8 }}>
+                {activity.events.length === 0 ? (
+                  <div className="empty-state" style={{ padding: '12px 0' }}>No activity recorded yet.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[...activity.events].reverse().map((ev) => {
+                      const typeColors = {
+                        lead_created:     { bg: 'rgba(100,100,255,0.08)', border: 'rgba(100,100,255,0.25)', icon: '👤' },
+                        sms_sent:         { bg: 'rgba(30,200,168,0.07)', border: 'rgba(30,200,168,0.25)', icon: '📤' },
+                        sms_reply:        { bg: ev.meta?.is_hot ? 'rgba(255,80,80,0.10)' : 'rgba(255,200,30,0.08)', border: ev.meta?.is_hot ? 'rgba(255,80,80,0.4)' : 'rgba(255,200,30,0.25)', icon: ev.meta?.is_hot ? '🔥' : '💬' },
+                        email_sent:       { bg: 'rgba(80,160,255,0.08)', border: 'rgba(80,160,255,0.25)', icon: '📧' },
+                        booking_booked:   { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '📅' },
+                        booking_confirmed:{ bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '✅' },
+                        booking_expired:  { bg: 'rgba(180,180,180,0.08)', border: 'rgba(180,180,180,0.25)', icon: '⏰' },
+                        booking_pending:  { bg: 'rgba(255,180,30,0.08)', border: 'rgba(255,180,30,0.25)', icon: '🔗' },
+                        booking_cancelled:{ bg: 'rgba(255,80,80,0.08)', border: 'rgba(255,80,80,0.25)', icon: '❌' },
+                        outcome_recorded: { bg: 'rgba(140,80,255,0.08)', border: 'rgba(140,80,255,0.25)', icon: '📝' },
+                        cadence_started:  { bg: 'rgba(30,168,255,0.07)', border: 'rgba(30,168,255,0.2)', icon: '🤖' },
+                        cadence_completed:{ bg: 'rgba(30,240,130,0.08)', border: 'rgba(30,240,130,0.25)', icon: '🏁' },
+                        dnc_flagged:      { bg: 'rgba(255,30,30,0.08)', border: 'rgba(255,30,30,0.30)', icon: '⛔' },
+                      }
+                      const style = typeColors[ev.type] || { bg: 'rgba(128,128,128,0.06)', border: 'rgba(128,128,128,0.18)', icon: '•' }
+                      const ts = ev.ts ? new Date(ev.ts).toLocaleString() : ''
+                      return (
+                        <div key={ev.id} style={{ background: style.bg, border: `1px solid ${style.border}`, borderRadius: 8, padding: '9px 12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>
+                              {style.icon} {ev.label}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0 }}>{ts}</div>
+                          </div>
+                          {ev.body && (
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.4 }}>
+                              {ev.body.length > 180 ? ev.body.slice(0, 180) + '…' : ev.body}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
 
           <section className="panel lead-detail-panel">
             <div className="panel-header"><h2 className="panel-title">📋 Details</h2></div>

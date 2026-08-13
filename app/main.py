@@ -38,6 +38,7 @@ from app.routers.social_webhooks_router import router as social_webhooks_router
 from app.routers.fiber_leads_router import router as fiber_leads_router
 from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
+from app.routers.timeline_router import router as timeline_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -273,6 +274,7 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
+app.include_router(timeline_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
