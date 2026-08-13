@@ -219,6 +219,8 @@ export default function LeadDetail() {
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [emailDraftReady, setEmailDraftReady] = useState(false)
+  const [emailAttachment, setEmailAttachment] = useState(null) // File object
+  const emailAttachRef = useRef(null)
   const [suggestingReply, setSuggestingReply] = useState(false)
   const [sendError, setSendError] = useState('')
   const [sendMode, setSendMode] = useState('sms') // 'sms' | 'email'
@@ -501,12 +503,25 @@ export default function LeadDetail() {
     setSendingEmail(true)
     setSendError('')
     try {
-      await api.post(`/email/send/${leadId}`, {
-        subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track),
-        body: emailBody,
-        include_booking_link: includeBookingLink,
-        appt_label: apptLabel,
-      })
+      if (emailAttachment) {
+        // Use multipart endpoint when an attachment is present
+        const formData = new FormData()
+        formData.append('subject', emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track))
+        formData.append('body_html', emailBody)
+        formData.append('include_booking_link', includeBookingLink ? 'true' : 'false')
+        if (apptLabel) formData.append('appt_label', apptLabel)
+        formData.append('file', emailAttachment)
+        await api.upload(`/email/send-with-attachment/${leadId}`, formData)
+        setEmailAttachment(null)
+        if (emailAttachRef.current) emailAttachRef.current.value = ''
+      } else {
+        await api.post(`/email/send/${leadId}`, {
+          subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track),
+          body: emailBody,
+          include_booking_link: includeBookingLink,
+          appt_label: apptLabel,
+        })
+      }
       setEmailSubject('')
       setEmailBody('')
       setEmailDraftReady(false)
@@ -1066,6 +1081,36 @@ export default function LeadDetail() {
                   onChange={(e) => setEmailBody(e.target.value)}
                   rows={5}
                 />
+                {/* Attachment picker */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <input
+                    ref={emailAttachRef}
+                    type="file"
+                    accept="image/*,.pdf,.doc,.docx"
+                    style={{ display: 'none' }}
+                    onChange={(e) => setEmailAttachment(e.target.files?.[0] || null)}
+                  />
+                  <button
+                    className="btn btn--secondary"
+                    style={{ fontSize: 12, padding: '4px 10px' }}
+                    onClick={() => emailAttachRef.current?.click()}
+                    type="button"
+                  >
+                    📎 {emailAttachment ? 'Change file' : 'Attach file'}
+                  </button>
+                  {emailAttachment && (
+                    <>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {emailAttachment.name}
+                      </span>
+                      <button
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--signal-red)', lineHeight: 1, padding: 0 }}
+                        onClick={() => { setEmailAttachment(null); if (emailAttachRef.current) emailAttachRef.current.value = '' }}
+                        title="Remove attachment"
+                      >✕</button>
+                    </>
+                  )}
+                </div>
                 <div className="compose-footer">
                   <label className="compose-checkbox">
                     <input
@@ -1080,7 +1125,7 @@ export default function LeadDetail() {
                     onClick={handleSendEmail}
                     disabled={sendingEmail || !emailBody.trim()}
                   >
-                    {sendingEmail ? 'Sending…' : 'Send email'}
+                    {sendingEmail ? 'Sending…' : emailAttachment ? '📎 Send with attachment' : 'Send email'}
                   </button>
                 </div>
                 {sendError && <div className="compose-error">{sendError}</div>}

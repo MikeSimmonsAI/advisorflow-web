@@ -4,6 +4,60 @@ import { api } from '../api/client'
 import '../styles/shared.css'
 import './EmailQueue.css'
 
+// Prefixes that are never a real person's inbox — system/auto senders
+const SYSTEM_PREFIXES = [
+  'noreply', 'no-reply', 'no_reply', 'donotreply', 'do-not-reply',
+  'do_not_reply', 'notifications', 'notification', 'automated',
+  'mailer', 'mailer-daemon', 'postmaster', 'bounce', 'bounces',
+  'autoresponder', 'newsletter', 'alerts', 'alert', 'system',
+  'support@domo', 'info@domo',
+]
+
+// Common domain typos — right side of @ has one of these
+const MISSPELLED_DOMAINS = [
+  // gmail variants
+  'gnail.com', 'gmial.com', 'gamil.com', 'gmai.com', 'gmail.co',
+  'gmail.org', 'gmail.net', 'gmaill.com', 'gmil.com', 'gmal.com',
+  'gmali.com', 'gimail.com', 'gemail.com', 'gmaol.com', 'gmaul.com',
+  // yahoo variants
+  'yahoa.com', 'yaho.com', 'yahooo.com', 'yaoo.com', 'ymail.co',
+  'yahomail.com', 'yhaoo.com', 'yahou.com', 'yhaoo.com', 'yhoo.com',
+  // hotmail / outlook variants
+  'hotmial.com', 'homail.com', 'hotmai.com', 'hotmal.com', 'hotmale.com',
+  'outlok.com', 'outllok.com', 'outook.com', 'otlook.com', 'ourlook.com',
+  'outlookl.com', 'outlook.co', 'outloook.com',
+  // aol
+  'aoll.com', 'aol.co', 'aoo.com',
+  // icloud
+  'icloud.co', 'iclould.com', 'iclod.com',
+  // comcast / att
+  'comast.net', 'comacast.net', 'attt.net', 'att.com',
+]
+
+// Known system/tool company domains where 'notifications@' style addresses live
+const SYSTEM_DOMAINS = ['domo.com', 'salesforce.com', 'hubspot.com', 'marketo.com', 'mailchimp.com']
+
+function detectBadEmail(lead) {
+  if (!lead.email) return null
+  const email = lead.email.toLowerCase().trim()
+  const [prefix, domain] = email.split('@')
+  if (!domain) return 'invalid format'
+
+  // System prefix check
+  if (SYSTEM_PREFIXES.some((p) => prefix === p || prefix.startsWith(p + '.')))
+    return 'system address'
+
+  // Known system domains (any address @domo.com etc. is likely a tool notification)
+  if (SYSTEM_DOMAINS.some((d) => domain === d))
+    return 'system domain'
+
+  // Misspelled domain
+  if (MISSPELLED_DOMAINS.includes(domain))
+    return 'possible typo'
+
+  return null
+}
+
 function detectMismatch(lead) {
   if (!lead.email || (!lead.first_name && !lead.last_name)) return false
   const username = lead.email.split('@')[0].toLowerCase()
@@ -226,6 +280,7 @@ export default function EmailQueue() {
   }
 
   const mismatchLeads  = leads.filter(detectMismatch)
+  const badEmailLeads  = leads.filter((l) => detectBadEmail(l))
   const visibleLeads   = showMismatchOnly ? mismatchLeads : leads
   const selectedIds    = Array.from(selected)
   const selectedMismatches = selectedIds.filter((id) => {
@@ -239,15 +294,17 @@ export default function EmailQueue() {
     warm:     leads.filter((l) => l.status === 'sent').length,
     hot:      leads.filter((l) => l.status === 'replied' || l.status === 'booked').length,
     mismatch: mismatchLeads.length,
+    badEmail: badEmailLeads.length,
   }
 
   const currentTone = TONE_OPTIONS.find(t => t.key === tone) || TONE_OPTIONS[1]
 
   const STATS = [
-    { key: 'total', label: 'In queue',       value: counts.total, color: 'var(--text-primary)',   dot: 'rgba(255,255,255,0.3)', icon: '📬' },
-    { key: 'cold',  label: 'Cold',            value: counts.cold,  color: 'var(--signal-blue)',   dot: 'var(--signal-blue)',  icon: '❄️' },
-    { key: 'warm',  label: 'Warm',            value: counts.warm,  color: 'var(--signal-amber)',  dot: 'var(--signal-amber)', icon: '☀️' },
-    { key: 'hot',   label: 'Replied/Booked',  value: counts.hot,   color: 'var(--signal-green)',  dot: 'var(--signal-green)', icon: '🔥' },
+    { key: 'total',    label: 'In queue',       value: counts.total,    color: 'var(--text-primary)',   dot: 'rgba(255,255,255,0.3)', icon: '📬' },
+    { key: 'cold',     label: 'Cold',            value: counts.cold,     color: 'var(--signal-blue)',   dot: 'var(--signal-blue)',  icon: '❄️' },
+    { key: 'warm',     label: 'Warm',            value: counts.warm,     color: 'var(--signal-amber)',  dot: 'var(--signal-amber)', icon: '☀️' },
+    { key: 'hot',      label: 'Replied/Booked',  value: counts.hot,      color: 'var(--signal-green)',  dot: 'var(--signal-green)', icon: '🔥' },
+    ...(counts.badEmail > 0 ? [{ key: 'badEmail', label: 'Bad emails', value: counts.badEmail, color: '#e74c3c', dot: '#e74c3c', icon: '🚫' }] : []),
   ]
 
   return (
@@ -393,9 +450,10 @@ export default function EmailQueue() {
             </thead>
             <tbody>
               {visibleLeads.map((lead) => {
-                const cfg      = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new
-                const isOpen   = draftLead?.id === lead.id
+                const cfg        = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new
+                const isOpen     = draftLead?.id === lead.id
                 const isMismatch = detectMismatch(lead)
+                const badEmail   = detectBadEmail(lead)
                 return (
                   <Fragment key={lead.id}>
                     <tr className={selected.has(lead.id) ? 'eq-row--selected' : ''} style={{ borderBottom: isOpen ? 'none' : undefined }}>
@@ -419,6 +477,15 @@ export default function EmailQueue() {
                               border: '1px solid #ffc107', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
                           >
                             ⚠️ mismatch
+                          </span>
+                        )}
+                        {badEmail && (
+                          <span
+                            title={`Bad email detected: ${badEmail}. This address is likely a system notification, wrong domain, or has a typo.`}
+                            style={{ marginLeft: 6, fontSize: 11, background: '#ffe4e4', color: '#c0392b',
+                              border: '1px solid #e74c3c', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
+                          >
+                            🚫 {badEmail}
                           </span>
                         )}
                       </td>
@@ -459,6 +526,15 @@ export default function EmailQueue() {
                                 ⚠️ <strong>Name/email mismatch:</strong> The email address doesn't match this lead's name.
                                 In funeral home records, this often means the email belongs to a surviving family member.
                                 Double-check before sending.
+                              </div>
+                            )}
+                            {badEmail && (
+                              <div style={{ background: '#ffe4e4', border: '1px solid #e74c3c', borderRadius: 6,
+                                padding: '8px 12px', margin: '8px 0', fontSize: 13, color: '#c0392b' }}>
+                                🚫 <strong>Suspicious email ({badEmail}):</strong> {lead.email} looks like a{' '}
+                                {badEmail === 'system address' ? 'system/notification address that will never be read by a real person.' :
+                                 badEmail === 'system domain' ? 'tool or platform notification address, not a personal inbox.' :
+                                 'possible typo — verify the domain before sending.'}
                               </div>
                             )}
 

@@ -24,11 +24,16 @@ export default function ReEngagement() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.get('/leads/?temperature=hot').catch(() => []),
-      api.get('/leads/?temperature=warm').catch(() => []),
-      api.get('/leads/?temperature=cold').catch(() => []),
+      api.get('/leads/?temperature=hot&page_size=200').catch(() => null),
+      api.get('/leads/?temperature=warm&page_size=200').catch(() => null),
+      api.get('/leads/?temperature=cold&page_size=200').catch(() => null),
     ]).then(([hot, warm, cold]) => {
-      setLeads({ hot: hot || [], warm: warm || [], cold: cold || [] })
+      // API returns paginated envelope {items:[...], total:N} — extract items
+      setLeads({
+        hot:  Array.isArray(hot)  ? hot  : (hot?.items  || []),
+        warm: Array.isArray(warm) ? warm : (warm?.items || []),
+        cold: Array.isArray(cold) ? cold : (cold?.items || []),
+      })
       setLoading(false)
     })
   }, [])

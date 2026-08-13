@@ -66,6 +66,55 @@ HEADER_MAP = {
 # these are not real prospects (e.g. "NSMG-DL-All Home Office").
 INTERNAL_EMAIL_MARKERS = ["@nsmg.com"]
 
+# Email prefixes that belong to notification systems, not real inboxes
+BAD_EMAIL_PREFIXES = {
+    "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
+    "notifications", "notification", "automated", "mailer", "mailer-daemon",
+    "postmaster", "bounce", "bounces", "autoresponder", "newsletter",
+    "alerts", "alert", "system", "info",
+}
+
+# Domains that belong to SaaS tools, not personal inboxes
+BAD_EMAIL_SYSTEM_DOMAINS = {"domo.com", "salesforce.com", "hubspot.com", "marketo.com", "mailchimp.com"}
+
+# Common misspelled personal email domains
+BAD_EMAIL_TYPO_DOMAINS = {
+    # gmail
+    "gnail.com", "gmial.com", "gamil.com", "gmai.com", "gmail.co", "gmail.org",
+    "gmail.net", "gmaill.com", "gmil.com", "gmal.com", "gmali.com", "gimail.com",
+    "gemail.com", "gmaol.com", "gmaul.com",
+    # yahoo
+    "yahoa.com", "yaho.com", "yahooo.com", "yaoo.com", "ymail.co",
+    "yahomail.com", "yhaoo.com", "yahou.com", "yhoo.com",
+    # hotmail / outlook
+    "hotmial.com", "homail.com", "hotmai.com", "hotmal.com", "hotmale.com",
+    "outlok.com", "outllok.com", "outook.com", "otlook.com", "ourlook.com",
+    "outlookl.com", "outlook.co", "outloook.com",
+    # aol / icloud / other
+    "aoll.com", "aol.co", "aoo.com", "icloud.co", "iclould.com", "iclod.com",
+    "comast.net", "comacast.net",
+}
+
+
+def _check_email_quality(email: str) -> str | None:
+    """
+    Returns a string describing why the email is suspect, or None if it looks fine.
+    Used to flag leads as needs_review instead of silently importing bad addresses.
+    """
+    if not email:
+        return None
+    low = email.strip().lower()
+    if "@" not in low:
+        return "invalid_format"
+    prefix, domain = low.split("@", 1)
+    if prefix in BAD_EMAIL_PREFIXES:
+        return "system_address"
+    if domain in BAD_EMAIL_SYSTEM_DOMAINS:
+        return "system_domain"
+    if domain in BAD_EMAIL_TYPO_DOMAINS:
+        return "typo_domain"
+    return None
+
 # Tier -> message track mapping. Every tier maps to SOMETHING now; nothing
 # maps to "excluded."
 TIER_TO_TRACK = {
@@ -77,6 +126,19 @@ TIER_TO_TRACK = {
     "partial": "needs_review",
     "addr_only": "needs_review",
 }
+
+
+def _merge_custom_fields(existing_json: str | None, email_quality_issue: str | None) -> str | None:
+    """Merges an email_quality flag into the existing custom_fields JSON blob, if any."""
+    base = {}
+    if existing_json:
+        try:
+            base = json.loads(existing_json)
+        except Exception:
+            base = {}
+    if email_quality_issue:
+        base["email_quality_issue"] = email_quality_issue
+    return json.dumps(base) if base else None
 
 
 def _build_column_lookup(columns) -> dict:
@@ -236,6 +298,7 @@ def import_leads_from_excel(
     flagged_call_restricted = 0
     flagged_needs_tier_review = 0
     email_only_count = 0
+    flagged_bad_email = 0
     tier_counts = {}
 
     # Within-batch dedup sets (catch duplicates inside the same uploaded file)
@@ -256,6 +319,7 @@ def import_leads_from_excel(
 
         tier = _infer_tier(row["tier_raw"], row["status_reason_raw"])
         call_restricted = _is_call_restricted(row["allow_calls_raw"])
+        email_quality_issue = _check_email_quality(row["email"]) if row["email"] else None
 
         # Route: phone present -> SMS channel. No phone but email present -> email-only channel.
         if phone_norm:
@@ -268,6 +332,9 @@ def import_leads_from_excel(
         message_track = TIER_TO_TRACK.get(tier, "needs_review")
         if tier == "partial":
             flagged_needs_tier_review += 1
+
+        if email_quality_issue:
+            flagged_bad_email += 1
 
         # Parse last contact date if present (best-effort, don't fail import on bad dates)
         last_contact_dt = None
@@ -302,7 +369,7 @@ def import_leads_from_excel(
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name or None,
             source_category=source_category or None,
-            custom_fields=row.get("custom_fields") or None,
+            custom_fields=_merge_custom_fields(row.get("custom_fields"), email_quality_issue),
         )
         db.add(lead)
         db.flush()
@@ -391,6 +458,7 @@ def import_leads_from_excel(
         "duplicates_flagged": duplicate_count,
         "flagged_call_restricted": flagged_call_restricted,
         "flagged_needs_tier_review": flagged_needs_tier_review,
+        "flagged_bad_email": flagged_bad_email,
         "skipped_no_contact_info": skipped_no_contact_info,
         "skipped_internal_records": skipped_internal_records,
         "tier_breakdown": tier_counts,
