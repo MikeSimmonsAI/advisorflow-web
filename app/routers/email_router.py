@@ -122,11 +122,15 @@ def email_only_queue(
     import, so keep `phone` in the response and let the UI display it when
     present. Search is intentionally scoped after org/advisor/channel filters.
     """
+    # Include new + needs_tier_review — both are actionable email-only leads.
+    # "dnc" and "sent"/"replied"/"booked" are intentionally excluded:
+    # dnc = opt-out or dup, sent+ = already in flight and visible in Replies.
+    ACTIONABLE = ("new", "needs_tier_review", "queued")
     query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
         Lead.contact_channel == "email_only",
-        Lead.status == "new",
+        Lead.status.in_(ACTIONABLE),
     )
 
     if search and search.strip():

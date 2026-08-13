@@ -75,7 +75,20 @@ BAD_EMAIL_PREFIXES = {
 }
 
 # Domains that belong to SaaS tools, not personal inboxes
-BAD_EMAIL_SYSTEM_DOMAINS = {"domo.com", "salesforce.com", "hubspot.com", "marketo.com", "mailchimp.com"}
+BAD_EMAIL_SYSTEM_DOMAINS = {
+    "domo.com", "salesforce.com", "hubspot.com", "marketo.com", "mailchimp.com",
+    "constantcontact.com", "sendgrid.net", "amazonses.com", "mailgun.org",
+    "auto-maildelivery.com", "mail-delivery.com", "bulk-mailer.com",
+    "massmail.com", "emaildelivery.com", "mailinglist.com",
+}
+
+# If any of these appear anywhere in the domain, it's a bulk/system sender
+BAD_EMAIL_DOMAIN_PATTERNS = [
+    "auto-mail", "automail", "bulk-mail", "bulkmail", "mass-mail", "massmail",
+    "mail-delivery", "maildelivery", "email-delivery", "emaildelivery",
+    "noreply", "no-reply", "donotreply", "newsletter", "mailinglist",
+    "notification", "auto-send", "autosend",
+]
 
 # Common misspelled personal email domains
 BAD_EMAIL_TYPO_DOMAINS = {
@@ -110,6 +123,8 @@ def _check_email_quality(email: str) -> str | None:
     if prefix in BAD_EMAIL_PREFIXES:
         return "system_address"
     if domain in BAD_EMAIL_SYSTEM_DOMAINS:
+        return "system_domain"
+    if any(pat in domain for pat in BAD_EMAIL_DOMAIN_PATTERNS):
         return "system_domain"
     if domain in BAD_EMAIL_TYPO_DOMAINS:
         return "typo_domain"

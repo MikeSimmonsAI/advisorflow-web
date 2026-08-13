@@ -34,8 +34,21 @@ const MISSPELLED_DOMAINS = [
   'comast.net', 'comacast.net', 'attt.net', 'att.com',
 ]
 
-// Known system/tool company domains where 'notifications@' style addresses live
-const SYSTEM_DOMAINS = ['domo.com', 'salesforce.com', 'hubspot.com', 'marketo.com', 'mailchimp.com']
+// Known system/tool company domains
+const SYSTEM_DOMAINS = [
+  'domo.com', 'salesforce.com', 'hubspot.com', 'marketo.com', 'mailchimp.com',
+  'constantcontact.com', 'sendgrid.net', 'amazonses.com', 'mailgun.org',
+  'auto-maildelivery.com', 'mail-delivery.com', 'bulk-mailer.com',
+  'massmail.com', 'emaildelivery.com', 'mailinglist.com',
+]
+
+// Domain substrings that scream bulk/automated sender
+const SYSTEM_DOMAIN_PATTERNS = [
+  'auto-mail', 'automail', 'bulk-mail', 'bulkmail', 'mass-mail', 'massmail',
+  'mail-delivery', 'maildelivery', 'email-delivery', 'emaildelivery',
+  'noreply', 'no-reply', 'donotreply', 'newsletter', 'mailinglist',
+  'notification', 'auto-send', 'autosend',
+]
 
 function detectBadEmail(lead) {
   if (!lead.email) return null
@@ -47,8 +60,10 @@ function detectBadEmail(lead) {
   if (SYSTEM_PREFIXES.some((p) => prefix === p || prefix.startsWith(p + '.')))
     return 'system address'
 
-  // Known system domains (any address @domo.com etc. is likely a tool notification)
+  // Known system domains or domain patterns
   if (SYSTEM_DOMAINS.some((d) => domain === d))
+    return 'system domain'
+  if (SYSTEM_DOMAIN_PATTERNS.some((p) => domain.includes(p)))
     return 'system domain'
 
   // Misspelled domain
@@ -93,6 +108,7 @@ export default function EmailQueue() {
   const [selected, setSelected]       = useState(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [showMismatchOnly, setShowMismatchOnly] = useState(false)
+  const [showFlagged, setShowFlagged] = useState(false)
 
   // ── Batch compose drawer ──────────────────────────────────────────────────
   const [composeOpen, setComposeOpen]       = useState(false)
@@ -139,9 +155,8 @@ export default function EmailQueue() {
   }
 
   function toggleAll() {
-    const visible = showMismatchOnly ? leads.filter(detectMismatch) : leads
-    if (visible.length > 0 && selected.size === visible.length) setSelected(new Set())
-    else setSelected(new Set(visible.map((l) => l.id)))
+    if (visibleLeads.length > 0 && selected.size === visibleLeads.length) setSelected(new Set())
+    else setSelected(new Set(visibleLeads.map((l) => l.id)))
   }
 
   // ── Batch: AI-generate a draft from the first selected lead ──────────────
@@ -281,7 +296,10 @@ export default function EmailQueue() {
 
   const mismatchLeads  = leads.filter(detectMismatch)
   const badEmailLeads  = leads.filter((l) => detectBadEmail(l))
-  const visibleLeads   = showMismatchOnly ? mismatchLeads : leads
+  const badEmailIds    = new Set(badEmailLeads.map((l) => l.id))
+  // Main list: exclude flagged bad-email leads unless user chose to show them
+  const cleanLeads     = leads.filter((l) => !badEmailIds.has(l.id))
+  const visibleLeads   = showMismatchOnly ? mismatchLeads.filter((l) => !badEmailIds.has(l.id)) : cleanLeads
   const selectedIds    = Array.from(selected)
   const selectedMismatches = selectedIds.filter((id) => {
     const lead = leads.find((l) => l.id === id)
@@ -614,6 +632,73 @@ export default function EmailQueue() {
           </table>
         )}
       </section>
+
+      {/* ── Flagged emails section (hidden by default) ─────────────────────── */}
+      {badEmailLeads.length > 0 && (
+        <section style={{ margin: '0 0 16px 0' }}>
+          <button
+            onClick={() => setShowFlagged((v) => !v)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.25)',
+              borderRadius: 8, padding: '10px 16px', cursor: 'pointer', color: '#e74c3c',
+              fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <span>🚫 {badEmailLeads.length} flagged email{badEmailLeads.length !== 1 ? 's' : ''} hidden from main list</span>
+            <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>
+              {showFlagged ? '▲ Hide' : '▼ Show for review'}
+            </span>
+          </button>
+          {showFlagged && (
+            <div style={{ border: '1px solid rgba(231,76,60,0.25)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 16px', background: 'rgba(231,76,60,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(231,76,60,0.15)' }}>
+                These addresses are system notifications, bulk-mail senders, or have domain typos. Verify before sending — most should be deleted.
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  {badEmailLeads.map((lead) => {
+                    const badEmail = detectBadEmail(lead)
+                    const isMismatch = detectMismatch(lead)
+                    const name = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'
+                    return (
+                      <tr key={lead.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', opacity: 0.85 }}>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', width: 180 }}>
+                          <span style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
+                            onClick={() => navigate(`/leads/${lead.id}`)}>
+                            {name}
+                          </span>
+                        </td>
+                        <td className="mono" style={{ padding: '10px 8px', fontSize: 12 }}>
+                          {lead.email || '—'}
+                          {badEmail && (
+                            <span style={{ marginLeft: 6, fontSize: 11, background: '#ffe4e4', color: '#c0392b',
+                              border: '1px solid #e74c3c', borderRadius: 4, padding: '1px 5px' }}>
+                              🚫 {badEmail}
+                            </span>
+                          )}
+                          {isMismatch && (
+                            <span style={{ marginLeft: 6, fontSize: 11, background: '#fff3cd', color: '#856404',
+                              border: '1px solid #ffc107', borderRadius: 4, padding: '1px 5px' }}>
+                              ⚠️ mismatch
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 8px' }}>
+                          <button className="btn btn--secondary" style={{ fontSize: 11, padding: '3px 10px' }}
+                            onClick={() => navigate(`/leads/${lead.id}`)}>
+                            Open →
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Fixed bottom bar + Compose Drawer ─────────────────────────────── */}
       {selected.size > 0 && (
