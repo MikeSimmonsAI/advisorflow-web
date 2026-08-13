@@ -104,6 +104,7 @@ def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_
         Lead.organization_id == current_user.organization_id,
         Lead.contact_channel == "email_only",
         Lead.status != "dnc",
+        Lead.manual_flag == None,  # never send to manually flagged leads
     ).all()
     result = send_email_batch(db, current_user, leads)
     return result
@@ -131,6 +132,8 @@ def email_only_queue(
         Lead.assigned_to_id == current_user.id,
         Lead.contact_channel == "email_only",
         Lead.status.in_(ACTIONABLE),
+        # Exclude manually flagged leads — bad_email and remove_all both hide from email queue
+        Lead.manual_flag == None,
     )
 
     if search and search.strip():
