@@ -217,6 +217,7 @@ async def send_email_with_attachment(
 class EmailDraftRequest(BaseModel):
     tone: str = "warm"
     ai_direction: Optional[str] = None
+    sample_message: Optional[str] = None  # User-provided sample to use as AI foundation
 
 
 @router.post("/draft/{lead_id}")
@@ -230,6 +231,8 @@ def draft_email(
     AI generates talking points + 3 full email draft options for a lead.
     Uses the lead's full context (tier, source year, last action, etc.)
     to personalize — not a generic template.
+    Respects relationship_type as the primary AI constraint.
+    If sample_message is provided, AI uses it as the foundation.
     """
     lead = db.query(Lead).filter(
         Lead.id == lead_id,
@@ -241,8 +244,9 @@ def draft_email(
     from app.services.draft_reply_service import draft_email_options
     tone = (req.tone if req else "warm")
     ai_direction = (req.ai_direction if req else None)
+    sample_message = (req.sample_message if req else None)
 
-    return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction)
+    return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message)
 
 
 @router.post("/poll-inbox")

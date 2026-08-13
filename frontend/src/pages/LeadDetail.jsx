@@ -218,6 +218,7 @@ export default function LeadDetail() {
   const [sendingEmail, setSendingEmail] = useState(false)
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
+  const [emailDraftReady, setEmailDraftReady] = useState(false)
   const [suggestingReply, setSuggestingReply] = useState(false)
   const [sendError, setSendError] = useState('')
   const [sendMode, setSendMode] = useState('sms') // 'sms' | 'email'
@@ -400,6 +401,7 @@ export default function LeadDetail() {
         .replace(/https?:\/\/\S+/g, '')
         .trim()
       setEmailBody(cleanBody)
+      setEmailDraftReady(true)
       // Smart subject from tier/track — no AI call needed
       const lead = data?.lead
       setEmailSubject(
@@ -446,6 +448,7 @@ export default function LeadDetail() {
       })
       setEmailSubject('')
       setEmailBody('')
+      setEmailDraftReady(false)
       load()
     } catch (err) {
       setSendError(err.message)
@@ -530,7 +533,7 @@ export default function LeadDetail() {
                 className="btn btn--secondary btn--sm"
                 style={{ fontSize: 11, padding: '3px 10px' }}
                 onClick={() => {
-                  setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', street_address: lead.street_address || '', city: lead.city || '', state: lead.state || '', zip_code: lead.zip_code || '' })
+                  setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', street_address: lead.street_address || '', city: lead.city || '', state: lead.state || '', zip_code: lead.zip_code || '', relationship_type: lead.relationship_type || 'cold_lead' })
                   setEditError('')
                   setShowEdit(e => !e)
                 }}
@@ -551,6 +554,17 @@ export default function LeadDetail() {
             <div className="lead-detail-badges">
               <TierBadge tier={lead.tier} />
               <StatusBadge status={lead.status} />
+              {lead.relationship_type && lead.relationship_type !== 'cold_lead' && (
+                <span className="badge badge--neutral-dim" title="Lead relationship type — affects AI familiarity">
+                  {{
+                    warm_lead: '☀️ Warm',
+                    re_engagement: '🔄 Re-engage',
+                    previous_prospect: '📋 Prev. prospect',
+                    past_customer: '🤝 Past customer',
+                    existing_customer: '⭐ Existing customer',
+                  }[lead.relationship_type] || lead.relationship_type}
+                </span>
+              )}
               {lead.is_duplicate && <span className="badge badge--neutral-dim">Duplicate</span>}
             </div>
           </div>
@@ -615,6 +629,24 @@ export default function LeadDetail() {
                 placeholder="75001" style={{ maxWidth: 120 }} />
             </label>
           </div>
+          <label className="leads-add-label" style={{ marginBottom: 12 }}>
+            Lead relationship
+            <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '2px 0 6px' }}>
+              This is the PRIMARY AI context — it controls how familiar the AI sounds.
+            </p>
+            <select
+              className="search-input"
+              value={editForm.relationship_type || 'cold_lead'}
+              onChange={e => setEditForm(f => ({ ...f, relationship_type: e.target.value }))}
+            >
+              <option value="cold_lead">❄️ Cold lead — no prior relationship</option>
+              <option value="warm_lead">☀️ Warm lead — showed prior interest / referral</option>
+              <option value="re_engagement">🔄 Re-engagement — contacted before, went quiet</option>
+              <option value="previous_prospect">📋 Previous prospect — was in pipeline, didn't close</option>
+              <option value="past_customer">🤝 Past customer — was a customer, lapsed</option>
+              <option value="existing_customer">⭐ Existing customer — active relationship</option>
+            </select>
+          </label>
           <label className="leads-add-label" style={{ marginBottom: 12 }}>Notes
             <textarea className="search-input" rows={2} value={editForm.notes || ''}
               onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
@@ -789,6 +821,22 @@ export default function LeadDetail() {
                   </button>
                   <span className="lead-compose-hint">Sends from your connected Microsoft 365 inbox.</span>
                 </div>
+                {emailDraftReady && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: 'var(--signal-green-dim, #e8f5e9)',
+                    border: '1px solid var(--signal-green, #2e7d32)',
+                    borderRadius: 6, padding: '7px 12px', fontSize: 13,
+                    color: 'var(--signal-green, #2e7d32)', fontWeight: 600,
+                  }}>
+                    ✅ Draft ready — review and edit below, then send.
+                    <button
+                      style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+                      onClick={() => setEmailDraftReady(false)}
+                      title="Dismiss"
+                    >×</button>
+                  </div>
+                )}
                 <input
                   className="compose-subject"
                   placeholder={`Subject — e.g. ${smartSubject(lead.first_name, lead.tier, lead.message_track)}`}

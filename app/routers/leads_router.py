@@ -29,6 +29,8 @@ def preview_upload(
     file: UploadFile = File(...),
     source_year: Optional[int] = Form(None),
     force_new_inquiry: bool = Form(False),
+    relationship_type: Optional[str] = Form(None),  # applied to all leads in this import
+    import_list_name: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -81,6 +83,8 @@ def preview_upload(
             source_filename=file.filename,
             dry_run=True,
             force_new_inquiry=force_new_inquiry,
+            relationship_type=relationship_type or "cold_lead",
+            import_list_name=import_list_name,
         )
     finally:
         os.unlink(tmp_path)
@@ -93,6 +97,8 @@ def confirm_upload(
     file: UploadFile = File(...),
     source_year: Optional[int] = Form(None),
     force_new_inquiry: bool = Form(False),
+    relationship_type: Optional[str] = Form(None),
+    import_list_name: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -127,6 +133,8 @@ def confirm_upload(
             source_year=source_year,
             source_filename=file.filename,
             force_new_inquiry=force_new_inquiry,
+            relationship_type=relationship_type or "cold_lead",
+            import_list_name=import_list_name,
         )
     finally:
         os.unlink(tmp_path)
@@ -956,6 +964,7 @@ class LeadFieldUpdate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     zip_code: Optional[str] = None
+    relationship_type: Optional[str] = None  # AI familiarity guardrail
 
 
 @router.patch("/{lead_id}")
@@ -1005,6 +1014,10 @@ def update_lead_fields(
         lead.state = payload.state.strip() or None
     if payload.zip_code is not None:
         lead.zip_code = payload.zip_code.strip() or None
+    if payload.relationship_type is not None:
+        valid_rel_types = {"cold_lead", "warm_lead", "re_engagement", "previous_prospect", "past_customer", "existing_customer"}
+        if payload.relationship_type in valid_rel_types:
+            lead.relationship_type = payload.relationship_type
 
     try:
         lead.updated_at = datetime.utcnow()
@@ -1032,6 +1045,7 @@ def update_lead_fields(
         "city": getattr(lead, "city", None),
         "state": getattr(lead, "state", None),
         "zip_code": getattr(lead, "zip_code", None),
+        "relationship_type": getattr(lead, "relationship_type", "cold_lead"),
     }
 
 

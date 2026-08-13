@@ -1,4 +1,5 @@
 import { useEffect, useState, Fragment } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import '../styles/shared.css'
 import './EmailQueue.css'
@@ -32,6 +33,7 @@ const STATUS_CONFIG = {
 }
 
 export default function EmailQueue() {
+  const navigate = useNavigate()
   const [leads, setLeads]           = useState([])
   const [loading, setLoading]       = useState(true)
   const [selected, setSelected]     = useState(new Set())
@@ -186,7 +188,7 @@ export default function EmailQueue() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Email queue</h1>
-          <p className="page-subtitle">Leads routed to email outreach. Click a name to get AI-drafted options with talking points.</p>
+          <p className="page-subtitle">Leads routed to email outreach. Click a name to open the contact record, or use ✨ Draft to generate AI email options.</p>
         </div>
         <button className="btn btn--primary" onClick={handleBatchSend} disabled={sending || selected.size === 0}>
           {sending ? 'Sending…' : selected.size > 0 ? `Batch send to ${selected.size}` : 'Select leads to batch send'}
@@ -318,7 +320,12 @@ export default function EmailQueue() {
                     <tr className={selected.has(lead.id) ? 'eq-row--selected' : ''} style={{ borderBottom: isOpen ? 'none' : undefined }}>
                       <td><input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggle(lead.id)} /></td>
                       <td>
-                        <span className="eq-lead-name" onClick={() => handleOpenDraft(lead)} style={{ cursor: 'pointer', fontWeight: 600 }}>
+                        <span
+                          className="eq-lead-name"
+                          onClick={() => navigate(`/leads/${lead.id}`)}
+                          style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)', textDecoration: 'underline' }}
+                          title="Open contact record"
+                        >
                           {`${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'}
                         </span>
                       </td>

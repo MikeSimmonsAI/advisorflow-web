@@ -31,23 +31,47 @@ TONE_INSTRUCTIONS = {
     "urgent": "Be brief and urgent. Time is a factor. Get straight to the point, make a specific ask, and create a sense of gentle urgency without being aggressive.",
 }
 
-DRAFT_REPLY_PROMPT = """You are drafting a short SMS reply from a service business advisor to a lead.
+RELATIONSHIP_TYPE_CONTEXT = {
+    "cold_lead": (
+        "COLD LEAD — No prior relationship. Do NOT act familiar. "
+        "Introduce yourself naturally. First message should just open a door."
+    ),
+    "warm_lead": (
+        "WARM LEAD — Showed prior interest or is a referral. "
+        "Some familiarity is appropriate. Soft CTA is fine."
+    ),
+    "previous_prospect": (
+        "PREVIOUS PROSPECT — Was in the pipeline before, didn't close. "
+        "They know us. Acknowledge the gap ('it's been a while'). Pick up naturally."
+    ),
+    "existing_customer": (
+        "EXISTING CUSTOMER — Active customer. Full familiarity. "
+        "Value-add conversation, not cold outreach. They are valued."
+    ),
+    "past_customer": (
+        "PAST CUSTOMER — Was a customer, relationship lapsed. They know us. "
+        "Don't treat them like a stranger. Make reconnecting feel easy."
+    ),
+    "re_engagement": (
+        "RE-ENGAGEMENT — We contacted them before; they went quiet. "
+        "They've heard of us. Brief, low-pressure, give them an easy out."
+    ),
+}
 
+DRAFT_REPLY_PROMPT = """You are drafting a short SMS message from a service business advisor to a lead.
+
+━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
+Relationship context: {relationship_context}
+
+User's AI direction (FOLLOW THIS EXACTLY):
+{ai_direction}
+{sample_message_section}
+━━━ CONTEXT ━━━
 Advisor: {advisor_name}
 Organization: {org_name}
-Tone instruction: {tone_instruction}
+Tone: {tone_instruction}
 Lead type: {lead_type}
-AI direction: {ai_direction}
-
-CRITICAL RULES:
-- Respond with ONLY JSON, no markdown and no preamble.
-- JSON shape: {{"suggested_reply": "..."}}
-- Keep it under 320 characters.
-- Sound human and respectful.
-- When signing or introducing yourself, use ONLY "{advisor_name}" and "{org_name}" — never use any other organization name, even if a different name appears in the conversation history below.
-- Do not claim anything not shown in the conversation.
-- If AI direction is provided, use it to shape the message purpose and context.
-- Include this booking link exactly once if relevant and not already in your draft: {booking_url}
+Booking link: {booking_url}
 
 Lead:
 - First name: {first_name}
@@ -59,6 +83,15 @@ Most recent inbound reply:
 
 Conversation history, oldest to newest:
 {history}
+
+━━━ RULES ━━━
+- Respond with ONLY JSON: {{"suggested_reply": "..."}}
+- Keep it under 320 characters.
+- Sound human and respectful.
+- Use ONLY "{advisor_name}" and "{org_name}" when signing or introducing.
+- Do not claim anything not shown in conversation or lead data.
+- The relationship context defines what familiarity is appropriate — respect it.
+- If a sample message is provided above, use it as the FOUNDATION and fill in variables (name, booking link, etc.). Do NOT rewrite it from scratch.
 """
 
 
@@ -127,7 +160,14 @@ def _fallback_reply(lead: Lead, advisor: User, booking_url: str, tone: str = "wa
     return f"Hi {name}, this is {advisor_name}. I'd love to connect and walk you through your options. {booking_url}"
 
 
-def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm", ai_direction: str = None) -> dict[str, Any]:
+def draft_reply(
+    db: Session,
+    lead: Lead,
+    advisor: User,
+    tone: str = "warm",
+    ai_direction: str = None,
+    sample_message: str = None,
+) -> dict[str, Any]:
     tone = tone if tone in TONE_INSTRUCTIONS else "warm"
     booking = get_or_create_booking_link(db, lead, advisor)
     booking_url = _booking_url(booking.token)
@@ -147,12 +187,29 @@ def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm", ai_d
     except Exception:
         org_name = "our organization"
 
+    # Relationship context is the PRIMARY AI guardrail
+    rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
+    relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(rel_type, RELATIONSHIP_TYPE_CONTEXT["cold_lead"])
+
+    direction = ai_direction.strip() if ai_direction and ai_direction.strip() else "(none — follow relationship context and tone)"
+
+    # If user provided a sample message, use it as the foundation
+    sample_section = ""
+    if sample_message and sample_message.strip():
+        sample_section = (
+            f"\nSample message (USE THIS AS YOUR FOUNDATION — fill in the lead's name, "
+            f"booking link, and any personalization. Do NOT rewrite it from scratch):\n"
+            f"{sample_message.strip()}\n"
+        )
+
     prompt = DRAFT_REPLY_PROMPT.format(
+        relationship_context=relationship_context,
         advisor_name=advisor_name,
         org_name=org_name,
         tone_instruction=TONE_INSTRUCTIONS[tone],
         lead_type=lead.message_track or lead.tier or "not specified",
-        ai_direction=ai_direction or "general reconnection outreach",
+        ai_direction=direction,
+        sample_message_section=sample_section,
         booking_url=booking_url,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
@@ -186,13 +243,19 @@ def draft_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm", ai_d
 
 # ── Email draft with talking points + 3 options ───────────────────────────────
 
-EMAIL_DRAFT_PROMPT = """You are helping a service business advisor write a cold outreach email to a lead.
+EMAIL_DRAFT_PROMPT = """You are helping a service business advisor write an outreach email to a lead.
 
+━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
+Relationship context: {relationship_context}
+
+User's AI direction (FOLLOW THIS EXACTLY — it overrides your defaults):
+{ai_direction}
+{sample_message_section}
+━━━ CONTEXT ━━━
 Advisor: {advisor_name}
 Organization: {org_name}
 Tone: {tone_desc}
 Lead type / context: {lead_type}
-AI direction: {ai_direction}
 
 Lead profile:
 - Name: {first_name} {last_name}
@@ -203,15 +266,15 @@ Lead profile:
 - Status reason: {status_reason}
 - Notes: {notes}
 
-Rules:
-- This is likely a COLD contact — they may not remember us
-- Use the lead's history (last action, source year, status reason) to make it personal and relevant
-- Keep emails under 150 words
-- Sound like a real person, not a mass marketing template
-- Each option should have a different angle/hook
-- Never be pushy or desperate
-- Always give them an easy out
-- CRITICAL: Use the EXACT advisor name "{advisor_name}" — NEVER write [Your Name], [Name], or any bracket placeholder. The real name is already provided above — use it directly.
+━━━ RULES ━━━
+- The relationship context above defines EXACTLY how familiar you should sound — respect it strictly.
+- Use the lead's history (last action, source year, status reason) to personalize.
+- Keep emails under 150 words.
+- Sound like a real person, not a mass marketing template.
+- Each option should have a different angle/hook.
+- Never be pushy or desperate. Always give them an easy out.
+- CRITICAL: Use the EXACT advisor name "{advisor_name}" — NEVER write [Your Name], [Name], or any bracket placeholder.
+- If a sample message is provided above, use it as the FOUNDATION for at least one option — fill in variables (name, etc.). Do NOT rewrite it from scratch.
 
 Respond ONLY with valid JSON, no markdown:
 {{
@@ -242,11 +305,13 @@ def draft_email_options(
     advisor,
     tone: str = "warm",
     ai_direction: str = None,
+    sample_message: str = None,
 ) -> dict:
     """
     Generate talking points + 3 email draft options for a lead.
     Uses full lead context (tier, source year, last action, etc.) to
     personalize the message rather than using a generic template.
+    Respects relationship_type as the primary AI constraint.
     """
     from openai import OpenAI
     import json, os
@@ -275,12 +340,29 @@ def draft_email_options(
         except Exception:
             last_contact = str(lead.last_contact_date)
 
+    # Relationship context — primary AI guardrail
+    rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
+    relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(rel_type, RELATIONSHIP_TYPE_CONTEXT["cold_lead"])
+
+    direction = ai_direction.strip() if ai_direction and ai_direction.strip() else "(none — follow relationship context and tone)"
+
+    # Sample message injection
+    sample_section = ""
+    if sample_message and sample_message.strip():
+        sample_section = (
+            f"\nSample message (USE THIS AS YOUR FOUNDATION for at least one option — "
+            f"fill in the lead's name and any personalization. Do NOT rewrite it from scratch):\n"
+            f"{sample_message.strip()}\n"
+        )
+
     prompt = EMAIL_DRAFT_PROMPT.format(
+        relationship_context=relationship_context,
         advisor_name=advisor.full_name or "your advisor",
         org_name=org_name,
         tone_desc=tone_desc,
         lead_type=lead.message_track or lead.tier or "not specified",
-        ai_direction=ai_direction or "general reconnection outreach",
+        ai_direction=direction,
+        sample_message_section=sample_section,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         tier=lead.tier or "unknown",

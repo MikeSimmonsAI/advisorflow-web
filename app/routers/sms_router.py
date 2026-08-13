@@ -74,6 +74,7 @@ def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: Us
 class DraftReplyRequest(BaseModel):
     tone: str = "warm"  # cold | warm | hot | urgent
     ai_direction: Optional[str] = None  # per-lead context override
+    sample_message: Optional[str] = None  # User-provided sample to use as AI foundation
 
 
 @router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
@@ -87,7 +88,8 @@ def draft_reply_for_lead(
     from app.services.draft_reply_service import draft_reply
     tone = (req.tone if req and req.tone else "warm")
     ai_direction = (req.ai_direction if req and req.ai_direction else None)
-    result = draft_reply(db, lead, current_user, tone=tone, ai_direction=ai_direction)
+    sample_message = (req.sample_message if req and req.sample_message else None)
+    result = draft_reply(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message)
     return result
 
 

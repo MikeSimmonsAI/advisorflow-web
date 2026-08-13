@@ -52,15 +52,47 @@ ESCALATION_KEYWORDS = [
 
 URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 
+RELATIONSHIP_TYPE_CONTEXT = {
+    "cold_lead": (
+        "COLD LEAD — No prior relationship. Do NOT act familiar. "
+        "Introduce yourself naturally. First message should just open a door."
+    ),
+    "warm_lead": (
+        "WARM LEAD — Showed prior interest or is a referral. "
+        "Some familiarity is appropriate. Soft CTA is fine."
+    ),
+    "previous_prospect": (
+        "PREVIOUS PROSPECT — Was in the pipeline before, didn't close. "
+        "They know us. Acknowledge the gap ('it's been a while'). Pick up naturally."
+    ),
+    "existing_customer": (
+        "EXISTING CUSTOMER — Active customer. Full familiarity. "
+        "Value-add conversation, not cold outreach. They are valued."
+    ),
+    "past_customer": (
+        "PAST CUSTOMER — Was a customer, relationship lapsed. They know us. "
+        "Don't treat them like a stranger. Make reconnecting feel easy."
+    ),
+    "re_engagement": (
+        "RE-ENGAGEMENT — We contacted them before; they went quiet. "
+        "They've heard of us. Brief, low-pressure, give them an easy out."
+    ),
+}
+
 SMART_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor manage email conversations with families on behalf of {org_name}.
 
 Your job: generate the next outbound email to move this family toward booking a {appt_label} appointment.
+
+━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
+Relationship context: {relationship_context}
+User's AI direction (FOLLOW THIS EXACTLY — it overrides your defaults): {ai_direction}
 
 CRITICAL RULES:
 - Be SMART not QUICK. Craft something genuinely thoughtful.
 - Sound like a caring human advisor, never robotic or generic.
 - This is a sensitive industry. Be compassionate, patient, never pushy.
 - Never reveal you are AI.
+- The relationship context above defines EXACTLY how familiar you should sound — respect it strictly.
 - Vary your approach each time — do NOT repeat what was said before.
 - Keep emails SHORT — 2-3 sentences max for the body. No filler.
 - Reference the previous outreach naturally if this is a follow-up.
@@ -331,7 +363,14 @@ def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, 
         logger.error("Escalation alert failed: %s", e)
 
 
-def generate_touch_email(db: Session, lead: Lead, advisor: User, touch_number: int) -> dict:
+def generate_touch_email(
+    db: Session,
+    lead: Lead,
+    advisor: User,
+    touch_number: int,
+    ai_direction: str = None,
+    relationship_type: str = None,
+) -> dict:
     if touch_number >= len(TOUCH_ANGLES):
         return {"should_stop": True, "stop_reason": "Cadence complete"}
 
@@ -341,8 +380,16 @@ def generate_touch_email(db: Session, lead: Lead, advisor: User, touch_number: i
     appt_label = _get_appt_label(lead)
     history = _get_conversation_history(db, lead)
 
+    # Resolve relationship context — caller override > lead field > default cold
+    rel_type = relationship_type or getattr(lead, "relationship_type", None) or "cold_lead"
+    relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(rel_type, RELATIONSHIP_TYPE_CONTEXT["cold_lead"])
+
+    direction = ai_direction.strip() if ai_direction and ai_direction.strip() else "(none — follow relationship context and tone)"
+
     org_name = _get_org_name(db, advisor)
     system = SMART_SYSTEM_PROMPT.format(
+        relationship_context=relationship_context,
+        ai_direction=direction,
         appt_label=appt_label,
         tone_instruction=TONE_MAP.get(tone, TONE_MAP["warm"]),
         touch_angle_instruction=TOUCH_ANGLE_MAP.get(angle, ""),
@@ -865,8 +912,19 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
 
 
 # Legacy compatibility
-def generate_auto_reply(db: Session, lead: Lead, advisor: User, tone: str = "warm") -> dict:
-    result = generate_touch_email(db, lead, advisor, touch_number=0)
+def generate_auto_reply(
+    db: Session,
+    lead: Lead,
+    advisor: User,
+    tone: str = "warm",
+    ai_direction: str = None,
+    relationship_type: str = None,
+) -> dict:
+    result = generate_touch_email(
+        db, lead, advisor, touch_number=0,
+        ai_direction=ai_direction,
+        relationship_type=relationship_type,
+    )
     booking_url = _get_booking_url(db, lead, advisor)
     return {
         "reply": result.get("body", ""),

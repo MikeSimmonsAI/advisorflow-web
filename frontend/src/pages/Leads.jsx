@@ -46,6 +46,8 @@ export default function Leads() {
   const [previewing, setPreviewing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [sourceYear, setSourceYear] = useState('')
+  const [importRelationshipType, setImportRelationshipType] = useState('cold_lead')
+  const [importListName, setImportListName] = useState('')
   const [forceNewInquiry, setForceNewInquiry] = useState(false)
   const [view, setView] = useState('all')
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
@@ -74,6 +76,8 @@ export default function Leads() {
   const [aiActioning, setAiActioning] = useState(null) // null | 'queue' | 'send_sms' | 'send_email' | 'send_both'
   const [aiResult, setAiResult] = useState(null)
   const [showBulkCompose, setShowBulkCompose] = useState(false)
+  const [bulkAiDirection, setBulkAiDirection] = useState('')
+  const [bulkRelationshipType, setBulkRelationshipType] = useState('')
 
   const currentUser = getCurrentUser()
   const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
@@ -160,6 +164,8 @@ export default function Leads() {
       const formData = new FormData()
       formData.append('file', file)
       if (sourceYear) formData.append('source_year', sourceYear)
+      if (importRelationshipType) formData.append('relationship_type', importRelationshipType)
+      if (importListName.trim()) formData.append('import_list_name', importListName.trim())
       if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/preview', formData)
       setPreview(result)
@@ -177,6 +183,8 @@ export default function Leads() {
       const formData = new FormData()
       formData.append('file', pendingFile.current)
       if (sourceYear) formData.append('source_year', sourceYear)
+      if (importRelationshipType) formData.append('relationship_type', importRelationshipType)
+      if (importListName.trim()) formData.append('import_list_name', importListName.trim())
       if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/confirm', formData)
       setPreview(null)
@@ -265,6 +273,8 @@ export default function Leads() {
         tone: aiTone,
         auto_send: autoSend,
         channel,
+        ai_direction: bulkAiDirection.trim() || null,
+        relationship_type: bulkRelationshipType || null,
       })
       setAiResult({ mode, ...result })
       if (!autoSend) {
@@ -484,7 +494,7 @@ export default function Leads() {
           <div className="panel-header">
             <h2 className="panel-title">Import leads</h2>
           </div>
-          <div className="leads-import-row">
+          <div className="leads-import-row" style={{ flexWrap: 'wrap', gap: 10 }}>
             <input
               type="number"
               placeholder="Source year (optional)"
@@ -492,6 +502,27 @@ export default function Leads() {
               onChange={(e) => setSourceYear(e.target.value)}
               className="settings-input leads-year-input"
             />
+            <input
+              type="text"
+              placeholder="List name (optional, e.g. 'Restland Q1 2024')"
+              value={importListName}
+              onChange={(e) => setImportListName(e.target.value)}
+              className="settings-input"
+              style={{ minWidth: 200 }}
+            />
+            <select
+              value={importRelationshipType}
+              onChange={(e) => setImportRelationshipType(e.target.value)}
+              className="filter-select"
+              title="AI will use this relationship context for all leads in this import"
+            >
+              <option value="cold_lead">❄️ Cold leads (default)</option>
+              <option value="warm_lead">☀️ Warm leads</option>
+              <option value="re_engagement">🔄 Re-engagement</option>
+              <option value="previous_prospect">📋 Previous prospects</option>
+              <option value="past_customer">🤝 Past customers</option>
+              <option value="existing_customer">⭐ Existing customers</option>
+            </select>
             <label className="compose-checkbox">
               <input
                 type="checkbox"
@@ -702,6 +733,28 @@ export default function Leads() {
           </div>
 
           <div className="leads-ai-controls">
+            {/* Relationship type — primary AI guardrail */}
+            <div className="leads-ai-tone-row" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 6 }}>
+              <span className="leads-ai-section-label" style={{ flexBasis: '100%', marginBottom: 4 }}>Lead relationship</span>
+              {[
+                { value: '', label: '🔵 Default (use lead record)' },
+                { value: 'cold_lead', label: '❄️ Cold lead' },
+                { value: 'warm_lead', label: '☀️ Warm lead' },
+                { value: 're_engagement', label: '🔄 Re-engagement' },
+                { value: 'previous_prospect', label: '📋 Previous prospect' },
+                { value: 'past_customer', label: '🤝 Past customer' },
+                { value: 'existing_customer', label: '⭐ Existing customer' },
+              ].map((r) => (
+                <button key={r.value}
+                  className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
+                  onClick={() => setBulkRelationshipType(r.value)}
+                  style={{ fontSize: 12 }}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+
             <div className="leads-ai-tone-row">
               <span className="leads-ai-section-label">Tone</span>
               {[
@@ -717,6 +770,24 @@ export default function Leads() {
                   {t.label}
                 </button>
               ))}
+            </div>
+
+            {/* AI direction — overrides all defaults */}
+            <div style={{ marginTop: 4 }}>
+              <span className="leads-ai-section-label" style={{ display: 'block', marginBottom: 6 }}>AI direction (optional)</span>
+              <textarea
+                style={{
+                  width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '8px 10px',
+                  borderRadius: 6, border: '1px solid var(--border-default)', resize: 'vertical',
+                  fontFamily: 'inherit', lineHeight: 1.5, minHeight: 60,
+                }}
+                placeholder="Tell the AI exactly what to do — e.g. 'File check lead — ask if they still need pre-need planning, keep it brief and low-pressure'"
+                value={bulkAiDirection}
+                onChange={(e) => setBulkAiDirection(e.target.value)}
+              />
+              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                This overrides AI defaults and applies to all selected leads. Leave blank to use relationship + tone defaults.
+              </p>
             </div>
 
             <div className="leads-ai-channel-row">

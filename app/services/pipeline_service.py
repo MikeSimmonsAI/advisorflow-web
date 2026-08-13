@@ -131,15 +131,54 @@ def _get_conversation(db: Session, lead_id: str) -> tuple[str, str]:
 
 # ── Core AI response generator ────────────────────────────────────────────────
 
-PIPELINE_PROMPT = """You are an AI assistant managing SMS conversations for a service business advisor.
-Your goal is to move leads toward booking an appointment through natural, human conversation.
+RELATIONSHIP_TYPE_CONTEXT = {
+    "cold_lead": (
+        "COLD LEAD — This person has NO prior relationship with the business. "
+        "They do not know us. Do NOT act familiar. Do NOT reference anything we supposedly know about them. "
+        "Introduce yourself and the business naturally. Keep it brief and low-pressure. "
+        "The goal of the first message is just to open a door, not close a sale."
+    ),
+    "warm_lead": (
+        "WARM LEAD — This person has shown prior interest, responded before, or is a referral. "
+        "Some familiarity is appropriate. Reference their interest or connection if known. "
+        "A soft call-to-action is appropriate but don't be pushy."
+    ),
+    "previous_prospect": (
+        "PREVIOUS PROSPECT — This person was in our pipeline before but didn't move forward. "
+        "They know who we are. Acknowledge the gap naturally ('it's been a while'). "
+        "Don't restart from scratch — pick up where you left off, briefly."
+    ),
+    "existing_customer": (
+        "EXISTING CUSTOMER — This person is an active customer. Treat them with familiarity. "
+        "This is a value-add or upsell conversation, not a cold outreach. "
+        "Reference the existing relationship. Make them feel appreciated."
+    ),
+    "past_customer": (
+        "PAST CUSTOMER — This person was a customer previously. The relationship lapsed. "
+        "They know us. Acknowledge it's been a while. Don't treat them like a stranger. "
+        "Make reconnecting feel easy and natural."
+    ),
+    "re_engagement": (
+        "RE-ENGAGEMENT — We contacted this person before and they went quiet. "
+        "They have heard of us but didn't respond or went cold. "
+        "Do NOT pretend we haven't talked. Keep it brief, low-pressure, give them an easy out."
+    ),
+}
 
+PIPELINE_PROMPT = """You are an AI managing SMS conversations for a service business advisor.
+
+━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
+Relationship context: {relationship_context}
+
+User's AI direction (FOLLOW THIS EXACTLY — it overrides your defaults):
+{ai_direction}
+
+━━━ CONTEXT ━━━
 Advisor: {advisor_name}
 Business: {org_name}
 Industry: {industry_context}
-Lead type/context: {lead_type}
-Tone instruction: {tone}
-AI direction: {ai_direction}
+Lead type: {lead_type}
+Tone: {tone}
 
 Lead: {first_name} {last_name}
 Booking link: {booking_url}
@@ -150,7 +189,13 @@ Conversation history:
 Latest message from lead:
 {latest_inbound}
 
-Analyze this conversation and respond with JSON only:
+━━━ INSTRUCTIONS ━━━
+1. The relationship context above defines what you can and cannot assume about this person.
+2. The user's AI direction is a COMMAND — follow it precisely, do not override it.
+3. Only work toward booking naturally after following the user's direction.
+4. If no conversation exists yet, write the FIRST outreach message based on the above.
+
+Respond with JSON only:
 {{
   "reply": "The exact message to send (under 320 chars, sound human)",
   "confidence": 92,
@@ -165,13 +210,11 @@ Analyze this conversation and respond with JSON only:
 Intent options: interested | objection | callback_request | question | not_interested | dnc | booked | unknown
 Stage options: outreach_sent | replied | ai_responding | booking_sent | booked | stopped | dnc
 
-Rules:
-- confidence: 0-100. Be honest. Complex objections should score 60-75. Clear interest scores 85-95.
-- should_stop: true ONLY if lead is booked, explicitly said DNC/STOP, or is clearly not interested after multiple attempts
+Additional rules:
+- confidence: 0-100. Be honest. Complex objections: 60-75. Clear interest: 85-95.
+- should_stop: true ONLY if lead is booked, said DNC/STOP, or clearly not interested after multiple attempts
 - Never reveal you are AI
-- Always move toward booking — include the booking link when it feels natural
-- Keep messages under 320 characters
-- Sound like a real person, not a script"""
+- Keep messages under 320 characters"""
 
 
 def analyze_and_respond(
@@ -210,13 +253,26 @@ def analyze_and_respond(
     }
     tone_desc = tone_map.get(pipeline.tone or "warm", tone_map["warm"])
 
+    # Resolve relationship context — this is the PRIMARY AI guardrail
+    rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
+    relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(
+        rel_type,
+        RELATIONSHIP_TYPE_CONTEXT["cold_lead"]
+    )
+
+    # User direction — if provided use it verbatim; never let the AI override it
+    ai_direction = pipeline.ai_direction or ""
+    if not ai_direction.strip():
+        ai_direction = "(none — use relationship context and tone to guide the message)"
+
     prompt = PIPELINE_PROMPT.format(
+        relationship_context=relationship_context,
         advisor_name=advisor.full_name or "your advisor",
         org_name=org_name,
         industry_context=industry_context,
         lead_type=pipeline.lead_type or lead.message_track or lead.tier or "general outreach",
         tone=tone_desc,
-        ai_direction=pipeline.ai_direction or "move conversation toward booking appointment",
+        ai_direction=ai_direction,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         booking_url=booking_url,

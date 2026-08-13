@@ -42,6 +42,8 @@ class AutoReplyRequest(BaseModel):
     tone: str = "warm"
     auto_send: bool = False
     channel: str = "email"
+    ai_direction: Optional[str] = None  # User's custom AI instructions (overrides defaults)
+    relationship_type: Optional[str] = None  # Override relationship context for this batch
 
 
 class SingleReplyRequest(BaseModel):
@@ -147,7 +149,12 @@ def generate_batch_replies(
     sent = skipped = queued = errors = 0
     for lead in leads:
         try:
-            ai_result = generate_auto_reply(db, lead, current_user, tone=req.tone)
+            ai_result = generate_auto_reply(
+                db, lead, current_user,
+                tone=req.tone,
+                ai_direction=req.ai_direction,
+                relationship_type=req.relationship_type,
+            )
             if ai_result["should_stop"]:
                 skipped += 1
                 results.append({"lead_id": lead.id, "action": "skipped", "reason": ai_result["reason"], "reply": ""})

@@ -137,6 +137,19 @@ COLUMNS_TO_ADD = [
     ("users", "lockout_until", "TIMESTAMP"),
     # SMS vs email-only queue routing — drives contact_channel logic in outreach scheduler
     ("leads", "contact_channel", "VARCHAR DEFAULT 'sms'"),
+    # Lead relationship context — tells AI who this person is relative to the business.
+    # This is the PRIMARY AI guardrail: cold_lead, warm_lead, previous_prospect,
+    # existing_customer, past_customer, re_engagement. Set at import or manually.
+    ("leads", "relationship_type", "VARCHAR DEFAULT 'cold_lead'"),
+    # Extra import metadata — JSON blob of any extra CSV columns not in the standard
+    # field map. Stored raw so AI and UI can access them without schema changes.
+    ("leads", "custom_fields", "TEXT"),
+    # Import list name — user-supplied label for the import batch (e.g. "2024 Purchased List")
+    ("leads", "import_list_name", "VARCHAR"),
+    # Source category — user-defined grouping (purchased, organic, referral, database, etc.)
+    ("leads", "source_category", "VARCHAR"),
+    # Meta app secret for Meta webhook HMAC verification
+    ("organizations", "meta_app_secret", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

@@ -321,6 +321,23 @@ class Lead(Base):
     state = Column(String, nullable=True)
     zip_code = Column(String, nullable=True)
 
+    # Relationship context — the PRIMARY AI guardrail for every message this lead receives.
+    # "cold_lead"          — never heard of us, no prior relationship
+    # "warm_lead"          — showed interest, responded before, or is a referral
+    # "previous_prospect"  — was in the pipeline before but didn't close
+    # "existing_customer"  — currently active customer (upsell / cross-sell context)
+    # "past_customer"      — was a customer, relationship lapsed
+    # "re_engagement"      — was contacted before (by us), went cold, trying again
+    relationship_type = Column(String, default="cold_lead", nullable=True)
+
+    # Extra import columns — any CSV columns not in the standard field map are
+    # stored here as a JSON object so AI and UI can use them without schema changes.
+    custom_fields = Column(Text, nullable=True)
+
+    # Import batch metadata
+    import_list_name = Column(String, nullable=True)  # user-supplied label, e.g. "2024 Purchased List"
+    source_category = Column(String, nullable=True)   # purchased, organic, referral, database, etc.
+
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

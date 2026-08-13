@@ -39,6 +39,7 @@ Lead Type, Status Reason, Sale Made?, Allow Phone Calls?, Last Action,
 Last Activity/Note, Street Address, City, State, ZIP Code, etc.
 """
 
+import json
 import pandas as pd
 from sqlalchemy.orm import Session
 from app.models.models import Lead, LeadTier
@@ -167,8 +168,19 @@ def parse_excel_file(file_path: str) -> list[dict]:
             f"Found columns: {list(df.columns)}"
         )
 
+    # Build a set of all column names already mapped to canonical keys
+    # so we can capture everything else as custom_fields
+    mapped_raw_cols = set(lookup.values())
+
     rows = []
     for _, row in df.iterrows():
+        # Capture extra columns not in HEADER_MAP as a JSON blob
+        custom = {
+            str(col): str(row[col]).strip()
+            for col in df.columns
+            if col not in mapped_raw_cols and str(row[col]).strip()
+        }
+
         rows.append({
             "first_name": row.get(lookup.get("first_name", ""), "").strip(),
             "last_name": row.get(lookup["last_name"], "").strip(),
@@ -183,6 +195,7 @@ def parse_excel_file(file_path: str) -> list[dict]:
             "city": row.get(lookup.get("city", ""), "").strip(),
             "state": row.get(lookup.get("state", ""), "").strip(),
             "zip_code": row.get(lookup.get("zip_code", ""), "").strip(),
+            "custom_fields": json.dumps(custom) if custom else None,
         })
     return rows
 
@@ -197,6 +210,9 @@ def import_leads_from_excel(
     dry_run: bool = False,
     force_new_inquiry: bool = False,
     _preloaded_rows: list | None = None,
+    relationship_type: str = None,   # applied to every lead in this batch
+    import_list_name: str = None,    # human-readable name for this import list
+    source_category: str = None,     # e.g. "crm_export", "referral", "web_form"
 ) -> dict:
     """
     Full import pipeline: parse -> route by tier/channel -> dedup check
@@ -277,6 +293,11 @@ def import_leads_from_excel(
             city=row.get("city") or None,
             state=row.get("state") or None,
             zip_code=row.get("zip_code") or None,
+            # New context fields — set batch-level values; default cold if not specified
+            relationship_type=relationship_type or "cold_lead",
+            import_list_name=import_list_name or None,
+            source_category=source_category or None,
+            custom_fields=row.get("custom_fields") or None,
         )
         db.add(lead)
         db.flush()
