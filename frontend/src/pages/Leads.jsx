@@ -39,7 +39,9 @@ const STATUS_FILTER_OPTIONS = [
 export default function Leads() {
   const navigate = useNavigate()
   const [leads, setLeads] = useState([])
+  const [leadsTotal, setLeadsTotal] = useState(0)
   const [needsReview, setNeedsReview] = useState([])
+  const [needsReviewTotal, setNeedsReviewTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [preview, setPreview] = useState(null)
@@ -133,8 +135,12 @@ export default function Leads() {
     ]).then(([leadsData, reviewData]) => {
       // Both endpoints return a paginated envelope {items, total, page, page_size}.
       // Fall back to raw array for backward-compatibility during rolling deploys.
-      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items ?? []))
-      setNeedsReview(Array.isArray(reviewData) ? reviewData : (reviewData.items ?? []))
+      const leadsArr = Array.isArray(leadsData) ? leadsData : (leadsData.items ?? [])
+      const reviewArr = Array.isArray(reviewData) ? reviewData : (reviewData.items ?? [])
+      setLeads(leadsArr)
+      setLeadsTotal(Array.isArray(leadsData) ? leadsData.length : (leadsData.total ?? leadsArr.length))
+      setNeedsReview(reviewArr)
+      setNeedsReviewTotal(Array.isArray(reviewData) ? reviewData.length : (reviewData.total ?? reviewArr.length))
       setLoading(false)
     }).catch((err) => {
       setLeads([])
@@ -401,15 +407,15 @@ export default function Leads() {
   const selectedCount = selected.size
 
   const stats = useMemo(() => ({
-    total: leads.length,
+    total: leadsTotal,          // real total from server, not capped at 500
     shown: filteredLeads.length,
     sendable: sendableLeads.length,
     selected: selectedCount,
-    needsReview: needsReview.length,
+    needsReview: needsReviewTotal, // real total from server
     dnc: leads.filter((l) => l.status === 'dnc').length,
     missingPhone: leads.filter((l) => !l.phone).length,
     duplicates: leads.filter((l) => l.is_duplicate).length,
-  }), [leads, filteredLeads.length, sendableLeads.length, selectedCount, needsReview.length])
+  }), [leadsTotal, needsReviewTotal, leads, filteredLeads.length, sendableLeads.length, selectedCount])
 
   useEffect(() => {
     if (!canBulkAssign) return
