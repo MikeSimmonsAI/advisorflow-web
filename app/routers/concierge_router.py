@@ -3,12 +3,13 @@ Public concierge endpoint — powers the "Ask BookaBoost" AI chat
 on bookaboost.live. No auth required. CORS open to bookaboost.live.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Literal
 import openai
 import os
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -71,24 +72,46 @@ TONE AND STYLE:
 - If someone is ready to move forward, tell them to click "Request a Demo" on the page."""
 
 
+# Simple per-IP rate limiter: max 30 requests per 60-second window
+_rate_store: dict = {}
+_RATE_LIMIT = 30
+_RATE_WINDOW = 60
+
+
+def _check_rate_limit(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window_start, count = _rate_store.get(ip, (now, 0))
+    if now - window_start > _RATE_WINDOW:
+        _rate_store[ip] = (now, 1)
+    else:
+        count += 1
+        _rate_store[ip] = (window_start, count)
+        if count > _RATE_LIMIT:
+            raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+
+
 class Message(BaseModel):
-    role: str
-    content: str
+    # Only allow user/assistant roles — never let callers inject a system turn
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=2000)
 
 
 class ConciergeRequest(BaseModel):
-    messages: List[Message]
+    messages: List[Message] = Field(..., max_length=20)
 
 
 @router.post("/chat")
-async def concierge_chat(req: ConciergeRequest):
+async def concierge_chat(req: ConciergeRequest, request: Request):
     """
     Public endpoint — no auth. Called from bookaboost.live static site.
     Routes visitor messages through OpenAI with BookaBoost system prompt.
     """
+    _check_rate_limit(request)
     try:
         client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+        # Only forward user/assistant turns — system role is injected exclusively below
         messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
         response = client.chat.completions.create(

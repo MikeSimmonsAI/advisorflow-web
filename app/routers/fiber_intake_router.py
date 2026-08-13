@@ -16,6 +16,7 @@ time an advisor visits Settings → Social/Intake). This keeps the URL
 shareable but not guessable.
 """
 
+import html
 import json
 import logging
 import uuid
@@ -145,13 +146,16 @@ def _get_org(db: Session, org_token: str) -> Organization:
 
 
 def _render_form(org_name: str, org_token: str, error: str = "") -> str:
-    error_html = f'<div style="color:#c0392b;background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:10px 14px;margin-bottom:18px;font-size:13px;">{error}</div>' if error else ""
+    # HTML-escape org_name and error so stored values can't inject markup.
+    safe_org_name = html.escape(org_name)
+    safe_error = html.escape(error)
+    error_html = f'<div style="color:#c0392b;background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:10px 14px;margin-bottom:18px;font-size:13px;">{safe_error}</div>' if error else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Get Connected — {org_name}</title>
+<title>Get Connected — {safe_org_name}</title>
 <style>{_BASE_CSS}</style>
 </head>
 <body>
@@ -159,7 +163,7 @@ def _render_form(org_name: str, org_token: str, error: str = "") -> str:
   <div class="logo-row">
     <div class="logo-icon">📡</div>
     <div>
-      <div class="logo-text">{org_name}</div>
+      <div class="logo-text">{safe_org_name}</div>
       <div class="logo-sub">Fiber Internet Services</div>
     </div>
   </div>
@@ -240,11 +244,11 @@ def _render_form(org_name: str, org_token: str, error: str = "") -> str:
 
     <div class="consent-box">
       <strong>SMS Communication Consent</strong><br>
-      By checking the box below, you consent to receive SMS text messages from {org_name} regarding your service inquiry, availability updates, and scheduling. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time.
+      By checking the box below, you consent to receive SMS text messages from {safe_org_name} regarding your service inquiry, availability updates, and scheduling. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time.
       <div class="consent-row">
         <input type="checkbox" id="sms_consent" name="sms_consent" value="yes" required>
         <label for="sms_consent" style="margin:0;font-weight:400;">
-          I agree to receive SMS messages from {org_name}. I understand I can reply STOP at any time to opt out.
+          I agree to receive SMS messages from {safe_org_name}. I understand I can reply STOP at any time to opt out.
         </label>
       </div>
     </div>
@@ -264,12 +268,13 @@ def _render_form(org_name: str, org_token: str, error: str = "") -> str:
 
 
 def _render_thankyou(org_name: str) -> str:
+    safe_org_name = html.escape(org_name)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Thank You — {org_name}</title>
+<title>Thank You — {safe_org_name}</title>
 <style>{_BASE_CSS}
 .check {{ font-size: 56px; text-align: center; margin-bottom: 16px; }}
 h1 {{ text-align: center; }}
@@ -281,7 +286,7 @@ h1 {{ text-align: center; }}
   <div class="check">✅</div>
   <h1>You're on our list!</h1>
   <p class="subtitle" style="margin-bottom:28px;">
-    Thanks for your interest in {org_name} fiber service.<br>
+    Thanks for your interest in {safe_org_name} fiber service.<br>
     A member of our team will reach out shortly to confirm availability at your address and walk you through the best plan for your needs.
   </p>
   <p style="font-size:13px;color:#9aa3b8;">You can close this window. We'll be in touch soon!</p>

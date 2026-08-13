@@ -541,10 +541,10 @@ def builder_preview(
 def builder_send(
     req: BuilderSendRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
-    Execute Campaign Builder send — any advisor can run this.
+    Execute Campaign Builder send — requires org_admin or super_admin.
     Creates a campaign record, sends to all lead_ids provided,
     and writes the results back to the campaign row for history.
     """

@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -6,6 +8,29 @@ from typing import Optional
 from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.utils.crypto import encrypt_value
+
+# Only http/https URLs are safe to store — javascript:, data:, vbscript: etc.
+# are blocked to prevent stored-XSS via social-link or booking-page fields.
+_SAFE_URL_SCHEMES = ("http://", "https://")
+
+
+def _validate_url(url: Optional[str], field: str) -> Optional[str]:
+    """Return url stripped+lowered if scheme is safe, else raise 400."""
+    if url is None:
+        return None
+    url = url.strip()
+    if not url:
+        return None
+    if not url.lower().startswith(_SAFE_URL_SCHEMES):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must be an http or https URL.",
+        )
+    return url
+
+
+# Profile-photo data-URL: only allow safe raster image MIME types (no SVG).
+_SAFE_PHOTO_MIME_RE = re.compile(r'^data:image/(jpeg|jpg|png|gif|webp);base64,')
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -175,7 +200,7 @@ def update_booking_page(
     current_user: User = Depends(get_current_user),
 ):
     """Save the advisor's personal booking page URL."""
-    current_user.booking_page_url = req.booking_page_url or None
+    current_user.booking_page_url = _validate_url(req.booking_page_url, "booking_page_url")
     db.commit()
     return {"success": True}
 
@@ -192,10 +217,10 @@ def update_social_links(
     This advisor-level endpoint is kept for backwards compatibility but is no longer
     wired up in the frontend Settings page. Will be removed in a future cleanup.
     """
-    current_user.facebook_url = req.facebook_url or None
-    current_user.google_review_url = req.google_review_url or None
-    current_user.instagram_url = req.instagram_url or None
-    current_user.linkedin_url = req.linkedin_url or None
+    current_user.facebook_url = _validate_url(req.facebook_url, "facebook_url")
+    current_user.google_review_url = _validate_url(req.google_review_url, "google_review_url")
+    current_user.instagram_url = _validate_url(req.instagram_url, "instagram_url")
+    current_user.linkedin_url = _validate_url(req.linkedin_url, "linkedin_url")
     db.commit()
     return {"success": True}
 
@@ -218,9 +243,13 @@ def update_profile_photo(
     Encoded in the browser before sending so no file storage / S3 is needed.
     The data URL is served directly as the <img> src everywhere the avatar appears.
     """
-    # Basic sanity check — must be a data URL with an image MIME type
-    if not req.photo_data_url.startswith("data:image/"):
-        raise HTTPException(status_code=400, detail="photo_data_url must be a valid image data URL.")
+    # Enforce a strict MIME allowlist (jpeg/png/gif/webp only).
+    # Rejecting image/svg+xml prevents stored XSS — SVG can embed <script>.
+    if not _SAFE_PHOTO_MIME_RE.match(req.photo_data_url):
+        raise HTTPException(
+            status_code=400,
+            detail="photo_data_url must be a valid JPEG, PNG, GIF, or WebP data URL."
+        )
     # Rough size guard — base64 of a 2MB file is ~2.7MB of text
     if len(req.photo_data_url) > 3_000_000:
         raise HTTPException(status_code=400, detail="Photo too large. Please use an image under 2MB.")

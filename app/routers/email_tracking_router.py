@@ -9,13 +9,22 @@ update. No sensitive data is exposed by either endpoint - they accept
 an ID and either return a 1x1 image or perform a redirect, nothing else.
 """
 
-from fastapi import APIRouter, Depends, Query
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, RedirectResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from app.deps import get_db
 from app.models.models import EmailMessage
+
+import os
+
+# Allowed destination schemes for the click-redirect endpoint.
+# Any url that doesn't start with http/https is rejected to prevent
+# open-redirect abuse (javascript: / data: / vbscript: etc.).
+_ALLOWED_SCHEMES = {"http", "https"}
 
 router = APIRouter(prefix="/email-tracking", tags=["email-tracking"])
 
@@ -72,6 +81,12 @@ def click_tracking_redirect(
     our side should never block the recipient from reaching the page
     they actually clicked toward.
     """
+    # Reject non-http(s) destinations to prevent open-redirect abuse.
+    # javascript:, data:, vbscript: etc. are all blocked.
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+        raise HTTPException(status_code=400, detail="Invalid redirect URL.")
+
     message = db.query(EmailMessage).filter(EmailMessage.id == email_message_id).first()
     if message:
         message.click_count = (message.click_count or 0) + 1

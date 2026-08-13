@@ -11,7 +11,9 @@ Success page logic:
   No rating → generic thank-you
 """
 
+import html
 import logging
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -54,26 +56,46 @@ def _already_submitted(db: Session, followup_id: str) -> bool:
     ).first() is not None
 
 
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$')
+
+
+def _safe_url(url: str | None) -> str | None:
+    """Return url only if it starts with http/https; else None."""
+    if url and url.lower().startswith(("http://", "https://")):
+        return html.escape(url, quote=True)
+    return None
+
+
+def _safe_color(color: str | None) -> str:
+    """Return color only if it's a valid hex code; else a safe default."""
+    if color and _HEX_COLOR_RE.match(color):
+        return color
+    return "#2fb6ff"
+
+
 def _review_links_html(org: Organization) -> str:
-    """High-rating: show Google + social links."""
+    """High-rating: show Google + social links. All URLs are scheme-validated."""
     if not org:
         return ""
     links = []
-    if getattr(org, "google_review_url", None):
+    google_url = _safe_url(getattr(org, "google_review_url", None))
+    if google_url:
         links.append(
-            f'<a href="{org.google_review_url}" target="_blank" style="'
+            f'<a href="{google_url}" target="_blank" rel="noopener noreferrer" style="'
             'display:inline-block;margin:6px;padding:12px 22px;background:#ea4335;'
             'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">⭐ Leave a Google Review</a>'
         )
-    if getattr(org, "facebook_url", None):
+    facebook_url = _safe_url(getattr(org, "facebook_url", None))
+    if facebook_url:
         links.append(
-            f'<a href="{org.facebook_url}" target="_blank" style="'
+            f'<a href="{facebook_url}" target="_blank" rel="noopener noreferrer" style="'
             'display:inline-block;margin:6px;padding:12px 22px;background:#1877f2;'
             'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;">👍 Facebook</a>'
         )
-    if getattr(org, "instagram_url", None):
+    instagram_url = _safe_url(getattr(org, "instagram_url", None))
+    if instagram_url:
         links.append(
-            f'<a href="{org.instagram_url}" target="_blank" style="'
+            f'<a href="{instagram_url}" target="_blank" rel="noopener noreferrer" style="'
             'display:inline-block;margin:6px;padding:12px 22px;background:#e1306c;'
             'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;">📸 Instagram</a>'
         )
@@ -124,9 +146,11 @@ def get_survey_page(token: str, db: Session = Depends(get_db)):
     followup, lead, advisor, org = _get_survey_context(db, token)
     already_done = _already_submitted(db, followup.id)
 
-    org_name = org.name if org else "our team"
-    first_name = lead.first_name if lead else "there"
-    primary_color = (getattr(org, "brand_color_primary", None) or "#2fb6ff") if org else "#2fb6ff"
+    # HTML-escape user-derived strings before interpolating into the page.
+    org_name = html.escape(org.name if org else "our team")
+    first_name = html.escape(lead.first_name if lead else "there")
+    # Validate hex color to prevent CSS injection via brand_color_primary.
+    primary_color = _safe_color(getattr(org, "brand_color_primary", None) if org else None)
     review_links = _review_links_html(org)
 
     if already_done:

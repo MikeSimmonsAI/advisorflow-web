@@ -303,9 +303,9 @@ def get_template(template_id: str, db: Session = Depends(get_db), current_user: 
 def seed_default_templates(
     industry: str = "funeral",
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),  # any logged-in user can seed
+    current_user: User = Depends(require_admin),
 ):
-    """Seed the pre-built default templates for this org. Any advisor can trigger this."""
+    """Seed the pre-built default templates for this org. Requires org_admin or super_admin."""
     seeded = _seed_defaults_for_org(db, current_user.organization_id, current_user.id, industry=industry)
     return {"seeded": seeded}
 

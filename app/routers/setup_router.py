@@ -32,7 +32,12 @@ from app.services.microsoft_email_service import get_microsoft_authorization_url
 
 router = APIRouter(tags=["setup"])
 
-SECRET_KEY = os.environ.get("SECRET_KEY", os.environ.get("JWT_SECRET", "changeme"))
+SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("JWT_SECRET") or ""
+if not SECRET_KEY or len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "setup_router requires SECRET_KEY or JWT_SECRET env var (≥32 chars). "
+        "Set it in your environment before starting the server."
+    )
 ALGORITHM = "HS256"
 EXPIRY_HOURS = 48
 TOKEN_PURPOSE = "integration_setup"

@@ -8,6 +8,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+_SAFE_URL_SCHEMES = ("http://", "https://")
+
+
+def _validate_url(url: Optional[str], field: str) -> Optional[str]:
+    """Strip and validate that url uses http/https; raise 400 otherwise."""
+    if url is None:
+        return None
+    url = url.strip()
+    if not url:
+        return None
+    if not url.lower().startswith(_SAFE_URL_SCHEMES):
+        raise HTTPException(status_code=400, detail=f"{field} must be an http or https URL.")
+    return url
+
 from app.deps import get_db, get_current_user, require_admin
 from app.models.models import Organization, User
 
@@ -207,10 +221,10 @@ def update_social_links(
 ):
     """Save organization-level social media / review page URLs."""
     org = _resolve_org(current_user, org_id, db)
-    org.facebook_url = req.facebook_url or None
-    org.google_review_url = req.google_review_url or None
-    org.instagram_url = req.instagram_url or None
-    org.linkedin_url = req.linkedin_url or None
+    org.facebook_url = _validate_url(req.facebook_url, "facebook_url")
+    org.google_review_url = _validate_url(req.google_review_url, "google_review_url")
+    org.instagram_url = _validate_url(req.instagram_url, "instagram_url")
+    org.linkedin_url = _validate_url(req.linkedin_url, "linkedin_url")
     db.commit()
     return {"updated": True}
 
