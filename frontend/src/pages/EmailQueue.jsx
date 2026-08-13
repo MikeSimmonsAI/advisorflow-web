@@ -267,10 +267,12 @@ export default function EmailQueue() {
       )
     )
 
-    const sent   = results.filter((r) => r.status === 'fulfilled').length
-    const failed = results.filter((r) => r.status === 'rejected').length
+    const sent    = results.filter((r) => r.status === 'fulfilled').length
+    const failed  = results.filter((r) => r.status === 'rejected').length
+    // Grab the first actual error message so the advisor knows WHY it failed
+    const firstErr = results.find((r) => r.status === 'rejected')?.reason?.message || null
 
-    setBatchResult({ sent, failed, total: ids.length })
+    setBatchResult({ sent, failed, total: ids.length, firstErr })
     setBatchSending(false)
 
     if (sent > 0) {
@@ -341,7 +343,7 @@ export default function EmailQueue() {
       loadSentLog()
       setSentLogVisible(true)
     } catch (err) {
-      setDraftSentMsg(`Failed: ${err.message}`)
+      setDraftSentMsg(`Send failed: ${err.message}`)
     } finally {
       setSendingDraft(false)
     }
@@ -460,8 +462,9 @@ export default function EmailQueue() {
       {batchResult && (
         <div className={`eq-send-result ${batchResult.failed === batchResult.total ? 'eq-send-result--error' : 'eq-send-result--success'}`}>
           {batchResult.failed === batchResult.total
-            ? `All ${batchResult.total} sends failed — check the console or backend logs.`
-            : `✓ Sent to ${batchResult.sent} lead${batchResult.sent !== 1 ? 's' : ''}${batchResult.failed > 0 ? ` · ${batchResult.failed} failed` : ''}`}
+            ? <>All {batchResult.total} sends failed.{batchResult.firstErr && <> Reason: <strong>{batchResult.firstErr}</strong></>}</>
+            : <>✓ Sent to {batchResult.sent} lead{batchResult.sent !== 1 ? 's' : ''}{batchResult.failed > 0 && <> · {batchResult.failed} failed{batchResult.firstErr && <> (<strong>{batchResult.firstErr}</strong>)</>}</>}</>
+          }
         </div>
       )}
 
