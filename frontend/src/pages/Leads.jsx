@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
@@ -76,8 +76,14 @@ export default function Leads() {
   const [aiActioning, setAiActioning] = useState(null) // null | 'queue' | 'send_sms' | 'send_email' | 'send_both'
   const [aiResult, setAiResult] = useState(null)
   const [showBulkCompose, setShowBulkCompose] = useState(false)
+  const [bulkComposeTab, setBulkComposeTab] = useState('ai') // 'ai' | 'manual'
   const [bulkAiDirection, setBulkAiDirection] = useState('')
   const [bulkRelationshipType, setBulkRelationshipType] = useState('')
+  // Phase 4: media attach for batch sends
+  const [bulkMediaUrl, setBulkMediaUrl] = useState('')
+  const [bulkMediaUploading, setBulkMediaUploading] = useState(false)
+  const [bulkMediaFileName, setBulkMediaFileName] = useState('')
+  const bulkMediaInputRef = useRef(null)
 
   const currentUser = getCurrentUser()
   const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
@@ -287,19 +293,56 @@ export default function Leads() {
     }
   }
 
+  async function handleBulkMediaUpload(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setBulkMediaUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const result = await api.upload('/sms/upload-media', fd)
+      setBulkMediaUrl(result.media_url)
+      setBulkMediaFileName(file.name)
+    } catch (err) {
+      alert(`Upload failed: ${err.message}`)
+    } finally {
+      setBulkMediaUploading(false)
+      e.target.value = ''
+    }
+  }
+
   async function handleBulkSend() {
     if (!bulkMessage.trim() || sendableSelectedIds.length === 0) return
     setBulkSending(true)
     setBulkResult(null)
     try {
-      const result = await api.post('/sms/send-batch', {
-        lead_ids: sendableSelectedIds,
-        template: bulkMessage,
-        include_booking_link: bulkIncludeBooking,
-      })
+      let result
+      if (bulkMediaUrl) {
+        // MMS batch: fire individually (send-batch doesn't support MMS yet)
+        const sends = await Promise.allSettled(
+          sendableSelectedIds.map(id =>
+            api.post('/sms/send-mms', {
+              lead_id: id,
+              template: bulkMessage,
+              media_url: bulkMediaUrl,
+              include_booking_link: bulkIncludeBooking,
+            })
+          )
+        )
+        const sent = sends.filter(r => r.status === 'fulfilled').length
+        result = { sent_count: sent, skipped_count: sendableSelectedIds.length - sent }
+      } else {
+        result = await api.post('/sms/send-batch', {
+          lead_ids: sendableSelectedIds,
+          template: bulkMessage,
+          include_booking_link: bulkIncludeBooking,
+        })
+      }
       setBulkResult(result)
       setSelected(new Set())
       setBulkMessage('')
+      setBulkMediaUrl('')
+      setBulkMediaFileName('')
       loadLeads()
     } catch (err) {
       alert(`Bulk send failed: ${err.message}`)
@@ -724,152 +767,7 @@ export default function Leads() {
         </div>
       )}
 
-      {/* ── AI Auto-Send Panel ── */}
-      {showBulkCompose && (
-        <section className="panel leads-ai-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">AI outreach — {sendableSelectedIds.length} lead{sendableSelectedIds.length === 1 ? '' : 's'}</h2>
-            <button className="back-link" onClick={() => { setShowBulkCompose(false); setAiResult(null) }}>Cancel</button>
-          </div>
-
-          <div className="leads-ai-controls">
-            {/* Relationship type — primary AI guardrail */}
-            <div className="leads-ai-tone-row" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 6 }}>
-              <span className="leads-ai-section-label" style={{ flexBasis: '100%', marginBottom: 4 }}>Lead relationship</span>
-              {[
-                { value: '', label: '🔵 Default (use lead record)' },
-                { value: 'cold_lead', label: '❄️ Cold lead' },
-                { value: 'warm_lead', label: '☀️ Warm lead' },
-                { value: 're_engagement', label: '🔄 Re-engagement' },
-                { value: 'previous_prospect', label: '📋 Previous prospect' },
-                { value: 'past_customer', label: '🤝 Past customer' },
-                { value: 'existing_customer', label: '⭐ Existing customer' },
-              ].map((r) => (
-                <button key={r.value}
-                  className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
-                  onClick={() => setBulkRelationshipType(r.value)}
-                  style={{ fontSize: 12 }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="leads-ai-tone-row">
-              <span className="leads-ai-section-label">Tone</span>
-              {[
-                { value: 'cold', label: '❄️ Cold' },
-                { value: 'warm', label: '☀️ Warm' },
-                { value: 'hot', label: '🔥 Hot' },
-                { value: 'urgent', label: '⚡ Urgent' },
-              ].map((t) => (
-                <button key={t.value}
-                  className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
-                  onClick={() => setAiTone(t.value)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {/* AI direction — overrides all defaults */}
-            <div style={{ marginTop: 4 }}>
-              <span className="leads-ai-section-label" style={{ display: 'block', marginBottom: 6 }}>AI direction (optional)</span>
-              <textarea
-                style={{
-                  width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '8px 10px',
-                  borderRadius: 6, border: '1px solid var(--border-default)', resize: 'vertical',
-                  fontFamily: 'inherit', lineHeight: 1.5, minHeight: 60,
-                }}
-                placeholder="Tell the AI exactly what to do — e.g. 'File check lead — ask if they still need pre-need planning, keep it brief and low-pressure'"
-                value={bulkAiDirection}
-                onChange={(e) => setBulkAiDirection(e.target.value)}
-              />
-              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                This overrides AI defaults and applies to all selected leads. Leave blank to use relationship + tone defaults.
-              </p>
-            </div>
-
-            <div className="leads-ai-channel-row">
-              <span className="leads-ai-section-label">Channel</span>
-              {[
-                { value: 'sms', label: '💬 SMS' },
-                { value: 'email', label: '✉️ Email' },
-                { value: 'both', label: '📡 Both' },
-              ].map((c) => (
-                <button key={c.value}
-                  className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
-                  onClick={() => setAiChannel(c.value)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="leads-ai-actions">
-            <button
-              className="btn btn--secondary leads-ai-btn"
-              onClick={() => handleAiAction('queue')}
-              disabled={!!aiActioning}
-            >
-              {aiActioning === 'queue' ? '⏳ Generating…' : '📥 AI Draft & Queue for review'}
-            </button>
-            <button
-              className={`btn btn--primary leads-ai-btn ${aiChannel === 'email' ? 'leads-ai-btn--email' : ''}`}
-              onClick={() => handleAiAction(aiChannel === 'email' ? 'send_email' : aiChannel === 'both' ? 'send_both' : 'send_sms')}
-              disabled={!!aiActioning || sendableSelectedIds.length === 0}
-            >
-              {aiActioning && aiActioning !== 'queue' ? '⏳ Sending…' :
-                aiChannel === 'email' ? `✉️ AI Auto-Send Email to ${sendableSelectedIds.length}` :
-                aiChannel === 'both' ? `📡 AI Auto-Send SMS + Email to ${sendableSelectedIds.length}` :
-                `💬 AI Auto-Send SMS to ${sendableSelectedIds.length}`}
-            </button>
-          </div>
-
-          <p className="leads-ai-note">
-            "Draft & Queue" puts AI messages in Auto-Send Queue for your review. "Auto-Send" fires immediately.
-          </p>
-
-          {aiResult && !aiResult.error && (
-            <div className="leads-ai-result">
-              {aiResult.mode === 'queue'
-                ? `✓ ${aiResult.queued} messages queued in Auto-Send Queue for your review`
-                : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped} · Errors: ${aiResult.errors}`}
-            </div>
-          )}
-          {aiResult?.error && <div className="compose-error">{aiResult.error}</div>}
-
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-            <div className="panel-header" style={{ marginBottom: 12 }}>
-              <h3 className="panel-title" style={{ fontSize: 14 }}>Or write your own message</h3>
-            </div>
-            <textarea
-              className="compose-textarea"
-              placeholder="Hi {first_name}, this is..."
-              value={bulkMessage}
-              onChange={(e) => setBulkMessage(e.target.value)}
-              rows={3}
-            />
-            <div className="compose-footer">
-              <label className="compose-checkbox">
-                <input type="checkbox" checked={bulkIncludeBooking} onChange={(e) => setBulkIncludeBooking(e.target.checked)} />
-                Include booking link
-              </label>
-              <button
-                className="btn btn--secondary"
-                onClick={handleBulkSend}
-                disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
-              >
-                {bulkSending ? 'Sending…' : `Send to ${sendableSelectedIds.length}`}
-              </button>
-            </div>
-            {bulkResult && (
-              <div className="leads-bulk-result">Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
-            )}
-          </div>
-        </section>
-      )}
+      {/* ── Batch Compose Drawer (Phase 3) — shown as bottom overlay ── */}
 
       {/* ── Leads Table ── */}
       <section className="panel leads-table-panel">
@@ -968,34 +866,232 @@ export default function Leads() {
         )}
       </section>
 
-      {/* ── Floating Bulk Action Bar ── */}
+      {/* ── Bottom Batch Action System (Phase 3 + 4) ── */}
+      {/* Hidden file input for bulk media upload */}
+      <input
+        ref={bulkMediaInputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.gif,.pdf"
+        style={{ display: 'none' }}
+        onChange={handleBulkMediaUpload}
+      />
+
       {selectedCount > 0 && (
-        <div className="leads-bulk-bar">
-          <span className="leads-bulk-count">{selectedCount} selected</span>
-          <button className="btn btn--secondary leads-bulk-clear" onClick={() => setSelected(new Set())}>Clear</button>
-          {canBulkAssign && (
-            <button className="btn btn--secondary" onClick={() => setShowBulkAssign(true)}>Assign to…</button>
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.18)',
+          background: 'var(--surface-raised, #1e2235)',
+          borderTop: '1px solid var(--border-subtle)',
+        }}>
+          {/* Expanded compose drawer */}
+          {showBulkCompose && (
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', maxHeight: '60vh', overflowY: 'auto' }}>
+              {/* Tab switcher */}
+              <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
+                {[
+                  { key: 'ai', label: '✨ AI Message' },
+                  { key: 'manual', label: '📝 Write your own' },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setBulkComposeTab(tab.key)}
+                    style={{
+                      padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      background: 'none', border: 'none',
+                      borderBottom: bulkComposeTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
+                      color: bulkComposeTab === tab.key ? 'var(--accent)' : 'var(--text-secondary)',
+                      marginBottom: -1,
+                    }}
+                  >{tab.label}</button>
+                ))}
+                <div style={{ flex: 1 }} />
+                <span style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 0', alignSelf: 'center' }}>
+                  {sendableSelectedIds.length} sendable of {selectedCount} selected
+                </span>
+              </div>
+
+              {/* Branch 1: AI Message */}
+              {bulkComposeTab === 'ai' && (
+                <div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', alignSelf: 'center', minWidth: 80 }}>Relationship</span>
+                    {[
+                      { value: '', label: '🔵 Default' },
+                      { value: 'cold_lead', label: '❄️ Cold' },
+                      { value: 'warm_lead', label: '☀️ Warm' },
+                      { value: 're_engagement', label: '🔄 Re-engage' },
+                      { value: 'previous_prospect', label: '📋 Prev. prospect' },
+                      { value: 'past_customer', label: '🤝 Past customer' },
+                      { value: 'existing_customer', label: '⭐ Existing' },
+                    ].map(r => (
+                      <button key={r.value}
+                        className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
+                        onClick={() => setBulkRelationshipType(r.value)}
+                        style={{ fontSize: 11 }}
+                      >{r.label}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', alignSelf: 'center', minWidth: 80 }}>Tone</span>
+                    {[
+                      { value: 'cold', label: '❄️ Cold' },
+                      { value: 'warm', label: '☀️ Warm' },
+                      { value: 'hot', label: '🔥 Hot' },
+                      { value: 'urgent', label: '⚡ Urgent' },
+                    ].map(t => (
+                      <button key={t.value}
+                        className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
+                        onClick={() => setAiTone(t.value)}
+                        style={{ fontSize: 11 }}
+                      >{t.label}</button>
+                    ))}
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', alignSelf: 'center', marginLeft: 12 }}>Channel</span>
+                    {[
+                      { value: 'sms', label: '💬 SMS' },
+                      { value: 'email', label: '✉️ Email' },
+                      { value: 'both', label: '📡 Both' },
+                    ].map(c => (
+                      <button key={c.value}
+                        className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
+                        onClick={() => setAiChannel(c.value)}
+                        style={{ fontSize: 11 }}
+                      >{c.label}</button>
+                    ))}
+                  </div>
+                  <textarea
+                    style={{
+                      width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '8px 10px',
+                      borderRadius: 6, border: '1px solid var(--border-default)', resize: 'vertical',
+                      fontFamily: 'inherit', lineHeight: 1.5, minHeight: 56, marginBottom: 10,
+                      background: 'var(--surface-base, #161929)', color: 'var(--text-primary)',
+                    }}
+                    placeholder="AI direction (optional) — e.g. 'File check lead — ask if they still need pre-need planning'"
+                    value={bulkAiDirection}
+                    onChange={e => setBulkAiDirection(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn--secondary"
+                      onClick={() => handleAiAction('queue')}
+                      disabled={!!aiActioning}
+                      style={{ flex: '1 1 160px' }}
+                    >
+                      {aiActioning === 'queue' ? '⏳ Generating…' : '📥 AI Draft & Queue for review'}
+                    </button>
+                    <button
+                      className="btn btn--primary"
+                      onClick={() => handleAiAction(aiChannel === 'email' ? 'send_email' : aiChannel === 'both' ? 'send_both' : 'send_sms')}
+                      disabled={!!aiActioning || sendableSelectedIds.length === 0}
+                      style={{ flex: '1 1 180px' }}
+                    >
+                      {aiActioning && aiActioning !== 'queue' ? '⏳ Sending…' :
+                        aiChannel === 'email' ? `✉️ AI Send Email to ${sendableSelectedIds.length}` :
+                        aiChannel === 'both' ? `📡 AI Send Both to ${sendableSelectedIds.length}` :
+                        `💬 AI Send SMS to ${sendableSelectedIds.length}`}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
+                    "Draft & Queue" saves to Auto-Send Queue for your review first. "Send" fires immediately.
+                  </p>
+                  {aiResult && !aiResult.error && (
+                    <div className="leads-ai-result" style={{ marginTop: 10 }}>
+                      {aiResult.mode === 'queue'
+                        ? `✓ ${aiResult.queued} messages queued for review`
+                        : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
+                    </div>
+                  )}
+                  {aiResult?.error && <div className="compose-error">{aiResult.error}</div>}
+                </div>
+              )}
+
+              {/* Branch 2: Write your own */}
+              {bulkComposeTab === 'manual' && (
+                <div>
+                  <textarea
+                    className="compose-textarea"
+                    placeholder={`Hi {first_name}, this is…  (use {first_name} to personalize)`}
+                    value={bulkMessage}
+                    onChange={e => setBulkMessage(e.target.value)}
+                    rows={3}
+                    style={{ marginBottom: 10 }}
+                  />
+                  {/* Media attachment (Phase 4) */}
+                  {bulkMediaFileName && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+                      padding: '6px 10px', background: 'rgba(30,200,168,0.08)', borderRadius: 6,
+                      border: '1px solid rgba(30,200,168,0.25)', fontSize: 12,
+                    }}>
+                      📎 {bulkMediaFileName}
+                      <button
+                        onClick={() => { setBulkMediaUrl(''); setBulkMediaFileName('') }}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--signal-red)', fontSize: 14 }}
+                      >✕</button>
+                    </div>
+                  )}
+                  <div className="compose-footer">
+                    <label className="compose-checkbox">
+                      <input type="checkbox" checked={bulkIncludeBooking} onChange={e => setBulkIncludeBooking(e.target.checked)} />
+                      Include booking link
+                    </label>
+                    <button
+                      onClick={() => bulkMediaInputRef.current?.click()}
+                      disabled={bulkMediaUploading}
+                      style={{ fontSize: 12, padding: '5px 12px', background: 'none', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}
+                    >
+                      {bulkMediaUploading ? '⏳ Uploading…' : '📎 Attach flyer'}
+                    </button>
+                    <button
+                      className="btn btn--primary"
+                      onClick={handleBulkSend}
+                      disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
+                    >
+                      {bulkSending ? 'Sending…' : `${bulkMediaUrl ? '📸 Send MMS' : '💬 Send SMS'} to ${sendableSelectedIds.length}`}
+                    </button>
+                  </div>
+                  {bulkResult && (
+                    <div className="leads-bulk-result">✓ Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
-          <button
-            className="btn btn--danger"
-            style={{ background: 'var(--signal-red)', color: '#fff', border: 'none' }}
-            onClick={handleDeleteSelected}
-          >
-            🗑 Delete ({selectedCount})
-          </button>
-          <button
-            className="btn btn--primary"
-            onClick={() => { setShowBulkCompose(true); setAiResult(null) }}
-          >
-            ✨ AI Outreach ({selectedCount})
-          </button>
-          <button
-            className="btn btn--primary"
-            style={{ background: '#16a34a', borderColor: '#16a34a' }}
-            onClick={() => setShowVoiceCampaign(true)}
-          >
-            📞 AI Call Campaign ({selectedCount})
-          </button>
+
+          {/* Bottom action bar (always visible when leads selected) */}
+          <div className="leads-bulk-bar" style={{ position: 'static', boxShadow: 'none', borderTop: 'none' }}>
+            <span className="leads-bulk-count">{selectedCount} selected</span>
+            <button className="btn btn--secondary leads-bulk-clear" onClick={() => { setSelected(new Set()); setShowBulkCompose(false) }}>Clear</button>
+            {canBulkAssign && (
+              <button className="btn btn--secondary" onClick={() => setShowBulkAssign(true)}>👤 Assign…</button>
+            )}
+            <button
+              className="btn btn--danger"
+              style={{ background: 'var(--signal-red)', color: '#fff', border: 'none' }}
+              onClick={handleDeleteSelected}
+            >
+              🗑 Delete ({selectedCount})
+            </button>
+            <button
+              className={`btn ${showBulkCompose && bulkComposeTab === 'manual' ? 'btn--secondary' : 'btn--primary'}`}
+              onClick={() => { setBulkComposeTab('manual'); setShowBulkCompose(v => bulkComposeTab === 'manual' ? !v : true) }}
+            >
+              📝 {showBulkCompose && bulkComposeTab === 'manual' ? '▼ Close' : '▲ Write message'}
+            </button>
+            <button
+              className={`btn ${showBulkCompose && bulkComposeTab === 'ai' ? 'btn--secondary' : 'btn--primary'}`}
+              onClick={() => { setBulkComposeTab('ai'); setAiResult(null); setShowBulkCompose(v => bulkComposeTab === 'ai' ? !v : true) }}
+            >
+              ✨ {showBulkCompose && bulkComposeTab === 'ai' ? '▼ Close' : '▲ AI Outreach'}
+            </button>
+            <button
+              className="btn btn--primary"
+              style={{ background: '#16a34a', borderColor: '#16a34a' }}
+              onClick={() => setShowVoiceCampaign(true)}
+            >
+              📞 AI Call Campaign
+            </button>
+          </div>
         </div>
       )}
 
