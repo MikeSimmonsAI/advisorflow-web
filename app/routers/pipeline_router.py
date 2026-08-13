@@ -99,7 +99,10 @@ def get_flagged(
 
     result = []
     for p in flagged:
-        lead = db.query(Lead).filter(Lead.id == p.lead_id).first()
+        lead = db.query(Lead).filter(
+            Lead.id == p.lead_id,
+            Lead.organization_id == current_user.organization_id,
+        ).first()
         result.append({
             "pipeline_id": p.id,
             "lead_id": p.lead_id,
@@ -138,7 +141,10 @@ def approve_flagged(
     pipeline.flagged = False
 
     if req.send:
-        lead = db.query(Lead).filter(Lead.id == pipeline.lead_id).first()
+        lead = db.query(Lead).filter(
+            Lead.id == pipeline.lead_id,
+            Lead.organization_id == current_user.organization_id,
+        ).first()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
         try:
@@ -149,7 +155,9 @@ def approve_flagged(
             pipeline.stage = "ai_responding"
             pipeline.last_outbound_at = datetime.utcnow()
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            import logging
+            logging.getLogger(__name__).error("pipeline approve send failed: %s", e)
+            raise HTTPException(status_code=500, detail="Failed to send message. Please try again.")
 
     db.commit()
     log_action(db, current_user.organization_id, current_user.id,
@@ -194,7 +202,10 @@ def get_conversations(
 
     result = []
     for p in pipelines:
-        lead = db.query(Lead).filter(Lead.id == p.lead_id).first()
+        lead = db.query(Lead).filter(
+            Lead.id == p.lead_id,
+            Lead.organization_id == current_user.organization_id,
+        ).first()
         result.append({
             "pipeline_id": p.id,
             "lead_id": p.lead_id,

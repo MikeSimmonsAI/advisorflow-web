@@ -43,8 +43,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
-from app.models.models import Lead, Organization
+from app.deps import get_db, get_current_user, require_admin
+from app.models.models import Lead, Organization, User
 
 logger = logging.getLogger(__name__)
 
@@ -172,10 +172,32 @@ async def meta_webhook_receive(
     Receives Meta Lead Ads notifications (Facebook + Instagram).
     Each notification contains a leadgen_id. We call the Graph API to
     fetch the actual field values, then create a Lead.
+
+    Meta signs every request with X-Hub-Signature-256 using the app secret.
+    We verify this before processing so only genuine Meta payloads are accepted.
     """
     org = _get_org_by_token(db, org_token)
 
     body = await request.body()
+
+    # HMAC signature verification using the org's stored Meta app secret.
+    # Meta sends:  X-Hub-Signature-256: sha256=<hex>
+    meta_app_secret = getattr(org, "meta_app_secret", None)
+    if meta_app_secret:
+        sig_header = request.headers.get("X-Hub-Signature-256", "")
+        expected = "sha256=" + hmac.new(
+            meta_app_secret.encode(), body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(sig_header, expected):
+            logger.warning("Meta webhook HMAC mismatch for org %s", org.id)
+            raise HTTPException(status_code=403, detail="Signature mismatch")
+    else:
+        logger.warning(
+            "Meta webhook received for org %s with no meta_app_secret configured — "
+            "payload accepted but not verified. Set meta_app_secret to enable HMAC.",
+            org.id,
+        )
+
     try:
         payload = json.loads(body)
     except Exception:
@@ -287,15 +309,26 @@ async def tiktok_webhook_receive(
 
     body = await request.body()
 
-    # Optional HMAC signature check using tiktok_webhook_secret if configured
+    # HMAC signature check — reject the request if no secret is configured.
+    # Silently accepting unsigned webhooks lets any caller who knows the
+    # org_token inject fake leads into the CRM.
     secret = getattr(org, "tiktok_webhook_secret", None)
-    if secret:
-        sig_header = request.headers.get("x-tiktok-signature", "")
-        expected = hmac.new(
-            secret.encode(), body, hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(sig_header, expected):
-            raise HTTPException(status_code=403, detail="Invalid TikTok signature")
+    if not secret:
+        logger.error(
+            "TikTok webhook received for org %s but tiktok_webhook_secret is not set. "
+            "Request rejected — configure the secret in org settings.",
+            org.id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="TikTok webhook secret not configured for this org.",
+        )
+    sig_header = request.headers.get("x-tiktok-signature", "")
+    expected = hmac.new(
+        secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(sig_header, expected):
+        raise HTTPException(status_code=403, detail="Invalid TikTok signature")
 
     try:
         payload = json.loads(body)
@@ -345,14 +378,13 @@ async def tiktok_webhook_receive(
 @router.get("/token")
 def get_or_create_webhook_token(
     db: Session = Depends(get_db),
-    current_user=Depends(__import__("app.deps", fromlist=["get_current_user"]).get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
     Returns the org's unique social webhook token (auto-generates if missing).
     Used by the OrgSettings UI to display the webhook URLs to copy.
+    Requires org_admin or super_admin.
     """
-    from app.deps import require_admin
-    require_admin(current_user)
 
     org = db.query(Organization).filter(
         Organization.id == current_user.organization_id

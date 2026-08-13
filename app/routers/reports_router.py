@@ -302,7 +302,13 @@ def revenue_by_period(
     advisor_ids = list(sales_by_advisor.keys())
     advisors_by_id = {}
     if advisor_ids:
-        advisors_by_id = {a.id: a.full_name for a in db.query(User).filter(User.id.in_(advisor_ids)).all()}
+        advisors_by_id = {
+            a.id: a.full_name
+            for a in db.query(User).filter(
+                User.id.in_(advisor_ids),
+                User.organization_id == org_id,
+            ).all()
+        }
 
     by_advisor = sorted(
         [

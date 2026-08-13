@@ -348,7 +348,10 @@ def get_upcoming_appointments(
         lead_name = "Unknown"
         lead_phone = None
         if b.lead_id:
-            lead = db.query(Lead).filter(Lead.id == b.lead_id).first()
+            lead = db.query(Lead).filter(
+                Lead.id == b.lead_id,
+                Lead.organization_id == target.organization_id,
+            ).first()
             if lead:
                 parts = [lead.first_name or "", lead.last_name or ""]
                 lead_name = " ".join(p for p in parts if p).strip() or "Unknown"
