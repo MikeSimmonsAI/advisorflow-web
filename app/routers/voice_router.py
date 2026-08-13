@@ -168,7 +168,16 @@ async def get_twiml(
     call_id = request.query_params.get("call_id", "")
     advisor_id = request.query_params.get("advisor_id", "")
 
-    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    # Scope lead lookup to the advisor's organization — prevents cross-org
+    # data access from any caller who knows a lead_id UUID.
+    # advisor_id is always embedded in the TwiML URL we generate when
+    # initiating the call, so it will always be present for legitimate calls.
+    advisor = db.query(User).filter(User.id == advisor_id).first() if advisor_id else None
+    if not advisor:
+        twiml = build_twilio_twiml_voicemail("Sorry, we were unable to connect this call. Goodbye.")
+        return Response(content=twiml, media_type="application/xml")
+
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == advisor.organization_id).first()
 
     if not lead:
         twiml = build_twilio_twiml_voicemail("Sorry, we were unable to connect this call. Goodbye.")
@@ -198,11 +207,20 @@ async def voice_stream(
     lead_id = websocket.query_params.get("lead_id", "")
     advisor_id = websocket.query_params.get("advisor_id", "")
 
-    lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    advisor = db.query(User).filter(User.id == advisor_id).first()
-    call = db.query(VoiceCall).filter(VoiceCall.id == call_id).first()
+    # Resolve advisor first; scope lead and call to advisor's org so no
+    # cross-tenant data is reachable via manipulated query params.
+    advisor = db.query(User).filter(User.id == advisor_id).first() if advisor_id else None
+    if not advisor:
+        await websocket.close()
+        return
 
-    if not lead or not advisor:
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == advisor.organization_id).first()
+    call = (
+        db.query(VoiceCall).filter(VoiceCall.id == call_id, VoiceCall.organization_id == advisor.organization_id).first()
+        if call_id else None
+    )
+
+    if not lead:
         await websocket.close()
         return
 

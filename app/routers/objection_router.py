@@ -104,11 +104,19 @@ def get_objection_reply(
 ):
     from app.models.models import Reply, Lead
 
-    reply = db.query(Reply).filter(Reply.id == reply_id).first()
+    reply = (
+        db.query(Reply)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(Reply.id == reply_id, Lead.organization_id == current_user.organization_id)
+        .first()
+    )
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
 
-    lead = db.query(Lead).filter(Lead.id == reply.lead_id).first()
+    lead = db.query(Lead).filter(
+        Lead.id == reply.lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "the lead"
     first_name = lead_name.split()[0] if lead_name else "there"
     lead_tier = lead.tier if lead and lead.tier else "unknown"

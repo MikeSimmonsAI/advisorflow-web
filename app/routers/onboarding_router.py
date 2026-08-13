@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
@@ -37,10 +37,10 @@ def _slugify(name: str) -> str:
 
 
 class OnboardingRegisterRequest(BaseModel):
-    business_name: str
-    admin_full_name: str
+    business_name: str = Field(..., min_length=1, max_length=200)
+    admin_full_name: str = Field(..., min_length=1, max_length=200)
     admin_email: EmailStr
-    admin_password: str
+    admin_password: str = Field(..., min_length=8)
     industry: str = "funeral"  # funeral, roofing, insurance, real_estate, dental, legal
 
 

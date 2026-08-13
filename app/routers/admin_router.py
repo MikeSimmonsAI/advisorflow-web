@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 import secrets
 from collections import defaultdict
 from datetime import datetime
@@ -609,7 +609,7 @@ def require_super_admin(current_user: User = Depends(require_admin)) -> User:
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str | None = None  # if provided, set this; otherwise auto-generate
+    new_password: str | None = Field(default=None, min_length=8)  # if provided, must be 8+ chars; otherwise auto-generate
 
 
 @router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
