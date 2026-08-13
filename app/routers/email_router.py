@@ -295,6 +295,132 @@ def email_sent_log(
     ]
 
 
+@router.post("/system-check")
+def email_system_check(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Full live diagnostic of the email stack for this advisor.
+    Tests every layer in order and returns a structured report so the
+    advisor can see exactly which step is broken without reading logs.
+    """
+    import os as _os
+    checks = []
+
+    def chk(name, ok, detail="", fix=""):
+        checks.append({"name": name, "ok": ok, "detail": detail, "fix": fix})
+
+    # ── 1. Which send path will be used? ─────────────────────────────────────
+    using_m365 = bool(current_user.microsoft_365_connected)
+    chk(
+        "Send path",
+        True,
+        "Microsoft 365 (your real Outlook mailbox)" if using_m365 else "Resend (shared email service)",
+    )
+
+    if using_m365:
+        # ── M365: check refresh token exists ─────────────────────────────────
+        has_token = bool(current_user.microsoft_oauth_refresh_token_encrypted)
+        chk(
+            "Microsoft 365 refresh token",
+            has_token,
+            f"Stored for mailbox: {current_user.microsoft_email_address or '(unknown)'}" if has_token else "No token stored",
+            "" if has_token else "Go to Settings → Integrations and reconnect your Microsoft 365 account.",
+        )
+
+        if has_token:
+            # ── M365: try refreshing the access token live ────────────────────
+            try:
+                from app.services.microsoft_email_service import _get_fresh_access_token
+                _get_fresh_access_token(current_user)
+                chk("Microsoft 365 token refresh", True, "Got a fresh access token from Microsoft — auth is working")
+            except Exception as e:
+                chk(
+                    "Microsoft 365 token refresh",
+                    False,
+                    str(e),
+                    "Your Microsoft 365 session has expired. Go to Settings → Integrations and reconnect.",
+                )
+
+    else:
+        # ── Resend: check API key env var ─────────────────────────────────────
+        resend_key = _os.environ.get("RESEND_API_KEY", "")
+        chk(
+            "RESEND_API_KEY env var",
+            bool(resend_key),
+            f"Set (starts with {resend_key[:8]}…)" if resend_key else "NOT SET",
+            "" if resend_key else "Add RESEND_API_KEY to your Render backend environment variables.",
+        )
+
+        # ── Resend: check from-address env var ────────────────────────────────
+        from_addr = _os.environ.get("EMAIL_FROM_ADDRESS", "")
+        chk(
+            "EMAIL_FROM_ADDRESS env var",
+            bool(from_addr),
+            f"Set to: {from_addr}" if from_addr else "NOT SET — defaulting to noreply@bookaboost.com (unverified domain!)",
+            "" if from_addr else "Add EMAIL_FROM_ADDRESS to Render env vars. Must be an address on a domain verified in your Resend account.",
+        )
+
+        if resend_key:
+            # ── Resend: call their domains/verify API to check from-domain ────
+            effective_from = from_addr or "noreply@bookaboost.com"
+            from_domain = effective_from.split("@")[-1] if "@" in effective_from else ""
+            try:
+                import httpx as _httpx
+                resp = _httpx.get(
+                    "https://api.resend.com/domains",
+                    headers={"Authorization": f"Bearer {resend_key}"},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    domains = resp.json().get("data", [])
+                    verified = [d for d in domains if d.get("status") == "verified"]
+                    verified_names = [d.get("name", "") for d in verified]
+                    domain_ok = any(from_domain == n or from_domain.endswith("." + n) for n in verified_names)
+                    chk(
+                        "Resend from-domain verified",
+                        domain_ok,
+                        f"From domain '{from_domain}' — verified domains in account: {', '.join(verified_names) or 'none'}",
+                        "" if domain_ok else f"Your from-address domain '{from_domain}' is not verified in Resend. Either verify it at resend.com/domains or set EMAIL_FROM_ADDRESS to an address on a verified domain.",
+                    )
+                else:
+                    chk("Resend from-domain verified", False, f"Resend API returned {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                chk("Resend domain check", False, str(e))
+
+    # ── Live test send to advisor's own email ─────────────────────────────────
+    advisor_email = current_user.email
+    if not advisor_email:
+        chk("Live test send", False, "Your user account has no email address — can't send test", "Add an email to your profile.")
+    else:
+        subject = "BookaBoost email system check ✓"
+        body_html = (
+            f"<p>This is an automated system-check email from BookaBoost.</p>"
+            f"<p>If you're reading this, email delivery is working correctly for <strong>{current_user.full_name}</strong>.</p>"
+            f"<p>Sent at: {datetime.utcnow().isoformat()} UTC</p>"
+        )
+        try:
+            if using_m365:
+                from app.services.microsoft_email_service import send_email_via_microsoft_graph
+                result = send_email_via_microsoft_graph(current_user, advisor_email, subject, body_html)
+            else:
+                from app.services.email_service import send_email_via_provider
+                result = send_email_via_provider(advisor_email, subject, body_html)
+
+            chk(
+                f"Live test send → {advisor_email}",
+                result["success"],
+                "Email delivered — check your inbox" if result["success"] else result.get("error", "Unknown error"),
+                "" if result["success"] else "See the error above for the specific failure reason.",
+            )
+        except Exception as e:
+            chk(f"Live test send → {advisor_email}", False, str(e))
+
+    all_ok = all(c["ok"] for c in checks)
+    return {"all_ok": all_ok, "checks": checks}
+
+
 @router.post("/poll-inbox")
 def poll_inbox(
     db: Session = Depends(get_db),

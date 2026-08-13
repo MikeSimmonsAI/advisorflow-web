@@ -113,6 +113,23 @@ export default function EmailQueue() {
   const [manualFlaggedLeads, setManualFlaggedLeads] = useState([])
   const [flagging, setFlagging] = useState(null)
 
+  // ── Email system diagnostic ───────────────────────────────────────────────
+  const [diagRunning, setDiagRunning] = useState(false)
+  const [diagResult,  setDiagResult]  = useState(null)
+
+  async function runSystemCheck() {
+    setDiagRunning(true)
+    setDiagResult(null)
+    try {
+      const result = await api.post('/email/system-check', {})
+      setDiagResult(result)
+    } catch (err) {
+      setDiagResult({ all_ok: false, checks: [{ name: 'System check request', ok: false, detail: err.message, fix: 'Backend may not be redeployed yet — trigger a manual redeploy on Render.' }] })
+    } finally {
+      setDiagRunning(false)
+    }
+  }
+
   // ── Recently Sent log ─────────────────────────────────────────────────────
   const [sentLog, setSentLog]             = useState([])
   const [sentLogVisible, setSentLogVisible] = useState(false)
@@ -397,6 +414,63 @@ export default function EmailQueue() {
             For a single lead, use <span className="eq-inline-chip">✨ Draft</span> to get AI-personalized options.
           </p>
         </div>
+      </div>
+
+      {/* ── Email System Diagnostic ───────────────────────────────────── */}
+      <div style={{ margin: '0 0 16px 0' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          background: diagResult ? (diagResult.all_ok ? 'rgba(30,240,168,0.07)' : 'rgba(231,76,60,0.08)') : 'rgba(255,255,255,0.03)',
+          border: `1px solid ${diagResult ? (diagResult.all_ok ? 'rgba(30,240,168,0.25)' : 'rgba(231,76,60,0.3)') : 'rgba(255,255,255,0.1)'}`,
+          borderRadius: diagResult ? '8px 8px 0 0' : 8,
+          padding: '10px 16px',
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: diagResult ? (diagResult.all_ok ? 'var(--signal-green)' : '#e74c3c') : 'var(--text-secondary)' }}>
+            {diagResult
+              ? diagResult.all_ok ? '✅ Email system is working' : '❌ Email system has issues'
+              : '🔧 Email not working?'}
+          </span>
+          <button
+            onClick={runSystemCheck}
+            disabled={diagRunning}
+            style={{
+              fontSize: 12, padding: '4px 14px', borderRadius: 6, cursor: diagRunning ? 'default' : 'pointer',
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
+              color: 'var(--text-secondary)', opacity: diagRunning ? 0.6 : 1,
+            }}
+          >
+            {diagRunning ? '⏳ Running check…' : diagResult ? '↻ Re-run check' : 'Run System Check'}
+          </button>
+          {diagResult && (
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginLeft: 'auto' }}>
+              {diagResult.all_ok ? 'A test email was sent to your inbox — check it arrived.' : 'See details below — each failed step has a fix.'}
+            </span>
+          )}
+        </div>
+
+        {diagResult && (
+          <div style={{ border: `1px solid ${diagResult.all_ok ? 'rgba(30,240,168,0.25)' : 'rgba(231,76,60,0.3)'}`, borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+            {diagResult.checks.map((c, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+                padding: '10px 16px',
+                borderBottom: i < diagResult.checks.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                background: c.ok ? 'transparent' : 'rgba(231,76,60,0.05)',
+              }}>
+                <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>{c.ok ? '✅' : '❌'}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: c.ok ? 'var(--text-primary)' : '#e74c3c' }}>{c.name}</div>
+                  {c.detail && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2, wordBreak: 'break-word' }}>{c.detail}</div>}
+                  {!c.ok && c.fix && (
+                    <div style={{ fontSize: 12, color: '#f39c12', marginTop: 4, background: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.25)', borderRadius: 4, padding: '4px 8px' }}>
+                      🔧 Fix: {c.fix}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Unified stats strip ───────────────────────────────────────── */}
