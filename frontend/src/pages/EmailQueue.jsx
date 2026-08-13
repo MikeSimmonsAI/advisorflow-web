@@ -114,13 +114,25 @@ export default function EmailQueue() {
   const [flagging, setFlagging] = useState(null)
 
   // ── Recently Sent log ─────────────────────────────────────────────────────
-  const [sentLog, setSentLog]           = useState([])
+  const [sentLog, setSentLog]             = useState([])
   const [sentLogVisible, setSentLogVisible] = useState(false)
+  const [sentLogLoading, setSentLogLoading] = useState(false)
+  const [sentLogError, setSentLogError]   = useState('')
+
+  // Build a fast email→sent-entry lookup for cross-referencing queue rows
+  const sentByEmail = Object.fromEntries(
+    sentLog.map((e) => [e.lead_email?.toLowerCase(), e])
+  )
 
   function loadSentLog() {
-    api.get('/email/sent-log?limit=150')
-      .then(setSentLog)
-      .catch(() => {})
+    setSentLogLoading(true)
+    setSentLogError('')
+    api.get('/email/sent-log?limit=300')
+      .then((data) => { setSentLog(data); setSentLogLoading(false) })
+      .catch((err) => {
+        setSentLogError(err?.message || 'Could not load sent log — backend may need a redeploy.')
+        setSentLogLoading(false)
+      })
   }
 
   function loadManualFlagged() {
@@ -493,13 +505,18 @@ export default function EmailQueue() {
               </div>
             ) : (
               <>
-                <div style={{ padding: '8px 16px', background: 'rgba(30,240,168,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(30,240,168,0.1)', display: 'flex', justifyContent: 'space-between' }}>
+                <div style={{ padding: '8px 16px', background: 'rgba(30,240,168,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(30,240,168,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Showing your {sentLog.length} most recent email sends — newest first.</span>
-                  <span
-                    style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent)' }}
-                    onClick={(e) => { e.stopPropagation(); loadSentLog() }}
-                  >
-                    ↻ Refresh
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {sentLogError && (
+                      <span style={{ color: '#e74c3c', fontWeight: 600 }}>⚠️ {sentLogError}</span>
+                    )}
+                    <span
+                      style={{ cursor: sentLogLoading ? 'default' : 'pointer', textDecoration: 'underline', color: sentLogLoading ? 'var(--text-secondary)' : 'var(--accent)', opacity: sentLogLoading ? 0.6 : 1 }}
+                      onClick={(e) => { if (!sentLogLoading) { e.stopPropagation(); loadSentLog() } }}
+                    >
+                      {sentLogLoading ? '⏳ Refreshing…' : '↻ Refresh'}
+                    </span>
                   </span>
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -621,6 +638,14 @@ export default function EmailQueue() {
                 const isOpen     = draftLead?.id === lead.id
                 const isMismatch = detectMismatch(lead)
                 const badEmail   = detectBadEmail(lead)
+                const sentEntry  = sentByEmail[lead.email?.toLowerCase()]
+                const sentDate   = sentEntry?.sent_at ? new Date(sentEntry.sent_at) : null
+                const sentIsToday = sentDate && new Date().toDateString() === sentDate.toDateString()
+                const sentTimeStr = sentDate
+                  ? sentIsToday
+                    ? sentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : sentDate.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                  : null
                 return (
                   <Fragment key={lead.id}>
                     <tr className={selected.has(lead.id) ? 'eq-row--selected' : ''} style={{ borderBottom: isOpen ? 'none' : undefined }}>
@@ -634,6 +659,14 @@ export default function EmailQueue() {
                         >
                           {`${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'}
                         </span>
+                        {sentEntry && (
+                          <span
+                            title={`Already emailed on ${sentDate?.toLocaleString()} — subject: "${sentEntry.subject || '—'}"`}
+                            style={{ marginLeft: 7, fontSize: 10, background: 'rgba(255,200,0,0.15)', color: '#d4a017', border: '1px solid rgba(255,200,0,0.35)', borderRadius: 4, padding: '1px 5px', fontWeight: 700, cursor: 'help', whiteSpace: 'nowrap' }}
+                          >
+                            ⚠ emailed {sentIsToday ? `today ${sentTimeStr}` : sentTimeStr}
+                          </span>
+                        )}
                       </td>
                       <td className="mono" style={{ fontSize: 12 }}>
                         {lead.email || '—'}
