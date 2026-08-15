@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
@@ -37,7 +38,7 @@ import FiberLeadCapture from './pages/FiberLeadCapture'
 import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
 import SetupIntegrations from './pages/SetupIntegrations'
-import { getCurrentUser } from './api/client'
+import { getCurrentUser, startKeepAlive } from './api/client'
 
 function isAuthenticated() {
   return !!localStorage.getItem('bookaboost_token')
@@ -68,6 +69,12 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
 }
 
 export default function App() {
+  // Restart keep-alive if the user reloads the page while already authenticated.
+  // The normal start happens in Login.jsx after successful login.
+  useEffect(() => {
+    if (isAuthenticated()) startKeepAlive()
+  }, [])
+
   return (
     <BrowserRouter>
       <Routes>

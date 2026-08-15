@@ -12,7 +12,28 @@ export function clearToken() {
   localStorage.removeItem('bookaboost_token')
 }
 
-async function request(path, options = {}) {
+/**
+ * Core fetch wrapper with retry logic for Render cold starts.
+ *
+ * Render free-tier services sleep after 15 minutes of inactivity. When the
+ * backend wakes from sleep, the first 1-2 requests can fail at the network
+ * layer (no response at all) before the server is ready. Without retries,
+ * this surfaces as a hard "Failed to fetch" error on every page.
+ *
+ * Retry policy:
+ *  - Only retries TypeError (network-level failure — no response from server)
+ *  - Does NOT retry HTTP errors (401, 403, 404, 500, etc.) — those are real
+ *  - Up to MAX_RETRIES attempts with RETRY_DELAY_MS between each
+ *  - Auth errors (401) redirect to login immediately, no retry
+ */
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 3000
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function request(path, options = {}, attempt = 0) {
   const token = getToken()
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = `Bearer ${token}`
@@ -22,7 +43,19 @@ async function request(path, options = {}) {
     headers['Content-Type'] = 'application/json'
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  let res
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  } catch (networkErr) {
+    // Network-level failure (server unreachable, CORS preflight blocked, etc.)
+    // Retry up to MAX_RETRIES times — handles Render cold start wake-up delay
+    if (attempt < MAX_RETRIES) {
+      await sleep(RETRY_DELAY_MS)
+      return request(path, options, attempt + 1)
+    }
+    // Exhausted retries — surface a cleaner message than the raw browser error
+    throw new Error('Unable to reach the server. Please check your connection or try again in a moment.')
+  }
 
   if (res.status === 401) {
     clearToken()
@@ -93,6 +126,31 @@ export function logout() {
   localStorage.removeItem('bb_branding')
 }
 
+// ── Keep-alive ────────────────────────────────────────────────────────────────
+// Ping the backend every 14 minutes so Render free-tier never sleeps while
+// an advisor has the app open. Call startKeepAlive() after login,
+// stopKeepAlive() after logout.
+
+let _keepAliveInterval = null
+
+export function startKeepAlive() {
+  if (_keepAliveInterval) return // already running
+  _keepAliveInterval = setInterval(async () => {
+    try {
+      await fetch(`${API_BASE}/ping`)
+    } catch {
+      // Silent — this is best-effort, not critical
+    }
+  }, 14 * 60 * 1000) // 14 minutes
+}
+
+export function stopKeepAlive() {
+  if (_keepAliveInterval) {
+    clearInterval(_keepAliveInterval)
+    _keepAliveInterval = null
+  }
+}
+
 // ── Branding ─────────────────────────────────────────────────────────────────
 
 export async function fetchAndStoreBranding() {
@@ -126,11 +184,9 @@ export function applyBrandingCSS(branding) {
   const accent = branding.brand_color_accent
 
   if (primary) {
-    // Set the brand variable AND override the signal-blue that's used throughout the UI
     root.style.setProperty('--accent', primary)
     root.style.setProperty('--brand-primary', primary)
     root.style.setProperty('--signal-blue', primary)
-    // Derive a dim version at ~15% opacity using the hex color
     root.style.setProperty('--signal-blue-dim', hexToRgba(primary, 0.15))
     root.style.setProperty('--border-subtle', hexToRgba(primary, 0.18))
     root.style.setProperty('--border-strong', hexToRgba(primary, 0.42))
@@ -148,7 +204,6 @@ export function applyBrandingCSS(branding) {
 }
 
 function hexToRgba(hex, alpha) {
-  // Handles #rrggbb and #rgb
   let h = hex.replace('#', '')
   if (h.length === 3) h = h.split('').map(c => c + c).join('')
   const r = parseInt(h.substring(0, 2), 16)
@@ -158,10 +213,6 @@ function hexToRgba(hex, alpha) {
 }
 
 // ── Org Context (super admin only) ───────────────────────────────────────────
-// Lets the super admin "enter" any org's context and see their data.
-// The stored orgId is sent as X-Org-Override on every API request; deps.py
-// reads this header and safely overrides the user's organization_id for
-// that request only (via db.expunge + in-memory mutation, no DB write).
 
 const ORG_CONTEXT_KEY = 'bb_org_context'
 

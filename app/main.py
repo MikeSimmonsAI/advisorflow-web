@@ -229,6 +229,14 @@ def sms_consent_evidence():
 </html>""")
 
 
+# ── Public health / keep-alive endpoints (no auth required) ─────────────────
+@app.get("/ping")
+def ping():
+    """Unauthenticated liveness probe. Used by the frontend keep-alive interval
+    and external uptime monitors to prevent Render free-tier sleep."""
+    return {"status": "ok"}
+
+
 # ── Public endpoint for landing page demo requests (no auth required)
 @app.get("/leads/demo-request")
 def demo_request_docs():
