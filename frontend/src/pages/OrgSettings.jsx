@@ -100,6 +100,14 @@ export default function OrgSettings() {
   const [savingSocial, setSavingSocial] = useState(false)
   const [socialSaved, setSocialSaved] = useState(false)
 
+  // Org-level email sender
+  const [fromEmail, setFromEmail] = useState('')
+  const [resendApiKey, setResendApiKey] = useState('')
+  const [resendApiKeySet, setResendApiKeySet] = useState(false)
+  const [savingEmailSender, setSavingEmailSender] = useState(false)
+  const [emailSenderSaved, setEmailSenderSaved] = useState(false)
+  const [emailSenderError, setEmailSenderError] = useState('')
+
   // Load all orgs for super admin selector
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -135,6 +143,9 @@ export default function OrgSettings() {
         setGoogleReviewUrl(data.google_review_url || '')
         setInstagramUrl(data.instagram_url || '')
         setLinkedinUrl(data.linkedin_url || '')
+        setFromEmail(data.from_email || '')
+        setResendApiKeySet(!!data.resend_api_key_set)
+        setResendApiKey('')  // Never pre-populate — only write when user explicitly enters it
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -212,6 +223,28 @@ export default function OrgSettings() {
       setError(err.message)
     } finally {
       setSavingSocial(false)
+    }
+  }
+
+  async function saveEmailSender() {
+    setSavingEmailSender(true)
+    setEmailSenderSaved(false)
+    setEmailSenderError('')
+    try {
+      const payload = { from_email: fromEmail || null }
+      // Only send the API key if the user actually typed something — empty field means "leave unchanged"
+      if (resendApiKey.trim()) payload.resend_api_key = resendApiKey.trim()
+      await api.patch(`/org-settings/email-sender${orgQuery}`, payload)
+      setEmailSenderSaved(true)
+      if (resendApiKey.trim()) {
+        setResendApiKeySet(true)
+        setResendApiKey('')  // Clear the field after saving so it doesn't linger
+      }
+      setTimeout(() => setEmailSenderSaved(false), 3000)
+    } catch (err) {
+      setEmailSenderError(err.message)
+    } finally {
+      setSavingEmailSender(false)
     }
   }
 
@@ -483,6 +516,57 @@ export default function OrgSettings() {
 
             <button className="btn btn--primary" onClick={saveSocialLinks} disabled={savingSocial} style={{ marginTop: 8 }}>
               {savingSocial ? 'Saving…' : socialSaved ? '✓ Saved' : 'Save social links'}
+            </button>
+          </section>
+
+          {/* ── Email Sender ── */}
+          <section className="panel os-section" style={{ marginTop: 16 }}>
+            <div className="panel-header"><h2 className="panel-title">📧 Email Sender</h2></div>
+            <p className="os-hint">
+              Set the address outbound emails are sent <em>from</em>. Use your org's own verified domain
+              (e.g. <code>support@bookaboost.live</code>) so replies land in your real inbox and emails
+              don't land in spam. Requires the domain to be verified in Resend first.
+            </p>
+
+            <label className="os-label">
+              From address
+              <input
+                className="os-input"
+                value={fromEmail}
+                onChange={(e) => setFromEmail(e.target.value)}
+                placeholder="support@yourdomain.live"
+                type="email"
+              />
+            </label>
+
+            <label className="os-label" style={{ marginTop: 10 }}>
+              Resend API key
+              <input
+                className="os-input"
+                value={resendApiKey}
+                onChange={(e) => setResendApiKey(e.target.value)}
+                placeholder={resendApiKeySet ? '●●●●●●●● (key on file — leave blank to keep)' : 're_xxxxxxxxxxxxxxxxxxxx'}
+                type="password"
+                autoComplete="new-password"
+              />
+              {resendApiKeySet && !resendApiKey && (
+                <span style={{ fontSize: 11, color: 'var(--signal-green, #1ef0a8)', marginTop: 3 }}>
+                  ✓ API key is configured
+                </span>
+              )}
+            </label>
+
+            {emailSenderError && (
+              <p style={{ color: 'var(--signal-red, #ff4d4f)', fontSize: 12, marginTop: 6 }}>{emailSenderError}</p>
+            )}
+
+            <button
+              className="btn btn--primary"
+              onClick={saveEmailSender}
+              disabled={savingEmailSender}
+              style={{ marginTop: 10 }}
+            >
+              {savingEmailSender ? 'Saving…' : emailSenderSaved ? '✓ Saved' : 'Save email sender'}
             </button>
           </section>
 

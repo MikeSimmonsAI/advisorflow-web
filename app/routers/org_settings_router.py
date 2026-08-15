@@ -158,6 +158,10 @@ def get_org_settings(
         "instagram_url": getattr(org, "instagram_url", None),
         "linkedin_url": getattr(org, "linkedin_url", None),
         "enabled_features": json.loads(org.enabled_features) if getattr(org, "enabled_features", None) else None,
+        # Org-level email sender — each brand sends from its own verified domain.
+        "from_email": getattr(org, "from_email", None),
+        # Never return the raw API key to the UI — only signal whether it's set.
+        "resend_api_key_set": bool(getattr(org, "resend_api_key", None)),
     }
 
 
@@ -227,6 +231,34 @@ def update_social_links(
     org.linkedin_url = _validate_url(req.linkedin_url, "linkedin_url")
     db.commit()
     return {"updated": True}
+
+
+class EmailSenderUpdate(BaseModel):
+    from_email: Optional[str] = None
+    resend_api_key: Optional[str] = None
+
+
+@router.patch("/email-sender")
+def update_email_sender(
+    req: EmailSenderUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Saves the org-level Resend API key and from-address. The key is stored
+    plaintext (it's an outbound service key, not a user secret — same
+    threat model as an SMTP password stored in env vars). Only updates
+    resend_api_key if a non-empty string is provided, so admins can update
+    the from_email alone without having to re-enter the key.
+    """
+    org = _resolve_org(current_user, org_id, db)
+    if req.from_email is not None:
+        org.from_email = req.from_email or None  # empty string → clear
+    if req.resend_api_key:  # only update when a non-empty value is explicitly provided
+        org.resend_api_key = req.resend_api_key
+    db.commit()
+    return {"updated": True, "from_email": org.from_email, "resend_api_key_set": bool(org.resend_api_key)}
 
 
 class FeaturesUpdate(BaseModel):

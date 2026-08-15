@@ -150,6 +150,12 @@ COLUMNS_TO_ADD = [
     ("leads", "source_category", "VARCHAR"),
     # Meta app secret for Meta webhook HMAC verification
     ("organizations", "meta_app_secret", "VARCHAR"),
+    # Org-level email sender — each brand sends from its own domain/address.
+    # BookaBoost: support@bookaboost.live / EvoSys Pro: support@evosyspro.live.
+    # When set, these override the global RESEND_API_KEY / EMAIL_FROM_ADDRESS env vars
+    # so each org's outbound email genuinely comes from their own domain.
+    ("organizations", "from_email", "VARCHAR"),
+    ("organizations", "resend_api_key", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

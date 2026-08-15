@@ -4,7 +4,7 @@ For leads with contact_channel="email_only" (no phone in the source
 data) - these can't go through the SMS cadence, so they get a separate
 nurture flow via email instead.
 
-Uses SendGrid by default (simple, generous free tier - 100 emails/day
+Uses Resend by default (simple, generous free tier - 100 emails/day
 free, good fit for a 5-advisor proof of concept). Swap the send_email()
 internals for AWS SES or another provider later without touching the
 calling code, since everything routes through this one function.
@@ -13,6 +13,12 @@ Per Mike's June 19 2026 correction: email-only leads are NOT excluded.
 They get imported and queued here, even though full content per track
 isn't fully fleshed out yet - Phase 2 ships the pipe, Phase 3 refines
 the actual email copy per track.
+
+Org-level sender (Task 108): each Organization can store its own
+from_email and resend_api_key. When set, send_email_via_provider()
+uses those instead of the global env vars, so BookaBoost sends from
+support@bookaboost.live and EvoSys Pro from support@evosyspro.live —
+each from their own verified Resend domain, no cross-contamination.
 """
 
 import os
@@ -124,20 +130,35 @@ def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url
     return {"subject": subject, "body_html": body}
 
 
-def send_email_via_provider(to_email: str, subject: str, body_html: str, attachments: list = None) -> dict:
+def send_email_via_provider(
+    to_email: str,
+    subject: str,
+    body_html: str,
+    attachments: list = None,
+    org=None,
+) -> dict:
     """
     Sends via Resend. Returns {"success": bool, "provider_message_id": str|None, "error": str|None}.
     attachments: list of dicts with keys: filename, content (base64 string), content_type
+
+    org: optional Organization object — when provided and the org has its own
+    resend_api_key / from_email set, those override the global env vars so each
+    brand sends from its own verified domain. Falls back gracefully to the global
+    env vars when org fields are not set (e.g. during system-check calls).
     """
-    if not RESEND_API_KEY:
+    # Resolve which API key and from address to use — org-level beats env var.
+    api_key = (getattr(org, "resend_api_key", None) or RESEND_API_KEY) if org else RESEND_API_KEY
+    from_addr = (getattr(org, "from_email", None) or FROM_EMAIL) if org else FROM_EMAIL
+
+    if not api_key:
         return {"success": False, "provider_message_id": None, "error": "RESEND_API_KEY not configured"}
 
     try:
         import resend
-        resend.api_key = RESEND_API_KEY
+        resend.api_key = api_key
 
         params = {
-            "from": FROM_EMAIL,
+            "from": from_addr,
             "to": [to_email],
             "subject": subject,
             "html": body_html,
@@ -162,24 +183,24 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
         raise ValueError(f"Lead {lead.id} has no email address.")
 
     from app.services.sms_service import create_booking_link
+    from app.models.models import Organization
     import os as _os
+
     booking = create_booking_link(db, lead, advisor)
     booking_url = f"{_os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
 
     track = lead.message_track or "email_only_nurture"
     rendered = render_email(db, track, lead, advisor, booking_url)
 
-    # Provider selection: send through the advisor's real Microsoft 365
-    # mailbox if they've connected it (per Mike's explicit request - real
-    # company email, not a generic SendGrid sender), falling back to the
-    # shared SendGrid sender for advisors who haven't connected Microsoft
-    # 365 yet. This is what actually makes the Microsoft integration
-    # usable - the OAuth flow alone does nothing if nothing ever calls it.
-    if advisor.microsoft_365_connected:
-        from app.services.microsoft_email_service import send_email_via_microsoft_graph
-        result = send_email_via_microsoft_graph(advisor, lead.email, rendered["subject"], rendered["body_html"])
-    else:
-        result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"])
+    # Look up the org so we can pass it to the provider (org-level sender).
+    org = db.query(Organization).filter_by(id=lead.organization_id).first()
+
+    # Provider selection: Resend using the org's own API key + from address when
+    # configured; falls back to global env vars for orgs that haven't set them yet.
+    # Microsoft 365 per-advisor sending is no longer the primary path — it hit
+    # anti-spam quota limits (WASCL RefuseQuota) during bulk sends. Resend via the
+    # org's verified domain is cleaner, more reliable, and scales properly.
+    result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"], org=org)
 
     email_msg = EmailMessage(
         lead_id=lead.id,

@@ -170,6 +170,13 @@ class Organization(Base):
     member_label = Column(String(100), nullable=True)   # singular e.g. "Agent"
     members_label = Column(String(100), nullable=True)  # plural   e.g. "Agents"
 
+    # Org-level email sender — overrides the global RESEND_API_KEY / EMAIL_FROM_ADDRESS
+    # env vars so each brand sends from its own domain (e.g. support@bookaboost.live
+    # for BookaBoost, support@evosyspro.live for EvoSys Pro).
+    # resend_api_key is stored plaintext (it's an outbound API key, not a user secret).
+    from_email = Column(String, nullable=True)       # e.g. "support@bookaboost.live"
+    resend_api_key = Column(String, nullable=True)   # org-specific Resend API key
+
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")
