@@ -259,23 +259,43 @@
 
 .leads-secondary { color: var(--text-tertiary) !important; }
 
-/* ── Floating Bulk Bar ── */
+/* ── Floating Bulk Bar (legacy — now handled inline) ── */
 .leads-bulk-bar {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 18px;
-  background: linear-gradient(135deg, rgba(11, 23, 50, 0.96), rgba(4, 9, 22, 0.96));
-  border: 1px solid var(--signal-blue);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 30px rgba(47,182,255,0.2);
-  backdrop-filter: blur(20px);
-  z-index: 100;
+  padding: 12px 24px;
   white-space: nowrap;
+}
+
+/* ── Compose footer row inside the batch drawer ── */
+.compose-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 6px;
+}
+
+.compose-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compose-error {
+  font-size: 12px;
+  color: var(--signal-red);
+  background: var(--signal-red-dim);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
 }
 
 .leads-bulk-count {

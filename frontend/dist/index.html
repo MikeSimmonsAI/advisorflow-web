@@ -7,10 +7,80 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-hiG-DB71.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-C0BSjG1w.css">
+    <style>
+      /* Instant splash — shown while JS bundle loads, hidden once React mounts */
+      body { margin: 0; background: #0d1021; }
+      #bb-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: #0d1021;
+        transition: opacity 0.3s ease;
+      }
+      #bb-splash.fade { opacity: 0; pointer-events: none; }
+      .bb-splash-logo {
+        display: flex; align-items: center; gap: 10px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.5px;
+        margin-bottom: 28px;
+      }
+      .bb-splash-pulse {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #2fb6ff;
+        box-shadow: 0 0 0 0 rgba(47,182,255,0.6);
+        animation: bb-pulse 1.4s ease-out infinite;
+      }
+      @keyframes bb-pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(47,182,255,0.7); }
+        70%  { box-shadow: 0 0 0 10px rgba(47,182,255,0); }
+        100% { box-shadow: 0 0 0 0 rgba(47,182,255,0); }
+      }
+      .bb-splash-bar {
+        width: 160px; height: 3px; border-radius: 2px;
+        background: rgba(255,255,255,0.08); overflow: hidden;
+      }
+      .bb-splash-bar-fill {
+        height: 100%; border-radius: 2px;
+        background: linear-gradient(90deg, #2fb6ff, #1ef0a8);
+        animation: bb-slide 1.2s ease-in-out infinite;
+        transform-origin: left;
+      }
+      @keyframes bb-slide {
+        0%   { transform: translateX(-100%) scaleX(0.4); }
+        50%  { transform: translateX(60%) scaleX(0.8); }
+        100% { transform: translateX(200%) scaleX(0.4); }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-DlYSetVF.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DyobUELZ.css">
   </head>
   <body>
+    <!-- Instant splash shown while React JS bundle loads -->
+    <div id="bb-splash">
+      <div class="bb-splash-logo">
+        <div class="bb-splash-pulse"></div>
+        BookaBoost
+      </div>
+      <div class="bb-splash-bar">
+        <div class="bb-splash-bar-fill"></div>
+      </div>
+    </div>
+
     <div id="root"></div>
+    <script>
+      // Remove splash once React has painted its first frame
+      document.addEventListener('DOMContentLoaded', function() {
+        var splash = document.getElementById('bb-splash');
+        // Wait for React to mount — observe #root having children
+        var obs = new MutationObserver(function() {
+          if (document.getElementById('root').children.length > 0) {
+            splash.classList.add('fade');
+            setTimeout(function() { splash.remove(); }, 350);
+            obs.disconnect();
+          }
+        });
+        obs.observe(document.getElementById('root'), { childList: true });
+      });
+    </script>
   </body>
 </html>

@@ -148,8 +148,18 @@ COLUMNS_TO_ADD = [
     ("leads", "import_list_name", "VARCHAR"),
     # Source category — user-defined grouping (purchased, organic, referral, database, etc.)
     ("leads", "source_category", "VARCHAR"),
+    # Manual flag — advisor-set flag when auto-detection misses a bad contact
+    # Values: null (clean), "bad_email", "remove_all"
+    ("leads", "manual_flag", "VARCHAR"),
+    ("leads", "manual_flag_reason", "VARCHAR"),
     # Meta app secret for Meta webhook HMAC verification
     ("organizations", "meta_app_secret", "VARCHAR"),
+    # Twilio delivery receipts — updated by /sms/status-callback webhook
+    # Values: pending, sent, delivered, failed, undelivered
+    ("messages", "delivery_status", "VARCHAR DEFAULT 'pending'"),
+    ("messages", "delivery_status_at", "TIMESTAMP"),
+    # last_messaged_at on leads — denormalized for fast "sent today" badge in Leads list
+    ("leads", "last_messaged_at", "TIMESTAMP"),
     # Org-level email sender — each brand sends from its own domain/address.
     # BookaBoost: support@bookaboost.live / EvoSys Pro: support@evosyspro.live.
     # When set, these override the global RESEND_API_KEY / EMAIL_FROM_ADDRESS env vars

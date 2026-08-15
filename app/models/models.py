@@ -345,6 +345,21 @@ class Lead(Base):
     import_list_name = Column(String, nullable=True)  # user-supplied label, e.g. "2024 Purchased List"
     source_category = Column(String, nullable=True)   # purchased, organic, referral, database, etc.
 
+    # Manual flag — set by any advisor when auto-detection misses a bad contact
+    # Values: null (clean), "bad_email" (hide from email/campaign but allow SMS),
+    #         "remove_all" (hide from all outreach lists everywhere)
+    manual_flag = Column(String, nullable=True)
+    manual_flag_reason = Column(String, nullable=True)  # optional note from the advisor
+
+    # Post-appointment case management — "open" until the appointment outcome is resolved
+    # Values: open, pending_outcome, sold, lost, follow_up, closed
+    case_status = Column(String, default="open", nullable=True)
+
+    # Denormalized timestamp of most recent outbound message (SMS or email).
+    # Updated by sms_service.send_sms() and email_router send endpoints.
+    # Used for "sent today" badge on Leads list.
+    last_messaged_at = Column(DateTime, nullable=True)
+
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -383,6 +398,11 @@ class Message(Base):
     twilio_sid = Column(String, nullable=True)  # Twilio's message SID for tracking
     twilio_status = Column(String, nullable=True)  # queued, sent, delivered, failed
     booking_link_id = Column(String, ForeignKey("booking_links.id", ondelete="SET NULL"), nullable=True)
+
+    # Twilio delivery receipt — updated by the /sms/status-callback webhook
+    # Values: pending (default), sent, delivered, failed, undelivered
+    delivery_status = Column(String, default="pending", nullable=True)
+    delivery_status_at = Column(DateTime, nullable=True)  # when Twilio last updated this
 
     sent_at = Column(DateTime, server_default=func.now())
 

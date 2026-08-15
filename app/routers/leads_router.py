@@ -31,6 +31,8 @@ def preview_upload(
     force_new_inquiry: bool = Form(False),
     relationship_type: Optional[str] = Form(None),  # applied to all leads in this import
     import_list_name: Optional[str] = Form(None),
+    campaign_purpose: Optional[str] = Form(None),   # why we're reaching out
+    offer_hook: Optional[str] = Form(None),          # what we're offering
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -85,6 +87,8 @@ def preview_upload(
             force_new_inquiry=force_new_inquiry,
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name,
+            campaign_purpose=campaign_purpose,
+            offer_hook=offer_hook,
         )
     finally:
         os.unlink(tmp_path)
@@ -99,6 +103,8 @@ def confirm_upload(
     force_new_inquiry: bool = Form(False),
     relationship_type: Optional[str] = Form(None),
     import_list_name: Optional[str] = Form(None),
+    campaign_purpose: Optional[str] = Form(None),
+    offer_hook: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -135,6 +141,8 @@ def confirm_upload(
             force_new_inquiry=force_new_inquiry,
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name,
+            campaign_purpose=campaign_purpose,
+            offer_hook=offer_hook,
         )
     finally:
         os.unlink(tmp_path)
@@ -147,10 +155,11 @@ def list_import_batches(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Returns all import batches for this org, newest first."""
+    """Returns all import batches for this org, newest first. Includes import_list_name for display."""
     rows = (
         db.query(
             Lead.source_file,
+            Lead.import_list_name,
             func.count(Lead.id).label("lead_count"),
             func.min(Lead.created_at).label("imported_at"),
         )
@@ -158,13 +167,14 @@ def list_import_batches(
             Lead.organization_id == current_user.organization_id,
             Lead.source_file.isnot(None),
         )
-        .group_by(Lead.source_file)
+        .group_by(Lead.source_file, Lead.import_list_name)
         .order_by(func.min(Lead.created_at).desc())
         .all()
     )
     return [
         {
             "source_file": r.source_file,
+            "import_list_name": r.import_list_name,
             "lead_count": r.lead_count,
             "imported_at": r.imported_at.isoformat() if r.imported_at else None,
         }
@@ -309,15 +319,45 @@ def list_leads(
     tier: Optional[str] = Query(None),
     message_track: Optional[str] = Query(None),
     temperature: Optional[str] = Query(None),
+    import_list_name: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Advisors see only their own leads. org_admin/super_admin see all org leads.
-    Filter by tier, message_track, or temperature (hot/warm/cold/unknown).
+    Returns a lean payload — only columns needed by the list view, no large
+    text blobs (notes, ai_quality_note, custom_fields). This keeps the Leads
+    page fast even with thousands of leads.
     """
     is_manager = current_user.role in ("org_admin", "super_admin")
-    query = db.query(Lead).filter(Lead.organization_id == current_user.organization_id)
+
+    # Select only the columns the list view needs — avoids loading large text
+    # fields (notes, ai_lead_quality_note, custom_fields, extra_data) and
+    # prevents SQLAlchemy lazy-loading relationships causing N+1 queries.
+    COLS = [
+        Lead.id, Lead.first_name, Lead.last_name, Lead.phone, Lead.email,
+        Lead.status, Lead.tier, Lead.message_track, Lead.source_file,
+        Lead.source_year, Lead.is_duplicate, Lead.assigned_to_id,
+        Lead.engagement_temperature, Lead.relationship_type,
+        Lead.contact_channel, Lead.import_list_name, Lead.created_at,
+        Lead.organization_id, Lead.case_status,
+        Lead.manual_flag, Lead.manual_flag_reason,
+        Lead.last_messaged_at,
+    ]
+    COL_NAMES = [
+        "id", "first_name", "last_name", "phone", "email",
+        "status", "tier", "message_track", "source_file",
+        "source_year", "is_duplicate", "assigned_to_id",
+        "engagement_temperature", "relationship_type",
+        "contact_channel", "import_list_name", "created_at",
+        "organization_id", "case_status",
+        "manual_flag", "manual_flag_reason",
+        "last_messaged_at",
+    ]
+
+    query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)
     if not is_manager:
         query = query.filter(Lead.assigned_to_id == current_user.id)
     if status_filter:
@@ -328,12 +368,68 @@ def list_leads(
         query = query.filter(Lead.message_track == message_track)
     if temperature:
         query = query.filter(Lead.engagement_temperature == temperature)
-    leads = query.order_by(Lead.created_at.desc()).all()
-    return leads
+    if import_list_name:
+        query = query.filter(Lead.import_list_name == import_list_name)
+    # Default: exclude remove_all flagged leads from main list (they appear in flagged section)
+    # bad_email flagged leads remain in the main list (still contactable by SMS)
+    query = query.filter(
+        (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email")
+    )
+
+    total = query.count()
+    rows = (
+        query
+        .order_by(Lead.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = []
+    for row in rows:
+        d = dict(zip(COL_NAMES, row))
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        items.append(d)
+
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/flagged")
+def list_flagged_leads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all manually flagged leads for this org (both bad_email and remove_all)."""
+    is_manager = current_user.role in ("org_admin", "super_admin")
+    query = db.query(Lead).filter(
+        Lead.organization_id == current_user.organization_id,
+        Lead.manual_flag != None,
+    )
+    if not is_manager:
+        query = query.filter(Lead.assigned_to_id == current_user.id)
+    leads = query.order_by(Lead.updated_at.desc()).limit(500).all()
+    return [
+        {
+            "id": l.id,
+            "first_name": l.first_name,
+            "last_name": l.last_name,
+            "email": l.email,
+            "phone": l.phone,
+            "manual_flag": l.manual_flag,
+            "manual_flag_reason": l.manual_flag_reason,
+            "tier": l.tier,
+            "status": l.status,
+            "contact_channel": l.contact_channel,
+        }
+        for l in leads
+    ]
 
 
 @router.get("/needs-review")
 def leads_needing_tier_review(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -342,12 +438,36 @@ def leads_needing_tier_review(
     These are held out of any SMS queue until a real tier is assigned -
     they are NOT defaulted to Pre-Need.
     """
-    leads = db.query(Lead).filter(
+    COLS = [
+        Lead.id, Lead.first_name, Lead.last_name, Lead.phone, Lead.email,
+        Lead.status, Lead.tier, Lead.message_track, Lead.source_file,
+        Lead.source_year, Lead.is_duplicate, Lead.assigned_to_id,
+        Lead.engagement_temperature, Lead.relationship_type,
+        Lead.contact_channel, Lead.import_list_name, Lead.created_at,
+        Lead.organization_id, Lead.case_status,
+    ]
+    COL_NAMES = [
+        "id", "first_name", "last_name", "phone", "email",
+        "status", "tier", "message_track", "source_file",
+        "source_year", "is_duplicate", "assigned_to_id",
+        "engagement_temperature", "relationship_type",
+        "contact_channel", "import_list_name", "created_at",
+        "organization_id", "case_status",
+    ]
+    query = db.query(*COLS).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
         Lead.status == "needs_tier_review",
-    ).order_by(Lead.created_at.desc()).all()
-    return leads
+    )
+    total = query.count()
+    rows = query.order_by(Lead.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = []
+    for row in rows:
+        d = dict(zip(COL_NAMES, row))
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        items.append(d)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.patch("/{lead_id}/tier")
@@ -817,6 +937,76 @@ def bulk_delete_duplicate_leads(
     return {"deleted": count, "message": f"Permanently deleted {count} duplicate leads."}
 
 
+# ── Deduplicate email-only leads that slipped past the original dedup ──────
+@router.post("/deduplicate-email-leads")
+def deduplicate_email_leads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    One-time (and safe to re-run) cleanup: finds email-only leads in this
+    org where the same (email + last_name) pair appears more than once, keeps
+    the oldest record, and marks all later duplicates as is_duplicate=True
+    with status=dnc — exactly what the importer now does on new uploads.
+
+    Does NOT delete anything — just flags. After reviewing, the advisor can
+    call DELETE /leads/duplicates/bulk-delete to permanently remove them.
+    Requires org_admin or super_admin.
+    """
+    if current_user.role not in ("org_admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Admin role required.")
+
+    from sqlalchemy import func as sqlfunc
+
+    # Pull all email-only leads for this org that have a real email and last name
+    email_leads = (
+        db.query(Lead)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.contact_channel == "email_only",
+            Lead.email.isnot(None),
+            Lead.last_name.isnot(None),
+        )
+        .order_by(Lead.created_at.asc())  # oldest first → we keep the first one
+        .all()
+    )
+
+    # Group by (normalized_email, normalized_last_name)
+    seen: dict = {}  # key -> first (oldest) lead id
+    flagged_ids = []
+
+    for lead in email_leads:
+        norm_email = (lead.email or "").strip().lower()
+        norm_last  = "".join(c for c in (lead.last_name or "").lower() if c.isalpha())
+        key = (norm_email, norm_last)
+
+        if not norm_email or not norm_last:
+            continue
+
+        if key in seen:
+            # This is a duplicate of the first record we saw for this key
+            if not lead.is_duplicate:
+                lead.is_duplicate = True
+                lead.duplicate_of_lead_id = seen[key]
+                lead.status = "dnc"
+                flagged_ids.append(lead.id)
+        else:
+            seen[key] = lead.id
+
+    db.commit()
+
+    return {
+        "scanned": len(email_leads),
+        "newly_flagged": len(flagged_ids),
+        "message": (
+            f"Flagged {len(flagged_ids)} email-only duplicate leads. "
+            "Call DELETE /leads/duplicates/bulk-delete to permanently remove them."
+            if flagged_ids else
+            "No new email-only duplicates found — list is already clean."
+        ),
+    }
+
+
 # ── PUBLIC: Landing page demo request (no auth required) ──────────────────
 class DemoRequestCreate(BaseModel):
     first_name: str
@@ -1103,6 +1293,46 @@ def update_lead_type(
     db.commit()
     log_action(db, current_user.organization_id, current_user.id, action="lead.update_type", target_type="lead", target_id=lead_id)
     return {"updated": True}
+
+
+class FlagLeadRequest(BaseModel):
+    flag_type: Optional[str] = None   # "bad_email" | "remove_all" | null (unflag)
+    reason: Optional[str] = None      # optional note from advisor
+
+
+@router.patch("/{lead_id}/flag")
+def flag_lead(
+    lead_id: str,
+    payload: FlagLeadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Any advisor in any org can manually flag a lead the auto-detection missed.
+    flag_type = "bad_email"   → hide from email queue + email campaigns, SMS still ok
+    flag_type = "remove_all"  → hide from all outreach lists everywhere
+    flag_type = None          → unflag, fully restore to all lists
+    """
+    # Advisors can only flag leads in their own org for security
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    valid_flags = {None, "bad_email", "remove_all"}
+    if payload.flag_type not in valid_flags:
+        raise HTTPException(status_code=400, detail=f"flag_type must be one of: bad_email, remove_all, or null to unflag")
+
+    lead.manual_flag = payload.flag_type
+    lead.manual_flag_reason = payload.reason if payload.flag_type else None
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+
+    action = "lead.unflag" if not payload.flag_type else f"lead.flag.{payload.flag_type}"
+    log_action(db, current_user.organization_id, current_user.id, action=action, target_type="lead", target_id=lead_id)
+    return {"flagged": bool(payload.flag_type), "flag_type": payload.flag_type}
 
 
 # ── PUBLIC: SMS opt-in form submission (no auth required) ─────────────────────

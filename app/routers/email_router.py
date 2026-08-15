@@ -85,6 +85,7 @@ def send_single_email(
         )
         db.add(msg)
         lead.status = "sent"
+        lead.last_messaged_at = datetime.utcnow()
         db.commit()
         return {"email_id": msg.id, "status": "sent"}
 
@@ -103,6 +104,7 @@ def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_
         Lead.organization_id == current_user.organization_id,
         Lead.contact_channel == "email_only",
         Lead.status != "dnc",
+        Lead.manual_flag == None,  # never send to manually flagged leads
     ).all()
     result = send_email_batch(db, current_user, leads)
     return result
@@ -121,11 +123,17 @@ def email_only_queue(
     import, so keep `phone` in the response and let the UI display it when
     present. Search is intentionally scoped after org/advisor/channel filters.
     """
+    # Include new + needs_tier_review — both are actionable email-only leads.
+    # "dnc" and "sent"/"replied"/"booked" are intentionally excluded:
+    # dnc = opt-out or dup, sent+ = already in flight and visible in Replies.
+    ACTIONABLE = ("new", "needs_tier_review", "queued")
     query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.assigned_to_id == current_user.id,
         Lead.contact_channel == "email_only",
-        Lead.status == "new",
+        Lead.status.in_(ACTIONABLE),
+        # Exclude manually flagged leads — bad_email and remove_all both hide from email queue
+        Lead.manual_flag == None,
     )
 
     if search and search.strip():
@@ -202,6 +210,7 @@ async def send_email_with_attachment(
     )
     db.add(msg)
     lead.status = "sent"
+    lead.last_messaged_at = datetime.utcnow()
     db.commit()
     return {"email_id": msg.id, "status": "sent", "has_attachment": bool(attachments)}
 
@@ -241,6 +250,169 @@ def draft_email(
     sample_message = (req.sample_message if req else None)
 
     return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message)
+
+
+@router.get("/sent-log")
+def email_sent_log(
+    limit: int = Query(default=150, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Recent email sends by this advisor — ordered newest first.
+    Used by Email Queue's 'Recently Sent' panel so advisors always know
+    who they already emailed and don't accidentally double-send.
+    """
+    from sqlalchemy import desc
+    rows = (
+        db.query(EmailMessage, Lead)
+        .join(Lead, EmailMessage.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            EmailMessage.sender_id == current_user.id,
+        )
+        .order_by(desc(EmailMessage.sent_at))
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": msg.id,
+            "lead_id": lead.id,
+            "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() or lead.email or "—",
+            "lead_email": lead.email,
+            "subject": msg.subject,
+            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "status": msg.status,
+        }
+        for msg, lead in rows
+    ]
+
+
+@router.post("/system-check")
+def email_system_check(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Full live diagnostic of the email stack for this advisor.
+    Tests every layer in order and returns a structured report so the
+    advisor can see exactly which step is broken without reading logs.
+    """
+    import os as _os
+    checks = []
+
+    def chk(name, ok, detail="", fix=""):
+        checks.append({"name": name, "ok": ok, "detail": detail, "fix": fix})
+
+    # ── 1. Which send path will be used? ─────────────────────────────────────
+    using_m365 = bool(current_user.microsoft_365_connected)
+    chk(
+        "Send path",
+        True,
+        "Microsoft 365 (your real Outlook mailbox)" if using_m365 else "Resend (shared email service)",
+    )
+
+    if using_m365:
+        # ── M365: check refresh token exists ─────────────────────────────────
+        has_token = bool(current_user.microsoft_oauth_refresh_token_encrypted)
+        chk(
+            "Microsoft 365 refresh token",
+            has_token,
+            f"Stored for mailbox: {current_user.microsoft_email_address or '(unknown)'}" if has_token else "No token stored",
+            "" if has_token else "Go to Settings → Integrations and reconnect your Microsoft 365 account.",
+        )
+
+        if has_token:
+            # ── M365: try refreshing the access token live ────────────────────
+            try:
+                from app.services.microsoft_email_service import _get_fresh_access_token
+                _get_fresh_access_token(current_user)
+                chk("Microsoft 365 token refresh", True, "Got a fresh access token from Microsoft — auth is working")
+            except Exception as e:
+                chk(
+                    "Microsoft 365 token refresh",
+                    False,
+                    str(e),
+                    "Your Microsoft 365 session has expired. Go to Settings → Integrations and reconnect.",
+                )
+
+    else:
+        # ── Resend: check API key env var ─────────────────────────────────────
+        resend_key = _os.environ.get("RESEND_API_KEY", "")
+        chk(
+            "RESEND_API_KEY env var",
+            bool(resend_key),
+            f"Set (starts with {resend_key[:8]}…)" if resend_key else "NOT SET",
+            "" if resend_key else "Add RESEND_API_KEY to your Render backend environment variables.",
+        )
+
+        # ── Resend: check from-address env var ────────────────────────────────
+        from_addr = _os.environ.get("EMAIL_FROM_ADDRESS", "")
+        chk(
+            "EMAIL_FROM_ADDRESS env var",
+            bool(from_addr),
+            f"Set to: {from_addr}" if from_addr else "NOT SET — defaulting to noreply@bookaboost.com (unverified domain!)",
+            "" if from_addr else "Add EMAIL_FROM_ADDRESS to Render env vars. Must be an address on a domain verified in your Resend account.",
+        )
+
+        if resend_key:
+            # ── Resend: call their domains/verify API to check from-domain ────
+            effective_from = from_addr or "noreply@bookaboost.com"
+            from_domain = effective_from.split("@")[-1] if "@" in effective_from else ""
+            try:
+                import httpx as _httpx
+                resp = _httpx.get(
+                    "https://api.resend.com/domains",
+                    headers={"Authorization": f"Bearer {resend_key}"},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    domains = resp.json().get("data", [])
+                    verified = [d for d in domains if d.get("status") == "verified"]
+                    verified_names = [d.get("name", "") for d in verified]
+                    domain_ok = any(from_domain == n or from_domain.endswith("." + n) for n in verified_names)
+                    chk(
+                        "Resend from-domain verified",
+                        domain_ok,
+                        f"From domain '{from_domain}' — verified domains in account: {', '.join(verified_names) or 'none'}",
+                        "" if domain_ok else f"Your from-address domain '{from_domain}' is not verified in Resend. Either verify it at resend.com/domains or set EMAIL_FROM_ADDRESS to an address on a verified domain.",
+                    )
+                else:
+                    chk("Resend from-domain verified", False, f"Resend API returned {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                chk("Resend domain check", False, str(e))
+
+    # ── Live test send to advisor's own email ─────────────────────────────────
+    advisor_email = current_user.email
+    if not advisor_email:
+        chk("Live test send", False, "Your user account has no email address — can't send test", "Add an email to your profile.")
+    else:
+        subject = "BookaBoost email system check ✓"
+        body_html = (
+            f"<p>This is an automated system-check email from BookaBoost.</p>"
+            f"<p>If you're reading this, email delivery is working correctly for <strong>{current_user.full_name}</strong>.</p>"
+            f"<p>Sent at: {datetime.utcnow().isoformat()} UTC</p>"
+        )
+        try:
+            if using_m365:
+                from app.services.microsoft_email_service import send_email_via_microsoft_graph
+                result = send_email_via_microsoft_graph(current_user, advisor_email, subject, body_html)
+            else:
+                from app.services.email_service import send_email_via_provider
+                result = send_email_via_provider(advisor_email, subject, body_html)
+
+            chk(
+                f"Live test send → {advisor_email}",
+                result["success"],
+                "Email delivered — check your inbox" if result["success"] else result.get("error", "Unknown error"),
+                "" if result["success"] else "See the error above for the specific failure reason.",
+            )
+        except Exception as e:
+            chk(f"Live test send → {advisor_email}", False, str(e))
+
+    all_ok = all(c["ok"] for c in checks)
+    return {"all_ok": all_ok, "checks": checks}
 
 
 @router.post("/poll-inbox")

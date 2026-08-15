@@ -117,6 +117,37 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
     return result
 
 
+@router.post("/webhook/status-callback")
+def sms_status_callback(
+    request: Request,
+    MessageSid: str = Form(...),
+    MessageStatus: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Twilio delivery status callback — called by Twilio each time an SMS
+    delivery status changes (sent → delivered, failed, undelivered, etc.).
+    No auth required: Twilio sends this automatically; it's keyed by MessageSid.
+    Configure Render env var API_BASE_URL so sms_service sets StatusCallback.
+
+    Delivery status values Twilio sends:
+      queued → sending → sent → delivered (success path)
+      queued → sending → sent → undelivered / failed (failure path)
+    """
+    from app.models.models import Message
+
+    msg = db.query(Message).filter(Message.twilio_sid == MessageSid).first()
+    if not msg:
+        # Twilio may re-POST for messages sent before this feature existed — that's OK
+        return {"status": "no_matching_message"}
+
+    msg.twilio_status = MessageStatus
+    msg.delivery_status = MessageStatus  # keep both columns in sync
+    msg.delivery_status_at = datetime.utcnow()
+    db.commit()
+    return {"status": "updated", "message_id": msg.id, "delivery_status": MessageStatus}
+
+
 @router.post("/webhook/inbound")
 def inbound_webhook(
     request: Request,

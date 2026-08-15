@@ -41,9 +41,10 @@ Last Activity/Note, Street Address, City, State, ZIP Code, etc.
 
 import json
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Lead, LeadTier
-from app.services.dedup_service import check_and_register, normalize_phone
+from app.services.dedup_service import check_and_register, normalize_phone, normalize_last_name
 
 HEADER_MAP = {
     "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name", "given name"],
@@ -65,6 +66,70 @@ HEADER_MAP = {
 # these are not real prospects (e.g. "NSMG-DL-All Home Office").
 INTERNAL_EMAIL_MARKERS = ["@nsmg.com"]
 
+# Email prefixes that belong to notification systems, not real inboxes
+BAD_EMAIL_PREFIXES = {
+    "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
+    "notifications", "notification", "automated", "mailer", "mailer-daemon",
+    "postmaster", "bounce", "bounces", "autoresponder", "newsletter",
+    "alerts", "alert", "system", "info",
+}
+
+# Domains that belong to SaaS tools, not personal inboxes
+BAD_EMAIL_SYSTEM_DOMAINS = {
+    "domo.com", "salesforce.com", "hubspot.com", "marketo.com", "mailchimp.com",
+    "constantcontact.com", "sendgrid.net", "amazonses.com", "mailgun.org",
+    "auto-maildelivery.com", "mail-delivery.com", "bulk-mailer.com",
+    "massmail.com", "emaildelivery.com", "mailinglist.com",
+}
+
+# If any of these appear anywhere in the domain, it's a bulk/system sender
+BAD_EMAIL_DOMAIN_PATTERNS = [
+    "auto-mail", "automail", "bulk-mail", "bulkmail", "mass-mail", "massmail",
+    "mail-delivery", "maildelivery", "email-delivery", "emaildelivery",
+    "noreply", "no-reply", "donotreply", "newsletter", "mailinglist",
+    "notification", "auto-send", "autosend",
+]
+
+# Common misspelled personal email domains
+BAD_EMAIL_TYPO_DOMAINS = {
+    # gmail
+    "gnail.com", "gmial.com", "gamil.com", "gmai.com", "gmail.co", "gmail.org",
+    "gmail.net", "gmaill.com", "gmil.com", "gmal.com", "gmali.com", "gimail.com",
+    "gemail.com", "gmaol.com", "gmaul.com",
+    # yahoo
+    "yahoa.com", "yaho.com", "yahooo.com", "yaoo.com", "ymail.co",
+    "yahomail.com", "yhaoo.com", "yahou.com", "yhoo.com",
+    # hotmail / outlook
+    "hotmial.com", "homail.com", "hotmai.com", "hotmal.com", "hotmale.com",
+    "outlok.com", "outllok.com", "outook.com", "otlook.com", "ourlook.com",
+    "outlookl.com", "outlook.co", "outloook.com",
+    # aol / icloud / other
+    "aoll.com", "aol.co", "aoo.com", "icloud.co", "iclould.com", "iclod.com",
+    "comast.net", "comacast.net",
+}
+
+
+def _check_email_quality(email: str) -> str | None:
+    """
+    Returns a string describing why the email is suspect, or None if it looks fine.
+    Used to flag leads as needs_review instead of silently importing bad addresses.
+    """
+    if not email:
+        return None
+    low = email.strip().lower()
+    if "@" not in low:
+        return "invalid_format"
+    prefix, domain = low.split("@", 1)
+    if prefix in BAD_EMAIL_PREFIXES:
+        return "system_address"
+    if domain in BAD_EMAIL_SYSTEM_DOMAINS:
+        return "system_domain"
+    if any(pat in domain for pat in BAD_EMAIL_DOMAIN_PATTERNS):
+        return "system_domain"
+    if domain in BAD_EMAIL_TYPO_DOMAINS:
+        return "typo_domain"
+    return None
+
 # Tier -> message track mapping. Every tier maps to SOMETHING now; nothing
 # maps to "excluded."
 TIER_TO_TRACK = {
@@ -76,6 +141,28 @@ TIER_TO_TRACK = {
     "partial": "needs_review",
     "addr_only": "needs_review",
 }
+
+
+def _merge_custom_fields(
+    existing_json: str | None,
+    email_quality_issue: str | None,
+    campaign_purpose: str | None = None,
+    offer_hook: str | None = None,
+) -> str | None:
+    """Merges campaign metadata and email quality flag into the existing custom_fields JSON blob."""
+    base = {}
+    if existing_json:
+        try:
+            base = json.loads(existing_json)
+        except Exception:
+            base = {}
+    if email_quality_issue:
+        base["email_quality_issue"] = email_quality_issue
+    if campaign_purpose:
+        base["campaign_purpose"] = campaign_purpose
+    if offer_hook:
+        base["offer_hook"] = offer_hook
+    return json.dumps(base) if base else None
 
 
 def _build_column_lookup(columns) -> dict:
@@ -213,6 +300,8 @@ def import_leads_from_excel(
     relationship_type: str = None,   # applied to every lead in this batch
     import_list_name: str = None,    # human-readable name for this import list
     source_category: str = None,     # e.g. "crm_export", "referral", "web_form"
+    campaign_purpose: str = None,    # e.g. "file_review", "markers", "pre_need", "event_invite"
+    offer_hook: str = None,          # e.g. "lunch_and_learn", "free_tour", "free_space", "custom"
 ) -> dict:
     """
     Full import pipeline: parse -> route by tier/channel -> dedup check
@@ -235,7 +324,12 @@ def import_leads_from_excel(
     flagged_call_restricted = 0
     flagged_needs_tier_review = 0
     email_only_count = 0
+    flagged_bad_email = 0
     tier_counts = {}
+
+    # Within-batch dedup sets (catch duplicates inside the same uploaded file)
+    seen_phone_keys: set = set()   # (norm_phone, norm_last_name)
+    seen_email_keys: set = set()   # (norm_email, norm_last_name) for email-only leads
 
     for row in rows:
         phone_norm = normalize_phone(row["phone"])
@@ -251,6 +345,7 @@ def import_leads_from_excel(
 
         tier = _infer_tier(row["tier_raw"], row["status_reason_raw"])
         call_restricted = _is_call_restricted(row["allow_calls_raw"])
+        email_quality_issue = _check_email_quality(row["email"]) if row["email"] else None
 
         # Route: phone present -> SMS channel. No phone but email present -> email-only channel.
         if phone_norm:
@@ -263,6 +358,9 @@ def import_leads_from_excel(
         message_track = TIER_TO_TRACK.get(tier, "needs_review")
         if tier == "partial":
             flagged_needs_tier_review += 1
+
+        if email_quality_issue:
+            flagged_bad_email += 1
 
         # Parse last contact date if present (best-effort, don't fail import on bad dates)
         last_contact_dt = None
@@ -297,38 +395,84 @@ def import_leads_from_excel(
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name or None,
             source_category=source_category or None,
-            custom_fields=row.get("custom_fields") or None,
+            custom_fields=_merge_custom_fields(
+                row.get("custom_fields"),
+                email_quality_issue,
+                campaign_purpose=campaign_purpose,
+                offer_hook=offer_hook,
+            ),
         )
         db.add(lead)
         db.flush()
 
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
-        # Dedup only applies to phone-based leads - email-only leads don't
-        # have a phone to check against the registry.
+        # ── Dedup: phone-based leads use ContactRegistry ──────────────────
         if phone_norm:
-            is_dup, registry_entry = check_and_register(
-                db,
-                organization_id=organization_id,
-                phone_raw=row["phone"],
-                last_name_raw=row["last_name"],
-                lead_id=lead.id,
-                user_id=uploading_user_id,
-            )
-            if call_restricted:
-                lead.status = "dnc"
-                flagged_call_restricted += 1
-            elif is_dup:
+            phone_key = (phone_norm, normalize_last_name(row["last_name"]))
+            if phone_key in seen_phone_keys:
+                # Duplicate within this same file — mark and skip
                 lead.is_duplicate = True
-                lead.duplicate_of_lead_id = registry_entry.first_seen_lead_id
-                lead.status = "dnc"  # someone already owns this relationship
+                lead.status = "dnc"
                 duplicate_count += 1
             else:
-                lead.status = (
-                    "needs_tier_review" if tier == "partial" else "new"
+                seen_phone_keys.add(phone_key)
+                is_dup, registry_entry = check_and_register(
+                    db,
+                    organization_id=organization_id,
+                    phone_raw=row["phone"],
+                    last_name_raw=row["last_name"],
+                    lead_id=lead.id,
+                    user_id=uploading_user_id,
                 )
+                if call_restricted:
+                    lead.status = "dnc"
+                    flagged_call_restricted += 1
+                elif is_dup:
+                    lead.is_duplicate = True
+                    lead.duplicate_of_lead_id = registry_entry.first_seen_lead_id
+                    lead.status = "dnc"  # someone already owns this relationship
+                    duplicate_count += 1
+                else:
+                    lead.status = (
+                        "needs_tier_review" if tier == "partial" else "new"
+                    )
+
+        # ── Dedup: email-only leads — check by normalized email + last name ─
         else:
-            lead.status = "new"  # queued for email outreach, not SMS
+            norm_email = (row["email"] or "").strip().lower()
+            norm_last  = normalize_last_name(row["last_name"])
+            email_key  = (norm_email, norm_last)
+
+            if norm_email and email_key in seen_email_keys:
+                # Duplicate within this same file
+                lead.is_duplicate = True
+                lead.status = "dnc"
+                duplicate_count += 1
+            elif norm_email:
+                seen_email_keys.add(email_key)
+                # Check the database for an existing lead with same email+last_name in this org
+                from app.models.models import Lead as LeadModel
+                existing_email_lead = (
+                    db.query(LeadModel)
+                    .filter(
+                        LeadModel.organization_id == organization_id,
+                        func.lower(LeadModel.email) == norm_email,
+                        func.lower(LeadModel.last_name) == norm_last,
+                        LeadModel.id != lead.id,  # exclude the row we just flushed
+                        LeadModel.is_duplicate.is_(False),
+                    )
+                    .first()
+                )
+                if existing_email_lead:
+                    lead.is_duplicate = True
+                    lead.duplicate_of_lead_id = existing_email_lead.id
+                    lead.status = "dnc"
+                    duplicate_count += 1
+                else:
+                    lead.status = "new"  # queued for email outreach
+            else:
+                lead.status = "new"  # no email either — unusual but let it through
 
         created_leads.append(lead)
 
@@ -345,6 +489,7 @@ def import_leads_from_excel(
         "duplicates_flagged": duplicate_count,
         "flagged_call_restricted": flagged_call_restricted,
         "flagged_needs_tier_review": flagged_needs_tier_review,
+        "flagged_bad_email": flagged_bad_email,
         "skipped_no_contact_info": skipped_no_contact_info,
         "skipped_internal_records": skipped_internal_records,
         "tier_breakdown": tier_counts,

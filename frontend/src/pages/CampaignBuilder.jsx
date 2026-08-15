@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import '../styles/shared.css'
 import './CampaignBuilder.css'
@@ -38,6 +38,30 @@ const CONTACT_HISTORY_OPTIONS = [
   { value: 'replied_not_booked', label: 'Replied — not booked' },
 ]
 
+const RELATIONSHIP_TYPE_OPTIONS = [
+  { value: '', label: 'All relationship types' },
+  { value: 'cold_lead', label: '❄️ Cold leads' },
+  { value: 'warm_lead', label: '☀️ Warm leads' },
+  { value: 're_engagement', label: '🔄 Re-engagement' },
+  { value: 'previous_prospect', label: '📋 Previous prospects' },
+  { value: 'past_customer', label: '🤝 Past customers' },
+  { value: 'existing_customer', label: '⭐ Existing customers' },
+]
+
+const CHANNEL_OPTIONS = [
+  { value: 'sms', label: '📱 SMS only (leads with phone)' },
+  { value: 'email', label: '✉️ Email only (email-only leads)' },
+  { value: 'auto', label: '🔄 Auto (SMS or email by lead type)' },
+]
+
+const OFFER_HOOK_OPTIONS = [
+  { value: '', label: 'No specific offer (general outreach)' },
+  { value: 'lunch_and_learn', label: '🍽 Lunch & Learn event' },
+  { value: 'free_tour', label: '🚪 Free funeral home tour' },
+  { value: 'free_space', label: '🌿 Free space consultation' },
+  { value: 'family_service_consult', label: '🤝 Free Family Service consult' },
+]
+
 const EMPTY_FILTERS = {
   tier: '',
   status: '',
@@ -48,6 +72,8 @@ const EMPTY_FILTERS = {
   lead_type: '',
   engagement_temperature: '',
   contact_history: '',
+  import_list_name: '',
+  relationship_type: '',
   has_phone: true,
   exclude_dnc: true,
   exclude_duplicates: true,
@@ -74,10 +100,14 @@ export default function CampaignBuilder() {
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState('')
 
+  const [importBatches, setImportBatches] = useState([])
+
   // Step 2 — message
   const [campaignName, setCampaignName] = useState('')
   const [purpose, setPurpose] = useState('custom')
   const [tone, setTone] = useState('warm')
+  const [channel, setChannel] = useState('sms')
+  const [offerHook, setOfferHook] = useState('')
   const [messageText, setMessageText] = useState('')
   const [aiDirection, setAiDirection] = useState('')
   const [includeBookingLink, setIncludeBookingLink] = useState(true)
@@ -137,6 +167,9 @@ export default function CampaignBuilder() {
     if (raw) {
       try { setAdvisorName(JSON.parse(raw).full_name || '') } catch {}
     }
+
+    // Load import batches for the batch filter
+    api.get('/leads/import-batches').then(setImportBatches).catch(() => {})
   }, [])
 
   function loadHistory() {
@@ -168,6 +201,9 @@ export default function CampaignBuilder() {
       if (filters.lead_type) params.set('lead_type', filters.lead_type)
       if (filters.engagement_temperature) params.set('engagement_temperature', filters.engagement_temperature)
       if (filters.contact_history) params.set('contact_history', filters.contact_history)
+      if (filters.import_list_name) params.set('import_list_name', filters.import_list_name)
+      if (filters.relationship_type) params.set('relationship_type', filters.relationship_type)
+      if (channel) params.set('channel', channel)
       params.set('has_phone', filters.has_phone ? 'true' : 'false')
       params.set('exclude_dnc', filters.exclude_dnc ? 'true' : 'false')
       params.set('exclude_duplicates', filters.exclude_duplicates ? 'true' : 'false')
@@ -188,6 +224,7 @@ export default function CampaignBuilder() {
         tone,
         lead_type: filters.lead_type || null,
         ai_direction: aiDirection || null,
+        offer_hook: offerHook || null,
       })
       if (result.message) setMessageText(result.message)
     } catch (err) {
@@ -207,6 +244,8 @@ export default function CampaignBuilder() {
         name: campaignName.trim() || `Campaign ${new Date().toLocaleDateString()}`,
         purpose,
         tone,
+        channel,
+        offer_hook: offerHook || null,
         message_template: messageText.trim(),
         include_booking_link: includeBookingLink,
         lead_ids: previewLeads.map(l => l.id),
@@ -223,6 +262,8 @@ export default function CampaignBuilder() {
           lead_type: filters.lead_type || null,
           engagement_temperature: filters.engagement_temperature || null,
           contact_history: filters.contact_history || null,
+          import_list_name: filters.import_list_name || null,
+          relationship_type: filters.relationship_type || null,
         },
         ai_direction: aiDirection || null,
       })
@@ -241,6 +282,8 @@ export default function CampaignBuilder() {
     setMessageText('')
     setAiDirection('')
     setTone('warm')
+    setChannel('sms')
+    setOfferHook('')
     setPreviewLeads([])
     setSendResult(null)
     setSendError('')
@@ -426,6 +469,32 @@ export default function CampaignBuilder() {
                       onChange={e => setFilter('source_year_max', e.target.value)}
                     />
                   </label>
+
+                  <label className="settings-label">
+                    Import batch / list name
+                    <select className="filter-select" value={filters.import_list_name} onChange={e => setFilter('import_list_name', e.target.value)}>
+                      <option value="">All import batches</option>
+                      {importBatches.map(b => (
+                        <option key={b.source_file} value={b.import_list_name || b.source_file}>
+                          {b.import_list_name || b.source_file}{b.lead_count ? ` (${b.lead_count})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="settings-label">
+                    Relationship type
+                    <select className="filter-select" value={filters.relationship_type} onChange={e => setFilter('relationship_type', e.target.value)}>
+                      {RELATIONSHIP_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="settings-label">
+                    Channel
+                    <select className="filter-select" value={channel} onChange={e => setChannel(e.target.value)}>
+                      {CHANNEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
                 </div>
 
                 <div className="campaign-checkbox-row">
@@ -563,6 +632,16 @@ export default function CampaignBuilder() {
                     </span>
                   </label>
 
+                  <label className="settings-label">
+                    Offer hook (AI will weave this naturally into the message)
+                    <select className="filter-select" value={offerHook} onChange={e => setOfferHook(e.target.value)}>
+                      {OFFER_HOOK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <span className="settings-help" style={{ fontSize: 11 }}>
+                      The AI will include this as a soft, low-pressure invite — not the entire focus of the message.
+                    </span>
+                  </label>
+
                   <div>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                       <button
@@ -574,7 +653,7 @@ export default function CampaignBuilder() {
                         {generating ? '⏳ Writing…' : '✨ AI Write Message'}
                       </button>
                       <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                        Uses your campaign type, tone, and direction above
+                        Uses your campaign type, tone, direction, and offer hook above
                       </span>
                     </div>
                     <textarea

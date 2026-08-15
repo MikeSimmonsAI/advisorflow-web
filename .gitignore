@@ -1,7 +1,40 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+*.pyd
+.Python
+*.egg-info/
+build/
+*.egg
 .env
-.env.*
-node_modules/
+.venv/
+venv/
+env/
+
+# Node / frontend
 frontend/node_modules/
+node_modules/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Vite build cache
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Render / deployment secrets
+*.pem

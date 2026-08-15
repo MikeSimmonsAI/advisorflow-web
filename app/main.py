@@ -39,6 +39,7 @@ from app.routers.fiber_leads_router import router as fiber_leads_router
 from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
 from app.routers.timeline_router import router as timeline_router
+from app.routers.activity_router import router as activity_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -235,6 +236,7 @@ def demo_request_docs():
 
 # ── All app routers
 app.include_router(auth_router.router)
+app.include_router(timeline_router)   # before leads_router — prevents /{lead_id} catch-all from shadowing /activity
 app.include_router(leads_router.router)
 app.include_router(sms_router.router)
 app.include_router(admin_router.router)
@@ -274,7 +276,7 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
-app.include_router(timeline_router)
+app.include_router(activity_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

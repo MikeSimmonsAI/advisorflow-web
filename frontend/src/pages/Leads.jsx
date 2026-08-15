@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
@@ -39,7 +39,9 @@ const STATUS_FILTER_OPTIONS = [
 export default function Leads() {
   const navigate = useNavigate()
   const [leads, setLeads] = useState([])
+  const [leadsTotal, setLeadsTotal] = useState(0)
   const [needsReview, setNeedsReview] = useState([])
+  const [needsReviewTotal, setNeedsReviewTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [preview, setPreview] = useState(null)
@@ -48,7 +50,12 @@ export default function Leads() {
   const [sourceYear, setSourceYear] = useState('')
   const [importRelationshipType, setImportRelationshipType] = useState('cold_lead')
   const [importListName, setImportListName] = useState('')
+  const [importCampaignPurpose, setImportCampaignPurpose] = useState('')
+  const [importOfferHook, setImportOfferHook] = useState('')
   const [forceNewInquiry, setForceNewInquiry] = useState(false)
+  const [batchFilter, setBatchFilter] = useState('')   // filter leads by import_list_name
+  const [bulkAiStarting, setBulkAiStarting] = useState(false)
+  const [bulkAiStartResult, setBulkAiStartResult] = useState(null)
   const [view, setView] = useState('all')
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
   const [showImport, setShowImport] = useState(false)
@@ -78,6 +85,13 @@ export default function Leads() {
   const [showBulkCompose, setShowBulkCompose] = useState(false)
   const [bulkAiDirection, setBulkAiDirection] = useState('')
   const [bulkRelationshipType, setBulkRelationshipType] = useState('')
+  const [bulkAiGenerating, setBulkAiGenerating] = useState(false)
+  const [bulkAiError, setBulkAiError] = useState('')
+  // Phase 4: media attach for batch sends
+  const [bulkMediaUrl, setBulkMediaUrl] = useState('')
+  const [bulkMediaUploading, setBulkMediaUploading] = useState(false)
+  const [bulkMediaFileName, setBulkMediaFileName] = useState('')
+  const bulkMediaInputRef = useRef(null)
 
   const currentUser = getCurrentUser()
   const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
@@ -89,6 +103,38 @@ export default function Leads() {
   const [bulkAssignError, setBulkAssignError] = useState('')
   const [showVoiceCampaign, setShowVoiceCampaign] = useState(false)
 
+  // Manual flagging
+  const [flaggedLeads, setFlaggedLeads] = useState([])
+  const [flaggedVisible, setFlaggedVisible] = useState(false)
+  const [flagging, setFlagging] = useState(null)  // lead id currently being flagged
+
+  function loadFlaggedLeads() {
+    api.get('/leads/flagged').then(setFlaggedLeads).catch(() => {})
+  }
+
+  async function handleFlagLead(e, lead, flagType) {
+    e.stopPropagation()
+    if (!flagType) {
+      // Unflag — confirm not needed
+    } else {
+      const label = flagType === 'bad_email' ? 'Flag as bad email' : 'Remove from all outreach'
+      const msg = flagType === 'bad_email'
+        ? `Flag "${lead.first_name} ${lead.last_name}" as a bad email?\n\nThey'll be hidden from the Email Queue and email campaigns, but you can still contact them by SMS. You can unflag anytime.`
+        : `Remove "${lead.first_name} ${lead.last_name}" from all outreach?\n\nThey'll be hidden from the Leads list, Email Queue, and all campaigns. You can unflag anytime.`
+      if (!window.confirm(msg)) return
+    }
+    setFlagging(lead.id)
+    try {
+      await api.patch(`/leads/${lead.id}/flag`, { flag_type: flagType || null })
+      loadLeads()
+      loadFlaggedLeads()
+    } catch (err) {
+      alert(`Flag failed: ${err.message}`)
+    } finally {
+      setFlagging(null)
+    }
+  }
+
   // Import history
   const [importBatches, setImportBatches] = useState([])
   const [batchesLoading, setBatchesLoading] = useState(false)
@@ -96,11 +142,28 @@ export default function Leads() {
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // batch object awaiting confirm
   const canManageBatches = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
   const [deletingLeads, setDeletingLeads] = useState(false)
+  const [dedupeRunning, setDedupeRunning] = useState(false)
+  const [dedupeResult, setDedupeResult] = useState(null)
 
   function loadImportBatches() {
-    if (!canManageBatches) return
+    // All advisors load batches (needed for batch filter dropdown)
     setBatchesLoading(true)
     api.get('/leads/import-batches').then(setImportBatches).catch(() => {}).finally(() => setBatchesLoading(false))
+  }
+
+  async function handleDedupeEmailLeads() {
+    if (!window.confirm('Scan all email-only leads and flag duplicates (same name + email address)?\n\nThis is safe — nothing gets deleted, just flagged. You can review and then bulk-delete the flagged ones.')) return
+    setDedupeRunning(true)
+    setDedupeResult(null)
+    try {
+      const result = await api.post('/leads/deduplicate-email-leads', {})
+      setDedupeResult(result)
+      loadLeads()
+    } catch (err) {
+      setDedupeResult({ error: err.message })
+    } finally {
+      setDedupeRunning(false)
+    }
   }
 
   async function handleDeleteBatch(batch) {
@@ -117,17 +180,24 @@ export default function Leads() {
     }
   }
 
-  function loadLeads() {
+  function loadLeads(filterBatch) {
     setLoading(true)
     setLoadError(null)
+    // filterBatch may be passed directly (e.g. from batch filter change); fall back to state
+    const activeBatch = filterBatch !== undefined ? filterBatch : batchFilter
+    const batchParam = activeBatch ? `&import_list_name=${encodeURIComponent(activeBatch)}` : ''
     Promise.all([
-      api.get('/leads/?page=1&page_size=100'),
-      api.get('/leads/needs-review?page=1&page_size=100'),
+      api.get(`/leads/?page=1&page_size=500${batchParam}`),
+      api.get('/leads/needs-review?page=1&page_size=500'),
     ]).then(([leadsData, reviewData]) => {
-      // Both endpoints now return a paginated envelope {items, total, page, page_size}.
-      // Fall back to the raw value for backward-compatibility during deploys.
-      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items ?? []))
-      setNeedsReview(Array.isArray(reviewData) ? reviewData : (reviewData.items ?? []))
+      // Both endpoints return a paginated envelope {items, total, page, page_size}.
+      // Fall back to raw array for backward-compatibility during rolling deploys.
+      const leadsArr = Array.isArray(leadsData) ? leadsData : (leadsData.items ?? [])
+      const reviewArr = Array.isArray(reviewData) ? reviewData : (reviewData.items ?? [])
+      setLeads(leadsArr)
+      setLeadsTotal(Array.isArray(leadsData) ? leadsData.length : (leadsData.total ?? leadsArr.length))
+      setNeedsReview(reviewArr)
+      setNeedsReviewTotal(Array.isArray(reviewData) ? reviewData.length : (reviewData.total ?? reviewArr.length))
       setLoading(false)
     }).catch((err) => {
       setLeads([])
@@ -137,7 +207,7 @@ export default function Leads() {
     })
   }
 
-  useEffect(() => { loadLeads(); loadImportBatches() }, [])
+  useEffect(() => { loadLeads(); loadImportBatches(); loadFlaggedLeads() }, [])
 
   async function handleGoogleContactsImport() {
     setGoogleImporting(true)
@@ -166,6 +236,8 @@ export default function Leads() {
       if (sourceYear) formData.append('source_year', sourceYear)
       if (importRelationshipType) formData.append('relationship_type', importRelationshipType)
       if (importListName.trim()) formData.append('import_list_name', importListName.trim())
+      if (importCampaignPurpose) formData.append('campaign_purpose', importCampaignPurpose)
+      if (importOfferHook) formData.append('offer_hook', importOfferHook)
       if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/preview', formData)
       setPreview(result)
@@ -185,6 +257,8 @@ export default function Leads() {
       if (sourceYear) formData.append('source_year', sourceYear)
       if (importRelationshipType) formData.append('relationship_type', importRelationshipType)
       if (importListName.trim()) formData.append('import_list_name', importListName.trim())
+      if (importCampaignPurpose) formData.append('campaign_purpose', importCampaignPurpose)
+      if (importOfferHook) formData.append('offer_hook', importOfferHook)
       if (forceNewInquiry) formData.append('force_new_inquiry', 'true')
       const result = await api.upload('/leads/upload/confirm', formData)
       setPreview(null)
@@ -287,24 +361,106 @@ export default function Leads() {
     }
   }
 
+  // AI generate: preview from first selected lead → fills textarea for review/edit
+  async function handleBulkAiGenerate() {
+    const firstId = sendableSelectedIds[0]
+    if (!firstId) return
+    setBulkAiGenerating(true)
+    setBulkAiError('')
+    try {
+      const result = await api.post('/ai-conversation/preview', {
+        lead_id: firstId,
+        tone: aiTone,
+        ai_direction: bulkAiDirection.trim() || null,
+      })
+      if (result.message) {
+        setBulkMessage(result.message)
+      } else {
+        setBulkAiError('AI returned no message.')
+      }
+    } catch (err) {
+      setBulkAiError(err.message || 'AI generate failed')
+    } finally {
+      setBulkAiGenerating(false)
+    }
+  }
+
+  async function handleBulkMediaUpload(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setBulkMediaUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const result = await api.upload('/sms/upload-media', fd)
+      setBulkMediaUrl(result.media_url)
+      setBulkMediaFileName(file.name)
+    } catch (err) {
+      alert(`Upload failed: ${err.message}`)
+    } finally {
+      setBulkMediaUploading(false)
+      e.target.value = ''
+    }
+  }
+
   async function handleBulkSend() {
     if (!bulkMessage.trim() || sendableSelectedIds.length === 0) return
     setBulkSending(true)
     setBulkResult(null)
     try {
-      const result = await api.post('/sms/send-batch', {
-        lead_ids: sendableSelectedIds,
-        template: bulkMessage,
-        include_booking_link: bulkIncludeBooking,
-      })
+      let result
+      if (bulkMediaUrl) {
+        // MMS batch: fire individually (send-batch doesn't support MMS yet)
+        const sends = await Promise.allSettled(
+          sendableSelectedIds.map(id =>
+            api.post('/sms/send-mms', {
+              lead_id: id,
+              template: bulkMessage,
+              media_url: bulkMediaUrl,
+              include_booking_link: bulkIncludeBooking,
+            })
+          )
+        )
+        const sent = sends.filter(r => r.status === 'fulfilled').length
+        result = { sent_count: sent, skipped_count: sendableSelectedIds.length - sent }
+      } else {
+        result = await api.post('/sms/send-batch', {
+          lead_ids: sendableSelectedIds,
+          template: bulkMessage,
+          include_booking_link: bulkIncludeBooking,
+        })
+      }
       setBulkResult(result)
       setSelected(new Set())
       setBulkMessage('')
+      setBulkMediaUrl('')
+      setBulkMediaFileName('')
       loadLeads()
     } catch (err) {
       alert(`Bulk send failed: ${err.message}`)
     } finally {
       setBulkSending(false)
+    }
+  }
+
+  async function handleBulkAiStart() {
+    if (selected.size === 0) return
+    const count = selected.size
+    if (!window.confirm(`Start AI conversations on ${count} lead${count === 1 ? '' : 's'}?\n\nThis will send the first AI outreach message to each lead immediately. Leads that are already active or on DNC will be skipped.`)) return
+    setBulkAiStarting(true)
+    setBulkAiStartResult(null)
+    try {
+      const result = await api.post('/ai-conversation/bulk-start', {
+        lead_ids: Array.from(selected),
+        channel: 'auto',  // routes by each lead's contact_channel
+      })
+      setBulkAiStartResult(result)
+      setSelected(new Set())
+      loadLeads()
+    } catch (err) {
+      setBulkAiStartResult({ error: err.message || 'Bulk AI start failed.' })
+    } finally {
+      setBulkAiStarting(false)
     }
   }
 
@@ -333,15 +489,15 @@ export default function Leads() {
   const selectedCount = selected.size
 
   const stats = useMemo(() => ({
-    total: leads.length,
+    total: leadsTotal,          // real total from server, not capped at 500
     shown: filteredLeads.length,
     sendable: sendableLeads.length,
     selected: selectedCount,
-    needsReview: needsReview.length,
+    needsReview: needsReviewTotal, // real total from server
     dnc: leads.filter((l) => l.status === 'dnc').length,
     missingPhone: leads.filter((l) => !l.phone).length,
     duplicates: leads.filter((l) => l.is_duplicate).length,
-  }), [leads, filteredLeads.length, sendableLeads.length, selectedCount, needsReview.length])
+  }), [leadsTotal, needsReviewTotal, leads, filteredLeads.length, sendableLeads.length, selectedCount])
 
   useEffect(() => {
     if (!canBulkAssign) return
@@ -523,6 +679,33 @@ export default function Leads() {
               <option value="past_customer">🤝 Past customers</option>
               <option value="existing_customer">⭐ Existing customers</option>
             </select>
+            <select
+              value={importCampaignPurpose}
+              onChange={(e) => setImportCampaignPurpose(e.target.value)}
+              className="filter-select"
+              title="Campaign purpose — AI uses this to set the right message goal"
+            >
+              <option value="">🎯 Campaign purpose (optional)</option>
+              <option value="file_review">📁 File review / reconnect</option>
+              <option value="markers">🪦 Markers / memorials</option>
+              <option value="pre_need">📋 Pre-need planning</option>
+              <option value="at_need_followup">💙 At-need follow-up</option>
+              <option value="upsell_existing">⭐ Existing client upsell</option>
+              <option value="event_invite">🎟 Event invitation</option>
+              <option value="re_engagement">🔄 Re-engagement / check-in</option>
+            </select>
+            <select
+              value={importOfferHook}
+              onChange={(e) => setImportOfferHook(e.target.value)}
+              className="filter-select"
+              title="Offer hook — AI will naturally weave this into outreach messages"
+            >
+              <option value="">🎁 Offer hook (optional)</option>
+              <option value="lunch_and_learn">🍽 Lunch & Learn event</option>
+              <option value="free_tour">🚪 Free funeral home tour</option>
+              <option value="free_space">🌿 Free space consultation</option>
+              <option value="family_service_consult">🤝 Free Family Service consult</option>
+            </select>
             <label className="compose-checkbox">
               <input
                 type="checkbox"
@@ -599,8 +782,34 @@ export default function Leads() {
             <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>📋 Import history</span>
-                <button className="btn btn--ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={loadImportBatches}>↻ Refresh</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn--secondary"
+                    style={{ fontSize: 12, padding: '3px 12px' }}
+                    onClick={handleDedupeEmailLeads}
+                    disabled={dedupeRunning}
+                    title="Finds and flags email-only leads that share the same name + email address"
+                  >
+                    {dedupeRunning ? '⏳ Scanning…' : '🧹 Clean up email dupes'}
+                  </button>
+                  <button className="btn btn--ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={loadImportBatches}>↻ Refresh</button>
+                </div>
               </div>
+              {dedupeResult && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13,
+                  background: dedupeResult.error ? 'var(--signal-red-dim)' : 'var(--signal-green-dim)',
+                  color: dedupeResult.error ? 'var(--signal-red)' : 'var(--signal-green)',
+                  border: `1px solid ${dedupeResult.error ? 'var(--signal-red)' : 'var(--signal-green)'}`,
+                }}>
+                  {dedupeResult.error ? `⚠️ ${dedupeResult.error}` : `✓ ${dedupeResult.message}`}
+                  {!dedupeResult.error && dedupeResult.newly_flagged > 0 && (
+                    <span style={{ marginLeft: 12, fontSize: 12, opacity: 0.85 }}>
+                      Now use "Duplicates" tab to bulk-delete them.
+                    </span>
+                  )}
+                </div>
+              )}
               {batchesLoading && <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading…</div>}
               {!batchesLoading && importBatches.length === 0 && (
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No import batches found.</div>
@@ -691,6 +900,23 @@ export default function Leads() {
           <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             {STATUS_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
+          {importBatches.length > 0 && (
+            <select
+              className="filter-select"
+              value={batchFilter}
+              onChange={(e) => { setBatchFilter(e.target.value); loadLeads(e.target.value) }}
+              title="Filter by import batch / list name"
+              style={{ maxWidth: 220 }}
+            >
+              <option value="">📦 All batches</option>
+              {importBatches.map((b) => (
+                <option key={b.source_file} value={b.import_list_name || b.source_file}>
+                  {b.import_list_name || b.source_file}
+                  {b.lead_count ? ` (${b.lead_count})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <span className="leads-count-pill">{filteredLeads.length} shown</span>
         </div>
       </div>
@@ -724,152 +950,22 @@ export default function Leads() {
         </div>
       )}
 
-      {/* ── AI Auto-Send Panel ── */}
-      {showBulkCompose && (
-        <section className="panel leads-ai-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">AI outreach — {sendableSelectedIds.length} lead{sendableSelectedIds.length === 1 ? '' : 's'}</h2>
-            <button className="back-link" onClick={() => { setShowBulkCompose(false); setAiResult(null) }}>Cancel</button>
-          </div>
-
-          <div className="leads-ai-controls">
-            {/* Relationship type — primary AI guardrail */}
-            <div className="leads-ai-tone-row" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 6 }}>
-              <span className="leads-ai-section-label" style={{ flexBasis: '100%', marginBottom: 4 }}>Lead relationship</span>
-              {[
-                { value: '', label: '🔵 Default (use lead record)' },
-                { value: 'cold_lead', label: '❄️ Cold lead' },
-                { value: 'warm_lead', label: '☀️ Warm lead' },
-                { value: 're_engagement', label: '🔄 Re-engagement' },
-                { value: 'previous_prospect', label: '📋 Previous prospect' },
-                { value: 'past_customer', label: '🤝 Past customer' },
-                { value: 'existing_customer', label: '⭐ Existing customer' },
-              ].map((r) => (
-                <button key={r.value}
-                  className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
-                  onClick={() => setBulkRelationshipType(r.value)}
-                  style={{ fontSize: 12 }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="leads-ai-tone-row">
-              <span className="leads-ai-section-label">Tone</span>
-              {[
-                { value: 'cold', label: '❄️ Cold' },
-                { value: 'warm', label: '☀️ Warm' },
-                { value: 'hot', label: '🔥 Hot' },
-                { value: 'urgent', label: '⚡ Urgent' },
-              ].map((t) => (
-                <button key={t.value}
-                  className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
-                  onClick={() => setAiTone(t.value)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {/* AI direction — overrides all defaults */}
-            <div style={{ marginTop: 4 }}>
-              <span className="leads-ai-section-label" style={{ display: 'block', marginBottom: 6 }}>AI direction (optional)</span>
-              <textarea
-                style={{
-                  width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '8px 10px',
-                  borderRadius: 6, border: '1px solid var(--border-default)', resize: 'vertical',
-                  fontFamily: 'inherit', lineHeight: 1.5, minHeight: 60,
-                }}
-                placeholder="Tell the AI exactly what to do — e.g. 'File check lead — ask if they still need pre-need planning, keep it brief and low-pressure'"
-                value={bulkAiDirection}
-                onChange={(e) => setBulkAiDirection(e.target.value)}
-              />
-              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                This overrides AI defaults and applies to all selected leads. Leave blank to use relationship + tone defaults.
-              </p>
-            </div>
-
-            <div className="leads-ai-channel-row">
-              <span className="leads-ai-section-label">Channel</span>
-              {[
-                { value: 'sms', label: '💬 SMS' },
-                { value: 'email', label: '✉️ Email' },
-                { value: 'both', label: '📡 Both' },
-              ].map((c) => (
-                <button key={c.value}
-                  className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
-                  onClick={() => setAiChannel(c.value)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="leads-ai-actions">
-            <button
-              className="btn btn--secondary leads-ai-btn"
-              onClick={() => handleAiAction('queue')}
-              disabled={!!aiActioning}
-            >
-              {aiActioning === 'queue' ? '⏳ Generating…' : '📥 AI Draft & Queue for review'}
-            </button>
-            <button
-              className={`btn btn--primary leads-ai-btn ${aiChannel === 'email' ? 'leads-ai-btn--email' : ''}`}
-              onClick={() => handleAiAction(aiChannel === 'email' ? 'send_email' : aiChannel === 'both' ? 'send_both' : 'send_sms')}
-              disabled={!!aiActioning || sendableSelectedIds.length === 0}
-            >
-              {aiActioning && aiActioning !== 'queue' ? '⏳ Sending…' :
-                aiChannel === 'email' ? `✉️ AI Auto-Send Email to ${sendableSelectedIds.length}` :
-                aiChannel === 'both' ? `📡 AI Auto-Send SMS + Email to ${sendableSelectedIds.length}` :
-                `💬 AI Auto-Send SMS to ${sendableSelectedIds.length}`}
-            </button>
-          </div>
-
-          <p className="leads-ai-note">
-            "Draft & Queue" puts AI messages in Auto-Send Queue for your review. "Auto-Send" fires immediately.
-          </p>
-
-          {aiResult && !aiResult.error && (
-            <div className="leads-ai-result">
-              {aiResult.mode === 'queue'
-                ? `✓ ${aiResult.queued} messages queued in Auto-Send Queue for your review`
-                : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped} · Errors: ${aiResult.errors}`}
-            </div>
-          )}
-          {aiResult?.error && <div className="compose-error">{aiResult.error}</div>}
-
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-            <div className="panel-header" style={{ marginBottom: 12 }}>
-              <h3 className="panel-title" style={{ fontSize: 14 }}>Or write your own message</h3>
-            </div>
-            <textarea
-              className="compose-textarea"
-              placeholder="Hi {first_name}, this is..."
-              value={bulkMessage}
-              onChange={(e) => setBulkMessage(e.target.value)}
-              rows={3}
-            />
-            <div className="compose-footer">
-              <label className="compose-checkbox">
-                <input type="checkbox" checked={bulkIncludeBooking} onChange={(e) => setBulkIncludeBooking(e.target.checked)} />
-                Include booking link
-              </label>
-              <button
-                className="btn btn--secondary"
-                onClick={handleBulkSend}
-                disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
-              >
-                {bulkSending ? 'Sending…' : `Send to ${sendableSelectedIds.length}`}
-              </button>
-            </div>
-            {bulkResult && (
-              <div className="leads-bulk-result">Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
-            )}
-          </div>
-        </section>
+      {bulkAiStartResult && (
+        <div className={`leads-bulk-result`} style={{
+          background: bulkAiStartResult.error ? 'rgba(255,77,77,0.12)' : 'rgba(124,58,237,0.12)',
+          color: bulkAiStartResult.error ? 'var(--signal-red)' : '#7c3aed',
+          border: `1px solid ${bulkAiStartResult.error ? 'var(--signal-red)' : '#7c3aed'}`,
+          marginBottom: 8,
+        }}>
+          {bulkAiStartResult.error
+            ? `⚠️ ${bulkAiStartResult.error}`
+            : `🤖 AI started on ${bulkAiStartResult.started} lead${bulkAiStartResult.started === 1 ? '' : 's'}${bulkAiStartResult.skipped > 0 ? ` · ${bulkAiStartResult.skipped} skipped (already active or DNC)` : ''}${bulkAiStartResult.errors > 0 ? ` · ${bulkAiStartResult.errors} errors` : ''}`
+          }
+          <button style={{ marginLeft: 12, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, fontSize: 12 }} onClick={() => setBulkAiStartResult(null)}>✕</button>
+        </div>
       )}
+
+      {/* ── Batch Compose Drawer (Phase 3) — shown as bottom overlay ── */}
 
       {/* ── Leads Table ── */}
       <section className="panel leads-table-panel">
@@ -904,6 +1000,7 @@ export default function Leads() {
                 <th>Tier</th>
                 <th>Status</th>
                 <th>Source</th>
+                <th></th>
                 {view === 'review' && <th>Assign tier</th>}
               </tr>
             </thead>
@@ -927,6 +1024,14 @@ export default function Leads() {
                       <div className="leads-name-cell">
                         <div className="leads-avatar">{initials}</div>
                         <span>{lead.first_name} {lead.last_name}</span>
+                        {lead.manual_flag === 'bad_email' && (
+                          <span style={{ fontSize: 10, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>⚠ bad email</span>
+                        )}
+                        {lead.last_messaged_at && new Date(lead.last_messaged_at).toDateString() === new Date().toDateString() && (
+                          <span style={{ fontSize: 10, background: 'rgba(30,240,168,0.15)', color: 'var(--signal-green)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 4, padding: '1px 5px', marginLeft: 6, fontWeight: 700 }}>
+                            ✓ sent today
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="mono leads-secondary">{lead.phone || '—'}</td>
@@ -937,13 +1042,43 @@ export default function Leads() {
                       {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
                       {lead.source_year ? ` (${lead.source_year})` : ''}
                     </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="btn btn--ghost"
-                        style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-red)' }}
-                        onClick={(e) => handleDeleteLead(e, lead.id)}
-                        title="Delete lead"
-                      >🗑</button>
+                    <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                      {/* Flag dropdown */}
+                      <div style={{ display: 'inline-flex', gap: 4 }}>
+                        {lead.manual_flag ? (
+                          <button
+                            className="btn btn--ghost"
+                            style={{ fontSize: 11, padding: '2px 8px', color: '#ffaa00' }}
+                            onClick={(e) => handleFlagLead(e, lead, null)}
+                            disabled={flagging === lead.id}
+                            title="Unflag this lead"
+                          >⚑ Unflag</button>
+                        ) : (
+                          <div style={{ position: 'relative', display: 'inline-block' }}>
+                            <select
+                              className="btn btn--ghost"
+                              style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 4 }}
+                              defaultValue=""
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                if (e.target.value) handleFlagLead(e, lead, e.target.value)
+                                e.target.value = ''
+                              }}
+                              disabled={flagging === lead.id}
+                            >
+                              <option value="" disabled>⚑ Flag</option>
+                              <option value="bad_email">⚠ Bad email</option>
+                              <option value="remove_all">⛔ Remove from all outreach</option>
+                            </select>
+                          </div>
+                        )}
+                        <button
+                          className="btn btn--ghost"
+                          style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-red)' }}
+                          onClick={(e) => handleDeleteLead(e, lead.id)}
+                          title="Delete lead"
+                        >🗑</button>
+                      </div>
                     </td>
                     {view === 'review' && (
                       <td>
@@ -968,34 +1103,290 @@ export default function Leads() {
         )}
       </section>
 
-      {/* ── Floating Bulk Action Bar ── */}
-      {selectedCount > 0 && (
-        <div className="leads-bulk-bar">
-          <span className="leads-bulk-count">{selectedCount} selected</span>
-          <button className="btn btn--secondary leads-bulk-clear" onClick={() => setSelected(new Set())}>Clear</button>
-          {canBulkAssign && (
-            <button className="btn btn--secondary" onClick={() => setShowBulkAssign(true)}>Assign to…</button>
+      {/* ── Manually Flagged Leads Section ── */}
+      {(flaggedLeads.length > 0 || flaggedVisible) && (
+        <section style={{ marginTop: 16, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,100,100,0.25)' }}>
+          <div
+            onClick={() => setFlaggedVisible(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: 'rgba(255,80,80,0.08)', cursor: 'pointer', userSelect: 'none' }}
+          >
+            <span style={{ color: '#ff6464', fontSize: 13, fontWeight: 600 }}>
+              ⛔ {flaggedLeads.length} manually flagged lead{flaggedLeads.length !== 1 ? 's' : ''} hidden from outreach
+            </span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+              {flaggedVisible ? '▲ Hide' : '▼ Show'}
+            </span>
+          </div>
+          {flaggedVisible && (
+            <div style={{ padding: '8px 0', background: 'var(--surface-card)' }}>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '4px 16px 12px' }}>
+                These leads were manually flagged by an advisor. Unflag them to restore to all lists.
+              </p>
+              <table className="data-table" style={{ margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Flag type</th>
+                    <th>Reason</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flaggedLeads.map(lead => (
+                    <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontWeight: 600 }}>{lead.first_name} {lead.last_name}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>{lead.email || '—'}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>{lead.phone || '—'}</td>
+                      <td>
+                        {lead.manual_flag === 'bad_email'
+                          ? <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '2px 6px' }}>⚠ bad email</span>
+                          : <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 4, padding: '2px 6px' }}>⛔ remove all</span>
+                        }
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{lead.manual_flag_reason || '—'}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="btn btn--ghost"
+                          style={{ fontSize: 11, padding: '2px 10px', color: 'var(--signal-green)', border: '1px solid rgba(100,255,150,0.3)' }}
+                          onClick={(e) => handleFlagLead(e, lead, null)}
+                          disabled={flagging === lead.id}
+                        >
+                          ✓ Unflag
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-          <button
-            className="btn btn--danger"
-            style={{ background: 'var(--signal-red)', color: '#fff', border: 'none' }}
-            onClick={handleDeleteSelected}
-          >
-            🗑 Delete ({selectedCount})
-          </button>
-          <button
-            className="btn btn--primary"
-            onClick={() => { setShowBulkCompose(true); setAiResult(null) }}
-          >
-            ✨ AI Outreach ({selectedCount})
-          </button>
-          <button
-            className="btn btn--primary"
-            style={{ background: '#16a34a', borderColor: '#16a34a' }}
-            onClick={() => setShowVoiceCampaign(true)}
-          >
-            📞 AI Call Campaign ({selectedCount})
-          </button>
+        </section>
+      )}
+
+      {/* ── Bottom Batch Action System (Phase 3 + 4) ── */}
+      {/* Hidden file input for bulk media upload */}
+      <input
+        ref={bulkMediaInputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.gif,.pdf"
+        style={{ display: 'none' }}
+        onChange={handleBulkMediaUpload}
+      />
+
+      {selectedCount > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 240, right: 0, zIndex: 200,
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.35)',
+          background: 'linear-gradient(180deg, rgba(10,20,46,0.98) 0%, rgba(5,10,24,0.99) 100%)',
+          borderTop: '2px solid var(--signal-blue)',
+          backdropFilter: 'blur(20px)',
+        }}>
+          {/* Expanded compose drawer — unified panel (no tabs, mirrors individual lead compose) */}
+          {showBulkCompose && (
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', maxHeight: '65vh', overflowY: 'auto' }}>
+              {/* Header row */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>
+                  ✉️ Compose message — {sendableSelectedIds.length} sendable of {selectedCount} selected
+                </span>
+                <button
+                  onClick={() => setShowBulkCompose(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-tertiary)', lineHeight: 1 }}
+                >✕</button>
+              </div>
+
+              {/* Tone + Channel pills row */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', minWidth: 40 }}>Tone</span>
+                {[
+                  { value: 'cold', label: '❄️ Cold' },
+                  { value: 'warm', label: '☀️ Warm' },
+                  { value: 'hot', label: '🔥 Hot' },
+                  { value: 'urgent', label: '⚡ Urgent' },
+                ].map(t => (
+                  <button key={t.value}
+                    className={`leads-ai-pill ${aiTone === t.value ? 'leads-ai-pill--active' : ''}`}
+                    onClick={() => setAiTone(t.value)}
+                    style={{ fontSize: 11 }}
+                  >{t.label}</button>
+                ))}
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', marginLeft: 10, minWidth: 52 }}>Channel</span>
+                {[
+                  { value: 'sms', label: '💬 SMS' },
+                  { value: 'email', label: '✉️ Email' },
+                  { value: 'both', label: '📡 Both' },
+                ].map(c => (
+                  <button key={c.value}
+                    className={`leads-ai-pill ${aiChannel === c.value ? 'leads-ai-pill--active' : ''}`}
+                    onClick={() => setAiChannel(c.value)}
+                    style={{ fontSize: 11 }}
+                  >{c.label}</button>
+                ))}
+              </div>
+
+              {/* Relationship type row */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', minWidth: 40 }}>Type</span>
+                {[
+                  { value: '', label: '🔵 Default' },
+                  { value: 'cold_lead', label: '❄️ Cold lead' },
+                  { value: 'warm_lead', label: '☀️ Warm lead' },
+                  { value: 're_engagement', label: '🔄 Re-engage' },
+                  { value: 'previous_prospect', label: '📋 Past prospect' },
+                  { value: 'past_customer', label: '🤝 Past customer' },
+                  { value: 'existing_customer', label: '⭐ Existing' },
+                ].map(r => (
+                  <button key={r.value}
+                    className={`leads-ai-pill ${bulkRelationshipType === r.value ? 'leads-ai-pill--active' : ''}`}
+                    onClick={() => setBulkRelationshipType(r.value)}
+                    style={{ fontSize: 11 }}
+                  >{r.label}</button>
+                ))}
+              </div>
+
+              {/* AI direction + generate button */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <input
+                  style={{
+                    flex: 1, fontSize: 13, padding: '7px 10px', borderRadius: 6,
+                    border: '1px solid var(--border-default)', fontFamily: 'inherit',
+                    background: 'var(--surface-base, #161929)', color: 'var(--text-primary)',
+                  }}
+                  placeholder="AI direction (optional) — e.g. file check, ask if they still need pre-need planning"
+                  value={bulkAiDirection}
+                  onChange={e => setBulkAiDirection(e.target.value)}
+                />
+                <button
+                  className="btn btn--secondary"
+                  onClick={handleBulkAiGenerate}
+                  disabled={bulkAiGenerating || sendableSelectedIds.length === 0}
+                  style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                >
+                  {bulkAiGenerating ? '⏳ Drafting…' : '✨ AI Draft'}
+                </button>
+              </div>
+              {bulkAiError && <div className="compose-error" style={{ marginBottom: 8 }}>{bulkAiError}</div>}
+              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '0 0 8px' }}>
+                "AI Draft" fills the box below using your tone + direction. Review, edit, then send.
+              </p>
+
+              {/* Message textarea */}
+              <textarea
+                className="compose-textarea"
+                placeholder="Hi {first_name}, this is… (use {first_name} to personalize)"
+                value={bulkMessage}
+                onChange={e => setBulkMessage(e.target.value)}
+                rows={4}
+                style={{ marginBottom: 10 }}
+              />
+
+              {/* Media attachment preview */}
+              {bulkMediaFileName && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+                  padding: '6px 10px', background: 'rgba(30,200,168,0.08)', borderRadius: 6,
+                  border: '1px solid rgba(30,200,168,0.25)', fontSize: 12,
+                }}>
+                  <span>📎</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bulkMediaFileName}</span>
+                  <span style={{ opacity: 0.6, fontSize: 11 }}>Will send as MMS</span>
+                  <button
+                    onClick={() => { setBulkMediaUrl(''); setBulkMediaFileName('') }}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--signal-red)', fontSize: 14 }}
+                  >✕</button>
+                </div>
+              )}
+
+              {/* Compose footer: booking link | attach | queue | send */}
+              <div className="compose-footer">
+                <label className="compose-checkbox">
+                  <input type="checkbox" checked={bulkIncludeBooking} onChange={e => setBulkIncludeBooking(e.target.checked)} />
+                  Include booking link
+                </label>
+                <button
+                  onClick={() => bulkMediaInputRef.current?.click()}
+                  disabled={bulkMediaUploading}
+                  style={{ fontSize: 12, padding: '5px 12px', background: 'none', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}
+                >
+                  {bulkMediaUploading ? '⏳ Uploading…' : '📎 Attach flyer'}
+                </button>
+                <button
+                  className="btn btn--secondary"
+                  onClick={() => handleAiAction('queue')}
+                  disabled={!!aiActioning || sendableSelectedIds.length === 0}
+                >
+                  {aiActioning === 'queue' ? '⏳ Queuing…' : '📥 AI Queue for review'}
+                </button>
+                <button
+                  className="btn btn--primary"
+                  onClick={handleBulkSend}
+                  disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
+                >
+                  {bulkSending ? 'Sending…' : `${bulkMediaUrl ? '📸 Send MMS' : aiChannel === 'email' ? '✉️ Send Email' : '💬 Send SMS'} to ${sendableSelectedIds.length}`}
+                </button>
+              </div>
+
+              {/* Results */}
+              {bulkResult && (
+                <div className="leads-bulk-result" style={{ marginTop: 8 }}>✓ Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
+              )}
+              {aiResult && !aiResult.error && (
+                <div className="leads-ai-result" style={{ marginTop: 8 }}>
+                  {aiResult.mode === 'queue'
+                    ? `✓ ${aiResult.queued} messages queued for review`
+                    : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
+                </div>
+              )}
+              {aiResult?.error && <div className="compose-error" style={{ marginTop: 8 }}>{aiResult.error}</div>}
+            </div>
+          )}
+
+          {/* Bottom action bar (always visible when leads selected) */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '12px 24px', flexWrap: 'wrap',
+          }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--signal-blue)', marginRight: 4 }}>
+              {selectedCount} selected
+            </span>
+            <button className="btn btn--secondary leads-bulk-clear" style={{ fontSize: 12 }} onClick={() => { setSelected(new Set()); setShowBulkCompose(false) }}>Deselect all</button>
+            {canBulkAssign && (
+              <button className="btn btn--secondary" style={{ fontSize: 12 }} onClick={() => setShowBulkAssign(true)}>👤 Assign…</button>
+            )}
+            <button
+              className="btn btn--danger"
+              style={{ background: 'var(--signal-red)', color: '#fff', border: 'none', fontSize: 12 }}
+              onClick={handleDeleteSelected}
+            >
+              🗑 Delete ({selectedCount})
+            </button>
+            <button
+              className="btn btn--primary"
+              style={{ background: '#16a34a', borderColor: '#16a34a', fontSize: 12 }}
+              onClick={() => setShowVoiceCampaign(true)}
+            >
+              📞 AI Call Campaign
+            </button>
+            <button
+              className="btn btn--primary"
+              style={{ background: '#7c3aed', borderColor: '#7c3aed', fontSize: 12 }}
+              onClick={handleBulkAiStart}
+              disabled={bulkAiStarting}
+              title="Start AI email/SMS conversations on all selected leads at once (up to 500)"
+            >
+              {bulkAiStarting ? '⏳ Starting AI…' : `🤖 Start AI on ${selectedCount}`}
+            </button>
+            <button
+              className={`btn ${showBulkCompose ? 'btn--secondary' : 'btn--primary'}`}
+              style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 700, minWidth: 180 }}
+              onClick={() => { setShowBulkCompose(v => !v); setAiResult(null); setBulkResult(null) }}
+            >
+              ✉️ {showBulkCompose ? '▼ Close compose' : `▲ Compose & Send (${selectedCount})`}
+            </button>
+          </div>
         </div>
       )}
 

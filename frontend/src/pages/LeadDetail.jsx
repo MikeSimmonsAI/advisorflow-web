@@ -219,6 +219,8 @@ export default function LeadDetail() {
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [emailDraftReady, setEmailDraftReady] = useState(false)
+  const [emailAttachment, setEmailAttachment] = useState(null) // File object
+  const emailAttachRef = useRef(null)
   const [suggestingReply, setSuggestingReply] = useState(false)
   const [sendError, setSendError] = useState('')
   const [sendMode, setSendMode] = useState('sms') // 'sms' | 'email'
@@ -248,8 +250,46 @@ export default function LeadDetail() {
   const [showCaseFile, setShowCaseFile] = useState(false)
   const [activity, setActivity] = useState(null)
   const [activityLoading, setActivityLoading] = useState(false)
-  const [showActivity, setShowActivity] = useState(false)
+  const [activityError, setActivityError] = useState('')
+  const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'timeline'
   const timelineRef = useRef(null)
+
+  // Manual flagging
+  const [flagging, setFlagging] = useState(false)
+
+  async function handleFlagLead(flagType) {
+    if (flagType) {
+      const label = flagType === 'bad_email' ? 'bad email' : 'remove from all outreach'
+      if (!window.confirm(`Flag "${lead.first_name} ${lead.last_name}" as ${label}?\n\nYou can unflag anytime to restore them to all lists.`)) return
+    }
+    setFlagging(true)
+    try {
+      await api.patch(`/leads/${leadId}/flag`, { flag_type: flagType || null })
+      load()
+    } catch (err) {
+      alert(`Flag failed: ${err.message}`)
+    } finally {
+      setFlagging(false)
+    }
+  }
+
+  // Phase 4: media/flyer attachment for SMS/MMS
+  const [mediaUrl, setMediaUrl] = useState('')
+  const [mediaFileName, setMediaFileName] = useState('')
+  const [mediaUploading, setMediaUploading] = useState(false)
+  const [mediaError, setMediaError] = useState('')
+  const mediaInputRef = useRef(null)
+
+  function loadActivity(silent = false) {
+    if (!silent) setActivityLoading(true)
+    setActivityError('')
+    api.get(`/leads/${leadId}/activity`)
+      .then(d => setActivity(d))
+      .catch(err => {
+        if (!silent) setActivityError(err.message || 'Failed to load activity log')
+      })
+      .finally(() => { if (!silent) setActivityLoading(false) })
+  }
 
   function load() {
     setLoading(true)
@@ -270,6 +310,8 @@ export default function LeadDetail() {
         setSendError(err.message || 'Failed to load lead')
       })
       .finally(() => setLoading(false))
+    // Also load activity log in background
+    loadActivity(true)
   }
 
   // Initial load
@@ -419,16 +461,53 @@ export default function LeadDetail() {
     }
   }
 
+  async function handleMediaUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setMediaUploading(true)
+    setMediaError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await api.upload('/sms/upload-media', formData)
+      setMediaUrl(result.media_url)
+      setMediaFileName(result.filename)
+    } catch (err) {
+      setMediaError(err.message || 'Upload failed')
+    } finally {
+      setMediaUploading(false)
+      if (mediaInputRef.current) mediaInputRef.current.value = ''
+    }
+  }
+
+  function handleRemoveMedia() {
+    setMediaUrl('')
+    setMediaFileName('')
+    setMediaError('')
+  }
+
   async function handleSend() {
     if (!messageText.trim()) return
     setSending(true)
     setSendError('')
     try {
-      await api.post('/sms/send', {
-        lead_id: leadId,
-        template: messageText,
-        include_booking_link: includeBookingLink,
-      })
+      if (mediaUrl) {
+        // Send as MMS with media attachment
+        await api.post('/sms/send-mms', {
+          lead_id: leadId,
+          template: messageText,
+          media_url: mediaUrl,
+          include_booking_link: includeBookingLink,
+        })
+        setMediaUrl('')
+        setMediaFileName('')
+      } else {
+        await api.post('/sms/send', {
+          lead_id: leadId,
+          template: messageText,
+          include_booking_link: includeBookingLink,
+        })
+      }
       setMessageText('')
       load()
     } catch (err) {
@@ -443,12 +522,25 @@ export default function LeadDetail() {
     setSendingEmail(true)
     setSendError('')
     try {
-      await api.post(`/email/send/${leadId}`, {
-        subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track),
-        body: emailBody,
-        include_booking_link: includeBookingLink,
-        appt_label: apptLabel,
-      })
+      if (emailAttachment) {
+        // Use multipart endpoint when an attachment is present
+        const formData = new FormData()
+        formData.append('subject', emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track))
+        formData.append('body_html', emailBody)
+        formData.append('include_booking_link', includeBookingLink ? 'true' : 'false')
+        if (apptLabel) formData.append('appt_label', apptLabel)
+        formData.append('file', emailAttachment)
+        await api.upload(`/email/send-with-attachment/${leadId}`, formData)
+        setEmailAttachment(null)
+        if (emailAttachRef.current) emailAttachRef.current.value = ''
+      } else {
+        await api.post(`/email/send/${leadId}`, {
+          subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track),
+          body: emailBody,
+          include_booking_link: includeBookingLink,
+          appt_label: apptLabel,
+        })
+      }
       setEmailSubject('')
       setEmailBody('')
       setEmailDraftReady(false)
@@ -503,18 +595,8 @@ export default function LeadDetail() {
     }
   }
 
-  async function handleLoadActivity() {
-    if (activity) { setShowActivity(a => !a); return }
-    setActivityLoading(true)
-    try {
-      const d = await api.get(`/leads/${leadId}/activity`)
-      setActivity(d)
-      setShowActivity(true)
-    } catch (err) {
-      console.error('Activity load error:', err)
-    } finally {
-      setActivityLoading(false)
-    }
+  function handleRefreshActivity() {
+    loadActivity(false)
   }
 
   if (loading) return <div className="empty-state" style={{ marginTop: 40 }}>Loading lead…</div>
@@ -557,6 +639,30 @@ export default function LeadDetail() {
               >
                 {showEdit ? '✕ Cancel' : '✏️ Edit'}
               </button>
+              {/* Flag / Unflag button */}
+              {lead.manual_flag ? (
+                <button
+                  className="btn btn--ghost btn--sm"
+                  style={{ fontSize: 11, padding: '3px 10px', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.35)' }}
+                  onClick={() => handleFlagLead(null)}
+                  disabled={flagging}
+                  title="Unflag — restore to all lists"
+                >
+                  ⚑ Unflag
+                </button>
+              ) : (
+                <select
+                  style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}
+                  defaultValue=""
+                  onChange={(e) => { if (e.target.value) { handleFlagLead(e.target.value); e.target.value = '' } }}
+                  disabled={flagging}
+                  title="Flag this contact"
+                >
+                  <option value="" disabled>⚑ Flag</option>
+                  <option value="bad_email">⚠ Bad email</option>
+                  <option value="remove_all">⛔ Remove from all outreach</option>
+                </select>
+              )}
               {editSuccess && <span style={{ fontSize: 12, color: 'var(--signal-green)' }}>✓ Saved</span>}
             </div>
             <div className="lead-detail-contact">
@@ -583,6 +689,12 @@ export default function LeadDetail() {
                 </span>
               )}
               {lead.is_duplicate && <span className="badge badge--neutral-dim">Duplicate</span>}
+              {lead.manual_flag === 'bad_email' && (
+                <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 6, padding: '2px 8px' }}>⚠ bad email flagged</span>
+              )}
+              {lead.manual_flag === 'remove_all' && (
+                <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 6, padding: '2px 8px' }}>⛔ removed from all outreach</span>
+              )}
             </div>
           </div>
         </div>
@@ -684,23 +796,137 @@ export default function LeadDetail() {
       <div className="lead-detail-grid">
         <div className="lead-detail-left">
 
-          {/* ── Conversation thread ── */}
+          {/* ── Tabbed Conversation + Full Timeline (Phase 2) ── */}
           <section className="panel lead-detail-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">💬 Conversation</h2>
-              <span className="panel-count">{events.length}</span>
-            </div>
-            {events.length === 0 ? (
-              <div className="empty-state">No messages yet. Send the first one below.</div>
-            ) : (
-              <div
-                className="lead-timeline"
-                ref={timelineRef}
-                style={{ maxHeight: '400px', overflowY: 'auto' }}
+            {/* Tab bar */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: 14, gap: 0 }}>
+              <button
+                onClick={() => setActiveTab('conversation')}
+                style={{
+                  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  background: 'none', border: 'none', borderBottom: activeTab === 'conversation' ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: activeTab === 'conversation' ? 'var(--accent)' : 'var(--text-secondary)',
+                  marginBottom: -1,
+                }}
               >
-                {events.map((e, i) => (
-                  <ConversationBubble key={i} event={e} />
-                ))}
+                💬 Conversation
+                {events.length > 0 && (
+                  <span style={{ marginLeft: 6, fontSize: 11, background: 'var(--accent)', color: '#fff', borderRadius: 10, padding: '1px 6px' }}>
+                    {events.length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab('timeline')}
+                style={{
+                  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  background: 'none', border: 'none', borderBottom: activeTab === 'timeline' ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: activeTab === 'timeline' ? 'var(--accent)' : 'var(--text-secondary)',
+                  marginBottom: -1,
+                }}
+              >
+                🗂️ Full History
+                {activity?.event_count > 0 && (
+                  <span style={{ marginLeft: 6, fontSize: 11, background: activeTab === 'timeline' ? 'var(--accent)' : 'var(--border-subtle)', color: activeTab === 'timeline' ? '#fff' : 'var(--text-secondary)', borderRadius: 10, padding: '1px 6px' }}>
+                    {activity.event_count}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Tab: Conversation */}
+            {activeTab === 'conversation' && (
+              events.length === 0 ? (
+                <div className="empty-state">No messages yet. Send the first one below.</div>
+              ) : (
+                <div
+                  className="lead-timeline"
+                  ref={timelineRef}
+                  style={{ maxHeight: '420px', overflowY: 'auto' }}
+                >
+                  {events.map((e, i) => (
+                    <ConversationBubble key={i} event={e} />
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* Tab: Full Timeline */}
+            {activeTab === 'timeline' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                    Complete activity history — newest first
+                  </span>
+                  <button
+                    onClick={handleRefreshActivity}
+                    disabled={activityLoading}
+                    style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}
+                  >
+                    {activityLoading ? '⏳' : '↺ Refresh'}
+                  </button>
+                </div>
+                {activityError && (
+                  <div style={{ fontSize: 12, color: 'var(--signal-red)', padding: '8px 12px', background: 'rgba(255,80,80,0.08)', borderRadius: 6, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    ⚠️ {activityError}
+                    <button onClick={handleRefreshActivity} style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>
+                  </div>
+                )}
+                {activityLoading && !activity && (
+                  <div className="empty-state" style={{ padding: '20px 0' }}>Loading history…</div>
+                )}
+                {!activityLoading && !activityError && activity && activity.events.length === 0 && (
+                  <div className="empty-state" style={{ padding: '12px 0' }}>No activity recorded yet.</div>
+                )}
+                {activity && activity.events.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '500px', overflowY: 'auto', paddingRight: 2 }}>
+                    {[...activity.events].reverse().map((ev) => {
+                      const typeStyles = {
+                        lead_created:      { bg: 'rgba(100,100,255,0.08)', border: 'rgba(100,100,255,0.25)', icon: '👤', color: '#6464ff' },
+                        sms_sent:          { bg: 'rgba(30,200,168,0.07)', border: 'rgba(30,200,168,0.25)', icon: '📤', color: '#1ec8a8' },
+                        sms_reply:         { bg: ev.meta?.is_hot ? 'rgba(255,80,80,0.10)' : 'rgba(255,200,30,0.08)', border: ev.meta?.is_hot ? 'rgba(255,80,80,0.4)' : 'rgba(255,200,30,0.30)', icon: ev.meta?.is_hot ? '🔥' : '💬', color: ev.meta?.is_hot ? '#ff5050' : '#c8a020' },
+                        email_sent:        { bg: 'rgba(80,160,255,0.08)', border: 'rgba(80,160,255,0.25)', icon: '📧', color: '#50a0ff' },
+                        booking_booked:    { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '📅', color: '#1ef082' },
+                        booking_confirmed: { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '✅', color: '#1ef082' },
+                        booking_expired:   { bg: 'rgba(180,180,180,0.08)', border: 'rgba(180,180,180,0.25)', icon: '⏰', color: '#999' },
+                        booking_pending:   { bg: 'rgba(255,180,30,0.08)', border: 'rgba(255,180,30,0.25)', icon: '🔗', color: '#ffb41e' },
+                        booking_cancelled: { bg: 'rgba(255,80,80,0.08)', border: 'rgba(255,80,80,0.25)', icon: '❌', color: '#ff5050' },
+                        outcome_recorded:  { bg: 'rgba(140,80,255,0.08)', border: 'rgba(140,80,255,0.25)', icon: '📝', color: '#8c50ff' },
+                        cadence_started:   { bg: 'rgba(30,168,255,0.07)', border: 'rgba(30,168,255,0.2)', icon: '🤖', color: '#1ea8ff' },
+                        cadence_completed: { bg: 'rgba(30,240,130,0.08)', border: 'rgba(30,240,130,0.25)', icon: '🏁', color: '#1ef082' },
+                        dnc_flagged:       { bg: 'rgba(255,30,30,0.08)', border: 'rgba(255,30,30,0.30)', icon: '⛔', color: '#ff1e1e' },
+                      }
+                      const s = typeStyles[ev.type] || { bg: 'rgba(128,128,128,0.06)', border: 'rgba(128,128,128,0.18)', icon: '•', color: 'var(--text-secondary)' }
+                      const ts = ev.ts ? new Date(ev.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+                      return (
+                        <div key={ev.id} style={{
+                          background: s.bg,
+                          border: `1px solid ${s.border}`,
+                          borderLeft: `3px solid ${s.color}`,
+                          borderRadius: 8,
+                          padding: '10px 14px',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
+                              {s.icon} {ev.label}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0 }}>{ts}</div>
+                          </div>
+                          {ev.body && (
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.45 }}>
+                              {ev.body.length > 200 ? ev.body.slice(0, 200) + '…' : ev.body}
+                            </div>
+                          )}
+                          {ev.meta?.hot_reason && (
+                            <div style={{ fontSize: 11, color: s.color, marginTop: 4, fontStyle: 'italic' }}>
+                              {ev.meta.hot_reason}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -787,6 +1013,34 @@ export default function LeadDetail() {
                   onChange={(e) => setMessageText(e.target.value)}
                   rows={4}
                 />
+                {/* Hidden file input for MMS media */}
+                <input
+                  ref={mediaInputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.gif,.pdf"
+                  style={{ display: 'none' }}
+                  onChange={handleMediaUpload}
+                />
+                {/* Media preview strip */}
+                {mediaUrl && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: 'var(--signal-blue-dim, #e3f2fd)',
+                    border: '1px solid var(--signal-blue, #1565c0)',
+                    borderRadius: 6, padding: '6px 10px', fontSize: 12,
+                    color: 'var(--signal-blue, #1565c0)', marginBottom: 4,
+                  }}>
+                    <span>📎</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mediaFileName}</span>
+                    <span style={{ opacity: 0.6, fontSize: 11 }}>Will send as MMS</span>
+                    <button
+                      onClick={handleRemoveMedia}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: 0, color: 'inherit', opacity: 0.7 }}
+                      title="Remove attachment"
+                    >✕</button>
+                  </div>
+                )}
+                {mediaError && <div style={{ color: 'var(--signal-red)', fontSize: 12, marginBottom: 4 }}>{mediaError}</div>}
                 <div className="compose-footer">
                   <label className="compose-checkbox">
                     <input
@@ -797,11 +1051,20 @@ export default function LeadDetail() {
                     Include booking link
                   </label>
                   <button
+                    className="btn btn--ghost"
+                    onClick={() => mediaInputRef.current?.click()}
+                    disabled={mediaUploading}
+                    title="Attach flyer or image (MMS)"
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  >
+                    {mediaUploading ? '⏳' : '📎 Flyer'}
+                  </button>
+                  <button
                     className="btn btn--primary"
                     onClick={handleSend}
                     disabled={sending || !messageText.trim()}
                   >
-                    {sending ? 'Sending…' : 'Send SMS'}
+                    {sending ? 'Sending…' : mediaUrl ? 'Send MMS 📎' : 'Send SMS'}
                   </button>
                 </div>
                 {sendError && <div className="compose-error">{sendError}</div>}
@@ -867,6 +1130,36 @@ export default function LeadDetail() {
                   onChange={(e) => setEmailBody(e.target.value)}
                   rows={5}
                 />
+                {/* Attachment picker */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <input
+                    ref={emailAttachRef}
+                    type="file"
+                    accept="image/*,.pdf,.doc,.docx"
+                    style={{ display: 'none' }}
+                    onChange={(e) => setEmailAttachment(e.target.files?.[0] || null)}
+                  />
+                  <button
+                    className="btn btn--secondary"
+                    style={{ fontSize: 12, padding: '4px 10px' }}
+                    onClick={() => emailAttachRef.current?.click()}
+                    type="button"
+                  >
+                    📎 {emailAttachment ? 'Change file' : 'Attach file'}
+                  </button>
+                  {emailAttachment && (
+                    <>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {emailAttachment.name}
+                      </span>
+                      <button
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--signal-red)', lineHeight: 1, padding: 0 }}
+                        onClick={() => { setEmailAttachment(null); if (emailAttachRef.current) emailAttachRef.current.value = '' }}
+                        title="Remove attachment"
+                      >✕</button>
+                    </>
+                  )}
+                </div>
                 <div className="compose-footer">
                   <label className="compose-checkbox">
                     <input
@@ -881,7 +1174,7 @@ export default function LeadDetail() {
                     onClick={handleSendEmail}
                     disabled={sendingEmail || !emailBody.trim()}
                   >
-                    {sendingEmail ? 'Sending…' : 'Send email'}
+                    {sendingEmail ? 'Sending…' : emailAttachment ? '📎 Send with attachment' : 'Send email'}
                   </button>
                 </div>
                 {sendError && <div className="compose-error">{sendError}</div>}
@@ -1084,60 +1377,6 @@ export default function LeadDetail() {
           )}
 
           <OutcomeTracker leadId={leadId} />
-
-          {/* ── Full Activity Log ── */}
-          <section className="panel lead-detail-panel">
-            <div className="panel-header" style={{ cursor: 'pointer' }} onClick={handleLoadActivity}>
-              <h2 className="panel-title">🗂️ Activity Log</h2>
-              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                {activityLoading ? 'Loading…' : showActivity ? '▲ collapse' : '▼ expand'}
-              </span>
-            </div>
-            {showActivity && activity && (
-              <div style={{ marginTop: 8 }}>
-                {activity.events.length === 0 ? (
-                  <div className="empty-state" style={{ padding: '12px 0' }}>No activity recorded yet.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {[...activity.events].reverse().map((ev) => {
-                      const typeColors = {
-                        lead_created:     { bg: 'rgba(100,100,255,0.08)', border: 'rgba(100,100,255,0.25)', icon: '👤' },
-                        sms_sent:         { bg: 'rgba(30,200,168,0.07)', border: 'rgba(30,200,168,0.25)', icon: '📤' },
-                        sms_reply:        { bg: ev.meta?.is_hot ? 'rgba(255,80,80,0.10)' : 'rgba(255,200,30,0.08)', border: ev.meta?.is_hot ? 'rgba(255,80,80,0.4)' : 'rgba(255,200,30,0.25)', icon: ev.meta?.is_hot ? '🔥' : '💬' },
-                        email_sent:       { bg: 'rgba(80,160,255,0.08)', border: 'rgba(80,160,255,0.25)', icon: '📧' },
-                        booking_booked:   { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '📅' },
-                        booking_confirmed:{ bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '✅' },
-                        booking_expired:  { bg: 'rgba(180,180,180,0.08)', border: 'rgba(180,180,180,0.25)', icon: '⏰' },
-                        booking_pending:  { bg: 'rgba(255,180,30,0.08)', border: 'rgba(255,180,30,0.25)', icon: '🔗' },
-                        booking_cancelled:{ bg: 'rgba(255,80,80,0.08)', border: 'rgba(255,80,80,0.25)', icon: '❌' },
-                        outcome_recorded: { bg: 'rgba(140,80,255,0.08)', border: 'rgba(140,80,255,0.25)', icon: '📝' },
-                        cadence_started:  { bg: 'rgba(30,168,255,0.07)', border: 'rgba(30,168,255,0.2)', icon: '🤖' },
-                        cadence_completed:{ bg: 'rgba(30,240,130,0.08)', border: 'rgba(30,240,130,0.25)', icon: '🏁' },
-                        dnc_flagged:      { bg: 'rgba(255,30,30,0.08)', border: 'rgba(255,30,30,0.30)', icon: '⛔' },
-                      }
-                      const style = typeColors[ev.type] || { bg: 'rgba(128,128,128,0.06)', border: 'rgba(128,128,128,0.18)', icon: '•' }
-                      const ts = ev.ts ? new Date(ev.ts).toLocaleString() : ''
-                      return (
-                        <div key={ev.id} style={{ background: style.bg, border: `1px solid ${style.border}`, borderRadius: 8, padding: '9px 12px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13 }}>
-                              {style.icon} {ev.label}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0 }}>{ts}</div>
-                          </div>
-                          {ev.body && (
-                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.4 }}>
-                              {ev.body.length > 180 ? ev.body.slice(0, 180) + '…' : ev.body}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
 
           <section className="panel lead-detail-panel">
             <div className="panel-header"><h2 className="panel-title">📋 Details</h2></div>

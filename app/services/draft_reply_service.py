@@ -256,6 +256,7 @@ Advisor: {advisor_name}
 Organization: {org_name}
 Tone: {tone_desc}
 Lead type / context: {lead_type}
+{offer_hook_line}
 
 Lead profile:
 - Name: {first_name} {last_name}
@@ -355,6 +356,26 @@ def draft_email_options(
             f"{sample_message.strip()}\n"
         )
 
+    # Pull offer hook from lead's custom_fields if present
+    _OFFER_HOOK_LABELS = {
+        "lunch_and_learn": "Invite to a free Lunch & Learn event (low-pressure, educational)",
+        "free_tour": "Offer a free funeral home tour (casual, no obligation)",
+        "free_space": "Offer a complimentary cemetery space consultation",
+        "family_service_consult": "Offer a free Family Service consultation",
+    }
+    try:
+        _cf = json.loads(lead.custom_fields or "{}") if lead.custom_fields else {}
+    except Exception:
+        _cf = {}
+    _offer_hook = _cf.get("offer_hook")
+    _offer_label = _OFFER_HOOK_LABELS.get(_offer_hook) if _offer_hook else None
+    if _offer_label:
+        offer_hook_line = f"OFFER HOOK: Weave this naturally into at least one option — {_offer_label}. Don't make it the entire email; offer it as a gentle, low-pressure option."
+    elif _offer_hook and _offer_hook not in ("none", "custom"):
+        offer_hook_line = f"OFFER HOOK: {_offer_hook}"
+    else:
+        offer_hook_line = ""
+
     prompt = EMAIL_DRAFT_PROMPT.format(
         relationship_context=relationship_context,
         advisor_name=advisor.full_name or "your advisor",
@@ -363,6 +384,7 @@ def draft_email_options(
         lead_type=lead.message_track or lead.tier or "not specified",
         ai_direction=direction,
         sample_message_section=sample_section,
+        offer_hook_line=offer_hook_line,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         tier=lead.tier or "unknown",
