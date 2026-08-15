@@ -588,11 +588,24 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(g
         or 0
     )
 
+    # Appointments that are booked or confirmed and still pending outcome
+    certified_appointments_waiting = (
+        db.query(func.count(distinct(BookingLink.lead_id)))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            BookingLink.status.in_(["booked", "confirmed"]),
+        )
+        .scalar()
+        or 0
+    )
+
     return {
         "replies_needing_attention": replies_needing_attention,
         "cadence_touches_due_today": cadence_touches_due_today,
         "leads_imported_last_24h": leads_imported_last_24h,
         "bookings_last_7_days": bookings_last_7_days,
+        "certified_appointments_waiting": certified_appointments_waiting,
     }
 
 

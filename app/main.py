@@ -41,6 +41,7 @@ from app.routers.contacts_router import router as contacts_router
 from app.routers.timeline_router import router as timeline_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
+from app.routers.email_tracking_router import router as email_tracking_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -50,6 +51,7 @@ ALLOWED_ORIGINS = [
     "https://bookaboost.live",
     "https://app.bookaboost.live",
     "https://evosyspro.live",
+    "https://app.evosyspro.live",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
@@ -285,8 +287,10 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
+app.include_router(timeline_router)
 app.include_router(activity_router)
 app.include_router(branding_router)  # public — no auth, must stay after CORS middleware
+app.include_router(email_tracking_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
@@ -376,7 +380,9 @@ async def on_startup():
             ADD COLUMN IF NOT EXISTS appointment_kept_at     TIMESTAMP   NULL,
             ADD COLUMN IF NOT EXISTS sale_recorded_at        TIMESTAMP   NULL,
             ADD COLUMN IF NOT EXISTS booking_notification_sent      BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS confirmation_notification_sent BOOLEAN DEFAULT FALSE;
+            ADD COLUMN IF NOT EXISTS confirmation_notification_sent BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS ai_direction            VARCHAR     NULL,
+            ADD COLUMN IF NOT EXISTS updated_at              TIMESTAMP   NULL;
     """
     try:
         with engine.connect() as conn:
