@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext, api } from '../api/client'
+import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import './Layout.css'
+
+// Detect which platform brand is running on this hostname — resolved once at module
+// load time so it never changes mid-session.
+const PLATFORM_THEME = detectTheme()
+const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 
 const NAV_ITEMS = [
   { to: '/', label: 'Overview', icon: 'grid' },
@@ -103,15 +109,25 @@ function LiveClock() {
 }
 
 function ThemeToggle() {
+  // Brand-specific themes (evosyspro, harmonyhustle) are always dark — no toggle
+  // and we must NOT override data-theme or we'll kill the brand CSS variables.
+  const isBrandTheme = PLATFORM_THEME !== THEMES.BOOKABOOST
   const [dark, setDark] = useState(() => {
+    if (isBrandTheme) return true
     const saved = localStorage.getItem('bb_theme')
     return saved !== 'light'
   })
 
   useEffect(() => {
+    // Only toggle data-theme for the default BookaBoost brand.
+    // Brand themes (evosyspro, harmonyhustle) have their own data-theme value
+    // set by initTheme() in main.jsx and must not be overwritten.
+    if (isBrandTheme) return
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
     localStorage.setItem('bb_theme', dark ? 'dark' : 'light')
-  }, [dark])
+  }, [dark, isBrandTheme])
+
+  if (isBrandTheme) return null  // brand themes don't expose a toggle
 
   return (
     <button
@@ -170,7 +186,10 @@ export default function Layout({ children }) {
     window.location.href = '/login'
   }
 
-  const brandName = isSuperAdmin ? 'BookaBoost' : (branding?.brand_name || 'BookaBoost')
+  // Shell brand name: org-level DB override wins, otherwise fall back to the
+  // platform brand detected from the hostname (EvoSys Pro, Harmony Hustle, BookaBoost).
+  // Super admins see the platform brand — never hardcoded 'BookaBoost'.
+  const brandName = branding?.brand_name || PLATFORM_BRAND.displayName
   const logoUrl = isSuperAdmin ? null : (branding?.brand_logo_url || null)
 
   return (
