@@ -651,14 +651,30 @@ def get_conversation_status(db: Session, lead_id: str, advisor_id: str) -> dict:
     }
 
 
-def process_scheduled_touches(db: Session) -> dict:
+def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
+    """Process due AI touches for leads.
+
+    Args:
+        db: Database session for this call.
+        org_id: If provided, only process conversations for leads belonging
+                to this org. The main loop calls this once per org so a
+                failure in one org cannot stall another.
+    """
     now = datetime.utcnow()
-    due = db.query(PipelineConversation).filter(
+    query = db.query(PipelineConversation).filter(
         PipelineConversation.next_send_at <= now,
         PipelineConversation.paused == False,
         PipelineConversation.flagged == False,
         PipelineConversation.stage.notin_(["stopped", "completed", "booked"]),
-    ).all()
+    )
+
+    if org_id:
+        # Scope to a single org: join through Lead to filter by organization_id
+        query = query.join(Lead, Lead.id == PipelineConversation.lead_id).filter(
+            Lead.organization_id == org_id
+        )
+
+    due = query.all()
 
     sent = 0
     errors = 0
