@@ -287,7 +287,6 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
-app.include_router(timeline_router)
 app.include_router(activity_router)
 app.include_router(branding_router)  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
