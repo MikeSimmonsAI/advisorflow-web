@@ -166,6 +166,10 @@ COLUMNS_TO_ADD = [
     # so each org's outbound email genuinely comes from their own domain.
     ("organizations", "from_email", "VARCHAR"),
     ("organizations", "resend_api_key", "VARCHAR"),
+    # Platform isolation — added when Platform model was introduced.
+    # platform_id on organizations and users links each org/user to their brand platform.
+    ("organizations", "platform_id", "VARCHAR"),
+    ("users", "platform_id", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
