@@ -84,6 +84,56 @@
 }
 
 
+/* ══════════════════════════════════════════════════════════════════════════
+   EVOSYS PRO THEME — applied when hostname contains "evosyspro"
+   initTheme() in main.jsx sets data-theme="evosyspro" on <html>
+   before React renders, so there is no flash of wrong-brand styling.
+
+   Palette: #040812 bg · #087cff/#22a3ff blue · #19d67c green
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="evosyspro"] {
+  --bg-base:       #040812;
+  --bg-panel:      rgba(7, 13, 26, 0.92);
+  --bg-card:       rgba(12, 21, 37, 0.88);
+  --bg-card-hover: rgba(17, 30, 53, 0.96);
+  --bg-elevated:   rgba(11, 18, 34, 0.94);
+  --bg-field:      rgba(6, 11, 22, 0.80);
+  --bg-field-soft: rgba(8, 13, 26, 0.70);
+  --bg-row:        rgba(8, 14, 28, 0.60);
+  --bg-row-hover:  rgba(15, 26, 50, 0.80);
+
+  --border-subtle: rgba(8, 124, 255, 0.16);
+  --border-strong: rgba(34, 163, 255, 0.38);
+  --border-danger: rgba(239, 68, 68, 0.34);
+
+  --signal-blue:       #087cff;
+  --signal-blue-dim:   rgba(8, 124, 255, 0.16);
+  --signal-green:      #19d67c;
+  --signal-green-dim:  rgba(25, 214, 124, 0.14);
+  --signal-red:        #ef4444;
+  --signal-red-dim:    rgba(239, 68, 68, 0.14);
+  --signal-amber:      #f59e0b;
+  --signal-amber-dim:  rgba(245, 158, 11, 0.14);
+  --signal-purple:     #8b5cf6;
+  --signal-purple-dim: rgba(139, 92, 246, 0.14);
+
+  --text-primary:   #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-tertiary:  #4a6080;
+
+  --glow-blue-sm:  0 0 14px rgba(8, 124, 255, 0.28);
+  --glow-blue-md:  0 0 24px rgba(8, 124, 255, 0.30);
+  --glow-blue-lg:  0 0 52px rgba(8, 124, 255, 0.34);
+  --glow-green-sm: 0 0 14px rgba(25, 214, 124, 0.26);
+  --glow-green-md: 0 0 30px rgba(25, 214, 124, 0.30);
+
+  --elevation-3: 0 24px 72px rgba(0,0,0,0.64), 0 1px 0 rgba(255,255,255,0.06), 0 0 40px rgba(8,124,255,0.08);
+  --elevation-4: 0 40px 120px rgba(0,0,0,0.78), 0 0 80px rgba(8,124,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08);
+
+  --sidebar-width: 220px;
+}
+
+
 * {
   box-sizing: border-box;
 }

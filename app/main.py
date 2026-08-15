@@ -40,6 +40,7 @@ from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
 from app.routers.timeline_router import router as timeline_router
 from app.routers.activity_router import router as activity_router
+from app.routers.branding_router import router as branding_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -277,6 +278,7 @@ app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
 app.include_router(activity_router)
+app.include_router(branding_router)  # public — no auth, must stay after CORS middleware
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
@@ -298,21 +300,41 @@ async def _review_request_loop():
 
 
 async def _ai_conversation_loop():
-    """Process AI conversation touches every 2 min for sub-60-second lead response."""
+    """Process AI conversation touches every 2 min — per-org isolated.
+
+    Each org's touches run in its own try/except block so a failure,
+    bad Twilio credential, or runaway query in one org cannot halt
+    processing for any other org. The loop itself never crashes the
+    web server process — all exceptions are caught and logged.
+    """
     from app.routers.ai_conversation_router import process_scheduled_touches
     from app.deps import SessionLocal
+    from app.models.models import Organization
     import logging as _log
     _logger = _log.getLogger("ai_conversation_loop")
     await asyncio.sleep(30)  # brief startup delay
     while True:
+        db = SessionLocal()
         try:
-            db = SessionLocal()
-            try:
-                process_scheduled_touches(db)
-            finally:
-                db.close()
+            orgs = db.query(Organization).filter(Organization.is_active == True).all()
+            org_ids = [o.id for o in orgs]
         except Exception as exc:
-            _logger.error("ai_conversation_loop error: %s", exc)
+            _logger.error("ai_conversation_loop: failed to fetch orgs: %s", exc)
+            org_ids = []
+        finally:
+            db.close()
+
+        for org_id in org_ids:
+            try:
+                db = SessionLocal()
+                try:
+                    process_scheduled_touches(db, org_id=org_id)
+                finally:
+                    db.close()
+            except Exception as exc:
+                _logger.error("ai_conversation_loop: org=%s error: %s", org_id, exc)
+                # Isolation: continue to next org regardless of this error
+
         await asyncio.sleep(120)  # 2 minutes
 
 
@@ -379,6 +401,23 @@ async def on_startup():
         _logging.getLogger(__name__).warning(
             "SUPER_ADMIN_EMAIL env var not set — skipping super_admin role grant on startup."
         )
+
+    # 5. Seed default Platform records (idempotent — ON CONFLICT DO NOTHING)
+    _platform_seed_sql = """
+        INSERT INTO platforms (id, name, slug, domain, support_email, is_active)
+        VALUES
+            ('plt-bookaboost',    'BookaBoost',    'bookaboost',    'app.bookaboost.live',   'support@bookaboost.live',   TRUE),
+            ('plt-evosyspro',     'EvoSys Pro',    'evosyspro',     'app.evosyspro.live',    'support@evosyspro.live',    TRUE),
+            ('plt-harmonyhustle', 'Harmony Hustle','harmonyhustle', 'app.harmonyhustle.com', 'support@harmonyhustle.com', TRUE)
+        ON CONFLICT (slug) DO NOTHING;
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(_text(_platform_seed_sql))
+            conn.commit()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Platform seed note: %s", e)
 
     # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
     asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min

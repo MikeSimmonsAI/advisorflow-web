@@ -15,7 +15,31 @@ from app.models.models import User, Organization
 _log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./advisorflow.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+
+# ── Connection pool hardening ──────────────────────────────────────────────
+# Each Render service gets its own isolated pool. A slow or runaway org
+# query cannot starve another platform's connections because each service
+# only holds connections from its own pool.
+#
+# pool_size     = base connections kept open (5 is safe for Render Starter)
+# max_overflow  = burst connections above pool_size (total max = 15)
+# pool_timeout  = raise after 30s waiting for a free connection (vs hanging forever)
+# pool_recycle  = replace connections every 30 min (avoids stale/dropped connections)
+# pool_pre_ping = verify connection is alive before handing it out (prevents "connection closed" errors)
+#
+_is_sqlite = "sqlite" in DATABASE_URL
+_pool_kwargs = (
+    {"connect_args": {"check_same_thread": False}}
+    if _is_sqlite
+    else {
+        "pool_size": 5,
+        "max_overflow": 10,
+        "pool_timeout": 30,
+        "pool_recycle": 1800,
+        "pool_pre_ping": True,
+    }
+)
+engine = create_engine(DATABASE_URL, **_pool_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -73,6 +97,17 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
-    if user.role not in ("org_admin", "super_admin"):
+    if user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
+def require_god(user: User = Depends(get_current_user)) -> User:
+    """OWNER_CONTROL_PLANE guard — only god_admin accounts pass this.
+    Used on all AdvisorFlow Command Center endpoints. Returns 403 to
+    anyone else, including super_admins, with no information about what
+    the endpoint does or that AdvisorFlow exists.
+    """
+    if user.role != "god_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return user

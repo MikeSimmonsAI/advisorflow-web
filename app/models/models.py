@@ -125,6 +125,54 @@ class NotificationType(str, enum.Enum):
 
 
 # ---------------------------------------------------------------------------
+# Platform — the brand layer above Organizations.
+# Each spinoff (BookaBoost, EvoSys Pro, Harmony Hustle) is a Platform.
+# Organizations belong to a Platform. Super admins are scoped to a Platform.
+# AdvisorFlow (god_admin) sits above all Platforms and sees everything.
+# ---------------------------------------------------------------------------
+class Platform(Base):
+    __tablename__ = "platforms"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)         # e.g. "BookaBoost"
+    slug = Column(String, unique=True, nullable=False)  # bookaboost | evosyspro | harmonyhustle
+    domain = Column(String, nullable=True)        # e.g. "app.bookaboost.live"
+    support_email = Column(String, nullable=True) # e.g. "support@bookaboost.live"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    organizations = relationship("Organization", back_populates="platform")
+
+
+# ---------------------------------------------------------------------------
+# PlatformEvent — AdvisorFlow's event bus table.
+# Every spinoff emits standardized events here. AdvisorFlow reads them to
+# power its Command Center intelligence layer (revenue, leads, AI ops, health).
+# Platforms never query each other — they only write their own events.
+# AdvisorFlow reads all of them. This is the isolation + visibility model.
+# ---------------------------------------------------------------------------
+class PlatformEvent(Base):
+    __tablename__ = "platform_events"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    event_type = Column(String, nullable=False)   # e.g. "lead.created", "appointment.booked"
+    platform = Column(String, nullable=False)      # bookaboost | evosyspro | harmonyhustle
+    org_id = Column(String, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    data = Column(Text, nullable=True)            # JSON payload (see app/events/schema.py)
+    occurred_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        # AdvisorFlow: all events for a platform in time order
+        Index("ix_platform_events_platform_time", "platform", "occurred_at"),
+        # AdvisorFlow: all events for a specific org
+        Index("ix_platform_events_org_time", "org_id", "occurred_at"),
+        # AdvisorFlow: filter by event type across all platforms
+        Index("ix_platform_events_type_time", "event_type", "occurred_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Organization - top-level tenant. Restland today, North Star Memorial Group
 # (and other cemeteries/funeral homes) later. Each org has its own isolated
 # lead pool and dedup registry.
@@ -136,6 +184,10 @@ class Organization(Base):
     name = Column(String, nullable=False)  # e.g. "Restland Cemetery & Funeral Home"
     slug = Column(String, unique=True, nullable=False)  # e.g. "restland"
     plan = Column(String, default="trial")  # trial, standard ($299/mo), enterprise
+
+    # Platform this org belongs to (BookaBoost, EvoSys Pro, etc.)
+    # Nullable for backward compat — existing orgs get assigned on migration.
+    platform_id = Column(String, ForeignKey("platforms.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -177,6 +229,7 @@ class Organization(Base):
     from_email = Column(String, nullable=True)       # e.g. "support@bookaboost.live"
     resend_api_key = Column(String, nullable=True)   # org-specific Resend API key
 
+    platform = relationship("Platform", back_populates="organizations")
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")
@@ -195,7 +248,16 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     must_change_password = Column(Boolean, default=True)
     full_name = Column(String, nullable=False)
-    role = Column(String, default="advisor")  # advisor, org_admin, super_admin (Mike)
+    # Roles (ascending privilege):
+    #   advisor      — sees only their own leads
+    #   org_admin    — sees all leads/users in their org
+    #   super_admin  — sees all orgs in their platform (scoped by platform_id)
+    #   god_admin    — sees everything across all platforms (AdvisorFlow owner)
+    role = Column(String, default="advisor")
+
+    # For super_admin: which platform they administer. Null = not yet assigned.
+    # god_admin ignores this — they bypass all scoping.
+    platform_id = Column(String, ForeignKey("platforms.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
 
     # Twilio config - each advisor brings their own account/number
