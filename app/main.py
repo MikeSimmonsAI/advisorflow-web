@@ -41,6 +41,7 @@ from app.routers.contacts_router import router as contacts_router
 from app.routers.timeline_router import router as timeline_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
+from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
@@ -288,7 +289,8 @@ app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
 app.include_router(activity_router)
-app.include_router(branding_router)  # public — no auth, must stay after CORS middleware
+app.include_router(branding_router)
+app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
 
 
@@ -413,6 +415,27 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning(
             "SUPER_ADMIN_EMAIL env var not set — skipping super_admin role grant on startup."
+        )
+
+    # 4b. Ensure the god_admin account has the correct role.
+    #     GOD_ADMIN_EMAIL must be set in Render env vars (never hardcoded).
+    #     This runs on every startup — idempotent, safe.
+    _god_admin_email = _os.environ.get("GOD_ADMIN_EMAIL", "")
+    if _god_admin_email:
+        try:
+            with engine.connect() as conn:
+                conn.execute(_text(
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE "
+                    "WHERE email=:email"
+                ), {"email": _god_admin_email})
+                conn.commit()
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("God admin role migration note: %s", e)
+    else:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "GOD_ADMIN_EMAIL env var not set — skipping god_admin role grant on startup."
         )
 
     # 5. Seed default Platform records (idempotent — ON CONFLICT DO NOTHING)
