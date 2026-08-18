@@ -255,6 +255,23 @@ export default function Layout({ children }) {
               ))}
             </>
           )}
+
+          {user?.role === 'god_admin' && (
+            <>
+              <div className="nav-divider" />
+              <div className="nav-section-label" style={{ color: '#f59e0b' }}>⚡ AdvisorFlow</div>
+              <NavLink to="/god"
+                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                style={({ isActive }) => isActive ? { color: '#f59e0b' } : { color: '#b45309' }}
+                onClick={closeSidebar}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                Command Center
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div className="sidebar-footer">

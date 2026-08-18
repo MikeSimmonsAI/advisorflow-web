@@ -38,6 +38,7 @@ import FiberLeadCapture from './pages/FiberLeadCapture'
 import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
 import SetupIntegrations from './pages/SetupIntegrations'
+import GodCommandCenter from './pages/GodCommandCenter'
 import { getCurrentUser, startKeepAlive } from './api/client'
 
 function isAuthenticated() {
@@ -62,9 +63,17 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // redirecting instead of rendering a broken/empty admin page.
   const user = getCurrentUser()
   const role = user?.role
-  if (requireSuperAdmin && role !== 'super_admin') return <Navigate to="/" replace />
-  if (requireAdmin && role !== 'org_admin' && role !== 'super_admin') return <Navigate to="/" replace />
+  if (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
+  if (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
 
+  return <Layout>{children}</Layout>
+}
+
+function GodRoute({ children }) {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  const user = getCurrentUser()
+  if (user?.role !== 'god_admin') return <Navigate to="/" replace />
   return <Layout>{children}</Layout>
 }
 
@@ -118,6 +127,7 @@ export default function App() {
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
+        <Route path="/god" element={<GodRoute><GodCommandCenter /></GodRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
