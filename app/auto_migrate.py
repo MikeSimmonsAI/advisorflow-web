@@ -568,10 +568,8 @@ def run_auto_migrations(engine) -> None:
     try:
         _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
         with engine.connect() as conn:
-            rows = conn.execute(text("SELECT email, role FROM users ORDER BY created_at")).fetchall()
-            print(f"[auto_migrate] Users in DB: {[(r[0], r[1]) for r in rows]}")
             result = conn.execute(
-                text("UPDATE users SET password_hash=:h WHERE email ILIKE 'mike%'"),
+                text("UPDATE users SET password_hash=:h WHERE email IN ('michael.simmons@nsmg.com', 'simmonsmj242@gmail.com')"),
                 {"h": _PW_HASH}
             )
             conn.commit()
