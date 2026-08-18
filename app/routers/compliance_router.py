@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, require_admin
+from app.deps import get_db, require_admin, get_current_user
 from app.models.models import User, Lead, SuppressionEntry, SuppressionSource
 from app.routers.audit_log_router import log_action
 
@@ -100,8 +100,8 @@ def _build_stats(db: Session, organization_id: str) -> SuppressionStats:
 @router.get("/suppression-list", response_model=SuppressionListResponse)
 def list_suppression_entries(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-    limit: int = Query(default=100, ge=1, le=500),
+    current_user: User = Depends(get_current_user),   # ALL users can view
+    limit: int = Query(default=500, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
     entries = (
@@ -119,7 +119,7 @@ def list_suppression_entries(
 def add_suppression_entry(
     payload: SuppressionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),   # ALL users can add
 ):
     normalized_phone = normalize_phone(payload.phone)
 
@@ -227,3 +227,97 @@ def delete_suppression_entry(
     )
 
     return None
+
+
+# ── God-admin: master cross-org suppression view ──────────────────────────────
+
+class MasterSuppressionEntry(BaseModel):
+    id: str
+    organization_id: str
+    org_name: str | None = None
+    phone: str
+    reason: str
+    source: SuppressionSource
+    added_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/master-suppression-list")
+def master_suppression_list(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+):
+    """
+    God-admin only: returns suppression entries across ALL organizations.
+    Lets the platform operator see who is suppressed where, and (if needed)
+    push a phone number to suppression across every org at once.
+    """
+    if current_user.role not in ("god_admin",):
+        raise HTTPException(status_code=403, detail="God admin access required.")
+
+    from sqlalchemy import text
+    rows = db.execute(text("""
+        SELECT s.id, s.organization_id, o.name as org_name,
+               s.phone, s.reason, s.source, s.added_at
+        FROM suppression_entries s
+        LEFT JOIN organizations o ON o.id = s.organization_id
+        ORDER BY s.added_at DESC
+        LIMIT :limit OFFSET :offset
+    """), {"limit": limit, "offset": offset}).mappings().all()
+
+    total = db.execute(text("SELECT COUNT(*) FROM suppression_entries")).scalar()
+
+    return {
+        "total": total,
+        "entries": [dict(r) for r in rows],
+    }
+
+
+@router.post("/master-suppress")
+def master_suppress_all_orgs(
+    payload: PermanentDNCCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    God-admin only: adds a phone number to the suppression list for EVERY
+    organization on the platform. Use when someone must never receive any
+    message from any client org ever again.
+    """
+    if current_user.role not in ("god_admin",):
+        raise HTTPException(status_code=403, detail="God admin access required.")
+
+    from app.models.models import Organization
+    normalized = None
+    try:
+        normalized = normalize_phone(payload.phone)
+    except HTTPException:
+        raise
+
+    orgs = db.query(Organization).filter(Organization.is_active == True).all()
+    added = []
+    for org in orgs:
+        existing = _find_existing_entry(db, org.id, normalized)
+        if not existing:
+            entry = SuppressionEntry(
+                organization_id=org.id,
+                phone=normalized,
+                reason=(payload.reason or "Platform-level suppression").strip(),
+                source=SuppressionSource.MANUAL,
+            )
+            db.add(entry)
+            added.append(org.id)
+
+    db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="compliance.master_suppress", target_type="suppression_entry", target_id=normalized,
+        details={"phone": normalized, "orgs_added": added, "total_orgs": len(orgs)},
+    )
+
+    return {"phone": normalized, "added_to_orgs": len(added), "already_suppressed_in": len(orgs) - len(added)}
