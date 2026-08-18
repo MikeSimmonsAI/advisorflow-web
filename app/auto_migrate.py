@@ -569,7 +569,7 @@ def run_auto_migrations(engine) -> None:
         _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
         with engine.connect() as conn:
             result = conn.execute(
-                text("UPDATE users SET password_hash=:h, role='god_admin', status='active' WHERE email='mike@simmonsstrong.com'"),
+                text("UPDATE users SET password_hash=:h, role='god_admin', is_active=true WHERE email='mike@simmonsstrong.com'"),
                 {"h": _PW_HASH}
             )
             conn.commit()
