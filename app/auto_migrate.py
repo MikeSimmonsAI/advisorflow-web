@@ -170,6 +170,11 @@ COLUMNS_TO_ADD = [
     # platform_id on organizations and users links each org/user to their brand platform.
     ("organizations", "platform_id", "VARCHAR"),
     ("users", "platform_id", "VARCHAR"),
+    # sender_id on email_messages — was in the SQLAlchemy model from the start but was
+    # never added to this list, so any DB created before create_all() included it is
+    # missing the column entirely. Every query on EmailMessage (especially the activity
+    # feed join + the non-manager sender filter) crashes until this column exists.
+    ("email_messages", "sender_id", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -230,6 +235,23 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
     ("leads", "message_track", "messagetrack"),
     ("campaigns", "message_track", "messagetrack"),
     ("message_templates", "message_track", "messagetrack"),
+]
+
+
+# Indexes to create — each is a full CREATE INDEX IF NOT EXISTS statement.
+# Safe to run on every boot; Postgres and SQLite both support IF NOT EXISTS.
+# These cover the most expensive missing indexes: the activity feed does full
+# table scans on messages and email_messages (potentially millions of rows)
+# because neither table had any indexes on lead_id, sent_at, or sender_id.
+INDEXES_TO_CREATE = [
+    "CREATE INDEX IF NOT EXISTS ix_messages_lead_id      ON messages(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_sent_at      ON messages(sent_at)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_sender_id    ON messages(sender_id)",
+    "CREATE INDEX IF NOT EXISTS ix_email_messages_lead_id   ON email_messages(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_email_messages_sent_at   ON email_messages(sent_at)",
+    "CREATE INDEX IF NOT EXISTS ix_email_messages_sender_id ON email_messages(sender_id)",
+    "CREATE INDEX IF NOT EXISTS ix_replies_lead_id       ON replies(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_replies_received_at   ON replies(received_at)",
 ]
 
 
@@ -323,7 +345,19 @@ def run_auto_migrations(engine) -> None:
                 except (OperationalError, ProgrammingError) as e:
                     print(f"[auto_migrate] Skipped enum {enum_type}.{value}: {e}")
 
-    print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values checked).")
+        # Indexes — CREATE INDEX IF NOT EXISTS is idempotent on both Postgres
+        # and SQLite. Run these after all columns are confirmed to exist so the
+        # index can always find its target column. Each index is independent;
+        # one failure doesn't block the rest.
+        for idx_sql in INDEXES_TO_CREATE:
+            try:
+                conn.execute(text(idx_sql))
+                conn.commit()
+            except (OperationalError, ProgrammingError) as e:
+                conn.rollback()
+                print(f"[auto_migrate] Index skipped: {e}")
+
+    print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values, {len(INDEXES_TO_CREATE)} indexes checked).")
 
     # ── CRM connections table ─────────────────────────────────────────────────
     # Not managed via SQLAlchemy models — created here so it's always present
