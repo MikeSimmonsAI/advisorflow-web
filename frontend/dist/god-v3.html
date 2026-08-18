@@ -317,11 +317,11 @@ let platformFilter = '', searchQ = '', roleFilter = '', statusFilter = ''
 
 // ── API ─────────────────────────────────────────────────────────────────────────
 const BASE = 'https://advisorflow-backend.onrender.com'
-function getToken() { return localStorage.getItem('token') || sessionStorage.getItem('token') }
+function getToken() { return localStorage.getItem('bookaboost_token') }
 
 async function apiFetch(path, opts = {}) {
   const token = getToken()
-  const resp = await fetch(BASE + '/api' + path, {
+  const resp = await fetch(BASE + path, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
