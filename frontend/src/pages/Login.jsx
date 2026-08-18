@@ -2,21 +2,34 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login, fetchAndStoreBranding, startKeepAlive } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
+import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
 
-const PLATFORMS = {
-  evosyspro: { brand: 'EVO', accent: 'Syspro', tagline: 'Sign in to your outreach console' },
-  default:    { brand: 'Booka', accent: 'Boost',  tagline: 'Sign in to your outreach console' },
+const theme = detectTheme()
+const brand = BRAND_CONFIG[theme]
+
+// Per-platform login page copy
+const PLATFORM_COPY = {
+  [THEMES.EVOSYSPRO]: {
+    headline: 'EvoSys Pro',
+    tagline: 'Enterprise outreach console. Sign in to continue.',
+    accentStyle: { color: '#087cff' },
+  },
+  [THEMES.HARMONYHUSTLE]: {
+    headline: 'Harmony Hustle',
+    tagline: 'Sign in to your outreach console.',
+    accentStyle: { color: '#10b981' },
+  },
+  [THEMES.BOOKABOOST]: {
+    headline: 'BookaBoost',
+    tagline: 'Sign in to your outreach console.',
+    accentStyle: {},
+  },
 }
 
-function getPlatform() {
-  const host = window.location.hostname
-  if (host.includes('evosyspro')) return PLATFORMS.evosyspro
-  return PLATFORMS.default
-}
+const copy = PLATFORM_COPY[theme] || PLATFORM_COPY[THEMES.BOOKABOOST]
 
 export default function Login() {
-  const platform = getPlatform()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -44,9 +57,9 @@ export default function Login() {
       <div className="login-card">
         <div className="login-brand">
           <SignalPulse color="blue" size={10} />
-          <span className="login-brand-mark">{platform.brand}<span className="login-brand-accent">{platform.accent}</span></span>
+          <span className="login-brand-mark" style={copy.accentStyle}>{copy.headline}</span>
         </div>
-        <p className="login-subtitle">{platform.tagline}</p>
+        <p className="login-subtitle">{copy.tagline}</p>
 
         <form onSubmit={handleSubmit} className="login-form">
           <label className="login-label">
@@ -79,6 +92,10 @@ export default function Login() {
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+
+        <div className="login-support">
+          Need help? <a href={`mailto:${brand.supportEmail}`}>{brand.supportEmail}</a>
+        </div>
       </div>
     </div>
   )

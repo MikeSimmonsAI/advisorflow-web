@@ -108,3 +108,18 @@
     max-width: 100%;
   }
 }
+
+
+.login-support {
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  text-align: center;
+}
+.login-support a {
+  color: var(--accent, #2fb6ff);
+  text-decoration: none;
+}
+.login-support a:hover {
+  text-decoration: underline;
+}

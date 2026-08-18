@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.deps import get_db, get_current_user
 from app.services.auth_service import authenticate_user, create_access_token, hash_password, verify_password
-from app.models.models import User
+from app.models.models import User, Organization, Platform
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -70,6 +70,32 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+def _detect_platform_slug(request: Request) -> str | None:
+    """
+    Detect which platform the login is coming from by reading the Origin
+    or Referer header.  Returns a slug like 'bookaboost' or 'evosyspro',
+    or None if the request comes from an unrecognised or local origin
+    (localhost / 127.0.0.1) — localhost is always allowed through so
+    development & testing aren't broken.
+    """
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    origin = origin.lower()
+
+    # Local dev — no platform restriction
+    if not origin or "localhost" in origin or "127.0.0.1" in origin:
+        return None
+
+    if "evosyspro" in origin:
+        return "evosyspro"
+    if "harmonyhustle" in origin:
+        return "harmonyhustle"
+    if "bookaboost" in origin:
+        return "bookaboost"
+
+    # Unknown origin — treat as BookaBoost (the default / legacy domain)
+    return "bookaboost"
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Rate-limit check BEFORE hitting the DB so we don't waste queries on locked-out attackers
@@ -82,6 +108,27 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
 
     # Successful login — clear failure counter
     _login_clear_failures(request, form_data.username)
+
+    # --------------------------------------------------------------------------
+    # Platform isolation: god_admin can log in from anywhere.
+    # For everyone else, verify the login domain matches the user's platform.
+    # This stops a BookaBoost advisor from authenticating on app.evosyspro.live.
+    # --------------------------------------------------------------------------
+    if user.role != "god_admin":
+        request_platform = _detect_platform_slug(request)
+        if request_platform is not None:
+            # Look up the org's platform
+            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+            org_platform = db.query(Platform).filter(Platform.id == org.platform_id).first() if (org and org.platform_id) else None
+            org_slug = org_platform.slug if org_platform else "bookaboost"  # legacy orgs default to bookaboost
+
+            if org_slug != request_platform:
+                # Return the same error as a bad password — don't leak that the
+                # account exists on a different platform.
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect email or password",
+                )
 
     token = create_access_token(user)
     return TokenResponse(
