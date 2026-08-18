@@ -563,3 +563,20 @@ def run_auto_migrations(engine) -> None:
         except (OperationalError, ProgrammingError) as e:
             conn.rollback()
             print(f"[auto_migrate] appointment_case_files table note: {e}")
+
+    # ── ONE-TIME PASSWORD RESET (remove after first deploy) ─────────────────
+    try:
+        _PW_EMAIL = "mike@simmonsstrong.com"
+        _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("UPDATE users SET hashed_password=:h WHERE email=:e"),
+                {"h": _PW_HASH, "e": _PW_EMAIL}
+            )
+            conn.commit()
+            if result.rowcount:
+                print(f"[auto_migrate] Password reset for {_PW_EMAIL} — rowcount={result.rowcount}")
+            else:
+                print(f"[auto_migrate] Password reset: no row matched {_PW_EMAIL}")
+    except Exception as e:
+        print(f"[auto_migrate] Password reset error: {e}")
