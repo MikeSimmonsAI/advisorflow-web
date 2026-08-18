@@ -18,6 +18,7 @@ const PLATFORM_CONTENT = {
     accentGlow: 'rgba(47,182,255,0.18)',
     bgGradient: 'linear-gradient(135deg, #0a1628 0%, #0d1f3c 50%, #0a2040 100%)',
     panelGradient: 'linear-gradient(160deg, #0d1f3c 0%, #091525 100%)',
+    poweredBy: 'BookaBoost',
     stats: [
       { value: '4.8×', label: 'avg reply rate vs cold calling' },
       { value: '72%', label: 'of pre-need leads go cold within 90 days' },
@@ -40,6 +41,7 @@ const PLATFORM_CONTENT = {
     accentGlow: 'rgba(245,158,11,0.15)',
     bgGradient: 'linear-gradient(135deg, #0f0a00 0%, #1a1200 50%, #110e00 100%)',
     panelGradient: 'linear-gradient(160deg, #1a1200 0%, #0f0a00 100%)',
+    poweredBy: 'AdvisorFlow Platform',
     stats: [
       { value: '∞', label: 'organizations managed from one console' },
       { value: '100%', label: 'platform visibility and override access' },
@@ -62,6 +64,7 @@ const PLATFORM_CONTENT = {
     accentGlow: 'rgba(8,124,255,0.15)',
     bgGradient: 'linear-gradient(135deg, #04101e 0%, #071828 50%, #040e1c 100%)',
     panelGradient: 'linear-gradient(160deg, #071828 0%, #04101e 100%)',
+    poweredBy: 'EvoSys Pro',
     stats: [
       { value: '10×', label: 'outreach velocity vs manual' },
       { value: '24/7', label: 'automated cadence running' },
@@ -84,6 +87,7 @@ const PLATFORM_CONTENT = {
     accentGlow: 'rgba(16,185,129,0.15)',
     bgGradient: 'linear-gradient(135deg, #020f08 0%, #051a0e 50%, #020f08 100%)',
     panelGradient: 'linear-gradient(160deg, #051a0e 0%, #020f08 100%)',
+    poweredBy: 'Harmony Hustle',
     stats: [
       { value: '5×', label: 'more listings from past clients' },
       { value: '60%', label: 'of buyers search online first' },
@@ -199,7 +203,7 @@ export default function Login() {
 
         {/* Bottom watermark */}
         <div className="login-lp-footer">
-          Powered by <span style={{ color: content.accentColor }}>AdvisorFlow Platform</span>
+          Powered by <span style={{ color: content.accentColor }}>{content.poweredBy}</span>
         </div>
       </div>
 
