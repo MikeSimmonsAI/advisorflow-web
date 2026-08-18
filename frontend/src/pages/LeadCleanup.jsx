@@ -191,7 +191,7 @@ export default function LeadCleanup() {
                   <div key={gi} className="cleanup-group">
                     <div className="cleanup-group-header">
                       <span className="cleanup-match-badge">
-                        {group.match_type === 'phone' ? '📞 Same phone number' : '👤 Same name + year'}
+                        {group.match_type === 'phone' ? '📞 Same phone number' : '✉️ Same email address'}
                       </span>
                       <span className="cleanup-match-key mono">{group.match_key}</span>
                       {mergeResults?.[gi] && (

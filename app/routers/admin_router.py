@@ -1073,19 +1073,18 @@ def potential_duplicate_leads(
     current_user: User = Depends(require_admin),
 ):
     """
-    Find likely duplicate leads using tiered confidence matching:
+    Find likely duplicate leads using two reliable signals:
 
     Tier 1 — PHONE match: same normalized phone number.
-              Strongest signal. Always grouped.
+              Strongest signal. Same last name alone is NOT sufficient —
+              common surnames like Acosta/Jones/Smith would create false
+              positives. Phone is the primary dedup key.
 
-    Tier 2 — PHONE + LAST NAME: same phone AND same last name.
-              Redundant with Tier 1 in most cases, but surfaces conflicts.
+    Tier 2 — EMAIL match: same non-empty email address (lowercased).
+              Good signal; only shown for leads not already in a phone group.
 
-    Tier 3 — LAST NAME + SOURCE YEAR: same normalized last name AND same
-              source_year. Only grouped if source_year is set on both leads.
-              Avoids grouping every "Jones" across all years.
-
-    Last name only (no phone, no year) is intentionally excluded — too noisy.
+    Name-only grouping (last name + year, etc.) is intentionally excluded
+    — too noisy; same last name does NOT mean same person.
 
     Existing import-caught duplicates (Lead.is_duplicate=True) are excluded
     since they're already flagged.
@@ -1101,24 +1100,21 @@ def potential_duplicate_leads(
         .all()
     )
 
-    # Tier 1: group by phone
+    # Tier 1: group by normalized phone
     phone_groups: dict[str, list[Lead]] = defaultdict(list)
-    # Tier 3: group by last_name + source_year (only when year is set)
-    name_year_groups: dict[tuple[str, int], list[Lead]] = defaultdict(list)
+    # Tier 2: group by normalized email
+    email_groups: dict[str, list[Lead]] = defaultdict(list)
 
     for lead in leads:
         phone_key = normalize_phone(lead.phone or lead.phone_raw or "")
-        last_key = normalize_last_name(lead.last_name or "")
+        email_key = (lead.email or "").strip().lower()
 
         if phone_key:
             phone_groups[phone_key].append(lead)
-
-        if last_key and lead.source_year:
-            name_year_groups[(last_key, lead.source_year)].append(lead)
+        if email_key:
+            email_groups[email_key].append(lead)
 
     results = []
-    # Track which lead IDs are already in a phone group to avoid
-    # showing the same leads again in a name+year group
     leads_in_phone_groups: set[str] = set()
 
     # Tier 1 — phone matches (highest confidence)
@@ -1133,19 +1129,18 @@ def potential_duplicate_leads(
             "leads": [_lead_summary(l) for l in group_leads],
         })
 
-    # Tier 3 — last name + source year (only leads NOT already in a phone group)
-    for (last_key, year), group_leads in name_year_groups.items():
-        # Filter out leads already surfaced by phone grouping
+    # Tier 2 — email matches (only leads NOT already in a phone group)
+    for email_key, group_leads in email_groups.items():
         new_leads = [l for l in group_leads if l.id not in leads_in_phone_groups]
         if len(new_leads) < 2:
             continue
         results.append({
-            "match_type": "name_year",
-            "match_key": f"{last_key} ({year})",
+            "match_type": "email",
+            "match_key": email_key,
             "leads": [_lead_summary(l) for l in new_leads],
         })
 
-    # Sort: phone matches first (most actionable), then name+year
+    # Sort: phone first, then email
     results.sort(key=lambda r: (0 if r["match_type"] == "phone" else 1, r["match_key"]))
 
     return results

@@ -16,7 +16,7 @@ export default function ReEngagement() {
   const _branding = getBranding()
   const industry = _branding?.industry || 'funeral'
 
-  const [activeTab, setActiveTab] = useState('hot')
+  const [activeTab, setActiveTab] = useState('hot') // 'hot' | 'warm' | 'cold' | 'all'
   const [leads, setLeads] = useState({ hot: [], warm: [], cold: [] })
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(null) // lead_id being actioned
@@ -38,7 +38,8 @@ export default function ReEngagement() {
     })
   }, [])
 
-  const current = leads[activeTab] || []
+  const allLeads = [...leads.hot, ...leads.warm, ...leads.cold]
+  const current = activeTab === 'all' ? allLeads : (leads[activeTab] || [])
   const tab = TABS.find(t => t.key === activeTab)
 
   function fmtDate(iso) {
@@ -72,10 +73,14 @@ export default function ReEngagement() {
             </div>
           </div>
         ))}
-        <div className="re-stat-chip" style={{ '--chip-color': '#64748b', cursor: 'default', opacity: 0.6 }}>
-          <span className="re-stat-icon">&#10067;</span>
+        <div
+          className={`re-stat-chip ${activeTab === 'all' ? 're-stat-chip--active' : ''}`}
+          style={{ '--chip-color': '#94a3b8' }}
+          onClick={() => setActiveTab(activeTab === 'all' ? 'hot' : 'all')}
+        >
+          <span className="re-stat-icon">&#9889;</span>
           <div className="re-stat-body">
-            <strong className="re-stat-count" style={{ color: '#64748b' }}>
+            <strong className="re-stat-count" style={{ color: '#94a3b8' }}>
               {loading ? '--' : (leads.hot.length + leads.warm.length + leads.cold.length)}
             </strong>
             <span className="re-stat-label">Total classified</span>
@@ -99,9 +104,14 @@ export default function ReEngagement() {
       </div>
 
       {/* DESCRIPTION */}
-      {tab && (
+      {tab && activeTab !== 'all' && (
         <div className="re-tab-desc" style={{ borderLeftColor: tab.color }}>
           <span dangerouslySetInnerHTML={{ __html: tab.icon }} /> {tab.desc}
+        </div>
+      )}
+      {activeTab === 'all' && (
+        <div className="re-tab-desc" style={{ borderLeftColor: '#94a3b8' }}>
+          ⚡ All classified leads — {allLeads.length} total across Hot, Warm, and Cold.
         </div>
       )}
 
@@ -111,10 +121,11 @@ export default function ReEngagement() {
       ) : current.length === 0 ? (
         <div className="re-empty">
           <span style={{ fontSize: 36, opacity: 0.3 }} dangerouslySetInnerHTML={{ __html: tab?.icon }} />
-          <span>No {activeTab} leads right now.</span>
+          <span>No {activeTab === 'all' ? 'classified' : activeTab} leads right now.</span>
           {activeTab === 'hot' && <span style={{ fontSize: 13, opacity: 0.55 }}>Hot leads are auto-classified from reply sentiment and tier urgency.</span>}
           {activeTab === 'warm' && <span style={{ fontSize: 13, opacity: 0.55 }}>Warm leads are in active cadence with recent touches.</span>}
           {activeTab === 'cold' && <span style={{ fontSize: 13, opacity: 0.55 }}>Cold leads haven't engaged recently. Import new leads or restart cadence to warm them up.</span>}
+          {activeTab === 'all' && <span style={{ fontSize: 13, opacity: 0.55 }}>No leads have been classified yet.</span>}
         </div>
       ) : (
         <div className="re-list">
@@ -126,6 +137,7 @@ export default function ReEngagement() {
                   <div className="re-card-name">{name}</div>
                   <div className="re-card-meta">
                     {lead.phone && <span>{lead.phone}</span>}
+                    {activeTab === 'all' && lead.temperature && <span className="re-badge" style={{ background: lead.temperature === 'hot' ? '#ff4d4d33' : lead.temperature === 'warm' ? '#f0c04033' : '#64748b33', color: lead.temperature === 'hot' ? '#ff4d4d' : lead.temperature === 'warm' ? '#f0c040' : '#94a3b8', textTransform: 'capitalize' }}>{lead.temperature}</span>}
                     {lead.tier && <span className="re-badge re-badge--tier">{lead.tier.replace('_', ' ')}</span>}
                     {lead.status && <span className="re-badge re-badge--status">{lead.status}</span>}
                     <span className="re-card-date">Imported {fmtDate(lead.created_at)}</span>

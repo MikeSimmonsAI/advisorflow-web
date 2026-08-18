@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _require_admin(current_user: User) -> None:
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
