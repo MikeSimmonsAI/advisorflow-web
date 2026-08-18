@@ -316,7 +316,7 @@ let loading = false
 let platformFilter = '', searchQ = '', roleFilter = '', statusFilter = ''
 
 // ── API ─────────────────────────────────────────────────────────────────────────
-const BASE = window.location.origin
+const BASE = 'https://advisorflow-backend.onrender.com'
 function getToken() { return localStorage.getItem('token') || sessionStorage.getItem('token') }
 
 async function apiFetch(path, opts = {}) {
