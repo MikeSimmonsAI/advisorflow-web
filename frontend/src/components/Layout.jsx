@@ -11,22 +11,25 @@ import './Layout.css'
 const PLATFORM_THEME = detectTheme()
 const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 
+// Advisor-level nav — every logged-in user sees these
 const NAV_ITEMS = [
   { to: '/', label: 'Overview', icon: 'grid' },
   { to: '/leads', label: 'Leads', icon: 'users' },
   { to: '/replies', label: 'Replies', icon: 'message' },
   { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
-  { to: '/cadence', label: 'Cadence', icon: 'repeat' },
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
   { to: '/activity', label: 'Activity', icon: 'send' },
   { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
-  { to: '/system-health', label: 'System Health', icon: 'activity' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
   { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
 ]
 
-// Admin-only nav items that don't need a feature flag (always visible to any admin)
-const ADMIN_ONLY_NAV_ITEMS = []
+// Admin-only nav items — always visible to org_admin and above (no feature flag)
+// Cadence and System Health are org-level tools, not advisor tools.
+const ADMIN_ONLY_NAV_ITEMS = [
+  { to: '/cadence', label: 'Cadence', icon: 'repeat' },
+  { to: '/system-health', label: 'System Health', icon: 'activity' },
+]
 
 // featureKey: which enabled_features key controls this item.
 // null = always visible to any admin. super_admin always bypasses all flags.

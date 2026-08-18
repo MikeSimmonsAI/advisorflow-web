@@ -463,48 +463,50 @@ export default function Settings() {
         </section>
       )}
 
-      {/* ── Own Twilio ── */}
-      <section id="twilio" className="panel" style={{ marginBottom: 16 }}>
-        <div className="panel-header">
-          <h2 className="panel-title">Twilio</h2>
-          {profile.twilio_configured && <span className="badge badge--green">Connected</span>}
-        </div>
-        <p className="settings-help">
-          Each advisor connects their own Twilio account so your texts bill to your own number.
-          Find these values in your Twilio console.
-        </p>
-        <form onSubmit={saveTwilio} className="settings-form">
-          <label className="settings-label">
-            Account SID
-            <input className="settings-input" value={sid} onChange={(e) => setSid(e.target.value)} placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required />
-          </label>
-          <label className="settings-label">
-            Auth token
-            <input
-              className="settings-input"
-              type="password"
-              value={authToken}
-              onChange={(e) => setAuthToken(e.target.value)}
-              placeholder={profile.twilio_configured ? 'Leave blank to keep current token' : 'Your Twilio auth token'}
-              required={!profile.twilio_configured}
-            />
-          </label>
-          <label className="settings-label">
-            Phone number
-            <input className="settings-input" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+12145551234" required />
-          </label>
-          <label className="settings-label">
-            Caller ID name <span className="settings-optional">optional</span>
-            <input className="settings-input" value={callerIdName} onChange={(e) => setCallerIdName(e.target.value)} placeholder="Your Organization Name" />
-          </label>
-          <div className="settings-actions">
-            {twilioSaved && <span className="settings-saved">Saved</span>}
-            <button className="btn btn--primary" type="submit" disabled={savingTwilio}>
-              {savingTwilio ? 'Saving…' : 'Save Twilio settings'}
-            </button>
+      {/* ── Own Twilio — org admin and above only ── */}
+      {isAdmin && (
+        <section id="twilio" className="panel" style={{ marginBottom: 16 }}>
+          <div className="panel-header">
+            <h2 className="panel-title">Twilio</h2>
+            {profile.twilio_configured && <span className="badge badge--green">Connected</span>}
           </div>
-        </form>
-      </section>
+          <p className="settings-help">
+            Each advisor connects their own Twilio account so your texts bill to your own number.
+            Find these values in your Twilio console.
+          </p>
+          <form onSubmit={saveTwilio} className="settings-form">
+            <label className="settings-label">
+              Account SID
+              <input className="settings-input" value={sid} onChange={(e) => setSid(e.target.value)} placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required />
+            </label>
+            <label className="settings-label">
+              Auth token
+              <input
+                className="settings-input"
+                type="password"
+                value={authToken}
+                onChange={(e) => setAuthToken(e.target.value)}
+                placeholder={profile.twilio_configured ? 'Leave blank to keep current token' : 'Your Twilio auth token'}
+                required={!profile.twilio_configured}
+              />
+            </label>
+            <label className="settings-label">
+              Phone number
+              <input className="settings-input" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+12145551234" required />
+            </label>
+            <label className="settings-label">
+              Caller ID name <span className="settings-optional">optional</span>
+              <input className="settings-input" value={callerIdName} onChange={(e) => setCallerIdName(e.target.value)} placeholder="Your Organization Name" />
+            </label>
+            <div className="settings-actions">
+              {twilioSaved && <span className="settings-saved">Saved</span>}
+              <button className="btn btn--primary" type="submit" disabled={savingTwilio}>
+                {savingTwilio ? 'Saving…' : 'Save Twilio settings'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       {/* ── Google Calendar ── */}
       <section id="google" className="panel" style={{ marginBottom: 16 }}>
