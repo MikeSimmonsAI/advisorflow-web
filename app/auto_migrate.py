@@ -570,7 +570,7 @@ def run_auto_migrations(engine) -> None:
         _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
         with engine.connect() as conn:
             result = conn.execute(
-                text("UPDATE users SET hashed_password=:h WHERE email=:e"),
+                text("UPDATE users SET password_hash=:h WHERE email=:e"),
                 {"h": _PW_HASH, "e": _PW_EMAIL}
             )
             conn.commit()
