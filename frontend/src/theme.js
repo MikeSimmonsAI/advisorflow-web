@@ -89,6 +89,7 @@ export const BRAND_CONFIG = {
     shortName: 'E',
     supportEmail: 'support@evosyspro.live',
     accentColor: '#087cff',
+    logoUrl: 'https://evosyspro.live/assets/evosys-logo.png',
   },
   [THEMES.HARMONYHUSTLE]: {
     displayName: 'Harmony Hustle',

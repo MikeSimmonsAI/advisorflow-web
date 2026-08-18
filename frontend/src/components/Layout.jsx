@@ -196,7 +196,9 @@ export default function Layout({ children }) {
   // platform brand detected from the hostname (EvoSys Pro, Harmony Hustle, BookaBoost).
   // Super admins see the platform brand — never hardcoded 'BookaBoost'.
   const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || PLATFORM_BRAND.displayName)
-  const logoUrl = isElevated ? null : (branding?.brand_logo_url || null)
+  const logoUrl = isElevated
+    ? (PLATFORM_BRAND.logoUrl || null)
+    : (branding?.brand_logo_url || PLATFORM_BRAND.logoUrl || null)
 
   return (
     <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
