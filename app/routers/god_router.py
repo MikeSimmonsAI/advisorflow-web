@@ -7,29 +7,35 @@ The existence of this router and the AdvisorFlow layer is invisible to
 every role below god_admin.
 
 Endpoints:
-  GET  /god/stats          — top-level KPIs across all platforms
-  GET  /god/platforms       — all platforms with org/lead counts
-  GET  /god/orgs           — all orgs across all platforms (paginated, filterable)
-  GET  /god/leads          — all leads across all platforms (paginated, filterable)
-  GET  /god/users          — all super_admins + god_admins
-  PATCH /god/users/{user_id}/role   — promote/demote a user's role
-  POST /god/users/{user_id}/deactivate  — deactivate any account
-  POST /god/users/{user_id}/activate    — reactivate any account
-  POST /god/orgs/{org_id}/impersonate   — return a short-lived org context token
-                                          for super_admin to use as X-Org-Override
+  GET   /god/stats                       — top-level KPIs across all platforms
+  GET   /god/platforms                   — all platforms with org/lead counts
+  POST  /god/platforms                   — create a new platform
+  GET   /god/orgs                        — all orgs across all platforms
+  POST  /god/orgs                        — create a new org
+  GET   /god/leads                       — all leads across all platforms
+  GET   /god/users                       — all super_admins + god_admins
+  POST  /god/users                       — create a new admin user
+  PATCH /god/users/{user_id}/role        — promote/demote a user's role
+  POST  /god/users/{user_id}/deactivate  — deactivate any account
+  POST  /god/users/{user_id}/activate    — reactivate any account
+  POST  /god/orgs/{org_id}/impersonate   — return a short-lived org context token
 """
 
 import logging
+import re
+import secrets
+import string
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god
-from app.models.models import User, Organization, Lead
+from app.models.models import User, Organization, Lead, Platform
+from app.services.auth_service import hash_password
 
 log = logging.getLogger(__name__)
 
@@ -42,9 +48,42 @@ class RolePatch(BaseModel):
     role: str  # "god_admin" | "super_admin" | "org_admin" | "advisor" | "viewer"
 
 
+class PlatformCreate(BaseModel):
+    name: str
+    slug: str
+    domain: Optional[str] = None
+    support_email: Optional[str] = None
+
+
+class OrgCreate(BaseModel):
+    name: str
+    platform_slug: str
+    plan: Optional[str] = "trial"
+
+
+class UserCreate(BaseModel):
+    email: str
+    full_name: str
+    role: str = "super_admin"
+    platform_slug: Optional[str] = None   # used to find an org to attach the user to
+    org_id: Optional[str] = None          # explicit org; takes precedence over platform_slug
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 ALLOWED_ROLES = {"god_admin", "super_admin", "org_admin", "advisor", "viewer"}
+
+
+def _slugify(text: str) -> str:
+    """Turn a display name into a URL-safe slug."""
+    s = text.lower().strip()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")
+
+
+def _temp_password(length: int = 12) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def _safe_count(db: Session, model, filters=None):
@@ -55,6 +94,143 @@ def _safe_count(db: Session, model, filters=None):
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
+
+@router.post("/platforms", status_code=201)
+def god_create_platform(
+    body: PlatformCreate,
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Create a new platform (brand)."""
+    slug = body.slug.strip().lower() or _slugify(body.name)
+    existing = db.query(Platform).filter(Platform.slug == slug).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Platform slug '{slug}' already exists.")
+
+    platform = Platform(
+        name=body.name.strip(),
+        slug=slug,
+        domain=body.domain,
+        support_email=body.support_email,
+        is_active=True,
+    )
+    db.add(platform)
+    db.commit()
+    db.refresh(platform)
+    log.info("AUDIT: god_admin %s created platform %s (%s)", god.email, platform.name, platform.id)
+    return {
+        "id":            platform.id,
+        "name":          platform.name,
+        "slug":          platform.slug,
+        "domain":        platform.domain,
+        "support_email": platform.support_email,
+        "is_active":     platform.is_active,
+        "org_count":     0,
+        "lead_count":    0,
+    }
+
+
+@router.post("/orgs", status_code=201)
+def god_create_org(
+    body: OrgCreate,
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Create a new organization under a platform."""
+    platform = db.query(Platform).filter(Platform.slug == body.platform_slug).first()
+    if not platform:
+        raise HTTPException(status_code=404, detail=f"Platform '{body.platform_slug}' not found.")
+
+    slug = _slugify(body.name)
+    # Ensure slug uniqueness
+    base_slug, suffix = slug, 1
+    while db.query(Organization).filter(Organization.slug == slug).first():
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+
+    org = Organization(
+        name=body.name.strip(),
+        slug=slug,
+        plan=body.plan or "trial",
+        platform_id=platform.id,
+        is_active=True,
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    log.info("AUDIT: god_admin %s created org %s (%s) on %s", god.email, org.name, org.id, body.platform_slug)
+    return {
+        "id":          org.id,
+        "name":        org.name,
+        "slug":        org.slug,
+        "plan":        org.plan,
+        "platform_id": org.platform_id,
+        "lead_count":  0,
+        "user_count":  0,
+        "created_at":  org.created_at.isoformat() if org.created_at else None,
+    }
+
+
+@router.post("/users", status_code=201)
+def god_create_user(
+    body: UserCreate,
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a new admin/super_admin user.
+    A temporary password is generated and returned once — the user must change it on first login.
+    """
+    if body.role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Allowed: {sorted(ALLOWED_ROLES)}")
+
+    existing = db.query(User).filter(User.email == body.email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"User with email '{body.email}' already exists.")
+
+    # Resolve org_id
+    org_id = body.org_id
+    if not org_id and body.platform_slug:
+        # Find the first org on that platform as a home org for this admin
+        row = db.execute(
+            text("SELECT o.id FROM organizations o JOIN platforms p ON o.platform_id=p.id WHERE p.slug=:slug LIMIT 1"),
+            {"slug": body.platform_slug}
+        ).fetchone()
+        if row:
+            org_id = row[0]
+
+    if not org_id:
+        # Fall back to the first org in the system
+        first_org = db.query(Organization).order_by(Organization.created_at).first()
+        if not first_org:
+            raise HTTPException(status_code=400, detail="No organizations exist yet. Create an org first.")
+        org_id = first_org.id
+
+    temp_pw = _temp_password()
+    user = User(
+        organization_id=org_id,
+        email=body.email.strip().lower(),
+        full_name=body.full_name.strip(),
+        password_hash=hash_password(temp_pw),
+        role=body.role,
+        must_change_password=True,
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    log.info("AUDIT: god_admin %s created user %s (%s) role=%s", god.email, user.email, user.id, user.role)
+    return {
+        "id":                  user.id,
+        "email":               user.email,
+        "name":                user.full_name,
+        "role":                user.role,
+        "is_active":           user.is_active,
+        "must_change_password": True,
+        "temp_password":       temp_pw,   # shown once in the UI — not stored
+        "organization_id":     user.organization_id,
+    }
+
 
 @router.get("/stats")
 def god_stats(

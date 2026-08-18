@@ -1445,21 +1445,45 @@ function drawerNewBrand() {
   return `
     <div class="form-group">
       <label class="form-label">Platform Name</label>
-      <input class="form-input" type="text" placeholder="e.g. Harmony Hustle Pro">
+      <input class="form-input" type="text" id="new-brand-name" placeholder="e.g. Harmony Hustle Pro">
     </div>
     <div class="form-group">
-      <label class="form-label">Brand Color</label>
-      <input class="form-input" type="color" value="#2fb6ff" style="height:40px;cursor:pointer">
+      <label class="form-label">Slug <span style="font-size:10px;color:var(--text-muted)">(URL-safe, no spaces)</span></label>
+      <input class="form-input" type="text" id="new-brand-slug" placeholder="e.g. harmonyhustlepro">
     </div>
     <div class="form-group">
       <label class="form-label">Domain</label>
-      <input class="form-input" type="text" placeholder="app.brandname.live">
+      <input class="form-input" type="text" id="new-brand-domain" placeholder="app.brandname.live">
     </div>
     <div class="form-group">
-      <label class="form-label">Description</label>
-      <textarea class="form-textarea" placeholder="Platform description and target market…"></textarea>
+      <label class="form-label">Support Email</label>
+      <input class="form-input" type="email" id="new-brand-email" placeholder="support@brandname.live">
     </div>
-    <button class="btn btn-gold" style="width:100%" onclick="showToast('success','Platform Registered','New platform created — configure env vars next')">Register Platform</button>`;
+    <button class="btn btn-gold" style="width:100%" onclick="submitNewBrand()">Register Platform</button>`;
+}
+
+async function submitNewBrand() {
+  const name   = document.getElementById('new-brand-name').value.trim();
+  const slug   = document.getElementById('new-brand-slug').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'-');
+  const domain = document.getElementById('new-brand-domain').value.trim();
+  const email  = document.getElementById('new-brand-email').value.trim();
+  if (!name||!slug) { showToast('error','Required','Name and slug are required'); return; }
+  try {
+    const r = await fetch(BASE+'/god/platforms', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+getToken()},
+      body: JSON.stringify({name, slug, domain:domain||null, support_email:email||null})
+    });
+    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.status); }
+    const p = await r.json();
+    STATE.platforms[p.slug] = {label:p.name.toUpperCase(), color:'#2fb6ff', orgs:0, leads:0};
+    closeDrawer();
+    buildScopeBar();
+    showToast('success','Platform Registered', name+' created — configure env vars next');
+    ownerAction('create_brand', name, 'global', {name, slug});
+  } catch(e) {
+    showToast('error','Create Failed', e.message);
+  }
 }
 function drawerNewCadence() {
   return `
@@ -1522,15 +1546,27 @@ function drawerInviteAdmin() {
     <button class="btn btn-primary" style="width:100%" onclick="submitInviteAdmin()">Send Invitation</button>`;
 }
 // Drawer submit handlers
-function submitNewOrg() {
+async function submitNewOrg() {
   const name = document.getElementById('new-org-name').value.trim();
   const platform = document.getElementById('new-org-platform').value;
+  const plan = document.getElementById('new-org-plan').value;
   if (!name) { showToast('error','Name Required','Please enter an organization name'); return; }
-  const newOrg = { id: STATE.orgs.length+1, name, platform, leads:0, status:'trial', mrr:0 };
-  STATE.orgs.push(newOrg);
-  closeDrawer();
-  ownerAction('create_org', name, platform, {name,platform});
-  renderOrgsTable();
+  try {
+    const r = await fetch(BASE+'/god/orgs', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+getToken()},
+      body: JSON.stringify({name, platform_slug: platform, plan})
+    });
+    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.status); }
+    const org = await r.json();
+    STATE.orgs.push({id:org.id, name:org.name, platform, leads:0, status:'trial', mrr:0});
+    closeDrawer();
+    ownerAction('create_org', name, platform, {name,platform});
+    renderOrgsTable();
+    showToast('success','Org Created',name+' is live on '+platform);
+  } catch(e) {
+    showToast('error','Create Failed', e.message);
+  }
 }
 function submitNewCadence() {
   const name = document.getElementById('new-cad-name').value.trim();
@@ -1549,17 +1585,31 @@ function submitNewCadence() {
   renderConversationList();
   selectCadence(newCad.id);
 }
-function submitInviteAdmin() {
+async function submitInviteAdmin() {
   const name = document.getElementById('inv-name').value.trim();
   const email = document.getElementById('inv-email').value.trim();
   const platform = document.getElementById('inv-platform').value;
   const role = document.getElementById('inv-role').value;
   if (!name||!email) { showToast('error','Required Fields','Name and email are required'); return; }
-  const perms = [...document.querySelectorAll('.inv-perm:checked')].map(c=>c.value);
-  STATE.superAdmins.push({ id:STATE.superAdmins.length+2, name, email, platform, role, status:'pending', perms });
-  closeDrawer();
-  ownerAction('invite_admin', email, platform, {name,email,platform,role});
-  renderAdmins();
+  try {
+    const r = await fetch(BASE+'/god/users', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+getToken()},
+      body: JSON.stringify({email, full_name:name, role, platform_slug:platform})
+    });
+    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.status); }
+    const user = await r.json();
+    STATE.admins.push({id:user.id, name, email, platform, role, status:'active', perms:[]});
+    closeDrawer();
+    ownerAction('invite_admin', email, platform, {name,email,platform,role});
+    renderAdmins();
+    // Show temp password — it's only returned once
+    showToast('success','User Created','Temp password: '+user.temp_password+' — share securely');
+    // Also alert so it's easy to copy
+    setTimeout(()=>alert('Temp password for '+email+':\n\n'+user.temp_password+'\n\nUser must change it on first login.'),300);
+  } catch(e) {
+    showToast('error','Create Failed', e.message);
+  }
 }
 // ═══════════════════════════════════════════════════════════
 // RENDER: COMMAND
