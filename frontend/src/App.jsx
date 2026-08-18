@@ -74,7 +74,7 @@ function GodRoute({ children }) {
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
   if (user?.role !== 'god_admin') return <Navigate to="/" replace />
-  return <Layout>{children}</Layout>
+  return <>{children}</>
 }
 
 export default function App() {
