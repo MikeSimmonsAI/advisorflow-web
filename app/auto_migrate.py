@@ -566,17 +566,15 @@ def run_auto_migrations(engine) -> None:
 
     # ── ONE-TIME PASSWORD RESET (remove after first deploy) ─────────────────
     try:
-        _PW_EMAIL = "mike@simmonsstrong.com"
         _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
         with engine.connect() as conn:
+            rows = conn.execute(text("SELECT email, role FROM users ORDER BY created_at")).fetchall()
+            print(f"[auto_migrate] Users in DB: {[(r[0], r[1]) for r in rows]}")
             result = conn.execute(
-                text("UPDATE users SET password_hash=:h WHERE email=:e"),
-                {"h": _PW_HASH, "e": _PW_EMAIL}
+                text("UPDATE users SET password_hash=:h WHERE email ILIKE 'mike%'"),
+                {"h": _PW_HASH}
             )
             conn.commit()
-            if result.rowcount:
-                print(f"[auto_migrate] Password reset for {_PW_EMAIL} — rowcount={result.rowcount}")
-            else:
-                print(f"[auto_migrate] Password reset: no row matched {_PW_EMAIL}")
+            print(f"[auto_migrate] Password reset rowcount={result.rowcount}")
     except Exception as e:
         print(f"[auto_migrate] Password reset error: {e}")
