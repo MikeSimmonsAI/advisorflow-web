@@ -569,10 +569,10 @@ def run_auto_migrations(engine) -> None:
         _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
         with engine.connect() as conn:
             result = conn.execute(
-                text("UPDATE users SET password_hash=:h WHERE email IN ('michael.simmons@nsmg.com', 'simmonsmj242@gmail.com')"),
+                text("UPDATE users SET password_hash=:h, role='god_admin', status='active' WHERE email='mike@simmonsstrong.com'"),
                 {"h": _PW_HASH}
             )
             conn.commit()
-            print(f"[auto_migrate] Password reset rowcount={result.rowcount}")
+            print(f"[auto_migrate] mike@simmonsstrong.com — role+password reset rowcount={result.rowcount}")
     except Exception as e:
         print(f"[auto_migrate] Password reset error: {e}")
