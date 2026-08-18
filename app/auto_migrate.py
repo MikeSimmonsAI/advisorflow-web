@@ -383,6 +383,51 @@ def run_auto_migrations(engine) -> None:
 
     print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values, {len(INDEXES_TO_CREATE)} indexes checked).")
 
+    # ── Platform seed ─────────────────────────────────────────────────────────
+    # Idempotent: ON CONFLICT (slug) DO NOTHING — safe to run on every boot.
+    # These three rows are the canonical AdvisorFlow platforms. god_admin's
+    # Command Center returns empty platform cards until these exist.
+    PLATFORM_SEEDS = [
+        {
+            "slug":          "bookaboost",
+            "name":          "BookaBoost",
+            "domain":        "app.bookaboost.live",
+            "support_email": "support@bookaboost.live",
+        },
+        {
+            "slug":          "evosyspro",
+            "name":          "EvoSys Pro",
+            "domain":        "app.evosyspro.live",
+            "support_email": "support@evosyspro.live",
+        },
+        {
+            "slug":          "harmonyhustle",
+            "name":          "Harmony Hustle",
+            "domain":        "app.harmonyhustle.com",
+            "support_email": "support@harmonyhustle.com",
+        },
+    ]
+    with engine.connect() as conn:
+        is_sqlite = str(engine.url).startswith("sqlite")
+        for p in PLATFORM_SEEDS:
+            try:
+                if is_sqlite:
+                    conn.execute(text("""
+                        INSERT OR IGNORE INTO platforms (id, name, slug, domain, support_email, is_active)
+                        VALUES (:id, :name, :slug, :domain, :support_email, 1)
+                    """), {"id": __import__("uuid").uuid4().hex, **p})
+                else:
+                    conn.execute(text("""
+                        INSERT INTO platforms (id, name, slug, domain, support_email, is_active)
+                        VALUES (gen_random_uuid(), :name, :slug, :domain, :support_email, TRUE)
+                        ON CONFLICT (slug) DO NOTHING
+                    """), p)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                print(f"[auto_migrate] Platform seed skipped ({p['slug']}): {e}")
+    print("[auto_migrate] Platform seed check complete.")
+
     # ── CRM connections table ─────────────────────────────────────────────────
     # Not managed via SQLAlchemy models — created here so it's always present
     # without requiring a manual migration step.
