@@ -28,10 +28,10 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      const user = await login(email, password)
       await fetchAndStoreBranding()
       startKeepAlive()
-      navigate('/')
+      navigate(user?.role === 'god_admin' ? '/god' : '/')
     } catch (err) {
       setError(err.message)
     } finally {
