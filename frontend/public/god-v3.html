@@ -2362,12 +2362,115 @@ document.getElementById('intel-input').addEventListener('keydown', e => {
 // ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// API — real data from AdvisorFlow backend
+// ═══════════════════════════════════════════════════════════
+const BASE = 'https://advisorflow-backend.onrender.com';
+
+function getToken() {
+  try { return localStorage.getItem('bookaboost_token') || ''; } catch(e) { return ''; }
+}
+
+async function apiGet(path) {
+  const r = await fetch(BASE + path, {
+    headers: { 'Authorization': 'Bearer ' + getToken() }
+  });
+  if (!r.ok) throw new Error(path + ' → ' + r.status);
+  return r.json();
+}
+
+const PLATFORM_META = {
+  bookaboost: { label:'BOOKABOOST',       color:'#4a9eff' },
+  evosys:     { label:'EVOSYS PRO',       color:'#a855f7' },
+  harmony:    { label:'HARMONY HUSTLE',   color:'#f59e0b', dev:true },
+};
+
+async function loadRealData() {
+  try {
+    const [stats, platforms, orgsData, leadsData, usersData] = await Promise.all([
+      apiGet('/god/stats'),
+      apiGet('/god/platforms'),
+      apiGet('/god/orgs?limit=100'),
+      apiGet('/god/leads?limit=200'),
+      apiGet('/god/users?limit=100'),
+    ]);
+
+    // KPIs
+    STATE.kpis.totalLeads     = stats.total_leads      ?? STATE.kpis.totalLeads;
+    STATE.kpis.activeOrgs     = stats.active_orgs      ?? STATE.kpis.activeOrgs;
+    STATE.kpis.totalRevenue   = stats.total_orgs * 297;
+    STATE.kpis.mrr            = String(stats.total_orgs * 297);
+
+    // Platforms
+    platforms.forEach(p => {
+      const meta = PLATFORM_META[p.slug];
+      if (meta) {
+        STATE.platforms[p.slug] = { ...meta, orgs: p.org_count, leads: p.lead_count };
+      }
+    });
+    STATE.platforms.global.orgs  = stats.total_orgs;
+    STATE.platforms.global.leads = stats.total_leads;
+
+    // Orgs — build a slug lookup so leads can reference platform name
+    const orgById = {};
+    if (orgsData.orgs && orgsData.orgs.length) {
+      STATE.orgs = orgsData.orgs.map(o => {
+        // Detect platform from platform_id by matching against fetched platforms list
+        const pRow = platforms.find(p => p.id === o.platform_id);
+        const slug = pRow ? pRow.slug : 'bookaboost';
+        const entry = { id: o.id, name: o.name, platform: slug, leads: o.lead_count, status: 'active', mrr: 297 };
+        orgById[o.id] = entry;
+        return entry;
+      });
+    }
+
+    // Leads
+    if (leadsData.leads && leadsData.leads.length) {
+      STATE.leads = leadsData.leads.map(l => {
+        const org = orgById[l.organization_id];
+        return {
+          id:       l.id,
+          name:     l.name || 'Unknown',
+          org:      org ? org.name : '',
+          platform: org ? org.platform : 'bookaboost',
+          status:   l.status  || 'imported',
+          source:   l.source  || '—',
+          created:  (l.created_at || '').slice(0, 10),
+          tier:     l.tier    || 'cold',
+          email:    l.email   || '',
+          phone:    l.phone   || '',
+        };
+      });
+    }
+
+    // Admins
+    if (usersData.users && usersData.users.length) {
+      STATE.admins = usersData.users.map(u => ({
+        id:       u.id,
+        name:     u.name || u.email,
+        email:    u.email,
+        platform: 'global',
+        role:     u.role,
+        status:   u.is_active ? 'active' : 'inactive',
+        perms:    [],
+      }));
+    }
+
+    renderScreen(STATE.currentScreen);
+    buildScopeBar();
+  } catch(e) {
+    console.error('[god-v3] loadRealData:', e);
+    showToast('warning', 'Live data unavailable', e.message);
+  }
+}
+
 function init() {
   buildSidebar();
   buildScopeBar();
   setInterval(updateClock, 1000);
   updateClock();
   navigateTo('command');
+  loadRealData();
 }
 init();
 </script>
