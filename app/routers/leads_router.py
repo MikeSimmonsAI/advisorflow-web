@@ -669,11 +669,19 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(ge
 
 @router.get("/{lead_id}")
 def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Returns full contact-card detail for a single lead."""
-    lead = db.query(Lead).filter(
+    """Returns full contact-card detail for a single lead.
+
+    Advisors can only access leads assigned to them. Org admins and above
+    can access any lead in their organization.
+    """
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    q = db.query(Lead).filter(
         Lead.id == lead_id,
         Lead.organization_id == current_user.organization_id,
-    ).first()
+    )
+    if not is_manager:
+        q = q.filter(Lead.assigned_to_id == current_user.id)
+    lead = q.first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
@@ -696,9 +704,11 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     """
     from app.models.models import Message, Reply, BookingLink, EmailMessage, CadenceState
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
-    ).first()
+    is_manager_tl = current_user.role in ("org_admin", "super_admin", "god_admin")
+    q_tl = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
+    if not is_manager_tl:
+        q_tl = q_tl.filter(Lead.assigned_to_id == current_user.id)
+    lead = q_tl.first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 

@@ -38,7 +38,7 @@ def sent_activity(
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
 
     # ── SMS sends ──────────────────────────────────────────────────────────
     sms_query = (

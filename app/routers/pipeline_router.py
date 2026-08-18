@@ -67,13 +67,19 @@ def launch(
     return result
 
 
+def _is_elevated(user: User) -> bool:
+    """Returns True for roles that can see all org-wide pipeline data."""
+    return user.role in ("org_admin", "super_admin", "god_admin")
+
+
 @router.get("/stats")
 def pipeline_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get pipeline engagement stats."""
-    return get_pipeline_stats(db, current_user.organization_id)
+    """Get pipeline engagement stats. Advisors see only their own; admins see org-wide."""
+    advisor_id = None if _is_elevated(current_user) else current_user.id
+    return get_pipeline_stats(db, current_user.organization_id, advisor_id=advisor_id)
 
 
 @router.get("/forecast")
@@ -82,7 +88,8 @@ def forecast(
     current_user: User = Depends(get_current_user),
 ):
     """Get AI forecast and alerts for overview dashboard."""
-    return get_ai_forecast(db, current_user.organization_id)
+    advisor_id = None if _is_elevated(current_user) else current_user.id
+    return get_ai_forecast(db, current_user.organization_id, advisor_id=advisor_id)
 
 
 @router.get("/flagged")
@@ -90,12 +97,15 @@ def get_flagged(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all conversations flagged for human review."""
-    flagged = db.query(PipelineConversation).filter(
+    """Get conversations flagged for human review. Advisors see only their own."""
+    q = db.query(PipelineConversation).filter(
         PipelineConversation.organization_id == current_user.organization_id,
         PipelineConversation.flagged == True,
         PipelineConversation.reviewed_at == None,
-    ).order_by(PipelineConversation.flagged_at.desc()).all()
+    )
+    if not _is_elevated(current_user):
+        q = q.filter(PipelineConversation.advisor_id == current_user.id)
+    flagged = q.order_by(PipelineConversation.flagged_at.desc()).all()
 
     result = []
     for p in flagged:
@@ -191,10 +201,12 @@ def get_conversations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all pipeline conversations, optionally filtered by stage."""
+    """Get pipeline conversations. Advisors see only their own; admins see org-wide."""
     query = db.query(PipelineConversation).filter(
         PipelineConversation.organization_id == current_user.organization_id,
     )
+    if not _is_elevated(current_user):
+        query = query.filter(PipelineConversation.advisor_id == current_user.id)
     if stage:
         query = query.filter(PipelineConversation.stage == stage)
 

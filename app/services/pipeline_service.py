@@ -538,12 +538,19 @@ def launch_pipeline(
     return {"launched": launched, "skipped": skipped, "errors": errors}
 
 
-def get_pipeline_stats(db: Session, organization_id: str) -> dict:
-    """Returns pipeline engagement stats for the overview dashboard."""
+def get_pipeline_stats(db: Session, organization_id: str, advisor_id: str | None = None) -> dict:
+    """Returns pipeline engagement stats for the overview dashboard.
 
-    pipelines = db.query(PipelineConversation).filter(
+    advisor_id — when provided, scopes results to that advisor's conversations only.
+    Omit (or pass None) to return org-wide stats (org_admin / super_admin / god_admin).
+    """
+
+    q = db.query(PipelineConversation).filter(
         PipelineConversation.organization_id == organization_id
-    ).all()
+    )
+    if advisor_id:
+        q = q.filter(PipelineConversation.advisor_id == advisor_id)
+    pipelines = q.all()
 
     stage_counts = {}
     for p in pipelines:
@@ -577,12 +584,14 @@ def get_pipeline_stats(db: Session, organization_id: str) -> dict:
     }
 
 
-def get_ai_forecast(db: Session, organization_id: str) -> dict:
+def get_ai_forecast(db: Session, organization_id: str, advisor_id: str | None = None) -> dict:
     """
     AI-powered forecast for the overview dashboard.
     Analyzes current pipeline to predict upcoming appointments and surface alerts.
+
+    advisor_id — when provided, scopes to that advisor's data only.
     """
-    stats = get_pipeline_stats(db, organization_id)
+    stats = get_pipeline_stats(db, organization_id, advisor_id=advisor_id)
     stage_counts = stats["by_stage"]
 
     alerts = []
