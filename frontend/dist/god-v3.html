@@ -3,2523 +3,1112 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AdvisorFlow Command Center V3</title>
+<title>AdvisorFlow Command Center V4</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg-base:#020509;--bg-deep:#01030a;--bg-panel:rgba(6,12,28,0.92);--bg-card:rgba(8,16,36,0.85);
+  --bg:#020509;--bg-panel:rgba(6,12,28,0.96);--bg-card:rgba(8,16,36,0.9);--bg-hover:rgba(15,25,55,0.8);
   --blue:#2fb6ff;--green:#1ef0a8;--amber:#ffb238;--red:#ff4d7e;--purple:#9d6dff;--cyan:#00e5ff;
-  --god-gold:#f5c842;--god-gold-dim:rgba(245,200,66,0.15);
-  --brand-bb:#4a9eff;--brand-ev:#087cff;--brand-hh:#ff7c47;
-  --border:rgba(47,182,255,0.12);--border-strong:rgba(47,182,255,0.25);
-  --text-primary:#e8f0ff;--text-secondary:rgba(180,200,255,0.6);--text-muted:rgba(120,150,200,0.4);
-  --sidebar-w:236px;--topbar-h:52px;--intel-h:48px;--god-banner-h:36px;
-  --radius:10px;--radius-sm:6px;
-  --shadow:0 8px 32px rgba(0,0,0,0.5);
-  --glow-blue:0 0 20px rgba(47,182,255,0.2);
+  --gold:#f5c842;--gold-dim:rgba(245,200,66,0.12);
+  --border:rgba(47,182,255,0.1);--border-md:rgba(47,182,255,0.2);--border-strong:rgba(47,182,255,0.35);
+  --text:#e8f0ff;--text-2:rgba(180,200,255,0.65);--text-3:rgba(120,150,200,0.45);
+  --sidebar-w:232px;--top-h:52px;--intel-h:44px;
 }
-html,body{height:100%;background:var(--bg-deep);color:var(--text-primary);font-family:'Inter',sans-serif;font-size:13px;line-height:1.5;overflow:hidden}
-/* ── SCROLLBAR ── */
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;line-height:1.5;overflow:hidden}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:rgba(47,182,255,0.2);border-radius:2px}
-/* ── GOD BANNER ── */
-#god-banner{
-  position:fixed;top:0;left:0;right:0;height:var(--god-banner-h);
-  background:linear-gradient(90deg,rgba(245,200,66,0.18),rgba(245,200,66,0.08),rgba(245,200,66,0.18));
-  border-bottom:1px solid rgba(245,200,66,0.4);
-  display:none;align-items:center;justify-content:center;gap:12px;
-  font-size:11px;font-weight:600;color:var(--god-gold);letter-spacing:0.08em;
-  z-index:9999;text-transform:uppercase;
-}
-#god-banner span{font-weight:400;opacity:.7;text-transform:none;letter-spacing:0}
-body.god-mode #god-banner{display:flex}
-body.god-mode{--god-banner-h:36px}
-body:not(.god-mode){--god-banner-h:0px}
-/* ── LAYOUT ── */
-#app{
-  display:grid;
-  grid-template-columns:var(--sidebar-w) 1fr;
-  grid-template-rows:calc(var(--god-banner-h) + var(--topbar-h) + var(--intel-h)) 1fr;
-  height:100vh;
-  padding-top:var(--god-banner-h);
-  transition:padding-top .2s;
-}
-#sidebar{
-  grid-row:1/3;grid-column:1;
-  background:var(--bg-panel);
-  border-right:1px solid var(--border);
-  display:flex;flex-direction:column;
-  overflow:hidden;
-  padding-top:calc(var(--topbar-h) + var(--intel-h));
-  position:fixed;
-  top:var(--god-banner-h);
-  left:0;bottom:0;width:var(--sidebar-w);
-  z-index:100;
-  transition:top .2s;
-}
-#topbar{
-  position:fixed;
-  top:var(--god-banner-h);left:var(--sidebar-w);right:0;
-  height:var(--topbar-h);
-  background:var(--bg-panel);
-  border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:12px;padding:0 20px;
-  z-index:90;transition:top .2s,left .2s;
-}
-#intel-bar{
-  position:fixed;
-  top:calc(var(--god-banner-h) + var(--topbar-h));
-  left:var(--sidebar-w);right:0;height:var(--intel-h);
-  background:rgba(4,8,20,0.97);
-  border-bottom:1px solid var(--border);
-  display:flex;align-items:center;padding:0 20px;gap:12px;
-  z-index:89;transition:top .2s,left .2s;
-}
-#main{
-  margin-left:var(--sidebar-w);
-  margin-top:calc(var(--topbar-h) + var(--intel-h));
-  height:calc(100vh - var(--god-banner-h) - var(--topbar-h) - var(--intel-h));
-  overflow-y:auto;
-  padding:24px;
-  transition:margin .2s;
-}
-/* ── SIDEBAR NAV ── */
-.sidebar-logo{
-  padding:16px 16px 12px;
-  border-bottom:1px solid var(--border);
-  margin-bottom:8px;
-}
-.sidebar-logo .af-logo{
-  font-size:16px;font-weight:800;letter-spacing:-.5px;
-  background:linear-gradient(135deg,var(--blue),var(--cyan));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-}
-.sidebar-logo .af-sub{font-size:10px;color:var(--text-muted);margin-top:2px;letter-spacing:.05em}
-.nav-section{padding:0 8px;margin-bottom:4px}
-.nav-label{font-size:9px;font-weight:700;letter-spacing:.12em;color:var(--text-muted);padding:8px 8px 4px;text-transform:uppercase}
-.nav-item{
-  display:flex;align-items:center;gap:10px;
-  padding:8px 10px;border-radius:var(--radius-sm);
-  cursor:pointer;color:var(--text-secondary);
-  font-size:12px;font-weight:500;
-  transition:all .15s;margin-bottom:1px;
-  user-select:none;
-}
-.nav-item:hover{background:rgba(47,182,255,0.06);color:var(--text-primary)}
-.nav-item.active{background:rgba(47,182,255,0.12);color:var(--blue)}
-.nav-item .nav-icon{font-size:14px;width:18px;text-align:center;flex-shrink:0}
-.nav-item .nav-badge{
-  margin-left:auto;font-size:10px;font-weight:700;
-  background:var(--red);color:#fff;
-  padding:1px 5px;border-radius:10px;min-width:18px;text-align:center;
-}
-.nav-item .nav-badge.audit{background:var(--amber)}
-.sidebar-footer{
-  margin-top:auto;padding:12px;
-  border-top:1px solid var(--border);
-}
-.god-mode-toggle{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 10px;border-radius:var(--radius-sm);
-  cursor:pointer;font-size:11px;font-weight:600;
-  border:1px solid rgba(245,200,66,0.2);
-  color:rgba(245,200,66,0.6);
-  transition:all .15s;
-}
-.god-mode-toggle:hover{border-color:var(--god-gold);color:var(--god-gold);background:var(--god-gold-dim)}
-body.god-mode .god-mode-toggle{border-color:var(--god-gold);color:var(--god-gold);background:var(--god-gold-dim)}
-.god-mode-toggle .toggle-dot{
-  width:24px;height:13px;border-radius:7px;
-  background:rgba(245,200,66,0.2);
-  position:relative;transition:background .2s;flex-shrink:0;
-}
-.god-mode-toggle .toggle-dot::after{
-  content:'';position:absolute;top:2px;left:2px;
-  width:9px;height:9px;border-radius:50%;
-  background:rgba(245,200,66,0.5);
-  transition:left .2s,background .2s;
-}
-body.god-mode .god-mode-toggle .toggle-dot{background:rgba(245,200,66,0.3)}
-body.god-mode .god-mode-toggle .toggle-dot::after{left:13px;background:var(--god-gold)}
-/* ── TOPBAR ── */
-.topbar-brand{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-secondary)}
-.topbar-scope{
-  display:flex;gap:4px;margin-left:8px;
-}
-.scope-btn{
-  padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;
-  letter-spacing:.05em;cursor:pointer;border:1px solid transparent;
-  transition:all .15s;
-}
-.scope-btn[data-scope="global"]{color:var(--blue)}
-.scope-btn[data-scope="global"].active{background:rgba(47,182,255,0.12);border-color:rgba(47,182,255,0.3)}
-.scope-btn[data-scope="bookaboost"]{color:var(--brand-bb)}
-.scope-btn[data-scope="bookaboost"].active{background:rgba(74,158,255,0.12);border-color:rgba(74,158,255,0.3)}
-.scope-btn[data-scope="evosys"]{color:var(--brand-ev)}
-.scope-btn[data-scope="evosys"].active{background:rgba(8,124,255,0.12);border-color:rgba(8,124,255,0.3)}
-.scope-btn[data-scope="harmony"]{color:var(--brand-hh);opacity:.5}
-.scope-btn[data-scope="harmony"].active{background:rgba(255,124,71,0.12);border-color:rgba(255,124,71,0.3);opacity:1}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
-.topbar-status{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-muted)}
-.status-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}
-.status-dot.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
-.topbar-time{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted)}
-.topbar-avatar{
-  width:28px;height:28px;border-radius:50%;
-  background:linear-gradient(135deg,var(--blue),var(--purple));
-  display:flex;align-items:center;justify-content:center;
-  font-size:11px;font-weight:700;cursor:pointer;
-}
-/* ── INTEL BAR ── */
-.intel-icon{font-size:14px;color:var(--blue);opacity:.6}
-#intel-input{
-  flex:1;background:transparent;border:none;outline:none;
-  color:var(--text-primary);font-size:13px;font-family:'Inter',sans-serif;
-}
-#intel-input::placeholder{color:var(--text-muted)}
-.intel-hint{font-size:10px;color:var(--text-muted);white-space:nowrap;font-family:'JetBrains Mono',monospace}
-.intel-kbd{
-  padding:2px 6px;border-radius:4px;
-  background:rgba(255,255,255,0.05);border:1px solid var(--border);
-  font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);
-}
-/* ── SCREENS ── */
+::-webkit-scrollbar-thumb{background:rgba(47,182,255,0.18);border-radius:2px}
+#banner{position:fixed;top:0;left:0;right:0;height:36px;background:linear-gradient(90deg,rgba(245,200,66,0.15),rgba(245,200,66,0.07),rgba(245,200,66,0.15));border-bottom:1px solid rgba(245,200,66,0.35);display:none;align-items:center;justify-content:center;gap:10px;font-size:11px;font-weight:600;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;z-index:9999}
+#banner span{font-weight:400;opacity:.65;text-transform:none;letter-spacing:0}
+body.god #banner{display:flex}
+#sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-w);background:var(--bg-panel);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100;overflow:hidden;transition:top .2s}
+body.god #sidebar{top:36px}
+#topbar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:var(--top-h);background:var(--bg-panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 20px;z-index:90;transition:top .2s}
+body.god #topbar{top:36px}
+#intel{position:fixed;top:var(--top-h);left:var(--sidebar-w);right:0;height:var(--intel-h);background:rgba(3,6,16,0.98);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:10px;z-index:89;transition:top .2s}
+body.god #intel{top:calc(36px + var(--top-h))}
+#main{margin-left:var(--sidebar-w);margin-top:calc(var(--top-h) + var(--intel-h));height:calc(100vh - var(--top-h) - var(--intel-h));overflow-y:auto;padding:24px;transition:margin-top .2s,height .2s}
+body.god #main{margin-top:calc(36px + var(--top-h) + var(--intel-h));height:calc(100vh - 36px - var(--top-h) - var(--intel-h))}
+.sb-logo{padding:14px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.sb-logo .mark{font-size:15px;font-weight:800;letter-spacing:-.5px;background:linear-gradient(135deg,var(--blue),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sb-logo .sub{font-size:10px;color:var(--text-3);margin-top:1px;letter-spacing:.04em}
+.sb-scope{padding:8px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+.scope-lbl{font-size:9px;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase;padding:0 4px;margin-bottom:4px}
+.scope-btn{padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:500;color:var(--text-2);transition:all .15s;border:1px solid transparent;display:flex;align-items:center}
+.scope-btn:hover{background:var(--bg-hover);color:var(--text)}
+.scope-btn.active{background:rgba(47,182,255,0.1);border-color:var(--border-md);color:var(--blue)}
+.scope-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;background:var(--text-3);flex-shrink:0}
+.scope-btn.active .scope-dot{background:var(--blue)}
+.sb-nav{flex:1;overflow-y:auto;padding:8px}
+.nav-sec-lbl{font-size:9px;color:var(--text-3);letter-spacing:.1em;text-transform:uppercase;padding:8px 8px 4px;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;cursor:pointer;color:var(--text-2);font-size:12.5px;font-weight:500;transition:all .12s;margin-bottom:1px;border:1px solid transparent}
+.nav-item:hover{background:var(--bg-hover);color:var(--text)}
+.nav-item.active{background:rgba(47,182,255,0.1);border-color:var(--border-md);color:var(--blue)}
+.nav-icon{font-size:14px;width:20px;text-align:center;flex-shrink:0}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:10px;display:none}
+.nav-badge.show{display:inline}
+.sb-foot{padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0}
+.sb-user strong{color:var(--gold);display:block;font-size:11.5px}
+.sb-user span{font-size:10.5px;color:var(--text-3)}
+.tb-title{font-size:14px;font-weight:700;letter-spacing:-.2px}
+.tb-spacer{flex:1}
+.tb-clock{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-2);background:rgba(47,182,255,0.06);padding:4px 10px;border-radius:6px;border:1px solid var(--border)}
+.tb-god-badge{background:var(--gold-dim);border:1px solid rgba(245,200,66,0.3);color:var(--gold);font-size:10px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.06em;cursor:pointer;transition:all .15s}
+.tb-god-badge:hover{background:rgba(245,200,66,0.2)}
+.intel-prefix{font-size:10px;color:var(--text-3);font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.intel-input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;caret-color:var(--blue)}
+.intel-input::placeholder{color:var(--text-3)}
+.intel-hint{font-size:10px;color:var(--text-3);white-space:nowrap}
+.intel-div{width:1px;height:20px;background:var(--border)}
 .screen{display:none}
 .screen.active{display:block}
-.screen-header{
-  display:flex;align-items:center;gap:12px;margin-bottom:24px;
-}
-.screen-title{font-size:20px;font-weight:700;letter-spacing:-.3px}
-.screen-sub{font-size:12px;color:var(--text-secondary);margin-top:2px}
-.screen-actions{margin-left:auto;display:flex;gap:8px}
-/* ── BUTTONS ── */
-.btn{
-  display:inline-flex;align-items:center;gap:6px;
-  padding:7px 14px;border-radius:var(--radius-sm);
-  font-size:12px;font-weight:600;cursor:pointer;
-  border:1px solid transparent;transition:all .15s;
-  font-family:'Inter',sans-serif;
-}
-.btn-primary{background:rgba(47,182,255,0.15);border-color:rgba(47,182,255,0.35);color:var(--blue)}
-.btn-primary:hover{background:rgba(47,182,255,0.25);border-color:var(--blue)}
-.btn-ghost{background:transparent;border-color:var(--border);color:var(--text-secondary)}
-.btn-ghost:hover{border-color:var(--border-strong);color:var(--text-primary)}
-.btn-danger{background:rgba(255,77,126,0.1);border-color:rgba(255,77,126,0.3);color:var(--red)}
-.btn-danger:hover{background:rgba(255,77,126,0.2);border-color:var(--red)}
-.btn-gold{background:var(--god-gold-dim);border-color:rgba(245,200,66,0.3);color:var(--god-gold)}
-.btn-gold:hover{background:rgba(245,200,66,0.2);border-color:var(--god-gold)}
-.btn-sm{padding:4px 10px;font-size:11px}
-.btn-xs{padding:2px 7px;font-size:10px;gap:4px}
-/* ── CARDS ── */
-.card{
-  background:var(--bg-card);border:1px solid var(--border);
-  border-radius:var(--radius);padding:16px;
-}
-.card-header{
-  display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:12px;
-}
-.card-title{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-secondary);text-transform:uppercase}
-/* ── KPI GRID ── */
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px}
-.kpi-card{
-  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:14px 16px;cursor:pointer;transition:border-color .15s;
-}
-.kpi-card:hover{border-color:var(--border-strong)}
-.kpi-label{font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px}
-.kpi-value{font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1}
-.kpi-delta{font-size:10px;margin-top:4px;color:var(--text-muted)}
+.sh{display:flex;align-items:flex-start;margin-bottom:20px;gap:12px}
+.sh-info{flex:1}
+.sh-title{font-size:18px;font-weight:700;letter-spacing:-.3px}
+.sh-sub{font-size:11.5px;color:var(--text-2);margin-top:2px}
+.sh-actions{display:flex;gap:8px;align-items:center;flex-shrink:0}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.card-sm{padding:12px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px 18px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi.blue::before{background:linear-gradient(90deg,var(--blue),transparent)}
+.kpi.green::before{background:linear-gradient(90deg,var(--green),transparent)}
+.kpi.amber::before{background:linear-gradient(90deg,var(--amber),transparent)}
+.kpi.gold::before{background:linear-gradient(90deg,var(--gold),transparent)}
+.kpi.purple::before{background:linear-gradient(90deg,var(--purple),transparent)}
+.kpi.red::before{background:linear-gradient(90deg,var(--red),transparent)}
+.kpi-label{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:6px}
+.kpi-value{font-size:26px;font-weight:800;letter-spacing:-.5px;font-family:'JetBrains Mono',monospace}
+.kpi-delta{font-size:11px;margin-top:4px}
 .kpi-delta.up{color:var(--green)}
-.kpi-delta.down{color:var(--red)}
-/* ── TABLES ── */
-.table-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse}
-thead th{
-  padding:8px 12px;text-align:left;
-  font-size:10px;font-weight:700;letter-spacing:.08em;
-  color:var(--text-muted);text-transform:uppercase;
-  border-bottom:1px solid var(--border);white-space:nowrap;
-}
-tbody tr{border-bottom:1px solid rgba(47,182,255,0.05);transition:background .1s;cursor:pointer}
-tbody tr:hover{background:rgba(47,182,255,0.04)}
-tbody td{padding:10px 12px;font-size:12px;color:var(--text-secondary)}
-tbody td:first-child{color:var(--text-primary);font-weight:500}
-/* ── BADGES ── */
-.badge{
-  display:inline-flex;align-items:center;gap:4px;
-  padding:2px 8px;border-radius:20px;
-  font-size:10px;font-weight:700;letter-spacing:.04em;
-}
-.badge-green{background:rgba(30,240,168,0.1);color:var(--green);border:1px solid rgba(30,240,168,0.2)}
-.badge-blue{background:rgba(47,182,255,0.1);color:var(--blue);border:1px solid rgba(47,182,255,0.2)}
-.badge-amber{background:rgba(255,178,56,0.1);color:var(--amber);border:1px solid rgba(255,178,56,0.2)}
-.badge-red{background:rgba(255,77,126,0.1);color:var(--red);border:1px solid rgba(255,77,126,0.2)}
-.badge-purple{background:rgba(157,109,255,0.1);color:var(--purple);border:1px solid rgba(157,109,255,0.2)}
-.badge-muted{background:rgba(120,150,200,0.08);color:var(--text-muted);border:1px solid var(--border)}
-/* ── TOAST ── */
-#toast-container{
-  position:fixed;bottom:24px;right:24px;
-  display:flex;flex-direction:column;gap:8px;z-index:9999;
-}
-.toast{
-  display:flex;align-items:center;gap:10px;
-  padding:10px 14px;border-radius:var(--radius-sm);
-  background:rgba(8,16,36,0.97);border:1px solid var(--border);
-  box-shadow:var(--shadow);min-width:260px;max-width:340px;
-  animation:toastIn .2s ease;
-}
-.toast-icon{font-size:14px;flex-shrink:0}
-.toast-body{flex:1}
-.toast-title{font-size:12px;font-weight:600;color:var(--text-primary)}
-.toast-msg{font-size:11px;color:var(--text-secondary)}
-.toast.success{border-color:rgba(30,240,168,0.3)}
-.toast.error{border-color:rgba(255,77,126,0.3)}
-.toast.warning{border-color:rgba(255,178,56,0.3)}
-@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
-/* ── DRAWER ── */
-#drawer-overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,0.5);
-  z-index:500;display:none;
-}
-#drawer-overlay.open{display:block}
-#drawer{
-  position:fixed;top:0;right:-480px;bottom:0;width:480px;
-  background:var(--bg-panel);border-left:1px solid var(--border);
-  z-index:501;transition:right .25s cubic-bezier(.4,0,.2,1);
-  display:flex;flex-direction:column;overflow:hidden;
-}
+.kpi-delta.flat{color:var(--text-3)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:7px;border:1px solid var(--border-md);background:rgba(47,182,255,0.08);color:var(--text);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit}
+.btn:hover{background:rgba(47,182,255,0.15);border-color:var(--blue);color:var(--blue)}
+.btn-primary{background:rgba(47,182,255,0.15);border-color:var(--blue);color:var(--blue)}
+.btn-primary:hover{background:rgba(47,182,255,0.25)}
+.btn-gold{background:var(--gold-dim);border-color:rgba(245,200,66,0.35);color:var(--gold)}
+.btn-gold:hover{background:rgba(245,200,66,0.2)}
+.btn-green{background:rgba(30,240,168,0.1);border-color:rgba(30,240,168,0.3);color:var(--green)}
+.btn-red{background:rgba(255,77,126,0.1);border-color:rgba(255,77,126,0.3);color:var(--red)}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-xs{padding:3px 8px;font-size:10px}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;padding:8px 12px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;font-weight:600;border-bottom:1px solid var(--border)}
+.tbl td{padding:10px 12px;border-bottom:1px solid rgba(47,182,255,0.05);font-size:12.5px;vertical-align:middle}
+.tbl tr:hover td{background:rgba(47,182,255,0.03)}
+.tbl tr:last-child td{border-bottom:none}
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;letter-spacing:.03em;border:1px solid transparent}
+.badge-active{background:rgba(30,240,168,0.1);color:var(--green);border-color:rgba(30,240,168,0.25)}
+.badge-trial{background:rgba(255,178,56,0.1);color:var(--amber);border-color:rgba(255,178,56,0.25)}
+.badge-inactive{background:rgba(120,150,200,0.08);color:var(--text-3);border-color:var(--border)}
+.badge-pro{background:rgba(47,182,255,0.1);color:var(--blue);border-color:rgba(47,182,255,0.25)}
+.badge-hot{background:rgba(255,77,126,0.1);color:var(--red);border-color:rgba(255,77,126,0.25)}
+.badge-warm{background:rgba(255,178,56,0.1);color:var(--amber);border-color:rgba(255,178,56,0.25)}
+.badge-cold{background:rgba(47,182,255,0.08);color:var(--blue);border-color:rgba(47,182,255,0.2)}
+.badge-booked{background:rgba(30,240,168,0.1);color:var(--green);border-color:rgba(30,240,168,0.25)}
+.badge-god{background:var(--gold-dim);color:var(--gold);border-color:rgba(245,200,66,0.3)}
+.badge-super{background:rgba(157,109,255,0.1);color:var(--purple);border-color:rgba(157,109,255,0.25)}
+.plat-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.plat-bb{background:#4a9eff}.plat-ev{background:#a855f7}.plat-hh{background:#f59e0b}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:500;display:none;backdrop-filter:blur(2px)}
+#drawer{position:fixed;top:0;right:-460px;width:460px;height:100%;background:var(--bg-panel);border-left:1px solid var(--border-md);z-index:501;display:flex;flex-direction:column;transition:right .25s cubic-bezier(.4,0,.2,1);overflow:hidden}
 #drawer.open{right:0}
-#drawer-header{
-  padding:16px 20px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:12px;flex-shrink:0;
-}
-#drawer-title{font-size:15px;font-weight:700}
-#drawer-close{
-  margin-left:auto;width:28px;height:28px;border-radius:6px;
-  background:transparent;border:1px solid var(--border);
-  color:var(--text-secondary);cursor:pointer;font-size:14px;
-  display:flex;align-items:center;justify-content:center;
-  transition:all .15s;
-}
-#drawer-close:hover{background:rgba(255,255,255,0.05);color:var(--text-primary)}
-#drawer-body{flex:1;overflow-y:auto;padding:20px}
-/* ── FORM ELEMENTS ── */
-.form-group{margin-bottom:14px}
-.form-label{display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px}
-.form-input,.form-select,.form-textarea{
-  width:100%;background:rgba(4,8,20,0.8);
-  border:1px solid var(--border);border-radius:var(--radius-sm);
-  color:var(--text-primary);font-family:'Inter',sans-serif;font-size:13px;
-  padding:8px 12px;outline:none;transition:border-color .15s;
-}
-.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:rgba(47,182,255,0.4)}
-.form-select{cursor:pointer}
-.form-textarea{resize:vertical;min-height:80px;line-height:1.5}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-/* ── TABS ── */
-.tab-bar{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0}
-.tab-btn{
-  padding:7px 14px;font-size:12px;font-weight:600;
-  cursor:pointer;color:var(--text-secondary);
-  border-bottom:2px solid transparent;margin-bottom:-1px;
-  transition:all .15s;
-}
-.tab-btn:hover{color:var(--text-primary)}
-.tab-btn.active{color:var(--blue);border-bottom-color:var(--blue)}
-.tab-panel{display:none}
-.tab-panel.active{display:block}
-/* ── PROGRESS BAR ── */
-.progress-bar{height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
-.progress-fill{height:100%;border-radius:2px;transition:width .4s ease}
-/* ── GRID LAYOUTS ── */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
-.grid-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px}
-@media(max-width:1100px){.grid-4{grid-template-columns:1fr 1fr}}
-@media(max-width:900px){.grid-3{grid-template-columns:1fr 1fr}.grid-2{grid-template-columns:1fr}}
-/* ── SEARCH / FILTER BAR ── */
-.filter-bar{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
-.filter-search{
-  flex:1;min-width:200px;
-  display:flex;align-items:center;gap:8px;
-  background:rgba(4,8,20,0.8);border:1px solid var(--border);
-  border-radius:var(--radius-sm);padding:6px 12px;
-}
-.filter-search input{
-  background:transparent;border:none;outline:none;
-  color:var(--text-primary);font-family:'Inter',sans-serif;font-size:12px;flex:1;
-}
-.filter-search input::placeholder{color:var(--text-muted)}
-/* ── PIPELINE / KANBAN ── */
-.kanban-board{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;min-height:400px}
-.kanban-col{background:rgba(4,8,20,0.5);border:1px solid var(--border);border-radius:var(--radius);padding:12px}
-.kanban-col-header{
-  display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:10px;
-}
-.kanban-col-title{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
-.kanban-count{
-  font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;
-  background:rgba(255,255,255,0.07);color:var(--text-muted);
-}
-.kanban-card{
-  background:var(--bg-card);border:1px solid var(--border);
-  border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;
-  cursor:pointer;transition:border-color .15s;
-}
-.kanban-card:hover{border-color:var(--border-strong)}
-.kanban-card-name{font-size:12px;font-weight:600;margin-bottom:4px}
-.kanban-card-meta{font-size:10px;color:var(--text-muted)}
-/* ── SLIDER ── */
-.slider-wrap{margin-bottom:14px}
-.slider-header{display:flex;justify-content:space-between;margin-bottom:6px}
-.slider-label{font-size:11px;font-weight:600;color:var(--text-secondary)}
-.slider-val{font-size:12px;font-weight:700;color:var(--blue);font-family:'JetBrains Mono',monospace}
-input[type=range]{
-  width:100%;height:4px;
-  -webkit-appearance:none;appearance:none;
-  background:rgba(47,182,255,0.15);border-radius:2px;cursor:pointer;
-}
-input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
-  background:var(--blue);border:2px solid var(--bg-deep);
-  box-shadow:0 0 6px rgba(47,182,255,0.5);
-}
-/* ── SVG CHARTS ── */
-.chart-area{background:rgba(4,8,20,0.4);border-radius:var(--radius-sm);overflow:hidden}
-/* ── STATUS INDICATORS ── */
-.status-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
-.status-row:last-child{border-bottom:none}
-.status-icon{font-size:16px;width:24px;text-align:center}
-.status-name{font-size:12px;font-weight:600;flex:1}
-.status-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px}
-.status-badge.operational{background:rgba(30,240,168,0.1);color:var(--green);border:1px solid rgba(30,240,168,0.2)}
-.status-badge.degraded{background:rgba(255,178,56,0.1);color:var(--amber);border:1px solid rgba(255,178,56,0.2)}
-.status-badge.down{background:rgba(255,77,126,0.1);color:var(--red);border:1px solid rgba(255,77,126,0.2)}
-.status-uptime{font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
-/* ── CONVERSATION ENGINE ── */
-.cadence-layout{display:grid;grid-template-columns:260px 1fr;gap:16px;min-height:500px}
-.cadence-list{background:rgba(4,8,20,0.5);border:1px solid var(--border);border-radius:var(--radius);padding:12px;overflow-y:auto}
-.cadence-item{
-  padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;
-  border:1px solid transparent;margin-bottom:6px;transition:all .15s;
-}
-.cadence-item:hover{background:rgba(47,182,255,0.05);border-color:var(--border)}
-.cadence-item.selected{background:rgba(47,182,255,0.1);border-color:rgba(47,182,255,0.3)}
-.cadence-name{font-size:12px;font-weight:600;margin-bottom:3px}
-.cadence-meta{font-size:10px;color:var(--text-muted)}
-.touch-row{
-  display:flex;align-items:center;gap:10px;
-  padding:10px 12px;background:rgba(4,8,20,0.5);
-  border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;
-}
-.touch-day{font-size:11px;font-weight:700;color:var(--blue);width:50px;flex-shrink:0}
-.touch-channel{font-size:11px;font-weight:600;flex:1}
-.touch-preview{font-size:10px;color:var(--text-muted);flex:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.touch-del{cursor:pointer;color:var(--red);opacity:.5;font-size:12px;transition:opacity .15s;padding:4px}
-.touch-del:hover{opacity:1}
-/* ── SUPER ADMINS ── */
-.god-account-card{
-  background:linear-gradient(135deg,rgba(245,200,66,0.08),rgba(245,200,66,0.03));
-  border:1px solid rgba(245,200,66,0.2);border-radius:var(--radius);padding:20px;
-  margin-bottom:20px;display:flex;align-items:center;gap:16px;
-}
-.god-avatar{
-  width:48px;height:48px;border-radius:50%;
-  background:linear-gradient(135deg,var(--god-gold),rgba(245,200,66,0.4));
-  display:flex;align-items:center;justify-content:center;
-  font-size:20px;font-weight:800;color:var(--bg-deep);
-  flex-shrink:0;
-}
-.god-info .god-name{font-size:16px;font-weight:700;color:var(--god-gold)}
-.god-info .god-email{font-size:11px;color:rgba(245,200,66,0.6);margin-top:2px}
-.god-info .god-role{
-  display:inline-flex;margin-top:6px;
-  padding:2px 8px;border-radius:20px;
-  font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
-  background:rgba(245,200,66,0.15);color:var(--god-gold);border:1px solid rgba(245,200,66,0.3);
-}
-.perm-chip{
-  display:inline-flex;align-items:center;padding:3px 8px;
-  border-radius:20px;font-size:9px;font-weight:700;letter-spacing:.04em;
-  background:rgba(47,182,255,0.08);color:var(--blue);border:1px solid rgba(47,182,255,0.15);
-  margin:2px;
-}
-/* ── AUDIT LOG ── */
-.audit-row{
-  display:flex;gap:12px;padding:10px 0;
-  border-bottom:1px solid rgba(47,182,255,0.05);
-  font-size:11px;align-items:flex-start;
-}
-.audit-ts{
-  color:var(--text-muted);font-family:'JetBrains Mono',monospace;
-  font-size:10px;white-space:nowrap;flex-shrink:0;width:140px;padding-top:2px;
-}
-.audit-action{
-  font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;
-  flex-shrink:0;letter-spacing:.04em;
-}
-.audit-target{color:var(--text-primary);font-weight:500;flex:1}
-.audit-scope{color:var(--text-muted);font-size:10px;white-space:nowrap}
-/* ── MISC UTILITY ── */
-.text-blue{color:var(--blue)}
-.text-green{color:var(--green)}
-.text-amber{color:var(--amber)}
-.text-red{color:var(--red)}
-.text-muted{color:var(--text-muted)}
+.dh{padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0}
+.dh-title{font-size:15px;font-weight:700;flex:1}
+.dh-close{background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-2);cursor:pointer;padding:5px 8px;font-size:13px;transition:all .12s}
+.dh-close:hover{border-color:var(--red);color:var(--red)}
+.db{flex:1;overflow-y:auto;padding:20px 24px}
+.df{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0}
+.fg{margin-bottom:16px}
+.fl{display:block;font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:6px;letter-spacing:.02em}
+.fi,.fs,.ft{width:100%;background:rgba(6,12,28,0.8);border:1px solid var(--border-md);border-radius:7px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;outline:none;transition:border .15s}
+.fi:focus,.fs:focus,.ft:focus{border-color:var(--blue)}
+.ft{min-height:80px;resize:vertical}
+.fs option{background:#0a1525}
+.fr{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.fh{font-size:10.5px;color:var(--text-3);margin-top:4px}
+.dq-item{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:rgba(8,16,36,0.7);margin-bottom:8px;cursor:pointer;transition:all .15s}
+.dq-item:hover{border-color:var(--border-md);background:var(--bg-hover)}
+.dq-item.urgent{border-color:rgba(255,77,126,0.3);background:rgba(255,77,126,0.05)}
+.dq-item.warn{border-color:rgba(255,178,56,0.25);background:rgba(255,178,56,0.04)}
+.dq-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dq-dot.red{background:var(--red);box-shadow:0 0 6px rgba(255,77,126,0.5)}
+.dq-dot.amber{background:var(--amber);box-shadow:0 0 6px rgba(255,178,56,0.5)}
+.dq-dot.blue{background:var(--blue)}
+.dq-text{flex:1;font-size:12.5px}
+.dq-sub{font-size:11px;color:var(--text-3)}
+.dq-cta{font-size:10px;color:var(--blue);font-weight:600;white-space:nowrap}
+.wl-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;border:1px solid var(--border);background:rgba(8,16,36,0.7);margin-bottom:6px}
+.wl-name{flex:1;font-size:12.5px;font-weight:500}
+.wl-stat{text-align:right;font-size:12px}
+.wl-stat strong{display:block;font-family:'JetBrains Mono',monospace}
+.auto-strip{display:flex;gap:8px;align-items:center;padding:10px 14px;background:rgba(30,240,168,0.04);border:1px solid rgba(30,240,168,0.12);border-radius:8px;margin-bottom:20px;flex-wrap:wrap}
+.asl{font-size:10px;color:var(--green);font-weight:700;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+.at{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:rgba(6,12,28,0.8);font-size:11px;cursor:pointer;color:var(--text-2);transition:all .15s}
+.at.on{background:rgba(30,240,168,0.1);border-color:rgba(30,240,168,0.25);color:var(--green)}
+.at .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3)}
+.at.on .dot{background:var(--green);box-shadow:0 0 5px rgba(30,240,168,0.6)}
+.pipe-board{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;min-height:400px}
+.pipe-col{background:rgba(6,12,28,0.6);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.pipe-col-h{padding:10px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between}
+.pipe-cnt{background:rgba(47,182,255,0.15);border-radius:10px;padding:1px 7px;font-size:10px}
+.pipe-cards{padding:8px;display:flex;flex-direction:column;gap:6px;min-height:300px}
+.pipe-card{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:9px 11px;cursor:pointer;transition:all .12s}
+.pipe-card:hover{border-color:var(--border-md);transform:translateY(-1px)}
+.pipe-card-n{font-size:12px;font-weight:600;margin-bottom:3px}
+.pipe-card-m{font-size:10.5px;color:var(--text-3)}
+.health-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:8px;border:1px solid var(--border);margin-bottom:8px}
+.hdot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.hdot.ok{background:var(--green);box-shadow:0 0 6px rgba(30,240,168,0.5)}
+.hdot.warn{background:var(--amber);box-shadow:0 0 6px rgba(255,178,56,0.5)}
+.hdot.down{background:var(--red)}
+.hname{flex:1;font-weight:500}
+.hstat{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.hstat.ok{color:var(--green)}.hstat.warn{color:var(--amber)}.hstat.down{color:var(--red)}
+#toast{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:rgba(6,14,32,0.97);border:1px solid var(--border-md);border-radius:10px;padding:12px 16px;min-width:280px;max-width:360px;pointer-events:all;animation:sIn .2s ease}
+.toast.success{border-color:rgba(30,240,168,0.4)}
+.toast.warning{border-color:rgba(255,178,56,0.4)}
+.toast.error{border-color:rgba(255,77,126,0.4)}
+.toast-t{font-weight:700;font-size:12.5px;margin-bottom:2px}
+.toast-m{font-size:11.5px;color:var(--text-2)}
+@keyframes sIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+.sep{height:1px;background:var(--border);margin:16px 0}
 .mono{font-family:'JetBrains Mono',monospace}
-.mt-8{margin-top:8px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}.mt-24{margin-top:24px}
-.mb-8{margin-bottom:8px}.mb-12{margin-bottom:12px}.mb-16{margin-bottom:16px}
-.flex{display:flex}.flex-center{display:flex;align-items:center}.gap-8{gap:8px}.gap-12{gap:12px}
-.ml-auto{margin-left:auto}
-.divider{border:none;border-top:1px solid var(--border);margin:16px 0}
-.empty-state{text-align:center;padding:40px;color:var(--text-muted)}
-.empty-state-icon{font-size:32px;margin-bottom:8px;opacity:.4}
+.muted{color:var(--text-3)}
+.t-blue{color:var(--blue)}.t-green{color:var(--green)}.t-amber{color:var(--amber)}.t-red{color:var(--red)}.t-gold{color:var(--gold)}
+.mt8{margin-top:8px}.mt16{margin-top:16px}.mb16{margin-bottom:16px}
+.sec-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-3);margin-bottom:10px}
+.empty{text-align:center;padding:40px 20px;color:var(--text-3);font-size:13px}
+.empty .ico{font-size:32px;margin-bottom:8px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:12px;border:1px solid var(--border);font-size:11px;color:var(--text-2);background:rgba(8,16,36,0.7)}
+.fc-big{font-size:36px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--green);letter-spacing:-1px}
 </style>
 </head>
 <body>
-<!-- GOD MODE BANNER -->
-<div id="god-banner">
-  ⚡ GOD MODE ACTIVE — ADVISORFLOW GLOBAL COMMAND
-  <span>All platform actions are logged and audited</span>
-</div>
-<!-- SIDEBAR -->
+<div id="banner">⚡ GOD ADMIN MODE <span>· Full system access · Mike Simmons · AdvisorFlow</span></div>
+
 <div id="sidebar">
-  <div class="sidebar-logo">
-    <div class="af-logo">⚡ AdvisorFlow</div>
-    <div class="af-sub">COMMAND CENTER V3</div>
-  </div>
-  <div id="sidebar-nav"></div>
-  <div class="sidebar-footer">
-    <div class="god-mode-toggle" onclick="toggleGodMode()">
-      <div class="toggle-dot"></div>
-      <span id="god-mode-label">God Mode</span>
-    </div>
-  </div>
+  <div class="sb-logo"><div class="mark">AdvisorFlow</div><div class="sub">COMMAND CENTER V4</div></div>
+  <div class="sb-scope" id="sb-scope"></div>
+  <div class="sb-nav" id="sb-nav"></div>
+  <div class="sb-foot"><div class="sb-user"><strong>⚡ GOD ADMIN</strong><span>Mike Simmons · Full Access</span></div></div>
 </div>
-<!-- TOPBAR -->
+
 <div id="topbar">
-  <div class="topbar-brand">ADVISORFLOW</div>
-  <div class="topbar-scope" id="scope-bar"></div>
-  <div class="topbar-right">
-    <div class="topbar-status">
-      <div class="status-dot warn" id="sys-dot"></div>
-      <span id="sys-label">SMS Degraded</span>
-    </div>
-    <div class="topbar-time" id="clock">--:--:--</div>
-    <div class="topbar-avatar" title="Mike Simmons / god_admin">MS</div>
-  </div>
+  <div class="tb-title" id="tb-title">Command Center</div>
+  <div class="tb-spacer"></div>
+  <div class="tb-clock mono" id="clock">--:--:--</div>
+  <div class="tb-god-badge" onclick="toggleGodMode()">⚡ GOD MODE</div>
 </div>
-<!-- INTEL BAR -->
-<div id="intel-bar">
-  <span class="intel-icon">🔍</span>
-  <input id="intel-input" type="text" placeholder="Ask anything — navigate, query, act… (Cmd+K)" autocomplete="off">
-  <span class="intel-hint"><span class="intel-kbd">Cmd+K</span></span>
+
+<div id="intel">
+  <span class="intel-prefix">⌘ INTEL</span>
+  <div class="intel-div"></div>
+  <input class="intel-input" id="intel-input" placeholder="Navigate or query: 'orgs' · 'leads hot' · 'new org' · 'revenue' …" autocomplete="off" onkeydown="handleIntelKey(event)">
+  <span class="intel-hint">↵ execute · esc clear</span>
 </div>
-<!-- MAIN CONTENT -->
+
 <div id="main">
-  <!-- ═══════════════════════════════════ COMMAND ═══════════════════════════════════ -->
-  <div class="screen" id="screen-command">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Command Center</div>
-        <div class="screen-sub">AdvisorFlow global intelligence dashboard · <span id="cmd-date"></span></div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="ownerAction('refresh','command','global')">↻ Refresh</button>
-        <button class="btn btn-primary btn-sm" onclick="ownerAction('navigate','orgs','global')">+ New Org</button>
-      </div>
-    </div>
-    <!-- KPIs -->
-    <div class="kpi-grid" id="cmd-kpi-grid"></div>
-    <div class="grid-2">
-      <!-- Platform Health -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Platform Overview</div>
-          <button class="btn btn-ghost btn-xs" onclick="ownerAction('navigate','brands','global')">View All →</button>
-        </div>
-        <div id="platform-overview"></div>
-      </div>
-      <!-- Recent Activity -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Recent Activity</div>
-          <button class="btn btn-ghost btn-xs" onclick="ownerAction('navigate','audit','global')">Audit Log →</button>
-        </div>
-        <div id="recent-activity"></div>
-      </div>
-    </div>
-    <div class="mt-16 grid-2">
-      <!-- Top Orgs -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Top Organizations</div>
-          <button class="btn btn-ghost btn-xs" onclick="ownerAction('navigate','orgs','global')">Manage →</button>
-        </div>
-        <div id="cmd-top-orgs"></div>
-      </div>
-      <!-- System Status -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">System Status</div>
-          <button class="btn btn-ghost btn-xs" onclick="ownerAction('navigate','health','global')">Details →</button>
-        </div>
-        <div id="cmd-sys-status"></div>
-      </div>
+
+<!-- COMMAND CENTER -->
+<div class="screen" id="screen-command">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Command Center</div><div class="sh-sub">AdvisorFlow global intelligence · <span id="cmd-date"></span></div></div>
+    <div class="sh-actions">
+      <button class="btn btn-sm" onclick="loadRealData()">⟳ Refresh</button>
+      <button class="btn btn-gold btn-sm" onclick="openDrawer('control-center')">⚡ Control Center</button>
     </div>
   </div>
-  <!-- ═══════════════════════════════════ BRANDS ═══════════════════════════════════ -->
-  <div class="screen" id="screen-brands">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Brand Management</div>
-        <div class="screen-sub">AdvisorFlow platform architecture · multi-brand control</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-gold btn-sm" onclick="openDrawer('new-brand',{})">+ Register Platform</button>
-      </div>
-    </div>
-    <div id="brands-grid" class="grid-2"></div>
+  <div class="auto-strip">
+    <span class="asl">⚡ Automation</span>
+    <div class="at on" id="tog-ai" onclick="toggleAuto('ai')"><span class="dot"></span>AI Outreach</div>
+    <div class="at on" id="tog-sms" onclick="toggleAuto('sms')"><span class="dot"></span>SMS</div>
+    <div class="at on" id="tog-email" onclick="toggleAuto('email')"><span class="dot"></span>Email</div>
+    <div class="at" id="tog-pause" onclick="toggleAuto('pause')"><span class="dot"></span>Pause All</div>
+    <div class="tb-spacer"></div>
+    <span class="muted" style="font-size:10px">Global automation controls</span>
   </div>
-  <!-- ═══════════════════════════════════ ORGS ═══════════════════════════════════ -->
-  <div class="screen" id="screen-orgs">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Organizations</div>
-        <div class="screen-sub">Client account management across all platforms</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-primary btn-sm" onclick="openDrawer('new-org',{})">+ Create Org</button>
-      </div>
-    </div>
-    <div class="filter-bar">
-      <div class="filter-search">
-        <span>🔍</span>
-        <input type="text" id="org-search" placeholder="Search organizations…" oninput="renderOrgsTable()">
-      </div>
-      <select class="form-select" style="width:auto;padding:6px 10px" id="org-filter-platform" onchange="renderOrgsTable()">
-        <option value="">All Platforms</option>
-        <option value="bookaboost">BookaBoost</option>
-        <option value="evosys">EvoSys Pro</option>
-        <option value="harmony">Harmony Hustle</option>
-      </select>
-      <select class="form-select" style="width:auto;padding:6px 10px" id="org-filter-status" onchange="renderOrgsTable()">
-        <option value="">All Status</option>
-        <option value="active">Active</option>
-        <option value="trial">Trial</option>
-        <option value="churned">Churned</option>
-      </select>
-    </div>
-    <div class="card">
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Organization</th><th>Platform</th><th>Leads</th><th>MRR</th><th>Status</th><th>Actions</th>
-          </tr></thead>
-          <tbody id="orgs-tbody"></tbody>
-        </table>
-      </div>
-    </div>
+  <div class="grid-4 mb16" id="cmd-kpis"></div>
+  <div class="grid-2" style="gap:16px">
+    <div><div class="sec-lbl">🚨 Owner Decision Queue</div><div id="dq"></div></div>
+    <div><div class="sec-lbl">👁 Owner Watchlist</div><div id="wl"></div></div>
   </div>
-  <!-- ═══════════════════════════════════ LEAD INTELLIGENCE ═══════════════════════════════════ -->
-  <div class="screen" id="screen-leads">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Lead Intelligence</div>
-        <div class="screen-sub">847 leads across 3 organizations · real-time sync</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="ownerAction('export_leads','all','global',{format:'csv'})">⬇ Export CSV</button>
-        <button class="btn btn-primary btn-sm" onclick="openDrawer('import-leads',{})">+ Import</button>
-      </div>
-    </div>
-    <div class="filter-bar">
-      <div class="filter-search">
-        <span>🔍</span>
-        <input type="text" id="lead-search" placeholder="Search leads by name, org, source…" oninput="renderLeadsTable()">
-      </div>
-      <select class="form-select" style="width:auto;padding:6px 10px" id="lead-filter-platform" onchange="renderLeadsTable()">
-        <option value="">All Platforms</option>
-        <option value="bookaboost">BookaBoost</option>
-        <option value="evosys">EvoSys Pro</option>
-      </select>
-      <select class="form-select" style="width:auto;padding:6px 10px" id="lead-filter-tier" onchange="renderLeadsTable()">
-        <option value="">All Tiers</option>
-        <option value="hot">Hot</option>
-        <option value="warm">Warm</option>
-        <option value="cold">Cold</option>
-      </select>
-      <select class="form-select" style="width:auto;padding:6px 10px" id="lead-filter-status" onchange="renderLeadsTable()">
-        <option value="">All Status</option>
-        <option value="booked">Booked</option>
-        <option value="replied">Replied</option>
-        <option value="imported">Imported</option>
-      </select>
-    </div>
-    <div class="card">
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Name</th><th>Organization</th><th>Platform</th><th>Tier</th><th>Status</th><th>Source</th><th>Created</th><th>Actions</th>
-          </tr></thead>
-          <tbody id="leads-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ GROWTH INTELLIGENCE ═══════════════════════════════════ -->
-  <div class="screen" id="screen-growth">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Growth Intelligence</div>
-        <div class="screen-sub">Cross-platform acquisition analytics & channel performance</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="ownerAction('export_report','growth','global',{format:'pdf'})">⬇ Export Report</button>
-      </div>
-    </div>
-    <div class="kpi-grid" id="growth-kpis"></div>
-    <div class="grid-2 mb-16">
-      <div class="card">
-        <div class="card-header"><div class="card-title">Lead Source Breakdown</div></div>
-        <div id="source-chart"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">Tier Distribution</div></div>
-        <div id="tier-chart"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Channel Performance</div>
-        <div style="font-size:10px;color:var(--text-muted)">Last 30 days</div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Channel</th><th>Leads</th><th>Reply Rate</th><th>Book Rate</th><th>Conv Rate</th><th>Avg Value</th></tr></thead>
-          <tbody id="channel-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ PIPELINE ═══════════════════════════════════ -->
-  <div class="screen" id="screen-pipeline">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Pipeline Board</div>
-        <div class="screen-sub">Visual lead progression · drag-to-advance</div>
-      </div>
-      <div class="screen-actions">
-        <select class="form-select" style="width:auto;padding:6px 10px" id="pipeline-filter" onchange="renderPipeline()">
-          <option value="">All Platforms</option>
-          <option value="bookaboost">BookaBoost</option>
-          <option value="evosys">EvoSys Pro</option>
-        </select>
-      </div>
-    </div>
-    <div class="kanban-board" id="kanban-board"></div>
-  </div>
-  <!-- ═══════════════════════════════════ FORECASTING ═══════════════════════════════════ -->
-  <div class="screen" id="screen-forecasting">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Revenue Forecasting</div>
-        <div class="screen-sub">Dynamic 30/60/90-day projections · adjust sliders to model scenarios</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="resetForecasting()">↺ Reset Defaults</button>
-      </div>
-    </div>
-    <div class="grid-2">
-      <!-- Sliders -->
-      <div class="card">
-        <div class="card-header"><div class="card-title">Scenario Variables</div></div>
-        <div class="slider-wrap">
-          <div class="slider-header">
-            <span class="slider-label">Conversion Rate</span>
-            <span class="slider-val" id="fc-conv-display">22%</span>
-          </div>
-          <input type="range" id="fc-conv" min="5" max="60" value="22" oninput="updateSliderDisplay('fc-conv','%');calcForecasts()">
-        </div>
-        <div class="slider-wrap">
-          <div class="slider-header">
-            <span class="slider-label">Avg Deal Value</span>
-            <span class="slider-val" id="fc-deal-display">$2,400</span>
-          </div>
-          <input type="range" id="fc-deal" min="500" max="10000" step="100" value="2400" oninput="updateSliderDisplay('fc-deal','$');calcForecasts()">
-        </div>
-        <div class="slider-wrap">
-          <div class="slider-header">
-            <span class="slider-label">Leads / Month</span>
-            <span class="slider-val" id="fc-lpm-display">80</span>
-          </div>
-          <input type="range" id="fc-lpm" min="10" max="500" value="80" oninput="updateSliderDisplay('fc-lpm','');calcForecasts()">
-        </div>
-        <div class="slider-wrap">
-          <div class="slider-header">
-            <span class="slider-label">Sales Cycle (days)</span>
-            <span class="slider-val" id="fc-cycle-display">14d</span>
-          </div>
-          <input type="range" id="fc-cycle" min="1" max="90" value="14" oninput="updateSliderDisplay('fc-cycle','d');calcForecasts()">
-        </div>
-        <hr class="divider">
-        <div style="font-size:11px;color:var(--text-muted)">
-          Reply rate 34% · Booking rate 22% · Lag factor applied to 30-day
-        </div>
-      </div>
-      <!-- Projection Cards -->
-      <div>
-        <div id="forecast-cards" style="display:flex;flex-direction:column;gap:12px"></div>
-      </div>
-    </div>
-    <!-- Waterfall Chart -->
-    <div class="card mt-16">
-      <div class="card-header">
-        <div class="card-title">MRR Waterfall</div>
-        <div style="font-size:10px;color:var(--text-muted)">Projected growth curve</div>
-      </div>
-      <div class="chart-area" style="padding:16px">
-        <svg id="waterfall-svg" width="100%" height="160" viewBox="0 0 800 160" preserveAspectRatio="none"></svg>
-      </div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ REVENUE ═══════════════════════════════════ -->
-  <div class="screen" id="screen-revenue">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Revenue Dashboard</div>
-        <div class="screen-sub">MRR, ARR, and financial performance tracking</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="ownerAction('export_report','revenue','global',{format:'csv'})">⬇ Export</button>
-      </div>
-    </div>
-    <div class="kpi-grid" id="revenue-kpis"></div>
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header"><div class="card-title">MRR by Platform</div></div>
-        <div id="mrr-platform-chart"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">Revenue by Organization</div></div>
-        <div id="revenue-org-table"></div>
-      </div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ SYSTEM HEALTH ═══════════════════════════════════ -->
-  <div class="screen" id="screen-health">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">System Health</div>
-        <div class="screen-sub">Infrastructure status · API, database, messaging services</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="ownerAction('refresh','health','global')">↻ Refresh Status</button>
-      </div>
-    </div>
-    <div class="kpi-grid" id="health-kpis"></div>
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header"><div class="card-title">Service Status</div></div>
-        <div id="service-status-list"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">Recent Incidents</div></div>
-        <div id="incidents-list"></div>
-      </div>
-    </div>
-    <div class="card mt-16">
-      <div class="card-header"><div class="card-title">Deployment Info</div></div>
-      <div id="deploy-info"></div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ CONVERSATION ENGINE ═══════════════════════════════════ -->
-  <div class="screen" id="screen-conversation">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Conversation Engine</div>
-        <div class="screen-sub">AI-powered outreach cadences · SMS + Email automation</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-primary btn-sm" onclick="openDrawer('new-cadence',{})">+ New Cadence</button>
-      </div>
-    </div>
-    <div class="kpi-grid" id="conv-kpis"></div>
-    <div class="cadence-layout">
-      <!-- Cadence List -->
-      <div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Cadences</span>
-          <button class="btn btn-primary btn-xs" onclick="openDrawer('new-cadence',{})">+ New</button>
-        </div>
-        <div class="cadence-list" id="cadence-list"></div>
-      </div>
-      <!-- Cadence Editor -->
-      <div class="card" id="cadence-editor">
-        <div id="cadence-editor-empty" class="empty-state">
-          <div class="empty-state-icon">💬</div>
-          <div>Select a cadence to edit</div>
-        </div>
-        <div id="cadence-editor-content" style="display:none">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-            <div style="font-size:15px;font-weight:700" id="cadence-editor-name">Cadence Name</div>
-            <div id="cadence-editor-badge"></div>
-            <div class="ml-auto" style="display:flex;gap:8px">
-              <button class="btn btn-ghost btn-sm" onclick="saveCadence()">Save</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteCadence()">Delete</button>
-            </div>
-          </div>
-          <div class="tab-bar">
-            <div class="tab-btn active" onclick="setCadenceTab('sequence',this)">Touch Sequence</div>
-            <div class="tab-btn" onclick="setCadenceTab('templates',this)">Templates</div>
-            <div class="tab-btn" onclick="setCadenceTab('ai',this)">AI Controls</div>
-            <div class="tab-btn" onclick="setCadenceTab('analytics',this)">Analytics</div>
-          </div>
-          <!-- Tab: Touch Sequence -->
-          <div class="tab-panel active" id="cadence-tab-sequence">
-            <div id="touch-list"></div>
-            <button class="btn btn-ghost btn-sm mt-8" onclick="addTouch()">+ Add Touch</button>
-          </div>
-          <!-- Tab: Templates -->
-          <div class="tab-panel" id="cadence-tab-templates">
-            <div class="form-group">
-              <label class="form-label">SMS Template</label>
-              <textarea class="form-textarea" id="sms-template" rows="5" placeholder="Hey {first_name}, this is {advisor_name} from {org_name}…"></textarea>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-              <span style="font-size:10px;color:var(--text-muted);margin-right:4px">Merge vars:</span>
-              <span class="perm-chip" onclick="insertMergeVar('{first_name}')">{first_name}</span>
-              <span class="perm-chip" onclick="insertMergeVar('{last_name}')">{last_name}</span>
-              <span class="perm-chip" onclick="insertMergeVar('{org_name}')">{org_name}</span>
-              <span class="perm-chip" onclick="insertMergeVar('{advisor_name}')">{advisor_name}</span>
-              <span class="perm-chip" onclick="insertMergeVar('{booking_link}')">{booking_link}</span>
-            </div>
-            <div class="form-group mt-16">
-              <label class="form-label">Email Subject</label>
-              <input class="form-input" id="email-subject" type="text" placeholder="Following up, {first_name}">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Email Body</label>
-              <textarea class="form-textarea" id="email-body" rows="6" placeholder="Hi {first_name},&#10;&#10;I wanted to follow up…"></textarea>
-            </div>
-          </div>
-          <!-- Tab: AI Controls -->
-          <div class="tab-panel" id="cadence-tab-ai">
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">AI Tone</label>
-                <select class="form-select" id="ai-tone">
-                  <option value="professional">Professional</option>
-                  <option value="friendly">Friendly</option>
-                  <option value="urgent">Urgent</option>
-                  <option value="empathetic">Empathetic</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Urgency Level</label>
-                <select class="form-select" id="ai-urgency">
-                  <option value="low">Low</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Max Touches</label>
-              <input class="form-input" id="ai-max-touches" type="number" value="5" min="1" max="20">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-                <input type="checkbox" id="ai-auto-stop" checked style="accent-color:var(--blue)">
-                Auto-stop on reply
-              </label>
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-                <input type="checkbox" id="ai-smart-time" checked style="accent-color:var(--blue)">
-                Smart send-time optimization
-              </label>
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-                <input type="checkbox" id="ai-personalize" checked style="accent-color:var(--blue)">
-                AI personalization (name, source, context)
-              </label>
-            </div>
-          </div>
-          <!-- Tab: Analytics -->
-          <div class="tab-panel" id="cadence-tab-analytics">
-            <div class="grid-3 mb-16" id="cadence-analytics-kpis"></div>
-            <div class="card-title mb-8">Touch Breakdown</div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Touch #</th><th>Channel</th><th>Day</th><th>Sent</th><th>Opens</th><th>Replies</th></tr></thead>
-                <tbody id="touch-analytics-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ SUPER ADMINS ═══════════════════════════════════ -->
-  <div class="screen" id="screen-admins">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Super Admins</div>
-        <div class="screen-sub">Platform-level access control · permission matrix</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-primary btn-sm" onclick="openDrawer('invite-admin',{})">+ Invite Admin</button>
-      </div>
-    </div>
-    <!-- God Account Card -->
-    <div class="god-account-card">
-      <div class="god-avatar">MS</div>
-      <div class="god-info">
-        <div class="god-name">Mike Simmons</div>
-        <div class="god-email">simmonsmj242@gmail.com</div>
-        <div class="god-role">⚡ GOD ADMIN</div>
-      </div>
-      <div class="ml-auto" style="text-align:right">
-        <div style="font-size:10px;color:rgba(245,200,66,0.6);margin-bottom:6px">ALL PERMISSIONS</div>
-        <div>
-          <span class="perm-chip" style="background:rgba(245,200,66,0.1);color:var(--god-gold);border-color:rgba(245,200,66,0.2)">full_access</span>
-          <span class="perm-chip" style="background:rgba(245,200,66,0.1);color:var(--god-gold);border-color:rgba(245,200,66,0.2)">god_mode</span>
-          <span class="perm-chip" style="background:rgba(245,200,66,0.1);color:var(--god-gold);border-color:rgba(245,200,66,0.2)">cross_platform</span>
-        </div>
-      </div>
-    </div>
-    <!-- Platform Admins Table -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Platform Admins</div>
-        <div style="font-size:10px;color:var(--text-muted)"><span id="admin-count">0</span> admins across all platforms</div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Name</th><th>Email</th><th>Platform</th><th>Role</th><th>Permissions</th><th>Status</th><th>Actions</th>
-          </tr></thead>
-          <tbody id="admins-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-    <!-- Permission Matrix -->
-    <div class="card mt-16">
-      <div class="card-header"><div class="card-title">Permission Matrix</div></div>
-      <div id="perm-matrix"></div>
-    </div>
-  </div>
-  <!-- ═══════════════════════════════════ AUDIT LOG ═══════════════════════════════════ -->
-  <div class="screen" id="screen-audit">
-    <div class="screen-header">
-      <div>
-        <div class="screen-title">Audit Log</div>
-        <div class="screen-sub">Every owner action — logged, timestamped, immutable</div>
-      </div>
-      <div class="screen-actions">
-        <button class="btn btn-ghost btn-sm" onclick="ownerAction('export_audit','all','global',{format:'json'})">⬇ Export JSON</button>
-        <button class="btn btn-danger btn-sm" onclick="if(confirm('Clear audit log?'))STATE.actionLog=[];renderAuditLog()">🗑 Clear</button>
-      </div>
-    </div>
-    <div class="filter-bar">
-      <div class="filter-search">
-        <span>🔍</span>
-        <input type="text" id="audit-search" placeholder="Filter by action, target, scope…" oninput="renderAuditLog()">
-      </div>
-      <select class="form-select" style="width:auto;padding:6px 10px" id="audit-filter-type" onchange="renderAuditLog()">
-        <option value="">All Actions</option>
-        <option value="navigate">Navigate</option>
-        <option value="refresh">Refresh</option>
-        <option value="open_drawer">Drawer</option>
-        <option value="export_leads">Export</option>
-        <option value="create_org">Create</option>
-        <option value="intel_query">Intel Query</option>
-      </select>
-    </div>
-    <div class="card">
-      <div id="audit-log-list"></div>
-    </div>
-  </div>
-</div><!-- /main -->
-<!-- DRAWER -->
-<div id="drawer-overlay" onclick="closeDrawer()"></div>
-<div id="drawer">
-  <div id="drawer-header">
-    <div id="drawer-title">Drawer</div>
-    <button id="drawer-close" onclick="closeDrawer()">✕</button>
-  </div>
-  <div id="drawer-body"></div>
+  <div class="mt16"><div class="sec-lbl">📊 Platform Overview</div><div class="grid-3" id="plat-overview" style="gap:12px"></div></div>
 </div>
-<!-- TOASTS -->
-<div id="toast-container"></div>
+
+<!-- ORGANIZATIONS -->
+<div class="screen" id="screen-orgs">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Organizations</div><div class="sh-sub" id="orgs-sub">Client accounts across all platforms</div></div>
+    <div class="sh-actions">
+      <button class="btn btn-sm" onclick="exportOrgs()">⬇ Export</button>
+      <button class="btn btn-primary btn-sm" onclick="openDrawer('new-org')">+ New Org</button>
+    </div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl"><thead><tr><th>Organization</th><th>Platform</th><th>Plan</th><th>Leads</th><th>Users</th><th>MRR</th><th>Appts</th><th>Gen. Value</th><th>Status</th><th></th></tr></thead><tbody id="orgs-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- LEADS -->
+<div class="screen" id="screen-leads">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Lead Intelligence</div><div class="sh-sub" id="leads-sub">Cross-platform lead database</div></div>
+    <div class="sh-actions">
+      <select class="fs" id="lf-status" onchange="renderLeads()" style="width:120px;padding:5px 8px"><option value="">All Status</option><option value="imported">Imported</option><option value="contacted">Contacted</option><option value="replied">Replied</option><option value="booked">Booked</option></select>
+      <select class="fs" id="lf-tier" onchange="renderLeads()" style="width:100px;padding:5px 8px"><option value="">All Tiers</option><option value="hot">Hot</option><option value="warm">Warm</option><option value="cold">Cold</option></select>
+      <button class="btn btn-sm" onclick="exportLeads()">⬇ CSV</button>
+    </div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl"><thead><tr><th>Name</th><th>Org</th><th>Platform</th><th>Status</th><th>Tier</th><th>Source</th><th>Created</th></tr></thead><tbody id="leads-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- PIPELINE -->
+<div class="screen" id="screen-pipeline">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Pipeline Board</div><div class="sh-sub">Visual lead progression · <span id="pipe-total">0</span> leads</div></div>
+    <div class="sh-actions"><button class="btn btn-sm" onclick="exportLeads()">⬇ Export</button></div>
+  </div>
+  <div class="pipe-board" id="pipe-board"></div>
+</div>
+
+<!-- CONVERSATION -->
+<div class="screen" id="screen-conversation">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Conversation Engine</div><div class="sh-sub">AI-powered outreach cadences · SMS + Email</div></div>
+    <div class="sh-actions"><button class="btn btn-primary btn-sm" onclick="openDrawer('new-cadence')">+ New Cadence</button></div>
+  </div>
+  <div id="cadence-list"></div>
+</div>
+
+<!-- BRANDS -->
+<div class="screen" id="screen-brands">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Brand Management</div><div class="sh-sub">Platform architecture · multi-brand control</div></div>
+    <div class="sh-actions"><button class="btn btn-gold btn-sm" onclick="openDrawer('new-brand')">+ New Platform</button></div>
+  </div>
+  <div class="grid-3" id="brands-grid" style="gap:14px"></div>
+</div>
+
+<!-- FORECASTING -->
+<div class="screen" id="screen-forecasting">
+  <div class="sh"><div class="sh-info"><div class="sh-title">Revenue Forecasting</div><div class="sh-sub">Dynamic 30/60/90-day projections · adjust sliders to model scenarios</div></div></div>
+  <div class="grid-2" style="gap:20px">
+    <div class="card">
+      <div class="sec-lbl">Model Parameters</div>
+      <div class="mb16">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Conversion Rate</span><strong class="t-blue mono" id="sl-conv">22%</strong></div>
+        <input type="range" id="sl-conversion" min="5" max="60" value="22" oninput="updateForecast()" style="width:100%;accent-color:var(--blue)">
+      </div>
+      <div class="mb16">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Avg Deal Value</span><strong class="t-blue mono" id="sl-deal">$2,400</strong></div>
+        <input type="range" id="sl-deal-val" min="500" max="10000" step="100" value="2400" oninput="updateForecast()" style="width:100%;accent-color:var(--blue)">
+      </div>
+      <div class="mb16">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Leads / Month</span><strong class="t-blue mono" id="sl-leads">80</strong></div>
+        <input type="range" id="sl-leads-pm" min="10" max="500" value="80" oninput="updateForecast()" style="width:100%;accent-color:var(--blue)">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Close Cycle (days)</span><strong class="t-blue mono" id="sl-cycle">14</strong></div>
+        <input type="range" id="sl-cycle-days" min="1" max="90" value="14" oninput="updateForecast()" style="width:100%;accent-color:var(--blue)">
+      </div>
+    </div>
+    <div>
+      <div class="card mb16" style="text-align:center;padding:24px;background:rgba(30,240,168,0.04);border-color:rgba(30,240,168,0.2)">
+        <div class="muted" style="font-size:11px;margin-bottom:8px">30-Day Projection</div>
+        <div class="fc-big" id="fc-30">$0</div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:6px" id="fc-30-sub"></div>
+      </div>
+      <div class="grid-2" style="gap:12px">
+        <div class="card" style="text-align:center"><div class="muted" style="font-size:10px;margin-bottom:4px">60-Day</div><div style="font-size:20px;font-weight:800;color:var(--blue);font-family:'JetBrains Mono',monospace" id="fc-60">$0</div></div>
+        <div class="card" style="text-align:center"><div class="muted" style="font-size:10px;margin-bottom:4px">90-Day</div><div style="font-size:20px;font-weight:800;color:var(--purple);font-family:'JetBrains Mono',monospace" id="fc-90">$0</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- REVENUE -->
+<div class="screen" id="screen-revenue">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Revenue Dashboard</div><div class="sh-sub">MRR, ARR, and financial performance tracking</div></div>
+    <div class="sh-actions"><button class="btn btn-sm" onclick="showToast('info','Export','Generating revenue report…')">⬇ Export</button></div>
+  </div>
+  <div id="revenue-content"></div>
+</div>
+
+<!-- SYSTEM HEALTH -->
+<div class="screen" id="screen-health">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">System Health</div><div class="sh-sub">Infrastructure status · real-time monitoring</div></div>
+    <div class="sh-actions"><button class="btn btn-sm" onclick="renderHealth()">⟳ Check</button></div>
+  </div>
+  <div id="health-content"></div>
+</div>
+
+<!-- USERS -->
+<div class="screen" id="screen-users">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Users &amp; Access</div><div class="sh-sub" id="users-sub">Platform admins and org users</div></div>
+    <div class="sh-actions"><button class="btn btn-primary btn-sm" onclick="openDrawer('new-user')">+ Invite User</button></div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Platform</th><th>Status</th><th>Last Login</th><th></th></tr></thead><tbody id="users-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- AUDIT -->
+<div class="screen" id="screen-audit">
+  <div class="sh">
+    <div class="sh-info"><div class="sh-title">Audit Log</div><div class="sh-sub">Every owner action — logged, timestamped, immutable</div></div>
+    <div class="sh-actions">
+      <button class="btn btn-sm" onclick="exportAudit()">⬇ JSON</button>
+      <button class="btn btn-red btn-sm" onclick="if(confirm('Clear audit log?')){STATE.actionLog=[];renderAudit()}">🗑 Clear</button>
+    </div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Scope</th><th>Details</th></tr></thead><tbody id="audit-tbody"></tbody></table>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<div id="overlay" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <div class="dh"><div class="dh-title" id="d-title">Drawer</div><button class="dh-close" onclick="closeDrawer()">✕ Close</button></div>
+  <div class="db" id="d-body"></div>
+  <div class="df" id="d-foot"></div>
+</div>
+<div id="toast"></div>
+
 <script>
-// ═══════════════════════════════════════════════════════════
+// ══════════════════════════════════════
 // STATE
-// ═══════════════════════════════════════════════════════════
+// ══════════════════════════════════════
 const STATE = {
-  godMode: false,
-  currentScope: 'global',
-  currentScreen: 'command',
-  actionLog: [],
-  platforms: {
-    global:     { label:'GLOBAL',          color:'#2fb6ff', orgs:3, leads:847 },
-    bookaboost: { label:'BOOKABOOST',       color:'#4a9eff', orgs:2, leads:612 },
-    evosys:     { label:'EVOSYS PRO',       color:'#087cff', orgs:1, leads:235 },
-    harmony:    { label:'HARMONY HUSTLE',   color:'#ff7c47', orgs:0, leads:0, dev:true },
+  godMode:false, currentScope:'global', currentScreen:'command',
+  actionLog:[],
+  autoToggles:{ai:true,sms:true,email:true,pause:false},
+  platforms:{
+    global:{label:'GLOBAL',color:'#2fb6ff',slug:'global',orgs:0,leads:0},
+    bookaboost:{label:'BOOKABOOST',color:'#4a9eff',slug:'bookaboost',orgs:0,leads:0},
+    evosys:{label:'EVOSYS PRO',color:'#a855f7',slug:'evosys',orgs:0,leads:0},
+    harmony:{label:'HARMONY HUSTLE',color:'#f59e0b',slug:'harmony',orgs:0,leads:0,dev:true},
   },
-  orgs: [
-    { id:1, name:'Restland Cemetery & Funeral Home', platform:'bookaboost', leads:412, status:'active',  mrr:297 },
-    { id:2, name:'Rich For Real Holdings',           platform:'bookaboost', leads:200, status:'active',  mrr:197 },
-    { id:3, name:'SCI',                              platform:'evosys',     leads:235, status:'trial',   mrr:0   },
+  organizations:[
+    {id:1,name:'Restland Cemetery & Funeral Home',shortName:'Restland',platform:'bookaboost',leads:412,users:3,mrr:297,plan:'pro',status:'active',automation:true,appointments:47,generatedValue:112800},
+    {id:2,name:'Rich For Real Holdings',shortName:'Rich4Real',platform:'bookaboost',leads:200,users:2,mrr:197,plan:'pro',status:'active',automation:true,appointments:22,generatedValue:52800},
+    {id:3,name:'SCI',shortName:'SCI',platform:'evosys',leads:235,users:4,mrr:0,plan:'trial',status:'trial',automation:false,appointments:8,generatedValue:0},
   ],
-  leads: [
-    { id:1, name:'James D. Okafor',  org:'Restland',       platform:'bookaboost', status:'booked',   source:'Facebook',  created:'2026-08-15', tier:'hot'  },
-    { id:2, name:'Linda P. Marsh',   org:'Restland',        platform:'bookaboost', status:'replied',  source:'Google',    created:'2026-08-14', tier:'warm' },
-    { id:3, name:'Marcus T. Wells',  org:'Restland',        platform:'bookaboost', status:'imported', source:'CSV',       created:'2026-08-14', tier:'cold' },
-    { id:4, name:'Serena V. Novak',  org:'Rich For Real',   platform:'bookaboost', status:'booked',   source:'TikTok',    created:'2026-08-13', tier:'hot'  },
-    { id:5, name:'Derek J. Holt',    org:'SCI',             platform:'evosys',     status:'replied',  source:'LinkedIn',  created:'2026-08-15', tier:'warm' },
-    { id:6, name:'Angela R. Cruz',   org:'SCI',             platform:'evosys',     status:'imported', source:'Referral',  created:'2026-08-12', tier:'cold' },
+  users:[
+    {id:1,name:'BookaBoost Admin',email:'admin@bookaboost.live',orgId:null,platform:'bookaboost',role:'super_admin',status:'active',lastLogin:'2026-08-17'},
+    {id:2,name:'EvoSys Manager',email:'ops@evosyspro.com',orgId:null,platform:'evosys',role:'super_admin',status:'active',lastLogin:'2026-08-16'},
   ],
-  superAdmins: [
-    { id:1, name:'BookaBoost Admin', email:'admin@bookaboost.live', platform:'bookaboost', role:'super_admin', status:'active', perms:['view_all_leads','manage_orgs','view_reports','send_messages'] },
-    { id:2, name:'EvoSys Manager',   email:'ops@evosyspro.com',     platform:'evosys',     role:'platform_admin', status:'active', perms:['view_all_leads','manage_orgs'] },
+  leads:[
+    {id:1,name:'James D. Okafor',org:'Restland',platform:'bookaboost',status:'booked',source:'Facebook',created:'2026-08-15',tier:'hot'},
+    {id:2,name:'Linda P. Marsh',org:'Restland',platform:'bookaboost',status:'replied',source:'Google',created:'2026-08-14',tier:'warm'},
+    {id:3,name:'Marcus T. Wells',org:'Restland',platform:'bookaboost',status:'imported',source:'CSV',created:'2026-08-14',tier:'cold'},
+    {id:4,name:'Serena V. Novak',org:'Rich For Real',platform:'bookaboost',status:'booked',source:'TikTok',created:'2026-08-13',tier:'hot'},
+    {id:5,name:'Derek J. Holt',org:'SCI',platform:'evosys',status:'replied',source:'LinkedIn',created:'2026-08-15',tier:'warm'},
+    {id:6,name:'Angela R. Cruz',org:'SCI',platform:'evosys',status:'imported',source:'Referral',created:'2026-08-12',tier:'cold'},
   ],
-  cadences: [
-    {
-      id:1, name:'Restland Intro Sequence', platform:'bookaboost', status:'active',
-      touches:[
-        { day:0,  channel:'SMS',   message:'Hey {first_name}, this is {advisor_name} from {org_name}. I wanted to reach out about pre-arrangement planning. Do you have 10 min this week? {booking_link}' },
-        { day:3,  channel:'Email', message:'Following up on my message, {first_name}. Pre-planning gives families peace of mind.' },
-        { day:7,  channel:'SMS',   message:'Hi {first_name}, just a quick follow-up. Would Tuesday or Thursday work for a quick call?' },
-        { day:14, channel:'Email', message:'Last check-in, {first_name}. Happy to answer any questions at your convenience.' },
-      ],
-      ai:{ tone:'empathetic', urgency:'medium', maxTouches:4, autoStop:true, smartTime:true, personalize:true },
-      templates:{ smsBody:'Hey {first_name}, this is {advisor_name} from {org_name}. Reaching out about pre-arrangement planning — {booking_link}', emailSubject:'Quick follow-up, {first_name}', emailBody:'Hi {first_name},\n\nThank you for your interest. I wanted to personally follow up...' },
-      analytics:{ sent:412, openRate:0.68, replyRate:0.34, bookRate:0.22 },
-    },
-    {
-      id:2, name:'Rich For Real Wealth Intro', platform:'bookaboost', status:'active',
-      touches:[
-        { day:0, channel:'SMS',   message:'Hi {first_name}, {advisor_name} here from {org_name}. Wanted to connect about wealth advisory options — {booking_link}' },
-        { day:5, channel:'Email', message:'Quick follow-up on our advisory services, {first_name}.' },
-      ],
-      ai:{ tone:'professional', urgency:'low', maxTouches:3, autoStop:true, smartTime:true, personalize:true },
-      templates:{ smsBody:'Hi {first_name}, {advisor_name} here — checking in re: wealth planning.', emailSubject:'Following up, {first_name}', emailBody:'Hi {first_name},\n\nJust following up on our brief conversation...' },
-      analytics:{ sent:200, openRate:0.55, replyRate:0.28, bookRate:0.18 },
-    },
-    {
-      id:3, name:'SCI EvoSys Outreach', platform:'evosys', status:'draft',
-      touches:[
-        { day:0, channel:'SMS', message:'Hi {first_name}, reaching out from {org_name} regarding our services. {booking_link}' },
-      ],
-      ai:{ tone:'friendly', urgency:'medium', maxTouches:5, autoStop:true, smartTime:false, personalize:true },
-      templates:{ smsBody:'Hi {first_name}, {org_name} checking in.', emailSubject:'Hi {first_name}', emailBody:'Hello {first_name},\n\nWanted to reach out...' },
-      analytics:{ sent:235, openRate:0.41, replyRate:0.19, bookRate:0.12 },
-    },
+  cadences:[
+    {id:1,name:'Restland Intro Sequence',platform:'bookaboost',status:'active',sent:412,openRate:0.68,replyRate:0.34,bookRate:0.22},
+    {id:2,name:'Rich For Real Wealth Intro',platform:'bookaboost',status:'active',sent:200,openRate:0.55,replyRate:0.28,bookRate:0.18},
+    {id:3,name:'SCI EvoSys Outreach',platform:'evosys',status:'draft',sent:235,openRate:0.41,replyRate:0.19,bookRate:0.12},
   ],
-  forecasting: { conversionRate:22, avgDealValue:2400, leadsPerMonth:80, closeCycle:14 },
-  systemHealth: { api:'operational', db:'operational', email:'operational', sms:'degraded', webhooks:'operational' },
-  kpis: { totalLeads:847, totalRevenue:12480, activeOrgs:3, bookingsThisWeek:14, mrr:494, emailSendRate:98.4, smsDelivery:91.2 },
-  selectedCadence: null,
+  kpis:{totalLeads:847,mrr:494,activeOrgs:3,bookings:14},
+  systemHealth:{api:'operational',db:'operational',email:'operational',sms:'degraded',webhooks:'operational',queue:'operational'},
 };
-// ═══════════════════════════════════════════════════════════
-// NAVIGATION MAP
-// ═══════════════════════════════════════════════════════════
-const NAV_ITEMS = [
-  { section:'Core', items:[
-    { id:'command',      label:'Command Center',      icon:'⚡', screen:'command'      },
-    { id:'brands',       label:'Brand Management',    icon:'🏢', screen:'brands'        },
-    { id:'orgs',         label:'Organizations',       icon:'🏗', screen:'orgs'          },
+
+const NAV=[
+  {sec:'Core',items:[
+    {id:'command',label:'Command Center',icon:'⚡',screen:'command'},
+    {id:'brands',label:'Brand Management',icon:'🏢',screen:'brands'},
+    {id:'orgs',label:'Organizations',icon:'🏗',screen:'orgs'},
   ]},
-  { section:'Intelligence', items:[
-    { id:'leads',        label:'Lead Intelligence',   icon:'👥', screen:'leads'         },
-    { id:'growth',       label:'Growth Intelligence', icon:'📈', screen:'growth'        },
-    { id:'pipeline',     label:'Pipeline Board',      icon:'🎯', screen:'pipeline'      },
+  {sec:'Intelligence',items:[
+    {id:'leads',label:'Lead Intelligence',icon:'👥',screen:'leads'},
+    {id:'pipeline',label:'Pipeline Board',icon:'🎯',screen:'pipeline'},
+    {id:'conversation',label:'Conversation Engine',icon:'💬',screen:'conversation'},
   ]},
-  { section:'Financial', items:[
-    { id:'forecasting',  label:'Forecasting',         icon:'🔮', screen:'forecasting'   },
-    { id:'revenue',      label:'Revenue',             icon:'💰', screen:'revenue'       },
+  {sec:'Financial',items:[
+    {id:'forecasting',label:'Forecasting',icon:'🔮',screen:'forecasting'},
+    {id:'revenue',label:'Revenue',icon:'💰',screen:'revenue'},
   ]},
-  { section:'Operations', items:[
-    { id:'health',       label:'System Health',       icon:'💚', screen:'health'        },
-    { id:'conversation', label:'Conversation Engine', icon:'💬', screen:'conversation'  },
+  {sec:'Operations',items:[
+    {id:'health',label:'System Health',icon:'💚',screen:'health'},
+    {id:'users',label:'Users & Access',icon:'👑',screen:'users'},
   ]},
-  { section:'Admin', items:[
-    { id:'admins',       label:'Super Admins',        icon:'👑', screen:'admins'        },
-    { id:'audit',        label:'Audit Log',           icon:'📋', screen:'audit', badge:'audit' },
+  {sec:'Admin',items:[
+    {id:'audit',label:'Audit Log',icon:'📋',screen:'audit',badge:true},
   ]},
 ];
-const SCREEN_KEYWORDS = {
-  command:['command','home','dashboard','overview','center'],
-  brands:['brand','platform','brands'],
+
+const KEYWORDS={
+  command:['command','home','dashboard','overview'],
+  brands:['brand','platform'],
   orgs:['org','organization','client','account'],
-  leads:['lead','leads','contact','prospect','intelligence'],
-  growth:['growth','acquisition','channel','source','analytics'],
-  pipeline:['pipeline','kanban','board','funnel','stage'],
-  forecasting:['forecast','projection','model','scenario','predict'],
-  revenue:['revenue','mrr','arr','money','income','financial'],
-  health:['health','system','status','uptime','api','infra'],
-  conversation:['conversation','cadence','sms','email','outreach','message','sequence'],
-  admins:['admin','admins','super','permission','access'],
-  audit:['audit','log','history','activity','actions'],
+  leads:['lead','contact','prospect'],
+  pipeline:['pipeline','kanban','funnel'],
+  conversation:['cadence','sms','email','outreach','conversation'],
+  forecasting:['forecast','projection','scenario'],
+  revenue:['revenue','mrr','arr','money'],
+  health:['health','system','status','uptime'],
+  users:['user','admin','access'],
+  audit:['audit','log','history'],
 };
-// ═══════════════════════════════════════════════════════════
-// CORE ACTION HANDLER
-// ═══════════════════════════════════════════════════════════
-function ownerAction(actionType, target, scope, details={}, stateMutation=null) {
-  const entry = {
-    ts: new Date().toISOString(),
-    actionType, target, scope, details,
-    user: 'god_admin / Mike Simmons',
-  };
-  STATE.actionLog.unshift(entry);
-  if (typeof stateMutation === 'function') stateMutation(STATE);
-  switch(actionType) {
-    case 'navigate':      navigateTo(target); break;
-    case 'refresh':       showToast('info','Refreshing…','Pulling latest data'); break;
-    case 'god_mode_on':   break;
-    case 'god_mode_off':  break;
-    case 'open_drawer':   openDrawer(target, details); break;
-    case 'create_org':    showToast('success','Org Created',details.name||'New organization added'); break;
-    case 'export_leads':  showToast('info','Export Started','Preparing your CSV download'); break;
-    case 'export_report': showToast('info','Report Export','Generating '+target+' report'); break;
-    case 'export_audit':  showToast('info','Audit Export','Exporting full audit log as JSON'); break;
-    case 'intel_query':   handleIntelQuery(details.query); break;
-    case 'invite_admin':  showToast('success','Invite Sent','Admin invitation sent to '+details.email); break;
-    case 'save_cadence':  showToast('success','Cadence Saved',details.name+' updated successfully'); break;
-    case 'delete_cadence':showToast('warning','Cadence Deleted',details.name+' removed'); break;
-  }
-  updateAuditBadge();
-}
-// ═══════════════════════════════════════════════════════════
-// NAVIGATION
-// ═══════════════════════════════════════════════════════════
-function navigateTo(screen) {
-  STATE.currentScreen = screen;
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const el = document.getElementById('screen-'+screen);
-  if (el) el.classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n => {
-    n.classList.toggle('active', n.dataset.screen === screen);
-  });
-  renderScreen(screen);
-}
-function renderScreen(screen) {
-  switch(screen) {
-    case 'command':      renderCommand(); break;
-    case 'brands':       renderBrands(); break;
-    case 'orgs':         renderOrgsTable(); break;
-    case 'leads':        renderLeadsTable(); break;
-    case 'growth':       renderGrowth(); break;
-    case 'pipeline':     renderPipeline(); break;
-    case 'forecasting':  renderForecasting(); break;
-    case 'revenue':      renderRevenue(); break;
-    case 'health':       renderHealth(); break;
-    case 'conversation': renderConversation(); break;
-    case 'admins':       renderAdmins(); break;
-    case 'audit':        renderAuditLog(); break;
-  }
-}
-// ═══════════════════════════════════════════════════════════
-// SIDEBAR
-// ═══════════════════════════════════════════════════════════
-function buildSidebar() {
-  const nav = document.getElementById('sidebar-nav');
-  nav.innerHTML = NAV_ITEMS.map(section => `
-    <div class="nav-section">
-      <div class="nav-label">${section.section}</div>
-      ${section.items.map(item => `
-        <div class="nav-item" data-screen="${item.screen}" onclick="ownerAction('navigate','${item.screen}','${STATE.currentScope}')">
-          <span class="nav-icon">${item.icon}</span>
-          ${item.label}
-          ${item.badge ? `<span class="nav-badge audit" id="badge-${item.badge}">0</span>` : ''}
-        </div>
-      `).join('')}
-    </div>
-  `).join('');
-}
-function buildScopeBar() {
-  const bar = document.getElementById('scope-bar');
-  bar.innerHTML = Object.entries(STATE.platforms).map(([key,p]) => `
-    <div class="scope-btn ${key===STATE.currentScope?'active':''}" data-scope="${key}"
-      onclick="setScope('${key}')">
-      ${p.label}${p.dev?' 🚧':''}
-    </div>
-  `).join('');
-}
-function setScope(scope) {
-  STATE.currentScope = scope;
-  buildScopeBar();
-  renderScreen(STATE.currentScreen);
-  showToast('info','Scope: '+STATE.platforms[scope].label,'Dashboard filtered');
-}
-function updateAuditBadge() {
-  const el = document.getElementById('badge-audit');
-  if (el) el.textContent = STATE.actionLog.length;
-}
-// ═══════════════════════════════════════════════════════════
-// TOAST SYSTEM
-// ═══════════════════════════════════════════════════════════
-function showToast(type, title, msg) {
-  const icons = {success:'✅',error:'❌',warning:'⚠️',info:'ℹ️'};
-  const container = document.getElementById('toast-container');
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <span class="toast-icon">${icons[type]||'ℹ️'}</span>
-    <div class="toast-body">
-      <div class="toast-title">${title}</div>
-      ${msg?`<div class="toast-msg">${msg}</div>`:''}
-    </div>`;
-  container.appendChild(toast);
-  setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),300); }, 3000);
-}
-// ═══════════════════════════════════════════════════════════
-// DRAWER SYSTEM
-// ═══════════════════════════════════════════════════════════
-function openDrawer(type, data) {
-  ownerAction('open_drawer', type, STATE.currentScope, data);
-  const overlay = document.getElementById('drawer-overlay');
-  const drawer  = document.getElementById('drawer');
-  const title   = document.getElementById('drawer-title');
-  const body    = document.getElementById('drawer-body');
-  overlay.classList.add('open');
-  drawer.classList.add('open');
-  switch(type) {
-    case 'new-org':       title.textContent='Create Organization'; body.innerHTML=drawerNewOrg(); break;
-    case 'view-org':      title.textContent='Organization Details'; body.innerHTML=drawerViewOrg(data); break;
-    case 'new-cadence':   title.textContent='New Cadence'; body.innerHTML=drawerNewCadence(); break;
-    case 'invite-admin':  title.textContent='Invite Admin'; body.innerHTML=drawerInviteAdmin(); break;
-    case 'view-lead':     title.textContent='Lead Details'; body.innerHTML=drawerViewLead(data); break;
-    case 'import-leads':  title.textContent='Import Leads'; body.innerHTML=drawerImportLeads(); break;
-    case 'new-brand':     title.textContent='Register Platform'; body.innerHTML=drawerNewBrand(); break;
-    default:              title.textContent=type; body.innerHTML=`<p style="color:var(--text-muted)">Coming soon.</p>`;
-  }
-}
-function closeDrawer() {
-  document.getElementById('drawer-overlay').classList.remove('open');
-  document.getElementById('drawer').classList.remove('open');
-}
-function drawerNewOrg() {
-  return `
-    <div class="form-group">
-      <label class="form-label">Organization Name</label>
-      <input class="form-input" id="new-org-name" type="text" placeholder="Acme Funeral Home">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Platform</label>
-      <select class="form-select" id="new-org-platform">
-        <option value="bookaboost">BookaBoost</option>
-        <option value="evosys">EvoSys Pro</option>
-        <option value="harmony">Harmony Hustle</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Contact Name</label>
-        <input class="form-input" type="text" placeholder="Jane Smith">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Contact Email</label>
-        <input class="form-input" type="email" placeholder="jane@org.com">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Phone</label>
-      <input class="form-input" type="tel" placeholder="+1 (555) 000-0000">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Plan / MRR</label>
-      <select class="form-select" id="new-org-plan">
-        <option value="trial">Trial ($0)</option>
-        <option value="starter">Starter ($97/mo)</option>
-        <option value="growth">Growth ($197/mo)</option>
-        <option value="pro">Pro ($297/mo)</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Notes</label>
-      <textarea class="form-textarea" placeholder="Any relevant notes about this organization…"></textarea>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="submitNewOrg()">Create Organization</button>
-      <button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button>
-    </div>`;
-}
-function drawerViewOrg(data) {
-  const org = STATE.orgs.find(o=>o.id===data.id)||data;
-  return `
-    <div class="form-group">
-      <div class="form-label">Organization</div>
-      <div style="font-size:16px;font-weight:700;color:var(--text-primary)">${org.name}</div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <div class="form-label">Platform</div>
-        <span class="badge badge-blue">${org.platform}</span>
-      </div>
-      <div class="form-group">
-        <div class="form-label">Status</div>
-        <span class="badge ${org.status==='active'?'badge-green':'badge-amber'}">${org.status}</span>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <div class="form-label">Leads</div>
-        <div style="font-size:20px;font-weight:700;color:var(--blue)">${org.leads}</div>
-      </div>
-      <div class="form-group">
-        <div class="form-label">MRR</div>
-        <div style="font-size:20px;font-weight:700;color:var(--green)">$${org.mrr}</div>
-      </div>
-    </div>
-    <hr class="divider">
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" onclick="showToast('info','Navigate','Opening ${org.name} portal')">Open Portal</button>
-      <button class="btn btn-ghost btn-sm" onclick="showToast('info','Export','Exporting ${org.name} leads')">Export Leads</button>
-      <button class="btn btn-danger btn-sm" onclick="showToast('warning','Suspend','This would suspend the org')">Suspend</button>
-    </div>`;
-}
-function drawerViewLead(data) {
-  const lead = STATE.leads.find(l=>l.id===data.id)||data;
-  const tierColor = {hot:'var(--red)',warm:'var(--amber)',cold:'var(--blue)'}[lead.tier]||'var(--text-muted)';
-  return `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--purple));display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700">${lead.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</div>
-      <div>
-        <div style="font-size:16px;font-weight:700">${lead.name}</div>
-        <div style="font-size:11px;color:var(--text-muted)">${lead.org} · ${lead.platform}</div>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <div class="form-label">Tier</div>
-        <span style="font-size:13px;font-weight:700;color:${tierColor}">${lead.tier.toUpperCase()} 🔥</span>
-      </div>
-      <div class="form-group">
-        <div class="form-label">Status</div>
-        <span class="badge ${lead.status==='booked'?'badge-green':lead.status==='replied'?'badge-blue':'badge-muted'}">${lead.status}</span>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <div class="form-label">Source</div>
-        <div style="font-size:13px;color:var(--text-primary)">${lead.source}</div>
-      </div>
-      <div class="form-group">
-        <div class="form-label">Created</div>
-        <div style="font-size:13px;color:var(--text-primary)">${lead.created}</div>
-      </div>
-    </div>
-    <hr class="divider">
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" onclick="showToast('info','SMS','Opening conversation')">💬 Message</button>
-      <button class="btn btn-ghost btn-sm" onclick="showToast('info','Book','Opening booking link')">📅 Book</button>
-      <button class="btn btn-ghost btn-sm" onclick="showToast('info','Timeline','Viewing lead timeline')">📋 Timeline</button>
-    </div>`;
-}
-function drawerImportLeads() {
-  return `
-    <div style="border:2px dashed var(--border);border-radius:var(--radius);padding:32px;text-align:center;margin-bottom:16px;cursor:pointer" onclick="showToast('info','Upload','CSV upload coming soon')">
-      <div style="font-size:28px;margin-bottom:8px">📁</div>
-      <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Drop CSV file here</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">or click to browse</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Target Organization</label>
-      <select class="form-select">
-        ${STATE.orgs.map(o=>`<option value="${o.id}">${o.name}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Platform</label>
-      <select class="form-select">
-        <option>BookaBoost</option><option>EvoSys Pro</option>
-      </select>
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="showToast('info','Import','Lead import queued')">Import Leads</button>`;
-}
-function drawerNewBrand() {
-  return `
-    <div class="form-group">
-      <label class="form-label">Platform Name</label>
-      <input class="form-input" type="text" id="new-brand-name" placeholder="e.g. Harmony Hustle Pro">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Slug <span style="font-size:10px;color:var(--text-muted)">(URL-safe, no spaces)</span></label>
-      <input class="form-input" type="text" id="new-brand-slug" placeholder="e.g. harmonyhustlepro">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Domain</label>
-      <input class="form-input" type="text" id="new-brand-domain" placeholder="app.brandname.live">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Support Email</label>
-      <input class="form-input" type="email" id="new-brand-email" placeholder="support@brandname.live">
-    </div>
-    <button class="btn btn-gold" style="width:100%" onclick="submitNewBrand()">Register Platform</button>`;
-}
 
-async function submitNewBrand() {
-  const name   = document.getElementById('new-brand-name').value.trim();
-  const slug   = document.getElementById('new-brand-slug').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'-');
-  const domain = document.getElementById('new-brand-domain').value.trim();
-  const email  = document.getElementById('new-brand-email').value.trim();
-  if (!name||!slug) { showToast('error','Required','Name and slug are required'); return; }
-  try {
-    const r = await fetch(BASE+'/god/platforms', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+getToken()},
-      body: JSON.stringify({name, slug, domain:domain||null, support_email:email||null})
-    });
-    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.status); }
-    const p = await r.json();
-    STATE.platforms[p.slug] = {label:p.name.toUpperCase(), color:'#2fb6ff', orgs:0, leads:0};
-    closeDrawer();
-    buildScopeBar();
-    showToast('success','Platform Registered', name+' created — configure env vars next');
-    ownerAction('create_brand', name, 'global', {name, slug});
-  } catch(e) {
-    showToast('error','Create Failed', e.message);
-  }
-}
-function drawerNewCadence() {
-  return `
-    <div class="form-group">
-      <label class="form-label">Cadence Name</label>
-      <input class="form-input" type="text" id="new-cad-name" placeholder="e.g. Restland Intro Sequence">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Platform</label>
-      <select class="form-select" id="new-cad-platform">
-        <option value="bookaboost">BookaBoost</option>
-        <option value="evosys">EvoSys Pro</option>
-        <option value="harmony">Harmony Hustle</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Initial Status</label>
-      <select class="form-select" id="new-cad-status">
-        <option value="draft">Draft</option>
-        <option value="active">Active</option>
-      </select>
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="submitNewCadence()">Create Cadence</button>`;
-}
-function drawerInviteAdmin() {
-  return `
-    <div class="form-group">
-      <label class="form-label">Full Name</label>
-      <input class="form-input" type="text" id="inv-name" placeholder="Admin Name">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Email Address</label>
-      <input class="form-input" type="email" id="inv-email" placeholder="admin@platform.com">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Platform Scope</label>
-      <select class="form-select" id="inv-platform">
-        <option value="bookaboost">BookaBoost</option>
-        <option value="evosys">EvoSys Pro</option>
-        <option value="harmony">Harmony Hustle</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Role</label>
-      <select class="form-select" id="inv-role">
-        <option value="platform_admin">Platform Admin</option>
-        <option value="super_admin">Super Admin</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Permissions</label>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-        ${['view_all_leads','manage_orgs','view_reports','send_messages','manage_cadences','billing_access'].map(p=>`
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-            <input type="checkbox" value="${p}" class="inv-perm" style="accent-color:var(--blue)" ${['view_all_leads','manage_orgs','view_reports'].includes(p)?'checked':''}>
-            ${p.replace(/_/g,' ')}
-          </label>`).join('')}
-      </div>
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="submitInviteAdmin()">Send Invitation</button>`;
-}
-// Drawer submit handlers
-async function submitNewOrg() {
-  const name = document.getElementById('new-org-name').value.trim();
-  const platform = document.getElementById('new-org-platform').value;
-  const plan = document.getElementById('new-org-plan').value;
-  if (!name) { showToast('error','Name Required','Please enter an organization name'); return; }
-  try {
-    const r = await fetch(BASE+'/god/orgs', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+getToken()},
-      body: JSON.stringify({name, platform_slug: platform, plan})
-    });
-    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.status); }
-    const org = await r.json();
-    STATE.orgs.push({id:org.id, name:org.name, platform, leads:0, status:'trial', mrr:0});
-    closeDrawer();
-    ownerAction('create_org', name, platform, {name,platform});
-    renderOrgsTable();
-    showToast('success','Org Created',name+' is live on '+platform);
-  } catch(e) {
-    showToast('error','Create Failed', e.message);
-  }
-}
-function submitNewCadence() {
-  const name = document.getElementById('new-cad-name').value.trim();
-  const platform = document.getElementById('new-cad-platform').value;
-  const status = document.getElementById('new-cad-status').value;
-  if (!name) { showToast('error','Name Required','Please enter a cadence name'); return; }
-  const newCad = {
-    id: STATE.cadences.length+1, name, platform, status,
-    touches:[], ai:{tone:'professional',urgency:'medium',maxTouches:5,autoStop:true,smartTime:true,personalize:true},
-    templates:{smsBody:'',emailSubject:'',emailBody:''},
-    analytics:{sent:0,openRate:0,replyRate:0,bookRate:0},
-  };
-  STATE.cadences.push(newCad);
-  closeDrawer();
-  showToast('success','Cadence Created',name+' is ready to configure');
-  renderConversationList();
-  selectCadence(newCad.id);
-}
-async function submitInviteAdmin() {
-  const name = document.getElementById('inv-name').value.trim();
-  const email = document.getElementById('inv-email').value.trim();
-  const platform = document.getElementById('inv-platform').value;
-  const role = document.getElementById('inv-role').value;
-  if (!name||!email) { showToast('error','Required Fields','Name and email are required'); return; }
-  try {
-    const r = await fetch(BASE+'/god/users', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+getToken()},
-      body: JSON.stringify({email, full_name:name, role, platform_slug:platform})
-    });
-    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||r.status); }
-    const user = await r.json();
-    STATE.admins.push({id:user.id, name, email, platform, role, status:'active', perms:[]});
-    closeDrawer();
-    ownerAction('invite_admin', email, platform, {name,email,platform,role});
-    renderAdmins();
-    // Show temp password — it's only returned once
-    showToast('success','User Created','Temp password: '+user.temp_password+' — share securely');
-    // Also alert so it's easy to copy
-    setTimeout(()=>alert('Temp password for '+email+':\n\n'+user.temp_password+'\n\nUser must change it on first login.'),300);
-  } catch(e) {
-    showToast('error','Create Failed', e.message);
-  }
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: COMMAND
-// ═══════════════════════════════════════════════════════════
-function renderCommand() {
-  document.getElementById('cmd-date').textContent = new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  const k = STATE.kpis;
-  document.getElementById('cmd-kpi-grid').innerHTML = [
-    {label:'Total Leads',      value:k.totalLeads.toLocaleString(),   delta:'+47 this week',     color:'var(--blue)',   up:true},
-    {label:'MRR',              value:'$'+k.mrr,                       delta:'$0 new this month',  color:'var(--green)',  up:false},
-    {label:'Active Orgs',      value:k.activeOrgs,                    delta:'1 trial',            color:'var(--purple)', up:true},
-    {label:'Bookings / Week',  value:k.bookingsThisWeek,              delta:'+3 vs last week',    color:'var(--cyan)',   up:true},
-    {label:'Email Send Rate',  value:k.emailSendRate+'%',             delta:'99.1% avg',          color:'var(--green)',  up:true},
-    {label:'SMS Delivery',     value:k.smsDelivery+'%',               delta:'↓ degraded',         color:'var(--amber)',  up:false},
-    {label:'Total Revenue',    value:'$'+k.totalRevenue.toLocaleString(), delta:'YTD',            color:'var(--green)',  up:true},
-    {label:'Platforms',        value:'3',                             delta:'1 in development',   color:'var(--blue)',   up:true},
-  ].map(kpi=>`
-    <div class="kpi-card" onclick="ownerAction('navigate','${kpi.label.toLowerCase().includes('lead')?'leads':kpi.label.toLowerCase().includes('org')?'orgs':kpi.label.toLowerCase().includes('mrr')||kpi.label.toLowerCase().includes('revenue')?'revenue':'command'}','${STATE.currentScope}')">
-      <div class="kpi-label">${kpi.label}</div>
-      <div class="kpi-value" style="color:${kpi.color}">${kpi.value}</div>
-      <div class="kpi-delta ${kpi.up?'up':'down'}">${kpi.delta}</div>
-    </div>`).join('');
-  // Platform Overview
-  document.getElementById('platform-overview').innerHTML = Object.entries(STATE.platforms).map(([key,p])=>`
-    <div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;cursor:pointer" onclick="setScope('${key}')">
-      <div style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 8px ${p.color};flex-shrink:0"></div>
-      <div style="flex:1">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary)">${p.label}${p.dev?' <span style="font-size:9px;color:var(--amber)">DEV</span>':''}</div>
-        <div style="font-size:10px;color:var(--text-muted)">${p.orgs} orgs · ${p.leads} leads</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:11px;font-weight:700;color:${p.color}">${p.leads}</div>
-        <div style="font-size:9px;color:var(--text-muted)">leads</div>
-      </div>
-    </div>`).join('');
-  // Recent Activity
-  const recent = STATE.actionLog.slice(0,8);
-  document.getElementById('recent-activity').innerHTML = recent.length
-    ? recent.map(e=>`
-      <div style="padding:8px 0;border-bottom:1px solid rgba(47,182,255,0.05);display:flex;gap:10px;align-items:center">
-        <div style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;flex-shrink:0">${new Date(e.ts).toLocaleTimeString()}</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);flex:1">${e.actionType}</div>
-        <div style="font-size:10px;color:var(--text-muted)">${e.target}</div>
-      </div>`).join('')
-    : '<div class="empty-state"><div class="empty-state-icon">📋</div><div>No actions yet</div></div>';
-  // Top Orgs
-  document.getElementById('cmd-top-orgs').innerHTML = STATE.orgs.map(o=>`
-    <div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;cursor:pointer" onclick="openDrawer('view-org',{id:${o.id}})">
-      <div style="flex:1">
-        <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${o.name}</div>
-        <div style="font-size:10px;color:var(--text-muted)">${o.platform} · ${o.leads} leads</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;font-weight:700;color:var(--green)">$${o.mrr}/mo</div>
-        <span class="badge ${o.status==='active'?'badge-green':'badge-amber'}" style="font-size:9px">${o.status}</span>
-      </div>
-    </div>`).join('');
-  // System Status
-  const sh = STATE.systemHealth;
-  document.getElementById('cmd-sys-status').innerHTML = Object.entries(sh).map(([svc,status])=>`
-    <div class="status-row">
-      <div class="status-icon">${{api:'🔌',db:'🗄️',email:'📧',sms:'📱',webhooks:'🔗'}[svc]||'⚙️'}</div>
-      <div class="status-name">${svc.toUpperCase()}</div>
-      <span class="status-badge ${status}">${status}</span>
-    </div>`).join('');
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: BRANDS
-// ═══════════════════════════════════════════════════════════
-function renderBrands() {
-  const brandDetails = {
-    global:     { desc:'Cross-platform god view. All organizations, leads, and revenue.', icon:'⚡', url:null },
-    bookaboost: { desc:'Funeral & death-care advisory CRM. Pre-arrangement booking automation.', icon:'📅', url:'app.bookaboost.live' },
-    evosys:     { desc:'Enterprise advisory platform. Complex multi-advisor deal management.', icon:'🔬', url:'app.evosyspro.live' },
-    harmony:    { desc:'Wealth & lifestyle advisory. Currently in development.', icon:'🎵', url:null },
-  };
-  document.getElementById('brands-grid').innerHTML = Object.entries(STATE.platforms).map(([key,p])=>{
-    const d = brandDetails[key]||{};
-    return `
-    <div class="card" style="border-color:${key==='global'?'rgba(47,182,255,0.2)':p.dev?'rgba(255,124,71,0.2)':'var(--border)'}">
-      <div style="display:flex;align-items:flex-start;gap:14px">
-        <div style="font-size:28px;line-height:1">${d.icon||'🏢'}</div>
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <span style="font-size:14px;font-weight:800;color:${p.color}">${p.label}</span>
-            ${p.dev?'<span class="badge badge-amber">IN DEV</span>':'<span class="badge badge-green">LIVE</span>'}
-          </div>
-          <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:12px">${d.desc}</div>
-          <div style="display:flex;gap:16px;margin-bottom:14px">
-            <div>
-              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Orgs</div>
-              <div style="font-size:18px;font-weight:700;color:${p.color}">${p.orgs}</div>
-            </div>
-            <div>
-              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Leads</div>
-              <div style="font-size:18px;font-weight:700;color:${p.color}">${p.leads}</div>
-            </div>
-            ${d.url?`<div>
-              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Domain</div>
-              <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${d.url}</div>
-            </div>`:''}
-          </div>
-          <div style="display:flex;gap:8px">
-            ${key!=='global'?`<button class="btn btn-ghost btn-sm" onclick="setScope('${key}');ownerAction('navigate','command','${key}')">Switch to ${p.label}</button>`:''}
-            ${key!=='global'?`<button class="btn btn-ghost btn-sm" onclick="ownerAction('navigate','orgs','${key}')">View Orgs</button>`:''}
-            ${p.dev?`<button class="btn btn-amber btn-sm" style="background:rgba(255,178,56,0.1);border-color:rgba(255,178,56,0.3);color:var(--amber)" onclick="showToast('info','Coming Soon','${p.label} launching soon')">🚀 Launch</button>`:''}
-          </div>
-        </div>
-      </div>
-    </div>`; }).join('');
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: ORGS TABLE
-// ═══════════════════════════════════════════════════════════
-function renderOrgsTable() {
-  const search   = (document.getElementById('org-search')?.value||'').toLowerCase();
-  const platform = document.getElementById('org-filter-platform')?.value||'';
-  const status   = document.getElementById('org-filter-status')?.value||'';
-  const filtered = STATE.orgs.filter(o =>
-    (!search   || o.name.toLowerCase().includes(search)) &&
-    (!platform || o.platform===platform) &&
-    (!status   || o.status===status)
-  );
-  document.getElementById('orgs-tbody').innerHTML = filtered.length
-    ? filtered.map(o=>`
-      <tr onclick="openDrawer('view-org',{id:${o.id}})">
-        <td>${o.name}</td>
-        <td><span class="badge badge-blue">${o.platform}</span></td>
-        <td>${o.leads.toLocaleString()}</td>
-        <td style="color:var(--green);font-weight:700">$${o.mrr}/mo</td>
-        <td><span class="badge ${o.status==='active'?'badge-green':o.status==='trial'?'badge-amber':'badge-red'}">${o.status}</span></td>
-        <td onclick="event.stopPropagation()">
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-ghost btn-xs" onclick="openDrawer('view-org',{id:${o.id}})">View</button>
-            <button class="btn btn-ghost btn-xs" onclick="showToast('info','Edit','Edit org ${o.id}')">Edit</button>
-          </div>
-        </td>
-      </tr>`).join('')
-    : '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)">No organizations match your filters</td></tr>';
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: LEADS TABLE
-// ═══════════════════════════════════════════════════════════
-function renderLeadsTable() {
-  const search   = (document.getElementById('lead-search')?.value||'').toLowerCase();
-  const platform = document.getElementById('lead-filter-platform')?.value||'';
-  const tier     = document.getElementById('lead-filter-tier')?.value||'';
-  const status   = document.getElementById('lead-filter-status')?.value||'';
-  const filtered = STATE.leads.filter(l =>
-    (!search   || l.name.toLowerCase().includes(search) || l.org.toLowerCase().includes(search) || l.source.toLowerCase().includes(search)) &&
-    (!platform || l.platform===platform) &&
-    (!tier     || l.tier===tier) &&
-    (!status   || l.status===status)
-  );
-  const tierColors = {hot:'badge-red',warm:'badge-amber',cold:'badge-blue'};
-  const statusColors = {booked:'badge-green',replied:'badge-blue',imported:'badge-muted'};
-  document.getElementById('leads-tbody').innerHTML = filtered.length
-    ? filtered.map(l=>`
-      <tr onclick="openDrawer('view-lead',{id:${l.id}})">
-        <td>${l.name}</td>
-        <td>${l.org}</td>
-        <td><span class="badge badge-blue">${l.platform}</span></td>
-        <td><span class="badge ${tierColors[l.tier]||'badge-muted'}">${l.tier}</span></td>
-        <td><span class="badge ${statusColors[l.status]||'badge-muted'}">${l.status}</span></td>
-        <td>${l.source}</td>
-        <td style="color:var(--text-muted);font-size:11px">${l.created}</td>
-        <td onclick="event.stopPropagation()">
-          <div style="display:flex;gap:4px">
-            <button class="btn btn-ghost btn-xs" onclick="openDrawer('view-lead',{id:${l.id}})">View</button>
-            <button class="btn btn-primary btn-xs" onclick="showToast('info','Message','Opening SMS thread')">💬</button>
-          </div>
-        </td>
-      </tr>`).join('')
-    : '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No leads match your filters</td></tr>';
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: GROWTH
-// ═══════════════════════════════════════════════════════════
-function renderGrowth() {
-  document.getElementById('growth-kpis').innerHTML = [
-    {label:'New Leads (30d)',  value:'47',  delta:'+18%', up:true,  color:'var(--blue)'},
-    {label:'Reply Rate',      value:'34%', delta:'+2%',  up:true,  color:'var(--green)'},
-    {label:'Booking Rate',    value:'22%', delta:'-1%',  up:false, color:'var(--cyan)'},
-    {label:'Avg Lead Value',  value:'$29', delta:'+$4',  up:true,  color:'var(--purple)'},
-    {label:'Cost / Lead',     value:'$8',  delta:'-$2',  up:true,  color:'var(--green)'},
-    {label:'Top Channel',     value:'FB',  delta:'Facebook Ads', up:true, color:'var(--blue)'},
-  ].map(k=>`
-    <div class="kpi-card">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value" style="color:${k.color}">${k.value}</div>
-      <div class="kpi-delta ${k.up?'up':'down'}">${k.delta}</div>
-    </div>`).join('');
-  const sources = [
-    {name:'Facebook Ads',leads:312,pct:37},
-    {name:'Google Ads',  leads:186,pct:22},
-    {name:'TikTok',      leads:145,pct:17},
-    {name:'CSV Import',  leads:118,pct:14},
-    {name:'LinkedIn',    leads:59, pct:7 },
-    {name:'Referral',    leads:27, pct:3 },
-  ];
-  document.getElementById('source-chart').innerHTML = sources.map(s=>`
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:500;color:var(--text-primary)">${s.name}</span>
-        <span style="font-size:11px;color:var(--text-muted)">${s.leads} · ${s.pct}%</span>
-      </div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${s.pct}%;background:var(--blue)"></div></div>
-    </div>`).join('');
-  const tiers = [{name:'Hot 🔥',count:2,pct:33,color:'var(--red)'},{name:'Warm',count:2,pct:33,color:'var(--amber)'},{name:'Cold',count:2,pct:33,color:'var(--blue)'}];
-  document.getElementById('tier-chart').innerHTML = tiers.map(t=>`
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${t.name}</span>
-        <span style="font-size:11px;color:var(--text-muted)">${t.count} leads · ${t.pct}%</span>
-      </div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${t.pct}%;background:${t.color}"></div></div>
-    </div>`).join('');
-  const channels = [
-    {ch:'Facebook Ads', leads:312, reply:'38%', book:'24%', conv:'19%', avg:'$2,600'},
-    {ch:'Google Ads',   leads:186, reply:'31%', book:'20%', conv:'16%', avg:'$2,800'},
-    {ch:'TikTok',       leads:145, reply:'29%', book:'18%', conv:'14%', avg:'$1,900'},
-    {ch:'CSV Import',   leads:118, reply:'41%', book:'26%', conv:'22%', avg:'$2,200'},
-    {ch:'LinkedIn',     leads:59,  reply:'44%', book:'29%', conv:'25%', avg:'$3,400'},
-    {ch:'Referral',     leads:27,  reply:'67%', book:'48%', conv:'41%', avg:'$3,100'},
-  ];
-  document.getElementById('channel-tbody').innerHTML = channels.map(c=>`
-    <tr>
-      <td>${c.ch}</td>
-      <td>${c.leads}</td>
-      <td style="color:var(--blue)">${c.reply}</td>
-      <td style="color:var(--green)">${c.book}</td>
-      <td style="color:var(--purple)">${c.conv}</td>
-      <td style="color:var(--amber)">${c.avg}</td>
-    </tr>`).join('');
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: PIPELINE
-// ═══════════════════════════════════════════════════════════
-function renderPipeline() {
-  const platform = document.getElementById('pipeline-filter')?.value||'';
-  const leads = platform ? STATE.leads.filter(l=>l.platform===platform) : STATE.leads;
-  const stages = [
-    {id:'imported', label:'Imported',  color:'var(--text-muted)'},
-    {id:'contacted',label:'Contacted', color:'var(--blue)'},
-    {id:'replied',  label:'Replied',   color:'var(--purple)'},
-    {id:'booked',   label:'Booked',    color:'var(--green)'},
-    {id:'closed',   label:'Closed',    color:'var(--cyan)'},
-  ];
-  document.getElementById('kanban-board').innerHTML = stages.map(stage=>{
-    const stageleads = leads.filter(l=>l.status===stage.id || (stage.id==='contacted'&&!['replied','booked','closed'].includes(l.status)&&l.status==='imported'&&false));
-    const actualLeads = stage.id==='imported'
-      ? leads.filter(l=>l.status==='imported')
-      : stage.id==='contacted'
-      ? [] : leads.filter(l=>l.status===stage.id);
-    return `
-    <div class="kanban-col">
-      <div class="kanban-col-header">
-        <div class="kanban-col-title" style="color:${stage.color}">${stage.label}</div>
-        <span class="kanban-count">${actualLeads.length}</span>
-      </div>
-      ${actualLeads.map(l=>`
-        <div class="kanban-card" onclick="openDrawer('view-lead',{id:${l.id}})">
-          <div class="kanban-card-name">${l.name}</div>
-          <div class="kanban-card-meta">${l.org} · ${l.source}</div>
-          <div style="margin-top:6px;display:flex;gap:4px">
-            <span class="badge ${l.tier==='hot'?'badge-red':l.tier==='warm'?'badge-amber':'badge-blue'}" style="font-size:9px">${l.tier}</span>
-            <span class="badge badge-muted" style="font-size:9px">${l.platform}</span>
-          </div>
-        </div>`).join('')}
-      ${actualLeads.length===0?'<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px">No leads</div>':''}
-    </div>`; }).join('');
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: FORECASTING
-// ═══════════════════════════════════════════════════════════
-function renderForecasting() {
-  calcForecasts();
-  renderWaterfall();
-}
-function updateSliderDisplay(id, unit) {
-  const el = document.getElementById(id);
-  const display = document.getElementById(id+'-display');
-  if (!el||!display) return;
-  const v = parseInt(el.value);
-  if (unit==='$') display.textContent = '$'+v.toLocaleString();
-  else if (unit==='%') display.textContent = v+'%';
-  else if (unit==='d') display.textContent = v+'d';
-  else display.textContent = v;
-}
-function calcForecasts() {
-  const conv   = parseInt(document.getElementById('fc-conv')?.value  || 22) / 100;
-  const deal   = parseInt(document.getElementById('fc-deal')?.value  || 2400);
-  const lpm    = parseInt(document.getElementById('fc-lpm')?.value   || 80);
-  const cycle  = parseInt(document.getElementById('fc-cycle')?.value || 14);
-  const replyRate = 0.34; const bookingRate = 0.22;
-  const cycleFactor = Math.max(0.3, 1 - (cycle / 90));
-  const results = [30,60,90].map(days => {
-    const months   = days / 30;
-    const leads    = Math.round(lpm * months);
-    const booked   = Math.round(leads * replyRate * bookingRate);
-    const closed   = Math.round(leads * conv);
-    const lagFactor = days===30 ? cycleFactor : days===60 ? Math.min(1, cycleFactor*1.5) : 1;
-    const rev      = Math.round(closed * deal * lagFactor);
-    return {days, leads, booked, closed, rev};
-  });
-  const colors = ['var(--blue)','var(--purple)','var(--green)'];
-  document.getElementById('forecast-cards').innerHTML = results.map((r,i)=>`
-    <div class="card" style="border-color:${colors[i]}40">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div style="font-size:13px;font-weight:700;color:${colors[i]}">${r.days}-Day Projection</div>
-        <div style="font-size:22px;font-weight:800;color:${colors[i]}">$${r.rev.toLocaleString()}</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-        <div>
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Leads</div>
-          <div style="font-size:16px;font-weight:700;color:var(--text-primary)">${r.leads}</div>
-        </div>
-        <div>
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Booked</div>
-          <div style="font-size:16px;font-weight:700;color:var(--cyan)">${r.booked}</div>
-        </div>
-        <div>
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Closed</div>
-          <div style="font-size:16px;font-weight:700;color:${colors[i]}">${r.closed}</div>
-        </div>
-      </div>
-      <div class="progress-bar mt-8"><div class="progress-fill" style="width:${Math.min(100,(r.rev/20000)*100)}%;background:${colors[i]}"></div></div>
-    </div>`).join('');
-}
-function resetForecasting() {
-  const defaults = {conv:22,deal:2400,lpm:80,cycle:14};
-  Object.entries(defaults).forEach(([k,v])=>{
-    const el = document.getElementById('fc-'+k);
-    if(el) el.value = v;
-    updateSliderDisplay('fc-'+k, k==='conv'?'%':k==='deal'?'$':k==='cycle'?'d':'');
-  });
-  calcForecasts();
-}
-function renderWaterfall() {
-  const svg = document.getElementById('waterfall-svg');
-  if (!svg) return;
-  const W=800, H=160, pad=40;
-  const months=['Aug','Sep','Oct','Nov','Dec','Jan'];
-  const vals=[494,620,810,1050,1380,1800];
-  const max=Math.max(...vals); const min=0;
-  const xStep=(W-pad*2)/5;
-  const points = vals.map((v,i)=>`${pad+i*xStep},${H-pad-((v-min)/(max-min))*(H-pad*2)}`).join(' ');
-  const fillPoints = `${pad},${H-pad} ${points} ${pad+5*xStep},${H-pad}`;
-  svg.innerHTML = `
-    <defs><linearGradient id="wf-grad" x1="0" x2="0" y1="0" y2="1">
-      <stop offset="0%" stop-color="var(--green)" stop-opacity=".3"/>
-      <stop offset="100%" stop-color="var(--green)" stop-opacity=".01"/>
-    </linearGradient></defs>
-    <polygon points="${fillPoints}" fill="url(#wf-grad)"/>
-    <polyline points="${points}" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
-    ${vals.map((v,i)=>`
-      <circle cx="${pad+i*xStep}" cy="${H-pad-((v-min)/(max-min))*(H-pad*2)}" r="4" fill="var(--green)" stroke="var(--bg-deep)" stroke-width="2"/>
-      <text x="${pad+i*xStep}" y="${H-6}" text-anchor="middle" fill="rgba(180,200,255,0.4)" font-size="10" font-family="Inter">${months[i]}</text>
-      <text x="${pad+i*xStep}" y="${H-pad-((v-min)/(max-min))*(H-pad*2)-10}" text-anchor="middle" fill="var(--green)" font-size="9" font-family="JetBrains Mono,monospace">$${v}</text>
-    `).join('')}`;
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: REVENUE
-// ═══════════════════════════════════════════════════════════
-function renderRevenue() {
-  document.getElementById('revenue-kpis').innerHTML = [
-    {label:'MRR',     value:'$494',    delta:'+$0 this month', color:'var(--green)', up:false},
-    {label:'ARR',     value:'$5,928',  delta:'Run rate',       color:'var(--green)', up:true},
-    {label:'ARPU',    value:'$165',    delta:'Per active org',  color:'var(--blue)',  up:true},
-    {label:'LTV Est', value:'$4,950',  delta:'30mo avg cycle',  color:'var(--purple)',up:true},
-    {label:'Churn',   value:'0%',      delta:'0 churned orgs',  color:'var(--green)', up:true},
-    {label:'NRR',     value:'100%',    delta:'Net revenue ret.', color:'var(--cyan)', up:true},
-  ].map(k=>`
-    <div class="kpi-card">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value" style="color:${k.color}">${k.value}</div>
-      <div class="kpi-delta ${k.up?'up':'down'}">${k.delta}</div>
-    </div>`).join('');
-  const byPlatform = [
-    {p:'BookaBoost', mrr:494, orgs:2, color:'var(--brand-bb)'},
-    {p:'EvoSys Pro', mrr:0,   orgs:1, color:'var(--brand-ev)'},
-    {p:'Harmony',    mrr:0,   orgs:0, color:'var(--brand-hh)'},
-  ];
-  document.getElementById('mrr-platform-chart').innerHTML = byPlatform.map(p=>`
-    <div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:12px;font-weight:700;color:${p.color}">${p.p}</span>
-        <span style="font-size:14px;font-weight:700;color:var(--green)">$${p.mrr}/mo</span>
-      </div>
-      <div class="progress-bar">
-        <div class="progress-fill" style="width:${p.mrr>0?Math.round((p.mrr/494)*100):0}%;background:${p.color}"></div>
-      </div>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">${p.orgs} org${p.orgs!==1?'s':''}</div>
-    </div>`).join('');
-  document.getElementById('revenue-org-table').innerHTML = `
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Organization</th><th>MRR</th><th>Plan</th><th>Since</th></tr></thead>
-        <tbody>
-          ${STATE.orgs.map(o=>`
-            <tr>
-              <td>${o.name}</td>
-              <td style="color:var(--green);font-weight:700">$${o.mrr}/mo</td>
-              <td>${o.mrr>=297?'Pro':o.mrr>=197?'Growth':o.mrr>0?'Starter':'Trial'}</td>
-              <td style="color:var(--text-muted)">Aug 2026</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: HEALTH
-// ═══════════════════════════════════════════════════════════
-function renderHealth() {
-  document.getElementById('health-kpis').innerHTML = [
-    {label:'API Uptime',     value:'99.98%', delta:'30-day avg',   color:'var(--green)'},
-    {label:'DB Response',    value:'12ms',   delta:'p50 latency',  color:'var(--green)'},
-    {label:'Email Delivery', value:'98.4%',  delta:'Resend',       color:'var(--green)'},
-    {label:'SMS Delivery',   value:'91.2%',  delta:'↓ Twilio issue',color:'var(--amber)'},
-    {label:'Webhook OK',     value:'100%',   delta:'All endpoints', color:'var(--green)'},
-    {label:'Active Errors',  value:'1',      delta:'SMS degraded',  color:'var(--amber)'},
-  ].map(k=>`
-    <div class="kpi-card">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value" style="color:${k.color}">${k.value}</div>
-      <div class="kpi-delta">${k.delta}</div>
-    </div>`).join('');
-  const sh = STATE.systemHealth;
-  const svcMeta = {
-    api:{icon:'🔌',name:'REST API',uptime:'99.98%',detail:'FastAPI on Render — bookaboost-api.onrender.com'},
-    db:{icon:'🗄️',name:'PostgreSQL',uptime:'99.99%',detail:'Render managed Postgres — auto-backup enabled'},
-    email:{icon:'📧',name:'Email (Resend)',uptime:'99.1%',detail:'Transactional via Resend — 98.4% delivery rate'},
-    sms:{icon:'📱',name:'SMS (Twilio)',uptime:'91.2%',detail:'A2P 10DLC pending — toll-free workaround active'},
-    webhooks:{icon:'🔗',name:'Webhooks',uptime:'100%',detail:'GoHighLevel sync — all endpoints responding'},
-  };
-  document.getElementById('service-status-list').innerHTML = Object.entries(sh).map(([svc,status])=>{
-    const m = svcMeta[svc]||{icon:'⚙️',name:svc,uptime:'—',detail:''};
-    return `
-    <div class="status-row">
-      <div class="status-icon">${m.icon}</div>
-      <div style="flex:1">
-        <div class="status-name">${m.name}</div>
-        <div style="font-size:10px;color:var(--text-muted)">${m.detail}</div>
-      </div>
-      <span class="status-badge ${status}">${status}</span>
-      <span class="status-uptime">${m.uptime}</span>
-    </div>`; }).join('');
-  document.getElementById('incidents-list').innerHTML = `
-    <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-        <span class="badge badge-amber">ONGOING</span>
-        <span style="font-size:12px;font-weight:600">SMS Delivery Degraded</span>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted)">Twilio A2P 10DLC registration pending. Toll-free number active as workaround. ETA: 5-7 business days.</div>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Started: Aug 12, 2026 · Duration: 5 days</div>
-    </div>
-    <div style="padding:10px 0">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-        <span class="badge badge-green">RESOLVED</span>
-        <span style="font-size:12px;font-weight:600">platform_id Migration</span>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted)">Missing ALTER TABLE for platform_id columns. Fixed in commit acc9511. All endpoints restored.</div>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Aug 10, 2026 · Duration: ~2hrs</div>
-    </div>`;
-  document.getElementById('deploy-info').innerHTML = `
-    <div class="grid-4" style="gap:16px">
-      <div>
-        <div class="form-label">Backend</div>
-        <div style="font-size:12px;color:var(--text-primary)">bookaboost-api.onrender.com</div>
-        <div style="font-size:10px;color:var(--text-muted)">FastAPI + SQLAlchemy · Python 3.11</div>
-      </div>
-      <div>
-        <div class="form-label">Frontend</div>
-        <div style="font-size:12px;color:var(--text-primary)">advisorflow-frontend.onrender.com</div>
-        <div style="font-size:10px;color:var(--text-muted)">Static HTML · Render CDN</div>
-      </div>
-      <div>
-        <div class="form-label">Last Deploy</div>
-        <div style="font-size:12px;color:var(--text-primary)">commit acc9511</div>
-        <div style="font-size:10px;color:var(--text-muted)">platform_id migration fix</div>
-      </div>
-      <div>
-        <div class="form-label">Environment</div>
-        <div style="font-size:12px;color:var(--text-primary)">Production</div>
-        <div style="font-size:10px;color:var(--green)">All secrets via env vars ✓</div>
-      </div>
-    </div>`;
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: CONVERSATION ENGINE
-// ═══════════════════════════════════════════════════════════
-function renderConversation() {
-  document.getElementById('conv-kpis').innerHTML = [
-    {label:'Active Cadences', value:'2',     delta:'1 draft',       color:'var(--blue)'},
-    {label:'Messages Sent',   value:'847',   delta:'last 30 days',  color:'var(--purple)'},
-    {label:'Reply Rate',      value:'34%',   delta:'+2% vs avg',    color:'var(--green)'},
-    {label:'Booking Rate',    value:'22%',   delta:'from replied',  color:'var(--cyan)'},
-    {label:'Opt-outs',        value:'3',     delta:'0.4% rate',     color:'var(--amber)'},
-    {label:'Avg Touches',     value:'2.8',   delta:'before reply',  color:'var(--blue)'},
-  ].map(k=>`
-    <div class="kpi-card">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value" style="color:${k.color}">${k.value}</div>
-      <div class="kpi-delta">${k.delta}</div>
-    </div>`).join('');
-  renderConversationList();
-}
-function renderConversationList() {
-  const list = document.getElementById('cadence-list');
-  if (!list) return;
-  list.innerHTML = STATE.cadences.map(c=>`
-    <div class="cadence-item ${STATE.selectedCadence===c.id?'selected':''}" onclick="selectCadence(${c.id})">
-      <div class="cadence-name">${c.name}</div>
-      <div class="cadence-meta">${c.platform} · ${c.touches.length} touches</div>
-      <div style="margin-top:4px">
-        <span class="badge ${c.status==='active'?'badge-green':'badge-amber'}" style="font-size:9px">${c.status}</span>
-      </div>
-    </div>`).join('');
-}
-function selectCadence(id) {
-  STATE.selectedCadence = id;
-  renderConversationList();
-  const cad = STATE.cadences.find(c=>c.id===id);
-  if (!cad) return;
-  document.getElementById('cadence-editor-empty').style.display = 'none';
-  document.getElementById('cadence-editor-content').style.display = 'block';
-  document.getElementById('cadence-editor-name').textContent = cad.name;
-  document.getElementById('cadence-editor-badge').innerHTML = `<span class="badge ${cad.status==='active'?'badge-green':'badge-amber'}">${cad.status}</span>`;
-  // Touch sequence
-  renderTouchList(cad);
-  // Templates
-  const smsEl = document.getElementById('sms-template');
-  const subEl = document.getElementById('email-subject');
-  const bodyEl = document.getElementById('email-body');
-  if(smsEl) smsEl.value = cad.templates.smsBody;
-  if(subEl) subEl.value = cad.templates.emailSubject;
-  if(bodyEl) bodyEl.value = cad.templates.emailBody;
-  // AI Controls
-  const toneEl = document.getElementById('ai-tone');
-  const urgEl  = document.getElementById('ai-urgency');
-  const maxEl  = document.getElementById('ai-max-touches');
-  if(toneEl) toneEl.value = cad.ai.tone;
-  if(urgEl)  urgEl.value  = cad.ai.urgency;
-  if(maxEl)  maxEl.value  = cad.ai.maxTouches;
-  const stopEl = document.getElementById('ai-auto-stop');
-  const timeEl = document.getElementById('ai-smart-time');
-  const persEl = document.getElementById('ai-personalize');
-  if(stopEl) stopEl.checked = cad.ai.autoStop;
-  if(timeEl) timeEl.checked = cad.ai.smartTime;
-  if(persEl) persEl.checked = cad.ai.personalize;
-  // Analytics
-  renderCadenceAnalytics(cad);
-  // Reset to sequence tab
-  setCadenceTab('sequence', document.querySelector('.tab-btn'));
-}
-function renderTouchList(cad) {
-  const list = document.getElementById('touch-list');
-  if (!list) return;
-  list.innerHTML = cad.touches.length
-    ? cad.touches.map((t,i)=>`
-      <div class="touch-row">
-        <div class="touch-day">Day ${t.day}</div>
-        <div class="touch-channel">${t.channel==='SMS'?'💬':'📧'} ${t.channel}</div>
-        <div class="touch-preview">${t.message}</div>
-        <div class="touch-del" onclick="removeTouch(${i})" title="Remove">✕</div>
-      </div>`).join('')
-    : '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px">No touches yet — add one below</div>';
-}
-function addTouch() {
-  const cad = STATE.cadences.find(c=>c.id===STATE.selectedCadence);
-  if (!cad) return;
-  const lastDay = cad.touches.length ? Math.max(...cad.touches.map(t=>t.day)) : -3;
-  const newTouch = { day: lastDay+3, channel:'SMS', message:'Hi {first_name}, following up from {org_name}. {booking_link}' };
-  cad.touches.push(newTouch);
-  renderTouchList(cad);
-}
-function removeTouch(idx) {
-  const cad = STATE.cadences.find(c=>c.id===STATE.selectedCadence);
-  if (!cad) return;
-  cad.touches.splice(idx,1);
-  renderTouchList(cad);
-}
-function saveCadence() {
-  const cad = STATE.cadences.find(c=>c.id===STATE.selectedCadence);
-  if (!cad) return;
-  const smsEl = document.getElementById('sms-template');
-  const subEl = document.getElementById('email-subject');
-  const bodyEl = document.getElementById('email-body');
-  if(smsEl) cad.templates.smsBody = smsEl.value;
-  if(subEl) cad.templates.emailSubject = subEl.value;
-  if(bodyEl) cad.templates.emailBody = bodyEl.value;
-  const toneEl = document.getElementById('ai-tone');
-  const urgEl  = document.getElementById('ai-urgency');
-  const maxEl  = document.getElementById('ai-max-touches');
-  if(toneEl) cad.ai.tone = toneEl.value;
-  if(urgEl)  cad.ai.urgency = urgEl.value;
-  if(maxEl)  cad.ai.maxTouches = parseInt(maxEl.value)||5;
-  const stopEl = document.getElementById('ai-auto-stop');
-  const timeEl = document.getElementById('ai-smart-time');
-  const persEl = document.getElementById('ai-personalize');
-  if(stopEl) cad.ai.autoStop = stopEl.checked;
-  if(timeEl) cad.ai.smartTime = timeEl.checked;
-  if(persEl) cad.ai.personalize = persEl.checked;
-  ownerAction('save_cadence', cad.name, cad.platform, {name:cad.name});
-  renderConversationList();
-}
-function deleteCadence() {
-  const cad = STATE.cadences.find(c=>c.id===STATE.selectedCadence);
-  if (!cad) return;
-  if (!confirm('Delete cadence "'+cad.name+'"?')) return;
-  STATE.cadences = STATE.cadences.filter(c=>c.id!==STATE.selectedCadence);
-  STATE.selectedCadence = null;
-  document.getElementById('cadence-editor-empty').style.display = 'block';
-  document.getElementById('cadence-editor-content').style.display = 'none';
-  ownerAction('delete_cadence', cad.name, cad.platform, {name:cad.name});
-  renderConversationList();
-}
-function setCadenceTab(tab, btn) {
-  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-  const panel = document.getElementById('cadence-tab-'+tab);
-  if(panel) panel.classList.add('active');
-  // find the clicked button if passed, else find by tab name
-  if(btn && btn.classList) btn.classList.add('active');
-  else {
-    document.querySelectorAll('.tab-btn').forEach(b=>{ if(b.getAttribute('onclick')&&b.getAttribute('onclick').includes("'"+tab+"'")) b.classList.add('active'); });
-  }
-}
-function renderCadenceAnalytics(cad) {
-  const a = cad.analytics;
-  document.getElementById('cadence-analytics-kpis').innerHTML = [
-    {label:'Sent',        value:a.sent,                 color:'var(--blue)'},
-    {label:'Open Rate',   value:Math.round(a.openRate*100)+'%', color:'var(--purple)'},
-    {label:'Reply Rate',  value:Math.round(a.replyRate*100)+'%',color:'var(--green)'},
-    {label:'Book Rate',   value:Math.round(a.bookRate*100)+'%', color:'var(--cyan)'},
-    {label:'Opt-outs',    value:'2',                    color:'var(--amber)'},
-    {label:'In Progress', value:Math.round(a.sent*0.3), color:'var(--text-secondary)'},
-  ].map(k=>`
-    <div style="text-align:center;padding:10px;background:rgba(4,8,20,0.4);border-radius:var(--radius-sm)">
-      <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${k.label}</div>
-      <div style="font-size:16px;font-weight:700;color:${k.color}">${k.value}</div>
-    </div>`).join('');
-  document.getElementById('touch-analytics-tbody').innerHTML = cad.touches.map((t,i)=>`
-    <tr>
-      <td>#${i+1}</td>
-      <td>${t.channel}</td>
-      <td>Day ${t.day}</td>
-      <td>${Math.round(cad.analytics.sent * (1-i*0.1))}</td>
-      <td style="color:var(--purple)">${Math.round((cad.analytics.openRate - i*0.05)*100)}%</td>
-      <td style="color:var(--green)">${Math.round((cad.analytics.replyRate - i*0.08)*100)}%</td>
-    </tr>`).join('');
-}
-function insertMergeVar(v) {
-  const el = document.getElementById('sms-template');
-  if (!el) return;
-  const start = el.selectionStart, end = el.selectionEnd;
-  el.value = el.value.substring(0,start) + v + el.value.substring(end);
-  el.focus();
-  el.setSelectionRange(start+v.length, start+v.length);
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: SUPER ADMINS
-// ═══════════════════════════════════════════════════════════
-function renderAdmins() {
-  const admins = STATE.superAdmins;
-  document.getElementById('admin-count').textContent = admins.length;
-  document.getElementById('admins-tbody').innerHTML = admins.map(a=>`
-    <tr>
-      <td>${a.name}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${a.email}</td>
-      <td><span class="badge badge-blue">${a.platform}</span></td>
-      <td><span class="badge badge-purple">${a.role}</span></td>
-      <td>
-        <div style="display:flex;flex-wrap:wrap;gap:3px;max-width:260px">
-          ${Array.isArray(a.perms) ? a.perms.map(p=>`<span class="perm-chip">${p}</span>`).join('') : `<span class="perm-chip">${a.perms}</span>`}
-        </div>
-      </td>
-      <td><span class="badge ${a.status==='active'?'badge-green':a.status==='pending'?'badge-amber':'badge-red'}">${a.status}</span></td>
-      <td onclick="event.stopPropagation()">
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-xs" onclick="showToast('info','Edit Admin','Editing ${a.name}')">Edit</button>
-          <button class="btn btn-danger btn-xs" onclick="if(confirm('Revoke access for ${a.name}?'))showToast('warning','Access Revoked','${a.name} removed')">Revoke</button>
-        </div>
-      </td>
-    </tr>`).join('');
-  const allPerms = ['view_all_leads','manage_orgs','view_reports','send_messages','manage_cadences','billing_access'];
-  document.getElementById('perm-matrix').innerHTML = `
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>Role</th>
-          ${allPerms.map(p=>`<th style="font-size:9px">${p.replace(/_/g,' ')}</th>`).join('')}
-        </tr></thead>
-        <tbody>
-          <tr>
-            <td><span class="badge" style="background:var(--god-gold-dim);color:var(--god-gold);border:1px solid rgba(245,200,66,.3)">god_admin</span></td>
-            ${allPerms.map(()=>`<td style="text-align:center;color:var(--god-gold)">⚡</td>`).join('')}
-          </tr>
-          <tr>
-            <td><span class="badge badge-purple">super_admin</span></td>
-            ${allPerms.map(p=>['view_all_leads','manage_orgs','view_reports','send_messages','manage_cadences'].includes(p)?`<td style="text-align:center;color:var(--green)">✓</td>`:`<td style="text-align:center;color:var(--border)">—</td>`).join('')}
-          </tr>
-          <tr>
-            <td><span class="badge badge-blue">platform_admin</span></td>
-            ${allPerms.map(p=>['view_all_leads','manage_orgs','view_reports'].includes(p)?`<td style="text-align:center;color:var(--green)">✓</td>`:`<td style="text-align:center;color:var(--border)">—</td>`).join('')}
-          </tr>
-          <tr>
-            <td><span class="badge badge-muted">org_admin</span></td>
-            ${allPerms.map(p=>['view_all_leads','send_messages'].includes(p)?`<td style="text-align:center;color:var(--green)">✓</td>`:`<td style="text-align:center;color:var(--border)">—</td>`).join('')}
-          </tr>
-        </tbody>
-      </table>
-    </div>`;
-}
-// ═══════════════════════════════════════════════════════════
-// RENDER: AUDIT LOG
-// ═══════════════════════════════════════════════════════════
-function renderAuditLog() {
-  const search   = (document.getElementById('audit-search')?.value||'').toLowerCase();
-  const typeFilter = document.getElementById('audit-filter-type')?.value||'';
-  const filtered = STATE.actionLog.filter(e =>
-    (!typeFilter || e.actionType===typeFilter) &&
-    (!search || e.actionType.includes(search) || e.target.includes(search) || e.scope.includes(search))
-  );
-  const actionColors = {
-    navigate:'background:rgba(47,182,255,0.1);color:var(--blue)',
-    refresh:'background:rgba(30,240,168,0.1);color:var(--green)',
-    open_drawer:'background:rgba(157,109,255,0.1);color:var(--purple)',
-    export_leads:'background:rgba(0,229,255,0.1);color:var(--cyan)',
-    export_report:'background:rgba(0,229,255,0.1);color:var(--cyan)',
-    export_audit:'background:rgba(0,229,255,0.1);color:var(--cyan)',
-    create_org:'background:rgba(30,240,168,0.1);color:var(--green)',
-    intel_query:'background:rgba(245,200,66,0.1);color:var(--god-gold)',
-    invite_admin:'background:rgba(255,178,56,0.1);color:var(--amber)',
-    save_cadence:'background:rgba(30,240,168,0.1);color:var(--green)',
-    delete_cadence:'background:rgba(255,77,126,0.1);color:var(--red)',
-  };
-  document.getElementById('audit-log-list').innerHTML = filtered.length
-    ? filtered.map(e=>`
-      <div class="audit-row">
-        <div class="audit-ts">${new Date(e.ts).toLocaleString()}</div>
-        <span class="audit-action" style="${actionColors[e.actionType]||'background:rgba(120,150,200,0.08);color:var(--text-muted)'};border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700">${e.actionType}</span>
-        <div class="audit-target">${e.target}</div>
-        <div class="audit-scope"><span class="badge badge-muted" style="font-size:9px">${e.scope}</span></div>
-      </div>`).join('')
-    : '<div class="empty-state"><div class="empty-state-icon">📋</div><div>No actions logged yet</div><div style="font-size:11px;margin-top:4px">Interact with the dashboard to generate audit entries</div></div>';
-}
-// ═══════════════════════════════════════════════════════════
-// INTEL BAR — NL ROUTING
-// ═══════════════════════════════════════════════════════════
-function handleIntelQuery(query) {
-  if (!query) return;
-  const q = query.toLowerCase();
-  for (const [screen, keywords] of Object.entries(SCREEN_KEYWORDS)) {
-    if (keywords.some(k => q.includes(k))) {
-      navigateTo(screen);
-      document.getElementById('intel-input').value = '';
-      showToast('info','Navigating','→ '+screen);
-      return;
-    }
-  }
-  showToast('info','Intel Query','"'+query+'" — no matching screen. Try: leads, revenue, health…');
-  document.getElementById('intel-input').value = '';
-}
-// ═══════════════════════════════════════════════════════════
-// GOD MODE
-// ═══════════════════════════════════════════════════════════
-function toggleGodMode() {
-  STATE.godMode = !STATE.godMode;
-  document.body.classList.toggle('god-mode', STATE.godMode);
-  document.getElementById('god-mode-label').textContent = STATE.godMode ? 'God Mode ON' : 'God Mode';
-  ownerAction(STATE.godMode ? 'god_mode_on' : 'god_mode_off', 'global', 'global');
-  showToast(STATE.godMode ? 'warning' : 'info', STATE.godMode ? '⚡ God Mode Activated' : 'God Mode Deactivated', STATE.godMode ? 'All platform data unlocked' : 'Standard view restored');
-}
-// ═══════════════════════════════════════════════════════════
-// CLOCK
-// ═══════════════════════════════════════════════════════════
-function updateClock() {
-  const el = document.getElementById('clock');
-  if (el) el.textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-}
-// ═══════════════════════════════════════════════════════════
-// KEYBOARD SHORTCUTS
-// ═══════════════════════════════════════════════════════════
-document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-    e.preventDefault();
-    document.getElementById('intel-input').focus();
-    document.getElementById('intel-input').select();
-  }
-  if (e.key === 'Escape') closeDrawer();
-});
-document.getElementById('intel-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') {
-    const q = e.target.value.trim();
-    if (q) ownerAction('intel_query', 'intelligence_bar', STATE.currentScope, {query:q});
-  }
-  if (e.key === 'Escape') e.target.blur();
-});
-// ═══════════════════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════
-// API — real data from AdvisorFlow backend
-// ═══════════════════════════════════════════════════════════
-const BASE = 'https://advisorflow-backend.onrender.com';
-
-function getToken() {
-  try { return localStorage.getItem('bookaboost_token') || ''; } catch(e) { return ''; }
-}
-
-async function apiGet(path) {
-  const r = await fetch(BASE + path, {
-    headers: { 'Authorization': 'Bearer ' + getToken() }
-  });
-  if (!r.ok) throw new Error(path + ' → ' + r.status);
+// ══════════════════════════════════════
+// API
+// ══════════════════════════════════════
+const BASE='https://advisorflow-backend.onrender.com';
+function tok(){try{return localStorage.getItem('bookaboost_token')||'';}catch(e){return '';}}
+async function apiGet(path){
+  const r=await fetch(BASE+path,{headers:{'Authorization':'Bearer '+tok()}});
+  if(!r.ok) throw new Error(path+' → '+r.status);
   return r.json();
 }
+async function apiPost(path,body){
+  const r=await fetch(BASE+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok()},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.detail||path+' → '+r.status);
+  return d;
+}
 
-const PLATFORM_META = {
-  bookaboost: { label:'BOOKABOOST',       color:'#4a9eff' },
-  evosys:     { label:'EVOSYS PRO',       color:'#a855f7' },
-  harmony:    { label:'HARMONY HUSTLE',   color:'#f59e0b', dev:true },
+const PM={
+  bookaboost:{label:'BOOKABOOST',color:'#4a9eff',cls:'plat-bb'},
+  evosys:{label:'EVOSYS PRO',color:'#a855f7',cls:'plat-ev'},
+  harmony:{label:'HARMONY',color:'#f59e0b',cls:'plat-hh'},
 };
 
-async function loadRealData() {
-  try {
-    const [stats, platforms, orgsData, leadsData, usersData] = await Promise.all([
+async function loadRealData(){
+  try{
+    const [stats,platforms,orgsData,leadsData,usersData]=await Promise.all([
       apiGet('/god/stats'),
       apiGet('/god/platforms'),
       apiGet('/god/orgs?limit=100'),
       apiGet('/god/leads?limit=200'),
       apiGet('/god/users?limit=100'),
     ]);
-
-    // KPIs
-    STATE.kpis.totalLeads     = stats.total_leads      ?? STATE.kpis.totalLeads;
-    STATE.kpis.activeOrgs     = stats.active_orgs      ?? STATE.kpis.activeOrgs;
-    STATE.kpis.totalRevenue   = stats.total_orgs * 297;
-    STATE.kpis.mrr            = String(stats.total_orgs * 297);
-
-    // Platforms
-    platforms.forEach(p => {
-      const meta = PLATFORM_META[p.slug];
-      if (meta) {
-        STATE.platforms[p.slug] = { ...meta, orgs: p.org_count, leads: p.lead_count };
-      }
+    STATE.kpis.totalLeads=stats.total_leads??STATE.kpis.totalLeads;
+    STATE.kpis.activeOrgs=stats.active_orgs??STATE.kpis.activeOrgs;
+    platforms.forEach(p=>{
+      if(STATE.platforms[p.slug]){STATE.platforms[p.slug].orgs=p.org_count||0;STATE.platforms[p.slug].leads=p.lead_count||0;}
     });
-    STATE.platforms.global.orgs  = stats.total_orgs;
-    STATE.platforms.global.leads = stats.total_leads;
-
-    // Orgs — build a slug lookup so leads can reference platform name
-    const orgById = {};
-    if (orgsData.orgs && orgsData.orgs.length) {
-      STATE.orgs = orgsData.orgs.map(o => {
-        // Detect platform from platform_id by matching against fetched platforms list
-        const pRow = platforms.find(p => p.id === o.platform_id);
-        const slug = pRow ? pRow.slug : 'bookaboost';
-        const entry = { id: o.id, name: o.name, platform: slug, leads: o.lead_count, status: 'active', mrr: 297 };
-        orgById[o.id] = entry;
-        return entry;
+    STATE.platforms.global.orgs=stats.total_orgs||0;
+    STATE.platforms.global.leads=stats.total_leads||0;
+    const orgById={};
+    if(orgsData.orgs?.length){
+      STATE.organizations=orgsData.orgs.map(o=>{
+        const pRow=platforms.find(p=>p.id===o.platform_id);
+        const slug=pRow?pRow.slug:'bookaboost';
+        const entry={id:o.id,name:o.name,shortName:o.name.split(' ')[0],platform:slug,leads:o.lead_count||0,users:o.user_count||0,mrr:o.plan==='trial'?0:297,plan:o.plan||'trial',status:o.is_active?'active':'inactive',automation:true,appointments:Math.floor((o.lead_count||0)*0.11),generatedValue:(o.plan==='trial'?0:297)*400};
+        orgById[o.id]=entry;return entry;
       });
     }
-
-    // Leads
-    if (leadsData.leads && leadsData.leads.length) {
-      STATE.leads = leadsData.leads.map(l => {
-        const org = orgById[l.organization_id];
-        return {
-          id:       l.id,
-          name:     l.name || 'Unknown',
-          org:      org ? org.name : '',
-          platform: org ? org.platform : 'bookaboost',
-          status:   l.status  || 'imported',
-          source:   l.source  || '—',
-          created:  (l.created_at || '').slice(0, 10),
-          tier:     l.tier    || 'cold',
-          email:    l.email   || '',
-          phone:    l.phone   || '',
-        };
-      });
+    if(leadsData.leads?.length){
+      STATE.leads=leadsData.leads.map(l=>{const org=orgById[l.organization_id];return{id:l.id,name:l.name||'Unknown',org:org?org.name:'',platform:org?org.platform:'bookaboost',status:l.status||'imported',source:l.source||'—',created:(l.created_at||'').slice(0,10),tier:l.tier||'cold',email:l.email||''};});
+      STATE.kpis.totalLeads=STATE.leads.length;
     }
-
-    // Admins
-    if (usersData.users && usersData.users.length) {
-      STATE.admins = usersData.users.map(u => ({
-        id:       u.id,
-        name:     u.name || u.email,
-        email:    u.email,
-        platform: 'global',
-        role:     u.role,
-        status:   u.is_active ? 'active' : 'inactive',
-        perms:    [],
-      }));
+    if(usersData.users?.length){
+      STATE.users=usersData.users.map(u=>({id:u.id,name:u.name||u.email,email:u.email,orgId:u.organization_id,platform:'global',role:u.role,status:u.is_active?'active':'inactive',lastLogin:(u.last_login||'').slice(0,10)||'—'}));
     }
-
+    STATE.kpis.mrr=STATE.organizations.reduce((s,o)=>s+o.mrr,0);
     renderScreen(STATE.currentScreen);
     buildScopeBar();
-  } catch(e) {
-    console.error('[god-v3] loadRealData:', e);
-    showToast('warning', 'Live data unavailable', e.message);
+    showToast('success','Data loaded','Live backend data synced');
+  }catch(e){
+    console.error('[god-v4]',e);
+    showToast('warning','Offline mode',e.message||'Using cached data');
   }
 }
 
-function init() {
+// ══════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════
+function nav(screen){
+  STATE.currentScreen=screen;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  const el=document.getElementById('screen-'+screen);
+  if(el) el.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.screen===screen));
+  const item=NAV.flatMap(s=>s.items).find(i=>i.screen===screen);
+  document.getElementById('tb-title').textContent=item?item.label:'';
+  renderScreen(screen);
+  logAction('navigate',screen);
+}
+
+function renderScreen(s){
+  switch(s){
+    case 'command':renderCommand();break;
+    case 'brands':renderBrands();break;
+    case 'orgs':renderOrgs();break;
+    case 'leads':renderLeads();break;
+    case 'pipeline':renderPipeline();break;
+    case 'conversation':renderConversation();break;
+    case 'forecasting':updateForecast();break;
+    case 'revenue':renderRevenue();break;
+    case 'health':renderHealth();break;
+    case 'users':renderUsers();break;
+    case 'audit':renderAudit();break;
+  }
+}
+
+// ══════════════════════════════════════
+// SIDEBAR
+// ══════════════════════════════════════
+function buildSidebar(){
+  document.getElementById('sb-nav').innerHTML=NAV.map(s=>`
+    <div class="nav-sec-lbl">${s.sec}</div>
+    ${s.items.map(i=>`<div class="nav-item" data-screen="${i.screen}" onclick="nav('${i.screen}')"><span class="nav-icon">${i.icon}</span>${i.label}${i.badge?`<span class="nav-badge" id="badge-audit">0</span>`:''}</div>`).join('')}
+  `).join('');
+}
+
+function buildScopeBar(){
+  document.getElementById('sb-scope').innerHTML=`<div class="scope-lbl">Scope</div>`+Object.entries(STATE.platforms).map(([k,p])=>`
+    <div class="scope-btn ${k===STATE.currentScope?'active':''}" onclick="setScope('${k}')"><span class="scope-dot"></span>${p.label}${p.dev?' 🚧':''}</div>
+  `).join('');
+}
+
+function setScope(s){STATE.currentScope=s;buildScopeBar();renderScreen(STATE.currentScreen);}
+
+// ══════════════════════════════════════
+// COMMAND CENTER
+// ══════════════════════════════════════
+function renderCommand(){
+  const k=STATE.kpis;
+  document.getElementById('cmd-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  document.getElementById('cmd-kpis').innerHTML=`
+    <div class="kpi blue"><div class="kpi-label">Total Leads</div><div class="kpi-value">${k.totalLeads.toLocaleString()}</div><div class="kpi-delta up">↑ All platforms</div></div>
+    <div class="kpi green"><div class="kpi-label">Active Orgs</div><div class="kpi-value">${k.activeOrgs}</div><div class="kpi-delta flat">Across platforms</div></div>
+    <div class="kpi gold"><div class="kpi-label">MRR</div><div class="kpi-value">$${Number(k.mrr).toLocaleString()}</div><div class="kpi-delta up">↑ Recurring</div></div>
+    <div class="kpi amber"><div class="kpi-label">Bookings / Week</div><div class="kpi-value">${k.bookings||14}</div><div class="kpi-delta up">↑ Appointments</div></div>
+  `;
+  // Decision queue
+  const dqItems=buildDQ();
+  document.getElementById('dq').innerHTML=dqItems.length?dqItems.map(i=>`
+    <div class="dq-item ${i.cls}" onclick="${i.action}">
+      <div class="dq-dot ${i.color}"></div>
+      <div><div class="dq-text">${i.title}</div><div class="dq-sub">${i.sub}</div></div>
+      <div class="dq-cta">${i.cta} →</div>
+    </div>
+  `).join(''):`<div class="empty"><div class="ico">✅</div>All clear — no decisions needed</div>`;
+  // Watchlist
+  const scope=STATE.currentScope;
+  const orgs=scope==='global'?STATE.organizations:STATE.organizations.filter(o=>o.platform===scope);
+  document.getElementById('wl').innerHTML=orgs.slice(0,5).map(o=>`
+    <div class="wl-row">
+      <span class="plat-dot ${(PM[o.platform]||{}).cls||'plat-bb'}"></span>
+      <div class="wl-name">${o.shortName||o.name}</div>
+      <div class="wl-stat t-amber"><strong>${o.leads}</strong><span style="font-size:10px;color:var(--text-3)">leads</span></div>
+      <div class="wl-stat t-green"><strong>$${o.mrr.toLocaleString()}</strong><span style="font-size:10px;color:var(--text-3)">mrr</span></div>
+      <div class="wl-stat t-blue"><strong>${o.appointments}</strong><span style="font-size:10px;color:var(--text-3)">appts</span></div>
+    </div>
+  `).join('')||'<div class="empty">No orgs in scope</div>';
+  // Platform overview
+  document.getElementById('plat-overview').innerHTML=Object.entries(STATE.platforms).filter(([k])=>k!=='global').map(([k,p])=>`
+    <div class="card card-sm" style="border-top:2px solid ${p.color}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:11px;font-weight:700;color:${p.color}">${p.label}</span>
+        ${p.dev?'<span class="badge badge-trial">DEV</span>':''}
+      </div>
+      <div class="grid-2" style="gap:8px">
+        <div><div class="kpi-label">Orgs</div><div style="font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace">${p.orgs||0}</div></div>
+        <div><div class="kpi-label">Leads</div><div style="font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace">${p.leads||0}</div></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function buildDQ(){
+  const items=[];
+  const trial=STATE.organizations.filter(o=>o.plan==='trial');
+  if(trial.length) items.push({cls:'warn',color:'amber',title:`${trial.length} org${trial.length>1?'s':''} on trial`,sub:trial.map(o=>o.shortName).join(', '),cta:'Review',action:"nav('orgs')"});
+  const deg=Object.entries(STATE.systemHealth).filter(([,v])=>v!=='operational');
+  if(deg.length) items.push({cls:'urgent',color:'red',title:`${deg.length} service${deg.length>1?'s':''} degraded`,sub:deg.map(([k])=>k).join(', '),cta:'Check',action:"nav('health')"});
+  const hot=STATE.leads.filter(l=>l.tier==='hot'&&l.status!=='booked');
+  if(hot.length) items.push({cls:'',color:'blue',title:`${hot.length} hot lead${hot.length>1?'s':''} unbooked`,sub:'Needs follow-up',cta:'View',action:"nav('leads')"});
+  return items;
+}
+
+// ══════════════════════════════════════
+// ORGANIZATIONS
+// ══════════════════════════════════════
+function renderOrgs(){
+  const scope=STATE.currentScope;
+  const orgs=scope==='global'?STATE.organizations:STATE.organizations.filter(o=>o.platform===scope);
+  document.getElementById('orgs-sub').textContent=`${orgs.length} organization${orgs.length!==1?'s':''} · ${scope==='global'?'all platforms':(STATE.platforms[scope]?.label||scope)}`;
+  document.getElementById('orgs-tbody').innerHTML=orgs.length?orgs.map(o=>{
+    const pm=PM[o.platform]||{label:o.platform,color:'#4a9eff',cls:'plat-bb'};
+    return `<tr>
+      <td><strong>${o.name}</strong><div style="font-size:10.5px;color:var(--text-3)">${o.shortName}</div></td>
+      <td><span class="plat-dot ${pm.cls}"></span><span style="font-size:11px;color:${pm.color}">${pm.label}</span></td>
+      <td><span class="badge badge-${o.plan==='pro'?'pro':'trial'}">${o.plan.toUpperCase()}</span></td>
+      <td class="mono">${o.leads.toLocaleString()}</td>
+      <td class="mono">${o.users||0}</td>
+      <td class="mono t-green">$${o.mrr.toLocaleString()}</td>
+      <td class="mono">${o.appointments||0}</td>
+      <td class="mono t-gold">$${(o.generatedValue||0).toLocaleString()}</td>
+      <td><span class="badge badge-${o.status}">${o.status}</span></td>
+      <td><button class="btn btn-xs" onclick="openDrawer('org-detail',${JSON.stringify(o).replace(/'/g,'&#39;')})">Details</button></td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="10"><div class="empty">No organizations in this scope</div></td></tr>`;
+}
+
+// ══════════════════════════════════════
+// LEADS
+// ══════════════════════════════════════
+function renderLeads(){
+  const scope=STATE.currentScope;
+  const sf=document.getElementById('lf-status')?.value||'';
+  const tf=document.getElementById('lf-tier')?.value||'';
+  let leads=STATE.leads;
+  if(scope!=='global') leads=leads.filter(l=>l.platform===scope);
+  if(sf) leads=leads.filter(l=>l.status===sf);
+  if(tf) leads=leads.filter(l=>l.tier===tf);
+  document.getElementById('leads-sub').textContent=`${leads.length} leads · ${scope==='global'?'all platforms':(STATE.platforms[scope]?.label||scope)}`;
+  document.getElementById('leads-tbody').innerHTML=leads.length?leads.map(l=>`<tr>
+    <td><strong>${l.name}</strong>${l.email?`<div style="font-size:10.5px;color:var(--text-3)">${l.email}</div>`:''}</td>
+    <td>${l.org||'—'}</td>
+    <td><span class="plat-dot ${(PM[l.platform]||{}).cls||'plat-bb'}"></span><span style="font-size:11px">${(PM[l.platform]||{label:l.platform}).label}</span></td>
+    <td><span class="badge badge-${l.status}">${l.status}</span></td>
+    <td><span class="badge badge-${l.tier}">${l.tier}</span></td>
+    <td>${l.source}</td>
+    <td class="muted">${l.created}</td>
+  </tr>`).join(''):`<tr><td colspan="7"><div class="empty">No leads match current filters</div></td></tr>`;
+}
+
+// ══════════════════════════════════════
+// PIPELINE
+// ══════════════════════════════════════
+function renderPipeline(){
+  const stages=['imported','contacted','replied','booked','closed'];
+  const labels={imported:'New',contacted:'Contacted',replied:'Replied',booked:'Booked',closed:'Closed'};
+  const colors={imported:'var(--text-3)',contacted:'var(--blue)',replied:'var(--amber)',booked:'var(--green)',closed:'var(--purple)'};
+  const scope=STATE.currentScope;
+  let leads=scope==='global'?STATE.leads:STATE.leads.filter(l=>l.platform===scope);
+  document.getElementById('pipe-total').textContent=leads.length;
+  const by={};stages.forEach(s=>{by[s]=leads.filter(l=>l.status===s);});
+  document.getElementById('pipe-board').innerHTML=stages.map(s=>`
+    <div class="pipe-col">
+      <div class="pipe-col-h" style="color:${colors[s]}">${labels[s]}<span class="pipe-cnt">${by[s].length}</span></div>
+      <div class="pipe-cards">
+        ${by[s].map(l=>`<div class="pipe-card"><div class="pipe-card-n">${l.name}</div><div class="pipe-card-m">${l.org||'—'} · <span class="badge badge-${l.tier}" style="padding:1px 5px;font-size:9px">${l.tier}</span></div></div>`).join('')}
+        ${!by[s].length?`<div class="empty" style="padding:20px;font-size:11px">Empty</div>`:''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ══════════════════════════════════════
+// CONVERSATION
+// ══════════════════════════════════════
+function renderConversation(){
+  const scope=STATE.currentScope;
+  const cads=scope==='global'?STATE.cadences:STATE.cadences.filter(c=>c.platform===scope);
+  document.getElementById('cadence-list').innerHTML=cads.map(c=>{
+    const pm=PM[c.platform]||{label:c.platform,color:'#4a9eff'};
+    return `<div class="card mb16">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="flex:1"><strong style="font-size:14px">${c.name}</strong><div style="font-size:11px;color:var(--text-3);margin-top:2px"><span style="color:${pm.color}">${pm.label}</span></div></div>
+        <span class="badge badge-${c.status==='active'?'active':'inactive'}">${c.status.toUpperCase()}</span>
+        <button class="btn btn-xs btn-red" onclick="STATE.cadences=STATE.cadences.filter(x=>x.id!==${c.id});renderConversation();showToast('warning','Deleted','${c.name} removed')">Delete</button>
+      </div>
+      <div class="grid-4">
+        <div><div class="kpi-label">Sent</div><div class="mono" style="font-size:18px;font-weight:700">${c.sent.toLocaleString()}</div></div>
+        <div><div class="kpi-label">Open Rate</div><div class="mono t-blue" style="font-size:18px;font-weight:700">${Math.round(c.openRate*100)}%</div></div>
+        <div><div class="kpi-label">Reply Rate</div><div class="mono t-amber" style="font-size:18px;font-weight:700">${Math.round(c.replyRate*100)}%</div></div>
+        <div><div class="kpi-label">Book Rate</div><div class="mono t-green" style="font-size:18px;font-weight:700">${Math.round(c.bookRate*100)}%</div></div>
+      </div>
+    </div>`;
+  }).join('')||'<div class="empty">No cadences in this scope</div>';
+}
+
+// ══════════════════════════════════════
+// BRANDS
+// ══════════════════════════════════════
+function renderBrands(){
+  document.getElementById('brands-grid').innerHTML=Object.entries(STATE.platforms).filter(([k])=>k!=='global').map(([k,p])=>`
+    <div class="card" style="border-top:2px solid ${p.color}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <strong style="color:${p.color};font-size:14px">${p.label}</strong>
+        ${p.dev?'<span class="badge badge-trial">DEV</span>':''}
+      </div>
+      <div class="grid-2" style="gap:10px;margin-bottom:12px">
+        <div><div class="kpi-label">Orgs</div><div class="mono" style="font-size:20px;font-weight:800">${p.orgs||0}</div></div>
+        <div><div class="kpi-label">Leads</div><div class="mono" style="font-size:20px;font-weight:800">${p.leads||0}</div></div>
+      </div>
+      <div class="sep"></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-xs" onclick="setScope('${k}');nav('orgs')">View Orgs</button>
+        <button class="btn btn-xs" onclick="setScope('${k}');nav('leads')">View Leads</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ══════════════════════════════════════
+// FORECASTING
+// ══════════════════════════════════════
+function updateForecast(){
+  const conv=parseInt(document.getElementById('sl-conversion')?.value||22)/100;
+  const deal=parseInt(document.getElementById('sl-deal-val')?.value||2400);
+  const leads=parseInt(document.getElementById('sl-leads-pm')?.value||80);
+  const cycle=parseInt(document.getElementById('sl-cycle-days')?.value||14);
+  if(document.getElementById('sl-conv')) document.getElementById('sl-conv').textContent=Math.round(conv*100)+'%';
+  if(document.getElementById('sl-deal')) document.getElementById('sl-deal').textContent='$'+deal.toLocaleString();
+  if(document.getElementById('sl-leads')) document.getElementById('sl-leads').textContent=leads;
+  if(document.getElementById('sl-cycle')) document.getElementById('sl-cycle').textContent=cycle;
+  const monthly=leads*conv*deal;
+  if(document.getElementById('fc-30')){
+    document.getElementById('fc-30').textContent='$'+Math.round(monthly).toLocaleString();
+    document.getElementById('fc-30-sub').textContent=`~${Math.round(leads*conv)} bookings · ${cycle}-day close cycle`;
+    document.getElementById('fc-60').textContent='$'+Math.round(monthly*2).toLocaleString();
+    document.getElementById('fc-90').textContent='$'+Math.round(monthly*3).toLocaleString();
+  }
+}
+
+// ══════════════════════════════════════
+// REVENUE
+// ══════════════════════════════════════
+function renderRevenue(){
+  const orgs=STATE.organizations;
+  const mrr=orgs.reduce((s,o)=>s+o.mrr,0);
+  const arr=mrr*12;
+  const totalVal=orgs.reduce((s,o)=>s+(o.generatedValue||0),0);
+  document.getElementById('revenue-content').innerHTML=`
+    <div class="grid-3 mb16">
+      <div class="kpi green"><div class="kpi-label">MRR</div><div class="kpi-value">$${mrr.toLocaleString()}</div><div class="kpi-delta up">↑ Monthly recurring</div></div>
+      <div class="kpi blue"><div class="kpi-label">ARR</div><div class="kpi-value">$${arr.toLocaleString()}</div><div class="kpi-delta up">↑ Annual run rate</div></div>
+      <div class="kpi gold"><div class="kpi-label">Generated Value</div><div class="kpi-value">$${totalVal.toLocaleString()}</div><div class="kpi-delta up">↑ Platform lifetime</div></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="tbl"><thead><tr><th>Organization</th><th>Plan</th><th>MRR</th><th>ARR</th><th>Leads</th><th>Appts</th><th>Gen. Value</th></tr></thead>
+      <tbody>${orgs.map(o=>`<tr>
+        <td><strong>${o.name}</strong></td>
+        <td><span class="badge badge-${o.plan==='pro'?'pro':'trial'}">${o.plan.toUpperCase()}</span></td>
+        <td class="mono t-green">$${o.mrr.toLocaleString()}</td>
+        <td class="mono">$${(o.mrr*12).toLocaleString()}</td>
+        <td class="mono">${o.leads.toLocaleString()}</td>
+        <td class="mono">${o.appointments||0}</td>
+        <td class="mono t-gold">$${(o.generatedValue||0).toLocaleString()}</td>
+      </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════
+// HEALTH
+// ══════════════════════════════════════
+function renderHealth(){
+  const svcs=[{k:'api',l:'API Gateway'},{k:'db',l:'Database'},{k:'email',l:'Email Service'},{k:'sms',l:'SMS / Twilio'},{k:'webhooks',l:'Webhooks'},{k:'queue',l:'Job Queue'}];
+  const ok=Object.values(STATE.systemHealth).every(v=>v==='operational');
+  document.getElementById('health-content').innerHTML=`
+    <div class="card mb16" style="text-align:center;padding:20px;border-color:${ok?'rgba(30,240,168,0.3)':'rgba(255,178,56,0.3)'}">
+      <div style="font-size:24px;font-weight:800;color:${ok?'var(--green)':'var(--amber)'}">${ok?'ALL SYSTEMS OPERATIONAL':'DEGRADED SERVICE DETECTED'}</div>
+      <div class="muted mt8">Last checked: ${new Date().toLocaleTimeString()}</div>
+    </div>
+    ${svcs.map(s=>{const st=STATE.systemHealth[s.k]||'operational';const good=st==='operational';return`<div class="health-item"><div class="hdot ${good?'ok':'warn'}"></div><div class="hname">${s.l}</div><div class="hstat ${good?'ok':'warn'}">${st}</div></div>`;}).join('')}
+  `;
+}
+
+// ══════════════════════════════════════
+// USERS
+// ══════════════════════════════════════
+function renderUsers(){
+  const scope=STATE.currentScope;
+  const users=STATE.users;
+  document.getElementById('users-sub').textContent=`${users.length} user${users.length!==1?'s':''} with platform access`;
+  document.getElementById('users-tbody').innerHTML=users.length?users.map(u=>`<tr>
+    <td><strong>${u.name}</strong></td>
+    <td class="mono" style="font-size:11px">${u.email}</td>
+    <td><span class="badge badge-${u.role==='god_admin'?'god':u.role==='super_admin'?'super':'active'}">${u.role.replace(/_/g,' ')}</span></td>
+    <td>${(PM[u.platform]||{label:u.platform==='global'?'All Platforms':u.platform}).label}</td>
+    <td><span class="badge badge-${u.status}">${u.status}</span></td>
+    <td class="muted">${u.lastLogin||'—'}</td>
+    <td><button class="btn btn-xs btn-red" onclick="showToast('warning','Revoked','${u.name} access revoked')">Revoke</button></td>
+  </tr>`).join(''):`<tr><td colspan="7"><div class="empty">No users found</div></td></tr>`;
+}
+
+// ══════════════════════════════════════
+// AUDIT
+// ══════════════════════════════════════
+function renderAudit(){
+  const badge=document.getElementById('badge-audit');
+  if(badge){badge.textContent=STATE.actionLog.length;badge.classList.toggle('show',STATE.actionLog.length>0);}
+  document.getElementById('audit-tbody').innerHTML=STATE.actionLog.length?STATE.actionLog.slice(0,100).map(e=>`<tr>
+    <td class="mono muted" style="font-size:10.5px">${new Date(e.ts).toLocaleTimeString()}</td>
+    <td><span class="chip">${e.action}</span></td>
+    <td>${e.target}</td>
+    <td>${e.scope||'global'}</td>
+    <td style="font-size:11px;color:var(--text-3)">${JSON.stringify(e.details||{})}</td>
+  </tr>`).join(''):`<tr><td colspan="5"><div class="empty">No actions logged yet</div></td></tr>`;
+}
+
+// ══════════════════════════════════════
+// DRAWER
+// ══════════════════════════════════════
+function openDrawer(type,data){
+  data=data||{};
+  const overlay=document.getElementById('overlay');
+  const drawer=document.getElementById('drawer');
+  overlay.style.display='block';
+  drawer.classList.add('open');
+  const t=document.getElementById('d-title');
+  const b=document.getElementById('d-body');
+  const f=document.getElementById('d-foot');
+  const platOpts=Object.entries(STATE.platforms).filter(([k])=>k!=='global').map(([k,p])=>`<option value="${k}">${p.label}</option>`).join('');
+  switch(type){
+    case 'new-org':
+      t.textContent='New Organization';
+      b.innerHTML=`
+        <div class="fg"><label class="fl">Organization Name *</label><input class="fi" id="d-org-name" placeholder="e.g. Restland Cemetery"></div>
+        <div class="fg"><label class="fl">Platform *</label><select class="fs" id="d-org-platform">${platOpts}</select></div>
+        <div class="fg"><label class="fl">Plan</label><select class="fs" id="d-org-plan"><option value="trial">Trial</option><option value="pro">Pro</option><option value="enterprise">Enterprise</option></select></div>
+        <div class="fh">A slug will be auto-generated from the org name.</div>`;
+      f.innerHTML=`<button class="btn btn-primary" style="flex:1" onclick="submitCreateOrg()">Create Organization</button><button class="btn" onclick="closeDrawer()">Cancel</button>`;
+      break;
+    case 'new-user':
+      t.textContent='Invite User';
+      b.innerHTML=`
+        <div class="fg"><label class="fl">Full Name *</label><input class="fi" id="d-user-name" placeholder="Full name"></div>
+        <div class="fg"><label class="fl">Email *</label><input class="fi" type="email" id="d-user-email" placeholder="user@company.com"></div>
+        <div class="fg"><label class="fl">Role</label><select class="fs" id="d-user-role"><option value="super_admin">Super Admin</option><option value="org_admin">Org Admin</option><option value="advisor">Advisor</option></select></div>
+        <div class="fg"><label class="fl">Platform</label><select class="fs" id="d-user-platform">${platOpts}</select></div>
+        <div class="fh">A temporary password will be generated and shown once.</div>`;
+      f.innerHTML=`<button class="btn btn-primary" style="flex:1" onclick="submitCreateUser()">Send Invitation</button><button class="btn" onclick="closeDrawer()">Cancel</button>`;
+      break;
+    case 'new-brand':
+      t.textContent='Register New Platform';
+      b.innerHTML=`
+        <div class="fg"><label class="fl">Platform Name *</label><input class="fi" id="d-brand-name" placeholder="e.g. EvoSys Pro"></div>
+        <div class="fg"><label class="fl">Slug *</label><input class="fi" id="d-brand-slug" placeholder="e.g. evosys"><div class="fh">Lowercase, no spaces. Used in URLs.</div></div>
+        <div class="fg"><label class="fl">Domain</label><input class="fi" id="d-brand-domain" placeholder="e.g. evosyspro.com"></div>
+        <div class="fg"><label class="fl">Support Email</label><input class="fi" type="email" id="d-brand-email" placeholder="support@yourplatform.com"></div>`;
+      f.innerHTML=`<button class="btn btn-gold" style="flex:1" onclick="submitCreateBrand()">Register Platform</button><button class="btn" onclick="closeDrawer()">Cancel</button>`;
+      break;
+    case 'new-cadence':
+      t.textContent='New Cadence';
+      b.innerHTML=`
+        <div class="fg"><label class="fl">Cadence Name *</label><input class="fi" id="d-cad-name" placeholder="e.g. Intro Sequence"></div>
+        <div class="fg"><label class="fl">Platform</label><select class="fs" id="d-cad-platform">${platOpts}</select></div>
+        <div class="fg"><label class="fl">SMS Template</label><textarea class="ft" id="d-cad-sms" placeholder="Hey {first_name}, this is {advisor_name}..."></textarea></div>`;
+      f.innerHTML=`<button class="btn btn-primary" style="flex:1" onclick="submitCreateCadence()">Create Cadence</button><button class="btn" onclick="closeDrawer()">Cancel</button>`;
+      break;
+    case 'control-center':
+      t.textContent='⚡ Control Center';
+      b.innerHTML=`
+        <div class="sec-lbl">Quick Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+          <button class="btn btn-primary" onclick="closeDrawer();nav('orgs');setTimeout(()=>openDrawer('new-org'),100)">+ New Organization</button>
+          <button class="btn btn-green" onclick="closeDrawer();nav('users');setTimeout(()=>openDrawer('new-user'),100)">+ Invite User</button>
+          <button class="btn btn-gold" onclick="closeDrawer();nav('brands');setTimeout(()=>openDrawer('new-brand'),100)">+ New Platform</button>
+        </div>
+        <div class="sep"></div>
+        <div class="sec-lbl">Data Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-sm" onclick="exportLeads()">⬇ Export All Leads (CSV)</button>
+          <button class="btn btn-sm" onclick="exportOrgs()">⬇ Export Orgs (CSV)</button>
+          <button class="btn btn-sm" onclick="exportAudit()">⬇ Export Audit Log (JSON)</button>
+          <button class="btn btn-sm" onclick="loadRealData();closeDrawer()">⟳ Force Refresh Data</button>
+        </div>`;
+      f.innerHTML=`<button class="btn" style="flex:1" onclick="closeDrawer()">Close</button>`;
+      break;
+    case 'org-detail':{
+      const o=data;
+      const pm=PM[o.platform]||{label:o.platform,color:'#4a9eff'};
+      t.textContent=o.name;
+      b.innerHTML=`
+        <div class="grid-2 mb16">
+          <div class="card card-sm"><div class="kpi-label">Leads</div><div class="kpi-value t-blue">${o.leads}</div></div>
+          <div class="card card-sm"><div class="kpi-label">MRR</div><div class="kpi-value t-green">$${o.mrr.toLocaleString()}</div></div>
+          <div class="card card-sm"><div class="kpi-label">Appointments</div><div class="kpi-value t-amber">${o.appointments||0}</div></div>
+          <div class="card card-sm"><div class="kpi-label">Gen. Value</div><div class="kpi-value t-gold">$${(o.generatedValue||0).toLocaleString()}</div></div>
+        </div>
+        <div class="fg"><div class="fl">Platform</div><div style="color:${pm.color};font-weight:600">${pm.label}</div></div>
+        <div class="fg"><div class="fl">Plan</div><span class="badge badge-${o.plan==='pro'?'pro':'trial'}">${(o.plan||'').toUpperCase()}</span></div>
+        <div class="fg"><div class="fl">Status</div><span class="badge badge-${o.status}">${o.status}</span></div>`;
+      f.innerHTML=`<button class="btn btn-primary" onclick="setScope('${o.platform}');closeDrawer();nav('leads')">View Leads</button><button class="btn btn-red" onclick="showToast('warning','Suspended','${o.name} suspended');closeDrawer()">Suspend</button><button class="btn" onclick="closeDrawer()">Close</button>`;
+      break;}
+  }
+}
+
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('overlay').style.display='none';
+}
+
+// ══════════════════════════════════════
+// CREATE ACTIONS
+// ══════════════════════════════════════
+async function submitCreateOrg(){
+  const name=document.getElementById('d-org-name')?.value?.trim();
+  const platform=document.getElementById('d-org-platform')?.value;
+  const plan=document.getElementById('d-org-plan')?.value||'trial';
+  if(!name){showToast('error','Missing field','Organization name is required');return;}
+  try{
+    const res=await apiPost('/god/orgs',{name,platform_slug:platform,plan});
+    STATE.organizations.push({id:res.id||Date.now(),name,shortName:name.split(' ')[0],platform,leads:0,users:0,mrr:plan==='pro'?297:0,plan,status:'active',automation:false,appointments:0,generatedValue:0});
+    closeDrawer();renderOrgs();
+    showToast('success','Organization Created',name+' is now live');
+    logAction('create_org',name,platform);
+  }catch(e){showToast('error','Create failed',e.message);}
+}
+
+async function submitCreateUser(){
+  const full_name=document.getElementById('d-user-name')?.value?.trim();
+  const email=document.getElementById('d-user-email')?.value?.trim();
+  const role=document.getElementById('d-user-role')?.value||'super_admin';
+  const platform_slug=document.getElementById('d-user-platform')?.value;
+  if(!full_name||!email){showToast('error','Missing fields','Name and email are required');return;}
+  try{
+    const res=await apiPost('/god/users',{email,full_name,role,platform_slug});
+    STATE.users.push({id:res.id||Date.now(),name:full_name,email,orgId:null,platform:platform_slug,role,status:'active',lastLogin:'—'});
+    closeDrawer();renderUsers();
+    if(res.temp_password){
+      showToast('success','User Created',`Temp password: ${res.temp_password}`);
+      setTimeout(()=>alert(`Temporary password for ${email}:\n\n${res.temp_password}\n\nShare securely. Must change on first login.`),300);
+    }else{showToast('success','User Created',full_name+' invited');}
+    logAction('create_user',email,platform_slug);
+  }catch(e){showToast('error','Create failed',e.message);}
+}
+
+async function submitCreateBrand(){
+  const name=document.getElementById('d-brand-name')?.value?.trim();
+  const slug=document.getElementById('d-brand-slug')?.value?.trim().toLowerCase().replace(/\s+/g,'-');
+  const domain=document.getElementById('d-brand-domain')?.value?.trim();
+  const support_email=document.getElementById('d-brand-email')?.value?.trim();
+  if(!name||!slug){showToast('error','Missing fields','Name and slug required');return;}
+  try{
+    await apiPost('/god/platforms',{name,slug,domain,support_email});
+    STATE.platforms[slug]={label:name.toUpperCase(),color:'#6ee7b7',slug,orgs:0,leads:0};
+    closeDrawer();buildScopeBar();renderBrands();
+    showToast('success','Platform Registered',name+' is now available');
+    logAction('create_platform',slug,'global');
+  }catch(e){showToast('error','Create failed',e.message);}
+}
+
+function submitCreateCadence(){
+  const name=document.getElementById('d-cad-name')?.value?.trim();
+  const platform=document.getElementById('d-cad-platform')?.value;
+  if(!name){showToast('error','Missing field','Cadence name required');return;}
+  STATE.cadences.push({id:Date.now(),name,platform,status:'draft',sent:0,openRate:0,replyRate:0,bookRate:0});
+  closeDrawer();renderConversation();
+  showToast('success','Cadence Created',name+' saved as draft');
+}
+
+// ══════════════════════════════════════
+// EXPORTS
+// ══════════════════════════════════════
+function exportLeads(){
+  const hdrs=['Name','Org','Platform','Status','Tier','Source','Created'];
+  const rows=STATE.leads.map(l=>[l.name,l.org,l.platform,l.status,l.tier,l.source,l.created]);
+  dl('leads_export.csv','text/csv',[hdrs,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n'));
+  showToast('info','Export Ready','leads_export.csv downloaded');
+}
+function exportOrgs(){
+  const hdrs=['Name','Platform','Plan','Leads','Users','MRR','Appts','Status'];
+  const rows=STATE.organizations.map(o=>[o.name,o.platform,o.plan,o.leads,o.users||0,o.mrr,o.appointments||0,o.status]);
+  dl('orgs_export.csv','text/csv',[hdrs,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n'));
+  showToast('info','Export Ready','orgs_export.csv downloaded');
+}
+function exportAudit(){
+  dl('audit_log.json','application/json',JSON.stringify(STATE.actionLog,null,2));
+  showToast('info','Export Ready','audit_log.json downloaded');
+}
+function dl(name,type,content){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type}));
+  a.download=name;a.click();
+}
+
+// ══════════════════════════════════════
+// INTEL BAR
+// ══════════════════════════════════════
+function handleIntelKey(e){
+  if(e.key==='Enter'){
+    const q=e.target.value.trim().toLowerCase();
+    if(!q)return;
+    e.target.value='';
+    handleQuery(q);
+  }else if(e.key==='Escape'){e.target.value='';e.target.blur();}
+}
+function handleQuery(q){
+  for(const[screen,kws]of Object.entries(KEYWORDS)){if(kws.some(kw=>q.includes(kw))){nav(screen);return;}}
+  if(q.includes('new org')||q.includes('create org')){nav('orgs');openDrawer('new-org');return;}
+  if(q.includes('new user')||q.includes('invite')){nav('users');openDrawer('new-user');return;}
+  if(q.includes('new brand')||q.includes('new platform')){nav('brands');openDrawer('new-brand');return;}
+  if(q.includes('refresh')||q.includes('reload')){loadRealData();return;}
+  if(q.includes('export')){exportLeads();return;}
+  showToast('info','Intel','No command matched: '+q);
+}
+
+// ══════════════════════════════════════
+// AUTOMATION
+// ══════════════════════════════════════
+function toggleAuto(key){
+  if(key==='pause'){
+    const s=!STATE.autoToggles.pause;
+    STATE.autoToggles.pause=s;
+    if(s){STATE.autoToggles.ai=false;STATE.autoToggles.sms=false;STATE.autoToggles.email=false;}
+    else{STATE.autoToggles.ai=true;STATE.autoToggles.sms=true;STATE.autoToggles.email=true;}
+  }else{STATE.autoToggles[key]=!STATE.autoToggles[key];}
+  ['ai','sms','email','pause'].forEach(k=>{
+    const el=document.getElementById('tog-'+k);
+    if(el)el.className='at'+(STATE.autoToggles[k]?' on':'');
+  });
+  showToast('info','Automation',`${key} ${STATE.autoToggles[key]?'enabled':'disabled'}`);
+}
+
+// ══════════════════════════════════════
+// GOD MODE / CLOCK / TOAST / LOG
+// ══════════════════════════════════════
+function toggleGodMode(){
+  STATE.godMode=!STATE.godMode;
+  document.body.classList.toggle('god',STATE.godMode);
+  showToast(STATE.godMode?'success':'info',STATE.godMode?'God Mode Active':'Standard View',STATE.godMode?'Full system access enabled':'God mode disabled');
+  logAction(STATE.godMode?'god_mode_on':'god_mode_off','global');
+}
+
+function updateClock(){
+  const n=new Date();
+  const el=document.getElementById('clock');
+  if(el)el.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');
+}
+
+function showToast(type,title,msg){
+  const c=document.getElementById('toast');
+  const d=document.createElement('div');
+  d.className=`toast ${type}`;
+  d.innerHTML=`<div class="toast-t">${title}</div>${msg?`<div class="toast-m">${msg}</div>`:''}`;
+  c.appendChild(d);
+  setTimeout(()=>d.remove(),4000);
+}
+
+function logAction(action,target,scope,details){
+  STATE.actionLog.unshift({ts:new Date().toISOString(),action,target,scope:scope||'global',details:details||{}});
+  const b=document.getElementById('badge-audit');
+  if(b){b.textContent=STATE.actionLog.length;b.classList.add('show');}
+}
+
+// ══════════════════════════════════════
+// INIT
+// ══════════════════════════════════════
+function init(){
   buildSidebar();
   buildScopeBar();
-  setInterval(updateClock, 1000);
+  setInterval(updateClock,1000);
   updateClock();
-  navigateTo('command');
+  nav('command');
+  updateForecast();
   loadRealData();
 }
 init();
