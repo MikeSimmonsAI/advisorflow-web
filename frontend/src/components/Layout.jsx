@@ -148,13 +148,15 @@ export default function Layout({ children }) {
   const [profilePhoto, setProfilePhoto] = useState(null)
   // Super admin always sees default BookaBoost branding — never a client org's branding
   const isSuperAdmin = user?.role === 'super_admin'
-  const [orgContext, setOrgCtx] = useState(() => isSuperAdmin ? getOrgContext() : null)
-  const [branding, setBranding] = useState(() => isSuperAdmin ? null : getBranding())
+  const isGodAdmin = user?.role === 'god_admin'
+  const isElevated = isSuperAdmin || isGodAdmin  // skip org branding for both
+  const [orgContext, setOrgCtx] = useState(() => isElevated ? getOrgContext() : null)
+  const [branding, setBranding] = useState(() => isElevated ? null : getBranding())
 
   // Feature gates: derive from branding STATE so the nav re-renders when flags update.
   // null enabled_features = all features on (backward-compatible).
-  // Super admin always bypasses — they control the flags, so they see everything.
-  const enabledFeatures = isSuperAdmin ? null : (branding?.enabled_features ?? null)
+  // Super admin and god admin always bypass — they see everything.
+  const enabledFeatures = isElevated ? null : (branding?.enabled_features ?? null)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
 
   function handleExitOrg() {
@@ -166,11 +168,11 @@ export default function Layout({ children }) {
   // Re-fetch branding on every navigation so feature flag changes made by super admin
   // are picked up without requiring a manual page reload.
   useEffect(() => {
-    if (isSuperAdmin) return  // super admin: no org branding applied to their shell
+    if (isElevated) return  // super admin / god admin: no org branding applied to their shell
     const stored = getBranding()
     if (stored) applyBrandingCSS(stored)
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
-  }, [isSuperAdmin, location.pathname])
+  }, [isElevated, location.pathname])
 
   // Fetch profile photo once on mount so avatar shows headshot if set.
   useEffect(() => {
@@ -190,8 +192,8 @@ export default function Layout({ children }) {
   // Shell brand name: org-level DB override wins, otherwise fall back to the
   // platform brand detected from the hostname (EvoSys Pro, Harmony Hustle, BookaBoost).
   // Super admins see the platform brand — never hardcoded 'BookaBoost'.
-  const brandName = branding?.brand_name || PLATFORM_BRAND.displayName
-  const logoUrl = isSuperAdmin ? null : (branding?.brand_logo_url || null)
+  const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || PLATFORM_BRAND.displayName)
+  const logoUrl = isElevated ? null : (branding?.brand_logo_url || null)
 
   return (
     <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
@@ -200,16 +202,47 @@ export default function Layout({ children }) {
       </button>
       <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          {logoUrl
-            ? <img src={logoUrl} alt={brandName} style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }} />
-            : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
-          }
+      <aside className="sidebar" style={isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}}>
+        <div className="sidebar-brand" style={isGodAdmin ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}}>
+          {isGodAdmin ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 20, lineHeight: 1 }}>⚡</span>
+                <span className="brand-mark" style={{ color: '#f59e0b', letterSpacing: '0.04em' }}>AdvisorFlow</span>
+              </div>
+              <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', paddingLeft: 28 }}>God Mode</span>
+            </div>
+          ) : logoUrl ? (
+            <img src={logoUrl} alt={brandName} style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }} />
+          ) : (
+            <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
+          )}
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
         </div>
 
         <nav className="sidebar-nav">
+          {/* God admin: Command Center pinned to top */}
+          {isGodAdmin && (
+            <>
+              <NavLink to="/god"
+                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                style={({ isActive }) => ({
+                  color: isActive ? '#f59e0b' : '#d97706',
+                  background: isActive ? 'rgba(245,158,11,0.12)' : 'transparent',
+                  borderLeft: isActive ? '3px solid #f59e0b' : '3px solid transparent',
+                  fontWeight: 600,
+                })}
+                onClick={closeSidebar}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                Command Center
+              </NavLink>
+              <div className="nav-divider" />
+            </>
+          )}
+
           {NAV_ITEMS.filter(item => !item.fiberOnly || (branding && branding.industry === 'fiber')).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.to === '/'}
               className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
@@ -219,7 +252,7 @@ export default function Layout({ children }) {
             </NavLink>
           ))}
 
-          {(user?.role === 'org_admin' || user?.role === 'super_admin') && (
+          {(user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin) && (
             <>
               <div className="nav-divider" />
               {ADMIN_ONLY_NAV_ITEMS.map((item) => (
@@ -241,10 +274,10 @@ export default function Layout({ children }) {
             </>
           )}
 
-          {user?.role === 'super_admin' && (
+          {(user?.role === 'super_admin' || isGodAdmin) && (
             <>
               <div className="nav-divider" />
-              <div className="nav-section-label">Platform Admin</div>
+              <div className="nav-section-label" style={isGodAdmin ? { color: '#b45309' } : {}}>Platform Admin</div>
               {SUPER_ADMIN_NAV_ITEMS.map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
@@ -253,23 +286,6 @@ export default function Layout({ children }) {
                   <Icon name={item.icon} />{item.label}
                 </NavLink>
               ))}
-            </>
-          )}
-
-          {user?.role === 'god_admin' && (
-            <>
-              <div className="nav-divider" />
-              <div className="nav-section-label" style={{ color: '#f59e0b' }}>⚡ AdvisorFlow</div>
-              <NavLink to="/god"
-                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-                style={({ isActive }) => isActive ? { color: '#f59e0b' } : { color: '#b45309' }}
-                onClick={closeSidebar}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                </svg>
-                Command Center
-              </NavLink>
             </>
           )}
         </nav>
