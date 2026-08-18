@@ -1095,3 +1095,79 @@ class RevokedToken(Base):
     __table_args__ = (
         Index("ix_revoked_tokens_expires_at", "expires_at"),
     )
+
+
+# ---------------------------------------------------------------------------
+# CRMContact — Native CRM master record.
+# Lives alongside leads but is a richer, long-lived relationship record.
+# A contact can optionally link to a Lead (lead_id) but is independent of it.
+# Stages are org-specific; defaults are funeral-industry appropriate but can
+# be overridden at the org level (future: org_crm_stages JSON column).
+# ---------------------------------------------------------------------------
+class CRMContact(Base):
+    __tablename__ = "crm_contacts"
+
+    id               = Column(String, primary_key=True, default=gen_uuid)
+    organization_id  = Column(String, ForeignKey("organizations.id"), nullable=False)
+
+    # Identity
+    first_name       = Column(String, nullable=True)
+    last_name        = Column(String, nullable=True)
+    phone            = Column(String, nullable=True)
+    email            = Column(String, nullable=True)
+
+    # Address
+    address_street   = Column(String, nullable=True)
+    address_city     = Column(String, nullable=True)
+    address_state    = Column(String, nullable=True)
+    address_zip      = Column(String, nullable=True)
+
+    # CRM pipeline stage
+    stage            = Column(String, default="inquiry")
+    # Default stages (funeral industry):
+    #   inquiry | pre_need | at_need | arrangements | services_complete | aftercare | closed
+
+    # Notes / history
+    notes            = Column(Text, nullable=True)
+
+    # Tags — comma-separated or JSON list stored as string for simplicity
+    tags             = Column(String, nullable=True)
+
+    # Link back to a lead record (optional)
+    lead_id          = Column(String, ForeignKey("leads.id"), nullable=True)
+
+    # Assigned advisor
+    assigned_to_id   = Column(String, ForeignKey("users.id"), nullable=True)
+
+    # Timestamps
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_contacted_at = Column(DateTime, nullable=True)
+
+    # Soft-delete
+    is_archived      = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("ix_crm_contacts_org", "organization_id"),
+        Index("ix_crm_contacts_stage", "organization_id", "stage"),
+        Index("ix_crm_contacts_lead", "lead_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# CRMNote — Timeline notes for a CRM contact.
+# Stored separately so they accumulate as a feed rather than replacing
+# the main notes text field.
+# ---------------------------------------------------------------------------
+class CRMNote(Base):
+    __tablename__ = "crm_notes"
+
+    id          = Column(String, primary_key=True, default=gen_uuid)
+    contact_id  = Column(String, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False)
+    author_id   = Column(String, ForeignKey("users.id"), nullable=True)
+    content     = Column(Text, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_crm_notes_contact", "contact_id"),
+    )

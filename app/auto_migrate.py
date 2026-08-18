@@ -199,6 +199,22 @@ COLUMNS_TO_ADD = [
     ("leads", "ai_lead_quality_note", "TEXT"),
     # Reply review tracking — when a reply was reviewed/actioned by an advisor
     ("replies", "reviewed_at", "TIMESTAMP"),
+    # CRM contacts — new master-record schema columns (first_name/last_name split,
+    # address fields, funeral-appropriate stages, lead link, etc.)
+    ("crm_contacts", "first_name", "VARCHAR"),
+    ("crm_contacts", "last_name", "VARCHAR"),
+    ("crm_contacts", "address_street", "VARCHAR"),
+    ("crm_contacts", "address_city", "VARCHAR"),
+    ("crm_contacts", "address_state", "VARCHAR"),
+    ("crm_contacts", "address_zip", "VARCHAR"),
+    ("crm_contacts", "stage", "VARCHAR DEFAULT 'inquiry'"),
+    ("crm_contacts", "notes", "TEXT"),
+    ("crm_contacts", "tags", "VARCHAR"),
+    ("crm_contacts", "lead_id", "VARCHAR"),
+    ("crm_contacts", "assigned_to_id", "VARCHAR"),
+    ("crm_contacts", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+    ("crm_contacts", "last_contacted_at", "TIMESTAMP"),
+    ("crm_contacts", "is_archived", "BOOLEAN DEFAULT FALSE"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

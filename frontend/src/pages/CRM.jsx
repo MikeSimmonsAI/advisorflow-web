@@ -3,22 +3,24 @@ import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './CRM.css'
 
-const PIPELINE_STAGES = [
-  { key: 'new',          label: 'New',          color: '#2fb6ff' },
-  { key: 'contacted',    label: 'Contacted',     color: '#7c3aed' },
-  { key: 'qualified',    label: 'Qualified',     color: '#f59e0b' },
-  { key: 'proposal',     label: 'Proposal Sent', color: '#06b6d4' },
-  { key: 'negotiation',  label: 'Negotiation',   color: '#8b5cf6' },
-  { key: 'closed_won',   label: 'Closed Won',    color: '#10b981' },
-  { key: 'closed_lost',  label: 'Closed Lost',   color: '#ef4444' },
+// Stages are loaded from /crm/stages at runtime so they're org-appropriate.
+// This fallback is used only before the API responds.
+const FALLBACK_STAGES = [
+  { key: 'inquiry',           label: 'Inquiry',             color: '#64748b' },
+  { key: 'pre_need',          label: 'Pre-Need',            color: '#6366f1' },
+  { key: 'at_need',           label: 'At-Need',             color: '#f59e0b' },
+  { key: 'arrangements',      label: 'Arrangements',        color: '#ef4444' },
+  { key: 'services_complete', label: 'Services Complete',   color: '#10b981' },
+  { key: 'aftercare',         label: 'Aftercare Follow-up', color: '#3b82f6' },
+  { key: 'closed',            label: 'Closed',              color: '#374151' },
 ]
 
-function stageColor(key) {
-  return (PIPELINE_STAGES.find(s => s.key === key) || {}).color || '#6b7280'
+function stageColor(key, stages) {
+  return ((stages || FALLBACK_STAGES).find(s => s.key === key) || {}).color || '#6b7280'
 }
 
-function stageLabel(key) {
-  return (PIPELINE_STAGES.find(s => s.key === key) || {}).label || key
+function stageLabel(key, stages) {
+  return ((stages || FALLBACK_STAGES).find(s => s.key === key) || {}).label || key
 }
 
 function fmtDate(iso) {
@@ -32,8 +34,10 @@ function initials(name) {
 }
 
 // ── Contact Card (list view) ───────────────────────────────────────────────
-function ContactCard({ contact, onClick }) {
-  const stage = PIPELINE_STAGES.find(s => s.key === contact.pipeline_stage) || PIPELINE_STAGES[0]
+function ContactCard({ contact, stages, onClick }) {
+  const stageList = stages || FALLBACK_STAGES
+  const stage = stageList.find(s => s.key === contact.stage) || stageList[0]
+  const addr = [contact.address_city, contact.address_state].filter(Boolean).join(', ')
   return (
     <div className="crm-card" onClick={() => onClick(contact)}>
       <div className="crm-card-avatar" style={{ background: stage.color + '22', borderColor: stage.color + '55', color: stage.color }}>
@@ -44,14 +48,14 @@ function ContactCard({ contact, onClick }) {
         <div className="crm-card-meta">
           {contact.phone && <span>{contact.phone}</span>}
           {contact.email && <span>{contact.email}</span>}
-          {contact.company && <span>🏢 {contact.company}</span>}
+          {addr && <span>📍 {addr}</span>}
         </div>
         <div className="crm-card-footer">
           <span className="crm-stage-badge" style={{ background: stage.color + '22', color: stage.color, borderColor: stage.color + '44' }}>
             {stage.label}
           </span>
-          {contact.last_contact_at && (
-            <span className="crm-card-date">Last contact: {fmtDate(contact.last_contact_at)}</span>
+          {contact.last_contacted_at && (
+            <span className="crm-card-date">Last contact: {fmtDate(contact.last_contacted_at)}</span>
           )}
         </div>
       </div>
@@ -60,7 +64,8 @@ function ContactCard({ contact, onClick }) {
 }
 
 // ── Detail Panel ───────────────────────────────────────────────────────────
-function ContactPanel({ contact, onClose, onSave, onDelete }) {
+function ContactPanel({ contact, stages, onClose, onSave, onDelete }) {
+  const stageList = stages || FALLBACK_STAGES
   const [form, setForm] = useState({ ...contact })
   const [note, setNote] = useState('')
   const [notes, setNotes] = useState([])
@@ -74,7 +79,7 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
   useEffect(() => {
     let active = true
     setNotesLoading(true)
-    api.get(`/crm/contacts/${contact.id}/notes`)
+    api.get(`/crm-native/contacts/${contact.id}/notes`)
       .then(data => { if (active) setNotes(Array.isArray(data) ? data : []) })
       .catch(() => {})
       .finally(() => { if (active) setNotesLoading(false) })
@@ -84,7 +89,7 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
   const handleSave = async () => {
     setSaving(true); setErr('')
     try {
-      const updated = await api.patch(`/crm/contacts/${contact.id}`, form)
+      const updated = await api.patch(`/crm-native/contacts/${contact.id}`, form)
       onSave(updated)
     } catch (e) {
       setErr(e.message || 'Save failed')
@@ -96,7 +101,7 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
   const handleAddNote = async () => {
     if (!note.trim()) return
     try {
-      const res = await api.post(`/crm/contacts/${contact.id}/notes`, { content: note.trim() })
+      const res = await api.post(`/crm-native/contacts/${contact.id}/notes`, { content: note.trim() })
       setNotes(prev => [res, ...prev])
       setNote('')
     } catch (e) {
@@ -108,7 +113,7 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
     if (!window.confirm(`Delete ${contact.full_name || 'this contact'}? This cannot be undone.`)) return
     setDeleting(true)
     try {
-      await api.delete(`/crm/contacts/${contact.id}`)
+      await api.delete(`/crm-native/contacts/${contact.id}`)
       onDelete(contact.id)
       onClose()
     } catch (e) {
@@ -129,8 +134,11 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
           <section className="crm-section">
             <h3 className="crm-section-title">Contact Info</h3>
             <div className="crm-form-grid">
-              <label>Full Name
-                <input value={form.full_name || ''} onChange={e => setForm(f => ({...f, full_name: e.target.value}))} />
+              <label>First Name
+                <input value={form.first_name || ''} onChange={e => setForm(f => ({...f, first_name: e.target.value}))} />
+              </label>
+              <label>Last Name
+                <input value={form.last_name || ''} onChange={e => setForm(f => ({...f, last_name: e.target.value}))} />
               </label>
               <label>Phone
                 <input value={form.phone || ''} onChange={e => setForm(f => ({...f, phone: e.target.value}))} />
@@ -138,21 +146,36 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
               <label>Email
                 <input type="email" value={form.email || ''} onChange={e => setForm(f => ({...f, email: e.target.value}))} />
               </label>
-              <label>Company
-                <input value={form.company || ''} onChange={e => setForm(f => ({...f, company: e.target.value}))} />
+            </div>
+          </section>
+
+          <section className="crm-section">
+            <h3 className="crm-section-title">Address</h3>
+            <div className="crm-form-grid">
+              <label style={{ gridColumn: '1 / -1' }}>Street
+                <input value={form.address_street || ''} onChange={e => setForm(f => ({...f, address_street: e.target.value}))} placeholder="123 Main St" />
+              </label>
+              <label>City
+                <input value={form.address_city || ''} onChange={e => setForm(f => ({...f, address_city: e.target.value}))} placeholder="City" />
+              </label>
+              <label>State
+                <input value={form.address_state || ''} onChange={e => setForm(f => ({...f, address_state: e.target.value}))} placeholder="TX" maxLength={2} />
+              </label>
+              <label>ZIP
+                <input value={form.address_zip || ''} onChange={e => setForm(f => ({...f, address_zip: e.target.value}))} placeholder="75001" />
               </label>
             </div>
           </section>
 
           <section className="crm-section">
-            <h3 className="crm-section-title">Pipeline Stage</h3>
+            <h3 className="crm-section-title">Stage</h3>
             <div className="crm-stage-picker">
-              {PIPELINE_STAGES.map(s => (
+              {stageList.map(s => (
                 <button
                   key={s.key}
-                  className={`crm-stage-btn ${form.pipeline_stage === s.key ? 'crm-stage-btn--active' : ''}`}
+                  className={`crm-stage-btn ${form.stage === s.key ? 'crm-stage-btn--active' : ''}`}
                   style={{ '--stage-color': s.color }}
-                  onClick={() => setForm(f => ({...f, pipeline_stage: s.key}))}
+                  onClick={() => setForm(f => ({...f, stage: s.key}))}
                 >
                   {s.label}
                 </button>
@@ -204,17 +227,18 @@ function ContactPanel({ contact, onClose, onSave, onDelete }) {
 }
 
 // ── Create Contact Modal ───────────────────────────────────────────────────
-function CreateModal({ onClose, onCreate }) {
-  const blank = { full_name: '', phone: '', email: '', company: '', pipeline_stage: 'new' }
+function CreateModal({ stages, onClose, onCreate }) {
+  const stageList = stages || FALLBACK_STAGES
+  const blank = { first_name: '', last_name: '', phone: '', email: '', address_street: '', address_city: '', address_state: '', address_zip: '', stage: 'inquiry' }
   const [form, setForm] = useState(blank)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
   const handleSubmit = async () => {
-    if (!form.full_name && !form.phone) { setErr('Name or phone required'); return }
+    if (!form.first_name && !form.last_name && !form.phone) { setErr('Name or phone required'); return }
     setSaving(true); setErr('')
     try {
-      const res = await api.post('/crm/contacts', form)
+      const res = await api.post('/crm-native/contacts', form)
       onCreate(res)
       onClose()
     } catch (e) {
@@ -232,8 +256,11 @@ function CreateModal({ onClose, onCreate }) {
         </div>
         <div className="crm-panel-body">
           <div className="crm-form-grid">
-            <label>Full Name
-              <input value={form.full_name} onChange={e => setForm(f => ({...f, full_name: e.target.value}))} placeholder="Jane Smith" />
+            <label>First Name
+              <input value={form.first_name} onChange={e => setForm(f => ({...f, first_name: e.target.value}))} placeholder="Jane" />
+            </label>
+            <label>Last Name
+              <input value={form.last_name} onChange={e => setForm(f => ({...f, last_name: e.target.value}))} placeholder="Smith" />
             </label>
             <label>Phone
               <input value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))} placeholder="(555) 000-0000" />
@@ -241,12 +268,21 @@ function CreateModal({ onClose, onCreate }) {
             <label>Email
               <input type="email" value={form.email} onChange={e => setForm(f => ({...f, email: e.target.value}))} placeholder="jane@example.com" />
             </label>
-            <label>Company
-              <input value={form.company} onChange={e => setForm(f => ({...f, company: e.target.value}))} placeholder="Acme Corp" />
+            <label style={{ gridColumn: '1 / -1' }}>Street Address
+              <input value={form.address_street} onChange={e => setForm(f => ({...f, address_street: e.target.value}))} placeholder="123 Main St" />
+            </label>
+            <label>City
+              <input value={form.address_city} onChange={e => setForm(f => ({...f, address_city: e.target.value}))} placeholder="City" />
+            </label>
+            <label>State
+              <input value={form.address_state} onChange={e => setForm(f => ({...f, address_state: e.target.value}))} placeholder="TX" maxLength={2} />
+            </label>
+            <label>ZIP
+              <input value={form.address_zip} onChange={e => setForm(f => ({...f, address_zip: e.target.value}))} placeholder="75001" />
             </label>
             <label>Stage
-              <select value={form.pipeline_stage} onChange={e => setForm(f => ({...f, pipeline_stage: e.target.value}))}>
-                {PIPELINE_STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+              <select value={form.stage} onChange={e => setForm(f => ({...f, stage: e.target.value}))}>
+                {stageList.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
             </label>
           </div>
@@ -264,8 +300,8 @@ function CreateModal({ onClose, onCreate }) {
 // ── Main CRM Page ──────────────────────────────────────────────────────────
 export default function CRM() {
   const user = getCurrentUser()
-  const isSuperAdmin = user?.role === 'super_admin'
 
+  const [stages, setStages] = useState(FALLBACK_STAGES)
   const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -278,8 +314,9 @@ export default function CRM() {
   const fetchContacts = async () => {
     setLoading(true); setError(null)
     try {
-      const data = await api.get('/crm/contacts')
-      setContacts(Array.isArray(data) ? data : (data.contacts || []))
+      const data = await api.get('/crm-native/contacts')
+      // Backend returns paginated envelope {items:[...], total:N}
+      setContacts(Array.isArray(data) ? data : (data.items || data.contacts || []))
     } catch (e) {
       setError(e.message || 'Failed to load contacts')
     } finally {
@@ -287,18 +324,21 @@ export default function CRM() {
     }
   }
 
-  useEffect(() => { fetchContacts() }, [])
+  useEffect(() => {
+    api.get('/crm-native/stages').then(s => { if (Array.isArray(s)) setStages(s) }).catch(() => {})
+    fetchContacts()
+  }, [])
 
   const filtered = useMemo(() => {
     let list = contacts
-    if (stageFilter !== 'all') list = list.filter(c => c.pipeline_stage === stageFilter)
+    if (stageFilter !== 'all') list = list.filter(c => c.stage === stageFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(c =>
         (c.full_name || '').toLowerCase().includes(q) ||
         (c.phone || '').includes(q) ||
         (c.email || '').toLowerCase().includes(q) ||
-        (c.company || '').toLowerCase().includes(q)
+        (c.address_city || '').toLowerCase().includes(q)
       )
     }
     return list
@@ -306,9 +346,9 @@ export default function CRM() {
 
   const stageCounts = useMemo(() => {
     const map = { all: contacts.length }
-    PIPELINE_STAGES.forEach(s => { map[s.key] = contacts.filter(c => c.pipeline_stage === s.key).length })
+    stages.forEach(s => { map[s.key] = contacts.filter(c => c.stage === s.key).length })
     return map
-  }, [contacts])
+  }, [contacts, stages])
 
   const handleSave = (updated) => {
     setContacts(prev => prev.map(c => c.id === updated.id ? updated : c))
@@ -327,8 +367,8 @@ export default function CRM() {
   // ── Pipeline Board View ─────────────────────────────────────────────────
   const renderPipeline = () => (
     <div className="crm-pipeline">
-      {PIPELINE_STAGES.map(stage => {
-        const cols = filtered.filter(c => c.pipeline_stage === stage.key)
+      {stages.map(stage => {
+        const cols = filtered.filter(c => c.stage === stage.key)
         return (
           <div key={stage.key} className="crm-pipeline-col">
             <div className="crm-pipeline-col-header" style={{ borderTopColor: stage.color }}>
@@ -339,7 +379,7 @@ export default function CRM() {
               {cols.map(c => (
                 <div key={c.id} className="crm-pipeline-card" onClick={() => setSelected(c)}>
                   <div className="crm-pipeline-card-name">{c.full_name || '(no name)'}</div>
-                  {c.company && <div className="crm-pipeline-card-company">{c.company}</div>}
+                  {c.address_city && <div className="crm-pipeline-card-company">📍 {c.address_city}{c.address_state ? `, ${c.address_state}` : ''}</div>}
                   {c.phone && <div className="crm-pipeline-card-phone">{c.phone}</div>}
                 </div>
               ))}
@@ -384,7 +424,7 @@ export default function CRM() {
           <button className={`filter-tab ${stageFilter === 'all' ? 'filter-tab--active' : ''}`} onClick={() => setStageFilter('all')}>
             All <span className="filter-tab-count">{stageCounts.all}</span>
           </button>
-          {PIPELINE_STAGES.map(s => (
+          {stages.map(s => (
             <button key={s.key} className={`filter-tab ${stageFilter === s.key ? 'filter-tab--active' : ''}`} onClick={() => setStageFilter(s.key)}>
               {s.label} <span className="filter-tab-count">{stageCounts[s.key] || 0}</span>
             </button>
@@ -404,7 +444,7 @@ export default function CRM() {
         view === 'pipeline' ? renderPipeline() : (
           <div className="crm-list">
             {filtered.map(c => (
-              <ContactCard key={c.id} contact={c} onClick={setSelected} />
+              <ContactCard key={c.id} contact={c} stages={stages} onClick={setSelected} />
             ))}
           </div>
         )
@@ -414,6 +454,7 @@ export default function CRM() {
       {selected && (
         <ContactPanel
           contact={selected}
+          stages={stages}
           onClose={() => setSelected(null)}
           onSave={handleSave}
           onDelete={handleDelete}
@@ -421,6 +462,7 @@ export default function CRM() {
       )}
       {showCreate && (
         <CreateModal
+          stages={stages}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />
