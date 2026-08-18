@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdvisorFlow Command Center V3</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#090b0e;--surface:#0f1217;--card:#141820;--border:#1e2530;
+    --gold:#f59e0b;--gold2:#fbbf24;--goldDim:#f59e0b33;
+    --blue:#3b82f6;--indigo:#6366f1;--teal:#06b6d4;--green:#10b981;--red:#ef4444;
+    --text:#e2e8f0;--textMid:#94a3b8;--textDim:#4b5563;
+    --radius:10px;--radiusSm:6px;
+  }
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:14px;overflow:hidden}
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-track{background:var(--bg)}
+  ::-webkit-scrollbar-thumb{background:#2a3444;border-radius:3px}
+
+  /* ── Layout ── */
+  #app{display:flex;flex-direction:column;height:100vh}
+
+  /* ── Header ── */
+  .header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 24px;height:60px;
+    background:linear-gradient(90deg,#0a0c10 0%,#0f1520 100%);
+    border-bottom:1px solid var(--border);
+    flex-shrink:0;
+  }
+  .header-brand{display:flex;align-items:center;gap:12px}
+  .header-icon{
+    width:38px;height:38px;border-radius:9px;
+    background:linear-gradient(135deg,var(--gold),#d97706);
+    display:flex;align-items:center;justify-content:center;
+    font-size:18px;box-shadow:0 0 20px #f59e0b55;
+  }
+  .header-title{font-size:16px;font-weight:700;color:var(--text);letter-spacing:-.3px}
+  .header-sub{font-size:11px;color:var(--gold);font-weight:500;letter-spacing:.5px;text-transform:uppercase}
+  .header-right{display:flex;align-items:center;gap:10px}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .live-label{font-size:11px;color:var(--green);font-weight:500}
+  .btn{
+    display:inline-flex;align-items:center;gap:6px;padding:6px 14px;
+    border-radius:var(--radiusSm);border:1px solid var(--border);
+    background:var(--card);color:var(--textMid);font-size:12px;font-weight:500;
+    cursor:pointer;transition:all .15s;font-family:inherit;
+  }
+  .btn:hover{border-color:var(--gold);color:var(--gold);background:#1a1f28}
+  .btn-primary{background:var(--gold);color:#000;border-color:var(--gold);font-weight:600}
+  .btn-primary:hover{background:var(--gold2);border-color:var(--gold2);color:#000}
+
+  /* ── Tabs ── */
+  .tabs{
+    display:flex;align-items:center;gap:2px;padding:0 24px;
+    background:var(--surface);border-bottom:1px solid var(--border);
+    flex-shrink:0;
+  }
+  .tab{
+    display:flex;align-items:center;gap:7px;padding:12px 18px;
+    border:none;background:none;color:var(--textMid);font-size:13px;
+    font-weight:500;cursor:pointer;position:relative;font-family:inherit;
+    transition:color .15s;white-space:nowrap;
+  }
+  .tab::after{
+    content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+    background:var(--gold);border-radius:2px 2px 0 0;
+    transform:scaleX(0);transition:transform .2s;
+  }
+  .tab.active{color:var(--gold)}
+  .tab.active::after{transform:scaleX(1)}
+  .tab:hover{color:var(--text)}
+  .tab-count{
+    background:var(--goldDim);color:var(--gold);border-radius:10px;
+    padding:1px 7px;font-size:11px;font-weight:600;
+  }
+
+  /* ── Main content ── */
+  .main{flex:1;overflow-y:auto;padding:24px}
+
+  /* ── Stats grid ── */
+  .stats-grid{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+    gap:14px;margin-bottom:28px;
+  }
+  .stat-card{
+    background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radius);padding:18px 20px;
+    position:relative;overflow:hidden;transition:border-color .2s;
+  }
+  .stat-card:hover{border-color:#2e3a4e}
+  .stat-card::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:2px;
+    background:var(--accent,var(--gold));
+  }
+  .stat-icon{font-size:20px;margin-bottom:10px;opacity:.85}
+  .stat-value{font-size:28px;font-weight:800;letter-spacing:-1px;color:var(--accent,var(--gold))}
+  .stat-label{font-size:12px;color:var(--textMid);font-weight:500;margin-top:3px}
+  .stat-sub{font-size:11px;color:var(--textDim);margin-top:4px}
+
+  /* ── Section title ── */
+  .section-title{
+    font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;
+    color:var(--textDim);margin:24px 0 14px;
+  }
+
+  /* ── Platform cards ── */
+  .platform-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .platform-card{
+    background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radius);padding:20px;
+    transition:border-color .2s, transform .15s;
+  }
+  .platform-card:hover{border-color:#2e3a4e;transform:translateY(-1px)}
+  .platform-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .platform-badge{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;
+  }
+  .platform-dot{width:6px;height:6px;border-radius:50%}
+  .platform-domain{font-size:11px;color:var(--textDim);font-family:'JetBrains Mono',monospace;margin-bottom:12px}
+  .platform-stats{display:flex;gap:16px}
+  .platform-stat{text-align:center}
+  .platform-stat-val{font-size:20px;font-weight:700;color:var(--text)}
+  .platform-stat-lbl{font-size:10px;color:var(--textDim);text-transform:uppercase;letter-spacing:.5px}
+
+  /* ── Filter bar ── */
+  .filter-bar{
+    display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;
+  }
+  .search-wrap{
+    display:flex;align-items:center;gap:8px;
+    background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radiusSm);padding:7px 12px;flex:1;min-width:180px;max-width:320px;
+    transition:border-color .15s;
+  }
+  .search-wrap:focus-within{border-color:var(--gold)}
+  .search-wrap svg{opacity:.4;flex-shrink:0}
+  .search-wrap input{background:none;border:none;outline:none;color:var(--text);font-family:inherit;font-size:13px;width:100%}
+  .search-wrap input::placeholder{color:var(--textDim)}
+  select.filter-sel{
+    background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radiusSm);padding:7px 30px 7px 12px;
+    color:var(--text);font-family:inherit;font-size:13px;
+    cursor:pointer;outline:none;
+    appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 10px center;
+    transition:border-color .15s;
+  }
+  select.filter-sel:focus{border-color:var(--gold)}
+  .total-badge{
+    margin-left:auto;background:var(--goldDim);color:var(--gold);
+    border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;white-space:nowrap;
+  }
+
+  /* ── Table ── */
+  .table-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  thead th{
+    background:var(--surface);padding:11px 16px;text-align:left;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--textDim);border-bottom:1px solid var(--border);white-space:nowrap;
+  }
+  tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+  tbody tr:last-child{border-bottom:none}
+  tbody tr:hover{background:#ffffff05}
+  td{padding:12px 16px;font-size:13px;vertical-align:middle}
+  .td-mono{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--textDim)}
+  .td-dim{color:var(--textDim)}
+  .td-name{font-weight:500;color:var(--text)}
+  .td-email{color:var(--textMid);font-size:12px}
+
+  /* ── Badges ── */
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+  .status-badge[data-s="new"]{background:#3b82f622;color:#60a5fa}
+  .status-badge[data-s="contacted"]{background:#6366f122;color:#818cf8}
+  .status-badge[data-s="replied"]{background:#06b6d422;color:#22d3ee}
+  .status-badge[data-s="qualified"]{background:#f59e0b22;color:#fbbf24}
+  .status-badge[data-s="booked"]{background:#10b98122;color:#34d399}
+  .status-badge[data-s="closed"]{background:#10b98133;color:#6ee7b7}
+  .status-badge[data-s="lost"]{background:#ef444422;color:#f87171}
+  .status-badge[data-s="dnc"]{background:#37415122;color:#6b7280}
+  .role-badge[data-r="god_admin"]{background:#f59e0b22;color:#f59e0b}
+  .role-badge[data-r="super_admin"]{background:#6366f122;color:#818cf8}
+  .role-badge[data-r="org_admin"]{background:#3b82f622;color:#60a5fa}
+  .role-badge[data-r="advisor"]{background:#06b6d422;color:#22d3ee}
+  .role-badge[data-r="viewer"]{background:#37415122;color:#6b7280}
+  .active-badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500}
+  .active-badge .dot{width:6px;height:6px;border-radius:50%}
+  .active-badge.on .dot{background:var(--green);box-shadow:0 0 5px var(--green)}
+  .active-badge.on{color:var(--green)}
+  .active-badge.off .dot{background:var(--textDim)}
+  .active-badge.off{color:var(--textDim)}
+
+  /* ── Action buttons ── */
+  .action-row{display:flex;gap:6px}
+  .action-btn{
+    width:28px;height:28px;border-radius:var(--radiusSm);border:1px solid var(--border);
+    background:var(--surface);color:var(--textMid);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:all .15s;
+  }
+  .action-btn:hover{border-color:var(--gold);color:var(--gold)}
+  .action-btn.danger:hover{border-color:var(--red);color:var(--red)}
+  .action-btn.ok:hover{border-color:var(--green);color:var(--green)}
+
+  /* ── Modal ── */
+  .modal-overlay{
+    position:fixed;inset:0;background:#000000aa;backdrop-filter:blur(4px);
+    display:flex;align-items:center;justify-content:center;z-index:1000;
+    opacity:0;animation:fadeIn .15s forwards;
+  }
+  @keyframes fadeIn{to{opacity:1}}
+  .modal{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:28px;width:360px;box-shadow:0 20px 60px #00000099;
+  }
+  .modal-title{font-size:16px;font-weight:700;margin-bottom:6px}
+  .modal-sub{font-size:13px;color:var(--textMid);margin-bottom:20px;font-family:'JetBrains Mono',monospace}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+  .input{
+    width:100%;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radiusSm);padding:9px 12px;color:var(--text);
+    font-family:inherit;font-size:13px;outline:none;transition:border-color .15s;
+  }
+  .input:focus{border-color:var(--gold)}
+
+  /* ── Toast ── */
+  .toast{
+    position:fixed;bottom:24px;right:24px;
+    background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radius);padding:12px 18px;
+    font-size:13px;font-weight:500;box-shadow:0 8px 30px #00000066;
+    display:flex;align-items:center;gap:10px;z-index:2000;
+    animation:slideIn .2s ease;
+  }
+  @keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
+  .toast.success{border-left:3px solid var(--green);color:var(--green)}
+  .toast.error{border-left:3px solid var(--red);color:var(--red)}
+
+  /* ── Empty / loading ── */
+  .empty{text-align:center;padding:48px;color:var(--textDim);font-size:13px}
+  .empty-icon{font-size:32px;margin-bottom:12px;opacity:.4}
+  .spinner{
+    width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--gold);
+    border-radius:50%;animation:spin .7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading-row{display:flex;justify-content:center;padding:40px;gap:12px;align-items:center;color:var(--textDim)}
+
+  /* ── Error banner ── */
+  .error-banner{
+    margin:0 24px 16px;background:#ef444415;border:1px solid #ef444433;
+    border-radius:var(--radiusSm);padding:10px 16px;color:var(--red);font-size:13px;
+    display:flex;align-items:center;gap:10px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="header-brand">
+      <div class="header-icon">⚡</div>
+      <div>
+        <div class="header-title">AdvisorFlow Command Center</div>
+        <div class="header-sub">God Admin · Full System Access</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="live-dot"></div>
+      <span class="live-label">LIVE</span>
+      <button class="btn" id="refreshBtn" onclick="refresh()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview" onclick="switchTab('overview')">
+      🌐 Overview
+    </button>
+    <button class="tab" data-tab="platforms" onclick="switchTab('platforms')">
+      ⚡ Platforms <span class="tab-count" id="cnt-platforms">—</span>
+    </button>
+    <button class="tab" data-tab="orgs" onclick="switchTab('orgs')">
+      🏢 Orgs <span class="tab-count" id="cnt-orgs">—</span>
+    </button>
+    <button class="tab" data-tab="leads" onclick="switchTab('leads')">
+      👥 Leads <span class="tab-count" id="cnt-leads">—</span>
+    </button>
+    <button class="tab" data-tab="users" onclick="switchTab('users')">
+      🛡️ Users <span class="tab-count" id="cnt-users">—</span>
+    </button>
+  </div>
+
+  <div class="main" id="main"></div>
+</div>
+
+<!-- Toast container -->
+<div id="toastContainer"></div>
+<!-- Modal container -->
+<div id="modalContainer"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let currentTab = 'overview'
+let stats = null, platforms = [], orgs = {total:0,orgs:[]}, leads = {total:0,leads:[]}, users = {total:0,users:[]}
+let loading = false
+let platformFilter = '', searchQ = '', roleFilter = '', statusFilter = ''
+
+// ── API ─────────────────────────────────────────────────────────────────────────
+const BASE = window.location.origin
+function getToken() { return localStorage.getItem('token') || sessionStorage.getItem('token') }
+
+async function apiFetch(path, opts = {}) {
+  const token = getToken()
+  const resp = await fetch(BASE + '/api' + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      ...(opts.headers || {}),
+    },
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.detail || 'Request failed: ' + resp.status)
+  }
+  return resp.json()
+}
+
+// ── Platform colors ────────────────────────────────────────────────────────────
+const PCOLORS = {
+  bookaboost: '#3b82f6',
+  evosys: '#0ea5e9',
+  evosyspro: '#0ea5e9',
+  harmony: '#10b981',
+  default: '#6366f1',
+}
+function pColor(slug) { return PCOLORS[slug?.toLowerCase()] || PCOLORS.default }
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const el = document.createElement('div')
+  el.className = `toast ${type}`
+  el.innerHTML = (type === 'success' ? '✓' : '✕') + ' ' + msg
+  document.getElementById('toastContainer').appendChild(el)
+  setTimeout(() => el.remove(), 3000)
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab
+  platformFilter = ''; searchQ = ''; roleFilter = ''; statusFilter = ''
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab))
+  loadCurrentTab()
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+function fmtDate(s) { return s ? s.slice(0,10) : '—' }
+function platformName(id) {
+  const p = platforms.find(x => x.id === id)
+  return p ? p.name : (id ? id.toString().slice(0,8) + '…' : '—')
+}
+function platformSlug(id) {
+  const p = platforms.find(x => x.id === id)
+  return p?.slug || ''
+}
+
+// ── Load functions ─────────────────────────────────────────────────────────────
+async function loadStats() {
+  const d = await apiFetch('/god/stats')
+  stats = d
+}
+async function loadPlatforms() {
+  const d = await apiFetch('/god/platforms')
+  platforms = d
+  document.getElementById('cnt-platforms').textContent = d.length
+}
+async function loadOrgs() {
+  const p = new URLSearchParams({ limit: 200 })
+  if (platformFilter) p.set('platform_slug', platformFilter)
+  if (searchQ) p.set('search', searchQ)
+  const d = await apiFetch('/god/orgs?' + p)
+  orgs = d
+  document.getElementById('cnt-orgs').textContent = d.total
+}
+async function loadLeads() {
+  const p = new URLSearchParams({ limit: 200 })
+  if (platformFilter) p.set('platform_slug', platformFilter)
+  if (searchQ) p.set('search', searchQ)
+  if (statusFilter) p.set('status', statusFilter)
+  const d = await apiFetch('/god/leads?' + p)
+  leads = d
+  document.getElementById('cnt-leads').textContent = d.total.toLocaleString()
+}
+async function loadUsers() {
+  const p = new URLSearchParams({ limit: 200 })
+  if (roleFilter) p.set('role', roleFilter)
+  if (searchQ) p.set('search', searchQ)
+  const d = await apiFetch('/god/users?' + p)
+  users = d
+  document.getElementById('cnt-users').textContent = d.total
+}
+
+async function loadCurrentTab() {
+  if (loading) return
+  loading = true
+  const btn = document.getElementById('refreshBtn')
+  btn.disabled = true
+  btn.innerHTML = '<div class="spinner" style="width:13px;height:13px"></div> Loading…'
+
+  try {
+    if (currentTab === 'overview') { await loadStats(); await loadPlatforms() }
+    if (currentTab === 'platforms') await loadPlatforms()
+    if (currentTab === 'orgs')     { await loadPlatforms(); await loadOrgs() }
+    if (currentTab === 'leads')    { await loadPlatforms(); await loadLeads() }
+    if (currentTab === 'users')    await loadUsers()
+    renderTab()
+  } catch(e) {
+    document.getElementById('main').innerHTML = `
+      <div class="error-banner">⚠ ${esc(e.message)} — make sure you're logged in as god_admin</div>`
+  } finally {
+    loading = false
+    btn.disabled = false
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Refresh`
+  }
+}
+
+function refresh() { loadCurrentTab() }
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+function renderTab() {
+  const main = document.getElementById('main')
+  if (currentTab === 'overview')  main.innerHTML = renderOverview()
+  if (currentTab === 'platforms') main.innerHTML = renderPlatforms()
+  if (currentTab === 'orgs')      main.innerHTML = renderOrgs()
+  if (currentTab === 'leads')     main.innerHTML = renderLeads()
+  if (currentTab === 'users')     main.innerHTML = renderUsers()
+  attachListeners()
+}
+
+// ── OVERVIEW ──────────────────────────────────────────────────────────────────
+function renderOverview() {
+  if (!stats) return '<div class="empty"><div class="empty-icon">📊</div>No stats available</div>'
+  const s = stats
+  const cards = [
+    { label:'Platforms', value:s.total_platforms, icon:'⚡', color:'#f59e0b' },
+    { label:'Total Orgs', value:s.total_orgs, icon:'🏢', color:'#6366f1' },
+    { label:'Active Orgs', value:s.active_orgs, icon:'✅', color:'#10b981' },
+    { label:'Total Leads', value:(s.total_leads||0).toLocaleString(), icon:'👥', color:'#3b82f6', sub:`+${s.new_leads_30d||0} last 30d` },
+    { label:'Total Users', value:s.total_users, icon:'👤', color:'#06b6d4' },
+    { label:'Admin Accounts', value:s.total_admins, icon:'🛡️', color:'#f59e0b' },
+  ]
+  let html = `<div class="stats-grid">`
+  for (const c of cards) {
+    html += `<div class="stat-card" style="--accent:${c.color}">
+      <div class="stat-icon">${c.icon}</div>
+      <div class="stat-value">${esc(c.value ?? '—')}</div>
+      <div class="stat-label">${esc(c.label)}</div>
+      ${c.sub ? `<div class="stat-sub">${esc(c.sub)}</div>` : ''}
+    </div>`
+  }
+  html += `</div>`
+
+  if (platforms.length) {
+    html += `<div class="section-title">Platforms</div><div class="platform-grid">`
+    for (const p of platforms) {
+      const col = pColor(p.slug)
+      html += `<div class="platform-card">
+        <div class="platform-card-header">
+          <span class="platform-badge badge" style="background:${col}22;color:${col};border:1px solid ${col}44">
+            <span class="platform-dot" style="background:${col}"></span>
+            ${esc(p.name||p.slug)}
+          </span>
+          <span style="font-size:11px;color:${p.is_active!==false?'var(--green)':'var(--textDim)'}">
+            ${p.is_active!==false ? '● Active' : '○ Inactive'}
+          </span>
+        </div>
+        ${p.domain ? `<div class="platform-domain">${esc(p.domain)}</div>` : ''}
+        <div class="platform-stats">
+          <div class="platform-stat"><div class="platform-stat-val">${p.org_count||0}</div><div class="platform-stat-lbl">Orgs</div></div>
+          <div class="platform-stat"><div class="platform-stat-val">${(p.lead_count||0).toLocaleString()}</div><div class="platform-stat-lbl">Leads</div></div>
+          <div class="platform-stat"><div class="platform-stat-val">${p.user_count||0}</div><div class="platform-stat-lbl">Users</div></div>
+        </div>
+      </div>`
+    }
+    html += `</div>`
+  }
+  return html
+}
+
+// ── PLATFORMS ─────────────────────────────────────────────────────────────────
+function renderPlatforms() {
+  if (!platforms.length) return `<div class="empty"><div class="empty-icon">⚡</div>No platforms found</div>`
+  let html = `<div class="platform-grid">`
+  for (const p of platforms) {
+    const col = pColor(p.slug)
+    html += `<div class="platform-card">
+      <div class="platform-card-header">
+        <span class="platform-badge badge" style="background:${col}22;color:${col};border:1px solid ${col}44">
+          <span class="platform-dot" style="background:${col}"></span>
+          ${esc(p.name||p.slug)}
+        </span>
+        <span style="font-size:11px;color:${p.is_active!==false?'var(--green)':'var(--textDim)'}">
+          ${p.is_active!==false ? '● Active' : '○ Inactive'}
+        </span>
+      </div>
+      <div style="font-size:11px;color:var(--textDim);margin-bottom:12px">
+        <span style="background:#ffffff08;padding:2px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace">
+          ${esc(p.slug)}
+        </span>
+      </div>
+      ${p.domain ? `<div style="font-size:12px;color:var(--textMid);margin-bottom:10px">🌐 ${esc(p.domain)}</div>` : ''}
+      ${p.support_email ? `<div style="font-size:12px;color:var(--textMid);margin-bottom:12px">📧 ${esc(p.support_email)}</div>` : ''}
+      <div class="platform-stats">
+        <div class="platform-stat"><div class="platform-stat-val">${p.org_count||0}</div><div class="platform-stat-lbl">Orgs</div></div>
+        <div class="platform-stat"><div class="platform-stat-val">${(p.lead_count||0).toLocaleString()}</div><div class="platform-stat-lbl">Leads</div></div>
+        <div class="platform-stat"><div class="platform-stat-val">${p.user_count||0}</div><div class="platform-stat-lbl">Users</div></div>
+      </div>
+    </div>`
+  }
+  html += `</div>`
+  return html
+}
+
+// ── ORGS ──────────────────────────────────────────────────────────────────────
+function renderOrgs() {
+  let html = `<div class="filter-bar">
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Search orgs…" value="${esc(searchQ)}" id="orgSearch" oninput="debounce(()=>{searchQ=this.value;loadOrgs().then(renderTab)},400)">
+    </div>
+    <select class="filter-sel" id="orgPlatform" onchange="platformFilter=this.value;loadOrgs().then(renderTab)">
+      <option value="">All Platforms</option>
+      ${platforms.map(p=>`<option value="${esc(p.slug)}" ${platformFilter===p.slug?'selected':''}>${esc(p.name)}</option>`).join('')}
+    </select>
+    <span class="total-badge">${orgs.total} orgs</span>
+  </div>`
+
+  if (!orgs.orgs.length) return html + `<div class="empty"><div class="empty-icon">🏢</div>No orgs found</div>`
+
+  html += `<div class="table-wrap"><table>
+    <thead><tr>
+      <th>Organization</th><th>Platform</th><th>Leads</th><th>Users</th><th>Created</th>
+    </tr></thead><tbody>`
+  for (const o of orgs.orgs) {
+    const pId = o.platform_id
+    const pName = platformName(pId)
+    const pSlug = platformSlug(pId)
+    const col = pColor(pSlug)
+    html += `<tr>
+      <td class="td-name">${esc(o.name)}</td>
+      <td>${pId
+        ? `<span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44">${esc(pName)}</span>`
+        : `<span class="td-dim">—</span>`}</td>
+      <td>${o.lead_count||0}</td>
+      <td>${o.user_count||0}</td>
+      <td class="td-dim">${fmtDate(o.created_at)}</td>
+    </tr>`
+  }
+  html += `</tbody></table></div>`
+  return html
+}
+
+// ── LEADS ─────────────────────────────────────────────────────────────────────
+function renderLeads() {
+  const statuses = ['new','contacted','replied','qualified','booked','closed','lost','dnc']
+  let html = `<div class="filter-bar">
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Search name, email, phone…" value="${esc(searchQ)}" oninput="debounce(()=>{searchQ=this.value;loadLeads().then(renderTab)},400)">
+    </div>
+    <select class="filter-sel" onchange="platformFilter=this.value;loadLeads().then(renderTab)">
+      <option value="">All Platforms</option>
+      ${platforms.map(p=>`<option value="${esc(p.slug)}" ${platformFilter===p.slug?'selected':''}>${esc(p.name)}</option>`).join('')}
+    </select>
+    <select class="filter-sel" onchange="statusFilter=this.value;loadLeads().then(renderTab)">
+      <option value="">All Statuses</option>
+      ${statuses.map(s=>`<option value="${s}" ${statusFilter===s?'selected':''}>${s}</option>`).join('')}
+    </select>
+    <span class="total-badge">${leads.total.toLocaleString()} leads</span>
+  </div>`
+
+  if (!leads.leads.length) return html + `<div class="empty"><div class="empty-icon">👥</div>No leads found</div>`
+
+  html += `<div class="table-wrap"><table>
+    <thead><tr>
+      <th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Tier</th><th>Source</th><th>Created</th>
+    </tr></thead><tbody>`
+  for (const l of leads.leads) {
+    html += `<tr>
+      <td class="td-name">${esc(l.name||'—')}</td>
+      <td class="td-email">${esc(l.email||'—')}</td>
+      <td class="td-dim">${esc(l.phone||'—')}</td>
+      <td>${l.status ? `<span class="badge status-badge" data-s="${esc(l.status)}">${esc(l.status)}</span>` : '<span class="td-dim">—</span>'}</td>
+      <td class="td-dim">${esc(l.tier||'—')}</td>
+      <td class="td-dim">${esc(l.source||'—')}</td>
+      <td class="td-dim">${fmtDate(l.created_at)}</td>
+    </tr>`
+  }
+  html += `</tbody></table></div>`
+  return html
+}
+
+// ── USERS ─────────────────────────────────────────────────────────────────────
+function renderUsers() {
+  const roles = ['god_admin','super_admin','org_admin','advisor','viewer']
+  let html = `<div class="filter-bar">
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Search name or email…" value="${esc(searchQ)}" oninput="debounce(()=>{searchQ=this.value;loadUsers().then(renderTab)},400)">
+    </div>
+    <select class="filter-sel" onchange="roleFilter=this.value;loadUsers().then(renderTab)">
+      <option value="">All Roles</option>
+      ${roles.map(r=>`<option value="${r}" ${roleFilter===r?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
+    </select>
+    <span class="total-badge">${users.total} users</span>
+  </div>`
+
+  if (!users.users.length) return html + `<div class="empty"><div class="empty-icon">🛡️</div>No users found</div>`
+
+  html += `<div class="table-wrap"><table>
+    <thead><tr>
+      <th>Email</th><th>Name</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th>
+    </tr></thead><tbody>`
+  for (const u of users.users) {
+    const active = u.is_active !== false
+    html += `<tr>
+      <td class="td-email" style="font-size:13px">${esc(u.email)}</td>
+      <td class="td-dim">${esc(u.name||u.full_name||'—')}</td>
+      <td><span class="badge role-badge" data-r="${esc(u.role)}">${esc((u.role||'').replace('_',' '))}</span></td>
+      <td><span class="active-badge ${active?'on':'off'}"><span class="dot"></span>${active?'Active':'Inactive'}</span></td>
+      <td class="td-dim">${fmtDate(u.created_at)}</td>
+      <td>
+        <div class="action-row">
+          <button class="action-btn" title="Change role" onclick="openRoleModal(${JSON.stringify(u)})">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </button>
+          <button class="action-btn ${active?'danger':'ok'}" title="${active?'Deactivate':'Activate'}" onclick="toggleActive(${JSON.stringify(u)})">
+            ${active
+              ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
+              : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+            }
+          </button>
+        </div>
+      </td>
+    </tr>`
+  }
+  html += `</tbody></table></div>`
+  return html
+}
+
+// ── User actions ──────────────────────────────────────────────────────────────
+function openRoleModal(user) {
+  const roles = ['god_admin','super_admin','org_admin','advisor','viewer']
+  const mc = document.getElementById('modalContainer')
+  mc.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-title">Change Role</div>
+      <div class="modal-sub">${esc(user.email)}</div>
+      <select class="input" id="newRoleSelect">
+        ${roles.map(r=>`<option value="${r}" ${r===user.role?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
+      </select>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="applyRole(${user.id}, '${esc(user.email)}')">Apply</button>
+      </div>
+    </div>
+  </div>`
+}
+function closeModal() { document.getElementById('modalContainer').innerHTML = '' }
+async function applyRole(userId, email) {
+  const role = document.getElementById('newRoleSelect').value
+  try {
+    await apiFetch(`/god/users/${userId}/role`, { method:'PATCH', body: JSON.stringify({role}) })
+    showToast(`${email} → ${role}`)
+    closeModal()
+    await loadUsers()
+    renderTab()
+  } catch(e) { showToast(e.message, 'error') }
+}
+async function toggleActive(user) {
+  const ep = user.is_active !== false ? 'deactivate' : 'activate'
+  try {
+    await apiFetch(`/god/users/${user.id}/${ep}`, { method:'POST' })
+    showToast(`${user.email} ${user.is_active!==false?'deactivated':'activated'}`)
+    await loadUsers()
+    renderTab()
+  } catch(e) { showToast(e.message, 'error') }
+}
+
+// ── Event listeners (for dynamically rendered content) ────────────────────────
+function attachListeners() {}
+
+// ── Debounce ──────────────────────────────────────────────────────────────────
+let debTimer = null
+function debounce(fn, ms) { clearTimeout(debTimer); debTimer = setTimeout(fn, ms) }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadCurrentTab()
+</script>
+</body>
+</html>
