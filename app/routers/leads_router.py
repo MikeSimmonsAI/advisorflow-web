@@ -193,7 +193,7 @@ def delete_import_batch(
     + their contact registry entries so a clean re-import works without
     duplicate flags. Restricted to org_admin / super_admin.
     """
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Only admins can delete import batches.")
 
     org_id = current_user.organization_id
@@ -331,7 +331,7 @@ def list_leads(
     text blobs (notes, ai_quality_note, custom_fields). This keeps the Leads
     page fast even with thousands of leads.
     """
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
 
     # Select only the columns the list view needs — avoids loading large text
     # fields (notes, ai_lead_quality_note, custom_fields, extra_data) and
@@ -401,7 +401,7 @@ def list_flagged_leads(
     current_user: User = Depends(get_current_user),
 ):
     """Return all manually flagged leads for this org (both bad_email and remove_all)."""
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     query = db.query(Lead).filter(
         Lead.organization_id == current_user.organization_id,
         Lead.manual_flag != None,
@@ -536,7 +536,7 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(g
     end_of_today = datetime.combine(now.date(), time.max)
     start_7d = now - timedelta(days=7)
 
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     base_lead_filters = [Lead.organization_id == current_user.organization_id]
     if not is_manager:
         base_lead_filters.append(Lead.assigned_to_id == current_user.id)
@@ -615,7 +615,7 @@ def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Dep
     Advisor-scoped engagement temperature counts for the Overview chart.
     Uses the real Lead.engagement_temperature field; no client-side guesses.
     """
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     eng_filters = [Lead.organization_id == current_user.organization_id]
     if not is_manager:
         eng_filters.append(Lead.assigned_to_id == current_user.id)
@@ -645,7 +645,7 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(ge
         "hot",
         "booked",
     ]
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     funnel_filters = [
         Lead.organization_id == current_user.organization_id,
         Lead.status.in_(stages),
@@ -932,7 +932,7 @@ def bulk_delete_duplicate_leads(
 
     Requires org_admin or super_admin role - advisors cannot bulk delete.
     """
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Admin role required to bulk delete leads.")
 
@@ -966,7 +966,7 @@ def deduplicate_email_leads(
     call DELETE /leads/duplicates/bulk-delete to permanently remove them.
     Requires org_admin or super_admin.
     """
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin role required.")
 
     from sqlalchemy import func as sqlfunc

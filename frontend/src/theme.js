@@ -20,6 +20,7 @@ export const THEMES = {
   BOOKABOOST: 'bookaboost',
   EVOSYSPRO: 'evosyspro',
   HARMONYHUSTLE: 'harmonyhustle',
+  ADVISORFLOW: 'advisorflow',
 }
 
 /**
@@ -31,6 +32,7 @@ export function detectTheme() {
 
   const host = window.location.hostname.toLowerCase()
 
+  if (host.includes('advisorflow')) return THEMES.ADVISORFLOW
   if (host.includes('evosyspro')) return THEMES.EVOSYSPRO
   if (host.includes('harmonyhustle')) return THEMES.HARMONYHUSTLE
 
@@ -47,6 +49,7 @@ export function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme)
 
   const titles = {
+    [THEMES.ADVISORFLOW]:  'AdvisorFlow',
     [THEMES.EVOSYSPRO]:    'EvoSys Pro',
     [THEMES.HARMONYHUSTLE]: 'Harmony Hustle',
     [THEMES.BOOKABOOST]:   'BookaBoost',
@@ -69,6 +72,12 @@ export function initTheme() {
  * Used in Layout.jsx to render the correct sidebar logo and brand name.
  */
 export const BRAND_CONFIG = {
+  [THEMES.ADVISORFLOW]: {
+    displayName: 'AdvisorFlow',
+    shortName: 'AF',
+    supportEmail: 'mike@simmonsstrong.com',
+    accentColor: '#f59e0b',
+  },
   [THEMES.BOOKABOOST]: {
     displayName: 'BookaBoost',
     shortName: 'BB',

@@ -10,6 +10,11 @@ const brand = BRAND_CONFIG[theme]
 
 // Per-platform login page copy
 const PLATFORM_COPY = {
+  [THEMES.ADVISORFLOW]: {
+    headline: '⚡ AdvisorFlow',
+    tagline: 'God-level access. Authorized personnel only.',
+    accentStyle: { color: '#f59e0b', letterSpacing: '0.02em' },
+  },
   [THEMES.EVOSYSPRO]: {
     headline: 'EvoSys Pro',
     tagline: 'Enterprise outreach console. Sign in to continue.',

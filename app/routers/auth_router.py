@@ -85,6 +85,9 @@ def _detect_platform_slug(request: Request) -> str | None:
     if not origin or "localhost" in origin or "127.0.0.1" in origin:
         return None
 
+    # AdvisorFlow god domain — god_admin only, no platform restriction needed
+    if "advisorflow" in origin:
+        return "advisorflow"
     if "evosyspro" in origin:
         return "evosyspro"
     if "harmonyhustle" in origin:
@@ -116,6 +119,9 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     # --------------------------------------------------------------------------
     if user.role != "god_admin":
         request_platform = _detect_platform_slug(request)
+        # advisorflow domain is god-only — non-god users blocked
+        if request_platform == "advisorflow":
+            raise HTTPException(status_code=401, detail="Incorrect email or password")
         if request_platform is not None:
             # Look up the org's platform
             org = db.query(Organization).filter(Organization.id == user.organization_id).first()

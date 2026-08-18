@@ -532,8 +532,8 @@ def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=404, detail="User not found")
     if target.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
-    if target.role == "super_admin":
-        raise HTTPException(status_code=400, detail="Cannot deactivate a super_admin account.")
+    if target.role in ("super_admin", "god_admin"):
+        raise HTTPException(status_code=400, detail="Cannot deactivate a super_admin or god_admin account.")
 
     target.is_active = False
     db.commit()
@@ -607,13 +607,11 @@ class ResetPasswordResponse(BaseModel):
 
 def require_super_admin(current_user: User = Depends(require_admin)) -> User:
     """
-    Stricter than require_admin - only super_admin passes. Layered on
-    top of require_admin (not a replacement) so org_admins still get a
-    clean 403 rather than this function needing its own duplicate auth
-    plumbing.
+    Stricter than require_admin - super_admin and god_admin pass.
+    god_admin sits above super_admin and must never be blocked by this gate.
     """
     from fastapi import HTTPException
-    if current_user.role != "super_admin":
+    if current_user.role not in ("super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Only the super admin can perform this action.")
     return current_user
 
@@ -711,8 +709,8 @@ def update_user(
         target.full_name = cleaned_name
 
     if req.role is not None:
-        if target.role == "super_admin":
-            raise HTTPException(status_code=400, detail="Cannot change the super_admin account's role.")
+        if target.role in ("super_admin", "god_admin"):
+            raise HTTPException(status_code=400, detail="Cannot change a super_admin or god_admin account's role.")
         if req.role not in ("advisor", "org_admin"):
             raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
         target.role = req.role

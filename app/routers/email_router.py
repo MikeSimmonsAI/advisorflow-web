@@ -436,7 +436,7 @@ def poll_inbox_all(
     current_user: User = Depends(get_current_user),
 ):
     """Poll inbox for all M365-connected advisors across all orgs. Super admin only."""
-    if current_user.role != "super_admin":
+    if current_user.role not in ("super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Super admin only")
     from app.services.email_poller_service import poll_all_orgs
     result = poll_all_orgs(db)

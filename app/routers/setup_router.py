@@ -75,7 +75,7 @@ def generate_setup_link(
     current_user: User = Depends(get_current_user),
 ):
     """Admin-only. Returns a 48-hour link the advisor can use to connect integrations."""
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin only.")
 
     advisor = db.query(User).filter(User.id == user_id).first()

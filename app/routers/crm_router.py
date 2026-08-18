@@ -88,7 +88,7 @@ def _get_org_id(current_user: User) -> str:
 
 def _require_admin(current_user: User):
     # User model uses `role`, not is_admin/is_super_admin attributes.
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin required")
 
 
