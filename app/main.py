@@ -43,7 +43,6 @@ from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
-from app.routers.temp_reset import router as temp_reset_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
 
@@ -292,7 +291,6 @@ app.include_router(contacts_router)
 app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
-app.include_router(temp_reset_router)  # TEMPORARY — delete after password reset
 app.include_router(email_tracking_router)
 
 
