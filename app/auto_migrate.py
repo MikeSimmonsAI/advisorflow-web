@@ -175,6 +175,30 @@ COLUMNS_TO_ADD = [
     # missing the column entirely. Every query on EmailMessage (especially the activity
     # feed join + the non-manager sender filter) crashes until this column exists.
     ("email_messages", "sender_id", "VARCHAR"),
+    # provider_message_id + status on email_messages — both referenced in timeline_router
+    # and email_router queries; missing from production DB on old installs.
+    ("email_messages", "provider_message_id", "VARCHAR"),
+    ("email_messages", "status", "VARCHAR DEFAULT 'queued'"),
+    # User notification columns — email-based hot-reply alerts; the SMS equivalents
+    # (notification_phone, notify_via_sms) are covered above but these email variants were missed.
+    ("users", "notification_email", "VARCHAR"),
+    ("users", "notify_on_hot_reply", "BOOLEAN DEFAULT TRUE"),
+    # Login tracking — last_login_at added for security audit, Twilio caller ID for SMS display name
+    ("users", "last_login_at", "TIMESTAMP"),
+    ("users", "twilio_caller_id_name", "VARCHAR"),
+    # White-label / multi-platform branding columns on organizations —
+    # required by fetchAndStoreBranding() in client.js and by org-settings endpoints.
+    ("organizations", "brand_name", "VARCHAR"),
+    ("organizations", "brand_logo_url", "VARCHAR"),
+    ("organizations", "brand_color_primary", "VARCHAR"),
+    ("organizations", "brand_color_accent", "VARCHAR"),
+    ("organizations", "industry", "VARCHAR DEFAULT 'funeral'"),
+    # Per-org tier config JSON — used by TierDefinition feature
+    ("organizations", "tier_config", "TEXT"),
+    # AI lead quality note — Phase 2 field added to Lead model
+    ("leads", "ai_lead_quality_note", "TEXT"),
+    # Reply review tracking — when a reply was reviewed/actioned by an advisor
+    ("replies", "reviewed_at", "TIMESTAMP"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

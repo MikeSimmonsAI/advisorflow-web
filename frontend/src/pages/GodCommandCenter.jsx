@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { apiRequest } from '../api/client'
+import { api } from '../api/client'
 import './GodCommandCenter.css'
 
 // ── icons (inline SVG so no dep needed) ──────────────────────────────────────
@@ -121,14 +121,14 @@ export default function GodCommandCenter() {
   // ── Fetch helpers ────────────────────────────────────────────────────────────
   const loadStats = useCallback(async () => {
     try {
-      const d = await apiRequest('/god/stats')
+      const d = await api.get('/god/stats')
       setStats(d)
     } catch (e) { setError(e.message) }
   }, [])
 
   const loadPlatforms = useCallback(async () => {
     try {
-      const d = await apiRequest('/god/platforms')
+      const d = await api.get('/god/platforms')
       setPlatforms(d)
     } catch (e) { setError(e.message) }
   }, [])
@@ -138,7 +138,7 @@ export default function GodCommandCenter() {
     if (platformFilter) params.set('platform_slug', platformFilter)
     if (search)         params.set('search', search)
     try {
-      const d = await apiRequest(`/god/orgs?${params}`)
+      const d = await api.get(`/god/orgs?${params}`)
       setOrgs(d)
     } catch (e) { setError(e.message) }
   }, [platformFilter, search])
@@ -149,7 +149,7 @@ export default function GodCommandCenter() {
     if (search)         params.set('search', search)
     if (statusFilter)   params.set('status', statusFilter)
     try {
-      const d = await apiRequest(`/god/leads?${params}`)
+      const d = await api.get(`/god/leads?${params}`)
       setLeads(d)
     } catch (e) { setError(e.message) }
   }, [platformFilter, search, statusFilter])
@@ -159,7 +159,7 @@ export default function GodCommandCenter() {
     if (roleFilter) params.set('role', roleFilter)
     if (search)     params.set('search', search)
     try {
-      const d = await apiRequest(`/god/users?${params}`)
+      const d = await api.get(`/god/users?${params}`)
       setUsers(d)
     } catch (e) { setError(e.message) }
   }, [roleFilter, search])
@@ -184,10 +184,7 @@ export default function GodCommandCenter() {
     if (!editingUser || !newRole) return
     setSaving(true)
     try {
-      await apiRequest(`/god/users/${editingUser.id}/role`, {
-        method: 'PATCH',
-        body: JSON.stringify({ role: newRole }),
-      })
+      await api.patch(`/god/users/${editingUser.id}/role`, { role: newRole })
       showToast(`${editingUser.email} → ${newRole}`)
       setEditingUser(null)
       loadUsers()
@@ -199,7 +196,7 @@ export default function GodCommandCenter() {
   const toggleActive = async (u) => {
     const ep = u.is_active ? 'deactivate' : 'activate'
     try {
-      await apiRequest(`/god/users/${u.id}/${ep}`, { method: 'POST' })
+      await api.post(`/god/users/${u.id}/${ep}`, {})
       showToast(`${u.email} ${u.is_active ? 'deactivated' : 'activated'}`)
       loadUsers()
     } catch (e) { showToast(e.message, 'error') }

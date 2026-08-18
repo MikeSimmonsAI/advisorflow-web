@@ -73,7 +73,7 @@ export default function Pipeline() {
       setForecast(forecastData)
       setFlagged(flaggedData || [])
       setConversations(convoData || [])
-      setLeads(leadsData || [])
+      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData?.items || []))
       setLoading(false)
     })
   }

@@ -240,7 +240,8 @@ def god_leads(
 
     if search:
         q = q.filter(
-            Lead.name.ilike(f"%{search}%") |
+            Lead.first_name.ilike(f"%{search}%") |
+            Lead.last_name.ilike(f"%{search}%") |
             Lead.email.ilike(f"%{search}%") |
             Lead.phone.ilike(f"%{search}%")
         )
@@ -254,12 +255,12 @@ def god_leads(
     def _lead_dict(l):
         return {
             "id":              l.id,
-            "name":            l.name,
+            "name":            f"{l.first_name or ''} {l.last_name or ''}".strip() or None,
             "email":           getattr(l, "email", None),
             "phone":           getattr(l, "phone", None),
             "status":          getattr(l, "status", None),
             "tier":            getattr(l, "tier", None),
-            "source":          getattr(l, "source", None),
+            "source":          getattr(l, "source_file", None),
             "organization_id": l.organization_id,
             "created_at":      l.created_at.isoformat() if getattr(l, "created_at", None) else None,
         }
@@ -291,7 +292,7 @@ def god_users(
     if search:
         q = q.filter(
             User.email.ilike(f"%{search}%") |
-            User.name.ilike(f"%{search}%")
+            User.full_name.ilike(f"%{search}%")
         )
 
     total = q.count()
@@ -301,7 +302,7 @@ def god_users(
         return {
             "id":              u.id,
             "email":           u.email,
-            "name":            getattr(u, "name", None),
+            "name":            getattr(u, "full_name", None),
             "role":            u.role,
             "is_active":       getattr(u, "is_active", True),
             "organization_id": getattr(u, "organization_id", None),

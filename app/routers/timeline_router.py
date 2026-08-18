@@ -55,11 +55,11 @@ def get_lead_timeline(
         "type": "lead_created",
         "ts": _fmt(lead.created_at),
         "label": "Lead added",
-        "body": f"Source: {lead.source or 'unknown'}"
+        "body": f"Source: {lead.source_file or 'unknown'}"
             + (f" · List: {lead.import_list_name}" if lead.import_list_name else "")
             + (f" · Type: {lead.relationship_type}" if lead.relationship_type and lead.relationship_type != 'cold_lead' else ""),
         "meta": {
-            "source": lead.source,
+            "source": lead.source_file,
             "relationship_type": lead.relationship_type,
             "import_list_name": lead.import_list_name,
         },
@@ -70,7 +70,7 @@ def get_lead_timeline(
     for m in sms_messages:
         # Look up sender name lazily
         sender = db.query(User).filter(User.id == m.sender_id).first()
-        sender_name = f"{sender.first_name} {sender.last_name}".strip() if sender else "Advisor"
+        sender_name = sender.full_name if sender else "Advisor"
         events.append({
             "id": f"sms-out-{m.id}",
             "type": "sms_sent",
@@ -151,7 +151,7 @@ def get_lead_timeline(
     outcomes = db.query(LeadOutcome).filter(LeadOutcome.lead_id == lead_id).all()
     for o in outcomes:
         recorder = db.query(User).filter(User.id == o.recorded_by_id).first()
-        recorder_name = f"{recorder.first_name} {recorder.last_name}".strip() if recorder else "Advisor"
+        recorder_name = recorder.full_name if recorder else "Advisor"
         sale_note = ""
         if o.resulted_in_sale:
             sale_note = f" · Sale: {o.sale_items or 'recorded'}"
