@@ -6,7 +6,7 @@ import './Settings.css'
 
 export default function Settings() {
   const currentUser = getCurrentUser()
-  const isAdmin = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const isAdmin = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'god_admin'
 
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
