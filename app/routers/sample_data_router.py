@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db
 from app.models.models import (
     User, Lead, LeadTier, LeadStatus, MessageTrack, EngagementTemperature,
-    Reply, ReplyClassification, CadenceState, Message,
+    Reply, ReplyClassification, CadenceState, Message, Organization,
 )
 from app.routers.admin_router import require_super_admin
 from app.routers.audit_log_router import log_action
@@ -94,6 +94,8 @@ def generate_sample_data(
     display. All organization-scoped to current_user's org only.
     """
     now = datetime.now(timezone.utc)
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    org_name = org.name if org else "our team"
     created_leads = []
 
     scenarios = [
@@ -155,7 +157,7 @@ def generate_sample_data(
             message = Message(
                 lead_id=lead.id,
                 sender_id=current_user.id,
-                body=f"Hi {first}, this is {current_user.full_name} with Restland. Following up on your file review.",
+                body=f"Hi {first}, this is {current_user.full_name} with {org_name}. Following up on your file review.",
                 twilio_status="delivered",
                 sent_at=now - timedelta(days=1),
             )

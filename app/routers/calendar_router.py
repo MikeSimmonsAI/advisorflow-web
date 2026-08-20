@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from datetime import datetime
+from urllib.parse import quote
 import logging
 import os
 
@@ -61,7 +62,7 @@ def oauth_callback(
     if error:
         # Advisor denied access or something went wrong on Google's side -
         # redirect back with a query param the frontend can show as an error toast.
-        return RedirectResponse(url=f"{redirect_base}?calendar_error={error}")
+        return RedirectResponse(url=f"{redirect_base}?calendar_error={quote(str(error))}")
 
     if not code:
         return RedirectResponse(url=f"{redirect_base}?calendar_error=missing_code")
@@ -74,7 +75,8 @@ def oauth_callback(
         full_callback_url = str(request.url)
         handle_oauth_callback(db, advisor_user_id=real_user_id, authorization_response_url=full_callback_url)
     except Exception as e:
-        return RedirectResponse(url=f"{redirect_base}?calendar_error={str(e)}")
+        logger.error("Google Calendar OAuth callback error for user %s: %s", real_user_id, e)
+        return RedirectResponse(url=f"{redirect_base}?calendar_error=connection_failed")
 
     return RedirectResponse(url=f"{redirect_base}?calendar_connected=true")
 

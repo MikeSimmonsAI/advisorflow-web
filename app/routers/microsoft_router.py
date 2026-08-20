@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -55,7 +56,7 @@ def microsoft_oauth_callback(
     redirect_base = FRONTEND_SETUP_URL if is_setup_flow else FRONTEND_SETTINGS_URL
 
     if error:
-        return RedirectResponse(url=f"{redirect_base}?microsoft_error={error}")
+        return RedirectResponse(url=f"{redirect_base}?microsoft_error={quote(str(error))}")
 
     if not code:
         return RedirectResponse(url=f"{redirect_base}?microsoft_error=missing_code")
@@ -63,6 +64,7 @@ def microsoft_oauth_callback(
     try:
         handle_microsoft_oauth_callback(db, advisor_user_id=real_user_id, authorization_code=code)
     except Exception as e:
-        return RedirectResponse(url=f"{redirect_base}?microsoft_error={str(e)}")
+        logger.error("Microsoft OAuth callback error for user %s: %s", real_user_id, e)
+        return RedirectResponse(url=f"{redirect_base}?microsoft_error=connection_failed")
 
     return RedirectResponse(url=f"{redirect_base}?microsoft_connected=true")
