@@ -7,6 +7,7 @@ import { initTheme } from './theme.js'
 // Detect hostname and apply the correct brand theme BEFORE React renders.
 // This sets data-theme on <html> so CSS variable overrides kick in immediately
 // with no flash of wrong-brand styling.
+// Build: 2026-08-20 — force cache-bust for bookaboost cream/gold theme
 initTheme()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
