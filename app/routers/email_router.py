@@ -388,9 +388,11 @@ def email_system_check(
     if not advisor_email:
         chk("Live test send", False, "Your user account has no email address — can't send test", "Add an email to your profile.")
     else:
-        subject = "BookaBoost email system check ✓"
+        from app.services.platform_utils import get_brand_name as _get_brand
+        _chk_brand = _get_brand(db, str(current_user.organization_id))
+        subject = f"{_chk_brand} email system check ✓"
         body_html = (
-            f"<p>This is an automated system-check email from BookaBoost.</p>"
+            f"<p>This is an automated system-check email from {_chk_brand}.</p>"
             f"<p>If you're reading this, email delivery is working correctly for <strong>{current_user.full_name}</strong>.</p>"
             f"<p>Sent at: {datetime.utcnow().isoformat()} UTC</p>"
         )

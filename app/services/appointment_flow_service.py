@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.models.models import Lead, User, BookingLink
+from app.services.platform_utils import get_brand_name
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,8 @@ def on_booking_confirmed(db: Session, lead: Lead, advisor: User, booking_link: B
 
     # 3. Alert SMS to advisor
     if advisor.twilio_phone_number:
-        alert = f"📅 BookaBoost: {lead_name} just booked for {appt_time}. Check your calendar."
+        brand = get_brand_name(db, str(advisor.organization_id))
+        alert = f"📅 {brand}: {lead_name} just booked for {appt_time}. Check your calendar."
         notification_phone = getattr(advisor, "notification_phone", None) or advisor.twilio_phone_number
         _send_sms_safe(advisor, notification_phone, alert)
 

@@ -13,6 +13,7 @@ import os
 from sqlalchemy.orm import Session
 from app.models.models import User, Lead, Reply, Notification, NotificationType
 from app.services.email_service import send_email_via_provider
+from app.services.platform_utils import get_brand_name
 
 NOTIFICATION_FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@restland-advisorflow.com")
 
@@ -47,7 +48,7 @@ def notify_hot_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> No
         </blockquote>
         <p>Phone: {lead.phone or 'N/A'}<br>
         Tier: {lead.tier if lead.tier else 'N/A'}</p>
-        <p>Log in to AdvisorFlow to respond.</p>
+        <p>Log in to {get_brand_name(db, str(advisor.organization_id))} to respond.</p>
     """
 
     result = send_email_via_provider(target_email, subject, body_html)

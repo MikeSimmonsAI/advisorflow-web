@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Lead, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
+from app.services.platform_utils import get_brand_name
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +359,7 @@ def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, 
 <p><strong>Reason:</strong> {reason}</p>
 {'<p><strong>Their message:</strong> ' + reply_body[:500] + '</p>' if reply_body else ''}
 <br><a href="{frontend_url}/leads/{lead.id}" style="background:#1a5fa8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;">View Lead & Respond →</a>
-<p style="color:#94a3b8;font-size:12px;margin-top:16px;">BookaBoost AI paused this conversation. Review and respond manually or click Resume AI on the lead page.</p>"""
+<p style="color:#94a3b8;font-size:12px;margin-top:16px;">{get_brand_name(db, str(advisor.organization_id))} AI paused this conversation. Review and respond manually or click Resume AI on the lead page.</p>"""
         _send_email_via_graph(advisor, notification_email, subject, body)
     except Exception as e:
         logger.error("Escalation alert failed: %s", e)

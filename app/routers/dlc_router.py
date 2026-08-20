@@ -126,7 +126,7 @@ def create_messaging_service(
 
     try:
         service = client.messaging.v1.services.create(
-            friendly_name=f"BookaBoost — {org.name}",
+            friendly_name=f"{org.name}",
             inbound_request_url="https://advisorflow-backend.onrender.com/sms/inbound",
             use_inbound_webhook_on_number=False,
             use_case_indication="BY_ORG",

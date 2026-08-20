@@ -534,7 +534,7 @@ async def handle_inbound_call(request: Request, db: Session = Depends(get_db)):
         twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="Polly.Joanna" rate="95%">
-        Thank you for calling. This is an AI assistant with BookaBoost.
+        Thank you for calling. This is an AI assistant with our scheduling team.
         We were not able to locate your record.
         Please hold while we connect you, or call back during business hours.
     </Say>

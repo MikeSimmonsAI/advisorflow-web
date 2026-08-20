@@ -138,7 +138,7 @@ def create_calendar_event_for_booking(
             f"Lead phone: {lead.phone or 'N/A'}\n"
             f"Lead email: {lead.email or 'N/A'}\n"
             f"Tier: {lead.tier or 'N/A'}\n"
-            f"Booked via AdvisorFlow booking link."
+            f"Booked via scheduling link."
         ),
         "start": {"dateTime": booked_datetime.isoformat(), "timeZone": "America/Chicago"},
         "end": {"dateTime": end_time.isoformat(), "timeZone": "America/Chicago"},

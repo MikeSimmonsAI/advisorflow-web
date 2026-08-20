@@ -9,6 +9,7 @@ import os
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, BookingLink
+from app.services.platform_utils import get_brand_name
 from app.services.calendar_service import (
     get_authorization_url, handle_oauth_callback,
     create_calendar_event_for_booking, cancel_calendar_event,
@@ -221,7 +222,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                         "content": (
                             f"<p>Appointment with {lead_name or 'Lead'}</p>"
                             f"<p>Phone: {lead_phone}</p>"
-                            f"<p>Booked via BookaBoost</p>"
+                            f"<p>Booked via {get_brand_name(db, str(advisor.organization_id))}</p>"
                         ),
                     },
                     "start": {
@@ -323,7 +324,8 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 from app.utils.crypto import decrypt_value
                 auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
                 client = Client(advisor.twilio_account_sid, auth_token)
-                msg_body = f"📅 BookaBoost: {lead_name or 'A lead'} just confirmed a {appt_label} for {slot_display}. Check your Outlook calendar."
+                _sms_brand = get_brand_name(db, str(advisor.organization_id))
+                msg_body = f"📅 {_sms_brand}: {lead_name or 'A lead'} just confirmed a {appt_label} for {slot_display}. Check your Outlook calendar."
                 client.messages.create(
                     body=msg_body,
                     from_=advisor.twilio_phone_number,
@@ -345,7 +347,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     email_result = {"success": False}
     if advisor and lead:
         try:
-            _send_booking_notification_email(advisor, lead, appt_label, slot_display)
+            _send_booking_notification_email(advisor, lead, appt_label, slot_display, db)
             email_result = {"success": True}
             logger.info("booking-confirmed: notification email sent")
         except Exception as e:
@@ -371,7 +373,7 @@ URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 NOTIFICATION_EMAIL = "michael.simmons@nsmg.com"  # advisor notification address
 
 
-def _send_booking_notification_email(advisor, lead, appt_label: str, slot_display: str):
+def _send_booking_notification_email(advisor, lead, appt_label: str, slot_display: str, db=None):
     """
     Send a professional booking notification email to the advisor.
     Uses 🔥 urgent subject for hot/at-need/imminent tiers.
@@ -392,6 +394,7 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
     is_urgent = tier in URGENT_TIERS
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "A lead"
     lead_url = f"{os.environ.get('FRONTEND_URL', 'https://advisorflow-frontend.onrender.com')}/leads/{lead.id}"
+    brand = get_brand_name(db, str(advisor.organization_id)) if db else "BookaBoost"
 
     if is_urgent:
         subject = f"🔥 URGENT Booking — {lead_name} Needs Immediate Attention"
@@ -420,7 +423,7 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
       <!-- Header -->
       <tr>
         <td style="background:{header_color};padding:28px 32px;">
-          <p style="margin:0;color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;opacity:0.8;">BookaBoost</p>
+          <p style="margin:0;color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;opacity:0.8;">{brand}</p>
           <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:800;letter-spacing:-0.02em;">
             {'🔥 Urgent Booking Alert' if is_urgent else '📅 New Booking Confirmed'}
           </h1>
@@ -472,7 +475,7 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
           <tr><td style="padding-bottom:24px;text-align:center;">
             <a href="{lead_url}"
                style="display:inline-block;background:{header_color};color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">
-              View Lead in BookaBoost →
+              View Lead in {brand} →
             </a>
           </td></tr>
 
@@ -491,7 +494,7 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
       <tr>
         <td style="background:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
           <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">
-            BookaBoost · Appointment Scheduling Platform · Dallas, TX<br>
+            {brand} · Appointment Scheduling Platform · Dallas, TX<br>
             This is an automated notification. Do not reply to this email.
           </p>
         </td>

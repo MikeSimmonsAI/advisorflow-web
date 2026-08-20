@@ -28,6 +28,7 @@ from app.models.models import (
     PipelineConversation
 )
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
+from app.services.platform_utils import get_brand_name
 
 logger = logging.getLogger(__name__)
 
@@ -370,9 +371,10 @@ def process_inbound_reply(
         pipeline.stage = "booked"
         pipeline.booked_at = datetime.utcnow()
         db.commit()
+        _brand = get_brand_name(db, str(advisor.organization_id))
         _notify_fsa_sms(
             advisor,
-            f"📅 BookaBoost: {lead.first_name or 'A lead'} {lead.last_name or ''} just booked! Check your calendar. — BookaBoost"
+            f"📅 {_brand}: {lead.first_name or 'A lead'} {lead.last_name or ''} just booked! Check your calendar. — {_brand}"
         )
         return {"action": "booked", "pipeline_id": pipeline.id}
 
@@ -458,9 +460,10 @@ def process_inbound_reply(
         db.commit()
 
         # Notify FSA about flagged reply
+        _brand = get_brand_name(db, str(advisor.organization_id))
         _notify_fsa_sms(
             advisor,
-            f"⚠️ BookaBoost: {lead.first_name or 'A lead'} replied and needs your attention. Log in to review. — BookaBoost"
+            f"⚠️ {_brand}: {lead.first_name or 'A lead'} replied and needs your attention. Log in to review. — {_brand}"
         )
 
         return {

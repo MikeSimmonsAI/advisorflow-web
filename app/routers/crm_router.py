@@ -74,7 +74,7 @@ class CRMConnectionCreate(BaseModel):
     api_base_url: Optional[str] = None
     sync_mode: str = "push_only"       # push_only | pull_only | two_way
     push_events: list[str] = ["booking", "status_change"]
-    annotation_tag: str = "BookaBoost"
+    annotation_tag: str = ""  # defaults to the org's platform brand name at send time
     active: bool = True
 
 

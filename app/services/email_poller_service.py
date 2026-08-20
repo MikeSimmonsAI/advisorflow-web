@@ -244,7 +244,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             # Fire alert email if reply is hot
             if reply.is_hot:
                 try:
-                    _send_hot_reply_alert(advisor, lead, body_text)
+                    _send_hot_reply_alert(advisor, lead, body_text, db)
                 except Exception as he:
                     logger.error("Hot reply alert email error lead=%s: %s", lead.id, he)
 
@@ -331,7 +331,7 @@ NOTIFICATION_EMAIL = "michael.simmons@nsmg.com"
 URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 
 
-def _send_hot_reply_alert(advisor, lead, reply_body: str):
+def _send_hot_reply_alert(advisor, lead, reply_body: str, db=None):
     """
     Send a 🔥 fire alert email to the advisor when a hot reply comes in.
     Sends to advisor.notification_email if set, otherwise falls back to NOTIFICATION_EMAIL.
@@ -368,6 +368,8 @@ def _send_hot_reply_alert(advisor, lead, reply_body: str):
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "A lead"
     lead_url = f"{os.environ.get('FRONTEND_URL', 'https://advisorflow-frontend.onrender.com')}/leads/{lead.id}"
     is_urgent = tier in URGENT_TIERS
+    from app.services.platform_utils import get_brand_name
+    brand = get_brand_name(db, str(advisor.organization_id)) if db else "BookaBoost"
 
     subject = f"🔥 HOT REPLY — {lead_name} Just Responded!"
     if is_urgent:
@@ -439,7 +441,7 @@ def _send_hot_reply_alert(advisor, lead, reply_body: str):
       <tr>
         <td style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;">
           <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">
-            BookaBoost · Automated Hot Reply Alert · Do not reply to this email.
+            {brand} · Automated Hot Reply Alert · Do not reply to this email.
           </p>
         </td>
       </tr>
