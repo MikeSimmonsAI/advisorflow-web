@@ -65,8 +65,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), payment=()"
         )
-        # Remove server fingerprint header Uvicorn/Starlette adds by default
-        response.headers.pop("server", None)
+        # Remove server fingerprint header Uvicorn/Starlette adds by default.
+        # MutableHeaders has no .pop() — use del with a guard instead.
+        if "server" in response.headers:
+            del response.headers["server"]
         return response
 
 
