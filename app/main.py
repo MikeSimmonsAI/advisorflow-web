@@ -110,7 +110,7 @@ def privacy_policy():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Privacy Policy - BookaBoost</title>
+<title>Privacy Policy - EvoSys Pro</title>
 <style>
   body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#222;line-height:1.7}
   h1{color:#0a0a1a}h2{color:#1a2a4a;margin-top:32px;border-bottom:1px solid #ddd;padding-bottom:6px}
@@ -118,35 +118,36 @@ def privacy_policy():
 </style>
 </head>
 <body>
-<h1><span class="brand">BookaBoost</span> Privacy Policy</h1>
-<p><strong>Last updated: July 2026</strong></p>
-<p>This Privacy Policy describes how BookaBoost collects, uses, and protects personal information in connection with our SMS appointment scheduling and outreach messaging program.</p>
+<h1><span class="brand">EvoSys Pro</span> Privacy Policy</h1>
+<p><strong>Last updated: August 2026</strong></p>
+<p>This Privacy Policy describes how EVO Integrated Solutions LLC, operating as EvoSys Pro, collects, uses, and protects personal information in connection with our SMS appointment scheduling and outreach messaging program.</p>
 <h2>Information We Collect</h2>
-<p>We collect your name and mobile phone number when you voluntarily provide them to a BookaBoost advisor during an in-person consultation, phone inquiry, or scheduled appointment.</p>
+<p>We collect your name and mobile phone number when you voluntarily provide them to an EvoSys Pro advisor during an in-person consultation, phone inquiry, or scheduled appointment.</p>
 <h2>How We Use Your Information</h2>
 <p>We use your mobile phone number solely to send SMS messages related to appointment scheduling, reminders, and follow-up communications regarding services you have expressed interest in.</p>
 <h2>SMS Messaging Program</h2>
-<p>By providing your mobile phone number to a BookaBoost advisor, you consent to receive SMS text messages regarding your account, appointments, and related services. Message frequency varies. Standard message and data rates may apply.</p>
+<p>By providing your mobile phone number to an EvoSys Pro advisor, you consent to receive SMS text messages regarding your account, appointments, and related services. Message frequency varies. Standard message and data rates may apply.</p>
 <p><strong>To opt out:</strong> Reply STOP to any message at any time.</p>
-<p><strong>For help:</strong> Reply HELP to any message or contact us at info@bookaboost.com.</p>
+<p><strong>For help:</strong> Reply HELP to any message or contact us at support@evosyspro.live.</p>
 <h2>Data Sharing</h2>
 <p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. Your mobile opt-in data and consent will not be sold, rented, or transferred to any third party at any time.</strong></p>
 <h2>Data Security</h2>
 <p>We implement appropriate technical and organizational measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction.</p>
 <h2>Contact Us</h2>
-<p>BookaBoost | Dallas, TX | Phone: 469-553-7417 | Email: info@bookaboost.com | bookaboost.com</p>
+<p>EVO Integrated Solutions LLC | DBA: EvoSys Pro | Dallas, TX | Email: support@evosyspro.live | evosyspro.live</p>
 </body>
 </html>""")
 
 
 @app.get("/terms", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/terms-of-service", response_class=HTMLResponse, include_in_schema=False)
 def terms_and_conditions():
     return HTMLResponse(content="""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Terms and Conditions - BookaBoost</title>
+<title>Terms and Conditions - EvoSys Pro</title>
 <style>
   body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#222;line-height:1.7}
   h1{color:#0a0a1a}h2{color:#1a2a4a;margin-top:32px;border-bottom:1px solid #ddd;padding-bottom:6px}
@@ -154,13 +155,13 @@ def terms_and_conditions():
 </style>
 </head>
 <body>
-<h1><span class="brand">BookaBoost</span> SMS Program - Terms and Conditions</h1>
-<p><strong>Last updated: July 2026</strong></p>
-<p>These Terms and Conditions govern your participation in the BookaBoost SMS appointment scheduling and outreach messaging program.</p>
+<h1><span class="brand">EvoSys Pro</span> SMS Program - Terms and Conditions</h1>
+<p><strong>Last updated: August 2026</strong></p>
+<p>These Terms and Conditions govern your participation in the EvoSys Pro SMS appointment scheduling and outreach messaging program, operated by EVO Integrated Solutions LLC.</p>
 <h2>Program Description</h2>
-<p>BookaBoost operates an SMS messaging program to send appointment scheduling messages, reminders, and follow-up communications to customers and prospects who have provided their mobile phone number to a BookaBoost advisor.</p>
+<p>EVO Integrated Solutions LLC, operating as EvoSys Pro, operates an SMS messaging program to send appointment scheduling messages, reminders, and follow-up communications to customers and prospects who have provided their mobile phone number to an EvoSys Pro advisor.</p>
 <h2>Consent to Receive Messages</h2>
-<p>By providing your mobile phone number to a BookaBoost advisor, you consent to receive recurring SMS text messages related to your account, appointments, and related services. Consent is not required as a condition of any purchase.</p>
+<p>By providing your mobile phone number to an EvoSys Pro advisor, you consent to receive recurring SMS text messages related to your account, appointments, and related services. Consent is not required as a condition of any purchase.</p>
 <h2>Message Frequency</h2>
 <p>Message frequency varies. You may receive multiple messages per month.</p>
 <h2>Message and Data Rates</h2>
@@ -168,14 +169,14 @@ def terms_and_conditions():
 <h2>How to Opt Out</h2>
 <p><strong>Reply STOP</strong> to any message at any time. You will receive one final confirmation and no further messages will be sent.</p>
 <h2>How to Get Help</h2>
-<p><strong>Reply HELP</strong> to any message, or contact BookaBoost: Phone: 469-553-7417 | Email: info@bookaboost.com</p>
+<p><strong>Reply HELP</strong> to any message, or contact EvoSys Pro: Email: support@evosyspro.live | evosyspro.live</p>
 <h2>Carriers</h2>
 <p>Mobile carriers are not liable for delayed or undelivered messages.</p>
 <h2>Privacy</h2>
 <p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes at any time.</strong></p>
 <p>See our full <a href="/privacy-policy">Privacy Policy</a> for complete details.</p>
 <h2>Contact</h2>
-<p>BookaBoost | Dallas, TX | Phone: 469-553-7417 | Email: info@bookaboost.com | bookaboost.com</p>
+<p>EVO Integrated Solutions LLC | DBA: EvoSys Pro | Dallas, TX | Email: support@evosyspro.live | evosyspro.live</p>
 </body>
 </html>""")
 
