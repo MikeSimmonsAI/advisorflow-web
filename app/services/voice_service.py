@@ -37,7 +37,7 @@ def build_voice_system_prompt(lead_info: dict, advisor_info: dict, call_number: 
     tier = (lead_info.get("tier") or "").lower()
     appt_label = lead_info.get("appt_label", "Family Services Appointment")
     advisor_name = advisor_info.get("name", "Mike Simmons")
-    org_name = advisor_info.get("org", "Restland Cemetery and Funeral Home")
+    org_name = advisor_info.get("org", "Greenland Cemetery and Funeral Home")
     booking_url = lead_info.get("booking_url", "")
 
     is_urgent = tier in URGENT_TIERS

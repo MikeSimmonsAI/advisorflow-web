@@ -13,16 +13,17 @@ const brand = BRAND_CONFIG[theme]
 const PLATFORM_CONTENT = {
   [THEMES.BOOKABOOST]: {
     headline: 'BookaBoost',
-    tagline: 'Pre-need outreach that works while you sleep.',
-    accentColor: '#2fb6ff',
-    accentGlow: 'rgba(47,182,255,0.18)',
-    bgGradient: 'linear-gradient(135deg, #0a1628 0%, #0d1f3c 50%, #0a2040 100%)',
-    panelGradient: 'linear-gradient(160deg, #0d1f3c 0%, #091525 100%)',
+    tagline: 'Pre-need outreach built for families who plan ahead — and the advisors who serve them.',
+    accentColor: '#c9973d',
+    accentGlow: 'rgba(201,151,61,0.15)',
+    bgGradient: 'linear-gradient(135deg, #faf8f4 0%, #f5f0e8 100%)',
+    panelGradient: 'linear-gradient(160deg, #2c1f10 0%, #3d2b14 100%)',
+    lightRight: true,
     poweredBy: 'BookaBoost',
     stats: [
-      { value: '4.8×', label: 'avg reply rate vs cold calling' },
+      { value: '4.8×', label: 'avg reply rate vs cold outreach' },
       { value: '72%', label: 'of pre-need leads go cold within 90 days' },
-      { value: '3 min', label: 'to launch your first cadence' },
+      { value: '3 min', label: 'to launch your first AI cadence' },
       { value: '100%', label: 'A2P 10DLC compliant messaging' },
     ],
     features: [
@@ -31,8 +32,8 @@ const PLATFORM_CONTENT = {
       { icon: '📋', text: 'Funeral-industry CRM built in' },
       { icon: '🔗', text: 'GoHighLevel & HubSpot sync' },
     ],
-    badge: 'Funeral Home Edition',
-    badgeStyle: { background: 'rgba(47,182,255,0.12)', color: '#2fb6ff', border: '1px solid rgba(47,182,255,0.3)' },
+    badge: 'Pre-Need Edition',
+    badgeStyle: { background: 'rgba(201,151,61,0.18)', color: '#c9973d', border: '1px solid rgba(201,151,61,0.4)' },
   },
   [THEMES.ADVISORFLOW]: {
     headline: '⚡ AdvisorFlow',
@@ -158,7 +159,7 @@ export default function Login() {
   const isAdvisorFlow = theme === THEMES.ADVISORFLOW
 
   return (
-    <div className="login-page" style={{ background: content.bgGradient }}>
+    <div className={`login-page${content.lightRight ? ' login-page--light' : ''}`} style={{ background: content.bgGradient }}>
 
       {/* Ambient orbs */}
       <div className="login-orb login-orb--1" style={{ background: content.accentGlow }} />

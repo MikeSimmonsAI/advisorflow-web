@@ -355,3 +355,62 @@
     display: flex;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   BookaBoost — warm / light right-panel overrides
+   .login-page--light is added when lightRight:true (BookaBoost)
+═══════════════════════════════════════════════════════════════ */
+
+.login-page--light .login-right {
+  background: #faf8f4;
+}
+
+.login-page--light .login-orb { opacity: 0.15; }
+
+.login-page--light .login-card-title { color: #1a1108; }
+
+.login-page--light .login-card-sub { color: #7a6248; }
+
+.login-page--light .login-mobile-brand span { color: #1a1108 !important; }
+
+.login-page--light .login-label {
+  color: #4a3520;
+  font-weight: 600;
+}
+
+.login-page--light .login-input {
+  background: #ffffff;
+  border: 1.5px solid #e0d3c0;
+  color: #1a1108;
+  box-shadow: 0 2px 8px rgba(60,30,10,.06);
+}
+
+.login-page--light .login-input::placeholder { color: #c0a880; }
+
+.login-page--light .login-input:focus {
+  border-color: #c9973d;
+  box-shadow: 0 0 0 3px rgba(201,151,61,.12), 0 2px 8px rgba(60,30,10,.06);
+}
+
+.login-page--light .login-submit {
+  box-shadow: 0 4px 16px rgba(201,151,61,.35) !important;
+}
+
+.login-page--light .login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(201,151,61,.4) !important;
+}
+
+.login-page--light .login-error {
+  background: #fff1f0;
+  border: 1px solid #ffd5d0;
+  color: #c0392b;
+}
+
+.login-page--light .login-support { color: #a08060; }
+.login-page--light .login-support a { color: #8a5a1a; }
+.login-page--light .login-support a:hover { color: #5a3a0a; }
+
+.login-page--light .login-left {
+  border-right-color: rgba(201,151,61,.2);
+}
