@@ -421,10 +421,9 @@ export default function LeadDetail() {
         tone: TONES[tone].key,
         ai_direction: aiDirection || null,
       })
-      // Strip booking URLs only if there's other text remaining after removal
-      const raw = draft.suggested_reply || ''
-      const stripped = raw.replace(/https?:\/\/\S+/g, '').trim()
-      const cleanReply = stripped.length > 0 ? stripped : raw.trim()
+      // Backend strips URLs before returning, but strip here too as a safety net.
+      // The "Include booking link" checkbox appends the clean link at send time.
+      const cleanReply = (draft.suggested_reply || '').replace(/https?:\/\/\S+/g, '').trim()
       setMessageText(cleanReply)
       // Keep includeBookingLink checked so the link is added cleanly on send
     } catch (err) {

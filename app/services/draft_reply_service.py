@@ -151,13 +151,15 @@ def _ensure_booking_link_in_text(text: str, lead: Lead, advisor: User, booking_u
 def _fallback_reply(lead: Lead, advisor: User, booking_url: str, tone: str = "warm") -> str:
     name = lead.first_name or "there"
     advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
+    # Do NOT include the booking URL here — the frontend's "Include booking link"
+    # checkbox appends it at send time. Including it here causes a double-link.
     if tone == "urgent":
-        return f"Hi {name}, I wanted to reach out one more time. Please let me know if you'd like to connect — I have time this week. {booking_url}"
+        return f"Hi {name}, I wanted to reach out one more time. Please let me know if you'd like to connect — I have time this week."
     if tone == "hot":
-        return f"Hi {name}, great hearing from you. I'd love to set up a time to talk — here's my booking link: {booking_url}"
+        return f"Hi {name}, great hearing from you! I'd love to set up a time to talk — check my booking link below."
     if tone == "cold":
-        return f"Hi {name}, this is {advisor_name}. Just wanted to introduce myself and let you know I'm here whenever you're ready. {booking_url}"
-    return f"Hi {name}, this is {advisor_name}. I'd love to connect and walk you through your options. {booking_url}"
+        return f"Hi {name}, this is {advisor_name}. Just wanted to introduce myself and let you know I'm here whenever you're ready."
+    return f"Hi {name}, this is {advisor_name}. I'd love to connect and walk you through your options."
 
 
 def draft_reply(
@@ -227,7 +229,12 @@ def draft_reply(
         )
         raw = response.choices[0].message.content
         parsed = _safe_parse_json(raw)
-        suggested = _ensure_booking_link_in_text(parsed.get("suggested_reply", ""), lead, advisor, booking_url)
+        # Strip any URLs the AI included — the frontend "Include booking link"
+        # checkbox appends the clean link at send time.
+        import re as _re
+        suggested = _re.sub(r'https?://\S+', '', parsed.get("suggested_reply", "")).strip()
+        if not suggested:
+            suggested = _fallback_reply(lead, advisor, booking_url, tone)
         source = "ai"
     except Exception:
         suggested = _fallback_reply(lead, advisor, booking_url, tone)
