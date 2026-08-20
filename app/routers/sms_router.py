@@ -8,6 +8,7 @@ from typing import Optional
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
+from app.utils.twilio_security import validate_twilio_webhook
 
 router = APIRouter(prefix="/sms", tags=["sms"])
 
@@ -118,7 +119,7 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
 
 
 @router.post("/webhook/status-callback")
-def sms_status_callback(
+async def sms_status_callback(
     request: Request,
     MessageSid: str = Form(...),
     MessageStatus: str = Form(...),
@@ -127,13 +128,9 @@ def sms_status_callback(
     """
     Twilio delivery status callback — called by Twilio each time an SMS
     delivery status changes (sent → delivered, failed, undelivered, etc.).
-    No auth required: Twilio sends this automatically; it's keyed by MessageSid.
-    Configure Render env var API_BASE_URL so sms_service sets StatusCallback.
-
-    Delivery status values Twilio sends:
-      queued → sending → sent → delivered (success path)
-      queued → sending → sent → undelivered / failed (failure path)
+    Validates X-Twilio-Signature before processing to prevent spoofed callbacks.
     """
+    await validate_twilio_webhook(request)
     from app.models.models import Message
 
     msg = db.query(Message).filter(Message.twilio_sid == MessageSid).first()
@@ -149,7 +146,7 @@ def sms_status_callback(
 
 
 @router.post("/webhook/inbound")
-def inbound_webhook(
+async def inbound_webhook(
     request: Request,
     From: str = Form(...),
     To: str = Form(...),
@@ -158,19 +155,11 @@ def inbound_webhook(
     db: Session = Depends(get_db),
 ):
     """
-    Twilio webhook for inbound SMS replies. Configure this URL in each
-    advisor's Twilio number messaging settings:
-    https://<your-domain>/sms/webhook/inbound
-
-    Matches the inbound number+sender phone back to the most recent Lead
-    that was texted from that Twilio number, attaches the Reply, runs
-    AI-based reply classification (interested/callback/dnc/neutral - see
-    reply_classification_service.py, which replaced the old naive
-    substring keyword matcher after testing surfaced real false
-    positives), stops the re-engagement cadence (any reply means the
-    lead is engaged - no more touches needed), and fires a HOT reply
-    email notification to the owning advisor.
+    Twilio webhook for inbound SMS replies.
+    Validates X-Twilio-Signature before processing to prevent spoofed inbound
+    messages that could inject fake lead replies or trigger AI flows.
     """
+    await validate_twilio_webhook(request)
     from app.services.dedup_service import normalize_phone
     from app.services.cadence_service import stop_cadence_for_lead
     from app.services.reply_classification_service import classify_reply, contains_hard_stop_language
@@ -523,9 +512,11 @@ async def upload_media(
     except HTTPException:
         raise
     except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).error("Media upload failed: %s", e)
         if os.path.exists(dest):
             os.unlink(dest)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Upload failed. Please try again.")
 
     if media_base:
         public_url = f"{media_base.rstrip('/')}/{filename}"

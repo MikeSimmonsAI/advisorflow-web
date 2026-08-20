@@ -580,15 +580,9 @@ def run_auto_migrations(engine) -> None:
             conn.rollback()
             print(f"[auto_migrate] appointment_case_files table note: {e}")
 
-    # ── ONE-TIME PASSWORD RESET (remove after first deploy) ─────────────────
-    try:
-        _PW_HASH = "$2b$12$Z.vk1S50eQYC0quZm77VAu/p1dfPmP/YyAl7y1Bk.lkenzIqNp3VO"
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("UPDATE users SET password_hash=:h, role='god_admin', is_active=true WHERE email='mike@simmonsstrong.com'"),
-                {"h": _PW_HASH}
-            )
-            conn.commit()
-            print(f"[auto_migrate] mike@simmonsstrong.com — role+password reset rowcount={result.rowcount}")
-    except Exception as e:
-        print(f"[auto_migrate] Password reset error: {e}")
+    # ONE-TIME PASSWORD RESET BLOCK REMOVED — security fix 2026-08-20
+    # Reason: this block committed a bcrypt hash to source control and ran on
+    # every deploy, overwriting any password change made through the app.
+    # God-admin role enforcement is handled in main.py on_startup via
+    # GOD_ADMIN_EMAIL env var (never hardcoded). Password is set once through
+    # the app and is not touched by migrations.

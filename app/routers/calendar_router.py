@@ -28,7 +28,8 @@ def connect_google_calendar(current_user: User = Depends(get_current_user)):
     try:
         url = get_authorization_url(current_user.id)
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Google Calendar OAuth URL error for user %s: %s", current_user.id, e)
+        raise HTTPException(status_code=500, detail="Google Calendar integration is not configured. Contact support.")
     return {"authorization_url": url}
 
 

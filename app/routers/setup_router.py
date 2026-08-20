@@ -18,6 +18,7 @@ Endpoints:
   GET  /setup/microsoft-connect     — public; return Microsoft OAuth URL
 """
 
+import logging
 import os
 import jwt
 from datetime import datetime, timedelta
@@ -29,6 +30,8 @@ from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.services.calendar_service import get_authorization_url
 from app.services.microsoft_email_service import get_microsoft_authorization_url
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["setup"])
 
@@ -131,7 +134,8 @@ def setup_google_connect(
         # "setup:{user_id}" prefix tells the callback to redirect to the setup page
         url = get_authorization_url(f"setup:{user_id}")
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _log.error("Google OAuth URL generation failed for user %s: %s", user_id, e)
+        raise HTTPException(status_code=500, detail="Calendar integration is not configured. Contact support.")
     return {"authorization_url": url}
 
 
@@ -150,5 +154,6 @@ def setup_microsoft_connect(
     try:
         url = get_microsoft_authorization_url(f"setup:{user_id}")
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _log.error("Microsoft OAuth URL generation failed for user %s: %s", user_id, e)
+        raise HTTPException(status_code=500, detail="Microsoft integration is not configured. Contact support.")
     return {"authorization_url": url}

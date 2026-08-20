@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, VoiceCall, Organization
+from app.utils.twilio_security import validate_twilio_webhook
 from app.services.voice_service import (
     build_twilio_twiml_outbound,
     build_twilio_twiml_voicemail,
@@ -136,7 +137,7 @@ def initiate_call(
         call.status = "failed"
         call.error_message = result.get("error")
         db.commit()
-        raise HTTPException(status_code=500, detail=result.get("error", "Call failed"))
+        raise HTTPException(status_code=500, detail="Call initiation failed. Check your phone settings.")
 
     call.call_sid = result["call_sid"]
     call.status = "ringing"
@@ -161,10 +162,10 @@ async def get_twiml(
     db: Session = Depends(get_db),
 ):
     """
-    Public endpoint — Twilio fetches this to get call instructions.
-    Returns TwiML that connects the call to our WebSocket media stream.
-    No auth — Twilio validates via signature.
+    Twilio fetches this to get call instructions (TwiML).
+    Validates X-Twilio-Signature to prevent spoofed call setups.
     """
+    await validate_twilio_webhook(request)
     call_id = request.query_params.get("call_id", "")
     advisor_id = request.query_params.get("advisor_id", "")
 
@@ -342,8 +343,9 @@ async def voice_stream(
 async def call_status_callback(request: Request, db: Session = Depends(get_db)):
     """
     Twilio calls this when call status changes.
-    Handles: no-answer → leave voicemail, completed, failed.
+    Validates X-Twilio-Signature to prevent spoofed status updates.
     """
+    await validate_twilio_webhook(request)
     form = await request.form()
     call_sid = form.get("CallSid", "")
     call_status = form.get("CallStatus", "")
@@ -401,7 +403,8 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/recording")
 async def recording_callback(request: Request, db: Session = Depends(get_db)):
-    """Twilio calls this when recording is available."""
+    """Twilio calls this when recording is available. Validates X-Twilio-Signature."""
+    await validate_twilio_webhook(request)
     form = await request.form()
     call_sid = form.get("CallSid", "")
     recording_url = form.get("RecordingUrl", "")
@@ -495,9 +498,10 @@ def get_call(
 @router.post("/inbound")
 async def handle_inbound_call(request: Request, db: Session = Depends(get_db)):
     """
-    Public endpoint — Twilio calls this when someone calls our number.
-    Looks up caller by phone number, finds their advisor, connects to AI.
+    Twilio calls this when someone calls our number.
+    Validates X-Twilio-Signature to prevent spoofed inbound call injections.
     """
+    await validate_twilio_webhook(request)
     form = await request.form()
     caller_phone = form.get("From", "").strip()
     call_sid = form.get("CallSid", "")

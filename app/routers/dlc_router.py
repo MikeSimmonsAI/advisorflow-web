@@ -138,7 +138,7 @@ def create_messaging_service(
         return {"success": True, "messaging_service_sid": service.sid, "created": True}
     except Exception as e:
         logger.exception("10DLC create-messaging-service error: %s", e)
-        raise HTTPException(status_code=500, detail=f"Twilio error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create messaging service. Contact support.")
 
 
 class BrandRequest(BaseModel):
@@ -221,7 +221,7 @@ def register_brand(
                     "then return here to register your campaign."
                 ),
             )
-        raise HTTPException(status_code=500, detail=f"Twilio error: {err_str}")
+        raise HTTPException(status_code=500, detail="Brand registration failed. Contact support.")
 
 
 class CampaignRequest(BaseModel):
@@ -313,7 +313,7 @@ def register_campaign(
         return {"success": True, "campaign_sid": campaign_sid, "campaign_status": campaign_status}
     except Exception as e:
         logger.exception("10DLC register-campaign error: %s", e)
-        raise HTTPException(status_code=500, detail=f"Twilio error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to register campaign. Contact support.")
 
 
 @router.post("/add-phone-number")

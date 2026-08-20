@@ -10,9 +10,10 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 
 import asyncio
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from sqlalchemy import text as _text
 from app.deps import engine
@@ -46,6 +47,30 @@ from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
+
+
+# ── Security headers middleware ───────────────────────────────────────────────
+# Injected on every response. These headers harden the app against clickjacking,
+# MIME sniffing, info leakage, and cross-origin data access.
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        # Prevent the app from being embedded in iframes (clickjacking)
+        response.headers["X-Frame-Options"] = "DENY"
+        # Stop browsers from sniffing content types (MIME confusion attacks)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Don't send Referer header to third-party sites
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Disable potentially dangerous browser features
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
+        # Remove server fingerprint header Uvicorn/Starlette adds by default
+        response.headers.pop("server", None)
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",

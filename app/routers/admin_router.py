@@ -1,5 +1,9 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import func, distinct
 from pydantic import BaseModel, EmailStr, Field
 import secrets
@@ -1244,7 +1248,8 @@ def merge_leads(
         raise
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Lead merge failed and was rolled back: {exc}") from exc
+        logger.exception("Lead merge failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Lead merge failed and was rolled back. Contact support.") from exc
 
 
 @router.patch("/leads/{lead_id}/fix-contact-info")

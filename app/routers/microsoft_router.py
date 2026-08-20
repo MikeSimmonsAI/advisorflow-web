@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -8,6 +10,7 @@ from app.models.models import User
 from app.services.microsoft_email_service import get_microsoft_authorization_url, handle_microsoft_oauth_callback
 
 router = APIRouter(prefix="/microsoft", tags=["microsoft"])
+logger = logging.getLogger(__name__)
 
 # Same destination as the Google Calendar OAuth flow - the Settings page,
 # since that's where both "Connect Google Calendar" and "Connect
@@ -22,7 +25,8 @@ def connect_microsoft_365(current_user: User = Depends(get_current_user)):
     try:
         url = get_microsoft_authorization_url(current_user.id)
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Microsoft OAuth URL error for user %s: %s", current_user.id, e)
+        raise HTTPException(status_code=500, detail="Microsoft integration is not configured. Contact support.")
     return {"authorization_url": url}
 
 
