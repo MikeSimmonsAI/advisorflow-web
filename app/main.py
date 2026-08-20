@@ -12,8 +12,10 @@ import asyncio
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from sqlalchemy import text as _text
 from app.deps import engine
@@ -47,6 +49,11 @@ from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 
 app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
+
+# ── Rate limiter (slowapi) ────────────────────────────────────────────────────
+from app.limiter import limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ── Security headers middleware ───────────────────────────────────────────────

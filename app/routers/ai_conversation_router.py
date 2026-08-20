@@ -190,7 +190,7 @@ def process_scheduled(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != "super_admin":
+    if current_user.role not in ("super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Super admin only")
     return process_scheduled_touches(db)
 

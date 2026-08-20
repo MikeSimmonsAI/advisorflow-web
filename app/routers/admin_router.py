@@ -440,8 +440,8 @@ class UserResponseWithOrg(BaseModel):
 
 @router.get("/users")
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Lists users. Super admin sees ALL users across every org; org_admin sees their own org only."""
-    if current_user.role == "super_admin":
+    """Lists users. God/super admin sees ALL users across every org; org_admin sees their own org only."""
+    if current_user.role in ("super_admin", "god_admin"):
         users = db.query(User).order_by(User.organization_id.asc(), User.created_at.asc()).all()
         org_ids = {u.organization_id for u in users}
         orgs_by_id = {

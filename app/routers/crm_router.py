@@ -10,10 +10,12 @@ Endpoints:
   POST   /crm/inbound/{org_id}        receive leads pushed FROM a CRM (pull-in)
 """
 
+import ipaddress
 import json
 import uuid
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -25,6 +27,40 @@ from app.models.models import User
 from app.services import crm_service
 
 router = APIRouter(prefix="/crm", tags=["crm"])
+
+_SAFE_URL_SCHEMES = ("http://", "https://")
+# RFC-1918 + link-local + loopback ranges that must never be fetched
+_BLOCKED_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),  # AWS/GCP metadata
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+
+def _validate_webhook_url(url: Optional[str]) -> Optional[str]:
+    """Validate webhook_url is a public http/https URL (blocks SSRF to internal networks)."""
+    if url is None:
+        return None
+    url = url.strip()
+    if not url:
+        return None
+    if not url.lower().startswith(_SAFE_URL_SCHEMES):
+        raise HTTPException(status_code=400, detail="webhook_url must be an http or https URL.")
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    # Reject bare IPs in private ranges
+    try:
+        addr = ipaddress.ip_address(hostname)
+        for net in _BLOCKED_NETS:
+            if addr in net:
+                raise HTTPException(status_code=400, detail="webhook_url must point to a public host.")
+    except ValueError:
+        pass  # hostname is a domain name — allow it (DNS resolution happens at send time, not here)
+    return url
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -154,7 +190,7 @@ def create_connection(
         "org_id": org_id,
         "name": payload.name,
         "crm_type": payload.crm_type,
-        "webhook_url": payload.webhook_url,
+        "webhook_url": _validate_webhook_url(payload.webhook_url),
         "webhook_secret": payload.webhook_secret,
         "api_key": payload.api_key,
         "api_base_url": payload.api_base_url,
@@ -184,7 +220,7 @@ def update_connection(
     if payload.crm_type is not None:
         updates["crm_type"] = payload.crm_type
     if payload.webhook_url is not None:
-        updates["webhook_url"] = payload.webhook_url
+        updates["webhook_url"] = _validate_webhook_url(payload.webhook_url)
     if payload.webhook_secret is not None:
         updates["webhook_secret"] = payload.webhook_secret
     if payload.api_key is not None:

@@ -80,7 +80,7 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     # expunge() detaches the user object from SQLAlchemy's session BEFORE we
     # mutate organization_id, so the change is never tracked as a pending DB
     # write - the real row in the users table stays untouched.
-    if user.role == "super_admin":
+    if user.role in ("super_admin", "god_admin"):
         org_override = request.headers.get("X-Org-Override")
         if org_override:
             target_org = db.query(Organization).filter(Organization.id == org_override).first()

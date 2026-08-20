@@ -88,7 +88,7 @@ def _resolve_org(current_user: User, org_id: Optional[str], db: Session) -> Orga
     Super admin can pass ?org_id= to manage any org's settings.
     Everyone else always gets their own org.
     """
-    if org_id and current_user.role == "super_admin":
+    if org_id and current_user.role in ("super_admin", "god_admin"):
         org = db.query(Organization).filter(Organization.id == org_id).first()
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
@@ -277,7 +277,7 @@ def update_enabled_features(
     Pass enabled_features=[] to disable all optional features.
     Pass enabled_features=["campaigns","reports",...] to restrict to a subset.
     """
-    if current_user.role != "super_admin":
+    if current_user.role not in ("super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Super admin only")
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:

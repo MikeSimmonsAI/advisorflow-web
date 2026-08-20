@@ -340,7 +340,7 @@ def reply_activity_by_day(
     start_date = (now.date() - timedelta(days=days - 1))
     start_at = datetime.combine(start_date, datetime.min.time())
 
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     activity_filters = [
         Lead.organization_id == current_user.organization_id,
         Reply.received_at.isnot(None),
@@ -392,7 +392,7 @@ def list_replies(
     """
     from app.models.models import ReplyClassification
 
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     query = (
         db.query(Reply)
         .join(Lead, Reply.lead_id == Lead.id)

@@ -582,7 +582,7 @@ def builder_preview(
     current_user: User = Depends(get_current_user),
 ):
     """Preview leads matching the Campaign Builder filters. Returns full lead list. Open to all advisors."""
-    is_manager = current_user.role in ("org_admin", "super_admin")
+    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
     criteria = {}
     if tier: criteria["tier"] = tier
     if status: criteria["status"] = status

@@ -42,7 +42,7 @@ def get_tier_definitions(
 ):
     """Get all tiers for the current org. super_admin can pass ?org_id= to view another org."""
     target_org_id = (
-        org_id if (current_user.role == "super_admin" and org_id)
+        org_id if (current_user.role in ("super_admin", "god_admin") and org_id)
         else current_user.organization_id
     )
     tiers = (
@@ -82,7 +82,7 @@ def create_tier_definition(
     current_user: User = Depends(require_admin),
 ):
     target_org_id = (
-        body.org_id if (current_user.role == "super_admin" and body.org_id)
+        body.org_id if (current_user.role in ("super_admin", "god_admin") and body.org_id)
         else current_user.organization_id
     )
 
@@ -122,7 +122,7 @@ def update_tier_definition(
     tier = db.query(TierDefinition).filter(TierDefinition.id == tier_id).first()
     if not tier:
         raise HTTPException(404, detail="Tier definition not found")
-    if current_user.role != "super_admin" and tier.organization_id != current_user.organization_id:
+    if current_user.role not in ("super_admin", "god_admin") and tier.organization_id != current_user.organization_id:
         raise HTTPException(403, detail="Not authorized")
 
     if body.tier_label is not None:
@@ -157,7 +157,7 @@ def delete_tier_definition(
     tier = db.query(TierDefinition).filter(TierDefinition.id == tier_id).first()
     if not tier:
         raise HTTPException(404, detail="Tier definition not found")
-    if current_user.role != "super_admin" and tier.organization_id != current_user.organization_id:
+    if current_user.role not in ("super_admin", "god_admin") and tier.organization_id != current_user.organization_id:
         raise HTTPException(403, detail="Not authorized")
 
     org_id = tier.organization_id
@@ -178,7 +178,7 @@ def seed_default_tiers(
 ):
     """Seed industry-appropriate default tiers. Idempotent — no-op if tiers already exist."""
     target_org_id = (
-        org_id if (current_user.role == "super_admin" and org_id)
+        org_id if (current_user.role in ("super_admin", "god_admin") and org_id)
         else current_user.organization_id
     )
     # Resolve industry: caller can pass it explicitly; otherwise fall back to org settings
@@ -201,7 +201,7 @@ def reset_default_tiers(
 ):
     """DESTRUCTIVE: wipes all tiers for the org and reseeds from industry defaults."""
     target_org_id = (
-        org_id if (current_user.role == "super_admin" and org_id)
+        org_id if (current_user.role in ("super_admin", "god_admin") and org_id)
         else current_user.organization_id
     )
     if not industry:

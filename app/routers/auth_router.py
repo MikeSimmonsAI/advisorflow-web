@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.deps import get_db, get_current_user
+from app.limiter import limiter
 from app.services.auth_service import authenticate_user, create_access_token, hash_password, verify_password
 from app.models.models import User, Organization, Platform
 
@@ -147,7 +148,9 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
 
 
 @router.post("/change-password")
+@limiter.limit("10/hour")
 def change_password(
+    request: Request,
     req: ChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

@@ -18,11 +18,12 @@ import re
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
+from app.limiter import limiter
 from app.models.models import Organization, User
 from app.services.auth_service import hash_password, create_access_token
 
@@ -60,7 +61,9 @@ def check_slug(slug: str, db: Session = Depends(get_db)):
 
 
 @router.post("/register", response_model=OnboardingRegisterResponse)
+@limiter.limit("5/hour")
 def register_org(
+    request: Request,
     req: OnboardingRegisterRequest,
     db: Session = Depends(get_db),
 ):

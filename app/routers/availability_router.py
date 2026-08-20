@@ -208,7 +208,7 @@ class RecurringBlockRequest(BaseModel):
 
 def _resolve_advisor(db: Session, current_user: User, advisor_id: Optional[str]) -> User:
     """Return the target advisor. Admins may pass advisor_id to manage another advisor."""
-    if advisor_id and current_user.role in ("org_admin", "super_admin"):
+    if advisor_id and current_user.role in ("org_admin", "super_admin", "god_admin"):
         target = db.query(User).filter(
             User.id == advisor_id,
             User.organization_id == current_user.organization_id,

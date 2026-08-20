@@ -153,7 +153,7 @@ def admin_assign_twilio(
     is updated — useful when all advisors share one Twilio account but
     have different phone numbers.
     """
-    if current_user.role not in ('org_admin', 'super_admin'):
+    if current_user.role not in ('org_admin', 'super_admin', 'god_admin'):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
     target = db.query(User).filter(
@@ -300,7 +300,7 @@ def admin_update_profile(
     Super admins can update users in any org; org admins are restricted to
     their own org.
     """
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
     q = db.query(User).filter(User.id == user_id)
@@ -366,7 +366,7 @@ def admin_get_profile(
     current_user: User = Depends(get_current_user),
 ):
     """Load a user's full profile for admin editing."""
-    if current_user.role not in ("org_admin", "super_admin"):
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
     q = db.query(User).filter(User.id == user_id)
