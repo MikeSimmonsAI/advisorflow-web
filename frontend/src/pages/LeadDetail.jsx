@@ -421,8 +421,10 @@ export default function LeadDetail() {
         tone: TONES[tone].key,
         ai_direction: aiDirection || null,
       })
-      // Strip raw booking URLs from the text — the link is appended cleanly at send time
-      const cleanReply = (draft.suggested_reply || '').replace(/https?:\/\/\S+/g, '').trim()
+      // Strip booking URLs only if there's other text remaining after removal
+      const raw = draft.suggested_reply || ''
+      const stripped = raw.replace(/https?:\/\/\S+/g, '').trim()
+      const cleanReply = stripped.length > 0 ? stripped : raw.trim()
       setMessageText(cleanReply)
       // Keep includeBookingLink checked so the link is added cleanly on send
     } catch (err) {
