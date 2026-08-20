@@ -374,6 +374,42 @@ def add_phone_number(
     return {"results": results}
 
 
+class PatchSIDsRequest(BaseModel):
+    messaging_service_sid: Optional[str] = None
+    brand_sid: Optional[str] = None
+    brand_status: Optional[str] = None
+    campaign_sid: Optional[str] = None
+    campaign_status: Optional[str] = None
+
+
+@router.post("/patch-sids")
+def patch_sids(
+    req: PatchSIDsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-only: Saves known Twilio SIDs directly to the org record.
+    Use when SIDs exist in Twilio but were never persisted to the DB.
+    """
+    _require_admin(current_user)
+    org = _get_org(db, current_user)
+
+    if req.messaging_service_sid and hasattr(org, "twilio_messaging_service_sid"):
+        org.twilio_messaging_service_sid = req.messaging_service_sid
+    if req.brand_sid and hasattr(org, "twilio_a2p_brand_sid"):
+        org.twilio_a2p_brand_sid = req.brand_sid
+    if req.brand_status and hasattr(org, "twilio_a2p_brand_status"):
+        org.twilio_a2p_brand_status = req.brand_status
+    if req.campaign_sid and hasattr(org, "twilio_a2p_campaign_sid"):
+        org.twilio_a2p_campaign_sid = req.campaign_sid
+    if req.campaign_status and hasattr(org, "twilio_a2p_campaign_status"):
+        org.twilio_a2p_campaign_status = req.campaign_status
+
+    db.commit()
+    return _status_response(org)
+
+
 @router.post("/refresh-status")
 def refresh_status(
     db: Session = Depends(get_db),
