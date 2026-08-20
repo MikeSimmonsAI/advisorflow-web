@@ -173,7 +173,7 @@ export default function Login() {
 
         {/* Brand */}
         <div className="login-lp-brand">
-          <SignalPulse color={theme === THEMES.ADVISORFLOW ? 'amber' : 'blue'} size={12} />
+          <SignalPulse color={theme === THEMES.EVOSYSPRO || theme === THEMES.HARMONYHUSTLE ? 'blue' : 'amber'} size={12} />
           <span className="login-lp-name" style={{ color: content.accentColor }}>{content.headline}</span>
         </div>
 

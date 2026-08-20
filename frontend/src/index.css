@@ -85,6 +85,165 @@
 
 
 /* ══════════════════════════════════════════════════════════════════════════
+   BOOKABOOST THEME — applied when hostname contains "bookaboost" (default)
+   applyTheme("bookaboost") sets data-theme="bookaboost" on <html>.
+
+   Palette: #faf8f4 cream · #b87c30/#c9973d gold · #1a1108 dark walnut
+   Sidebar stays dark walnut for contrast; content area is warm cream.
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="bookaboost"] {
+  /* ── Backgrounds ── */
+  --bg-base:            #faf8f4;
+  --bg-panel:           rgba(255, 255, 255, 0.92);
+  --bg-card:            rgba(255, 255, 255, 0.90);
+  --bg-card-hover:      rgba(250, 248, 244, 0.98);
+  --bg-elevated:        rgba(255, 255, 255, 0.96);
+  --bg-field:           rgba(255, 255, 255, 0.85);
+  --bg-field-soft:      rgba(250, 248, 244, 0.90);
+  --bg-row:             rgba(250, 248, 244, 0.55);
+  --bg-row-hover:       rgba(232, 221, 208, 0.50);
+  --bg-glass:           rgba(0, 0, 0, 0.03);
+  --bg-glass-mid:       rgba(0, 0, 0, 0.05);
+  --bg-glass-strong:    rgba(0, 0, 0, 0.09);
+  --surface-inset:      rgba(0, 0, 0, 0.07);
+
+  /* ── Borders ── */
+  --border-subtle:      rgba(184, 124, 48, 0.18);
+  --border-strong:      rgba(184, 124, 48, 0.42);
+  --border-danger:      rgba(220, 70, 70, 0.30);
+
+  /* ── Signal / accent — gold replaces blue throughout ── */
+  --signal-blue:        #b87c30;
+  --signal-blue-dim:    rgba(184, 124, 48, 0.15);
+  --signal-green:       #2e8b57;
+  --signal-green-dim:   rgba(46, 139, 87, 0.15);
+  --signal-red:         #c0392b;
+  --signal-red-dim:     rgba(192, 57, 43, 0.15);
+  --signal-amber:       #c9973d;
+  --signal-amber-dim:   rgba(201, 151, 61, 0.16);
+
+  /* ── Typography ── */
+  --text-primary:       #1a1108;
+  --text-secondary:     #7a6248;
+  --text-tertiary:      #a08060;
+  --text-inverse:       #faf8f4;
+  --text-danger-soft:   #7a1a1a;
+
+  /* ── Shadows / glows ── */
+  --panel-shadow:        0 8px 40px rgba(60, 30, 10, 0.10), inset 0 1px 0 rgba(255,255,255,0.8);
+  --panel-shadow-strong: 0 16px 64px rgba(60, 30, 10, 0.16), inset 0 1px 0 rgba(255,255,255,0.9);
+  --glow-blue-sm:        0 0 14px rgba(184, 124, 48, 0.22);
+  --glow-blue-md:        0 0 24px rgba(184, 124, 48, 0.28);
+  --glow-blue-lg:        0 0 52px rgba(184, 124, 48, 0.32);
+  --glow-amber-md:       0 0 30px rgba(201, 151, 61, 0.30);
+  --elevation-1:  0 2px 8px rgba(60,30,10,0.10), 0 1px 0 rgba(255,255,255,0.9);
+  --elevation-2:  0 8px 28px rgba(60,30,10,0.14), 0 1px 0 rgba(255,255,255,0.9);
+  --elevation-3:  0 16px 56px rgba(60,30,10,0.18), 0 1px 0 rgba(255,255,255,0.9);
+  --elevation-4:  0 32px 96px rgba(60,30,10,0.24), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+
+/* Page/body background for BookaBoost */
+[data-theme="bookaboost"] body,
+[data-theme="bookaboost"] html {
+  background: #faf8f4;
+  color: #1a1108;
+}
+
+/* Sidebar — stays dark walnut for rich contrast */
+[data-theme="bookaboost"] .sidebar {
+  background: linear-gradient(160deg, #2c1f10 0%, #1a1108 100%);
+  border-right: 1px solid rgba(184, 124, 48, 0.25);
+}
+[data-theme="bookaboost"] .sidebar .nav-item {
+  color: rgba(255, 255, 255, 0.6);
+}
+[data-theme="bookaboost"] .sidebar .nav-item:hover {
+  color: #fff;
+  background: rgba(184, 124, 48, 0.12);
+}
+[data-theme="bookaboost"] .sidebar .nav-item--active {
+  color: #c9973d;
+  background: rgba(184, 124, 48, 0.18);
+}
+[data-theme="bookaboost"] .sidebar .brand-mark {
+  color: #c9973d;
+}
+[data-theme="bookaboost"] .sidebar .user-name {
+  color: rgba(255, 255, 255, 0.9);
+}
+[data-theme="bookaboost"] .sidebar .user-role {
+  color: rgba(255, 255, 255, 0.45);
+}
+[data-theme="bookaboost"] .sidebar .logout-btn {
+  color: rgba(255, 255, 255, 0.4);
+}
+[data-theme="bookaboost"] .sidebar .logout-btn:hover {
+  color: #c9973d;
+  background: rgba(184, 124, 48, 0.10);
+}
+[data-theme="bookaboost"] .nav-divider {
+  border-color: rgba(184, 124, 48, 0.12);
+}
+
+/* Main content panels */
+[data-theme="bookaboost"] .panel {
+  background: rgba(255, 255, 255, 0.90);
+  border: 1px solid rgba(184, 124, 48, 0.18);
+  color: #1a1108;
+}
+
+/* Data tables */
+[data-theme="bookaboost"] .data-table th {
+  background: rgba(184, 124, 48, 0.08);
+  color: #7a6248;
+  border-bottom: 1px solid rgba(184, 124, 48, 0.18);
+}
+[data-theme="bookaboost"] .data-table td {
+  border-bottom: 1px solid rgba(184, 124, 48, 0.10);
+  color: #1a1108;
+}
+[data-theme="bookaboost"] .data-table tbody tr:hover td {
+  background: rgba(184, 124, 48, 0.06);
+}
+
+/* Top bar */
+[data-theme="bookaboost"] .top-bar-time { color: #c9973d; }
+[data-theme="bookaboost"] .top-bar-date { color: #7a6248; }
+
+/* Selects */
+[data-theme="bookaboost"] select,
+[data-theme="bookaboost"] option {
+  background: #fff;
+  color: #1a1108;
+}
+
+/* KPI / overview cards */
+[data-theme="bookaboost"] .overview-kpi-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(184, 124, 48, 0.18);
+  color: #1a1108;
+}
+[data-theme="bookaboost"] .overview-kpi-card::before {
+  background: linear-gradient(90deg, rgba(184,124,48,.18), transparent);
+}
+
+/* Reply items */
+[data-theme="bookaboost"] .reply-item {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(184, 124, 48, 0.15);
+}
+[data-theme="bookaboost"] .reply-body { color: #4a3520; }
+
+/* Funnel track */
+[data-theme="bookaboost"] .funnel-track {
+  background: rgba(184, 124, 48, 0.10);
+  border: 1px solid rgba(184, 124, 48, 0.18);
+}
+
+/* Today briefing */
+[data-theme="bookaboost"] .today-briefing-line { color: #4a3520; }
+
+/* ══════════════════════════════════════════════════════════════════════════
    EVOSYS PRO THEME — applied when hostname contains "evosyspro"
    initTheme() in main.jsx sets data-theme="evosyspro" on <html>
    before React renders, so there is no flash of wrong-brand styling.

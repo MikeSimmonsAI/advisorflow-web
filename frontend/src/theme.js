@@ -82,7 +82,7 @@ export const BRAND_CONFIG = {
     displayName: 'BookaBoost',
     shortName: 'BB',
     supportEmail: 'support@bookaboost.live',
-    accentColor: '#2fb6ff',
+    accentColor: '#c9973d',
   },
   [THEMES.EVOSYSPRO]: {
     displayName: 'EvoSys Pro',
