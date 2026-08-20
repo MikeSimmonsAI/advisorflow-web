@@ -86,7 +86,7 @@ Conversation history, oldest to newest:
 
 ━━━ RULES ━━━
 - Respond with ONLY JSON: {{"suggested_reply": "..."}}
-- Keep it under 320 characters.
+- HARD LIMIT: Keep it under 160 characters (one SMS segment = one charge). Count carefully.
 - Sound human and respectful.
 - Use ONLY "{advisor_name}" and "{org_name}" when signing or introducing.
 - Do not claim anything not shown in conversation or lead data.
@@ -225,7 +225,7 @@ def draft_reply(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=220,
+            max_tokens=120,
         )
         raw = response.choices[0].message.content
         parsed = _safe_parse_json(raw)
@@ -235,10 +235,15 @@ def draft_reply(
         suggested = _re.sub(r'https?://\S+', '', parsed.get("suggested_reply", "")).strip()
         if not suggested:
             suggested = _fallback_reply(lead, advisor, booking_url, tone)
+        # Hard cap at 155 chars to leave room for the booking link the frontend may append
+        suggested = suggested[:155].rsplit(' ', 1)[0] if len(suggested) > 155 else suggested
         source = "ai"
     except Exception:
         suggested = _fallback_reply(lead, advisor, booking_url, tone)
         source = "fallback"
+    # Final safety net — never exceed 155 chars (leaves room for booking link)
+    if len(suggested) > 155:
+        suggested = suggested[:155].rsplit(' ', 1)[0]
 
     return {
         "suggested_reply": suggested,
