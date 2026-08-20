@@ -580,6 +580,17 @@ def run_auto_migrations(engine) -> None:
             conn.rollback()
             print(f"[auto_migrate] appointment_case_files table note: {e}")
 
+    # ONE-TIME ORG RENAME: Restland → Greenland (idempotent — no-op if already done)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "UPDATE organizations SET name = 'Greenland Cemetery and Funeral Home' "
+                "WHERE name = 'Restland Cemetery & Funeral Home'"
+            ))
+            conn.commit()
+    except Exception as e:
+        print(f"[auto_migrate] Restland→Greenland rename note: {e}")
+
     # ONE-TIME PASSWORD RESET BLOCK REMOVED — security fix 2026-08-20
     # Reason: this block committed a bcrypt hash to source control and ran on
     # every deploy, overwriting any password change made through the app.
