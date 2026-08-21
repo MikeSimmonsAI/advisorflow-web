@@ -923,15 +923,27 @@ def get_available_slots(
             logger.warning("Could not fetch Google Calendar for slots: %s", e)
 
     # ── If slot is today, remove slots that are in the past ──────────────────
-    if target_date == today:
-        now_naive = dt_cls.utcnow()
-        # Add a 2-hour buffer so advisor has time to prepare
-        cutoff_time = now_naive.replace(hour=now_naive.hour, minute=now_naive.minute)
+    # Slots are expressed as Central Time (9am-5pm CT); we must compare in CT.
+    # The server runs UTC, so utcnow() must be converted to Central before comparison.
+    try:
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        from datetime import timezone as _tz
+        _central = _ZoneInfo('America/Chicago')
+        _today_ct = dt_cls.now(_tz.utc).astimezone(_central).date()
+    except Exception:
+        _today_ct = today  # fallback to UTC date if zoneinfo unavailable
+
+    if target_date == _today_ct:
+        try:
+            now_central = dt_cls.now(_tz.utc).astimezone(_central).replace(tzinfo=None)
+        except Exception:
+            now_central = dt_cls.utcnow()
         from datetime import timedelta as td
-        cutoff_time = cutoff_time + td(hours=2)
+        # Add a 2-hour buffer so advisor has time to prepare
+        cutoff_time = now_central + td(hours=2)
         available = [
             s for s in available
-            if dt_cls(today.year, today.month, today.day, s.hour, s.minute) >= cutoff_time
+            if dt_cls(_today_ct.year, _today_ct.month, _today_ct.day, s.hour, s.minute) >= cutoff_time
         ]
 
     return {
