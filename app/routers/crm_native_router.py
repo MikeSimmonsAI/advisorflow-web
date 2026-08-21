@@ -198,11 +198,19 @@ def _base_query(db: Session, user: User):
 
 @router.get("/stages")
 def get_stages(
+    org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return this org's CRM stages. Custom if configured, else industry default."""
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    """Return this org's CRM stages. Custom if configured, else industry default.
+    Super admin / god admin can pass ?org_id= to inspect any org's stages.
+    """
+    if org_id and current_user.role in ("super_admin", "god_admin"):
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+    else:
+        org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     if not org:
         return GENERIC_STAGES
     stages = _get_org_stages(org)

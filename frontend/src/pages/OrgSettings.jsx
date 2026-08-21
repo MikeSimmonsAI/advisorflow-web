@@ -660,7 +660,7 @@ export default function OrgSettings() {
         <AppointmentTypesSection orgQuery={orgQuery} />
 
         {/* ── CRM Pipeline Stages ── */}
-        <CRMStagesSection />
+        <CRMStagesSection orgQuery={orgQuery} />
 
         {/* ── CRM Custom Fields ── */}
         <CRMCustomFieldsSection />
@@ -728,7 +728,7 @@ function AppointmentTypesSection({ orgQuery }) {
 
   useEffect(() => {
     setLoading(true)
-    api.get('/settings/appointment-types')
+    api.get(`/settings/appointment-types${orgQuery}`)
       .then(d => {
         setTypes(d.appointment_types || [])
         setIsCustom(!!d.is_custom)
@@ -765,7 +765,7 @@ function AppointmentTypesSection({ orgQuery }) {
   async function save() {
     setErr(''); setSaving(true)
     try {
-      const d = await api.put('/settings/appointment-types', { appointment_types: types })
+      const d = await api.put(`/settings/appointment-types${orgQuery}`, { appointment_types: types })
       setTypes(d.appointment_types || types)
       setIsCustom(true)
       setSaved(true); setTimeout(() => setSaved(false), 3000)
@@ -777,7 +777,7 @@ function AppointmentTypesSection({ orgQuery }) {
     if (!window.confirm('Reset appointment types to system defaults?')) return
     setResetting(true)
     try {
-      const d = await api.delete('/settings/appointment-types')
+      const d = await api.delete(`/settings/appointment-types${orgQuery}`)
       setTypes(d.appointment_types || [])
       setIsCustom(false)
     } catch (e) { setErr(e.message || 'Reset failed') }
@@ -837,7 +837,7 @@ function AppointmentTypesSection({ orgQuery }) {
 }
 
 // ── CRM Pipeline Stages ───────────────────────────────────────────────────
-function CRMStagesSection() {
+function CRMStagesSection({ orgQuery }) {
   const COLORS = ['#64748b','#6366f1','#f59e0b','#ef4444','#10b981','#3b82f6','#f97316','#8b5cf6','#ec4899','#14b8a6']
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -849,7 +849,7 @@ function CRMStagesSection() {
 
   useEffect(() => {
     setLoading(true)
-    fetch('/api/crm-native/stages', { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
+    fetch(`/api/crm-native/stages${orgQuery}`, { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
       .then(r => r.json()).then(d => {
         setData(d)
         setStages(d.stages || [])
