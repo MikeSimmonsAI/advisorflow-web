@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login, fetchAndStoreBranding, startKeepAlive } from '../api/client'
+import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
@@ -148,6 +148,7 @@ export default function Login() {
       const user = await login(email, password)
       await fetchAndStoreBranding()
       startKeepAlive()
+      startRefreshLoop()
       navigate(user?.role === 'god_admin' ? '/god' : '/')
     } catch (err) {
       setError(err.message)

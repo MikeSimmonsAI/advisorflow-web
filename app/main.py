@@ -9,6 +9,7 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 """
 
 import asyncio
+import os
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,7 +49,17 @@ from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 
-app = FastAPI(title="BookaBoost", version="0.1.0-phase1")
+_DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+
+app = FastAPI(
+    title="BookaBoost",
+    version="0.1.0-phase1",
+    # Hide /docs and /redoc in production so the API surface isn't discoverable.
+    # Set DEBUG=true in the Render env vars on staging if you need Swagger UI.
+    docs_url="/docs" if _DEBUG else None,
+    redoc_url="/redoc" if _DEBUG else None,
+    openapi_url="/openapi.json" if _DEBUG else None,
+)
 
 # ── Rate limiter (slowapi) ────────────────────────────────────────────────────
 from app.limiter import limiter
@@ -62,6 +73,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
+        # Force HTTPS for 1 year; include subdomains so the whole domain is covered.
+        # preload is intentionally omitted — see hstspreload.org before adding it.
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
         # Prevent the app from being embedded in iframes (clickjacking)
         response.headers["X-Frame-Options"] = "DENY"
         # Stop browsers from sniffing content types (MIME confusion attacks)

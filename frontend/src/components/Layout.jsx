@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext, api, stopKeepAlive } from '../api/client'
+import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
@@ -186,9 +186,10 @@ export default function Layout({ children }) {
 
   function closeSidebar() { if (window.innerWidth <= 1024) setSidebarOpen(false) }
 
-  function handleLogout() {
+  async function handleLogout() {
     stopKeepAlive()
-    logout()
+    stopRefreshLoop()
+    await logout()  // calls /auth/logout to kill server session, then clears local state
     window.location.href = '/login'
   }
 

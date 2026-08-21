@@ -120,7 +120,18 @@ export function getCurrentUser() {
   return raw ? JSON.parse(raw) : null
 }
 
-export function logout() {
+export async function logout() {
+  // Tell the server to invalidate the session immediately (clears session_token).
+  // Best-effort — if the network call fails the local state is still cleared.
+  const token = getToken()
+  if (token) {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    } catch { /* silent — we're logging out regardless */ }
+  }
   clearToken()
   localStorage.removeItem('bookaboost_user')
   localStorage.removeItem('bb_branding')
@@ -148,6 +159,46 @@ export function stopKeepAlive() {
   if (_keepAliveInterval) {
     clearInterval(_keepAliveInterval)
     _keepAliveInterval = null
+  }
+}
+
+// ── Token refresh loop ────────────────────────────────────────────────────────
+// JWT lifetime is 2 hours. While the app is open, silently refresh every 30
+// minutes so an active user is never kicked. If the refresh fails (401 = server
+// kicked the session) the request() handler above will redirect to /login on the
+// next real API call. Call startRefreshLoop() right after login and
+// stopRefreshLoop() on logout.
+
+let _refreshInterval = null
+const REFRESH_INTERVAL_MS = 30 * 60 * 1000 // 30 minutes
+
+export function startRefreshLoop() {
+  if (_refreshInterval) return // already running
+  _refreshInterval = setInterval(async () => {
+    const token = getToken()
+    if (!token) return
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.access_token) setToken(data.access_token)
+      }
+      // Non-2xx (401 = session was force-killed server-side): don't redirect here.
+      // The next real API call will 401 and the request() handler redirects to /login.
+    } catch {
+      // Network error — silent. The user is still "using" the app; the 2-hr JWT
+      // stays valid until the server rejects it.
+    }
+  }, REFRESH_INTERVAL_MS)
+}
+
+export function stopRefreshLoop() {
+  if (_refreshInterval) {
+    clearInterval(_refreshInterval)
+    _refreshInterval = null
   }
 }
 

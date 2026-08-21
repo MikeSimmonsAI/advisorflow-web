@@ -137,7 +137,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
                     detail="Incorrect email or password",
                 )
 
-    token = create_access_token(user)
+    token = create_access_token(user, db)
     return TokenResponse(
         access_token=token,
         role=user.role,
@@ -145,6 +145,35 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         organization_id=user.organization_id,
         must_change_password=user.must_change_password,
     )
+
+
+@router.post("/refresh")
+def refresh_token(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Issue a fresh 2-hour JWT for the currently authenticated user.
+    Called silently by the frontend every 30 minutes while the app is open.
+    Generates a new session_token UUID, invalidating any other active sessions.
+    Returns 401 if the token has expired or the session was invalidated.
+    """
+    token = create_access_token(current_user, db)
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+def logout(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Invalidate the current session immediately by clearing session_token.
+    Any outstanding JWT for this user becomes worthless.
+    """
+    current_user.session_token = None
+    db.commit()
+    return {"success": True}
 
 
 @router.post("/change-password")

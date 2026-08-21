@@ -520,26 +520,42 @@ def create_user(
     )
 
 
+def _get_target_user_for_admin(user_id: str, current_user: User, db: Session) -> User:
+    """
+    Fetch the target user for admin actions with correct scope:
+    - god_admin / super_admin  → any user in any org
+    - org_admin                → users in their own org only
+    Raises 404 if not found within scope.
+    """
+    from fastapi import HTTPException
+    if current_user.role in ("god_admin", "super_admin"):
+        target = db.query(User).filter(User.id == user_id).first()
+    else:
+        target = db.query(User).filter(
+            User.id == user_id, User.organization_id == current_user.organization_id
+        ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    return target
+
+
 @router.patch("/users/{user_id}/deactivate")
 def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
-    Deactivates (not deletes) an advisor account - they can no longer log
+    Deactivates (not deletes) an advisor account — they can no longer log
     in, but their leads/messages/history stay intact for record-keeping.
-    Deletion isn't offered here on purpose: removing a user shouldn't
-    silently orphan or destroy their lead history.
+    Also immediately kills any active session by clearing session_token,
+    so outstanding JWTs are rejected on the next request.
     """
     from fastapi import HTTPException
-    target = db.query(User).filter(
-        User.id == user_id, User.organization_id == current_user.organization_id
-    ).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
+    target = _get_target_user_for_admin(user_id, current_user, db)
     if target.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
     if target.role in ("super_admin", "god_admin"):
         raise HTTPException(status_code=400, detail="Cannot deactivate a super_admin or god_admin account.")
 
     target.is_active = False
+    target.session_token = None  # immediately invalidate any active JWT
     db.commit()
 
     log_action(
@@ -554,12 +570,7 @@ def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
 @router.patch("/users/{user_id}/reactivate")
 def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Re-enables a previously deactivated account."""
-    from fastapi import HTTPException
-    target = db.query(User).filter(
-        User.id == user_id, User.organization_id == current_user.organization_id
-    ).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
+    target = _get_target_user_for_admin(user_id, current_user, db)
 
     target.is_active = True
     db.commit()
@@ -567,6 +578,38 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     log_action(
         db, current_user.organization_id, current_user.id,
         action="user.reactivate", target_type="user", target_id=target.id,
+        details={"email": target.email},
+    )
+
+    return {"success": True}
+
+
+@router.post("/users/{user_id}/force-logout")
+def force_logout_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Immediately invalidates the target user's active session by clearing
+    their session_token. Their next API request (within milliseconds) will
+    get a 401 and the frontend will redirect them to login. The account
+    stays active — this is a kick, not a deactivation.
+
+    Scope:
+      - org_admin: own org only
+      - super_admin / god_admin: any user in any org
+    Cannot force-logout super_admin or god_admin accounts.
+    """
+    from fastapi import HTTPException
+    target = _get_target_user_for_admin(user_id, current_user, db)
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot force-logout your own account.")
+    if target.role in ("super_admin", "god_admin"):
+        raise HTTPException(status_code=400, detail="Cannot force-logout a super_admin or god_admin account.")
+
+    target.session_token = None
+    db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="user.force_logout", target_type="user", target_id=target.id,
         details={"email": target.email},
     )
 

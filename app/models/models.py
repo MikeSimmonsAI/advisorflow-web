@@ -313,6 +313,14 @@ class User(Base):
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     lockout_until = Column(DateTime, nullable=True)
 
+    # Single-session enforcement.
+    # On every login a new UUID is generated and stored here AND embedded as
+    # the JWT's `jti` claim.  get_current_user rejects any token whose jti
+    # doesn't match this column, so logging in elsewhere invalidates all
+    # previous sessions.  Deactivating or force-logging-out a user clears
+    # this value, which makes every outstanding token immediately invalid.
+    session_token = Column(String, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 

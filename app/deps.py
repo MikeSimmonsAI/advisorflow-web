@@ -63,6 +63,16 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
+    # Single-session enforcement: reject tokens from previous logins.
+    # jti is present on all tokens issued after the session_token migration.
+    # Tokens without jti (legacy) are accepted until they expire naturally.
+    token_jti = payload.get("jti")
+    if token_jti and user.session_token != token_jti:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
+        )
+
     # Enforce must_change_password server-side: any endpoint other than
     # /auth/change-password and /auth/login is blocked until the user sets a
     # real password. The frontend shows a modal but we must also block at the

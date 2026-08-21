@@ -39,7 +39,7 @@ import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
 import SetupIntegrations from './pages/SetupIntegrations'
 import GodCommandCenter from './pages/GodCommandCenter'
-import { getCurrentUser, startKeepAlive } from './api/client'
+import { getCurrentUser, startKeepAlive, startRefreshLoop } from './api/client'
 
 function isAuthenticated() {
   return !!localStorage.getItem('bookaboost_token')
@@ -81,7 +81,10 @@ export default function App() {
   // Restart keep-alive if the user reloads the page while already authenticated.
   // The normal start happens in Login.jsx after successful login.
   useEffect(() => {
-    if (isAuthenticated()) startKeepAlive()
+    if (isAuthenticated()) {
+      startKeepAlive()
+      startRefreshLoop()
+    }
   }, [])
 
   return (

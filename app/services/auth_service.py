@@ -12,6 +12,7 @@ Roles:
 """
 
 import os
+import uuid
 import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,7 @@ if len(_jwt_secret) < 32:
     )
 JWT_SECRET = _jwt_secret
 JWT_ALGORITHM = "HS256"
-TOKEN_EXPIRY_HOURS = 24 * 7  # 1 week
+TOKEN_EXPIRY_HOURS = 2   # 2-hour lifetime; frontend refreshes every 30 min while active
 
 
 def hash_password(plain_password: str) -> str:
@@ -42,11 +43,21 @@ def verify_password(plain_password: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain_password.encode(), hashed.encode())
 
 
-def create_access_token(user: User) -> str:
+def create_access_token(user: User, db: Session) -> str:
+    """
+    Generate a new JWT for the user.  A fresh session_token UUID is written
+    to the DB and embedded as the `jti` claim, which single-session
+    enforcement in get_current_user uses to reject tokens from previous logins.
+    """
+    jti = str(uuid.uuid4())
+    user.session_token = jti
+    db.add(user)
+    db.commit()
     payload = {
         "sub": user.id,
         "org_id": user.organization_id,
         "role": user.role,
+        "jti": jti,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRY_HOURS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
