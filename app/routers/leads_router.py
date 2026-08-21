@@ -712,9 +712,21 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    messages = db.query(Message).filter(Message.lead_id == lead_id).all()
-    replies = db.query(Reply).filter(Reply.lead_id == lead_id).all()
-    email_messages = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).all()
+    # Limit to 200 most recent events per channel — enough for any real conversation.
+    # The new indexes on (lead_id, sent_at DESC) / (lead_id, received_at DESC) make these fast.
+    from sqlalchemy import desc as _desc
+    messages = (db.query(Message)
+                .filter(Message.lead_id == lead_id)
+                .order_by(_desc(Message.sent_at))
+                .limit(200).all())
+    replies = (db.query(Reply)
+               .filter(Reply.lead_id == lead_id)
+               .order_by(_desc(Reply.received_at))
+               .limit(200).all())
+    email_messages = (db.query(EmailMessage)
+                      .filter(EmailMessage.lead_id == lead_id)
+                      .order_by(_desc(EmailMessage.sent_at))
+                      .limit(200).all())
 
     events = []
     for m in messages:
