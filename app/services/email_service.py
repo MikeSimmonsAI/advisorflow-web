@@ -170,7 +170,7 @@ def send_email_via_provider(
                 for att in attachments
             ]
 
-        response = resend.emails.send(params)
+        response = resend.Emails.send(params)
         message_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", None)
         return {"success": True, "provider_message_id": message_id, "error": None}
     except Exception as e:
