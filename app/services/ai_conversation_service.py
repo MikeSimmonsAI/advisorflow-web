@@ -596,7 +596,15 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
 
         org_name = _get_org_name(db, advisor)
         clean_body = _strip_signoff(email_data["body"])
-        html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name)
+        booking_url = _get_booking_url(db, lead, advisor)
+        booking_btn = (
+            f'<br><br>'
+            f'<a href="{booking_url}" '
+            f'style="display:inline-block;background:#1a5fa8;color:#ffffff;padding:12px 28px;'
+            f'border-radius:6px;text-decoration:none;font-weight:700;font-size:15px;">'
+            f'Schedule a Time &rarr;</a>'
+        )
+        html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name, extra_html=booking_btn)
         _send_email_resend(db, advisor, lead.email, email_data["subject"], html_body)
 
         msg = EmailMessage(
