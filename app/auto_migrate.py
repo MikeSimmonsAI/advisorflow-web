@@ -292,6 +292,16 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sender_id ON email_messages(sender_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_lead_id       ON replies(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_received_at   ON replies(received_at)",
+    # booking_links — looked up by lead, by org, and by slug
+    "CREATE INDEX IF NOT EXISTS ix_booking_links_lead_id       ON booking_links(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_booking_links_organization_id ON booking_links(organization_id)",
+    "CREATE INDEX IF NOT EXISTS ix_booking_links_slug          ON booking_links(slug)",
+    # audit_log_entries — heavily filtered by org, action, actor, and time
+    "CREATE INDEX IF NOT EXISTS ix_audit_log_org_created ON audit_log_entries(organization_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_audit_log_actor       ON audit_log_entries(actor_user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_audit_log_action      ON audit_log_entries(action)",
+    # suppression_entries — looked up by org and by phone for every outbound send
+    "CREATE INDEX IF NOT EXISTS ix_suppression_org_phone ON suppression_entries(organization_id, phone)",
 ]
 
 

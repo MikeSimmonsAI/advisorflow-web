@@ -178,10 +178,11 @@ async def inbound_webhook(
             Lead.organization_id == advisor.organization_id,
         ).order_by(Lead.updated_at.desc()).first()
     else:
-        # No advisor owns this Twilio number (misconfigured / shared number) -
-        # fall back to unscoped lookup so the webhook still works rather than
-        # silently dropping replies.
-        lead = db.query(Lead).filter(Lead.phone == lead_phone).order_by(Lead.updated_at.desc()).first()
+        # No advisor owns this Twilio number — misconfigured or shared number.
+        # Return early rather than doing a cross-org lead lookup which could
+        # apply DNC flags or AI pipeline triggers to the wrong org's data.
+        print(f"[sms_webhook] Unrecognized Twilio number {twilio_to} — no matching advisor, dropping inbound from {lead_phone}")
+        return {"status": "no_matching_advisor"}
 
     if not lead:
         # Unknown sender - log nothing actionable, just acknowledge Twilio

@@ -994,6 +994,16 @@ def bulk_delete_duplicate_leads(
 
     db.commit()
 
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="lead.bulk_delete_duplicates",
+        target_type="organization",
+        target_id=current_user.organization_id,
+        details={"deleted_count": count},
+    )
+
     return {"deleted": count, "message": f"Permanently deleted {count} duplicate leads."}
 
 

@@ -687,7 +687,12 @@ export default function EmailQueue() {
         {loading ? (
           <div className="empty-state">Loading…</div>
         ) : visibleLeads.length === 0 ? (
-          <div className="empty-state">No leads in email queue.</div>
+          <div className="empty-state">
+            No leads in the email queue.
+            <p style={{ marginTop: 8, color: 'var(--text-secondary)', maxWidth: 420, fontSize: 13 }}>
+              Leads appear here when they have a valid email address and are set to <em>email only</em> outreach. Check that your imported leads include email addresses and aren't already marked DNC.
+            </p>
+          </div>
         ) : (
           <table className="data-table">
             <thead>

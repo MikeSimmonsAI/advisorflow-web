@@ -366,7 +366,12 @@ export default function AutoSendQueue() {
 
       {tab === 'history' && (
         history.length === 0 ? (
-          <div className="empty-state">No history yet.</div>
+          <div className="empty-state">
+            No history yet.
+            <p style={{ marginTop: 8, color: 'var(--text-secondary)', maxWidth: 380, fontSize: 13 }}>
+              Messages you approve or skip from the Pending queue will appear here as a record of your decisions.
+            </p>
+          </div>
         ) : (
           <section className="panel">
             <table className="data-table">

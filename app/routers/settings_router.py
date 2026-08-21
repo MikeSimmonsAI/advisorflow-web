@@ -8,6 +8,7 @@ from typing import Optional
 from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.utils.crypto import encrypt_value
+from app.routers.audit_log_router import log_action
 
 # Only http/https URLs are safe to store — javascript:, data:, vbscript: etc.
 # are blocked to prevent stored-XSS via social-link or booking-page fields.
@@ -180,6 +181,15 @@ def update_twilio_config(
     current_user.twilio_phone_number = req.twilio_phone_number
     current_user.twilio_caller_id_name = req.twilio_caller_id_name
     db.commit()
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="settings.twilio_updated",
+        target_type="user",
+        target_id=current_user.id,
+        details={"twilio_account_sid": req.twilio_account_sid, "twilio_phone_number": req.twilio_phone_number},
+    )
     return {"success": True}
 
 
@@ -220,6 +230,15 @@ def admin_assign_twilio(
         target.twilio_auth_token_encrypted = encrypt_value(req.twilio_auth_token)
 
     db.commit()
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="settings.admin_assign_twilio",
+        target_type="user",
+        target_id=user_id,
+        details={"twilio_phone_number": req.twilio_phone_number, "assigned_by": current_user.id},
+    )
     return {
         "success": True,
         "user_id": user_id,
@@ -441,6 +460,16 @@ def admin_update_profile(
 
     db.commit()
     db.refresh(target)
+    changed_fields = {k: v for k, v in req.model_dump().items() if v is not None and k not in ("twilio_auth_token", "profile_photo_url")}
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="admin.profile_updated",
+        target_type="user",
+        target_id=user_id,
+        details=changed_fields,
+    )
     return {
         "success": True,
         "user_id": target.id,

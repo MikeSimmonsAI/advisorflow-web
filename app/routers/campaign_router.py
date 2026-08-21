@@ -467,6 +467,7 @@ def list_campaigns(
         db.query(Campaign)
         .filter(Campaign.organization_id == current_user.organization_id)
         .order_by(Campaign.created_at.desc())
+        .limit(500)
         .all()
     )
     return [
@@ -614,7 +615,7 @@ def builder_preview(
         contacted_recent = db.query(Message.lead_id).filter(Message.sent_at >= cutoff).distinct()
         query = query.filter(~Lead.id.in_(contacted_recent))
 
-    leads = query.order_by(Lead.last_name.asc(), Lead.first_name.asc()).all()
+    leads = query.order_by(Lead.last_name.asc(), Lead.first_name.asc()).limit(5000).all()
 
     return [
         {
