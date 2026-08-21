@@ -380,39 +380,16 @@ def _check_escalation(text: str) -> tuple:
     return False, ""
 
 
-def _send_email_via_graph(advisor: User, to_email: str, subject: str, body: str):
-    import httpx
-    from app.utils.crypto import decrypt_value
+def _send_email_resend(db: Session, advisor: User, to_email: str, subject: str, body: str):
+    """Send via Resend using the org's configured API key / from address.
+    Raises on failure so callers can catch and handle."""
+    from app.services.email_service import send_email_via_provider
+    from app.models.models import Organization
 
-    resp = httpx.post(
-        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-        data={
-            "client_id": os.environ.get("MICROSOFT_CLIENT_ID"),
-            "client_secret": os.environ.get("MICROSOFT_CLIENT_SECRET"),
-            "refresh_token": decrypt_value(advisor.microsoft_oauth_refresh_token_encrypted),
-            "grant_type": "refresh_token",
-            "scope": "offline_access Mail.Read Mail.Send User.Read",
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    access_token = resp.json()["access_token"]
-
-    send_resp = httpx.post(
-        "https://graph.microsoft.com/v1.0/me/sendMail",
-        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-        json={
-            "message": {
-                "subject": subject,
-                "body": {"contentType": "HTML", "content": body.replace('\n', '<br>')},
-                "toRecipients": [{"emailAddress": {"address": to_email}}],
-            },
-            "saveToSentItems": True,
-        },
-        timeout=15,
-    )
-    if send_resp.status_code not in (200, 201, 202):
-        raise Exception(f"Graph sendMail failed: {send_resp.status_code} {send_resp.text[:300]}")
+    org = db.query(Organization).filter_by(id=advisor.organization_id).first()
+    result = send_email_via_provider(to_email, subject, body, org=org)
+    if not result["success"]:
+        raise Exception(f"Resend send failed: {result.get('error', 'unknown error')}")
 
 
 def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, advisor: User, reason: str, reply_body: str):
@@ -435,7 +412,7 @@ def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, 
 {'<p><strong>Their message:</strong> ' + reply_body[:500] + '</p>' if reply_body else ''}
 <br><a href="{frontend_url}/leads/{lead.id}" style="background:#1a5fa8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;">View Lead & Respond →</a>
 <p style="color:#94a3b8;font-size:12px;margin-top:16px;">{get_brand_name(db, str(advisor.organization_id))} AI paused this conversation. Review and respond manually or click Resume AI on the lead page.</p>"""
-        _send_email_via_graph(advisor, notification_email, subject, body)
+        _send_email_resend(db, advisor, notification_email, subject, body)
     except Exception as e:
         logger.error("Escalation alert failed: %s", e)
 
@@ -620,7 +597,7 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
         org_name = _get_org_name(db, advisor)
         clean_body = _strip_signoff(email_data["body"])
         html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name)
-        _send_email_via_graph(advisor, lead.email, email_data["subject"], html_body)
+        _send_email_resend(db, advisor, lead.email, email_data["subject"], html_body)
 
         msg = EmailMessage(
             id=str(uuid.uuid4()),
@@ -916,7 +893,7 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
     try:
         clean_body = _strip_signoff(body)
         html_body = _build_email_html(clean_body, advisor_name, org_name)
-        _send_email_via_graph(advisor, lead.email, subject, html_body)
+        _send_email_resend(db, advisor, lead.email, subject, html_body)
 
         msg = EmailMessage(
             id=str(uuid.uuid4()),
@@ -964,11 +941,6 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
             _escalate_conversation(db, conv, lead, advisor, "Lead replied but has no email address on file", reply_body)
             return {"action": "escalated", "reason": "no_email"}
 
-        if not advisor.microsoft_365_connected:
-            logger.warning("Post-booking reply for lead %s but advisor email not connected — escalating", lead.id)
-            _escalate_conversation(db, conv, lead, advisor, "Post-booking reply received but advisor email not connected", reply_body)
-            return {"action": "escalated", "reason": "email_not_connected"}
-
         return _handle_post_booking_reply(db, lead, advisor, reply_body, conv)
     # ────────────────────────────────────────────────────────────────────────
 
@@ -1004,7 +976,7 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         )
         html_booking = _build_email_html(clean_booking_body, advisor.full_name or "Your Advisor", org_name, extra_html=booking_btn)
         try:
-            _send_email_via_graph(advisor, lead.email, result["subject"], html_booking)
+            _send_email_resend(db, advisor, lead.email, result["subject"], html_booking)
             conv.stage = "booking_sent"
             conv.booking_link_sent_at = datetime.utcnow()
             db.commit()
@@ -1017,7 +989,7 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         org_name = _get_org_name(db, advisor)
         clean_reply = _strip_signoff(result["body"])
         html_reply = _build_email_html(clean_reply, advisor.full_name or "Your Advisor", org_name)
-        _send_email_via_graph(advisor, lead.email, result["subject"], html_reply)
+        _send_email_resend(db, advisor, lead.email, result["subject"], html_reply)
         msg = EmailMessage(
             id=str(uuid.uuid4()),
             lead_id=lead.id,
