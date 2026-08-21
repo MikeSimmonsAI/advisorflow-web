@@ -95,12 +95,15 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
     The Vercel booking frontend calls this to get booking details by token.
     """
     from app.models.models import Lead, Organization
+    # Look up by token only — do NOT filter by status.
+    # The AI cadence may have issued multiple links for the same lead; all remain
+    # valid until a booking is confirmed. The booking app checks `status` in the
+    # response to decide whether to show "already booked" vs. the booking form.
     booking = db.query(BookingLink).filter(
         BookingLink.token == token,
-        BookingLink.status == "pending",
     ).first()
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking link not found or already used")
+        raise HTTPException(status_code=404, detail="Booking link not found")
 
     lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
     advisor = db.query(User).filter(User.id == booking.user_id).first()

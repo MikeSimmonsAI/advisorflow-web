@@ -240,16 +240,10 @@ def _strip_signoff(body: str) -> str:
 
 
 def _get_booking_url(db: Session, lead: Lead, advisor: User) -> str:
-    # Always create a fresh link for AI emails — reusing stale links risks
-    # embedding a token that the booking app can't resolve (expired, wrong advisor, etc.).
-    # Cancel any outstanding pending links for this lead first to keep the DB tidy.
-    stale = db.query(BookingLink).filter(
-        BookingLink.lead_id == lead.id,
-        BookingLink.status == "pending",
-    ).all()
-    for s in stale:
-        s.status = "expired"
-    db.flush()
+    # Create a fresh link for this AI touch.
+    # IMPORTANT: do NOT expire previous pending links — if the lead already received
+    # an earlier email with a booking button, that link must still work when they click it.
+    # Each AI touch gets its own link; all remain valid until the lead books.
     link = create_booking_link(db, lead, advisor)
     return f"{BOOKING_BASE_URL}/book/{link.token}"
 
