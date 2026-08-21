@@ -308,6 +308,10 @@ class User(Base):
     # so it's self-contained with no external storage dependency.
     profile_photo_url = Column(Text, nullable=True)
 
+    # Personal contact info (NOT Twilio) — used for directory/profile display
+    phone = Column(String, nullable=True)       # e.g. "+14155551234"
+    job_title = Column(String, nullable=True)   # e.g. "Senior Advisor"
+
     # Brute-force / credential-stuffing protection.
     # Incremented on each failed password attempt; reset to 0 on success.
     # When failed_login_attempts reaches LOGIN_LOCKOUT_THRESHOLD (10),

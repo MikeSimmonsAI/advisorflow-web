@@ -4,6 +4,7 @@ import { getCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
+import ProfileOnboarding from './ProfileOnboarding'
 import './Layout.css'
 
 // Detect which platform brand is running on this hostname — resolved once at module
@@ -329,6 +330,8 @@ export default function Layout({ children }) {
         )}
         <main className="main-content">{children}</main>
       </div>
+      {/* Mandatory profile completion — floats over all pages until done */}
+      <ProfileOnboarding />
     </div>
   )
 }

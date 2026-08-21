@@ -54,6 +54,8 @@ class ProfileResponse(BaseModel):
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
     profile_photo_url: Optional[str] = None
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
 
 
 class TwilioConfigRequest(BaseModel):
@@ -112,11 +114,15 @@ def get_profile(current_user: User = Depends(get_current_user)):
         instagram_url=getattr(current_user, 'instagram_url', None),
         linkedin_url=getattr(current_user, 'linkedin_url', None),
         profile_photo_url=getattr(current_user, 'profile_photo_url', None),
+        phone=getattr(current_user, 'phone', None),
+        job_title=getattr(current_user, 'job_title', None),
     )
 
 
 class SelfProfileRequest(BaseModel):
     full_name: Optional[str] = None
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
 
 
 @router.patch("/profile")
@@ -131,6 +137,10 @@ def update_own_profile(
         if not name:
             raise HTTPException(status_code=400, detail="Name cannot be empty.")
         current_user.full_name = name
+    if req.phone is not None:
+        current_user.phone = req.phone.strip() or None
+    if req.job_title is not None:
+        current_user.job_title = req.job_title.strip() or None
     db.commit()
     return {"success": True, "full_name": current_user.full_name}
 

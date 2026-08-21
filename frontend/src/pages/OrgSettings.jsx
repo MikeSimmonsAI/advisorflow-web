@@ -321,31 +321,41 @@ export default function OrgSettings() {
 
               <label className="os-label">
                 Logo
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
-                  {brandLogoUrl && (
-                    <img src={brandLogoUrl} alt="Logo preview"
-                      style={{ height: 40, maxWidth: 120, objectFit: 'contain', borderRadius: 4, background: 'rgba(255,255,255,0.08)', padding: 4 }}
-                      onError={(e) => e.target.style.display='none'} />
-                  )}
-                  <label style={{ cursor: 'pointer' }}>
-                    <span className="btn btn--secondary" style={{ fontSize: 13, padding: '6px 14px', pointerEvents: 'none' }}>
-                      {brandLogoUrl ? '🔄 Replace logo' : '📁 Upload logo'}
-                    </span>
-                    <input type="file" accept="image/*" style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target.files[0]
-                        if (!file) return
-                        const reader = new FileReader()
-                        reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
-                        reader.readAsDataURL(file)
-                      }} />
-                  </label>
-                  {brandLogoUrl && (
-                    <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--error, #ef4444)' }}
-                      onClick={() => setBrandLogoUrl('')}>Remove</button>
-                  )}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--signal-blue, #2fb6ff)' }}
+                  onDragLeave={(e) => { e.currentTarget.style.borderColor = '' }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.style.borderColor = ''
+                    const file = e.dataTransfer.files[0]
+                    if (!file || !file.type.startsWith('image/')) return
+                    if (file.size > 500 * 1024) { alert('Logo must be under 500KB'); return }
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
+                    reader.readAsDataURL(file)
+                  }}
+                  style={{ marginTop: 6, border: '2px dashed rgba(255,255,255,0.15)', borderRadius: 8, padding: '14px 12px', textAlign: 'center', transition: 'border-color .15s', cursor: 'pointer' }}
+                  onClick={() => document.getElementById('os-logo-input').click()}
+                >
+                  {brandLogoUrl
+                    ? <img src={brandLogoUrl} alt="Logo preview" style={{ maxHeight: 52, maxWidth: 160, objectFit: 'contain', borderRadius: 6 }} onError={(e) => e.target.style.display='none'} />
+                    : <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>🖼 Drop logo here or <span style={{ color: 'var(--signal-blue, #2fb6ff)' }}>browse</span><div style={{ fontSize: 11, marginTop: 4 }}>PNG · JPG · SVG · WEBP · max 500KB</div></div>
+                  }
                 </div>
-                <span className="os-hint">PNG, JPG, or SVG — stored directly, no URL needed</span>
+                <input id="os-logo-input" type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files[0]
+                    if (!file) return
+                    if (file.size > 500 * 1024) { alert('Logo must be under 500KB'); return }
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
+                    reader.readAsDataURL(file)
+                  }} />
+                {brandLogoUrl && (
+                  <button className="btn btn--secondary" style={{ fontSize: 11, padding: '3px 10px', marginTop: 6, color: 'var(--error, #ef4444)' }}
+                    onClick={(e) => { e.stopPropagation(); setBrandLogoUrl('') }}>✕ Remove logo</button>
+                )}
+                <span className="os-hint">Applies to everyone in your org — no URL needed, upload directly</span>
               </label>
 
               <label className="os-label">
