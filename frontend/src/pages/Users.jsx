@@ -110,7 +110,7 @@ function Modal({ title, onClose, children }) {
 }
 
 // ── Profile Setup Panel ───────────────────────────────────────────────────
-function ProfilePanel({ user, data, loading, saving, error, onClose, onChange, onPhotoChange, onSave, isSuperAdmin }) {
+function ProfilePanel({ user, data, loading, saving, error, onClose, onChange, onPhotoChange, onSave, isSuperAdmin, isGodAdmin }) {
   const color = avatarColor(user?.full_name)
   return (
     <div className="pp-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -168,6 +168,7 @@ function ProfilePanel({ user, data, loading, saving, error, onClose, onChange, o
                     <option value="advisor">Advisor</option>
                     <option value="org_admin">Org Admin</option>
                     {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+                    {isGodAdmin && <option value="god_admin">God Admin</option>}
                   </select>
                 </label>
                 <label className="pp-field">
@@ -247,7 +248,8 @@ function ProfilePanel({ user, data, loading, saving, error, onClose, onChange, o
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function Users() {
   const currentUser = getCurrentUser()
-  const isSuperAdmin = currentUser?.role === 'super_admin'
+  const isGodAdmin   = currentUser?.role === 'god_admin'
+  const isSuperAdmin = currentUser?.role === 'super_admin' || isGodAdmin
   const isAdmin = currentUser?.role === 'org_admin' || isSuperAdmin
 
   const [users, setUsers] = useState([])
@@ -591,6 +593,7 @@ export default function Users() {
           saving={profileSaving}
           error={profileError}
           isSuperAdmin={isSuperAdmin}
+          isGodAdmin={isGodAdmin}
           onClose={() => setProfileUser(null)}
           onChange={handleProfileChange}
           onPhotoChange={handleProfilePhoto}

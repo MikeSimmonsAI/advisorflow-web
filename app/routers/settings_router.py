@@ -115,6 +115,26 @@ def get_profile(current_user: User = Depends(get_current_user)):
     )
 
 
+class SelfProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+
+
+@router.patch("/profile")
+def update_own_profile(
+    req: SelfProfileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Any authenticated user can update their own display name."""
+    if req.full_name is not None:
+        name = req.full_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty.")
+        current_user.full_name = name
+    db.commit()
+    return {"success": True, "full_name": current_user.full_name}
+
+
 @router.put("/twilio")
 def update_twilio_config(
     req: TwilioConfigRequest,

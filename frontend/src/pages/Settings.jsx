@@ -42,6 +42,20 @@ export default function Settings() {
   const [photoSaving, setPhotoSaving] = useState(false)
   const [photoSaved, setPhotoSaved] = useState(false)
 
+  // Name change
+  const [displayName, setDisplayName]   = useState('')
+  const [nameSaving, setNameSaving]     = useState(false)
+  const [nameSaved, setNameSaved]       = useState(false)
+  const [nameError, setNameError]       = useState('')
+
+  // Password change
+  const [currentPw, setCurrentPw]       = useState('')
+  const [newPw, setNewPw]               = useState('')
+  const [confirmPw, setConfirmPw]       = useState('')
+  const [pwSaving, setPwSaving]         = useState(false)
+  const [pwSaved, setPwSaved]           = useState(false)
+  const [pwError, setPwError]           = useState('')
+
   // Admin — advisor Twilio assignment
   const [advisors, setAdvisors] = useState([])
   const [advisorsLoading, setAdvisorsLoading] = useState(false)
@@ -60,6 +74,7 @@ export default function Settings() {
       setNotifyOnHot(p.notify_on_hot_reply)
       setBookingUrl(p.booking_page_url || '')
       setPhotoPreview(p.profile_photo_url || null)
+      setDisplayName(p.full_name || '')
       setLoading(false)
     })
 
@@ -245,6 +260,39 @@ export default function Settings() {
     }
   }
 
+  async function saveName(e) {
+    e.preventDefault()
+    const name = displayName.trim()
+    if (!name) { setNameError('Name cannot be empty.'); return }
+    setNameSaving(true); setNameSaved(false); setNameError('')
+    try {
+      await api.patch('/settings/profile', { full_name: name })
+      setNameSaved(true)
+      setTimeout(() => setNameSaved(false), 2500)
+    } catch (err) {
+      setNameError(err.message || 'Failed to save name.')
+    } finally {
+      setNameSaving(false)
+    }
+  }
+
+  async function savePassword(e) {
+    e.preventDefault()
+    if (newPw !== confirmPw) { setPwError('Passwords do not match.'); return }
+    if (newPw.length < 8)    { setPwError('Password must be at least 8 characters.'); return }
+    setPwSaving(true); setPwSaved(false); setPwError('')
+    try {
+      await api.post('/auth/change-password', { current_password: currentPw, new_password: newPw })
+      setCurrentPw(''); setNewPw(''); setConfirmPw('')
+      setPwSaved(true)
+      setTimeout(() => setPwSaved(false), 2500)
+    } catch (err) {
+      setPwError(err.message || 'Failed to change password.')
+    } finally {
+      setPwSaving(false)
+    }
+  }
+
   if (loading) return <div className="empty-state">Loading settings…</div>
 
   return (
@@ -313,6 +361,54 @@ export default function Settings() {
             {photoSaving ? 'Saving…' : 'Save photo'}
           </button>
         </div>
+      </section>
+
+      {/* ── Display Name ── */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">✏️ Display Name</h2>
+        </div>
+        <form onSubmit={saveName} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Full name</label>
+            <input
+              value={displayName}
+              onChange={e => { setDisplayName(e.target.value); setNameError('') }}
+              placeholder="Your full name"
+              style={{ width: '100%' }}
+            />
+          </div>
+          <button type="submit" className="btn btn--primary" disabled={nameSaving} style={{ whiteSpace: 'nowrap' }}>
+            {nameSaving ? 'Saving…' : nameSaved ? '✓ Saved' : 'Save name'}
+          </button>
+        </form>
+        {nameError && <div className="settings-error" style={{ marginTop: 8 }}>{nameError}</div>}
+      </section>
+
+      {/* ── Change Password ── */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">🔐 Change Password</h2>
+        </div>
+        <form onSubmit={savePassword} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 400 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Current password</label>
+            <input type="password" value={currentPw} onChange={e => { setCurrentPw(e.target.value); setPwError('') }} required placeholder="Your current password" />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>New password</label>
+            <input type="password" value={newPw} onChange={e => { setNewPw(e.target.value); setPwError('') }} required placeholder="At least 8 characters" />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Confirm new password</label>
+            <input type="password" value={confirmPw} onChange={e => { setConfirmPw(e.target.value); setPwError('') }} required placeholder="Repeat new password" />
+          </div>
+          {pwError  && <div className="settings-error">{pwError}</div>}
+          {pwSaved  && <div style={{ color: 'var(--success)', fontSize: 13 }}>✓ Password changed successfully.</div>}
+          <button type="submit" className="btn btn--primary" disabled={pwSaving} style={{ alignSelf: 'flex-start' }}>
+            {pwSaving ? 'Saving…' : 'Change password'}
+          </button>
+        </form>
       </section>
 
       {calendarMessage && (
