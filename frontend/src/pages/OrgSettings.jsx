@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, fetchAndStoreBranding, getCurrentUser } from '../api/client'
+import { api, fetchAndStoreBranding, getCurrentUser, getOrgContext } from '../api/client'
 import '../styles/shared.css'
 import './OrgSettings.css'
 
@@ -66,9 +66,14 @@ export default function OrgSettings() {
   const user = getCurrentUser()
   const isSuperAdmin = user?.role === 'super_admin' || user?.role === 'god_admin'
 
-  // Super admin org selector
+  // Super admin org selector — seed from active org view context so god admin
+  // who entered Fiber Cartel's org view sees Fiber Cartel's settings immediately.
   const [allOrgs, setAllOrgs] = useState([])
-  const [selectedOrgId, setSelectedOrgId] = useState(null)
+  const [selectedOrgId, setSelectedOrgId] = useState(() => {
+    if (!isSuperAdmin) return null
+    const ctx = getOrgContext()
+    return ctx?.orgId || null
+  })
 
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -121,7 +126,8 @@ export default function OrgSettings() {
     api.get('/admin/organizations')
       .then(orgs => {
         setAllOrgs(orgs)
-        if (orgs.length > 0) setSelectedOrgId(orgs[0].id)
+        // Only fall back to orgs[0] if no org was pre-selected from org view context
+        setSelectedOrgId(prev => prev || (orgs.length > 0 ? orgs[0].id : null))
       })
       .catch(() => {})
   }, [isSuperAdmin])
@@ -309,8 +315,8 @@ export default function OrgSettings() {
         </div>
       </header>
 
-      {/* Super admin org selector */}
-      {isSuperAdmin && (
+      {/* Super admin org selector — hidden when already in an org view (banner handles context) */}
+      {isSuperAdmin && !getOrgContext() && (
         <div className="panel" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
           <label style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>Managing org:</label>
           <select
@@ -336,7 +342,7 @@ export default function OrgSettings() {
       {error && <div className="os-error">{error}</div>}
       {success && <div className="os-success">{success}</div>}
 
-      {(!isSuperAdmin || (isSuperAdmin && selectedOrgId && !loading)) && (
+      {(!isSuperAdmin || (isSuperAdmin && (selectedOrgId || getOrgContext()) && !loading)) && (
         <>
           <div className="os-grid">
             <section className="panel os-section">
