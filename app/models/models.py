@@ -216,6 +216,11 @@ class Organization(Base):
     # e.g. [{"value": "pre_need", "label": "Pre-Need", "color": "blue"}, ...]
     tier_config = Column(Text, nullable=True)
 
+    # Per-org appointment type options — JSON array of strings shown in the
+    # "Appt type" dropdown on the lead detail page. When null the frontend
+    # falls back to the built-in default list so existing orgs are unaffected.
+    appointment_types = Column(Text, nullable=True)
+
     # Per-org feature flags (super admin only). JSON array of feature keys.
     # null = all features enabled (backward-compatible default).
     # [] = no optional features. ["campaigns", "reports", ...] = explicit allow-list.

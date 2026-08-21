@@ -212,17 +212,19 @@ Best regards,<br>
 
 def _strip_signoff(body: str) -> str:
     """Remove any AI-generated sign-off from the email body.
-    GPT sometimes adds closings despite being told not to — strip them here."""
+    GPT sometimes adds closings despite being told not to — strip them here.
+    Handles both newline-separated and inline sign-offs."""
     import re
+    # Match sign-off phrases whether they follow a newline OR inline punctuation/space
     signoff_patterns = [
-        r'\n+\s*(best regards|warm regards|kind regards|sincerely|take care|'
+        r'[\n,.]?\s*(best regards|warm regards|kind regards|sincerely|take care|'
         r'thanks|thank you|looking forward|yours truly|respectfully|with care|'
         r'cordially|cheers)[,.]?.*',
     ]
     for pat in signoff_patterns:
         body = re.sub(pat, '', body, flags=re.IGNORECASE | re.DOTALL)
-    # Also strip trailing [Your Name], [Name], placeholder lines
-    body = re.sub(r'\n+\s*\[.*?\].*', '', body, flags=re.DOTALL)
+    # Strip trailing [Your Name], [Name], placeholder lines
+    body = re.sub(r'[\n,.]?\s*\[.*?\].*', '', body, flags=re.DOTALL)
     return body.strip()
 
 
@@ -231,13 +233,17 @@ def _strip_signoff(body: str) -> str:
 
 
 def _get_booking_url(db: Session, lead: Lead, advisor: User) -> str:
-    existing = (
-        db.query(BookingLink)
-        .filter(BookingLink.lead_id == lead.id, BookingLink.status == "pending")
-        .order_by(BookingLink.created_at.desc())
-        .first()
-    )
-    link = existing or create_booking_link(db, lead, advisor)
+    # Always create a fresh link for AI emails — reusing stale links risks
+    # embedding a token that the booking app can't resolve (expired, wrong advisor, etc.).
+    # Cancel any outstanding pending links for this lead first to keep the DB tidy.
+    stale = db.query(BookingLink).filter(
+        BookingLink.lead_id == lead.id,
+        BookingLink.status == "pending",
+    ).all()
+    for s in stale:
+        s.status = "expired"
+    db.flush()
+    link = create_booking_link(db, lead, advisor)
     return f"{BOOKING_BASE_URL}/book/{link.token}"
 
 

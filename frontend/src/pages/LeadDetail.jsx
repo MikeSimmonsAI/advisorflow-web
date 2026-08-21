@@ -56,7 +56,8 @@ const APPT_TYPE_MAP = {
   general:           'Family Services Appointment',
 }
 
-const APPT_TYPE_OPTIONS = [
+// Fallback list — overridden by org-specific types fetched from the API
+const DEFAULT_APPT_TYPE_OPTIONS = [
   'Pre-Need Planning Consultation',
   'Pre-Planning Consultation',
   'At-Need Arrangement Conference',
@@ -252,6 +253,7 @@ export default function LeadDetail() {
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
   const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'calls' | 'timeline'
+  const [apptTypeOptions, setApptTypeOptions] = useState(DEFAULT_APPT_TYPE_OPTIONS)
   const timelineRef = useRef(null)
 
   // Manual flagging
@@ -313,6 +315,13 @@ export default function LeadDetail() {
     // Also load activity log in background
     loadActivity(true)
   }
+
+  // Load org-specific appointment types once on mount
+  useEffect(() => {
+    api.get('/settings/appointment-types')
+      .then(d => { if (d?.appointment_types?.length) setApptTypeOptions(d.appointment_types) })
+      .catch(() => {}) // silently fall back to defaults
+  }, [])
 
   // Initial load
   useEffect(() => { load() }, [leadId])
@@ -1096,7 +1105,7 @@ export default function LeadDetail() {
                   value={apptLabel}
                   onChange={(e) => setApptLabel(e.target.value)}
                 >
-                  {APPT_TYPE_OPTIONS.map((opt) => (
+                  {apptTypeOptions.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>

@@ -99,6 +99,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
+    "https://advisorflow-booking.vercel.app",
     "https://bookaboost.com",
     "https://bookaboost.live",
     "https://app.bookaboost.live",

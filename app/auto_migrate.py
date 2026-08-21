@@ -195,6 +195,8 @@ COLUMNS_TO_ADD = [
     ("organizations", "industry", "VARCHAR DEFAULT 'funeral'"),
     # Per-org tier config JSON — used by TierDefinition feature
     ("organizations", "tier_config", "TEXT"),
+    # Per-org appointment type options — JSON array of strings for the Appt type dropdown
+    ("organizations", "appointment_types", "TEXT"),
     # AI lead quality note — Phase 2 field added to Lead model
     ("leads", "ai_lead_quality_note", "TEXT"),
     # Reply review tracking — when a reply was reviewed/actioned by an advisor

@@ -517,3 +517,92 @@ def admin_get_profile(
         "google_calendar_connected": target.google_calendar_connected,
         "microsoft_365_connected": target.microsoft_365_connected,
     }
+
+
+# ── Per-org appointment types ────────────────────────────────────────────────
+
+DEFAULT_APPT_TYPES = [
+    "Pre-Need Planning Consultation",
+    "Pre-Planning Consultation",
+    "At-Need Arrangement Conference",
+    "Immediate Need Consultation",
+    "Urgent Arrangement Consultation",
+    "Family File Review",
+    "Property Ownership Review",
+    "Property Transfer Appointment",
+    "Cemetery Property Consultation",
+    "Marker & Memorial Consultation",
+    "Memorial Planning Consultation",
+    "Memorial Flower Review",
+    "Contract Review Appointment",
+    "Family Services Appointment",
+    "Family Services Consultation",
+    "General Consultation",
+    "New Family Consultation",
+    "Insurance & Benefits Review",
+    "Benefits & Coverage Consultation",
+    "Veterans Benefits Consultation",
+]
+
+
+@router.get("/appointment-types")
+def get_appointment_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return this org's configured appointment types (falls back to defaults)."""
+    import json
+    from app.models.models import Organization
+    org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+    if org and org.appointment_types:
+        try:
+            types = json.loads(org.appointment_types)
+            if isinstance(types, list) and types:
+                return {"appointment_types": types, "is_custom": True}
+        except Exception:
+            pass
+    return {"appointment_types": DEFAULT_APPT_TYPES, "is_custom": False}
+
+
+class ApptTypesRequest(BaseModel):
+    appointment_types: list[str]
+
+
+@router.put("/appointment-types")
+def update_appointment_types(
+    req: ApptTypesRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save org-specific appointment type list. Admin only."""
+    import json
+    from app.models.models import Organization
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    if not req.appointment_types:
+        raise HTTPException(status_code=400, detail="At least one appointment type required.")
+    org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    org.appointment_types = json.dumps(req.appointment_types)
+    db.commit()
+    log_action(db, current_user.organization_id, current_user.id,
+               action="settings.appointment_types_updated", target_type="organization",
+               target_id=str(current_user.organization_id))
+    return {"appointment_types": req.appointment_types, "is_custom": True}
+
+
+@router.delete("/appointment-types")
+def reset_appointment_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reset to platform defaults."""
+    from app.models.models import Organization
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+    if org:
+        org.appointment_types = None
+        db.commit()
+    return {"appointment_types": DEFAULT_APPT_TYPES, "is_custom": False}
