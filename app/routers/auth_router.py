@@ -170,9 +170,13 @@ def logout(
     """
     Invalidate the current session immediately by clearing session_token.
     Any outstanding JWT for this user becomes worthless.
+    Re-fetches the real user row in case current_user was detached from the
+    DB session by the god_admin X-Org-Override logic in get_current_user.
     """
-    current_user.session_token = None
-    db.commit()
+    real_user = db.query(User).filter(User.id == current_user.id).first()
+    if real_user:
+        real_user.session_token = None
+        db.commit()
     return {"success": True}
 
 
@@ -192,12 +196,20 @@ def change_password(
     authenticates them, since changing a password is a sensitive action
     worth a second check.
     """
-    if not verify_password(req.current_password, current_user.password_hash):
+    # Re-fetch the real user row from the DB. current_user may be detached from
+    # the SQLAlchemy session when the caller is a god_admin or super_admin with an
+    # active X-Org-Override header — get_current_user() calls db.expunge(user) in
+    # that case, so any writes to current_user are silently dropped on commit.
+    real_user = db.query(User).filter(User.id == current_user.id).first()
+    if not real_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if not verify_password(req.current_password, real_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
     if len(req.new_password) < 8:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 8 characters")
 
-    current_user.password_hash = hash_password(req.new_password)
-    current_user.must_change_password = False
+    real_user.password_hash = hash_password(req.new_password)
+    real_user.must_change_password = False
     db.commit()
     return {"success": True}
