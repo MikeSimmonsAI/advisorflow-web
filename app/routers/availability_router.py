@@ -329,13 +329,72 @@ def delete_block(
 @router.get("/upcoming")
 def get_upcoming_appointments(
     advisor_id: Optional[str] = Query(None),
+    org_wide: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return upcoming booked appointments. Admins can pass advisor_id."""
+    """
+    Return upcoming booked appointments.
+    - Admins can pass advisor_id to view a specific advisor's appointments.
+    - Admins can pass org_wide=true to see ALL advisors in the org.
+    - god_admin with org_wide=true sees across all orgs on their platform.
+    """
     from datetime import datetime as dt
-    target = _resolve_advisor(db, current_user, advisor_id)
+
+    ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
+    is_admin = current_user.role in ADMIN_ROLES
     now = dt.now()
+
+    if org_wide and is_admin:
+        if current_user.role == "god_admin":
+            bookings = db.query(BookingLink).filter(
+                BookingLink.status == "booked",
+                BookingLink.booked_time >= now,
+            ).order_by(BookingLink.booked_time.asc()).limit(100).all()
+        else:
+            org_user_ids = [
+                u.id for u in db.query(User).filter(
+                    User.organization_id == current_user.organization_id,
+                    User.is_active == True,
+                ).all()
+            ]
+            bookings = db.query(BookingLink).filter(
+                BookingLink.user_id.in_(org_user_ids),
+                BookingLink.status == "booked",
+                BookingLink.booked_time >= now,
+            ).order_by(BookingLink.booked_time.asc()).limit(100).all()
+
+        # Cache advisor names
+        advisor_cache = {}
+        def get_advisor_name(user_id):
+            if user_id not in advisor_cache:
+                u = db.query(User).filter(User.id == user_id).first()
+                advisor_cache[user_id] = u.full_name if u else "Advisor"
+            return advisor_cache[user_id]
+
+        result = []
+        for b in bookings:
+            lead_name = "Unknown"
+            lead_phone = None
+            if b.lead_id:
+                lead = db.query(Lead).filter(Lead.id == b.lead_id).first()
+                if lead:
+                    parts = [lead.first_name or "", lead.last_name or ""]
+                    lead_name = " ".join(p for p in parts if p).strip() or "Unknown"
+                    lead_phone = lead.phone
+            result.append({
+                "id": b.id,
+                "lead_id": b.lead_id,
+                "lead_name": lead_name,
+                "lead_phone": lead_phone,
+                "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+                "advisor_name": get_advisor_name(b.user_id),
+                "advisor_id": b.user_id,
+            })
+        return result
+
+    # Single-advisor path (own or specified)
+    target = _resolve_advisor(db, current_user, advisor_id)
 
     bookings = db.query(BookingLink).filter(
         BookingLink.user_id == target.id,

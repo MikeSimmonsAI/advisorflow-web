@@ -211,8 +211,8 @@ export default function Availability() {
       api.get('/admin/users').then(users => {
         const advisors = (users || []).filter(u => u.is_active !== false)
         setTeam(advisors)
-        const me = advisors.find(u => u.id === user?.id)
-        setSelectedAdvisor(me || advisors[0] || null)
+        // Default to "All Advisors" aggregate view for admins
+        setSelectedAdvisor({ id: 'all', full_name: 'All Advisors' })
       }).catch(() => {
         setSelectedAdvisor({ id: user?.id, full_name: user?.full_name || 'You' })
       })
@@ -242,20 +242,38 @@ export default function Availability() {
     if (!selectedAdvisor) return
     setLoading(true)
     const adv = selectedAdvisor
-    const advisorParam = adv.id !== user?.id ? `?advisor_id=${adv.id}` : ''
-    Promise.all([
-      api.get(`/availability/blocks${advisorParam}`).catch(() => []),
-      api.get(`/availability/upcoming${advisorParam}`).catch(() => []),
-      api.get(`/availability/slots/${adv.id}`).catch(() => null),
-      // Calendar events endpoint only for own schedule
-      adv.id === user?.id ? api.get('/calendar/events?days_ahead=60').catch(() => []) : Promise.resolve([]),
-    ]).then(([blocksData, upcomingData, slotsData, eventsData]) => {
-      setBlocks(blocksData || [])
-      setUpcoming(upcomingData || [])
-      setOpenSlots(slotsData?.slots?.length ?? null)
-      setCalEvents(eventsData || [])
-      setLoading(false)
-    })
+    const isAll = adv.id === 'all'
+
+    if (isAll) {
+      // Org-wide aggregate view
+      Promise.all([
+        api.get('/availability/upcoming?org_wide=true').catch(() => []),
+        api.get('/calendar/events?days_ahead=90&org_wide=true').catch(() => []),
+      ]).then(([upcomingData, eventsData]) => {
+        setBlocks([])   // blocks are per-advisor, not meaningful in aggregate view
+        setUpcoming(upcomingData || [])
+        setOpenSlots(null)
+        setCalEvents(eventsData || [])
+        setLoading(false)
+      })
+    } else {
+      const advisorParam = adv.id !== user?.id ? `?advisor_id=${adv.id}` : ''
+      const eventsParam = adv.id !== user?.id
+        ? `/calendar/events?days_ahead=60&advisor_id=${adv.id}`
+        : '/calendar/events?days_ahead=60'
+      Promise.all([
+        api.get(`/availability/blocks${advisorParam}`).catch(() => []),
+        api.get(`/availability/upcoming${advisorParam}`).catch(() => []),
+        api.get(`/availability/slots/${adv.id}`).catch(() => null),
+        api.get(eventsParam).catch(() => []),
+      ]).then(([blocksData, upcomingData, slotsData, eventsData]) => {
+        setBlocks(blocksData || [])
+        setUpcoming(upcomingData || [])
+        setOpenSlots(slotsData?.slots?.length ?? null)
+        setCalEvents(eventsData || [])
+        setLoading(false)
+      })
+    }
   }, [selectedAdvisor?.id, user?.id])
 
   useEffect(() => { if (selectedAdvisor) load() }, [selectedAdvisor?.id])
@@ -359,20 +377,27 @@ export default function Availability() {
           </p>
         </div>
         {/* ADVISOR SELECTOR — admins only */}
-        {isAdmin && team.length > 1 && (
+        {isAdmin && team.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Viewing advisor:
+              Viewing:
             </label>
             <select
               className="filter-select"
-              value={selectedAdvisor?.id || ''}
+              value={selectedAdvisor?.id || 'all'}
               onChange={e => {
-                const adv = team.find(u => u.id === e.target.value)
-                if (adv) setSelectedAdvisor(adv)
+                const val = e.target.value
+                if (val === 'all') {
+                  setSelectedAdvisor({ id: 'all', full_name: 'All Advisors' })
+                  if (mainTab === 'block') setMainTab('calendar')
+                } else {
+                  const adv = team.find(u => u.id === val)
+                  if (adv) setSelectedAdvisor(adv)
+                }
               }}
               style={{ minWidth: 200 }}
             >
+              <option value="all">🗓 All Advisors</option>
               {isSuperAdmin ? (
                 Object.entries(
                   team.reduce((acc, u) => {
@@ -451,10 +476,11 @@ export default function Availability() {
       </div>
 
       {/* MAIN TABS */}
+      {/* hide Block Time tab in org-wide view — blocks are per-advisor */}
       <div className="av-main-tabs">
         {[
           { key: 'calendar', label: '📅 Calendar' },
-          { key: 'block', label: '🚫 Block Time' },
+          ...(selectedAdvisor?.id !== 'all' ? [{ key: 'block', label: '🚫 Block Time' }] : []),
           { key: 'settings', label: '⚙️ Booking Settings' },
         ].map(t => (
           <button
@@ -508,6 +534,9 @@ export default function Availability() {
                     <div key={appt.id} className="av-upcoming-row">
                       <div className="av-upcoming-time-block">
                         <span className="av-upcoming-datetime">{fmtDateTime(appt.booked_time)}</span>
+                        {appt.advisor_name && (
+                          <span className="av-upcoming-advisor">{appt.advisor_name}</span>
+                        )}
                       </div>
                       <div className="av-upcoming-lead-info">
                         <span className="av-upcoming-name">{appt.lead_name}</span>

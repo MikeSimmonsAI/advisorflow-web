@@ -594,51 +594,88 @@ def cancel_booking(booking_id: str, db: Session = Depends(get_db), current_user:
 @router.get("/events")
 def list_calendar_events(
     days_ahead: int = Query(60, ge=1, le=365),
+    org_wide: bool = Query(False),
+    advisor_id: str = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Return upcoming confirmed/booked appointments for the current advisor,
-    formatted for the embedded mini-calendar view in Availability.jsx.
-    Pulls from BookingLink (our source of truth) rather than Google Calendar
-    so it works regardless of whether the advisor has a calendar integration.
+    Return upcoming confirmed/booked appointments formatted for the embedded
+    mini-calendar view in Availability.jsx.
+
+    - Default: returns the current user's own events.
+    - org_wide=true (admins only): returns ALL advisors in the org (god_admin
+      sees across all orgs on their platform).
+    - advisor_id=<id> (admins only): returns a specific advisor's events.
+
+    Pulls from BookingLink rather than Google Calendar so it works regardless
+    of whether the advisor has a calendar integration connected.
     """
     from app.models.models import Lead
     from datetime import timedelta, timezone
 
+    ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
+    is_admin = current_user.role in ADMIN_ROLES
+
     cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
     now = datetime.now(timezone.utc)
 
-    bookings = (
-        db.query(BookingLink)
-        .filter(
-            BookingLink.user_id == current_user.id,
-            BookingLink.status.in_(["booked", "confirmed", "pending"]),
-        )
-        .all()
-    )
+    # Build the query filter based on access level
+    if org_wide and is_admin:
+        # God admin: all orgs on the same platform; others: own org only
+        if current_user.role == "god_admin":
+            q = db.query(BookingLink)
+        else:
+            # Collect all user IDs in this org
+            org_user_ids = [
+                u.id for u in db.query(User).filter(
+                    User.organization_id == current_user.organization_id,
+                    User.is_active == True,
+                ).all()
+            ]
+            q = db.query(BookingLink).filter(BookingLink.user_id.in_(org_user_ids))
+    elif advisor_id and is_admin:
+        # Single specific advisor (admin viewing another advisor's calendar)
+        q = db.query(BookingLink).filter(BookingLink.user_id == advisor_id)
+    else:
+        q = db.query(BookingLink).filter(BookingLink.user_id == current_user.id)
+
+    bookings = q.filter(
+        BookingLink.status.in_(["booked", "confirmed"])
+    ).all()
+
+    # Cache advisor names to avoid N+1 queries in org_wide mode
+    advisor_cache = {}
+    def get_advisor_name(user_id):
+        if user_id not in advisor_cache:
+            u = db.query(User).filter(User.id == user_id).first()
+            advisor_cache[user_id] = u.full_name if u else "Advisor"
+        return advisor_cache[user_id]
 
     events = []
     for b in bookings:
         if not b.booked_time:
             continue
         bt = b.booked_time
-        # Normalise to UTC-aware if naive
         if bt.tzinfo is None:
             bt = bt.replace(tzinfo=timezone.utc)
         if bt < now or bt > cutoff:
             continue
 
-        lead = db.query(Lead).filter(Lead.id == b.lead_id).first()
+        lead = db.query(Lead).filter(Lead.id == b.lead_id).first() if b.lead_id else None
         lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Lead"
 
-        events.append({
+        event = {
             "id": b.id,
             "booked_time": bt.isoformat(),
             "lead_name": lead_name,
             "lead_id": b.lead_id,
             "status": b.status,
-        })
+            "advisor_id": b.user_id,
+        }
+        if org_wide and is_admin:
+            event["advisor_name"] = get_advisor_name(b.user_id)
+        events.append(event)
 
     events.sort(key=lambda e: e["booked_time"])
     return events

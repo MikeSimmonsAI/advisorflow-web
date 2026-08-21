@@ -574,3 +574,11 @@
   border-color: var(--accent);
   color: #fff;
 }
+
+/* ── Advisor name label in org-wide upcoming list ──────────────────────────── */
+.av-upcoming-advisor {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  opacity: 0.8;
+}
