@@ -84,6 +84,14 @@ export default function Reports() {
           <h1 className="page-title">Reports</h1>
           <p className="page-subtitle">Performance, pipeline, and revenue — all in one place.</p>
         </div>
+        {data?.is_god_view && (
+          <div style={{
+            background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+            color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 600,
+          }}>
+            ⚡ God View — All Organizations
+          </div>
+        )}
       </header>
 
       {/* KPI ROW */}
@@ -133,6 +141,7 @@ export default function Reports() {
                   <thead>
                     <tr>
                       <th>Advisor</th>
+                      {data?.is_god_view && <th>Organization</th>}
                       <th>Leads</th>
                       <th>Sent</th>
                       <th>Replies</th>
@@ -151,6 +160,11 @@ export default function Reports() {
                             <span style={{ fontWeight: 600 }}>{a.advisor_name}</span>
                           </div>
                         </td>
+                        {data?.is_god_view && (
+                          <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {a.organization_name || '—'}
+                          </td>
+                        )}
                         <td className="mono">{num(a.leads_owned)}</td>
                         <td className="mono">{num(a.messages_sent)}</td>
                         <td className="mono">{num(a.replies)}</td>

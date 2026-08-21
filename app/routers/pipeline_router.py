@@ -7,12 +7,20 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
 
+from sqlalchemy import func
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, PipelineConversation
+from app.models.models import User, Lead, PipelineConversation, Organization
 from app.services.pipeline_service import (
     launch_pipeline, get_pipeline_stats, get_ai_forecast
 )
 from app.routers.audit_log_router import log_action
+
+
+def _get_org_ids(db: Session, current_user: User) -> list:
+    """Return org IDs to scope queries to. god_admin sees ALL orgs."""
+    if current_user.role == "god_admin":
+        return [str(row[0]) for row in db.query(Organization.id).all()]
+    return [str(current_user.organization_id)]
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -77,8 +85,33 @@ def pipeline_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get pipeline engagement stats. Advisors see only their own; admins see org-wide."""
+    """Get pipeline engagement stats. Advisors see only their own; admins see org-wide; god sees all orgs."""
     advisor_id = None if _is_elevated(current_user) else current_user.id
+    is_god = current_user.role == "god_admin"
+
+    if is_god:
+        # Aggregate across all orgs
+        org_ids = _get_org_ids(db, current_user)
+        combined = {
+            "total_in_pipeline": 0, "by_stage": {}, "flagged_count": 0, "flagged": [],
+            "total_messages_sent": 0, "total_replies_received": 0, "total_booked": 0,
+            "ai_auto_sent": 0, "ai_flagged": 0, "is_god_view": True,
+        }
+        for oid in org_ids:
+            s = get_pipeline_stats(db, oid)
+            combined["total_in_pipeline"] += s["total_in_pipeline"]
+            combined["flagged_count"] += s["flagged_count"]
+            combined["flagged"].extend(s.get("flagged", []))
+            combined["total_messages_sent"] += s["total_messages_sent"]
+            combined["total_replies_received"] += s["total_replies_received"]
+            combined["total_booked"] += s["total_booked"]
+            combined["ai_auto_sent"] += s["ai_auto_sent"]
+            combined["ai_flagged"] += s["ai_flagged"]
+            for stage, cnt in s["by_stage"].items():
+                combined["by_stage"][stage] = combined["by_stage"].get(stage, 0) + cnt
+        combined["flagged"] = combined["flagged"][:10]  # cap at 10
+        return combined
+
     return get_pipeline_stats(db, current_user.organization_id, advisor_id=advisor_id)
 
 

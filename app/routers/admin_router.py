@@ -148,13 +148,13 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.get("/dashboard")
 def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
-    Mike's master view - KPIs across every advisor in the organization.
-    org_admin sees their own org; super_admin (Mike, eventually) can be
-    extended to cross-org once North Star Memorial Group comes online.
+    Master view - KPIs across every advisor. god_admin sees ALL orgs aggregated;
+    org_admin/super_admin see their own org only.
     """
-    org_id = current_user.organization_id
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
 
-    advisors = db.query(User).filter(User.organization_id == org_id, User.role == "advisor").all()
+    advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role == "advisor").all()
 
     per_advisor_stats = []
     for advisor in advisors:
@@ -166,23 +166,29 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
             .filter(Lead.assigned_to_id == advisor.id, Reply.is_hot == True)
             .scalar()
         )
+        org_name = None
+        if is_god:
+            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+            org_name = org.name if org else None
         per_advisor_stats.append({
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
+            "organization_name": org_name,
             "leads_owned": lead_count,
             "messages_sent": sent_count,
             "hot_replies": hot_count,
         })
 
-    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id == org_id).scalar()
+    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar()
     total_duplicates = (
         db.query(func.count(Lead.id))
-        .filter(Lead.organization_id == org_id, Lead.is_duplicate == True)
+        .filter(Lead.organization_id.in_(org_ids), Lead.is_duplicate == True)
         .scalar()
     )
 
     return {
-        "organization_id": org_id,
+        "organization_id": current_user.organization_id if not is_god else "all",
+        "is_god_view": is_god,
         "total_leads": total_leads,
         "total_duplicates_prevented": total_duplicates,
         "advisors": per_advisor_stats,
@@ -248,6 +254,14 @@ def all_org_leads(
 # ---------------------------------------------------------------------------
 
 HOT_REPLY_CLASSIFICATIONS = (ReplyClassification.INTERESTED, ReplyClassification.CALLBACK)
+
+
+def _get_org_ids(db: Session, current_user: User) -> list:
+    """Return org IDs to scope queries to.
+    god_admin sees ALL organizations; everyone else is scoped to their own org."""
+    if current_user.role == "god_admin":
+        return [str(row[0]) for row in db.query(Organization.id).all()]
+    return [str(current_user.organization_id)]
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:
@@ -333,20 +347,28 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
 
 @router.get("/dashboard/metrics")
 def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Org-scoped advisor quality metrics for the upgraded Manager Command Dashboard."""
-    org_id = current_user.organization_id
+    """Advisor quality metrics. god_admin sees all orgs aggregated; others see their own org."""
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
+
     advisors = (
         db.query(User)
-        .filter(User.organization_id == org_id, User.role == "advisor")
+        .filter(User.organization_id.in_(org_ids), User.role == "advisor")
         .order_by(User.full_name.asc())
         .all()
     )
 
-    advisor_rows = [_advisor_metrics(db, org_id, advisor) for advisor in advisors]
+    advisor_rows = []
+    for advisor in advisors:
+        row = _advisor_metrics(db, str(advisor.organization_id), advisor)
+        if is_god:
+            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+            row["organization_name"] = org.name if org else None
+        advisor_rows.append(row)
 
     totals = {
         "advisor_id": "org_total",
-        "advisor_name": "Organization total",
+        "advisor_name": "All Organizations" if is_god else "Organization total",
         "leads_owned": sum(row["leads_owned"] for row in advisor_rows),
         "messages_sent": sum(row["messages_sent"] for row in advisor_rows),
         "replies": sum(row["replies"] for row in advisor_rows),
@@ -354,7 +376,7 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
         "booked_leads": sum(row["booked_leads"] for row in advisor_rows),
         "dnc_leads": sum(row["dnc_leads"] for row in advisor_rows),
         "duplicate_leads_prevented": db.query(func.count(Lead.id)).filter(
-            Lead.organization_id == org_id,
+            Lead.organization_id.in_(org_ids),
             Lead.is_duplicate == True,
         ).scalar() or 0,
     }
@@ -364,7 +386,8 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
     totals["dnc_rate"] = _safe_rate(totals["dnc_leads"], totals["leads_owned"])
 
     return {
-        "organization_id": org_id,
+        "organization_id": current_user.organization_id if not is_god else "all",
+        "is_god_view": is_god,
         "totals": totals,
         "advisors": advisor_rows,
     }
@@ -372,31 +395,32 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
 
 @router.get("/dashboard/funnel")
 def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Org-wide lead funnel counts from existing Lead/Message/Reply/LeadOutcome data."""
-    org_id = current_user.organization_id
+    """Lead funnel counts. god_admin sees all orgs aggregated; others see their own org."""
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
 
-    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id == org_id).scalar() or 0
+    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar() or 0
 
     sent = db.query(func.count(distinct(Lead.id))).join(Message, Message.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
     ).scalar() or 0
 
     replied = db.query(func.count(distinct(Lead.id))).join(Reply, Reply.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
     ).scalar() or 0
 
     hot_interested = db.query(func.count(distinct(Lead.id))).join(Reply, Reply.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
         ((Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)),
     ).scalar() or 0
 
     booked = db.query(func.count(Lead.id)).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
         Lead.status == "booked",
     ).scalar() or 0
 
     sold = db.query(func.count(distinct(Lead.id))).join(LeadOutcome, LeadOutcome.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
         LeadOutcome.resulted_in_sale == True,
     ).scalar() or 0
 
@@ -410,7 +434,8 @@ def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends
     ]
 
     return {
-        "organization_id": org_id,
+        "organization_id": current_user.organization_id if not is_god else "all",
+        "is_god_view": is_god,
         "total_leads": total_leads,
         "sent": sent,
         "replied": replied,

@@ -404,6 +404,34 @@ async def _ai_conversation_loop():
         await asyncio.sleep(120)  # 2 minutes
 
 
+async def _cadence_loop():
+    """Run due SMS cadence touches every hour — all orgs at once.
+
+    run_due_cadences already applies with_for_update(skip_locked=True) so
+    concurrent invocations (e.g. a manual admin trigger) cannot double-send.
+    All exceptions are caught so a bad row never crashes the web server.
+    """
+    from app.services.cadence_service import run_due_cadences
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("cadence_loop")
+    await asyncio.sleep(90)  # brief startup delay — offset from other loops
+    while True:
+        db = SessionLocal()
+        try:
+            result = run_due_cadences(db)  # organization_id=None → all orgs
+            if result.get("sent"):
+                _logger.info(
+                    "cadence_loop: sent=%s completed=%s errors=%s",
+                    result.get("sent", 0), result.get("completed", 0), result.get("errors", 0),
+                )
+        except Exception as exc:
+            _logger.error("cadence_loop: error: %s", exc)
+        finally:
+            db.close()
+        await asyncio.sleep(3600)  # 1 hour
+
+
 @app.on_event("startup")
 async def on_startup():
     # 1. Create any brand-new tables
@@ -556,6 +584,7 @@ async def on_startup():
     # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
     asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
     asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
+    asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
 
 
 @app.get("/health")

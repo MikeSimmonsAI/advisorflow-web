@@ -44,6 +44,14 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 HOT_REPLY_CLASSIFICATIONS = (ReplyClassification.INTERESTED, ReplyClassification.CALLBACK)
 
 
+def _get_org_ids(db: Session, current_user: User) -> list:
+    """Return org IDs to scope queries to.
+    god_admin sees ALL organizations; everyone else is scoped to their own org."""
+    if current_user.role == "god_admin":
+        return [str(row[0]) for row in db.query(Organization.id).all()]
+    return [str(current_user.organization_id)]
+
+
 def _resolve_date_range(start_date: Optional[str], end_date: Optional[str]) -> tuple[datetime, datetime]:
     """
     Shared date-range resolution for every report endpoint below.
@@ -108,19 +116,19 @@ def conversion_trend(
     created on this day."
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_id = current_user.organization_id
+    org_ids = _get_org_ids(db, current_user)
 
     replies = (
         db.query(Reply, Lead.id)
         .join(Lead, Reply.lead_id == Lead.id)
-        .filter(Lead.organization_id == org_id, Reply.received_at >= start, Reply.received_at <= end)
+        .filter(Lead.organization_id.in_(org_ids), Reply.received_at >= start, Reply.received_at <= end)
         .all()
     )
     bookings = (
         db.query(BookingLink)
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == org_id, BookingLink.status == "booked",
+            Lead.organization_id.in_(org_ids), BookingLink.status == "booked",
             BookingLink.booked_time.isnot(None), BookingLink.booked_time >= start, BookingLink.booked_time <= end,
         )
         .all()
@@ -129,7 +137,7 @@ def conversion_trend(
         db.query(LeadOutcome)
         .join(Lead, LeadOutcome.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == org_id, LeadOutcome.resulted_in_sale == True,
+            Lead.organization_id.in_(org_ids), LeadOutcome.resulted_in_sale == True,
             LeadOutcome.created_at >= start, LeadOutcome.created_at <= end,
         )
         .all()
@@ -199,9 +207,10 @@ def engagement_vs_conversion(
     advisor's engagement rate for the leads they worked in this window.
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_id = current_user.organization_id
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
 
-    advisors = db.query(User).filter(User.organization_id == org_id, User.role.in_(["advisor", "org_admin"])).all()
+    advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role.in_(["advisor", "org_admin"])).all()
     advisors_by_id = {a.id: a for a in advisors}
 
     # --- 5 total DB queries regardless of advisor count ---
@@ -211,7 +220,7 @@ def engagement_vs_conversion(
         db.query(Message.sender_id, func.count(distinct(Message.lead_id)))
         .join(Lead, Message.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == org_id,
+            Lead.organization_id.in_(org_ids),
             Message.sent_at >= start, Message.sent_at <= end,
         )
         .group_by(Message.sender_id)
@@ -223,7 +232,7 @@ def engagement_vs_conversion(
         db.query(Message.sender_id.label("advisor_id"), Message.lead_id)
         .join(Lead, Message.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == org_id,
+            Lead.organization_id.in_(org_ids),
             Message.sent_at >= start, Message.sent_at <= end,
         )
         .distinct()
@@ -268,6 +277,7 @@ def engagement_vs_conversion(
     )
 
     # Assemble rows from dicts — only advisors with activity get non-zero counts
+    org_cache = {}
     rows = []
     for advisor in advisors:
         messaged_count = msg_counts.get(advisor.id, 0)
@@ -275,7 +285,7 @@ def engagement_vs_conversion(
         hot_replied_count = hot_replied.get(advisor.id, 0)
         booked_count = booked.get(advisor.id, 0)
         sold_count = sold.get(advisor.id, 0)
-        rows.append({
+        row = {
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
             "leads_messaged": messaged_count,
@@ -285,13 +295,21 @@ def engagement_vs_conversion(
             "sold": sold_count,
             "engagement_rate": round((replied_count / messaged_count) * 100, 1) if messaged_count else 0.0,
             "conversion_rate": round((booked_count / messaged_count) * 100, 1) if messaged_count else 0.0,
-        })
+        }
+        if is_god:
+            oid = str(advisor.organization_id)
+            if oid not in org_cache:
+                org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+                org_cache[oid] = org.name if org else None
+            row["organization_name"] = org_cache[oid]
+        rows.append(row)
 
     rows.sort(key=lambda r: r["leads_messaged"], reverse=True)
 
     return {
         "start_date": start.strftime("%Y-%m-%d"),
         "end_date": end.strftime("%Y-%m-%d"),
+        "is_god_view": is_god,
         "advisors": rows,
     }
 
@@ -314,13 +332,14 @@ def revenue_by_period(
     future relative to when the sale was recorded and is sometimes null.
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_id = current_user.organization_id
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
 
     sale_outcomes = (
         db.query(LeadOutcome)
         .join(Lead, LeadOutcome.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == org_id, LeadOutcome.resulted_in_sale == True,
+            Lead.organization_id.in_(org_ids), LeadOutcome.resulted_in_sale == True,
             LeadOutcome.created_at >= start, LeadOutcome.created_at <= end,
         )
         .all()
@@ -337,7 +356,6 @@ def revenue_by_period(
             a.id: a.full_name
             for a in db.query(User).filter(
                 User.id.in_(advisor_ids),
-                User.organization_id == org_id,
             ).all()
         }
 
@@ -376,12 +394,15 @@ def crm_summary(
     - Total contacts by stage
     - Custom field fill rates and value breakdowns
     """
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
+    # For field schema use first org (or current user's org if available)
     org_id = current_user.organization_id
     org = db.query(Organization).filter(Organization.id == org_id).first()
 
     # Stage breakdown
     contacts = db.query(CRMContact).filter(
-        CRMContact.organization_id == org_id,
+        CRMContact.organization_id.in_(org_ids),
         CRMContact.is_archived == False,
     ).all()
 
@@ -434,6 +455,7 @@ def crm_summary(
         field_stats.append(stat)
 
     return {
+        "is_god_view": is_god,
         "total_contacts": total,
         "stage_counts": stage_counts,
         "custom_field_stats": field_stats,
