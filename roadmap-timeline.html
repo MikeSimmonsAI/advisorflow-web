@@ -1,0 +1,542 @@
+<title>BookaBoost Roadmap 60-Day Sprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d0f;
+    --surface: #141418;
+    --surface-2: #1c1c22;
+    --border: rgba(255,255,255,0.07);
+    --gold: #c9a760;
+    --gold-dim: rgba(201,167,96,0.15);
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,0.12);
+    --blue: #60a5fa;
+    --blue-dim: rgba(96,165,250,0.12);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.12);
+    --amber: #fbbf24;
+    --amber-dim: rgba(251,191,36,0.12);
+    --text: #f3efe6;
+    --text-muted: rgba(243,239,230,0.45);
+    --text-dim: rgba(243,239,230,0.25);
+    --rail: rgba(201,167,96,0.3);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    min-height: 100vh;
+    padding: 48px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 760px; margin: 0 auto; }
+
+  /* Header */
+  .header { margin-bottom: 56px; }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .header h1 {
+    font-size: clamp(28px, 5vw, 40px);
+    font-weight: 900;
+    line-height: 1.1;
+    text-wrap: balance;
+    margin-bottom: 14px;
+  }
+  .header h1 em { color: var(--gold); font-style: normal; }
+  .tagline {
+    font-size: 15px;
+    color: var(--text-muted);
+    line-height: 1.65;
+    max-width: 560px;
+  }
+
+  /* Summary stats */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 56px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-num {
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--gold);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-label { font-size: 11px; color: var(--text-muted); font-weight: 600; letter-spacing: .04em; }
+
+  /* Timeline */
+  .timeline { position: relative; }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--gold), rgba(201,167,96,0.1));
+  }
+
+  /* Phase */
+  .phase { position: relative; padding-left: 56px; margin-bottom: 48px; }
+  .phase:last-child { margin-bottom: 0; }
+
+  .phase-dot {
+    position: absolute;
+    left: 12px;
+    top: 18px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--gold);
+    background: var(--bg);
+    display: grid;
+    place-items: center;
+    z-index: 1;
+  }
+  .phase-dot.active { background: var(--gold); }
+  .phase-dot.active::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--bg);
+  }
+
+  .phase-header { margin-bottom: 16px; }
+  .phase-date {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .phase-title {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.2;
+    margin-bottom: 4px;
+  }
+  .phase-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+  /* Tier cards */
+  .tiers { display: flex; flex-direction: column; gap: 10px; }
+
+  .tier {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: start;
+    transition: border-color .15s;
+  }
+  .tier:hover { border-color: rgba(201,167,96,0.2); }
+
+  .tier-num {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    padding-top: 2px;
+    min-width: 36px;
+  }
+
+  .tier-body {}
+  .tier-name {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 3px;
+    line-height: 1.3;
+  }
+  .tier-detail {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+
+  .tier-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    padding: 3px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    margin-top: 1px;
+  }
+  .badge-done { background: var(--green-dim); color: var(--green); }
+  .badge-now  { background: var(--gold-dim);  color: var(--gold);  }
+  .badge-next { background: var(--blue-dim);  color: var(--blue);  }
+  .badge-soon { background: var(--purple-dim); color: var(--purple); }
+  .badge-future { background: rgba(255,255,255,0.06); color: var(--text-dim); }
+  .badge-moat { background: var(--amber-dim); color: var(--amber); }
+
+  /* The big flow */
+  .flow-section {
+    background: var(--surface);
+    border: 1px solid rgba(201,167,96,0.2);
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 48px;
+  }
+  .flow-section h2 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .flow-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+  }
+  .flow-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2px 0;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .flow-step-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+  }
+  .flow-step-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .flow-step-note {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .flow-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  /* Pitch box */
+  .pitch {
+    background: linear-gradient(135deg, rgba(201,167,96,0.08), rgba(201,167,96,0.03));
+    border: 1px solid rgba(201,167,96,0.25);
+    border-radius: 12px;
+    padding: 28px;
+    text-align: center;
+    margin-top: 48px;
+  }
+  .pitch p {
+    font-size: clamp(15px, 2.5vw, 18px);
+    font-weight: 700;
+    line-height: 1.5;
+    color: var(--text);
+    font-style: italic;
+  }
+  .pitch p em { color: var(--gold); font-style: normal; }
+  .pitch-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .divider { height: 1px; background: var(--border); margin: 40px 0; }
+</style>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="eyebrow">AdvisorFlow / BookaBoost</div>
+    <h1>60-Day Full Sprint<br><em>Aug — Nov 2026</em></h1>
+    <p class="tagline">10 tiers. 60-90 days. Full speed. The only system that goes from a ZIP code to a booked appointment with zero humans required — and we're building the whole thing now.</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-num">10</div>
+      <div class="stat-label">Tiers</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">5</div>
+      <div class="stat-label">Phases</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">60</div>
+      <div class="stat-label">Days</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">0</div>
+      <div class="stat-label">Competitors with full stack</div>
+    </div>
+  </div>
+
+  <!-- Full Flow -->
+  <div class="flow-section">
+    <h2>The Full Automated Flow</h2>
+    <div class="flow-steps">
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(201,167,96,0.12);">🔍</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">ZIP Code / Ad / Social</div>
+            <div class="flow-step-note">Enter a ZIP + business type — or a lead arrives from a Facebook ad</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(96,165,250,0.12);">📋</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">Scrape → Validate → Import</div>
+            <div class="flow-step-note">Google Places API pulls leads, phone validation routes by channel</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(34,197,94,0.12);">💬</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">AI SMS or Email Outreach</div>
+            <div class="flow-step-note">Tone engine writes the message — mobile gets SMS, landline gets email</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(167,139,250,0.12);">⚡</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">Automated Cadence</div>
+            <div class="flow-step-note">Drip sequence fires on schedule — zero human involvement</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(251,191,36,0.12);">🤖</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">AI Auto-Reply</div>
+            <div class="flow-step-note">Inbound texts answered automatically by AI — no human needed</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(239,68,68,0.12);">📞</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">No Response? → AI Voice Call</div>
+            <div class="flow-step-note">AI agent calls the lead, qualifies, and books the appointment</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step">
+        <div class="flow-icon" style="background:rgba(201,167,96,0.12);">📅</div>
+        <div class="flow-step-content">
+          <div>
+            <div class="flow-step-label">Appointment Booked</div>
+            <div class="flow-step-note">On the calendar. Lead tracked. Data retained in god layer forever.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline">
+
+    <!-- Phase 1 -->
+    <div class="phase">
+      <div class="phase-dot active"></div>
+      <div class="phase-header">
+        <div class="phase-date">Week 1–2 · Aug 20 – Sep 3</div>
+        <div class="phase-title">Phase 1: Stabilize & Ship</div>
+        <div class="phase-desc">Lock the foundation. SMS working. Backend stays up on its own.</div>
+      </div>
+      <div class="tiers">
+        <div class="tier">
+          <div class="tier-num">TIER 1</div>
+          <div class="tier-body">
+            <div class="tier-name">Fix & Stabilize</div>
+            <div class="tier-detail">Render health check → auto-restart · UptimeRobot monitoring · Twilio toll-free verification · SMS compose box fixed · Activity log bug · Leads pagination</div>
+          </div>
+          <div class="tier-badge badge-now">🔥 Now</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="phase">
+      <div class="phase-dot"></div>
+      <div class="phase-header">
+        <div class="phase-date">Week 3–4 · Sep 3 – Sep 17</div>
+        <div class="phase-title">Phase 2: Self-Service + Lead Engine</div>
+        <div class="phase-desc">Advisors control their own calendar. ZIP code → leads in the system, automatically.</div>
+      </div>
+      <div class="tiers">
+        <div class="tier">
+          <div class="tier-num">TIER 2</div>
+          <div class="tier-body">
+            <div class="tier-name">Self-Service Booking Settings</div>
+            <div class="tier-detail">Advisors set their own hours, duration, buffer time, appointment types, confirmation message. No code change needed. Calendly/Cal.com escape hatch field.</div>
+          </div>
+          <div class="tier-badge badge-next">Up Next</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">TIER 3</div>
+          <div class="tier-body">
+            <div class="tier-name">Lead Scraper / Import Engine</div>
+            <div class="tier-detail">ZIP + business type → Google Places API → phone validation → auto-import. Mobile to SMS, landline + email to email, no email to voice queue. VA never touches Excel again.</div>
+          </div>
+          <div class="tier-badge badge-next">Up Next</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="phase">
+      <div class="phase-dot"></div>
+      <div class="phase-header">
+        <div class="phase-date">Week 5–6 · Sep 17 – Oct 1</div>
+        <div class="phase-title">Phase 3: Agency Model + Social Capture</div>
+        <div class="phase-desc">Master account runs the show. Facebook lead submits → AI text goes out in seconds.</div>
+      </div>
+      <div class="tiers">
+        <div class="tier">
+          <div class="tier-num">TIER 4</div>
+          <div class="tier-body">
+            <div class="tier-name">Agency Model (Master + Sub-Accounts)</div>
+            <div class="tier-detail">Master scrapes and assigns leads to individual providers. Sub-accounts see only their leads. Bulk import, assignment, agency analytics.</div>
+          </div>
+          <div class="tier-badge badge-soon">Week 5</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">TIER 5</div>
+          <div class="tier-body">
+            <div class="tier-name">Social Lead Capture (Speed to Lead)</div>
+            <div class="tier-detail">Meta, Instagram, TikTok, Google Ads lead forms → webhook fires into BookaBoost instantly → AI text in seconds. Contact rate drops 80% after 5 min — this kills that gap.</div>
+          </div>
+          <div class="tier-badge badge-soon">Week 6</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="phase">
+      <div class="phase-dot"></div>
+      <div class="phase-header">
+        <div class="phase-date">Week 7–8 · Oct 1 – Oct 15</div>
+        <div class="phase-title">Phase 4: Funnels + God Layer + Billing</div>
+        <div class="phase-desc">Landing pages feed the pipeline. AdvisorFlow sees everything. Clients pay automatically.</div>
+      </div>
+      <div class="tiers">
+        <div class="tier">
+          <div class="tier-num">TIER 6</div>
+          <div class="tier-body">
+            <div class="tier-name">Funnels & Landing Pages</div>
+            <div class="tier-detail">Landing page builder in BookaBoost. Fill form → lead created instantly → cadence fires. UTM tracking, A/B testing on CTAs.</div>
+          </div>
+          <div class="tier-badge badge-future">Week 7</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">TIER 7</div>
+          <div class="tier-body">
+            <div class="tier-name">AdvisorFlow God Layer</div>
+            <div class="tier-detail">Command Center across all platforms. Domain-based branding routing. White-label login portals. Granular super admin permissions. Location-based ad targeting.</div>
+          </div>
+          <div class="tier-badge badge-future">Week 7</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">TIER 8</div>
+          <div class="tier-body">
+            <div class="tier-name">Billing & Monetization</div>
+            <div class="tier-detail">Stripe per platform, per-org isolation. Client self-service billing. Usage-based SMS/email pass-through. Lead scraper credits. Agency plan pricing.</div>
+          </div>
+          <div class="tier-badge badge-future">Week 8</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 5 -->
+    <div class="phase">
+      <div class="phase-dot"></div>
+      <div class="phase-header">
+        <div class="phase-date">Week 9–12 · Oct 15 – Nov 18</div>
+        <div class="phase-title">Phase 5: The Full Suite — Nobody Has This</div>
+        <div class="phase-desc">AI Voice closes every gap. The data layer becomes the second business that runs itself.</div>
+      </div>
+      <div class="tiers">
+        <div class="tier">
+          <div class="tier-num">TIER 9</div>
+          <div class="tier-body">
+            <div class="tier-name">AI Voice Calling</div>
+            <div class="tier-detail">No response to SMS or email → AI agent calls them, qualifies, books the appointment. Call transcript logged. No lead ever falls through again. Bland AI / Vapi / Retell AI. No competitor has scraping + SMS + email + AI reply + AI voice in one native platform at any price point.</div>
+          </div>
+          <div class="tier-badge badge-moat">The Closer</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">TIER 10</div>
+          <div class="tier-body">
+            <div class="tier-name">Data Monetization Layer</div>
+            <div class="tier-detail">Every lead ever touched lives in the AdvisorFlow god layer. Sell verified lead packages. Upload to Meta/TikTok as ad audiences. Sell booked appointments per-appointment. License the database. Run your own outreach with your own leads — revenue with zero SaaS customers needed. The SaaS funds the machine. The data compounds forever.</div>
+          </div>
+          <div class="tier-badge badge-moat">The Moat</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /timeline -->
+
+  <div class="divider"></div>
+
+  <!-- Pitch -->
+  <div class="pitch">
+    <div class="pitch-label">The One-Sentence Pitch</div>
+    <p>"The only platform where you enter a <em>ZIP code</em> and a business type, and appointments get booked <em>automatically</em> — no spreadsheets, no manual calling, no duct tape."</p>
+  </div>
+
+</div>
