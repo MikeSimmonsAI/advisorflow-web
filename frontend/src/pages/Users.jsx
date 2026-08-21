@@ -168,7 +168,7 @@ function ProfilePanel({ user, data, loading, saving, error, onClose, onChange, o
                     <option value="advisor">Advisor</option>
                     <option value="org_admin">Org Admin</option>
                     {isSuperAdmin && <option value="super_admin">Super Admin</option>}
-                    {isGodAdmin && <option value="god_admin">God Admin</option>}
+                    {/* god_admin assignment is God Command Center only */}
                   </select>
                 </label>
                 <label className="pp-field">

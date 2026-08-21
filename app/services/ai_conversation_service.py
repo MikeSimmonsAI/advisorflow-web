@@ -110,6 +110,8 @@ LEAD: {first_name} {last_name}
 APPOINTMENT TYPE: {appt_label}
 LEAD TIER: {tier}
 SOURCE: {source} {source_year}
+ADDITIONAL LEAD CONTEXT:
+{lead_context}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
 {{"subject": "email subject line", "body": "2-3 sentence email body only, no sign-off, no URLs", "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
@@ -129,10 +131,13 @@ CRITICAL RULES:
 - Never reveal you are AI.
 - CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
 
+Relationship context: {relationship_context}
 ADVISOR: {advisor_name}
 ORGANIZATION: {org_name}
 LEAD: {first_name} {last_name}
 APPOINTMENT TYPE: {appt_label}
+ADDITIONAL LEAD CONTEXT:
+{lead_context}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
 {{"subject": "reply subject", "body": "your reply body, 2-3 sentences, no sign-off, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
@@ -234,31 +239,98 @@ def _get_booking_url(db: Session, lead: Lead, advisor: User) -> str:
 
 
 def _get_conversation_history(db: Session, lead: Lead) -> str:
+    """
+    Returns the last 10 messages across ALL channels (email + SMS)
+    in chronological order so the AI has full context of the relationship.
+    """
     import re
+    from app.models.models import Message as OutboundSMS
+
+    events = []
+
+    # Outbound emails
     email_msgs = db.query(EmailMessage).filter(
         EmailMessage.lead_id == lead.id
     ).order_by(EmailMessage.sent_at.asc()).all()
-
-    email_replies = db.query(Reply).filter(
-        Reply.lead_id == lead.id,
-        Reply.source == "email",
-    ).order_by(Reply.received_at.asc()).all()
-
-    events = []
     for m in email_msgs:
-        body = re.sub(r'<[^>]+>', ' ', m.body_html or '').strip()[:200]
-        events.append({"dir": "out", "subject": m.subject or "", "body": body, "ts": m.sent_at or datetime.min})
-    for r in email_replies:
-        events.append({"dir": "in", "body": (r.body or "")[:200], "ts": r.received_at or datetime.min})
+        body = re.sub(r'<[^>]+>', ' ', m.body_html or '').strip()[:250]
+        events.append({"dir": "out", "channel": "email", "subject": m.subject or "", "body": body, "ts": m.sent_at or datetime.min})
+
+    # All replies (email + SMS)
+    all_replies = db.query(Reply).filter(
+        Reply.lead_id == lead.id,
+    ).order_by(Reply.received_at.asc()).all()
+    for r in all_replies:
+        sentiment = ""
+        if r.classification:
+            cls_val = r.classification.value if hasattr(r.classification, 'value') else str(r.classification)
+            if cls_val not in ("neutral", "unknown"):
+                sentiment = f" [{cls_val}]"
+        is_hot_marker = " 🔥" if r.is_hot else ""
+        events.append({
+            "dir": "in",
+            "channel": r.source or "sms",
+            "body": (r.body or "")[:250] + sentiment + is_hot_marker,
+            "ts": r.received_at or datetime.min,
+        })
+
+    # Outbound SMS
+    sms_msgs = db.query(OutboundSMS).filter(
+        OutboundSMS.lead_id == lead.id
+    ).order_by(OutboundSMS.sent_at.asc()).all()
+    for m in sms_msgs:
+        events.append({"dir": "out", "channel": "sms", "body": (m.body or "")[:250], "ts": m.sent_at or datetime.min})
 
     events.sort(key=lambda e: e["ts"])
     lines = []
-    for e in events[-8:]:
+    for e in events[-10:]:  # last 10 across all channels
+        channel_tag = f"[{e['channel'].upper()}] " if e.get("channel") else ""
         if e["dir"] == "out":
-            lines.append(f"ADVISOR: [{e['subject']}] {e['body']}")
+            subject_part = f"[{e['subject']}] " if e.get("subject") else ""
+            lines.append(f"ADVISOR {channel_tag}{subject_part}{e['body']}")
         else:
-            lines.append(f"LEAD: {e['body']}")
+            lines.append(f"LEAD {channel_tag}{e['body']}")
     return "\n".join(lines) if lines else "No prior conversation."
+
+
+def _build_lead_context(lead: Lead) -> str:
+    """
+    Returns a richer lead context block for injection into AI prompts.
+    Includes notes, location, custom fields summary, and source info.
+    """
+    parts = []
+
+    # Location for personalization
+    location_parts = [lead.city, lead.state] if hasattr(lead, 'city') and (lead.city or lead.state) else []
+    if hasattr(lead, 'city') and lead.city:
+        location_parts = [lead.city]
+        if hasattr(lead, 'state') and lead.state:
+            location_parts.append(lead.state)
+    if location_parts:
+        parts.append(f"Location: {', '.join(location_parts)}")
+
+    # Source year gives age-of-record context
+    if lead.source_year:
+        parts.append(f"Record from: {lead.source_year}")
+
+    # Advisor notes (surface key facts without dumping everything)
+    notes = (lead.notes or "").strip()
+    if notes:
+        parts.append(f"Advisor notes: {notes[:300]}")
+
+    # Custom fields — any campaign hooks, offer context, etc.
+    try:
+        cf = __import__('json').loads(lead.custom_fields or "{}") if lead.custom_fields else {}
+    except Exception:
+        cf = {}
+    # Filter out internal keys already handled elsewhere
+    skip_keys = {"offer_hook", "campaign_purpose"}
+    extra_cf = {k: v for k, v in cf.items() if k not in skip_keys and v}
+    if extra_cf:
+        cf_lines = "; ".join(f"{k}: {v}" for k, v in list(extra_cf.items())[:5])
+        parts.append(f"Extra context: {cf_lines}")
+
+    return "\n".join(parts) if parts else "No additional context."
 
 
 def _get_or_create_conversation(db: Session, lead: Lead, advisor: User, channel: str = "email") -> PipelineConversation:
@@ -412,6 +484,7 @@ def generate_touch_email(
         offer_hook_line = ""
 
     org_name = _get_org_name(db, advisor)
+    lead_context = _build_lead_context(lead)
     system = SMART_SYSTEM_PROMPT.format(
         relationship_context=relationship_context,
         ai_direction=direction,
@@ -426,6 +499,7 @@ def generate_touch_email(
         tier=lead.tier or "unknown",
         source=lead.source_file or "",
         source_year=str(lead.source_year or ""),
+        lead_context=lead_context,
     )
     user_msg = f"Conversation history:\n{history}\n\nThis is touch #{touch_number + 1} of 8. Generate the email now."
 
@@ -472,12 +546,17 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
     history = _get_conversation_history(db, lead)
 
     org_name = _get_org_name(db, advisor)
+    lead_context = _build_lead_context(lead)
+    rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
+    relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(rel_type, RELATIONSHIP_TYPE_CONTEXT["cold_lead"])
     system = REPLY_SYSTEM_PROMPT.format(
         advisor_name=advisor.full_name or "Your Advisor",
         org_name=org_name,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         appt_label=appt_label,
+        relationship_context=relationship_context,
+        lead_context=lead_context,
     )
     user_msg = f"Conversation history:\n{history}\n\nLead's latest reply:\n{reply_body}\n\nGenerate your response now."
 
