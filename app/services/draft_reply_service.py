@@ -257,12 +257,16 @@ def draft_reply(
 
 EMAIL_DRAFT_PROMPT = """You are helping a service business advisor write an outreach email to a lead.
 
-━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
-Relationship context: {relationship_context}
+━━━ #1 MANDATORY — ADVISOR'S SPECIFIC INSTRUCTION ━━━
+The advisor has given you explicit direction. This is your PRIMARY task. Do not write about anything else.
+Direction: {ai_direction}
 
-User's AI direction (FOLLOW THIS EXACTLY — it overrides your defaults):
-{ai_direction}
+If the direction says "file review and permission form" — write about THAT specifically.
+If it says something else entirely — write about THAT. Do NOT fall back to generic relationship content.
 {sample_message_section}
+━━━ #2 Relationship context (secondary — tone only, do not override direction) ━━━
+{relationship_context}
+
 ━━━ CONTEXT ━━━
 Advisor: {advisor_name}
 Organization: {org_name}
@@ -420,11 +424,20 @@ def draft_email_options(
 
     try:
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        sys_msg = (
+            "You are drafting outreach emails for service business advisors. "
+            "When the advisor provides explicit direction, follow it LITERALLY and specifically — "
+            "it overrides all other guidance. If they say 'file review', write about file review. "
+            "Never substitute generic content when specific direction is given."
+        )
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
-            max_tokens=800,
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.5,
+            max_tokens=1500,
         )
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()

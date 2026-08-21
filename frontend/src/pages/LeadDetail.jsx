@@ -1112,8 +1112,9 @@ export default function LeadDetail() {
             {/* Appointment type dropdown — visible for both SMS and email */}
             {canSend && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <label style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', fontWeight: 600 }}>
-                  📅 Appt type
+                <label style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', fontWeight: 600 }}
+                  title="Sets the appointment type on the booking link — what the lead sees on the booking page">
+                  📅 Booking type
                 </label>
                 <select
                   className="filter-select"
