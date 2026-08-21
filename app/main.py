@@ -430,6 +430,36 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("pipeline_conversations migration note: %s", e)
 
+    # 3b. Ensure all performance-critical indexes exist on the leads table.
+    #     CREATE INDEX IF NOT EXISTS is idempotent — safe to run on every startup.
+    #     These cover the filter + sort combos the leads page uses most.
+    _index_migrations = [
+        # Tier filter (very common on leads page)
+        "CREATE INDEX IF NOT EXISTS ix_leads_org_tier ON leads (organization_id, tier);",
+        # Engagement temperature filter (hot/warm/cold selector)
+        "CREATE INDEX IF NOT EXISTS ix_leads_org_temp ON leads (organization_id, engagement_temperature);",
+        # created_at ordering — every paginated query sorts by this
+        "CREATE INDEX IF NOT EXISTS ix_leads_org_created ON leads (organization_id, created_at DESC);",
+        # updated_at ordering — recent-leads endpoint
+        "CREATE INDEX IF NOT EXISTS ix_leads_org_updated ON leads (organization_id, updated_at DESC);",
+        # import_list_name — list management and dedup queries
+        "CREATE INDEX IF NOT EXISTS ix_leads_org_import_list ON leads (organization_id, import_list_name);",
+        # last_messaged_at — "sent today" badge on leads list
+        "CREATE INDEX IF NOT EXISTS ix_leads_org_last_messaged ON leads (organization_id, last_messaged_at DESC);",
+        # Messages table — conversation history loads per lead
+        "CREATE INDEX IF NOT EXISTS ix_messages_lead_sent ON messages (lead_id, sent_at DESC);",
+        # Replies table — inbound history per lead
+        "CREATE INDEX IF NOT EXISTS ix_replies_lead_received ON replies (lead_id, received_at DESC);",
+    ]
+    for _idx_sql in _index_migrations:
+        try:
+            with engine.connect() as conn:
+                conn.execute(_text(_idx_sql))
+                conn.commit()
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Index migration note (%s): %s", _idx_sql[:60], e)
+
     # 4. Ensure the master super_admin account has the correct role.
     #    NOTE: password_hash is intentionally NOT set here — it would overwrite
     #    any password change made through the app on every deploy.
