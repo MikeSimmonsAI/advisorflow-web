@@ -388,6 +388,21 @@ body.god #main{margin-top:calc(36px + var(--top-h) + var(--intel-h));height:calc
   </div>
 </div>
 
+<!-- ROLE PERMISSIONS -->
+<div class="screen" id="screen-permissions">
+  <div class="sh">
+    <div class="sh-info">
+      <div class="sh-title">Role Permissions</div>
+      <div class="sh-sub">Control what each role can do across the platform. God Admin permissions are fixed and cannot be changed.</div>
+    </div>
+    <div class="sh-actions">
+      <button class="btn btn-sm" onclick="loadPermissions()">↻ Refresh</button>
+    </div>
+  </div>
+  <div id="perms-loading" style="color:var(--text-2);font-size:13px;padding:20px 0">Loading permissions…</div>
+  <div id="perms-matrix" style="display:none"></div>
+</div>
+
 </div><!-- /main -->
 
 <div id="overlay" onclick="closeDrawer()"></div>
@@ -459,6 +474,7 @@ const NAV=[
   ]},
   {sec:'Admin',items:[
     {id:'audit',label:'Audit Log',icon:'📋',screen:'audit',badge:true},
+    {id:'permissions',label:'Role Permissions',icon:'🔐',screen:'permissions'},
   ]},
 ];
 
@@ -474,6 +490,7 @@ const KEYWORDS={
   health:['health','system','status','uptime'],
   users:['user','admin','access'],
   audit:['audit','log','history'],
+  permissions:['permission','role','access','toggle','control'],
 };
 
 // ══════════════════════════════════════
@@ -488,6 +505,12 @@ async function apiGet(path){
 }
 async function apiPost(path,body){
   const r=await fetch(BASE+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok()},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.detail||path+' → '+r.status);
+  return d;
+}
+async function apiPatch(path,body){
+  const r=await fetch(BASE+path,{method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok()},body:JSON.stringify(body)});
   const d=await r.json();
   if(!r.ok) throw new Error(d.detail||path+' → '+r.status);
   return d;
@@ -569,6 +592,7 @@ function renderScreen(s){
     case 'health':renderHealth();break;
     case 'users':renderUsers();break;
     case 'audit':renderAudit();break;
+    case 'permissions':loadPermissions();break;
   }
 }
 
@@ -1113,6 +1137,121 @@ function logAction(action,target,scope,details){
   STATE.actionLog.unshift({ts:new Date().toISOString(),action,target,scope:scope||'global',details:details||{}});
   const b=document.getElementById('badge-audit');
   if(b){b.textContent=STATE.actionLog.length;b.classList.add('show');}
+}
+
+// ══════════════════════════════════════
+// ROLE PERMISSIONS
+// ══════════════════════════════════════
+const PERM_LABELS={
+  own_leads:'View own leads',
+  import_leads:'Import leads',
+  own_settings:'Edit own settings',
+  change_own_password:'Change own password',
+  view_all_org_leads:'View all org leads',
+  create_users:'Create users',
+  deactivate_users:'Deactivate users',
+  force_logout_users:'Force logout users',
+  view_audit_log:'View audit log',
+  edit_org_settings:'Edit org settings',
+  assign_twilio:'Assign Twilio numbers',
+  change_user_roles:'Change user roles',
+  cross_org_access:'Cross-org access (platform-wide)',
+  manage_platforms:'Manage platforms',
+  create_orgs:'Create organizations',
+  promote_to_god:'Promote to God Admin',
+  command_center:'Command Center access',
+};
+const ROLE_ORDER=['advisor','org_admin','super_admin','god_admin'];
+const ROLE_LABELS={advisor:'Advisor',org_admin:'Org Admin',super_admin:'Super Admin',god_admin:'God Admin'};
+const ROLE_COLORS={advisor:'var(--text-2)',org_admin:'var(--blue)',super_admin:'var(--purple)',god_admin:'var(--gold)'};
+
+let _permsData=null;
+
+async function loadPermissions(){
+  const loading=document.getElementById('perms-loading');
+  const matrix=document.getElementById('perms-matrix');
+  if(loading)loading.style.display='block';
+  if(matrix)matrix.style.display='none';
+  try{
+    _permsData=await apiGet('/god/role-config');
+    renderPermsMatrix(_permsData);
+  }catch(e){
+    if(loading)loading.textContent='Failed to load permissions: '+e.message;
+    showToast('error','Permissions Error',e.message);
+  }
+}
+
+function renderPermsMatrix(data){
+  const loading=document.getElementById('perms-loading');
+  const matrix=document.getElementById('perms-matrix');
+  if(!matrix)return;
+
+  const allPerms=Object.keys(PERM_LABELS);
+  let html=`<div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;min-width:600px">
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--border);width:220px">Permission</th>
+        ${ROLE_ORDER.map(r=>`<th style="text-align:center;padding:10px 14px;font-size:11px;font-weight:700;color:${ROLE_COLORS[r]};letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border)">${ROLE_LABELS[r]}</th>`).join('')}
+      </tr>
+    </thead>
+    <tbody>`;
+
+  allPerms.forEach((perm,i)=>{
+    const bg=i%2===0?'rgba(255,255,255,0.02)':'transparent';
+    html+=`<tr style="background:${bg}">
+      <td style="padding:9px 14px;font-size:12px;color:var(--text-2);border-bottom:1px solid rgba(47,182,255,0.05)">${PERM_LABELS[perm]}</td>`;
+    ROLE_ORDER.forEach(role=>{
+      const roleData=data[role]||{};
+      const locked=role==='god_admin'||perm==='cross_org_access'&&role==='advisor';
+      const enabled=!!roleData[perm];
+      if(locked){
+        // god_admin row and certain locked perms: display-only
+        html+=`<td style="text-align:center;padding:9px 14px;border-bottom:1px solid rgba(47,182,255,0.05)">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:18px;border-radius:9px;background:${enabled?'rgba(30,240,168,0.15)':'rgba(255,255,255,0.05)'};border:1px solid ${enabled?'rgba(30,240,168,0.3)':'rgba(255,255,255,0.08)'};font-size:11px;color:${enabled?'var(--green)':'var(--text-3)'};cursor:default" title="Locked">${enabled?'✓':'–'}</span>
+        </td>`;
+      }else{
+        html+=`<td style="text-align:center;padding:9px 14px;border-bottom:1px solid rgba(47,182,255,0.05)">
+          <button onclick="togglePerm('${role}','${perm}',this)" data-role="${role}" data-perm="${perm}" data-enabled="${enabled?'1':'0'}"
+            style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:22px;border-radius:11px;border:none;cursor:pointer;transition:all .2s;outline:none;position:relative;background:${enabled?'rgba(47,182,255,0.2)':'rgba(255,255,255,0.06)'};border:1px solid ${enabled?'rgba(47,182,255,0.5)':'rgba(255,255,255,0.1)'}" title="${enabled?'Click to disable':'Click to enable'}">
+            <span style="position:absolute;width:16px;height:16px;border-radius:50%;background:${enabled?'var(--blue)':'rgba(150,170,210,0.4)'};top:2px;transition:left .2s;left:${enabled?'24px':'2px'}"></span>
+          </button>
+        </td>`;
+      }
+    });
+    html+=`</tr>`;
+  });
+
+  html+=`</tbody></table></div>
+  <p style="margin-top:14px;font-size:11px;color:var(--text-3)">God Admin permissions are fixed and cannot be modified. Changes take effect immediately for new API requests.</p>`;
+
+  matrix.innerHTML=html;
+  if(loading)loading.style.display='none';
+  matrix.style.display='block';
+}
+
+async function togglePerm(role,perm,btn){
+  const enabled=btn.dataset.enabled==='1';
+  const newVal=!enabled;
+  // optimistic UI
+  btn.dataset.enabled=newVal?'1':'0';
+  btn.style.background=newVal?'rgba(47,182,255,0.2)':'rgba(255,255,255,0.06)';
+  btn.style.borderColor=newVal?'rgba(47,182,255,0.5)':'rgba(255,255,255,0.1)';
+  const dot=btn.querySelector('span');
+  if(dot){dot.style.background=newVal?'var(--blue)':'rgba(150,170,210,0.4)';dot.style.left=newVal?'24px':'2px';}
+
+  try{
+    await apiPatch('/god/role-config',{role,permission:perm,enabled:newVal});
+    showToast('success','Permission Updated',`${ROLE_LABELS[role]} · ${PERM_LABELS[perm]} → ${newVal?'ON':'OFF'}`);
+    logAction('perm_toggle',role,'global',{perm,enabled:newVal});
+  }catch(e){
+    // revert
+    btn.dataset.enabled=enabled?'1':'0';
+    btn.style.background=enabled?'rgba(47,182,255,0.2)':'rgba(255,255,255,0.06)';
+    btn.style.borderColor=enabled?'rgba(47,182,255,0.5)':'rgba(255,255,255,0.1)';
+    if(dot){dot.style.background=enabled?'var(--blue)':'rgba(150,170,210,0.4)';dot.style.left=enabled?'24px':'2px';}
+    showToast('error','Update Failed',e.message);
+  }
 }
 
 // ══════════════════════════════════════

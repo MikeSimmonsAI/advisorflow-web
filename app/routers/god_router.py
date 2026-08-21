@@ -590,3 +590,143 @@ def god_impersonate_org(
         "header_value": org_id,
         "instruction":  "Pass X-Org-Override: <org_id> on subsequent requests to view as that org.",
     }
+
+
+# ── Role Permission Config ─────────────────────────────────────────────────────
+# God admin can view and override what each role is allowed to do.
+# Stored in the system_config table as a JSON blob under key "role_permissions".
+# The backend enforces the most critical overrides (cross-org access is handled
+# directly in deps.py). This API exposes the full matrix for the Command Center UI.
+
+import json as _json
+from sqlalchemy import text as _text
+
+_DEFAULT_ROLE_PERMISSIONS = {
+    "advisor": {
+        "own_leads":            True,
+        "import_leads":         True,
+        "own_settings":         True,
+        "change_own_password":  True,
+    },
+    "org_admin": {
+        "own_leads":            True,
+        "import_leads":         True,
+        "own_settings":         True,
+        "change_own_password":  True,
+        "view_all_org_leads":   True,
+        "create_users":         True,
+        "deactivate_users":     True,
+        "force_logout_users":   True,
+        "view_audit_log":       True,
+        "edit_org_settings":    True,
+        "assign_twilio":        True,
+        "change_user_roles":    True,
+        "cross_org_access":     False,
+    },
+    "super_admin": {
+        "own_leads":            True,
+        "import_leads":         True,
+        "own_settings":         True,
+        "change_own_password":  True,
+        "view_all_org_leads":   True,
+        "create_users":         True,
+        "deactivate_users":     True,
+        "force_logout_users":   True,
+        "view_audit_log":       True,
+        "edit_org_settings":    True,
+        "assign_twilio":        True,
+        "change_user_roles":    True,
+        "cross_org_access":     False,  # super_admin is org-scoped — only god_admin sees all
+    },
+    "god_admin": {
+        "own_leads":            True,
+        "import_leads":         True,
+        "own_settings":         True,
+        "change_own_password":  True,
+        "view_all_org_leads":   True,
+        "create_users":         True,
+        "deactivate_users":     True,
+        "force_logout_users":   True,
+        "view_audit_log":       True,
+        "edit_org_settings":    True,
+        "assign_twilio":        True,
+        "change_user_roles":    True,
+        "cross_org_access":     True,
+        "manage_platforms":     True,
+        "create_orgs":          True,
+        "promote_to_god":       True,
+        "command_center":       True,
+    },
+}
+
+_CONFIG_KEY = "role_permissions"
+
+
+def _load_role_permissions(db: Session) -> dict:
+    row = db.execute(_text("SELECT value FROM system_config WHERE key = :k"), {"k": _CONFIG_KEY}).fetchone()
+    if row:
+        try:
+            stored = _json.loads(row[0])
+            # Merge stored overrides on top of defaults so new permissions
+            # added in code are always present even without a re-save.
+            merged = _json.loads(_json.dumps(_DEFAULT_ROLE_PERMISSIONS))
+            for role, perms in stored.items():
+                if role in merged:
+                    merged[role].update(perms)
+            return merged
+        except Exception:
+            pass
+    return _json.loads(_json.dumps(_DEFAULT_ROLE_PERMISSIONS))
+
+
+def _save_role_permissions(db: Session, config: dict) -> None:
+    db.execute(_text("""
+        INSERT INTO system_config (key, value)
+        VALUES (:k, :v)
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value
+    """), {"k": _CONFIG_KEY, "v": _json.dumps(config)})
+    db.commit()
+
+
+class RolePermissionPatch(BaseModel):
+    role: str
+    permission: str
+    enabled: bool
+
+
+@router.get("/role-config")
+def get_role_config(
+    god: User = Depends(require_god),
+    db:  Session = Depends(get_db),
+):
+    """Return the full role permission matrix."""
+    return _load_role_permissions(db)
+
+
+@router.patch("/role-config")
+def patch_role_config(
+    body: RolePermissionPatch,
+    god:  User = Depends(require_god),
+    db:   Session = Depends(get_db),
+):
+    """Toggle a single permission for a role. god_admin-only."""
+    PROTECTED = {"god_admin"}
+    LOCKED_GOD_PERMS = {"command_center", "cross_org_access", "manage_platforms",
+                        "create_orgs", "promote_to_god"}
+
+    if body.role == "god_admin":
+        raise HTTPException(status_code=400, detail="god_admin permissions cannot be modified.")
+    if body.role not in _DEFAULT_ROLE_PERMISSIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown role: {body.role}")
+    if body.permission not in _DEFAULT_ROLE_PERMISSIONS.get(body.role, {}):
+        raise HTTPException(status_code=400, detail=f"Unknown permission: {body.permission}")
+
+    config = _load_role_permissions(db)
+    config[body.role][body.permission] = body.enabled
+    _save_role_permissions(db, config)
+
+    log.info(
+        "AUDIT: god_admin %s set %s.%s = %s",
+        god.email, body.role, body.permission, body.enabled
+    )
+    return {"role": body.role, "permission": body.permission, "enabled": body.enabled}

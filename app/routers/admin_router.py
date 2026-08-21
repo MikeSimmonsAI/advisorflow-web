@@ -523,12 +523,13 @@ def create_user(
 def _get_target_user_for_admin(user_id: str, current_user: User, db: Session) -> User:
     """
     Fetch the target user for admin actions with correct scope:
-    - god_admin / super_admin  → any user in any org
-    - org_admin                → users in their own org only
+    - god_admin     → any user in any org (platform-wide)
+    - super_admin   → users in their own org only
+    - org_admin     → users in their own org only
     Raises 404 if not found within scope.
     """
     from fastapi import HTTPException
-    if current_user.role in ("god_admin", "super_admin"):
+    if current_user.role == "god_admin":
         target = db.query(User).filter(User.id == user_id).first()
     else:
         target = db.query(User).filter(

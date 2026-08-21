@@ -413,6 +413,21 @@ async def on_startup():
     from app.auto_migrate import run_auto_migrations
     run_auto_migrations(engine)
 
+    # 2b. System config table — stores god_admin-controlled global settings
+    #     (role permission overrides, feature flags, etc.)
+    try:
+        with engine.connect() as conn:
+            conn.execute(_text("""
+                CREATE TABLE IF NOT EXISTS system_config (
+                    key   VARCHAR PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """))
+            conn.commit()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("system_config table migration note: %s", e)
+
     # 3. AI-conversation columns on pipeline_conversations (IF NOT EXISTS)
     migration_sql = """
         ALTER TABLE pipeline_conversations

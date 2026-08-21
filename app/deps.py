@@ -85,12 +85,13 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="You must change your password before continuing. Use /auth/change-password."
             )
 
-    # Super admin context override: allows the platform owner to "enter" any
-    # org's data without logging in as that org's user.
-    # expunge() detaches the user object from SQLAlchemy's session BEFORE we
-    # mutate organization_id, so the change is never tracked as a pending DB
-    # write - the real row in the users table stays untouched.
-    if user.role in ("super_admin", "god_admin"):
+    # Cross-org context override: allows the platform OWNER (god_admin only) to
+    # "enter" any org's data without logging in as that org's user.
+    # super_admin is intentionally excluded — a super_admin is scoped to their
+    # own org only and has no cross-org visibility. Only god_admin can traverse
+    # platform-wide. expunge() detaches the user object from SQLAlchemy's session
+    # BEFORE we mutate organization_id so the change is never written to the DB.
+    if user.role == "god_admin":
         org_override = request.headers.get("X-Org-Override")
         if org_override:
             target_org = db.query(Organization).filter(Organization.id == org_override).first()
