@@ -388,6 +388,92 @@ body.god #main{margin-top:calc(36px + var(--top-h) + var(--intel-h));height:calc
   </div>
 </div>
 
+<!-- ORG BRANDING -->
+<div class="screen" id="screen-branding">
+  <div class="sh">
+    <div class="sh-info">
+      <div class="sh-title">Org Branding</div>
+      <div class="sh-sub">White-label each organization — logo, colors, name, and more.</div>
+    </div>
+  </div>
+  <!-- Org picker -->
+  <div class="card" style="padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:14px">
+    <label style="font-size:12px;color:var(--text-2);font-weight:600;white-space:nowrap">Select Org:</label>
+    <select id="branding-org-select" class="fs" style="flex:1;max-width:340px;padding:7px 10px;font-size:13px" onchange="loadOrgBranding()">
+      <option value="">— choose an organization —</option>
+    </select>
+    <button class="btn btn-sm" onclick="loadOrgBranding()">Load</button>
+  </div>
+  <!-- Branding form -->
+  <div id="branding-form" style="display:none">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- Left column -->
+      <div class="card" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px">Identity</div>
+        <div>
+          <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Brand Name <span style="color:var(--text-3)">(replaces "BookaBoost" in UI)</span></label>
+          <input id="bf-brand-name" class="fs" type="text" placeholder="e.g. Sunrise Advisors" style="width:100%;padding:8px 10px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Tagline</label>
+          <input id="bf-tagline" class="fs" type="text" placeholder="e.g. Your future, our focus." style="width:100%;padding:8px 10px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Support Email <span style="color:var(--text-3)">(shown in app)</span></label>
+          <input id="bf-support-email" class="fs" type="email" placeholder="support@yourorg.com" style="width:100%;padding:8px 10px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Email Sender Name <span style="color:var(--text-3)">("From" on outbound emails)</span></label>
+          <input id="bf-email-sender" class="fs" type="text" placeholder="e.g. Sunrise Advisors Team" style="width:100%;padding:8px 10px;font-size:13px">
+        </div>
+      </div>
+      <!-- Right column -->
+      <div class="card" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px">Visual</div>
+        <div>
+          <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Logo URL</label>
+          <input id="bf-logo-url" class="fs" type="url" placeholder="https://yourorg.com/logo.png" style="width:100%;padding:8px 10px;font-size:13px" oninput="previewLogo()">
+          <div id="bf-logo-preview" style="margin-top:8px;height:48px;display:flex;align-items:center;gap:10px">
+            <img id="bf-logo-img" src="" alt="" style="max-height:44px;max-width:140px;border-radius:6px;display:none;border:1px solid var(--border)">
+            <span id="bf-logo-none" style="font-size:11px;color:var(--text-3)">No logo set</span>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Favicon URL</label>
+          <input id="bf-favicon-url" class="fs" type="url" placeholder="https://yourorg.com/favicon.ico" style="width:100%;padding:8px 10px;font-size:13px">
+        </div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Primary Color</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="bf-color-primary" type="color" value="#2fb6ff" style="width:40px;height:34px;border:none;border-radius:6px;cursor:pointer;background:none;padding:2px" oninput="document.getElementById('bf-color-primary-hex').value=this.value;updateColorPreview()">
+              <input id="bf-color-primary-hex" class="fs" type="text" placeholder="#2fb6ff" maxlength="7" style="flex:1;padding:7px 8px;font-size:12px;font-family:'JetBrains Mono',monospace" oninput="syncColorPicker('primary')">
+            </div>
+          </div>
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:5px">Accent Color</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="bf-color-accent" type="color" value="#1ef0a8" style="width:40px;height:34px;border:none;border-radius:6px;cursor:pointer;background:none;padding:2px" oninput="document.getElementById('bf-color-accent-hex').value=this.value;updateColorPreview()">
+              <input id="bf-color-accent-hex" class="fs" type="text" placeholder="#1ef0a8" maxlength="7" style="flex:1;padding:7px 8px;font-size:12px;font-family:'JetBrains Mono',monospace" oninput="syncColorPicker('accent')">
+            </div>
+          </div>
+        </div>
+        <!-- Live color preview -->
+        <div id="bf-color-preview" style="display:flex;gap:8px;margin-top:2px">
+          <div id="bfp-primary" style="flex:1;height:28px;border-radius:6px;background:#2fb6ff;transition:background .2s"></div>
+          <div id="bfp-accent" style="flex:1;height:28px;border-radius:6px;background:#1ef0a8;transition:background .2s"></div>
+        </div>
+      </div>
+    </div>
+    <!-- Save bar -->
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+      <button class="btn btn-sm" onclick="resetBrandingForm()">Reset</button>
+      <button class="btn btn-primary" onclick="saveBranding()">💾 Save Branding</button>
+    </div>
+  </div>
+  <div id="branding-loading" style="display:none;color:var(--text-2);font-size:13px;padding:20px 0">Loading…</div>
+</div>
+
 <!-- ROLE PERMISSIONS -->
 <div class="screen" id="screen-permissions">
   <div class="sh">
@@ -458,6 +544,7 @@ const NAV=[
     {id:'command',label:'Command Center',icon:'⚡',screen:'command'},
     {id:'brands',label:'Brand Management',icon:'🏢',screen:'brands'},
     {id:'orgs',label:'Organizations',icon:'🏗',screen:'orgs'},
+    {id:'branding',label:'Org Branding',icon:'🎨',screen:'branding'},
   ]},
   {sec:'Intelligence',items:[
     {id:'leads',label:'Lead Intelligence',icon:'👥',screen:'leads'},
@@ -491,6 +578,7 @@ const KEYWORDS={
   users:['user','admin','access'],
   audit:['audit','log','history'],
   permissions:['permission','role','access','toggle','control'],
+  branding:['branding','brand','logo','color','colour','theme','white label','whitelabel','customize','customise'],
 };
 
 // ══════════════════════════════════════
@@ -593,6 +681,7 @@ function renderScreen(s){
     case 'users':renderUsers();break;
     case 'audit':renderAudit();break;
     case 'permissions':loadPermissions();break;
+    case 'branding':initBrandingScreen();break;
   }
 }
 
@@ -1137,6 +1226,123 @@ function logAction(action,target,scope,details){
   STATE.actionLog.unshift({ts:new Date().toISOString(),action,target,scope:scope||'global',details:details||{}});
   const b=document.getElementById('badge-audit');
   if(b){b.textContent=STATE.actionLog.length;b.classList.add('show');}
+}
+
+// ══════════════════════════════════════
+// ORG BRANDING
+// ══════════════════════════════════════
+let _brandingCurrentOrg = null;
+
+function initBrandingScreen(){
+  // Populate org dropdown from loaded STATE data
+  const sel = document.getElementById('branding-org-select');
+  if(!sel) return;
+  const current = sel.value;
+  // Rebuild options
+  while(sel.options.length > 1) sel.remove(1);
+  (STATE.orgs||[]).forEach(o=>{
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.name + (o.platform_slug ? ' · ' + o.platform_slug.toUpperCase() : '');
+    sel.appendChild(opt);
+  });
+  if(current) sel.value = current;
+}
+
+async function loadOrgBranding(){
+  const sel = document.getElementById('branding-org-select');
+  const orgId = sel && sel.value;
+  if(!orgId){ showToast('info','Select Org','Please choose an organization first.'); return; }
+
+  const loading = document.getElementById('branding-loading');
+  const form = document.getElementById('branding-form');
+  if(loading) loading.style.display = 'block';
+  if(form) form.style.display = 'none';
+
+  try{
+    const data = await apiGet('/god/orgs/'+orgId+'/branding');
+    _brandingCurrentOrg = orgId;
+    populateBrandingForm(data);
+    if(loading) loading.style.display = 'none';
+    if(form) form.style.display = 'block';
+  }catch(e){
+    if(loading) loading.style.display = 'none';
+    showToast('error','Load Failed', e.message);
+  }
+}
+
+function populateBrandingForm(d){
+  const s = id => document.getElementById(id);
+  const set = (id, val) => { const el=s(id); if(el) el.value = val||''; };
+  set('bf-brand-name', d.brand_name);
+  set('bf-tagline', d.tagline);
+  set('bf-support-email', d.support_email);
+  set('bf-email-sender', d.email_sender_name);
+  set('bf-logo-url', d.brand_logo_url);
+  set('bf-favicon-url', d.favicon_url);
+
+  const primary = d.brand_color_primary || '#2fb6ff';
+  const accent = d.brand_color_accent || '#1ef0a8';
+  set('bf-color-primary', primary);
+  set('bf-color-primary-hex', primary);
+  set('bf-color-accent', accent);
+  set('bf-color-accent-hex', accent);
+  updateColorPreview();
+  previewLogo();
+}
+
+function previewLogo(){
+  const url = (document.getElementById('bf-logo-url')||{}).value||'';
+  const img = document.getElementById('bf-logo-img');
+  const none = document.getElementById('bf-logo-none');
+  if(img && none){
+    if(url){ img.src=url; img.style.display='block'; none.style.display='none'; }
+    else { img.style.display='none'; none.style.display='block'; }
+  }
+}
+
+function syncColorPicker(which){
+  const hex = (document.getElementById('bf-color-'+which+'-hex')||{}).value||'';
+  if(/^#[0-9a-fA-F]{6}$/.test(hex)){
+    const picker = document.getElementById('bf-color-'+which);
+    if(picker) picker.value = hex;
+    updateColorPreview();
+  }
+}
+
+function updateColorPreview(){
+  const p = (document.getElementById('bf-color-primary')||{}).value;
+  const a = (document.getElementById('bf-color-accent')||{}).value;
+  const pp = document.getElementById('bfp-primary');
+  const pa = document.getElementById('bfp-accent');
+  if(pp && p) pp.style.background = p;
+  if(pa && a) pa.style.background = a;
+}
+
+function resetBrandingForm(){
+  if(_brandingCurrentOrg) loadOrgBranding();
+}
+
+async function saveBranding(){
+  if(!_brandingCurrentOrg){ showToast('info','No Org','Select an org first.'); return; }
+  const g = id => (document.getElementById(id)||{}).value||'';
+  const payload = {
+    brand_name: g('bf-brand-name')||null,
+    tagline: g('bf-tagline')||null,
+    support_email: g('bf-support-email')||null,
+    email_sender_name: g('bf-email-sender')||null,
+    brand_logo_url: g('bf-logo-url')||null,
+    favicon_url: g('bf-favicon-url')||null,
+    brand_color_primary: g('bf-color-primary-hex')||null,
+    brand_color_accent: g('bf-color-accent-hex')||null,
+  };
+  try{
+    await apiPatch('/god/orgs/'+_brandingCurrentOrg+'/branding', payload);
+    showToast('success','Branding Saved','Changes applied to the org.');
+    logAction('branding_update', _brandingCurrentOrg, 'global', payload);
+  }catch(e){
+    showToast('error','Save Failed', e.message);
+  }
 }
 
 // ══════════════════════════════════════

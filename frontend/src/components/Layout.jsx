@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, logout, getBranding, applyBrandingCSS, fetchAndStoreBranding, getOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { getCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
@@ -173,7 +173,7 @@ export default function Layout({ children }) {
   useEffect(() => {
     if (isElevated) return  // super admin / god admin: no org branding applied to their shell
     const stored = getBranding()
-    if (stored) applyBrandingCSS(stored)
+    if (stored) { applyBrandingCSS(stored); applyBrandingDOM(stored) }
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
   }, [isElevated, location.pathname])
 

@@ -730,3 +730,68 @@ def patch_role_config(
         god.email, body.role, body.permission, body.enabled
     )
     return {"role": body.role, "permission": body.permission, "enabled": body.enabled}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ORG BRANDING
+# ══════════════════════════════════════════════════════════════════════════════
+
+class OrgBrandingUpdate(BaseModel):
+    brand_name: Optional[str] = None
+    brand_logo_url: Optional[str] = None
+    brand_color_primary: Optional[str] = None
+    brand_color_accent: Optional[str] = None
+    favicon_url: Optional[str] = None
+    tagline: Optional[str] = None
+    support_email: Optional[str] = None
+    email_sender_name: Optional[str] = None
+
+
+def _branding_dict(org: Organization) -> dict:
+    return {
+        "org_id": org.id,
+        "org_name": org.name,
+        "brand_name": org.brand_name,
+        "brand_logo_url": org.brand_logo_url,
+        "brand_color_primary": org.brand_color_primary,
+        "brand_color_accent": org.brand_color_accent,
+        "favicon_url": org.favicon_url,
+        "tagline": org.tagline,
+        "support_email": org.support_email,
+        "email_sender_name": org.email_sender_name,
+    }
+
+
+@router.get("/orgs/{org_id}/branding")
+def get_org_branding(
+    org_id: str,
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Return branding config for any org (god_admin only)."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+    return _branding_dict(org)
+
+
+@router.patch("/orgs/{org_id}/branding")
+def patch_org_branding(
+    org_id: str,
+    body: OrgBrandingUpdate,
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Update branding fields for an org (god_admin only)."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    for field, value in body.dict(exclude_unset=True).items():
+        setattr(org, field, value)
+
+    db.commit()
+    db.refresh(org)
+
+    log.info("AUDIT: god_admin %s updated branding for org=%s", god.email, org_id)
+    return _branding_dict(org)

@@ -206,21 +206,42 @@ export function stopRefreshLoop() {
 
 export async function fetchAndStoreBranding() {
   try {
-    const data = await api.get('/org-settings/')
+    // Primary source: per-org branding set by god_admin in Command Center
+    const data = await api.get('/branding/org')
     const branding = {
-      brand_name: data.brand_name || data.name || 'BookaBoost',
+      brand_name: data.brand_name || null,
       brand_logo_url: data.brand_logo_url || null,
       brand_color_primary: data.brand_color_primary || null,
       brand_color_accent: data.brand_color_accent || null,
-      industry: data.industry || 'funeral',
-      enabled_features: data.enabled_features || null,
-      member_label: data.member_label || null,
-      members_label: data.members_label || null,
+      favicon_url: data.favicon_url || null,
+      tagline: data.tagline || null,
+      support_email: data.support_email || null,
+      email_sender_name: data.email_sender_name || null,
     }
     localStorage.setItem('bb_branding', JSON.stringify(branding))
     applyBrandingCSS(branding)
+    applyBrandingDOM(branding)
     return branding
-  } catch { return null }
+  } catch {
+    // Fall back to org-settings for backward compat
+    try {
+      const data = await api.get('/org-settings/')
+      const branding = {
+        brand_name: data.brand_name || data.name || null,
+        brand_logo_url: data.brand_logo_url || null,
+        brand_color_primary: data.brand_color_primary || null,
+        brand_color_accent: data.brand_color_accent || null,
+        favicon_url: null,
+        tagline: null,
+        support_email: null,
+        email_sender_name: null,
+      }
+      localStorage.setItem('bb_branding', JSON.stringify(branding))
+      applyBrandingCSS(branding)
+      applyBrandingDOM(branding)
+      return branding
+    } catch { return null }
+  }
 }
 
 export function getBranding() {
@@ -252,6 +273,24 @@ export function applyBrandingCSS(branding) {
     root.style.setProperty('--glow-green-sm', `0 0 14px ${hexToRgba(accent, 0.26)}`)
     root.style.setProperty('--glow-green-md', `0 0 30px ${hexToRgba(accent, 0.30)}`)
   }
+}
+
+export function applyBrandingDOM(branding) {
+  if (!branding) return
+
+  // Swap favicon if org has one set
+  if (branding.favicon_url) {
+    let link = document.querySelector("link[rel~='icon']")
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.href = branding.favicon_url
+  }
+
+  // Store tagline and support email for components to read via getBranding()
+  // (logo and brand_name are applied by Layout/Sidebar via getBranding())
 }
 
 function hexToRgba(hex, alpha) {

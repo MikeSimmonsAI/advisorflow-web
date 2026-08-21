@@ -19,8 +19,12 @@ CORS: allowed from any origin (public endpoint, no sensitive data)
 """
 
 import os
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+
+from app.deps import get_db, get_current_user
+from app.models.models import User, Organization
 
 router = APIRouter(prefix="/branding", tags=["branding"])
 
@@ -76,3 +80,37 @@ def get_branding(request: Request):
             return JSONResponse(content=config)
 
     return JSONResponse(content=_DEFAULT_BRAND)
+
+
+@router.get("/org")
+def get_org_branding(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the authenticated user's org branding from the database.
+    Called by the frontend on login to apply per-org white-label customization.
+    Falls back to None values if the org has no custom branding set.
+    """
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not org:
+        return {
+            "brand_name": None,
+            "brand_logo_url": None,
+            "brand_color_primary": None,
+            "brand_color_accent": None,
+            "favicon_url": None,
+            "tagline": None,
+            "support_email": None,
+            "email_sender_name": None,
+        }
+    return {
+        "brand_name": org.brand_name,
+        "brand_logo_url": org.brand_logo_url,
+        "brand_color_primary": org.brand_color_primary,
+        "brand_color_accent": org.brand_color_accent,
+        "favicon_url": getattr(org, "favicon_url", None),
+        "tagline": getattr(org, "tagline", None),
+        "support_email": getattr(org, "support_email", None),
+        "email_sender_name": getattr(org, "email_sender_name", None),
+    }

@@ -192,10 +192,14 @@ class Organization(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     # White label / branding
-    brand_name = Column(String, nullable=True)        # overrides "BookaBoost" in UI
-    brand_logo_url = Column(String, nullable=True)    # URL to org logo
+    brand_name = Column(String, nullable=True)            # overrides "BookaBoost" in UI
+    brand_logo_url = Column(String, nullable=True)        # URL to org logo
     brand_color_primary = Column(String, nullable=True)   # hex e.g. "#2fb6ff"
     brand_color_accent = Column(String, nullable=True)    # hex e.g. "#1ef0a8"
+    favicon_url = Column(String, nullable=True)           # URL to org favicon
+    tagline = Column(String, nullable=True)               # short tagline shown in UI
+    support_email = Column(String, nullable=True)         # support contact shown in app
+    email_sender_name = Column(String, nullable=True)     # "From" name on outbound emails
     industry = Column(String, default="funeral")          # funeral, roofing, insurance, etc.
 
     # Org contact details — shown on public booking pages instead of hardcoded values
