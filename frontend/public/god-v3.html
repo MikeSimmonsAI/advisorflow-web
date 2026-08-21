@@ -638,12 +638,13 @@ const PM={
 
 async function loadRealData(){
   try{
-    const [stats,platforms,orgsData,leadsData,usersData]=await Promise.all([
+    const [stats,platforms,orgsData,leadsData,usersData,cadencesData]=await Promise.all([
       apiGet('/god/stats'),
       apiGet('/god/platforms'),
       apiGet('/god/orgs?limit=100'),
       apiGet('/god/leads?limit=200'),
       apiGet('/god/users?limit=100'),
+      apiGet('/god/cadences').catch(()=>({cadences:[]})),
     ]);
     STATE.kpis.totalLeads=stats.total_leads??STATE.kpis.totalLeads;
     STATE.kpis.activeOrgs=stats.active_orgs??STATE.kpis.activeOrgs;
@@ -667,6 +668,9 @@ async function loadRealData(){
     }
     if(usersData.users?.length){
       STATE.users=usersData.users.map(u=>({id:u.id,name:u.name||u.email,email:u.email,orgId:u.organization_id,platform:'global',role:u.role,status:u.is_active?'active':'inactive',lastLogin:(u.last_login||'').slice(0,10)||'—'}));
+    }
+    if(cadencesData.cadences?.length){
+      STATE.cadences=cadencesData.cadences;
     }
     STATE.kpis.mrr=STATE.organizations.reduce((s,o)=>s+o.mrr,0);
     renderScreen(STATE.currentScreen);
@@ -863,22 +867,39 @@ function renderPipeline(){
 function renderConversation(){
   const scope=STATE.currentScope;
   const cads=scope==='global'?STATE.cadences:STATE.cadences.filter(c=>c.platform===scope);
+  if(!cads.length){
+    document.getElementById('cadence-list').innerHTML='<div class="empty">No cadence activity in this scope — leads will appear here once outreach sequences are running</div>';
+    return;
+  }
   document.getElementById('cadence-list').innerHTML=cads.map(c=>{
     const pm=PM[c.platform]||{label:c.platform,color:'#4a9eff'};
+    const statusCls=c.status==='active'?'active':c.status==='configured'?'pro':'inactive';
+    // Support both old (template-level) and new (org-level) data shapes
+    const enrolled=c.total_enrolled??c.sent??0;
+    const activeCount=c.active_count??0;
+    const replied=c.replied_count??0;
+    const booked=c.booked_count??0;
+    const replyRate=c.reply_rate!=null?c.reply_rate:(c.replyRate??0);
+    const bookRate=c.book_rate!=null?c.book_rate:(c.bookRate??0);
+    const label=c.org_name??c.name??'Unknown';
+    const templates=c.templates_count!=null?`<div style="font-size:11px;color:var(--text-3);margin-top:2px">${c.templates_count} template${c.templates_count!==1?'s':''} configured</div>`:'';
     return `<div class="card mb16">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <div style="flex:1"><strong style="font-size:14px">${c.name}</strong><div style="font-size:11px;color:var(--text-3);margin-top:2px"><span style="color:${pm.color}">${pm.label}</span></div></div>
-        <span class="badge badge-${c.status==='active'?'active':'inactive'}">${c.status.toUpperCase()}</span>
-        <button class="btn btn-xs btn-red" onclick="STATE.cadences=STATE.cadences.filter(x=>x.id!==${c.id});renderConversation();showToast('warning','Deleted','${c.name} removed')">Delete</button>
+        <div style="flex:1">
+          <strong style="font-size:14px">${label}</strong>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px"><span style="color:${pm.color}">${pm.label}</span></div>
+          ${templates}
+        </div>
+        <span class="badge badge-${statusCls}">${c.status.toUpperCase()}</span>
       </div>
       <div class="grid-4">
-        <div><div class="kpi-label">Sent</div><div class="mono" style="font-size:18px;font-weight:700">${c.sent.toLocaleString()}</div></div>
-        <div><div class="kpi-label">Open Rate</div><div class="mono t-blue" style="font-size:18px;font-weight:700">${Math.round(c.openRate*100)}%</div></div>
-        <div><div class="kpi-label">Reply Rate</div><div class="mono t-amber" style="font-size:18px;font-weight:700">${Math.round(c.replyRate*100)}%</div></div>
-        <div><div class="kpi-label">Book Rate</div><div class="mono t-green" style="font-size:18px;font-weight:700">${Math.round(c.bookRate*100)}%</div></div>
+        <div><div class="kpi-label">Enrolled</div><div class="mono" style="font-size:18px;font-weight:700">${enrolled.toLocaleString()}</div></div>
+        <div><div class="kpi-label">Active Now</div><div class="mono t-blue" style="font-size:18px;font-weight:700">${activeCount.toLocaleString()}</div></div>
+        <div><div class="kpi-label">Reply Rate</div><div class="mono t-amber" style="font-size:18px;font-weight:700">${Math.round(replyRate*100)}%</div></div>
+        <div><div class="kpi-label">Book Rate</div><div class="mono t-green" style="font-size:18px;font-weight:700">${Math.round(bookRate*100)}%</div></div>
       </div>
     </div>`;
-  }).join('')||'<div class="empty">No cadences in this scope</div>';
+  }).join('');
 }
 
 // ══════════════════════════════════════
@@ -958,34 +979,95 @@ function renderRevenue(){
 // ══════════════════════════════════════
 // HEALTH
 // ══════════════════════════════════════
-function renderHealth(){
-  const svcs=[{k:'api',l:'API Gateway'},{k:'db',l:'Database'},{k:'email',l:'Email Service'},{k:'sms',l:'SMS / Twilio'},{k:'webhooks',l:'Webhooks'},{k:'queue',l:'Job Queue'}];
-  const ok=Object.values(STATE.systemHealth).every(v=>v==='operational');
-  document.getElementById('health-content').innerHTML=`
-    <div class="card mb16" style="text-align:center;padding:20px;border-color:${ok?'rgba(30,240,168,0.3)':'rgba(255,178,56,0.3)'}">
-      <div style="font-size:24px;font-weight:800;color:${ok?'var(--green)':'var(--amber)'}">${ok?'ALL SYSTEMS OPERATIONAL':'DEGRADED SERVICE DETECTED'}</div>
-      <div class="muted mt8">Last checked: ${new Date().toLocaleTimeString()}</div>
-    </div>
-    ${svcs.map(s=>{const st=STATE.systemHealth[s.k]||'operational';const good=st==='operational';return`<div class="health-item"><div class="hdot ${good?'ok':'warn'}"></div><div class="hname">${s.l}</div><div class="hstat ${good?'ok':'warn'}">${st}</div></div>`;}).join('')}
-  `;
+const SVC_LABELS={api:'API Gateway',db:'Database',email:'Email / Resend',sms:'SMS / Twilio',webhooks:'Webhooks',queue:'Job Queue'};
+
+async function renderHealth(){
+  const el=document.getElementById('health-content');
+  el.innerHTML=`<div class="empty" style="padding:30px">Checking services…</div>`;
+  try{
+    const data=await apiGet('/god/health');
+    const svcs=data.services||{};
+    const overall=data.overall||'operational';
+    const ok=overall==='operational';
+    const checkedAt=data.checked_at?new Date(data.checked_at).toLocaleTimeString():new Date().toLocaleTimeString();
+    // Cache into STATE for the decision queue
+    STATE.systemHealth=svcs;
+    el.innerHTML=`
+      <div class="card mb16" style="text-align:center;padding:20px;border-color:${ok?'rgba(30,240,168,0.3)':'rgba(255,178,56,0.3)'}">
+        <div style="font-size:24px;font-weight:800;color:${ok?'var(--green)':'var(--amber)'}">${ok?'ALL SYSTEMS OPERATIONAL':'DEGRADED SERVICE DETECTED'}</div>
+        <div class="muted mt8">Live check · ${checkedAt}</div>
+      </div>
+      ${Object.entries(svcs).map(([k,v])=>{
+        const good=v==='operational';
+        const warn=!good;
+        const dot=good?'ok':'warn';
+        const label=SVC_LABELS[k]||k;
+        return`<div class="health-item"><div class="hdot ${dot}"></div><div class="hname">${label}</div><div class="hstat ${dot}">${v}</div></div>`;
+      }).join('')}
+      <div style="text-align:right;margin-top:12px"><button class="btn btn-sm" onclick="renderHealth()">↻ Re-check</button></div>
+    `;
+  }catch(e){
+    el.innerHTML=`<div class="empty" style="padding:30px;color:var(--red)">Health check failed: ${e.message}</div>`;
+  }
 }
 
 // ══════════════════════════════════════
 // USERS
 // ══════════════════════════════════════
+async function revokeUser(userId, userName, btn){
+  if(!confirm(`Deactivate ${userName}?\n\nThis blocks their login immediately. You can reactivate them later.`)) return;
+  btn.disabled=true;btn.textContent='…';
+  try{
+    await apiPost('/god/users/'+userId+'/deactivate',{});
+    // Update local state
+    const u=STATE.users.find(x=>x.id==userId);
+    if(u) u.status='inactive';
+    renderUsers();
+    showToast('warning','Access Revoked',userName+' has been deactivated');
+    logAction('revoke_user',userName,'global');
+  }catch(e){
+    btn.disabled=false;btn.textContent='Revoke';
+    showToast('error','Revoke Failed',e.message);
+  }
+}
+
+async function restoreUser(userId, userName, btn){
+  btn.disabled=true;btn.textContent='…';
+  try{
+    await apiPost('/god/users/'+userId+'/activate',{});
+    const u=STATE.users.find(x=>x.id==userId);
+    if(u) u.status='active';
+    renderUsers();
+    showToast('success','Access Restored',userName+' has been reactivated');
+    logAction('restore_user',userName,'global');
+  }catch(e){
+    btn.disabled=false;btn.textContent='Restore';
+    showToast('error','Restore Failed',e.message);
+  }
+}
+
 function renderUsers(){
-  const scope=STATE.currentScope;
   const users=STATE.users;
   document.getElementById('users-sub').textContent=`${users.length} user${users.length!==1?'s':''} with platform access`;
-  document.getElementById('users-tbody').innerHTML=users.length?users.map(u=>`<tr>
-    <td><strong>${u.name}</strong></td>
-    <td class="mono" style="font-size:11px">${u.email}</td>
-    <td><span class="badge badge-${u.role==='god_admin'?'god':u.role==='super_admin'?'super':'active'}">${u.role.replace(/_/g,' ')}</span></td>
-    <td>${(PM[u.platform]||{label:u.platform==='global'?'All Platforms':u.platform}).label}</td>
-    <td><span class="badge badge-${u.status}">${u.status}</span></td>
-    <td class="muted">${u.lastLogin||'—'}</td>
-    <td><button class="btn btn-xs btn-red" onclick="showToast('warning','Revoked','${u.name} access revoked')">Revoke</button></td>
-  </tr>`).join(''):`<tr><td colspan="7"><div class="empty">No users found</div></td></tr>`;
+  document.getElementById('users-tbody').innerHTML=users.length?users.map(u=>{
+    const isGod=u.role==='god_admin';
+    const inactive=u.status==='inactive';
+    const roleCls=isGod?'god':u.role==='super_admin'?'super':'active';
+    const actionBtn=isGod
+      ?`<span style="font-size:10px;color:var(--text-3)">Protected</span>`
+      :inactive
+        ?`<button class="btn btn-xs btn-green" onclick="restoreUser('${u.id}','${u.name.replace(/'/g,"\\'")}',this)">Restore</button>`
+        :`<button class="btn btn-xs btn-red" onclick="revokeUser('${u.id}','${u.name.replace(/'/g,"\\'")}',this)">Revoke</button>`;
+    return`<tr style="${inactive?'opacity:.55':''}">
+      <td><strong>${u.name}</strong></td>
+      <td class="mono" style="font-size:11px">${u.email}</td>
+      <td><span class="badge badge-${roleCls}">${u.role.replace(/_/g,' ')}</span></td>
+      <td>${(PM[u.platform]||{label:u.platform==='global'?'All Platforms':u.platform}).label}</td>
+      <td><span class="badge badge-${u.status}">${u.status}</span></td>
+      <td class="muted">${u.lastLogin||'—'}</td>
+      <td>${actionBtn}</td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="7"><div class="empty">No users found</div></td></tr>`;
 }
 
 // ══════════════════════════════════════

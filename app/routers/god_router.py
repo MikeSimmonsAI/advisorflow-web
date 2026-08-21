@@ -18,10 +18,14 @@ Endpoints:
   PATCH /god/users/{user_id}/role        — promote/demote a user's role
   POST  /god/users/{user_id}/deactivate  — deactivate any account
   POST  /god/users/{user_id}/activate    — reactivate any account
+  POST  /god/users/{user_id}/force-logout — invalidate session token (kick without deactivating)
   POST  /god/orgs/{org_id}/impersonate   — return a short-lived org context token
+  GET   /god/health                      — real platform service health check
+  GET   /god/cadences                    — cadence stats per org for Conversation Engine
 """
 
 import logging
+import os
 import re
 import secrets
 import string
@@ -34,7 +38,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god
-from app.models.models import User, Organization, Lead, Platform
+from app.models.models import User, Organization, Lead, Platform, CadenceState, CadenceTemplate
 from app.services.auth_service import hash_password
 
 log = logging.getLogger(__name__)
@@ -773,6 +777,154 @@ def get_org_branding(
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")
     return _branding_dict(org)
+
+
+@router.post("/users/{user_id}/force-logout")
+def god_force_logout_user(
+    user_id: str,
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """
+    Invalidate a user's session token without deactivating the account.
+    Their next API request returns 401 and the frontend redirects to login.
+    god_admin can force-logout any non-god_admin account.
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == god.id:
+        raise HTTPException(status_code=400, detail="Cannot force-logout your own account.")
+    if target.role == "god_admin":
+        raise HTTPException(status_code=400, detail="Cannot force-logout another god_admin account.")
+
+    target.session_token = None
+    db.commit()
+
+    log.info("AUDIT: god_admin %s force-logged-out user %s (%s)", god.email, target.email, user_id)
+    return {"success": True, "message": f"{target.name or target.email} has been kicked out of their session."}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PLATFORM HEALTH — real service checks
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/health")
+def god_platform_health(
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """
+    Real platform-wide health check for the Command Center.
+    Checks each service by attempting an actual operation or reading env config.
+    """
+    results = {}
+
+    # API: always operational if this request reached us
+    results["api"] = "operational"
+
+    # Database: try a trivial query
+    try:
+        db.execute(text("SELECT 1"))
+        results["db"] = "operational"
+    except Exception:
+        results["db"] = "degraded"
+
+    # Email (Resend): check env var presence
+    resend_key = os.environ.get("RESEND_API_KEY", "")
+    results["email"] = "operational" if resend_key and resend_key.startswith("re_") else "not configured"
+
+    # SMS (Twilio): check env vars
+    twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    twilio_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    twilio_number = os.environ.get("TWILIO_PHONE_NUMBER", "")
+    if twilio_sid and twilio_token and twilio_number:
+        results["sms"] = "operational"
+    elif twilio_sid or twilio_token:
+        results["sms"] = "misconfigured"
+    else:
+        results["sms"] = "not configured"
+
+    # Webhooks: no dedicated service — mark as operational
+    results["webhooks"] = "operational"
+
+    # Job Queue: background tasks run inline on Render; mark as operational
+    results["queue"] = "operational"
+
+    # Derive overall status
+    degraded_services = [k for k, v in results.items() if v not in ("operational",)]
+    overall = "operational" if not degraded_services else "degraded"
+
+    return {
+        "overall": overall,
+        "services": results,
+        "checked_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CADENCES — org-level stats for Conversation Engine
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/cadences")
+def god_list_cadences(
+    god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """
+    Cadence stats per org for the Conversation Engine screen.
+    Returns per-org counts of active/replied/booked cadence states
+    plus number of templates configured.
+    """
+    from sqlalchemy import case as sa_case
+
+    orgs = db.query(Organization).filter(Organization.is_active == True).all()
+    result = []
+
+    for org in orgs:
+        # Template count for this org
+        template_count = db.query(func.count(CadenceTemplate.id)).filter(
+            CadenceTemplate.organization_id == org.id,
+            CadenceTemplate.is_active == True,
+        ).scalar() or 0
+
+        # Cadence state counts for leads in this org
+        lead_ids_sub = db.query(Lead.id).filter(Lead.organization_id == org.id).subquery()
+        row = db.query(
+            func.count().label("total"),
+            func.sum(sa_case((CadenceState.status == "active", 1), else_=0)).label("active_count"),
+            func.sum(sa_case((CadenceState.status == "stopped_replied", 1), else_=0)).label("replied"),
+            func.sum(sa_case((CadenceState.status == "stopped_booked", 1), else_=0)).label("booked"),
+            func.sum(sa_case((CadenceState.status == "completed", 1), else_=0)).label("completed"),
+        ).filter(CadenceState.lead_id.in_(lead_ids_sub)).one()
+
+        total = row.total or 0
+        active_count = int(row.active_count or 0)
+        replied = int(row.replied or 0)
+        booked = int(row.booked or 0)
+
+        # Only include orgs that have at least some cadence activity or templates
+        if total == 0 and template_count == 0:
+            continue
+
+        platform = db.query(Platform).filter(Platform.id == org.platform_id).first()
+        platform_slug = platform.slug if platform else "bookaboost"
+
+        result.append({
+            "org_id": org.id,
+            "org_name": org.name,
+            "platform": platform_slug,
+            "status": "active" if active_count > 0 else ("configured" if template_count > 0 else "inactive"),
+            "templates_count": template_count,
+            "total_enrolled": total,
+            "active_count": active_count,
+            "replied_count": replied,
+            "booked_count": booked,
+            "reply_rate": round(replied / total, 3) if total > 0 else 0,
+            "book_rate": round(booked / total, 3) if total > 0 else 0,
+        })
+
+    return {"cadences": result, "total": len(result)}
 
 
 @router.patch("/orgs/{org_id}/branding")
