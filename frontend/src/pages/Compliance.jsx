@@ -25,6 +25,57 @@ function formatDate(value) {
   }
 }
 
+function formatPhone(raw) {
+  const digits = (raw || '').replace(/\D/g, '')
+  // 11-digit US format stored as 1XXXXXXXXXX
+  if (digits.length === 11 && digits[0] === '1') {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`
+  }
+  return raw || '—'
+}
+
+/** Confirmation modal for high-stakes removal */
+function ConfirmModal({ entry, onConfirm, onCancel, busy }) {
+  if (!entry) return null
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal-box" onClick={e => e.stopPropagation()}>
+        <div className="modal-icon">⚠️</div>
+        <h3>Remove from Suppression List?</h3>
+        <p>
+          <span className="modal-phone">{formatPhone(entry.phone)}</span> will become
+          contactable again. This is a high-stakes action and will be logged.
+        </p>
+        <p className="modal-reason">Reason on record: <em>{entry.reason}</em></p>
+        <div className="modal-actions">
+          <button className="ghost-button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="danger-button" onClick={onConfirm} disabled={busy}>
+            {busy ? 'Removing…' : 'Yes, Remove'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function exportCsv(entries) {
+  const header = ['Phone', 'Reason', 'Source', 'Added']
+  const rows = entries.map(e => [
+    formatPhone(e.phone),
+    `"${(e.reason || '').replace(/"/g, '""')}"`,
+    e.source === 'REPLY_STOP' || e.source === 'reply_stop' ? 'Reply STOP' : 'Manual',
+    formatDate(e.added_at),
+  ])
+  const csv = [header, ...rows].map(r => r.join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `dnc-suppression-list-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function Compliance() {
   const currentUser = getCurrentUser()
   const isAdmin = ['org_admin', 'super_admin', 'god_admin'].includes(currentUser?.role)
@@ -39,6 +90,7 @@ export default function Compliance() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [confirmEntry, setConfirmEntry] = useState(null) // entry pending confirmation
 
   const manualPercent = useMemo(() => {
     if (!stats.total) return 0
@@ -93,11 +145,17 @@ export default function Compliance() {
     }
   }
 
-  async function removeEntry(entryId) {
+  function requestRemove(entry) {
+    setConfirmEntry(entry)
+  }
+
+  async function confirmRemove() {
+    if (!confirmEntry) return
     setError('')
     setBusy(true)
     try {
-      await api.delete(`/compliance/suppression-list/${entryId}`)
+      await api.delete(`/compliance/suppression-list/${confirmEntry.id}`)
+      setConfirmEntry(null)
       await loadSuppressionList()
     } catch (err) {
       setError(err.message || 'Could not remove suppression entry.')
@@ -112,6 +170,13 @@ export default function Compliance() {
 
   return (
     <div className="compliance-page">
+      <ConfirmModal
+        entry={confirmEntry}
+        onConfirm={confirmRemove}
+        onCancel={() => setConfirmEntry(null)}
+        busy={busy}
+      />
+
       <section className="compliance-hero glass-panel">
         <div>
           <h1>DNC / Suppression List</h1>
@@ -155,7 +220,13 @@ export default function Compliance() {
           </div>
           <label>
             Phone number
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="214-555-0101" required />
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="214-555-0101"
+              required
+            />
+            <span className="field-hint">Enter any format — we'll normalize it automatically.</span>
           </label>
           <label>
             Reason <span style={{ fontWeight: 400, opacity: 0.6 }}>(required)</span>
@@ -174,7 +245,13 @@ export default function Compliance() {
             </div>
             <label>
               Phone number
-              <input value={dncPhone} onChange={(e) => setDncPhone(e.target.value)} placeholder="972-555-0144" required />
+              <input
+                value={dncPhone}
+                onChange={(e) => setDncPhone(e.target.value)}
+                placeholder="972-555-0144"
+                required
+              />
+              <span className="field-hint">Enter any format — we'll normalize it automatically.</span>
             </label>
             <label>
               Reason
@@ -197,13 +274,23 @@ export default function Compliance() {
             <p className="eyebrow green">Protected Numbers</p>
             <h2>Suppression List</h2>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               className="suppression-search"
               placeholder="Search phone or reason…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
+            {entries.length > 0 && (
+              <button
+                className="ghost-button export-btn"
+                onClick={() => exportCsv(filtered.length < entries.length ? filtered : entries)}
+                type="button"
+                title="Download as CSV"
+              >
+                ↓ Export CSV
+              </button>
+            )}
             <button className="ghost-button" onClick={loadSuppressionList} disabled={loading || busy}>Refresh</button>
           </div>
         </div>
@@ -229,7 +316,7 @@ export default function Compliance() {
               ) : (
                 filtered.map((entry) => (
                   <tr key={entry.id}>
-                    <td className="phone-cell">{entry.phone}</td>
+                    <td className="phone-cell">{formatPhone(entry.phone)}</td>
                     <td>{entry.reason}</td>
                     <td>
                       <span className={`source-pill ${entry.source}`}>
@@ -239,7 +326,12 @@ export default function Compliance() {
                     <td>{formatDate(entry.added_at)}</td>
                     {isAdmin && (
                       <td className="actions-cell">
-                        <button className="remove-button" onClick={() => removeEntry(entry.id)} disabled={busy} type="button">
+                        <button
+                          className="remove-button"
+                          onClick={() => requestRemove(entry)}
+                          disabled={busy}
+                          type="button"
+                        >
                           Remove
                         </button>
                       </td>
@@ -250,6 +342,12 @@ export default function Compliance() {
             </tbody>
           </table>
         </div>
+        {!loading && filtered.length > 0 && (
+          <p className="suppression-count">
+            Showing {filtered.length} of {entries.length} entr{entries.length === 1 ? 'y' : 'ies'}
+            {search ? ` matching "${search}"` : ''}
+          </p>
+        )}
         {!isAdmin && entries.length > 0 && (
           <p className="compliance-readonly-note">
             🔒 Only organization admins can remove entries from this list.

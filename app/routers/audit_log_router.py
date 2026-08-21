@@ -7,8 +7,8 @@ defines the persistence helper and the read-only admin endpoint.
 """
 
 import json
-from datetime import datetime
-from typing import Any
+from datetime import datetime, date
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
@@ -83,11 +83,29 @@ class AuditLogListResponse(BaseModel):
     entries: list[AuditLogEntryOut]
 
 
+@router.get("/actions")
+def list_audit_actions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Return distinct action names for this org — used to populate the action filter dropdown."""
+    from sqlalchemy import text
+    rows = db.execute(text("""
+        SELECT DISTINCT action FROM audit_log_entries
+        WHERE organization_id = :org_id
+        ORDER BY action
+    """), {"org_id": current_user.organization_id}).mappings().all()
+    return {"actions": [r["action"] for r in rows]}
+
+
 @router.get("", response_model=AuditLogListResponse)
 def list_audit_log(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
     action: str | None = Query(default=None, description="Optional exact action filter."),
+    actor: str | None = Query(default=None, description="Filter by actor name (partial match)."),
+    date_from: Optional[date] = Query(default=None, description="Start date (inclusive), YYYY-MM-DD."),
+    date_to: Optional[date] = Query(default=None, description="End date (inclusive), YYYY-MM-DD."),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
@@ -102,6 +120,31 @@ def list_audit_log(
 
     if action:
         query = query.filter(AuditLogEntry.action == action)
+
+    if date_from:
+        from datetime import datetime as dt
+        query = query.filter(AuditLogEntry.created_at >= dt.combine(date_from, dt.min.time()))
+
+    if date_to:
+        from datetime import datetime as dt, timedelta
+        query = query.filter(AuditLogEntry.created_at < dt.combine(date_to, dt.min.time()) + timedelta(days=1))
+
+    # Actor name filter: resolve matching user IDs first, then filter by them
+    if actor:
+        matched_actors = (
+            db.query(User.id)
+            .filter(
+                User.organization_id == current_user.organization_id,
+                User.full_name.ilike(f"%{actor}%"),
+            )
+            .all()
+        )
+        actor_ids = [row[0] for row in matched_actors]
+        if actor_ids:
+            query = query.filter(AuditLogEntry.actor_user_id.in_(actor_ids))
+        else:
+            # No matching users — return empty result set
+            query = query.filter(AuditLogEntry.actor_user_id == "__no_match__")
 
     total = query.count()
     entries = (
