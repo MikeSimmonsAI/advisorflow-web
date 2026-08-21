@@ -1259,20 +1259,33 @@ function logAction(action,target,scope,details){
 // ══════════════════════════════════════
 let _brandingCurrentOrg = null;
 
-function initBrandingScreen(){
-  // Populate org dropdown from loaded STATE data
+async function initBrandingScreen(){
   const sel = document.getElementById('branding-org-select');
   if(!sel) return;
   const current = sel.value;
-  // Rebuild options
-  while(sel.options.length > 1) sel.remove(1);
-  (STATE.orgs||[]).forEach(o=>{
-    const opt = document.createElement('option');
-    opt.value = o.id;
-    opt.textContent = o.name + (o.platform_slug ? ' · ' + o.platform_slug.toUpperCase() : '');
-    sel.appendChild(opt);
-  });
-  if(current) sel.value = current;
+
+  // Always fetch fresh from API — STATE.organizations may have stale placeholder data
+  try{
+    const data = await apiGet('/god/orgs?limit=200');
+    const orgs = Array.isArray(data) ? data : (data.orgs || data.organizations || data.items || []);
+    while(sel.options.length > 1) sel.remove(1);
+    orgs.forEach(o=>{
+      const opt = document.createElement('option');
+      opt.value = o.id;
+      opt.textContent = o.name;
+      sel.appendChild(opt);
+    });
+    if(current) sel.value = current;
+    if(orgs.length === 0){
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(no organizations found)';
+      opt.disabled = true;
+      sel.appendChild(opt);
+    }
+  }catch(e){
+    showToast('error','Failed to load orgs', e.message);
+  }
 }
 
 async function loadOrgBranding(){
