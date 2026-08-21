@@ -136,23 +136,50 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
     }
 
 
+@router.post("/start-all-eligible")
+def start_all_eligible(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """Start cadence for every eligible lead in the org that isn't already in one."""
+    from app.services.cadence_service import start_cadence
+    leads = (
+        db.query(Lead)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.status == "new",
+            Lead.is_duplicate.is_(False),
+        )
+        .all()
+    )
+    started, skipped = 0, 0
+    for lead in leads:
+        state = start_cadence(db, lead)
+        if state:
+            started += 1
+        else:
+            skipped += 1
+    db.commit()
+    return {"started": started, "skipped": skipped}
+
+
 @router.get("/active")
 def list_active_cadences(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    states = (
+    is_admin = current_user.role in ("org_admin", "super_admin", "god_admin")
+    query = (
         db.query(CadenceState)
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
             Lead.organization_id == current_user.organization_id,
-            Lead.assigned_to_id == current_user.id,
             CadenceState.status.in_(["active", "paused"]),
         )
-        .order_by(CadenceState.next_touch_due_at.asc())
-        .all()
     )
+    # Advisors only see leads assigned to them; admins see the whole org
+    if not is_admin:
+        query = query.filter(Lead.assigned_to_id == current_user.id)
+    states = query.order_by(CadenceState.next_touch_due_at.asc()).all()
 
     results = []
     for state in states:
         lead = state.lead
+        advisor = lead.assigned_to
         results.append({
             "cadence_state_id": state.id,
             "lead_id": lead.id,
@@ -164,5 +191,6 @@ def list_active_cadences(db: Session = Depends(get_db), current_user: User = Dep
             "total_touches": 9,
             "next_touch_due_at": state.next_touch_due_at,
             "cadence_started_at": state.cadence_started_at,
+            "advisor_name": (advisor.full_name or advisor.email) if advisor else None,
         })
     return results

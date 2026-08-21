@@ -251,7 +251,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
         {/* Header */}
         <div className="cf-header">
           <div className="cf-header-left">
-            <div className="cf-header-title">📁 Case File</div>
+            <div className="cf-header-title">📋 Client Record</div>
             <div className="cf-header-sub">
               {lead?.first_name} {lead?.last_name}
               {lead?.phone && <span className="cf-header-phone"> · {lead.phone}</span>}
@@ -539,7 +539,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
             <div className="cf-btn cf-btn--ghost" onClick={onClose}>Cancel</div>
             <div className={`cf-btn cf-btn--primary ${saving ? 'cf-btn--loading' : ''}`}
               onClick={saving ? null : handleSave}>
-              {saving ? '⏳ Saving...' : selectedFileId ? '💾 Save Changes' : '💾 Create Case File'}
+              {saving ? '⏳ Saving...' : selectedFileId ? '💾 Save Changes' : '💾 Create Client Record'}
             </div>
           </div>
         </div>

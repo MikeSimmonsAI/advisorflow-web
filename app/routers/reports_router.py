@@ -32,10 +32,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, distinct
 from sqlalchemy.orm import Session
 
+import json
 from app.deps import get_db, require_admin
 from app.models.models import (
     User, Lead, Message, Reply, ReplyClassification, BookingLink,
-    LeadOutcome,
+    LeadOutcome, CRMContact, Organization,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -362,4 +363,78 @@ def revenue_by_period(
         "total_sales": len(sale_outcomes),
         "by_advisor": by_advisor,
         "product_mix": product_mix,
+    }
+
+
+@router.get("/crm-summary")
+def crm_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    CRM overview for Reports page:
+    - Total contacts by stage
+    - Custom field fill rates and value breakdowns
+    """
+    org_id = current_user.organization_id
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+
+    # Stage breakdown
+    contacts = db.query(CRMContact).filter(
+        CRMContact.organization_id == org_id,
+        CRMContact.is_archived == False,
+    ).all()
+
+    stage_counts: dict[str, int] = {}
+    for c in contacts:
+        stage_counts[c.stage or "unknown"] = stage_counts.get(c.stage or "unknown", 0) + 1
+
+    total = len(contacts)
+
+    # Custom field schema
+    custom_fields = []
+    if org and org.crm_custom_fields:
+        try:
+            custom_fields = json.loads(org.crm_custom_fields)
+        except Exception:
+            custom_fields = []
+
+    # Custom field fill rates + value counts
+    field_stats = []
+    for field in custom_fields:
+        key = field.get("key")
+        if not key:
+            continue
+        filled = 0
+        value_counts: dict[str, int] = {}
+        for c in contacts:
+            raw = None
+            if c.custom_data:
+                try:
+                    data = json.loads(c.custom_data) if isinstance(c.custom_data, str) else c.custom_data
+                    raw = data.get(key)
+                except Exception:
+                    raw = None
+            if raw not in (None, "", []):
+                filled += 1
+                val_str = str(raw)
+                value_counts[val_str] = value_counts.get(val_str, 0) + 1
+
+        fill_rate = round(filled / total * 100, 1) if total > 0 else 0
+        # For dropdown fields, return top value counts; for others, just fill rate
+        stat = {
+            "key": key,
+            "label": field.get("label", key),
+            "type": field.get("type", "text"),
+            "filled": filled,
+            "fill_rate_pct": fill_rate,
+        }
+        if field.get("type") == "dropdown":
+            stat["value_counts"] = sorted(value_counts.items(), key=lambda x: -x[1])[:10]
+        field_stats.append(stat)
+
+    return {
+        "total_contacts": total,
+        "stage_counts": stage_counts,
+        "custom_field_stats": field_stats,
     }

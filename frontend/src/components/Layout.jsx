@@ -7,59 +7,65 @@ import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
 import './Layout.css'
 
-// Detect which platform brand is running on this hostname — resolved once at module
-// load time so it never changes mid-session.
 const PLATFORM_THEME = detectTheme()
 const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 
-// Advisor-level nav — every logged-in user sees these
-const NAV_ITEMS = [
-  { to: '/', label: 'Overview', icon: 'grid' },
-  { to: '/leads', label: 'Leads', icon: 'users' },
-  { to: '/replies', label: 'Replies', icon: 'message' },
-  { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
-  { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
-  { to: '/activity', label: 'Activity', icon: 'send' },
-  { to: '/availability', label: 'Availability', icon: 'calendar' },
-  { to: '/crm', label: 'CRM', icon: 'database' },
-  { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
-  { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
+// ── ADVISOR TOOLS ─────────────────────────────────────────────────────────────
+// Core tools every logged-in user sees — no dropdowns, always visible
+const ADVISOR_NAV = [
+  { to: '/',             label: 'Overview',    icon: 'grid' },
+  { to: '/leads',        label: 'Leads',       icon: 'users' },
+  { to: '/replies',      label: 'Replies',     icon: 'message' },
+  { to: '/crm',          label: 'CRM',         icon: 'database' },
+  { to: '/ai-hub',       label: 'AI Hub',      icon: 'cpu' },
+  { to: '/email-queue',  label: 'Email Queue', icon: 'mail' },
+  { to: '/availability', label: 'Availability',icon: 'calendar' },
+  { to: '/settings',     label: 'Settings',    icon: 'settings' },
+  // Fiber-only — hidden unless org industry = fiber
   { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
 ]
 
-// Admin-only nav items — always visible to org_admin and above (no feature flag)
-// Cadence and System Health are org-level tools, not advisor tools.
-const ADMIN_ONLY_NAV_ITEMS = [
-  { to: '/cadence', label: 'Cadence', icon: 'repeat' },
-  { to: '/system-health', label: 'System Health', icon: 'activity' },
+// ── ADMIN TOOLS (grouped into dropdown sections) ───────────────────────────────
+// "Analytics" dropdown
+const ADMIN_ANALYTICS = [
+  { to: '/reports',      label: 'Reports',       icon: 'activity',   featureKey: 'reports' },
+  { to: '/admin',        label: 'Master Dashboard', icon: 'shield',  featureKey: 'master_dashboard' },
 ]
 
-// featureKey: which enabled_features key controls this item.
-// null = always visible to any admin. super_admin always bypasses all flags.
-const ADMIN_NAV_ITEMS = [
-  { to: '/admin',            label: 'Master Dashboard',   icon: 'shield',       featureKey: 'master_dashboard' },
-  { to: '/reports',          label: 'Reports',            icon: 'activity',     featureKey: 'reports' },
-  { to: '/users',            label: 'Users',              icon: 'user-plus',    featureKey: 'users' },
-  // Availability moved to all-user NAV_ITEMS — every advisor manages their own schedule
-  { to: '/campaigns',        label: 'Campaigns',          icon: 'target',       featureKey: 'campaigns' },
-  { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: 'crm_connectors' },
-  { to: '/lead-cleanup',     label: 'Lead Cleanup',       icon: 'users',        featureKey: 'lead_cleanup' },
-  { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
-  { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
-  { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
-  // Compliance is in all-user NAV_ITEMS — everyone can add DNC, only admins can remove
-  { to: '/audit-log',        label: 'Audit Log',          icon: 'activity',     featureKey: 'audit_log' },
+// "Outreach" dropdown
+const ADMIN_OUTREACH = [
+  { to: '/cadence',      label: 'Cadence',       icon: 'repeat' },
+  { to: '/campaigns',    label: 'Campaigns',     icon: 'target',     featureKey: 'campaigns' },
+  { to: '/re-engagement',label: 'Re-engagement', icon: 'thermometer' },
+  { to: '/activity',     label: 'Activity',      icon: 'send' },
 ]
 
-// Platform Admin — super admin only, always visible (no feature-key restrictions)
-// Compliance and Audit Log moved to ADMIN_NAV_ITEMS so super admin can grant them per org
-const SUPER_ADMIN_NAV_ITEMS = [
-  { to: '/provision-client', label: 'Provision Client', icon: 'user-plus' },
-  { to: '/templates', label: 'Templates', icon: 'file-text' },
-  { to: '/cadence-templates', label: 'Cadence Builder', icon: 'sliders' },
-  { to: '/orgs', label: 'Org Manager', icon: 'building' },
+// "Team & Config" dropdown
+const ADMIN_CONFIG = [
+  { to: '/users',           label: 'Users',             icon: 'user-plus', featureKey: 'users' },
+  { to: '/tier-definitions',label: 'Tier Config',       icon: 'layers',    featureKey: 'tier_config' },
+  { to: '/org-settings',    label: 'Branding & Settings',icon: 'settings', featureKey: 'branding_settings' },
+  { to: '/lead-cleanup',    label: 'Lead Cleanup',      icon: 'users',     featureKey: 'lead_cleanup' },
+  { to: '/crm-connectors',  label: 'CRM Connectors',    icon: 'link',      featureKey: 'crm_connectors' },
 ]
+
+// "Compliance" dropdown
+const ADMIN_COMPLIANCE = [
+  { to: '/compliance',   label: 'DNC List',       icon: 'shield-check' },
+  { to: '/10dlc',        label: 'A2P 10DLC',      icon: 'shield-check', featureKey: 'a2p_10dlc' },
+  { to: '/audit-log',    label: 'Audit Log',       icon: 'activity',     featureKey: 'audit_log' },
+  { to: '/system-health',label: 'System Health',  icon: 'activity' },
+]
+
+// ── PLATFORM ADMIN (super admin only) ────────────────────────────────────────
+const SUPER_ADMIN_NAV = [
+  { to: '/provision-client',   label: 'Provision Client',  icon: 'user-plus' },
+  { to: '/templates',          label: 'Templates',          icon: 'file-text' },
+  { to: '/cadence-templates',  label: 'Cadence Builder',    icon: 'sliders' },
+  { to: '/orgs',               label: 'Org Manager',        icon: 'building' },
+]
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function Icon({ name }) {
   const paths = {
@@ -88,11 +94,69 @@ function Icon({ name }) {
     layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
     thermometer: <><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" /></>,
     database: <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
+    chartbar: <><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></>,
+    chevron: <polyline points="6 9 12 15 18 9" />,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       {paths[name]}
     </svg>
+  )
+}
+
+function ChevronIcon({ open }) {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)', flexShrink: 0 }}
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  )
+}
+
+/** A collapsible dropdown group in the sidebar */
+function NavGroup({ label, icon, items, location, onClick, isFeatureEnabled, defaultOpen = false }) {
+  // Auto-open if any child is the current route
+  const hasActive = items.some(i => location.pathname === i.to || (i.to !== '/' && location.pathname.startsWith(i.to)))
+  const [open, setOpen] = useState(hasActive || defaultOpen)
+
+  // If location changes and a child becomes active, open the group
+  useEffect(() => {
+    if (hasActive) setOpen(true)
+  }, [hasActive])
+
+  const visibleItems = items.filter(i => !i.featureKey || isFeatureEnabled(i.featureKey))
+  if (visibleItems.length === 0) return null
+
+  return (
+    <div className="nav-group">
+      <button
+        type="button"
+        className={`nav-group-trigger ${hasActive ? 'nav-group-trigger--active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+      >
+        <Icon name={icon} />
+        <span className="nav-group-label">{label}</span>
+        <ChevronIcon open={open} />
+      </button>
+      {open && (
+        <div className="nav-group-items">
+          {visibleItems.map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => `nav-item nav-item--child ${isActive ? 'nav-item--active' : ''}`}
+              onClick={onClick}
+            >
+              <Icon name={item.icon} />
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -115,8 +179,6 @@ function LiveClock() {
 }
 
 function ThemeToggle() {
-  // Brand-specific themes (evosyspro, harmonyhustle) are always dark — no toggle
-  // and we must NOT override data-theme or we'll kill the brand CSS variables.
   const isBrandTheme = PLATFORM_THEME !== THEMES.BOOKABOOST
   const [dark, setDark] = useState(() => {
     if (isBrandTheme) return true
@@ -125,15 +187,12 @@ function ThemeToggle() {
   })
 
   useEffect(() => {
-    // Only toggle data-theme for the default BookaBoost brand.
-    // Brand themes (evosyspro, harmonyhustle) have their own data-theme value
-    // set by initTheme() in main.jsx and must not be overwritten.
     if (isBrandTheme) return
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
     localStorage.setItem('bb_theme', dark ? 'dark' : 'light')
   }, [dark, isBrandTheme])
 
-  if (isBrandTheme) return null  // brand themes don't expose a toggle
+  if (isBrandTheme) return null
 
   return (
     <button
@@ -152,16 +211,13 @@ export default function Layout({ children }) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [profilePhoto, setProfilePhoto] = useState(null)
-  // Super admin always sees default BookaBoost branding — never a client org's branding
   const isSuperAdmin = user?.role === 'super_admin'
   const isGodAdmin = user?.role === 'god_admin'
-  const isElevated = isSuperAdmin || isGodAdmin  // skip org branding for both
+  const isOrgAdmin = user?.role === 'org_admin' || isSuperAdmin || isGodAdmin
+  const isElevated = isSuperAdmin || isGodAdmin
   const [orgContext, setOrgCtx] = useState(() => isElevated ? getOrgContext() : null)
   const [branding, setBranding] = useState(() => isElevated ? null : getBranding())
 
-  // Feature gates: derive from branding STATE so the nav re-renders when flags update.
-  // null enabled_features = all features on (backward-compatible).
-  // Super admin and god admin always bypass — they see everything.
   const enabledFeatures = isElevated ? null : (branding?.enabled_features ?? null)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
 
@@ -171,16 +227,13 @@ export default function Layout({ children }) {
     window.location.href = '/'
   }
 
-  // Re-fetch branding on every navigation so feature flag changes made by super admin
-  // are picked up without requiring a manual page reload.
   useEffect(() => {
-    if (isElevated) return  // super admin / god admin: no org branding applied to their shell
+    if (isElevated) return
     const stored = getBranding()
     if (stored) { applyBrandingCSS(stored); applyBrandingDOM(stored) }
     fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
   }, [isElevated, location.pathname])
 
-  // Fetch profile photo once on mount so avatar shows headshot if set.
   useEffect(() => {
     api.get('/settings/profile').then(p => {
       if (p?.profile_photo_url) setProfilePhoto(p.profile_photo_url)
@@ -192,13 +245,10 @@ export default function Layout({ children }) {
   async function handleLogout() {
     stopKeepAlive()
     stopRefreshLoop()
-    await logout()  // calls /auth/logout to kill server session, then clears local state
+    await logout()
     window.location.href = '/login'
   }
 
-  // Shell brand name: org-level DB override wins, otherwise fall back to the
-  // platform brand detected from the hostname (EvoSys Pro, Harmony Hustle, BookaBoost).
-  // Super admins see the platform brand — never hardcoded 'BookaBoost'.
   const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || PLATFORM_BRAND.displayName)
   const logoUrl = isElevated
     ? (PLATFORM_BRAND.logoUrl || null)
@@ -252,7 +302,8 @@ export default function Layout({ children }) {
             </>
           )}
 
-          {NAV_ITEMS.filter(item => !item.fiberOnly || (branding && branding.industry === 'fiber')).map((item) => (
+          {/* ── ADVISOR TOOLS ── */}
+          {ADVISOR_NAV.filter(item => !item.fiberOnly || (branding && branding.industry === 'fiber')).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.to === '/'}
               className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
               onClick={closeSidebar}
@@ -261,33 +312,60 @@ export default function Layout({ children }) {
             </NavLink>
           ))}
 
-          {(user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin) && (
+          {/* ── ADMIN TOOLS (grouped dropdowns) ── */}
+          {isOrgAdmin && (
             <>
               <div className="nav-divider" />
-              {ADMIN_ONLY_NAV_ITEMS.map((item) => (
-                <NavLink key={item.to} to={item.to}
-                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-                  onClick={closeSidebar}
-                >
-                  <Icon name={item.icon} />{item.label}
-                </NavLink>
-              ))}
-              {ADMIN_NAV_ITEMS.filter(item => isFeatureEnabled(item.featureKey)).map((item) => (
-                <NavLink key={item.to} to={item.to}
-                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-                  onClick={closeSidebar}
-                >
-                  <Icon name={item.icon} />{item.label}
-                </NavLink>
-              ))}
+              <div className="nav-section-label">Admin Tools</div>
+
+              {/* Analytics */}
+              <NavGroup
+                label="Analytics"
+                icon="chartbar"
+                items={ADMIN_ANALYTICS}
+                location={location}
+                onClick={closeSidebar}
+                isFeatureEnabled={isFeatureEnabled}
+              />
+
+              {/* Outreach */}
+              <NavGroup
+                label="Outreach"
+                icon="send"
+                items={ADMIN_OUTREACH}
+                location={location}
+                onClick={closeSidebar}
+                isFeatureEnabled={isFeatureEnabled}
+              />
+
+              {/* Team & Config */}
+              <NavGroup
+                label="Team & Config"
+                icon="settings"
+                items={ADMIN_CONFIG}
+                location={location}
+                onClick={closeSidebar}
+                isFeatureEnabled={isFeatureEnabled}
+              />
+
+              {/* Compliance */}
+              <NavGroup
+                label="Compliance"
+                icon="shield-check"
+                items={ADMIN_COMPLIANCE}
+                location={location}
+                onClick={closeSidebar}
+                isFeatureEnabled={isFeatureEnabled}
+              />
             </>
           )}
 
-          {(user?.role === 'super_admin' || isGodAdmin) && (
+          {/* ── PLATFORM ADMIN (super admin / god admin) ── */}
+          {(isSuperAdmin || isGodAdmin) && (
             <>
               <div className="nav-divider" />
               <div className="nav-section-label" style={isGodAdmin ? { color: '#b45309' } : {}}>Platform Admin</div>
-              {SUPER_ADMIN_NAV_ITEMS.map((item) => (
+              {SUPER_ADMIN_NAV.map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
@@ -332,7 +410,6 @@ export default function Layout({ children }) {
         )}
         <main className="main-content">{children}</main>
       </div>
-      {/* Mandatory profile completion — floats over all pages until done */}
       <ProfileOnboarding />
     </div>
   )

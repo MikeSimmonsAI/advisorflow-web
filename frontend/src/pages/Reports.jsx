@@ -51,6 +51,7 @@ export default function Reports() {
   const [data, setData]         = useState(null)
   const [pipeline, setPipeline] = useState(null)
   const [outcomes, setOutcomes] = useState(null)
+  const [crmSummary, setCrmSummary] = useState(null)
   const [loading, setLoading]   = useState(true)
   const [activeTab, setActiveTab] = useState('performance')
 
@@ -59,10 +60,12 @@ export default function Reports() {
       api.get('/admin/dashboard/metrics').catch(() => null),
       api.get('/pipeline/stats').catch(() => null),
       api.get('/outcomes/summary').catch(() => null),
-    ]).then(([metricsData, pipelineData, outcomesData]) => {
+      api.get('/reports/crm-summary').catch(() => null),
+    ]).then(([metricsData, pipelineData, outcomesData, crmData]) => {
       setData(metricsData)
       setPipeline(pipelineData)
       setOutcomes(outcomesData)
+      setCrmSummary(crmData)
       setLoading(false)
     })
   }, [])
@@ -102,6 +105,7 @@ export default function Reports() {
           { key: 'pipeline',    label: '🚀 Pipeline' },
           { key: 'engagement',  label: '📈 Engagement' },
           { key: 'outcomes',    label: '💰 Outcomes' },
+          { key: 'crm',         label: '🗂 CRM' },
         ].map(t => (
           <button key={t.key} className={`rpt-tab ${activeTab === t.key ? 'rpt-tab--active' : ''}`}
             onClick={() => setActiveTab(t.key)}>
@@ -349,6 +353,84 @@ export default function Reports() {
                   </div>
                 ))}
               </section>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* CRM TAB */}
+      {activeTab === 'crm' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {loading || !crmSummary ? (
+            <div className="empty-state">{loading ? 'Loading…' : 'No CRM data yet.'}</div>
+          ) : (
+            <>
+              {/* Summary KPIs */}
+              <div className="rpt-kpi-row">
+                <KpiCard icon="👤" label="Total contacts"  value={num(crmSummary.total_contacts)} color="var(--text-primary)" />
+                {(crmSummary.stage_counts || []).slice(0, 4).map(s => (
+                  <KpiCard key={s.stage} icon="📌" label={s.stage || 'Unknown'} value={num(s.count)} color="var(--signal-blue)" />
+                ))}
+              </div>
+
+              {/* Stage breakdown */}
+              {crmSummary.stage_counts?.length > 0 && (
+                <section className="panel">
+                  <div className="panel-header"><h2 className="panel-title">Stage breakdown</h2></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
+                    {crmSummary.stage_counts.map(s => (
+                      <div key={s.stage} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ width: 140, fontSize: 13, color: 'var(--text-secondary)', flexShrink: 0 }}>{s.stage || '—'}</span>
+                        <Bar value={s.count} max={Math.max(...crmSummary.stage_counts.map(x => x.count), 1)} color="var(--signal-blue)" />
+                        <span style={{ width: 48, textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{num(s.count)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Custom field fill rates */}
+              {crmSummary.custom_field_stats?.length > 0 && (
+                <section className="panel">
+                  <div className="panel-header">
+                    <h2 className="panel-title">Custom field completion</h2>
+                    <span className="panel-count">{crmSummary.custom_field_stats.length} fields</span>
+                  </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Field</th>
+                        <th>Type</th>
+                        <th>Filled</th>
+                        <th>Fill rate</th>
+                        <th style={{ width: 160 }}>Top values</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {crmSummary.custom_field_stats.map(f => (
+                        <tr key={f.key}>
+                          <td style={{ fontWeight: 600 }}>{f.label}</td>
+                          <td style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{f.type}</td>
+                          <td>{num(f.filled)} / {num(crmSummary.total_contacts)}</td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Bar value={f.fill_rate_pct} max={100} color={f.fill_rate_pct > 60 ? 'var(--signal-green)' : f.fill_rate_pct > 30 ? 'var(--signal-amber)' : 'var(--signal-red)'} />
+                              <span style={{ width: 44, fontSize: 12, fontWeight: 700 }}>{pct(f.fill_rate_pct)}</span>
+                            </div>
+                          </td>
+                          <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {f.value_counts ? Object.entries(f.value_counts).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(' · ') : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              )}
+
+              {(!crmSummary.custom_field_stats || crmSummary.custom_field_stats.length === 0) && (
+                <div className="empty-state">No custom fields configured yet. Add them in Admin → CRM settings.</div>
+              )}
             </>
           )}
         </div>

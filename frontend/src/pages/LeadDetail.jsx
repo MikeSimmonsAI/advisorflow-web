@@ -1449,7 +1449,7 @@ export default function LeadDetail() {
                     style={{ width: '100%', fontSize: 13 }}
                     onClick={() => setShowCaseFile(true)}
                   >
-                    📁 Open Case File
+                    📋 Open Client Record
                   </button>
                   <button
                     className="btn btn--danger"
@@ -1496,10 +1496,10 @@ export default function LeadDetail() {
           {!booking && (
             <section className="panel lead-detail-panel">
               <div className="panel-header">
-                <h2 className="panel-title">📁 Case File</h2>
+                <h2 className="panel-title">📋 Client Record</h2>
               </div>
               <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
-                Record appointment outcomes, products discussed, policy details, and next steps.
+                Record appointment outcomes, products discussed, and next steps for this client.
               </p>
               <button
                 className="btn btn--primary"

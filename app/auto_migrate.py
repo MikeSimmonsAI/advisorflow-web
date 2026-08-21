@@ -221,6 +221,8 @@ COLUMNS_TO_ADD = [
     ("organizations", "crm_custom_fields", "TEXT"),
     # Custom field values per contact — JSON object {field_key: value}
     ("crm_contacts", "custom_data", "TEXT"),
+    # Who uploaded each lead batch (full name of the user who ran the import)
+    ("leads", "imported_by_name", "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

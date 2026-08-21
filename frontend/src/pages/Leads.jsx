@@ -1090,8 +1090,17 @@ export default function Leads() {
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>
                     <td className="mono leads-secondary" style={{ fontSize: 11 }}>
-                      {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
-                      {lead.source_year ? ` (${lead.source_year})` : ''}
+                      <div>{lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 22) : '—'}</div>
+                      {lead.imported_by_name && (
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
+                          {lead.imported_by_name}
+                        </div>
+                      )}
+                      {lead.created_at && (
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                          {new Date(lead.created_at).toLocaleDateString()}
+                        </div>
+                      )}
                     </td>
                     <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                       {/* Flag dropdown */}

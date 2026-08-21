@@ -14,6 +14,9 @@ function statusLabel(value) {
 
 export default function LeadCleanup() {
   const [groups, setGroups] = useState([])
+  const [flaggedDuplicates, setFlaggedDuplicates] = useState([])
+  const [flaggedLoading, setFlaggedLoading] = useState(true)
+  const [unflaggingId, setUnflaggingId] = useState(null)
   const [deletingDuplicates, setDeletingDuplicates] = useState(false)
   const [deleteResult, setDeleteResult] = useState(null)
   const [selectedKeepByGroup, setSelectedKeepByGroup] = useState({})
@@ -40,7 +43,28 @@ export default function LeadCleanup() {
       .then((users) => setAdvisors(users.filter((u) => u.role === 'advisor')))
       .catch(() => {})
     loadPotentialDuplicates()
+    loadFlaggedDuplicates()
   }, [])
+
+  function loadFlaggedDuplicates() {
+    setFlaggedLoading(true)
+    api.get('/admin/leads/flagged-duplicates')
+      .then(data => setFlaggedDuplicates(data || []))
+      .catch(() => setFlaggedDuplicates([]))
+      .finally(() => setFlaggedLoading(false))
+  }
+
+  async function unflagDuplicate(leadId) {
+    setUnflaggingId(leadId)
+    try {
+      await api.patch(`/admin/leads/${leadId}/fix-contact-info`, { unflag_duplicate: true })
+      setFlaggedDuplicates(prev => prev.filter(l => l.id !== leadId))
+    } catch (err) {
+      alert(err.message || 'Could not unflag lead.')
+    } finally {
+      setUnflaggingId(null)
+    }
+  }
 
   function loadPotentialDuplicates() {
     setLoading(true)
@@ -248,6 +272,60 @@ export default function LeadCleanup() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Flagged duplicates — already caught by the dedup system */}
+        <div className="panel" style={{ marginBottom: 20 }}>
+          <div className="panel-header">
+            <h2 className="panel-title">⚑ Flagged duplicates</h2>
+            <span className="panel-count">{flaggedLoading ? '…' : flaggedDuplicates.length}</span>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
+            These leads were automatically flagged as duplicates on import. Review and delete, or unflag if incorrect.
+          </p>
+          {flaggedLoading ? (
+            <div className="empty-state">Loading…</div>
+          ) : flaggedDuplicates.length === 0 ? (
+            <div className="empty-state">No flagged duplicates found.</div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Source</th>
+                  <th>Flagged on</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flaggedDuplicates.map(lead => (
+                  <tr key={lead.id}>
+                    <td>{nameForLead(lead)}</td>
+                    <td className="mono">{lead.phone || '—'}</td>
+                    <td className="mono" style={{ fontSize: 12 }}>{lead.email || '—'}</td>
+                    <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn--secondary cleanup-btn-sm"
+                        onClick={() => unflagDuplicate(lead.id)}
+                        disabled={unflaggingId === lead.id}
+                        title="Mark as NOT a duplicate"
+                      >
+                        {unflaggingId === lead.id ? 'Saving…' : 'Unflag'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <aside className="cleanup-sidebar">

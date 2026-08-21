@@ -439,6 +439,7 @@ class Lead(Base):
 
     # Import batch metadata
     import_list_name = Column(String, nullable=True)  # user-supplied label, e.g. "2024 Purchased List"
+    imported_by_name = Column(String, nullable=True)  # full name of the user who ran the import
     source_category = Column(String, nullable=True)   # purchased, organic, referral, database, etc.
 
     # Manual flag — set by any advisor when auto-detection misses a bad contact

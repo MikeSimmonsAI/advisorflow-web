@@ -143,6 +143,7 @@ def confirm_upload(
             import_list_name=import_list_name,
             campaign_purpose=campaign_purpose,
             offer_hook=offer_hook,
+            imported_by_name=current_user.full_name or current_user.email,
         )
     finally:
         os.unlink(tmp_path)
@@ -160,6 +161,7 @@ def list_import_batches(
         db.query(
             Lead.source_file,
             Lead.import_list_name,
+            Lead.imported_by_name,
             func.count(Lead.id).label("lead_count"),
             func.min(Lead.created_at).label("imported_at"),
         )
@@ -167,7 +169,7 @@ def list_import_batches(
             Lead.organization_id == current_user.organization_id,
             Lead.source_file.isnot(None),
         )
-        .group_by(Lead.source_file, Lead.import_list_name)
+        .group_by(Lead.source_file, Lead.import_list_name, Lead.imported_by_name)
         .order_by(func.min(Lead.created_at).desc())
         .all()
     )
@@ -175,6 +177,7 @@ def list_import_batches(
         {
             "source_file": r.source_file,
             "import_list_name": r.import_list_name,
+            "imported_by_name": r.imported_by_name,
             "lead_count": r.lead_count,
             "imported_at": r.imported_at.isoformat() if r.imported_at else None,
         }
@@ -341,8 +344,8 @@ def list_leads(
         Lead.status, Lead.tier, Lead.message_track, Lead.source_file,
         Lead.source_year, Lead.is_duplicate, Lead.assigned_to_id,
         Lead.engagement_temperature, Lead.relationship_type,
-        Lead.contact_channel, Lead.import_list_name, Lead.created_at,
-        Lead.organization_id, Lead.case_status,
+        Lead.contact_channel, Lead.import_list_name, Lead.imported_by_name,
+        Lead.created_at, Lead.organization_id, Lead.case_status,
         Lead.manual_flag, Lead.manual_flag_reason,
         Lead.last_messaged_at,
     ]
@@ -351,8 +354,8 @@ def list_leads(
         "status", "tier", "message_track", "source_file",
         "source_year", "is_duplicate", "assigned_to_id",
         "engagement_temperature", "relationship_type",
-        "contact_channel", "import_list_name", "created_at",
-        "organization_id", "case_status",
+        "contact_channel", "import_list_name", "imported_by_name",
+        "created_at", "organization_id", "case_status",
         "manual_flag", "manual_flag_reason",
         "last_messaged_at",
     ]
