@@ -591,6 +591,59 @@ def cancel_booking(booking_id: str, db: Session = Depends(get_db), current_user:
     return result
 
 
+@router.get("/events")
+def list_calendar_events(
+    days_ahead: int = Query(60, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return upcoming confirmed/booked appointments for the current advisor,
+    formatted for the embedded mini-calendar view in Availability.jsx.
+    Pulls from BookingLink (our source of truth) rather than Google Calendar
+    so it works regardless of whether the advisor has a calendar integration.
+    """
+    from app.models.models import Lead
+    from datetime import timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
+    now = datetime.now(timezone.utc)
+
+    bookings = (
+        db.query(BookingLink)
+        .filter(
+            BookingLink.user_id == current_user.id,
+            BookingLink.status.in_(["booked", "confirmed", "pending"]),
+        )
+        .all()
+    )
+
+    events = []
+    for b in bookings:
+        if not b.booked_time:
+            continue
+        bt = b.booked_time
+        # Normalise to UTC-aware if naive
+        if bt.tzinfo is None:
+            bt = bt.replace(tzinfo=timezone.utc)
+        if bt < now or bt > cutoff:
+            continue
+
+        lead = db.query(Lead).filter(Lead.id == b.lead_id).first()
+        lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Lead"
+
+        events.append({
+            "id": b.id,
+            "booked_time": bt.isoformat(),
+            "lead_name": lead_name,
+            "lead_id": b.lead_id,
+            "status": b.status,
+        })
+
+    events.sort(key=lambda e: e["booked_time"])
+    return events
+
+
 @router.post("/send-reminders")
 def send_reminders(
     db: Session = Depends(get_db),

@@ -312,6 +312,16 @@ class User(Base):
     phone = Column(String, nullable=True)       # e.g. "+14155551234"
     job_title = Column(String, nullable=True)   # e.g. "Senior Advisor"
 
+    # Booking / scheduling settings — advisor configures their own calendar availability
+    appt_duration_minutes = Column(Integer, default=30, nullable=True)          # length of each appointment slot
+    buffer_minutes = Column(Integer, default=0, nullable=True)                  # gap between back-to-back bookings
+    max_bookings_per_day = Column(Integer, default=8, nullable=True)            # cap on same-day bookings
+    available_start_time = Column(String, default="09:00", nullable=True)       # daily open time, HH:MM 24h
+    available_end_time = Column(String, default="17:00", nullable=True)         # daily close time, HH:MM 24h
+    available_days = Column(String, default="0,1,2,3,4", nullable=True)         # comma-sep weekday indices 0=Mon
+    booking_timezone = Column(String, default="America/Chicago", nullable=True) # IANA tz for the advisor
+    booking_confirmation_message = Column(Text, nullable=True)                  # custom message shown after booking
+
     # Brute-force / credential-stuffing protection.
     # Incremented on each failed password attempt; reset to 0 on success.
     # When failed_login_attempts reaches LOGIN_LOCKOUT_THRESHOLD (10),

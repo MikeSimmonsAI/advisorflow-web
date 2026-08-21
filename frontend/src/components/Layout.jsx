@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
   { to: '/activity', label: 'Activity', icon: 'send' },
+  { to: '/availability', label: 'Availability', icon: 'calendar' },
   { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
   { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
@@ -39,7 +40,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/admin',            label: 'Master Dashboard',   icon: 'shield',       featureKey: 'master_dashboard' },
   { to: '/reports',          label: 'Reports',            icon: 'activity',     featureKey: 'reports' },
   { to: '/users',            label: 'Users',              icon: 'user-plus',    featureKey: 'users' },
-  { to: '/availability',     label: 'Availability',       icon: 'calendar',     featureKey: null },
+  // Availability moved to all-user NAV_ITEMS — every advisor manages their own schedule
   { to: '/campaigns',        label: 'Campaigns',          icon: 'target',       featureKey: 'campaigns' },
   { to: '/crm',              label: 'CRM',                icon: 'database',     featureKey: null },
   { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: null },

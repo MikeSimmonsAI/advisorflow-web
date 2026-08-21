@@ -56,6 +56,15 @@ class ProfileResponse(BaseModel):
     profile_photo_url: Optional[str] = None
     phone: Optional[str] = None
     job_title: Optional[str] = None
+    # Booking / scheduling settings
+    appt_duration_minutes: int = 30
+    buffer_minutes: int = 0
+    max_bookings_per_day: int = 8
+    available_start_time: str = "09:00"
+    available_end_time: str = "17:00"
+    available_days: str = "0,1,2,3,4"
+    booking_timezone: str = "America/Chicago"
+    booking_confirmation_message: Optional[str] = None
 
 
 class TwilioConfigRequest(BaseModel):
@@ -116,6 +125,14 @@ def get_profile(current_user: User = Depends(get_current_user)):
         profile_photo_url=getattr(current_user, 'profile_photo_url', None),
         phone=getattr(current_user, 'phone', None),
         job_title=getattr(current_user, 'job_title', None),
+        appt_duration_minutes=getattr(current_user, 'appt_duration_minutes', None) or 30,
+        buffer_minutes=getattr(current_user, 'buffer_minutes', None) or 0,
+        max_bookings_per_day=getattr(current_user, 'max_bookings_per_day', None) or 8,
+        available_start_time=getattr(current_user, 'available_start_time', None) or '09:00',
+        available_end_time=getattr(current_user, 'available_end_time', None) or '17:00',
+        available_days=getattr(current_user, 'available_days', None) or '0,1,2,3,4',
+        booking_timezone=getattr(current_user, 'booking_timezone', None) or 'America/Chicago',
+        booking_confirmation_message=getattr(current_user, 'booking_confirmation_message', None),
     )
 
 
@@ -280,9 +297,10 @@ def update_profile_photo(
             status_code=400,
             detail="photo_data_url must be a valid JPEG, PNG, GIF, or WebP data URL."
         )
-    # Rough size guard — base64 of a 2MB file is ~2.7MB of text
-    if len(req.photo_data_url) > 3_000_000:
-        raise HTTPException(status_code=400, detail="Photo too large. Please use an image under 2MB.")
+    # Rough size guard — base64 of a ~9MB file is ~12MB of text; frontend
+    # compresses to 900px max at 85% quality, so real payloads are tiny.
+    if len(req.photo_data_url) > 12_000_000:
+        raise HTTPException(status_code=400, detail="Photo too large. Please use an image under 9MB.")
     current_user.profile_photo_url = req.photo_data_url
     db.commit()
     db.refresh(current_user)
@@ -297,6 +315,53 @@ def delete_profile_photo(
     """Remove the advisor's profile photo, reverting to the initials avatar."""
     current_user.profile_photo_url = None
     db.commit()
+    return {"success": True}
+
+
+# ── Booking settings — any advisor can configure their own schedule ────────────
+
+class BookingSettingsRequest(BaseModel):
+    appt_duration_minutes: Optional[int] = None
+    buffer_minutes: Optional[int] = None
+    max_bookings_per_day: Optional[int] = None
+    available_start_time: Optional[str] = None   # HH:MM 24h
+    available_end_time: Optional[str] = None     # HH:MM 24h
+    available_days: Optional[str] = None         # comma-sep weekday indices, e.g. "0,1,2,3,4"
+    booking_timezone: Optional[str] = None       # IANA, e.g. "America/Chicago"
+    booking_confirmation_message: Optional[str] = None
+
+
+@router.patch("/booking-settings")
+def update_booking_settings(
+    req: BookingSettingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Advisors update their own booking / scheduling preferences."""
+    if req.appt_duration_minutes is not None:
+        if req.appt_duration_minutes < 5 or req.appt_duration_minutes > 480:
+            raise HTTPException(status_code=400, detail="appt_duration_minutes must be 5–480.")
+        current_user.appt_duration_minutes = req.appt_duration_minutes
+    if req.buffer_minutes is not None:
+        if req.buffer_minutes < 0 or req.buffer_minutes > 120:
+            raise HTTPException(status_code=400, detail="buffer_minutes must be 0–120.")
+        current_user.buffer_minutes = req.buffer_minutes
+    if req.max_bookings_per_day is not None:
+        if req.max_bookings_per_day < 1 or req.max_bookings_per_day > 50:
+            raise HTTPException(status_code=400, detail="max_bookings_per_day must be 1–50.")
+        current_user.max_bookings_per_day = req.max_bookings_per_day
+    if req.available_start_time is not None:
+        current_user.available_start_time = req.available_start_time
+    if req.available_end_time is not None:
+        current_user.available_end_time = req.available_end_time
+    if req.available_days is not None:
+        current_user.available_days = req.available_days
+    if req.booking_timezone is not None:
+        current_user.booking_timezone = req.booking_timezone
+    if req.booking_confirmation_message is not None:
+        current_user.booking_confirmation_message = req.booking_confirmation_message or None
+    db.commit()
+    db.refresh(current_user)
     return {"success": True}
 
 

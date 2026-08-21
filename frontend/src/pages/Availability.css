@@ -314,3 +314,263 @@
   color: var(--signal-red, #f87171);
   background: rgba(248, 113, 113, 0.1);
 }
+
+/* ── MAIN TABS (Calendar / Block / Settings) ───────────────────────────────── */
+.availability-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.av-main-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0;
+}
+
+.av-main-tab {
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.av-main-tab:hover {
+  color: var(--text-primary);
+}
+
+.av-main-tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── CALENDAR TAB ──────────────────────────────────────────────────────────── */
+.av-calendar-tab {}
+
+.av-cal-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+  margin-bottom: 0;
+}
+
+@media (max-width: 800px) {
+  .av-cal-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── MINI CALENDAR ─────────────────────────────────────────────────────────── */
+.mini-cal {
+  padding: 4px 0 8px;
+}
+
+.mini-cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 0 2px;
+}
+
+.mini-cal-month {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mini-cal-nav-btn {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+
+.mini-cal-nav-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mini-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.mini-cal-dow {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 4px 0;
+  letter-spacing: 0.04em;
+}
+
+.mini-cal-day {
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+  min-width: 0;
+}
+
+.mini-cal-day:hover:not(.mini-cal-day--past) {
+  background: rgba(47, 182, 255, 0.08);
+  border-color: rgba(47, 182, 255, 0.25);
+  color: var(--accent);
+}
+
+.mini-cal-day--today {
+  background: rgba(47, 182, 255, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.mini-cal-day--appt {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.mini-cal-day--blocked {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.mini-cal-day--past {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.mini-cal-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.mini-cal-dot--appt {
+  background: #1ef0a8;
+}
+
+.mini-cal-dot--blocked {
+  background: #f87171;
+}
+
+.mini-cal-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  align-items: center;
+}
+
+.mini-cal-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mini-cal-legend .mini-cal-dot {
+  position: static;
+  transform: none;
+}
+
+/* ── BOOKING SETTINGS ──────────────────────────────────────────────────────── */
+.av-booking-settings {}
+
+.bs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 24px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 640px) {
+  .bs-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bs-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bs-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+.bs-days-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bs-day-btn {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s;
+  min-width: 42px;
+  text-align: center;
+}
+
+.bs-day-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bs-day-btn--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

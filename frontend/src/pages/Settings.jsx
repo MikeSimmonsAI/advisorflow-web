@@ -225,13 +225,30 @@ export default function Settings() {
   function handlePhotoChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      alert('Photo must be under 2MB.')
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Photo must be under 10MB.')
       e.target.value = ''
       return
     }
+    // Auto-compress: resize to max 900×900 and re-encode at 85% quality so
+    // even high-res headshots stay small enough to store as a data URL.
     const reader = new FileReader()
-    reader.onload = (ev) => setPhotoPreview(ev.target.result)
+    reader.onload = (ev) => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 900
+        let { width: w, height: h } = img
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX }
+          else { w = Math.round(w * MAX / h); h = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = w; canvas.height = h
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+        setPhotoPreview(canvas.toDataURL('image/jpeg', 0.85))
+      }
+      img.src = ev.target.result
+    }
     reader.readAsDataURL(file)
   }
 
