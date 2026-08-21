@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
   { to: '/activity', label: 'Activity', icon: 'send' },
   { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
+  { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
   { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
 ]
@@ -46,7 +47,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
   { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
   { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
-  { to: '/compliance',       label: 'Compliance',         icon: 'shield-check', featureKey: 'compliance' },
+  // Compliance is in all-user NAV_ITEMS — everyone can add DNC, only admins can remove
   { to: '/audit-log',        label: 'Audit Log',          icon: 'activity',     featureKey: 'audit_log' },
 ]
 

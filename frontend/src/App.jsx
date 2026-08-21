@@ -113,7 +113,7 @@ export default function App() {
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Admin /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
         <Route path="/users/:userId" element={<ProtectedRoute requireAdmin><UserDetail /></ProtectedRoute>} />
-        <Route path="/compliance" element={<ProtectedRoute requireAdmin><Compliance /></ProtectedRoute>} />
+        <Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
         <Route path="/audit-log" element={<ProtectedRoute requireAdmin><AuditLog /></ProtectedRoute>} />
         <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
         <Route path="/lead-cleanup" element={<ProtectedRoute requireAdmin><LeadCleanup /></ProtectedRoute>} />
