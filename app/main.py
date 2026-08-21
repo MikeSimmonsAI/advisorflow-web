@@ -523,7 +523,7 @@ async def on_startup():
         try:
             with engine.connect() as conn:
                 conn.execute(_text(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE "
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE, full_name='MDG Testing' "
                     "WHERE email=:email"
                 ), {"email": _god_admin_email})
                 conn.commit()
