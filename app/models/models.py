@@ -1137,6 +1137,172 @@ class RevokedToken(Base):
     )
 
 
+# ── Client Proposal Portal ─────────────────────────────────────────────────────
+#
+# Proposals are rich, multi-block sales documents created by advisors/admins
+# and shared with prospects/clients via a secure magic-link portal.
+# Clients never touch the internal app — they land on /portal/view/:token
+# and see a completely different, premium full-screen experience.
+#
+# Architecture:
+#   Proposal        — the document (metadata, status, branding overrides)
+#   ProposalBlock   — ordered content blocks (text / image / pdf / video / divider)
+#   ProposalToken   — one-time or limited magic-link access tokens per recipient
+#   ProposalView    — analytics: every open/scroll/download event
+#
+# White-label note: branding_override JSON is stored now but UI controls are
+# not exposed yet. Future: per-proposal logo, accent color, company name override.
+
+class Proposal(Base):
+    __tablename__ = "proposals"
+
+    id              = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+    created_by_id   = Column(String, ForeignKey("users.id"), nullable=False)
+
+    title           = Column(String, nullable=False)
+    # Short subtitle shown on portal cover — e.g. "Prepared for Acme Corp"
+    subtitle        = Column(String, nullable=True)
+    # Client-facing name shown at top of portal ("Hi, Sarah 👋")
+    client_name     = Column(String, nullable=True)
+    client_email    = Column(String, nullable=True)
+    client_company  = Column(String, nullable=True)
+
+    # draft | published | archived
+    status          = Column(String, default="draft", nullable=False)
+
+    # Future white-label: {"logo_url": "...", "accent": "#087cff", "company_name": "Acme"}
+    branding_override = Column(Text, nullable=True)  # JSON string
+
+    # Optional expiry for the whole proposal (not just tokens)
+    expires_at      = Column(DateTime, nullable=True)
+
+    # Soft-delete
+    deleted_at      = Column(DateTime, nullable=True)
+
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    blocks          = relationship("ProposalBlock", back_populates="proposal",
+                                   order_by="ProposalBlock.position",
+                                   cascade="all, delete-orphan")
+    tokens          = relationship("ProposalToken", back_populates="proposal",
+                                   cascade="all, delete-orphan")
+    views           = relationship("ProposalView", back_populates="proposal",
+                                   cascade="all, delete-orphan")
+
+
+class ProposalBlock(Base):
+    """
+    A single content block inside a proposal.
+    Blocks are ordered by `position` (0-indexed).
+
+    block_type values:
+        text    — rich text body (markdown stored, rendered client-side)
+        image   — uploaded image; file_url points to stored file
+        pdf     — uploaded PDF; file_url points to stored file
+        video   — embed URL (YouTube / Vimeo / Loom)
+        divider — visual section break, no content
+        cta     — call-to-action button with label + href
+    """
+    __tablename__ = "proposal_blocks"
+
+    id          = Column(String, primary_key=True, default=gen_uuid)
+    proposal_id = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+
+    block_type  = Column(String, nullable=False)  # text|image|pdf|video|divider|cta
+    position    = Column(Integer, nullable=False, default=0)
+
+    # Primary content — meaning depends on block_type:
+    #   text    → markdown string
+    #   image   → caption
+    #   pdf     → display title
+    #   video   → optional title
+    #   cta     → button label
+    content     = Column(Text, nullable=True)
+
+    # Secondary content — meaning depends on block_type:
+    #   image / pdf → relative upload path or absolute URL
+    #   video       → embed URL
+    #   cta         → destination href
+    file_url    = Column(String, nullable=True)
+
+    # Original filename (for display in download UI)
+    file_name   = Column(String, nullable=True)
+    # Bytes — used to show file size in download badge
+    file_size   = Column(Integer, nullable=True)
+
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    proposal    = relationship("Proposal", back_populates="blocks")
+
+
+class ProposalToken(Base):
+    """
+    Magic-link access token.  Each sent invite creates one row.
+    Resolving the token starts a 48-hour portal session (stored client-side).
+    Admins can revoke a token (redeemed_at = sentinel) or let it expire.
+    """
+    __tablename__ = "proposal_tokens"
+
+    id              = Column(String, primary_key=True, default=gen_uuid)
+    proposal_id     = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+
+    # The opaque token string in the magic link URL
+    token           = Column(String, unique=True, nullable=False, default=gen_uuid)
+
+    # Who this link was sent to (display only — no auth account required)
+    recipient_email = Column(String, nullable=True)
+    recipient_name  = Column(String, nullable=True)
+
+    # Null = never expires (admin access), otherwise 48h from creation
+    expires_at      = Column(DateTime, nullable=True)
+
+    # Set on first redemption — subsequent hits still allowed until expiry
+    first_redeemed_at = Column(DateTime, nullable=True)
+
+    # Revocation: set to a past datetime to hard-block the token
+    revoked_at      = Column(DateTime, nullable=True)
+
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+    proposal        = relationship("Proposal", back_populates="tokens")
+    views           = relationship("ProposalView", back_populates="token",
+                                   cascade="all, delete-orphan")
+
+
+class ProposalView(Base):
+    """
+    One row per portal session. Tracks open, scroll depth, and download.
+    duration_seconds is computed when the client sends a 'close' event.
+    """
+    __tablename__ = "proposal_views"
+
+    id              = Column(String, primary_key=True, default=gen_uuid)
+    proposal_id     = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    token_id        = Column(String, ForeignKey("proposal_tokens.id", ondelete="SET NULL"),
+                             nullable=True, index=True)
+
+    opened_at       = Column(DateTime, default=datetime.utcnow)
+    closed_at       = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+
+    # 0–100 — highest scroll percentage reached during session
+    max_scroll_pct  = Column(Integer, default=0)
+
+    # True once the client hits the download button for any block
+    downloaded      = Column(Boolean, default=False)
+
+    # Coarse location context (IP → city only, no street, never stored raw IP)
+    viewer_city     = Column(String, nullable=True)
+
+    proposal        = relationship("Proposal", back_populates="views")
+    token           = relationship("ProposalToken", back_populates="views")
+
+
 # ---------------------------------------------------------------------------
 # CRMContact — Native CRM master record.
 # Lives alongside leads but is a richer, long-lived relationship record.

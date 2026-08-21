@@ -32,6 +32,7 @@ from app.routers import (
 )
 from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
+from app.routers import proposal_router
 from app.routers import reports_router, crm_router
 from app.routers.crm_native_router import router as crm_native_router
 from app.routers.survey_router import router as survey_router
@@ -346,6 +347,7 @@ app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
+app.include_router(proposal_router.router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

@@ -35,6 +35,7 @@ const ADMIN_ANALYTICS = [
 // "Outreach" dropdown
 const ADMIN_OUTREACH = [
   { to: '/cadence',      label: 'Cadence',       icon: 'repeat' },
+  { to: '/proposals',    label: 'Proposals',     icon: 'file-text' },
   { to: '/campaigns',    label: 'Campaigns',     icon: 'target',     featureKey: 'campaigns' },
   { to: '/re-engagement',label: 'Re-engagement', icon: 'thermometer' },
   { to: '/activity',     label: 'Activity',      icon: 'send' },

@@ -39,6 +39,10 @@ import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
 import SetupIntegrations from './pages/SetupIntegrations'
 import GodCommandCenter from './pages/GodCommandCenter'
+import Proposals from './pages/Proposals'
+import ProposalEditor from './pages/ProposalEditor'
+import PortalAccess from './pages/portal/PortalAccess'
+import PortalViewer from './pages/portal/PortalViewer'
 import { getCurrentUser, startKeepAlive, startRefreshLoop } from './api/client'
 
 function isAuthenticated() {
@@ -131,6 +135,15 @@ export default function App() {
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
         <Route path="/god" element={<GodRoute><GodCommandCenter /></GodRoute>} />
+
+        {/* Client Proposal Portal — admin side (requires org_admin+) */}
+        <Route path="/proposals" element={<ProtectedRoute requireAdmin><Proposals /></ProtectedRoute>} />
+        <Route path="/proposals/:proposalId" element={<ProtectedRoute requireAdmin><ProposalEditor /></ProtectedRoute>} />
+
+        {/* Client portal — NO internal JWT, uses magic-link token in sessionStorage */}
+        <Route path="/portal/access/:token" element={<PortalAccess />} />
+        <Route path="/portal/view/:proposalId" element={<PortalViewer />} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
