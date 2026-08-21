@@ -108,6 +108,13 @@ export default function OrgSettings() {
   const [emailSenderSaved, setEmailSenderSaved] = useState(false)
   const [emailSenderError, setEmailSenderError] = useState('')
 
+  // Booking page contact info
+  const [orgName, setOrgName] = useState('')
+  const [orgAddress, setOrgAddress] = useState('')
+  const [orgPhone, setOrgPhone] = useState('')
+  const [savingContact, setSavingContact] = useState(false)
+  const [contactSaved, setContactSaved] = useState(false)
+
   // Load all orgs for super admin selector
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -146,6 +153,9 @@ export default function OrgSettings() {
         setFromEmail(data.from_email || '')
         setResendApiKeySet(!!data.resend_api_key_set)
         setResendApiKey('')  // Never pre-populate — only write when user explicitly enters it
+        setOrgName(data.name || '')
+        setOrgAddress(data.org_address || '')
+        setOrgPhone(data.org_phone || '')
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -245,6 +255,26 @@ export default function OrgSettings() {
       setEmailSenderError(err.message)
     } finally {
       setSavingEmailSender(false)
+    }
+  }
+
+  async function saveContactInfo() {
+    setSavingContact(true)
+    setContactSaved(false)
+    setError('')
+    try {
+      const result = await api.patch(`/org-settings/contact${orgQuery}`, {
+        name: orgName || null,
+        org_address: orgAddress || null,
+        org_phone: orgPhone || null,
+      })
+      if (result.name) setOrgName(result.name)
+      setContactSaved(true)
+      setTimeout(() => setContactSaved(false), 3000)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingContact(false)
     }
   }
 
@@ -580,6 +610,55 @@ export default function OrgSettings() {
             </button>
           </section>
 
+        {/* ── Booking Page Info ── */}
+        <section className="panel os-section" style={{ marginTop: 16 }}>
+          <div className="panel-header"><h2 className="panel-title">📅 Booking Page Info</h2></div>
+          <p className="os-hint">
+            This info appears in the header of your booking page and in confirmation emails.
+            The address and phone are shown to leads when they book an appointment.
+          </p>
+
+          <label className="os-label">
+            Organization name
+            <input
+              className="os-input"
+              value={orgName}
+              onChange={(e) => setOrgName(e.target.value)}
+              placeholder="e.g. Acme Funeral Home"
+            />
+            <span className="os-hint">Shown as the main heading on booking pages and emails</span>
+          </label>
+
+          <label className="os-label">
+            Office address
+            <input
+              className="os-input"
+              value={orgAddress}
+              onChange={(e) => setOrgAddress(e.target.value)}
+              placeholder="e.g. 123 Main St, Springfield, IL 62701"
+            />
+            <span className="os-hint">Displayed under your org name on the booking page header</span>
+          </label>
+
+          <label className="os-label">
+            Office phone
+            <input
+              className="os-input"
+              value={orgPhone}
+              onChange={(e) => setOrgPhone(e.target.value)}
+              placeholder="e.g. (555) 123-4567"
+            />
+            <span className="os-hint">Shown on the booking page so leads can call with questions</span>
+          </label>
+
+          <button className="btn btn--primary" onClick={saveContactInfo} disabled={savingContact} style={{ marginTop: 8 }}>
+            {savingContact ? 'Saving…' : contactSaved ? '✓ Saved' : 'Save booking page info'}
+          </button>
+        </section>
+
+        {/* ── Appointment Types ── */}
+        <AppointmentTypesSection orgQuery={orgQuery} />
+
         {/* ── CRM Pipeline Stages ── */}
         <CRMStagesSection />
 
@@ -633,6 +712,127 @@ function SeedDemoButton({ orgId }) {
       )}
       {status === 'error' && <div style={{ color: '#f87171', fontSize: 13 }}>{err}</div>}
     </div>
+  )
+}
+
+// ── Appointment Types ─────────────────────────────────────────────────────
+function AppointmentTypesSection({ orgQuery }) {
+  const [types, setTypes] = useState([])
+  const [isCustom, setIsCustom] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [newType, setNewType] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    api.get('/settings/appointment-types')
+      .then(d => {
+        setTypes(d.appointment_types || [])
+        setIsCustom(!!d.is_custom)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [orgQuery])
+
+  function addType() {
+    const t = newType.trim()
+    if (!t) return
+    if (types.includes(t)) { setErr('That type already exists'); return }
+    setTypes(prev => [...prev, t])
+    setNewType('')
+    setErr('')
+  }
+
+  function removeType(idx) {
+    setTypes(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function moveUp(idx) {
+    if (idx === 0) return
+    setTypes(prev => { const a = [...prev]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; return a })
+  }
+
+  function moveDown(idx) {
+    setTypes(prev => {
+      if (idx >= prev.length - 1) return prev
+      const a = [...prev]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; return a
+    })
+  }
+
+  async function save() {
+    setErr(''); setSaving(true)
+    try {
+      const d = await api.put('/settings/appointment-types', { appointment_types: types })
+      setTypes(d.appointment_types || types)
+      setIsCustom(true)
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+    } catch (e) { setErr(e.message || 'Save failed') }
+    finally { setSaving(false) }
+  }
+
+  async function reset() {
+    if (!window.confirm('Reset appointment types to system defaults?')) return
+    setResetting(true)
+    try {
+      const d = await api.delete('/settings/appointment-types')
+      setTypes(d.appointment_types || [])
+      setIsCustom(false)
+    } catch (e) { setErr(e.message || 'Reset failed') }
+    finally { setResetting(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h2 className="panel-title">📋 Appointment Types</h2>
+          <p className="os-hint" style={{ marginTop: 2 }}>
+            These options appear in the "Booking type" dropdown when creating a booking link.
+            {isCustom ? ' Using custom types.' : ' Using system defaults.'}
+          </p>
+        </div>
+        {isCustom && (
+          <button className="btn btn--secondary" onClick={reset} disabled={resetting} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+            {resetting ? 'Resetting…' : '↺ Reset to defaults'}
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
+        {types.map((t, i) => (
+          <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 3 }}>
+              <button onClick={() => moveUp(i)} disabled={i === 0} style={{ padding: '3px 7px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 5, cursor: 'pointer', fontSize: 11, opacity: i === 0 ? 0.3 : 1 }}>↑</button>
+              <button onClick={() => moveDown(i)} disabled={i === types.length - 1} style={{ padding: '3px 7px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 5, cursor: 'pointer', fontSize: 11, opacity: i === types.length - 1 ? 0.3 : 1 }}>↓</button>
+            </div>
+            <span style={{ flex: 1, fontSize: 13, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-color)' }}>{t}</span>
+            <button onClick={() => removeType(i)} disabled={types.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 5, cursor: 'pointer', color: '#ef4444', fontSize: 12, opacity: types.length <= 1 ? 0.3 : 1 }}>✕</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <input
+          className="os-input"
+          style={{ flex: 1, marginBottom: 0 }}
+          value={newType}
+          onChange={(e) => { setNewType(e.target.value); setErr('') }}
+          onKeyDown={(e) => e.key === 'Enter' && addType()}
+          placeholder="Add a new appointment type…"
+        />
+        <button className="btn btn--secondary" onClick={addType} disabled={!newType.trim()} style={{ fontSize: 13, whiteSpace: 'nowrap' }}>+ Add</button>
+      </div>
+
+      {err && <div style={{ color: 'var(--signal-red)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      <button className="btn btn--primary" onClick={save} disabled={saving || types.length === 0} style={{ fontSize: 13 }}>
+        {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save appointment types'}
+      </button>
+    </section>
   )
 }
 
