@@ -100,6 +100,9 @@ CRITICAL RULES:
 - Personalize using the lead's name, tier, and history.
 - CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
 
+HOW TO INTRODUCE THE ADVISOR:
+{advisor_intro_instruction}
+
 TONE: {tone_instruction}
 TOUCH ANGLE: {touch_angle_instruction}
 {offer_hook_line}
@@ -154,7 +157,11 @@ TONE_MAP = {
 }
 
 TOUCH_ANGLE_MAP = {
-    "warm_intro": "Introduce yourself warmly. Explain why you're reaching out specifically for them. Make it personal.",
+    "warm_intro": (
+        "First contact. Use the HOW TO INTRODUCE THE ADVISOR instruction above precisely. "
+        "Be warm and specific — mention why you're reaching out for THIS person (their tier, source, or context). "
+        "One clear, simple ask at the end. No pressure. No filler. Sound like a person, not a template."
+    ),
     "value_proposition": "Focus on what your organization can do for them. What peace of mind looks like. Don't ask yet.",
     "soft_reference": "Reference your previous email naturally ('I reached out a few days ago...'). Try a completely different angle.",
     "checkin": "Simple, low-pressure check-in. Just making sure they got your message. No ask.",
@@ -423,6 +430,38 @@ def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, 
         logger.error("Escalation alert failed: %s", e)
 
 
+def _build_advisor_intro_instruction(advisor_name: str, org_name: str) -> str:
+    """
+    Generates a clear directive for how the AI should introduce the advisor in the email.
+    Handles the common case where advisor full_name == org_name (e.g. both "MDG Testing")
+    so the AI never writes "My name is X with X."
+    """
+    # Normalize for comparison (lowercase, strip extra whitespace)
+    adv_norm = (advisor_name or "").strip().lower()
+    org_norm = (org_name or "").strip().lower()
+
+    if not advisor_name or advisor_name.strip() == "Your Advisor":
+        return (
+            f"Introduce yourself as a Family Service Advisor at {org_name}. "
+            f"Do NOT say your name — just reference the organization."
+        )
+
+    if adv_norm == org_norm:
+        # Advisor name IS the org name — introducing with "with" would be redundant
+        return (
+            f"Your name is {advisor_name} and you represent {org_name}. "
+            f"IMPORTANT: Do NOT write 'My name is {advisor_name} with {org_name}' — they are the same. "
+            f"Instead just say something like 'I'm {advisor_name}' or 'I'm reaching out from {org_name}' — pick one, not both."
+        )
+
+    # Normal case — advisor has a distinct name from the org
+    return (
+        f"Your name is {advisor_name} and you work at {org_name}. "
+        f"When introducing yourself for the first time, say something like "
+        f"'My name is {advisor_name}, a Family Service Advisor at {org_name}' — natural and specific."
+    )
+
+
 def generate_touch_email(
     db: Session,
     lead: Lead,
@@ -470,15 +509,18 @@ def generate_touch_email(
         offer_hook_line = ""
 
     org_name = _get_org_name(db, advisor)
+    advisor_name = advisor.full_name or "Your Advisor"
     lead_context = _build_lead_context(lead)
+    advisor_intro = _build_advisor_intro_instruction(advisor_name, org_name)
     system = SMART_SYSTEM_PROMPT.format(
         relationship_context=relationship_context,
         ai_direction=direction,
         appt_label=appt_label,
+        advisor_intro_instruction=advisor_intro,
         tone_instruction=TONE_MAP.get(tone, TONE_MAP["warm"]),
         touch_angle_instruction=TOUCH_ANGLE_MAP.get(angle, ""),
         offer_hook_line=offer_hook_line,
-        advisor_name=advisor.full_name or "Your Advisor",
+        advisor_name=advisor_name,
         org_name=org_name,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
