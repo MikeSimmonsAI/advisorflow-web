@@ -211,7 +211,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
     try {
       const r = await api.post(`/case-file/${selectedFileId}/crm-push`)
       const ok = r?.results?.filter(x => x.ok).length
-      showToast(ok ? `Pushed to ${ok} CRM connection(s) ✓` : 'No active CRM connections found')
+      showToast(ok ? `Exported to ${ok} external CRM ✓` : 'No external CRM configured — your data is saved in AdvisorFlow. Set up HubSpot/GHL in Settings → Integrations to enable this.')
     } catch (e) {
       showToast(e?.message || 'CRM push failed', 'error')
     } finally {
@@ -526,8 +526,9 @@ export default function CaseFile({ lead, onClose, onSaved }) {
             {selectedFileId && (
               <>
                 <div className={`cf-btn cf-btn--crm ${crmPushing ? 'cf-btn--loading' : ''}`}
-                  onClick={crmPushing ? null : handleCrmPush}>
-                  {crmPushing ? '⏳ Pushing...' : '🔗 Push to CRM'}
+                  onClick={crmPushing ? null : handleCrmPush}
+                  title="Sync to an external CRM (HubSpot, Salesforce, GoHighLevel). Set up in Settings → Integrations. Your data is already saved in AdvisorFlow.">
+                  {crmPushing ? '⏳ Pushing...' : '🔗 Export to External CRM'}
                 </div>
                 <div className="cf-btn cf-btn--danger" onClick={() => setShowCloseModal(true)}>
                   🔒 Close Case
