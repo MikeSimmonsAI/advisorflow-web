@@ -64,7 +64,7 @@ const TIER_COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'neutral']
 
 export default function OrgSettings() {
   const user = getCurrentUser()
-  const isSuperAdmin = user?.role === 'super_admin'
+  const isSuperAdmin = user?.role === 'super_admin' || user?.role === 'god_admin'
 
   // Super admin org selector
   const [allOrgs, setAllOrgs] = useState([])
