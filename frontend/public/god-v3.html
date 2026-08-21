@@ -1019,7 +1019,6 @@ async function revokeUser(userId, userName, btn){
   btn.disabled=true;btn.textContent='…';
   try{
     await apiPost('/god/users/'+userId+'/deactivate',{});
-    // Update local state
     const u=STATE.users.find(x=>x.id==userId);
     if(u) u.status='inactive';
     renderUsers();
@@ -1046,6 +1045,45 @@ async function restoreUser(userId, userName, btn){
   }
 }
 
+function openRoleChangeDrawer(userId, userName, currentRole){
+  const ROLES=['advisor','org_admin','super_admin'];
+  const roleLabels={advisor:'Advisor',org_admin:'Org Admin',super_admin:'Super Admin'};
+  openDrawer('_custom_role_change',{});
+  // Overwrite drawer content directly
+  const t=document.getElementById('d-title');
+  const b=document.getElementById('d-body');
+  const f=document.getElementById('d-foot');
+  t.textContent='Change Role — '+userName;
+  b.innerHTML=`
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-2)">
+      Current role: <span class="badge badge-${currentRole==='super_admin'?'super':'active'}">${roleLabels[currentRole]||currentRole}</span>
+    </div>
+    <div class="fg"><label class="fl">New Role</label>
+      <select class="fs" id="d-new-role">
+        ${ROLES.map(r=>`<option value="${r}" ${r===currentRole?'selected':''}>${roleLabels[r]||r}</option>`).join('')}
+      </select>
+    </div>
+    <div class="fh">Role change takes effect immediately. Super Admin can manage their own org only.</div>
+  `;
+  f.innerHTML=`
+    <button class="btn btn-primary" style="flex:1" onclick="submitRoleChange('${userId}','${userName.replace(/'/g,"\\'")}')">Change Role</button>
+    <button class="btn" onclick="closeDrawer()">Cancel</button>
+  `;
+}
+
+async function submitRoleChange(userId, userName){
+  const role=document.getElementById('d-new-role')?.value;
+  if(!role) return;
+  try{
+    await apiPatch('/god/users/'+userId+'/role',{role});
+    const u=STATE.users.find(x=>x.id==userId);
+    if(u) u.role=role;
+    closeDrawer();renderUsers();
+    showToast('success','Role Changed',userName+' is now '+role.replace(/_/g,' '));
+    logAction('change_role',userName,'global',{new_role:role});
+  }catch(e){showToast('error','Role Change Failed',e.message);}
+}
+
 function renderUsers(){
   const users=STATE.users;
   document.getElementById('users-sub').textContent=`${users.length} user${users.length!==1?'s':''} with platform access`;
@@ -1053,11 +1091,15 @@ function renderUsers(){
     const isGod=u.role==='god_admin';
     const inactive=u.status==='inactive';
     const roleCls=isGod?'god':u.role==='super_admin'?'super':'active';
-    const actionBtn=isGod
-      ?`<span style="font-size:10px;color:var(--text-3)">Protected</span>`
+    const safeName=u.name.replace(/'/g,"\\'");
+    const roleBtn=isGod
+      ?`<span style="font-size:10px;color:var(--text-3)">God Admin</span>`
+      :`<button class="btn btn-xs" onclick="openRoleChangeDrawer('${u.id}','${safeName}','${u.role}')">Role ↕</button>`;
+    const revokeBtn=isGod
+      ?``
       :inactive
-        ?`<button class="btn btn-xs btn-green" onclick="restoreUser('${u.id}','${u.name.replace(/'/g,"\\'")}',this)">Restore</button>`
-        :`<button class="btn btn-xs btn-red" onclick="revokeUser('${u.id}','${u.name.replace(/'/g,"\\'")}',this)">Revoke</button>`;
+        ?`<button class="btn btn-xs btn-green" onclick="restoreUser('${u.id}','${safeName}',this)">Restore</button>`
+        :`<button class="btn btn-xs btn-red" onclick="revokeUser('${u.id}','${safeName}',this)">Revoke</button>`;
     return`<tr style="${inactive?'opacity:.55':''}">
       <td><strong>${u.name}</strong></td>
       <td class="mono" style="font-size:11px">${u.email}</td>
@@ -1065,7 +1107,7 @@ function renderUsers(){
       <td>${(PM[u.platform]||{label:u.platform==='global'?'All Platforms':u.platform}).label}</td>
       <td><span class="badge badge-${u.status}">${u.status}</span></td>
       <td class="muted">${u.lastLogin||'—'}</td>
-      <td>${actionBtn}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">${roleBtn}${revokeBtn}</td>
     </tr>`;
   }).join(''):`<tr><td colspan="7"><div class="empty">No users found</div></td></tr>`;
 }

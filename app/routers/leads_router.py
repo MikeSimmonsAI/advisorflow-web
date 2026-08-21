@@ -10,7 +10,7 @@ from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
 from app.deps import get_db, get_current_user
-from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature
+from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
 from app.services.import_service import import_leads_from_excel
 from app.services.dedup_service import normalize_phone
 from app.routers.audit_log_router import log_action
@@ -702,7 +702,7 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     tracked on the backend the whole time but never surfaced anywhere in
     the UI - an advisor had no way to see if someone actually booked.
     """
-    from app.models.models import Message, Reply, BookingLink, EmailMessage, CadenceState
+    from app.models.models import Message, Reply, BookingLink, EmailMessage, CadenceState, VoiceCall as _VoiceCall
 
     is_manager_tl = current_user.role in ("org_admin", "super_admin", "god_admin")
     q_tl = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
@@ -799,11 +799,36 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
             "expires_at": latest_booking.expires_at,
         }
 
+    # Voice call records — shown on the Calls tab
+    voice_calls_raw = (
+        db.query(_VoiceCall)
+        .filter(_VoiceCall.lead_id == lead_id)
+        .order_by(_VoiceCall.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    voice_call_list = []
+    for vc in voice_calls_raw:
+        voice_call_list.append({
+            "id": vc.id,
+            "outcome": vc.outcome,
+            "status": vc.status,
+            "duration_seconds": vc.duration_seconds,
+            "transcript": vc.transcript,
+            "voicemail_transcript": vc.voicemail_transcript,
+            "voicemail_left": vc.voicemail_left,
+            "call_number": vc.call_number,
+            "recording_url": vc.recording_url,
+            "started_at": vc.started_at.isoformat() if vc.started_at else None,
+            "created_at": vc.created_at.isoformat() if vc.created_at else None,
+        })
+
     return {
         "lead": lead,
         "events": events,
         "ai_quality": ai_note,
         "booking": booking_info,
+        "voice_calls": voice_call_list,
     }
 
 
@@ -1167,6 +1192,30 @@ def create_lead_manually(
     db.refresh(lead)
 
     log_action(db, current_user.organization_id, current_user.id, action="lead.create_manual", target_type="lead", target_id=lead.id)
+
+    # Auto-create a CRM contact so this lead shows up in the CRM immediately.
+    # Silently skip if one already exists (shouldn't happen for a brand-new lead, but defensive).
+    try:
+        already_in_crm = db.query(CRMContact).filter(
+            CRMContact.lead_id == lead.id,
+            CRMContact.organization_id == current_user.organization_id,
+            CRMContact.is_archived == False,
+        ).first()
+        if not already_in_crm:
+            crm_contact = CRMContact(
+                organization_id=current_user.organization_id,
+                first_name=lead.first_name,
+                last_name=lead.last_name,
+                phone=lead.phone,
+                email=lead.email,
+                stage="inquiry",
+                lead_id=lead.id,
+                assigned_to_id=lead.assigned_to_id or current_user.id,
+            )
+            db.add(crm_contact)
+            db.commit()
+    except Exception:
+        pass  # CRM creation is best-effort; lead was already committed
 
     return {
         "id": lead.id,

@@ -251,7 +251,7 @@ export default function LeadDetail() {
   const [activity, setActivity] = useState(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
-  const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'timeline'
+  const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'calls' | 'timeline'
   const timelineRef = useRef(null)
 
   // Manual flagging
@@ -818,6 +818,22 @@ export default function LeadDetail() {
                 )}
               </button>
               <button
+                onClick={() => setActiveTab('calls')}
+                style={{
+                  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  background: 'none', border: 'none', borderBottom: activeTab === 'calls' ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: activeTab === 'calls' ? 'var(--accent)' : 'var(--text-secondary)',
+                  marginBottom: -1,
+                }}
+              >
+                📞 Calls
+                {data?.voice_calls?.length > 0 && (
+                  <span style={{ marginLeft: 6, fontSize: 11, background: activeTab === 'calls' ? 'var(--accent)' : 'var(--border-subtle)', color: activeTab === 'calls' ? '#fff' : 'var(--text-secondary)', borderRadius: 10, padding: '1px 6px' }}>
+                    {data.voice_calls.length}
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setActiveTab('timeline')}
                 style={{
                   padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -851,6 +867,124 @@ export default function LeadDetail() {
                 </div>
               )
             )}
+
+            {/* Tab: Voice Calls + Transcripts */}
+            {activeTab === 'calls' && (() => {
+              const calls = data?.voice_calls || []
+              if (calls.length === 0) {
+                return <div className="empty-state">No AI voice calls yet. Use the "Call with AI" button below to start one.</div>
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '480px', overflowY: 'auto', paddingRight: 4 }}>
+                  {calls.map((vc) => {
+                    const outcomeColor = {
+                      booked: '#1ef082',
+                      booking_requested: '#1ea8ff',
+                      no_answer: '#888',
+                      not_interested: '#ff5050',
+                      completed: '#1ef0a8',
+                      escalated: '#ffb41e',
+                      failed: '#ff5050',
+                    }[vc.outcome] || '#888'
+                    const outcomeLabel = {
+                      booked: '📅 Booked',
+                      booking_requested: '🔗 Booking link sent',
+                      no_answer: '📵 No answer',
+                      not_interested: '🚫 Not interested',
+                      completed: '✅ Completed',
+                      escalated: '🔔 Escalated',
+                      failed: '⚠️ Failed',
+                    }[vc.outcome] || vc.outcome || 'Unknown'
+                    const startedLabel = vc.started_at
+                      ? new Date(vc.started_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : new Date(vc.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    const durationLabel = vc.duration_seconds
+                      ? `${Math.floor(vc.duration_seconds / 60)}m ${vc.duration_seconds % 60}s`
+                      : null
+
+                    return (
+                      <div key={vc.id} style={{
+                        background: 'var(--surface-card, rgba(255,255,255,0.04))',
+                        border: '1px solid var(--border-subtle)',
+                        borderLeft: `3px solid ${outcomeColor}`,
+                        borderRadius: 10,
+                        padding: '14px 16px',
+                      }}>
+                        {/* Call header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                              📞 Call #{vc.call_number || '?'}
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 600, background: outcomeColor + '22', color: outcomeColor, border: `1px solid ${outcomeColor}44`, borderRadius: 20, padding: '2px 8px' }}>
+                              {outcomeLabel}
+                            </span>
+                            {durationLabel && (
+                              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>⏱ {durationLabel}</span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{startedLabel}</span>
+                        </div>
+
+                        {/* Live call transcript */}
+                        {vc.transcript && (
+                          <div style={{ marginBottom: 10 }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              📝 Call Transcript
+                            </div>
+                            <div style={{
+                              fontSize: 12,
+                              color: 'var(--text-primary)',
+                              background: 'rgba(0,0,0,0.15)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 8,
+                              padding: '10px 14px',
+                              lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap',
+                              maxHeight: 280,
+                              overflowY: 'auto',
+                              fontFamily: 'var(--font-mono, monospace)',
+                            }}>
+                              {vc.transcript}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Voicemail transcript */}
+                        {vc.voicemail_left && vc.voicemail_transcript && (
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              📬 Voicemail Transcript
+                            </div>
+                            <div style={{
+                              fontSize: 12,
+                              color: 'var(--text-primary)',
+                              background: 'rgba(255,180,30,0.06)',
+                              border: '1px solid rgba(255,180,30,0.2)',
+                              borderRadius: 8,
+                              padding: '10px 14px',
+                              lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap',
+                              maxHeight: 180,
+                              overflowY: 'auto',
+                            }}>
+                              {vc.voicemail_transcript}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* No transcript available */}
+                        {!vc.transcript && !(vc.voicemail_left && vc.voicemail_transcript) && (
+                          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                            {vc.voicemail_left ? 'Voicemail left — no transcript available.' : 'No transcript for this call.'}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
 
             {/* Tab: Full Timeline */}
             {activeTab === 'timeline' && (

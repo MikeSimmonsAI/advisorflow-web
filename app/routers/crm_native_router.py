@@ -289,3 +289,60 @@ def create_from_lead(
     db.commit()
     db.refresh(contact)
     return {**_contact_dict(contact), "already_existed": False}
+
+
+@router.post("/sync-from-leads")
+def sync_leads_to_crm(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk-sync all org leads into the CRM — creates a CRMContact for every
+    lead that doesn't already have one.  Safe to call multiple times; leads
+    already in CRM are silently skipped.  Only syncs non-duplicate leads.
+    """
+    # Collect all lead IDs that already have a CRM contact
+    existing_lead_ids = {
+        row.lead_id
+        for row in db.query(CRMContact.lead_id).filter(
+            CRMContact.organization_id == current_user.organization_id,
+            CRMContact.lead_id.isnot(None),
+            CRMContact.is_archived == False,
+        ).all()
+        if row.lead_id
+    }
+
+    leads = (
+        db.query(Lead)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.is_duplicate == False,
+        )
+        .all()
+    )
+
+    created = 0
+    for lead in leads:
+        if lead.id in existing_lead_ids:
+            continue
+        contact = CRMContact(
+            organization_id=current_user.organization_id,
+            first_name=lead.first_name,
+            last_name=lead.last_name,
+            phone=lead.phone,
+            email=lead.email,
+            stage="inquiry",
+            lead_id=lead.id,
+            assigned_to_id=lead.assigned_to_id or current_user.id,
+        )
+        db.add(contact)
+        created += 1
+
+    if created:
+        db.commit()
+
+    return {
+        "synced": created,
+        "already_existed": len(leads) - created,
+        "total_leads": len(leads),
+    }

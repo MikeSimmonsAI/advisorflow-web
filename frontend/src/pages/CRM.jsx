@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './CRM.css'
@@ -310,6 +310,8 @@ export default function CRM() {
   const [view, setView] = useState('list') // 'list' | 'pipeline'
   const [selected, setSelected] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
 
   const fetchContacts = async () => {
     setLoading(true); setError(null)
@@ -364,6 +366,23 @@ export default function CRM() {
     setContacts(prev => [created, ...prev])
   }
 
+  const handleSyncLeads = async () => {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const result = await api.post('/crm-native/sync-from-leads', {})
+      setSyncResult(result)
+      if (result.synced > 0) {
+        // Reload contacts to show the newly synced ones
+        await fetchContacts()
+      }
+    } catch (e) {
+      setSyncResult({ error: e.message || 'Sync failed' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   // ── Pipeline Board View ─────────────────────────────────────────────────
   const renderPipeline = () => (
     <div className="crm-pipeline">
@@ -408,6 +427,24 @@ export default function CRM() {
               ⬜ Pipeline
             </button>
           </div>
+          <button
+            className="btn btn--secondary"
+            onClick={handleSyncLeads}
+            disabled={syncing}
+            title="Import all uploaded leads into the CRM — existing contacts are skipped"
+          >
+            {syncing ? '⏳ Syncing…' : '🔄 Sync Leads → CRM'}
+          </button>
+          {syncResult && !syncResult.error && (
+            <span style={{ fontSize: 12, color: 'var(--signal-green)', alignSelf: 'center' }}>
+              ✓ {syncResult.synced} added
+            </span>
+          )}
+          {syncResult?.error && (
+            <span style={{ fontSize: 12, color: 'var(--signal-red)', alignSelf: 'center' }}>
+              ⚠ {syncResult.error}
+            </span>
+          )}
           <button className="btn btn--primary" onClick={() => setShowCreate(true)}>+ Add Contact</button>
         </div>
       </div>
