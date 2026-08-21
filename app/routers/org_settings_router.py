@@ -162,6 +162,9 @@ def get_org_settings(
         "from_email": getattr(org, "from_email", None),
         # Never return the raw API key to the UI — only signal whether it's set.
         "resend_api_key_set": bool(getattr(org, "resend_api_key", None)),
+        # Contact / booking page info
+        "org_address": getattr(org, "org_address", None),
+        "org_phone": getattr(org, "org_phone", None),
     }
 
 
@@ -187,6 +190,31 @@ def update_branding(
     if req.members_label is not None: org.members_label = req.members_label or None
     db.commit()
     return {"updated": True}
+
+
+class ContactInfoUpdate(BaseModel):
+    name: Optional[str] = None
+    org_address: Optional[str] = None
+    org_phone: Optional[str] = None
+
+
+@router.patch("/contact")
+def update_contact_info(
+    req: ContactInfoUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Update org name, address and phone — shown on the booking page header and confirmation emails."""
+    org = _resolve_org(current_user, org_id, db)
+    if req.name is not None and req.name.strip():
+        org.name = req.name.strip()
+    if req.org_address is not None:
+        org.org_address = req.org_address.strip() or None
+    if req.org_phone is not None:
+        org.org_phone = req.org_phone.strip() or None
+    db.commit()
+    return {"updated": True, "name": org.name, "org_address": org.org_address, "org_phone": org.org_phone}
 
 
 @router.patch("/industry")

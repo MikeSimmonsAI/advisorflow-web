@@ -522,6 +522,15 @@ def admin_get_profile(
 # ── Per-org appointment types ────────────────────────────────────────────────
 
 DEFAULT_APPT_TYPES = [
+    # ── Universal / general ───────────────────────────────────────────────────
+    "General Consultation",
+    "New Web Lead",
+    "Walk-In",
+    "Phone Call",
+    "Video Call",
+    "Referral Appointment",
+    "Follow-Up Appointment",
+    # ── Funeral / memorial ────────────────────────────────────────────────────
     "Pre-Need Planning Consultation",
     "Pre-Planning Consultation",
     "At-Need Arrangement Conference",
@@ -537,10 +546,12 @@ DEFAULT_APPT_TYPES = [
     "Contract Review Appointment",
     "Family Services Appointment",
     "Family Services Consultation",
-    "General Consultation",
     "New Family Consultation",
+    # ── Insurance / financial ─────────────────────────────────────────────────
     "Insurance & Benefits Review",
     "Benefits & Coverage Consultation",
+    "Policy Review",
+    "Annual Review",
     "Veterans Benefits Consultation",
 ]
 
