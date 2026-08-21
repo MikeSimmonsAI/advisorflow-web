@@ -226,6 +226,14 @@ class Organization(Base):
     member_label = Column(String(100), nullable=True)   # singular e.g. "Agent"
     members_label = Column(String(100), nullable=True)  # plural   e.g. "Agents"
 
+    # Custom CRM pipeline stages — JSON array of {key, label, color}
+    # Null = use industry default stages from INDUSTRY_STAGES map in crm_native_router.
+    crm_stages = Column(Text, nullable=True)
+
+    # Custom field schema for CRM contacts — JSON array of {key, label, type, options?}
+    # type: "text" | "number" | "dropdown" | "date"
+    crm_custom_fields = Column(Text, nullable=True)
+
     # Org-level email sender — overrides the global RESEND_API_KEY / EMAIL_FROM_ADDRESS
     # env vars so each brand sends from its own domain (e.g. support@bookaboost.live
     # for BookaBoost, support@evosyspro.live for EvoSys Pro).
@@ -1169,6 +1177,9 @@ class CRMContact(Base):
     created_at       = Column(DateTime, default=datetime.utcnow)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_contacted_at = Column(DateTime, nullable=True)
+
+    # Custom field values — JSON object keyed by field key defined in org.crm_custom_fields
+    custom_data      = Column(Text, nullable=True)
 
     # Soft-delete
     is_archived      = Column(Boolean, default=False)

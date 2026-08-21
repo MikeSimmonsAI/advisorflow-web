@@ -580,6 +580,12 @@ export default function OrgSettings() {
             </button>
           </section>
 
+        {/* ── CRM Pipeline Stages ── */}
+        <CRMStagesSection />
+
+        {/* ── CRM Custom Fields ── */}
+        <CRMCustomFieldsSection />
+
         {/* ── Demo Data Seed (super admin only) ── */}
         {isSuperAdmin && selectedOrgId && (
           <section className="panel os-section" style={{ marginTop: 16, borderColor: 'rgba(217,119,6,0.3)' }}>
@@ -627,5 +633,229 @@ function SeedDemoButton({ orgId }) {
       )}
       {status === 'error' && <div style={{ color: '#f87171', fontSize: 13 }}>{err}</div>}
     </div>
+  )
+}
+
+// ── CRM Pipeline Stages ───────────────────────────────────────────────────
+function CRMStagesSection() {
+  const COLORS = ['#64748b','#6366f1','#f59e0b','#ef4444','#10b981','#3b82f6','#f97316','#8b5cf6','#ec4899','#14b8a6']
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [stages, setStages] = useState([])
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch('/api/crm-native/stages', { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
+      .then(r => r.json()).then(d => {
+        setData(d)
+        setStages(d.stages || [])
+      }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  function addStage() {
+    setStages(s => [...s, { key: `stage_${Date.now()}`, label: 'New Stage', color: COLORS[s.length % COLORS.length] }])
+  }
+
+  function removeStage(idx) {
+    setStages(s => s.filter((_, i) => i !== idx))
+  }
+
+  function moveUp(idx) {
+    if (idx === 0) return
+    setStages(s => { const a = [...s]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; return a })
+  }
+
+  function moveDown(idx) {
+    setStages(s => { if (idx >= s.length - 1) return s; const a = [...s]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; return a })
+  }
+
+  async function save() {
+    setErr(''); setSaving(true)
+    try {
+      const res = await fetch('/api/crm-native/stages', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
+        body: JSON.stringify({ stages }),
+      })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Save failed') }
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function reset() {
+    if (!confirm('Reset to industry default stages?')) return
+    setResetting(true)
+    try {
+      const res = await fetch('/api/crm-native/stages/reset', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
+      })
+      const d = await res.json()
+      setStages(d.stages || [])
+      setData(prev => ({ ...prev, is_custom: false }))
+    } catch (e) { setErr(e.message) }
+    finally { setResetting(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 className="panel-title">CRM Pipeline Stages</h2>
+          <p className="os-hint" style={{ marginTop: 2 }}>
+            Define the stages contacts move through in your CRM.
+            {data?.is_custom ? ' Custom stages active.' : ` Using ${data?.industry || 'default'} industry defaults.`}
+          </p>
+        </div>
+        {data?.is_custom && (
+          <button className="btn btn--secondary" onClick={reset} disabled={resetting} style={{ fontSize: 12 }}>
+            {resetting ? 'Resetting…' : 'Reset to default'}
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        {stages.map((s, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="color" value={s.color || '#64748b'} onChange={e => setStages(ss => ss.map((x,j) => j===i ? {...x, color: e.target.value} : x))} style={{ width: 36, height: 34, border: 'none', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
+            <input
+              className="os-input"
+              style={{ flex: 1, marginBottom: 0 }}
+              value={s.label}
+              onChange={e => setStages(ss => ss.map((x,j) => j===i ? {...x, label: e.target.value} : x))}
+              placeholder="Stage name"
+            />
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button onClick={() => moveUp(i)} disabled={i===0} style={{ padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', opacity: i===0?0.3:1 }}>↑</button>
+              <button onClick={() => moveDown(i)} disabled={i===stages.length-1} style={{ padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', opacity: i===stages.length-1?0.3:1 }}>↓</button>
+              <button onClick={() => removeStage(i)} disabled={stages.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#ef4444', opacity: stages.length<=1?0.3:1 }}>✕</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {err && <div style={{ color: 'var(--signal-red)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button className="btn btn--secondary" onClick={addStage} style={{ fontSize: 13 }}>+ Add Stage</button>
+        <button className="btn btn--primary" onClick={save} disabled={saving} style={{ fontSize: 13 }}>
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Stages'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ── CRM Custom Fields ─────────────────────────────────────────────────────
+const FIELD_TYPES = [
+  { value: 'text',     label: 'Text' },
+  { value: 'number',   label: 'Number' },
+  { value: 'dropdown', label: 'Dropdown' },
+  { value: 'date',     label: 'Date' },
+]
+
+function CRMCustomFieldsSection() {
+  const [fields, setFields] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/crm-native/custom-fields', { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
+      .then(r => r.json()).then(d => setFields(Array.isArray(d) ? d : []))
+      .catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  function addField() {
+    setFields(f => [...f, { key: `field_${Date.now()}`, label: '', type: 'text', options: '' }])
+  }
+
+  function removeField(idx) {
+    setFields(f => f.filter((_, i) => i !== idx))
+  }
+
+  function update(idx, patch) {
+    setFields(f => f.map((x, i) => i === idx ? { ...x, ...patch } : x))
+  }
+
+  async function save() {
+    setErr(''); setSaving(true)
+    const cleaned = fields.map(f => ({
+      key: f.key,
+      label: f.label.trim(),
+      type: f.type,
+      options: f.type === 'dropdown' ? (f.options || '').split(',').map(o => o.trim()).filter(Boolean) : undefined,
+    }))
+    if (cleaned.some(f => !f.label)) { setErr('All fields need a label'); setSaving(false); return }
+    try {
+      const res = await fetch('/api/crm-native/custom-fields', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
+        body: JSON.stringify({ fields: cleaned }),
+      })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Save failed') }
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header">
+        <h2 className="panel-title">CRM Custom Fields</h2>
+        <p className="os-hint" style={{ marginTop: 2 }}>
+          Add industry-specific fields to every contact record. All fields are optional.
+          For example: Vehicle make/model for auto shops, Current ISP for fiber, Policy type for insurance.
+        </p>
+      </div>
+      {fields.length === 0 && (
+        <p style={{ color: 'var(--text-tertiary)', fontSize: 13, marginBottom: 12 }}>No custom fields yet. Add fields specific to your industry below.</p>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+        {fields.map((f, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <input
+              className="os-input"
+              style={{ flex: '1 1 140px', marginBottom: 0, minWidth: 120 }}
+              placeholder="Field name (e.g. Vehicle Make)"
+              value={f.label}
+              onChange={e => update(i, { label: e.target.value })}
+            />
+            <select
+              className="os-input"
+              style={{ flex: '0 0 120px', marginBottom: 0 }}
+              value={f.type}
+              onChange={e => update(i, { type: e.target.value })}
+            >
+              {FIELD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            {f.type === 'dropdown' && (
+              <input
+                className="os-input"
+                style={{ flex: '1 1 200px', marginBottom: 0, minWidth: 160 }}
+                placeholder="Options (comma separated)"
+                value={f.options || ''}
+                onChange={e => update(i, { options: e.target.value })}
+              />
+            )}
+            <button onClick={() => removeField(i)} style={{ padding: '6px 10px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#ef4444', whiteSpace: 'nowrap' }}>Remove</button>
+          </div>
+        ))}
+      </div>
+      {err && <div style={{ color: 'var(--signal-red)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button className="btn btn--secondary" onClick={addField} style={{ fontSize: 13 }}>+ Add Field</button>
+        <button className="btn btn--primary" onClick={save} disabled={saving || fields.length === 0} style={{ fontSize: 13 }}>
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Fields'}
+        </button>
+      </div>
+    </section>
   )
 }

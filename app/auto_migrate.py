@@ -215,6 +215,12 @@ COLUMNS_TO_ADD = [
     ("crm_contacts", "updated_at", "TIMESTAMP DEFAULT NOW()"),
     ("crm_contacts", "last_contacted_at", "TIMESTAMP"),
     ("crm_contacts", "is_archived", "BOOLEAN DEFAULT FALSE"),
+    # Custom CRM stages per org — JSON array of {key, label, color}
+    ("organizations", "crm_stages", "TEXT"),
+    # Custom field schema per org — JSON array of {key, label, type, options?}
+    ("organizations", "crm_custom_fields", "TEXT"),
+    # Custom field values per contact — JSON object {field_key: value}
+    ("crm_contacts", "custom_data", "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

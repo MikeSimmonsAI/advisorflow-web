@@ -11,7 +11,6 @@ const ALL_FEATURES = [
   { key: 'availability',     label: 'Availability' },
   { key: 'campaigns',        label: 'Campaigns' },
   // CRM
-  { key: 'crm',              label: 'CRM (Contact Management)' },
   { key: 'crm_connectors',   label: 'CRM Connectors (GoHighLevel / HubSpot)' },
   // Lead tools
   { key: 'lead_cleanup',     label: 'Lead Cleanup' },
@@ -23,6 +22,25 @@ const ALL_FEATURES = [
   { key: 'compliance',       label: 'Compliance' },
   { key: 'audit_log',        label: 'Audit Log' },
 ]
+// Features each plan tier includes by default
+const PLAN_FEATURES = {
+  trial: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log'],
+  standard: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc'],
+  enterprise: null, // null = all features
+}
+
+function getPlanLabel(plan) {
+  return { trial: 'TRIAL', standard: 'STANDARD', enterprise: 'ENTERPRISE' }[plan] || (plan || 'TRIAL').toUpperCase()
+}
+
+function getBelowPlanCount(plan, currentFeatures) {
+  const expected = PLAN_FEATURES[plan]
+  if (!expected) return 0  // enterprise = all, never below
+  if (currentFeatures === null) return 0  // already has all
+  const missing = expected.filter(f => !currentFeatures.includes(f))
+  return missing.length
+}
+
 export default function OrgManager() {
   const [orgs, setOrgs] = useState([])
   const [users, setUsers] = useState([])
@@ -97,6 +115,22 @@ export default function OrgManager() {
       alert('Failed to save: ' + e.message)
     } finally {
       setSaving(prev => ({ ...prev, [orgId]: false }))
+    }
+  }
+
+  async function applyPlanDefaults(org) {
+    const plan = (org.plan || 'trial').toLowerCase()
+    const defaults = PLAN_FEATURES[plan] || PLAN_FEATURES.trial
+    setOrgFeatures(prev => ({ ...prev, [org.id]: defaults }))
+    setSaving(prev => ({ ...prev, [org.id]: true }))
+    try {
+      await api.patch(`/org-settings/features?org_id=${org.id}`, {
+        enabled_features: defaults,
+      })
+    } catch (e) {
+      alert('Failed to apply plan defaults: ' + e.message)
+    } finally {
+      setSaving(prev => ({ ...prev, [org.id]: false }))
     }
   }
   const usersByOrg = users.reduce((acc, u) => {
@@ -197,10 +231,29 @@ export default function OrgManager() {
                         ? <span className="org-features-status org-features-status--all">All enabled</span>
                         : <span className="org-features-status">{features.length}/{ALL_FEATURES.length} enabled</span>
                       }
+                      {(() => {
+                        const below = getBelowPlanCount((org.plan || 'trial').toLowerCase(), features)
+                        return below > 0 ? (
+                          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--signal-amber)', fontWeight: 700, background: 'rgba(234,179,8,0.1)', padding: '2px 7px', borderRadius: 10 }}>
+                            ⚠ {below} below {getPlanLabel(org.plan)} plan
+                          </span>
+                        ) : null
+                      })()}
                     </span>
-                    <button type="button" className="org-features-grant-all" onClick={() => grantAll(org.id)}>
-                      Grant All
-                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                        onClick={() => applyPlanDefaults(org)}
+                        disabled={saving[org.id]}
+                        title={`Apply default features for ${getPlanLabel(org.plan)} plan`}
+                      >
+                        Apply {getPlanLabel(org.plan)} defaults
+                      </button>
+                      <button type="button" className="org-features-grant-all" onClick={() => grantAll(org.id)}>
+                        Grant All
+                      </button>
+                    </div>
                   </div>
                   <div className="org-features-grid">
                     {ALL_FEATURES.map(f => {

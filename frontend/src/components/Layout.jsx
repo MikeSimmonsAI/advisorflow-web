@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
   { to: '/activity', label: 'Activity', icon: 'send' },
   { to: '/availability', label: 'Availability', icon: 'calendar' },
+  { to: '/crm', label: 'CRM', icon: 'database' },
   { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
   { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
@@ -42,8 +43,7 @@ const ADMIN_NAV_ITEMS = [
   { to: '/users',            label: 'Users',              icon: 'user-plus',    featureKey: 'users' },
   // Availability moved to all-user NAV_ITEMS — every advisor manages their own schedule
   { to: '/campaigns',        label: 'Campaigns',          icon: 'target',       featureKey: 'campaigns' },
-  { to: '/crm',              label: 'CRM',                icon: 'database',     featureKey: null },
-  { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: null },
+  { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: 'crm_connectors' },
   { to: '/lead-cleanup',     label: 'Lead Cleanup',       icon: 'users',        featureKey: 'lead_cleanup' },
   { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
   { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
