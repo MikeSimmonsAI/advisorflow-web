@@ -117,30 +117,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 {{"subject": "email subject line", "body": "2-3 sentence email body only, no sign-off, no URLs", "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
 """
 
-REPLY_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor respond to a lead's email reply on behalf of {org_name}.
+REPLY_SYSTEM_PROMPT = """You are an AI assistant helping {advisor_name} at {org_name} respond to a lead's email reply.
 
-The lead replied. Generate the ideal response to keep the conversation moving toward booking.
+The lead replied. Generate the smartest, most human response to move this conversation forward.
 
 CRITICAL RULES:
-- Read the lead's reply carefully. Respond directly to what they said.
-- Be SMART — think about what this person actually needs right now.
-- Compassionate and human. Never salesy.
+- Read the lead's reply carefully. Respond DIRECTLY to what they actually said — not to a generic script.
+- Compassionate and human. Never salesy, never robotic.
 - 2-3 sentences max. No filler.
-- If they show ANY interest → offer to book immediately.
-- If they ask a question → answer it and gently ask if they'd like to schedule.
+- Objection handling — respond with care, not pressure:
+  * "already have one / covered" → Acknowledge sincerely. Offer a no-pressure second-opinion or free review angle.
+  * "send info / not ready" → Offer one genuinely useful fact, then ask one easy question.
+  * "too busy / not a good time" → Respect it. Offer to follow up when convenient.
+  * "not interested" → Set should_stop=true. Close gracefully: acknowledge and leave the door open.
+  * "how much / price" → Don't quote numbers. Invite a conversation to understand their situation.
+- If they show clear interest → offer to schedule, include should_book=true.
+- If they ask a question → answer it specifically, then gently ask if they'd like to schedule.
 - Never reveal you are AI.
-- CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
+- CRITICAL: Do NOT include any sign-off, closing, or signature. Write ONLY the 2-3 sentence body and STOP.
 
 Relationship context: {relationship_context}
-ADVISOR: {advisor_name}
-ORGANIZATION: {org_name}
-LEAD: {first_name} {last_name}
-APPOINTMENT TYPE: {appt_label}
+ADVISOR: {advisor_name}  |  ORGANIZATION: {org_name}
+LEAD: {first_name} {last_name}  |  APPOINTMENT TYPE: {appt_label}
 ADDITIONAL LEAD CONTEXT:
 {lead_context}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
-{{"subject": "reply subject", "body": "your reply body, 2-3 sentences, no sign-off, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
+{{"subject": "reply subject", "body": "2-3 sentence reply, no sign-off, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
 """
 
 TONE_MAP = {
@@ -558,14 +561,18 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
         relationship_context=relationship_context,
         lead_context=lead_context,
     )
-    user_msg = f"Conversation history:\n{history}\n\nLead's latest reply:\n{reply_body}\n\nGenerate your response now."
+    user_msg = (
+        f"Full conversation history (read this carefully — it is your context):\n{history}\n\n"
+        f"Lead's latest reply:\n{reply_body}\n\n"
+        f"Now generate your response, addressing exactly what they said."
+    )
 
     try:
         response = _get_client().chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-            temperature=0.5,
-            max_tokens=300,
+            temperature=0.65,
+            max_tokens=350,
         )
         raw = response.choices[0].message.content.strip()
         clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
