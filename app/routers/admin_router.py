@@ -586,6 +586,7 @@ class UserResponseWithOrg(BaseModel):
     temp_password: str | None = None
     organization_id: str | None = None
     organization_name: str | None = None
+    profile_photo_url: str | None = None
 
 
 @router.get("/users")
@@ -604,6 +605,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
                 "is_active": u.is_active, "must_change_password": u.must_change_password,
                 "organization_id": u.organization_id,
                 "organization_name": orgs_by_id.get(u.organization_id, "Unknown"),
+                "profile_photo_url": getattr(u, "profile_photo_url", None),
             }
             for u in users
         ]
@@ -617,6 +619,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
         UserResponse(
             id=u.id, email=u.email, full_name=u.full_name, role=u.role,
             is_active=u.is_active, must_change_password=u.must_change_password,
+            profile_photo_url=getattr(u, "profile_photo_url", None),
         )
         for u in users
     ]

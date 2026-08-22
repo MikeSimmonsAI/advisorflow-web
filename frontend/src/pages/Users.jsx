@@ -33,8 +33,11 @@ function UserCard({ u, isSuperAdmin, isAdmin, stats, onDeactivate, onReactivate,
 
   return (
     <div className={`uc ${inactive ? 'uc--off' : ''}`}>
-      <div className="uc-avatar" style={{ background: color + '22', borderColor: color + '55' }}>
-        <span style={{ color }}>{initials(u.full_name)}</span>
+      <div className="uc-avatar" style={u.profile_photo_url ? { borderColor: color + '55', background: 'transparent', padding: 0, overflow: 'hidden' } : { background: color + '22', borderColor: color + '55' }}>
+        {u.profile_photo_url
+          ? <img src={u.profile_photo_url} alt={u.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', display: 'block' }} />
+          : <span style={{ color }}>{initials(u.full_name)}</span>
+        }
       </div>
 
       <div className="uc-body">

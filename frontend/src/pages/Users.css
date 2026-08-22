@@ -70,7 +70,7 @@
 /* ── User card ── */
 .uc {
   background: var(--surface-1); border: 1px solid var(--border-subtle);
-  border-radius: 14px; padding: 20px; display: flex; gap: 16px;
+  border-radius: 14px; padding: 20px; display: flex; gap: 16px; align-items: flex-start;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .uc:hover { border-color: var(--signal-blue); box-shadow: var(--glow-blue-sm); }
