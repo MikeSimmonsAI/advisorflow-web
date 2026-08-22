@@ -17,7 +17,7 @@ Architecture notes:
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
-    UniqueConstraint, Index, Enum as SAEnum
+    UniqueConstraint, Index, Enum as SAEnum, LargeBinary
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
@@ -1198,12 +1198,13 @@ class ProposalBlock(Base):
     Blocks are ordered by `position` (0-indexed).
 
     block_type values:
-        text    — rich text body (markdown stored, rendered client-side)
-        image   — uploaded image; file_url points to stored file
-        pdf     — uploaded PDF; file_url points to stored file
-        video   — embed URL (YouTube / Vimeo / Loom)
-        divider — visual section break, no content
-        cta     — call-to-action button with label + href
+        text        — rich text body (markdown stored, rendered client-side)
+        image       — uploaded image; file_url points to stored file
+        pdf         — uploaded PDF; file_url points to stored file
+        video       — embed URL (YouTube / Vimeo / Loom)
+        divider     — visual section break, no content
+        cta         — call-to-action button with label + href
+        website_url — live iframe embed of an external URL
     """
     __tablename__ = "proposal_blocks"
 
@@ -1301,6 +1302,28 @@ class ProposalView(Base):
 
     proposal        = relationship("Proposal", back_populates="views")
     token           = relationship("ProposalToken", back_populates="views")
+
+
+class ProposalFile(Base):
+    """
+    Stores uploaded files (images, PDFs) for proposal blocks.
+    Files are kept in the database as binary data — fine for small-scale
+    agency use (typically <5 MB per file, dozens of files total).
+    Served via GET /proposals/files/{file_id} with no auth required so
+    client portal links work without a session.
+    """
+    __tablename__ = "proposal_files"
+
+    id              = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    proposal_id     = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    filename        = Column(String, nullable=False)
+    content_type    = Column(String, nullable=False)   # e.g. image/png, application/pdf
+    file_size       = Column(Integer, nullable=False)
+    file_data       = Column(LargeBinary, nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow)
 
 
 # ---------------------------------------------------------------------------

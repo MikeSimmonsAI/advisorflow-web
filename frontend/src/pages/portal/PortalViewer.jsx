@@ -221,6 +221,112 @@ function DividerBlock() {
   )
 }
 
+function WebsiteUrlBlock({ block }) {
+  const [expanded, setExpanded] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  if (!block.file_url) return null
+
+  const url = block.file_url.startsWith('http') ? block.file_url : `https://${block.file_url}`
+
+  return (
+    <div style={{
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 12,
+      overflow: 'hidden',
+      background: 'rgba(8,12,30,0.6)',
+    }}>
+      {/* Header bar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 20px',
+        borderBottom: expanded ? '1px solid rgba(255,255,255,0.08)' : 'none',
+        background: 'rgba(255,255,255,0.02)',
+      }}>
+        {/* Browser chrome dots */}
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {['#ff5f57', '#ffbd2e', '#28c840'].map(c => (
+            <div key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c, opacity: 0.7 }} />
+          ))}
+        </div>
+        {/* URL pill */}
+        <div style={{
+          flex: 1, background: 'rgba(0,0,0,0.3)',
+          borderRadius: 6, padding: '5px 12px',
+          fontSize: 12, color: '#6a8aaa', fontFamily: 'monospace',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {url}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={() => setExpanded(e => !e)}
+            style={{
+              background: 'rgba(8,124,255,0.15)',
+              border: '1px solid rgba(8,124,255,0.3)',
+              borderRadius: 8, padding: '6px 14px',
+              color: '#087cff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              background: 'rgba(25,214,124,0.1)',
+              border: '1px solid rgba(25,214,124,0.3)',
+              borderRadius: 8, padding: '6px 14px',
+              color: '#19d67c', fontSize: 12, fontWeight: 600,
+              textDecoration: 'none', display: 'inline-flex', alignItems: 'center',
+            }}
+          >
+            ↗ Open
+          </a>
+        </div>
+      </div>
+      {/* iframe */}
+      {expanded && (
+        loadError ? (
+          <div style={{
+            height: 240,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            color: '#4a6080', fontSize: 14, gap: 12,
+          }}>
+            <div style={{ fontSize: 32 }}>🚫</div>
+            <div>This site doesn't allow embedding.</div>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: '#087cff', fontSize: 13, textDecoration: 'none',
+                border: '1px solid rgba(8,124,255,0.3)',
+                borderRadius: 8, padding: '7px 16px',
+              }}
+            >
+              Open in new tab ↗
+            </a>
+          </div>
+        ) : (
+          <iframe
+            src={url}
+            title={block.content || 'Site Preview'}
+            style={{ width: '100%', height: 560, border: 'none', display: 'block' }}
+            onError={() => setLoadError(true)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        )
+      )}
+      {block.content && (
+        <div style={{ padding: '10px 20px', fontSize: 13, color: '#4a6080', fontStyle: 'italic', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          {block.content}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CtaBlock({ block }) {
   if (!block.content) return null
   return (
@@ -505,12 +611,13 @@ export default function PortalViewer() {
             className="portal-block"
             style={{ animationDelay: `${0.15 * idx}s`, marginBottom: block.block_type === 'divider' ? 40 : 56 }}
           >
-            {block.block_type === 'text'    && <TextBlock block={block} />}
-            {block.block_type === 'image'   && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
-            {block.block_type === 'pdf'     && <PdfBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
-            {block.block_type === 'video'   && <VideoBlock block={block} />}
-            {block.block_type === 'divider' && <DividerBlock />}
-            {block.block_type === 'cta'     && <CtaBlock block={block} />}
+            {block.block_type === 'text'        && <TextBlock block={block} />}
+            {block.block_type === 'image'       && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
+            {block.block_type === 'pdf'         && <PdfBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
+            {block.block_type === 'video'       && <VideoBlock block={block} />}
+            {block.block_type === 'divider'     && <DividerBlock />}
+            {block.block_type === 'cta'         && <CtaBlock block={block} />}
+            {block.block_type === 'website_url' && <WebsiteUrlBlock block={block} />}
           </div>
         ))}
 

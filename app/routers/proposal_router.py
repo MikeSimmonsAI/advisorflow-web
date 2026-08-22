@@ -35,13 +35,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin
 from app.models.models import (
-    User, Organization, Proposal, ProposalBlock, ProposalToken, ProposalView,
+    User, Organization, Proposal, ProposalBlock, ProposalToken, ProposalView, ProposalFile,
 )
 from app.services.email_service import send_email
 
@@ -124,7 +125,7 @@ class ProposalUpdate(BaseModel):
 
 
 class BlockCreate(BaseModel):
-    block_type: str   # text | image | pdf | video | divider | cta
+    block_type: str   # text | image | pdf | video | divider | cta | website_url (live site embed)
     content: Optional[str] = None
     file_url: Optional[str] = None
     file_name: Optional[str] = None
@@ -316,7 +317,7 @@ def unpublish_proposal(
 
 # ── Block management ───────────────────────────────────────────────────────────
 
-VALID_BLOCK_TYPES = {"text", "image", "pdf", "video", "divider", "cta"}
+VALID_BLOCK_TYPES = {"text", "image", "pdf", "video", "divider", "cta", "website_url"}
 
 
 @router.post("/{proposal_id}/blocks")
@@ -575,6 +576,80 @@ def get_analytics(
         "token_activity": token_activity,
         "view_timeline": view_timeline,
     }
+
+
+# ── File upload / serve ────────────────────────────────────────────────────────
+
+ALLOWED_TYPES = {
+    "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
+    "application/pdf",
+}
+MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
+
+
+@router.post("/{proposal_id}/upload")
+async def upload_proposal_file(
+    proposal_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Upload an image or PDF for use in a proposal block.
+    Returns {file_id, file_url, filename, content_type, file_size}.
+    The file_url is a path to the public serve endpoint.
+    """
+    p = db.query(Proposal).filter_by(id=proposal_id,
+                                     organization_id=current_user.organization_id,
+                                     deleted_at=None).first()
+    if not p:
+        raise HTTPException(404, "Proposal not found")
+
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Allowed: images and PDF.")
+
+    data = await file.read()
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(400, f"File too large ({len(data) // 1024 // 1024} MB). Maximum is 20 MB.")
+
+    pf = ProposalFile(
+        organization_id=current_user.organization_id,
+        proposal_id=proposal_id,
+        filename=file.filename or "upload",
+        content_type=file.content_type,
+        file_size=len(data),
+        file_data=data,
+    )
+    db.add(pf)
+    db.commit()
+    db.refresh(pf)
+
+    return {
+        "file_id": pf.id,
+        "file_url": f"/proposals/files/{pf.id}",
+        "filename": pf.filename,
+        "content_type": pf.content_type,
+        "file_size": pf.file_size,
+    }
+
+
+@router.get("/files/{file_id}")
+def serve_proposal_file(file_id: str, db: Session = Depends(get_db)):
+    """
+    Serves an uploaded proposal file. No auth required — client portal links
+    must work without a session. Files are keyed by UUID so they're not guessable.
+    """
+    pf = db.query(ProposalFile).filter_by(id=file_id).first()
+    if not pf:
+        raise HTTPException(404, "File not found")
+    return Response(
+        content=pf.file_data,
+        media_type=pf.content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{pf.filename}"',
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
 
 
 # ── Client portal surface (no internal JWT) ────────────────────────────────────

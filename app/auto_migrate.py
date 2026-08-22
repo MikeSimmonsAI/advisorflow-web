@@ -600,6 +600,27 @@ def run_auto_migrations(engine) -> None:
             conn.rollback()
             print(f"[auto_migrate] appointment_case_files table note: {e}")
 
+    # ── proposal_files table ──────────────────────────────────────────────────
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS proposal_files (
+                    id              VARCHAR PRIMARY KEY,
+                    organization_id VARCHAR NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                    proposal_id     VARCHAR NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+                    filename        VARCHAR NOT NULL,
+                    content_type    VARCHAR NOT NULL,
+                    file_size       INTEGER NOT NULL,
+                    file_data       BYTEA   NOT NULL,
+                    created_at      TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+            print("[auto_migrate] proposal_files table ensured.")
+    except (OperationalError, ProgrammingError) as e:
+        conn.rollback()
+        print(f"[auto_migrate] proposal_files table note: {e}")
+
     # ONE-TIME ORG RENAME: Restland → Greenland (idempotent — no-op if already done)
     try:
         with engine.connect() as conn:

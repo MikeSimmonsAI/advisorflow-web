@@ -9,6 +9,7 @@ const BLOCK_ICONS = {
   video: '▶',
   divider: '—',
   cta: '⚡',
+  website_url: '🌐',
 }
 
 const BLOCK_LABELS = {
@@ -18,13 +19,17 @@ const BLOCK_LABELS = {
   video: 'Video Embed',
   divider: 'Divider',
   cta: 'Call to Action',
+  website_url: 'Live Site Preview',
 }
 
-function BlockCard({ block, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, isLast }) {
+function BlockCard({ block, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, isLast, onUpload }) {
   const [editing, setEditing] = useState(false)
   const [localContent, setLocalContent] = useState(block.content || '')
   const [localUrl, setLocalUrl] = useState(block.file_url || '')
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef(null)
 
   async function saveBlock() {
     setSaving(true)
@@ -33,6 +38,22 @@ function BlockCard({ block, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, i
       setEditing(false)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleFileDrop(e) {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer?.files?.[0] || e.target?.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      await onUpload(file)
+      setEditing(false)
+    } catch (err) {
+      alert(err.message || 'Upload failed')
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -108,17 +129,64 @@ function BlockCard({ block, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, i
                 )}
               </div>
             )}
-            {['image', 'pdf', 'video', 'cta'].includes(block.block_type) && (
+            {['image', 'pdf'].includes(block.block_type) && (
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: '#667', display: 'block', marginBottom: 6 }}>
+                  {block.file_url ? 'Replace File' : 'Upload File'}
+                </label>
+                {/* Drag-and-drop zone */}
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleFileDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    border: `2px dashed ${dragOver ? '#087cff' : 'rgba(255,255,255,0.15)'}`,
+                    borderRadius: 8, padding: '20px 16px',
+                    textAlign: 'center', cursor: 'pointer',
+                    background: dragOver ? 'rgba(8,124,255,0.06)' : 'rgba(255,255,255,0.02)',
+                    transition: 'border-color 0.15s, background 0.15s',
+                  }}
+                >
+                  {uploading ? (
+                    <div style={{ color: '#087cff', fontSize: 13 }}>Uploading…</div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 22, marginBottom: 6 }}>
+                        {block.block_type === 'pdf' ? '📄' : '🖼'}
+                      </div>
+                      <div style={{ fontSize: 13, color: '#aab', marginBottom: 4 }}>
+                        {block.file_url
+                          ? `Current: ${block.file_name || 'file uploaded'}`
+                          : `Drop ${block.block_type === 'pdf' ? 'PDF' : 'image'} here, or click to browse`}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#556' }}>
+                        {block.block_type === 'pdf' ? 'PDF up to 20 MB' : 'PNG, JPG, GIF, WebP up to 20 MB'}
+                      </div>
+                    </>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={block.block_type === 'pdf' ? 'application/pdf' : 'image/*'}
+                    style={{ display: 'none' }}
+                    onChange={handleFileDrop}
+                  />
+                </div>
+              </div>
+            )}
+            {['video', 'cta', 'website_url'].includes(block.block_type) && (
               <div style={{ marginBottom: 10 }}>
                 <label style={{ fontSize: 11, color: '#667', display: 'block', marginBottom: 4 }}>
                   {block.block_type === 'video' ? 'Video URL (YouTube / Vimeo / Loom)' :
                    block.block_type === 'cta' ? 'Button Link (URL)' :
-                   'File URL (paste upload URL)'}
+                   'Website URL (must allow embedding)'}
                 </label>
                 <input
                   value={localUrl}
                   onChange={e => setLocalUrl(e.target.value)}
-                  placeholder={block.block_type === 'video' ? 'https://www.loom.com/share/...' : 'https://...'}
+                  placeholder={block.block_type === 'video' ? 'https://www.loom.com/share/...' :
+                               block.block_type === 'website_url' ? 'https://yourdomain.com' : 'https://...'}
                   style={{
                     width: '100%', boxSizing: 'border-box',
                     background: 'rgba(0,0,0,0.3)',
@@ -127,6 +195,11 @@ function BlockCard({ block, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, i
                     color: '#fff', fontSize: 13, outline: 'none',
                   }}
                 />
+                {block.block_type === 'website_url' && (
+                  <div style={{ fontSize: 11, color: '#556', marginTop: 4 }}>
+                    Note: some sites (e.g. Google) block iframe embedding. Vercel preview URLs, staging sites, and most custom domains work well.
+                  </div>
+                )}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -178,6 +251,11 @@ function BlockCard({ block, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, i
             )}
             {block.block_type === 'video' && block.file_url && (
               <div style={{ fontSize: 13, color: '#668' }}>🎬 {block.file_url}</div>
+            )}
+            {block.block_type === 'website_url' && (
+              <div style={{ fontSize: 13, color: block.file_url ? '#19d67c' : '#556' }}>
+                {block.file_url ? `🌐 ${block.file_url}` : 'No URL set — click Edit to add one'}
+              </div>
             )}
             {block.block_type === 'cta' && block.content && (
               <div style={{ fontSize: 13, color: '#19d67c' }}>→ {block.content} {block.file_url && `(${block.file_url})`}</div>
@@ -442,6 +520,18 @@ export default function ProposalEditor() {
     })
   }
 
+  async function uploadFileForBlock(blockId, file) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const r = await api.upload(`/proposals/${proposalId}/upload`, fd)
+    // r = { file_id, file_url, filename, content_type, file_size }
+    await updateBlock(blockId, {
+      file_url: r.file_url,
+      file_name: r.filename,
+      file_size: r.file_size,
+    })
+  }
+
   async function loadAnalytics() {
     const r = await api.get(`/proposals/${proposalId}/analytics`)
     setAnalytics(r)
@@ -561,6 +651,7 @@ export default function ProposalEditor() {
                 onMoveDown={() => moveBlock(block.id, 'down')}
                 isFirst={idx === 0}
                 isLast={idx === blocks.length - 1}
+                onUpload={(file) => uploadFileForBlock(block.id, file)}
               />
             ))}
           </div>
