@@ -52,6 +52,7 @@ function platformColor(slug) {
 export default function OrgManager() {
   const [orgs, setOrgs] = useState([])
   const [users, setUsers] = useState([])
+  const [availablePlatforms, setAvailablePlatforms] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -60,17 +61,20 @@ export default function OrgManager() {
   const [featuresExpanded, setFeaturesExpanded] = useState({})
   const [orgFeatures, setOrgFeatures] = useState({})
   const [saving, setSaving] = useState({})
+  const [platformSaving, setPlatformSaving] = useState({})
   const navigate = useNavigate()
 
   useEffect(() => {
     async function load() {
       try {
-        const [orgsData, usersData] = await Promise.all([
+        const [orgsData, usersData, platformsData] = await Promise.all([
           api.get('/admin/orgs'),
           api.get('/admin/users'),
+          api.get('/admin/platforms'),
         ])
         setOrgs(orgsData)
         setUsers(usersData)
+        setAvailablePlatforms(platformsData)
         const featInit = {}
         orgsData.forEach(o => {
           featInit[o.id] = (o.enabled_features !== undefined && o.enabled_features !== null)
@@ -133,6 +137,25 @@ export default function OrgManager() {
       alert('Failed to save: ' + e.message)
     } finally {
       setSaving(prev => ({ ...prev, [orgId]: false }))
+    }
+  }
+
+  async function assignPlatform(orgId, platformId) {
+    setPlatformSaving(prev => ({ ...prev, [orgId]: true }))
+    try {
+      const result = await api.patch(`/admin/orgs/${orgId}/platform`, {
+        platform_id: platformId || null,
+      })
+      setOrgs(prev => prev.map(o => o.id === orgId ? {
+        ...o,
+        platform_id: result.platform_id,
+        platform_name: result.platform_name,
+        platform_slug: result.platform_slug,
+      } : o))
+    } catch (e) {
+      alert('Failed to assign platform: ' + e.message)
+    } finally {
+      setPlatformSaving(prev => ({ ...prev, [orgId]: false }))
     }
   }
 
@@ -287,6 +310,24 @@ export default function OrgManager() {
                         </span>
                         <span className="org-badge org-badge--industry">{org.industry || 'general'}</span>
                       </div>
+                    </div>
+
+                    {/* ── Platform assignment ── */}
+                    <div className="org-platform-assign">
+                      <label className="org-platform-assign-label">Platform</label>
+                      <select
+                        className="org-platform-assign-select"
+                        value={org.platform_id || ''}
+                        disabled={platformSaving[org.id]}
+                        onChange={e => assignPlatform(org.id, e.target.value || null)}
+                        style={org.platform_slug ? { borderColor: pColor.border, color: pColor.text } : {}}
+                      >
+                        <option value="">— Unassigned —</option>
+                        {availablePlatforms.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                      {platformSaving[org.id] && <span className="org-platform-saving">Saving…</span>}
                     </div>
 
                     <div className="org-card-stats">

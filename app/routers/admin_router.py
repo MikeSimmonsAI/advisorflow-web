@@ -2346,3 +2346,55 @@ def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(re
         }
         for o in orgs
     ]
+
+# ---------------------------------------------------------------------------
+# Platform list — god_admin only. Used by OrgManager to populate the
+# platform assignment dropdown on each org card.
+# ---------------------------------------------------------------------------
+
+@router.get("/platforms")
+def list_platforms(db: Session = Depends(get_db), current_user: User = Depends(require_super_admin)):
+    """Returns all platforms. God admin only."""
+    from app.models.models import Platform
+    platforms = db.query(Platform).filter(Platform.is_active == True).order_by(Platform.name.asc()).all()
+    return [{"id": p.id, "name": p.name, "slug": p.slug} for p in platforms]
+
+
+# ---------------------------------------------------------------------------
+# Assign an org to a platform — god_admin only.
+# ---------------------------------------------------------------------------
+
+@router.patch("/orgs/{org_id}/platform")
+def set_org_platform(
+    org_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """Assign or unassign a platform for an org. Pass platform_id: null to unassign."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    platform_id = body.get("platform_id")  # None = unassign
+
+    if platform_id is not None:
+        from app.models.models import Platform
+        platform = db.query(Platform).filter(Platform.id == platform_id).first()
+        if not platform:
+            raise HTTPException(status_code=404, detail="Platform not found")
+        org.platform_id = platform_id
+    else:
+        org.platform_id = None
+
+    db.commit()
+    db.refresh(org)
+
+    from app.models.models import Platform as PlatformModel
+    p = db.query(PlatformModel).filter(PlatformModel.id == org.platform_id).first() if org.platform_id else None
+    return {
+        "id": org.id,
+        "platform_id": org.platform_id,
+        "platform_name": p.name if p else None,
+        "platform_slug": p.slug if p else None,
+    }

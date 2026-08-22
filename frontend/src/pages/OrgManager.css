@@ -464,3 +464,46 @@
   border-radius: 10px;
   letter-spacing: 0.02em;
 }
+
+/* ── Platform assignment dropdown on org card ── */
+.org-platform-assign {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  border-top: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  margin-top: 4px;
+}
+
+.org-platform-assign-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  min-width: 52px;
+}
+
+.org-platform-assign-select {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.15));
+  background: var(--bg-secondary, rgba(255,255,255,0.05));
+  color: var(--text-primary, #e2e8f0);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.org-platform-assign-select:focus {
+  outline: none;
+  border-color: rgba(47,182,255,0.5);
+}
+
+.org-platform-saving {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+}
