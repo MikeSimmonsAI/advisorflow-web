@@ -18,7 +18,7 @@ export default function Proposals() {
 
   useEffect(() => {
     api.get('/proposals/').then(r => {
-      setProposals(r.data)
+      setProposals(Array.isArray(r) ? r : [])
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
@@ -29,7 +29,7 @@ export default function Proposals() {
     setCreating(true)
     try {
       const r = await api.post('/proposals/', form)
-      navigate(`/proposals/${r.data.id}`)
+      navigate(`/proposals/${r.id}`)
     } catch {
       setCreating(false)
     }

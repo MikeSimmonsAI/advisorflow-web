@@ -233,10 +233,10 @@ function SendModal({ proposal, onClose, onSent }) {
     setSending(true)
     try {
       const r = await api.post(`/proposals/${proposal.id}/send`, form)
-      setResult(r.data)
-      onSent && onSent(r.data)
+      setResult(r)
+      onSent && onSent(r)
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to send invite')
+      alert(err.message || 'Failed to send invite')
     } finally {
       setSending(false)
     }
@@ -385,8 +385,8 @@ export default function ProposalEditor() {
   async function loadProposal() {
     try {
       const r = await api.get(`/proposals/${proposalId}`)
-      setProposal(r.data)
-      setBlocks(r.data.blocks || [])
+      setProposal(r)
+      setBlocks(r.blocks || [])
     } catch {
       navigate('/proposals')
     } finally {
@@ -399,9 +399,9 @@ export default function ProposalEditor() {
     try {
       const endpoint = proposal.status === 'published' ? 'unpublish' : 'publish'
       const r = await api.post(`/proposals/${proposalId}/${endpoint}`)
-      setProposal(p => ({ ...p, status: r.data.status }))
+      setProposal(p => ({ ...p, status: r.status }))
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to update status')
+      alert(err.message || 'Failed to update status')
     } finally {
       setPublishing(false)
     }
@@ -410,7 +410,7 @@ export default function ProposalEditor() {
   async function addBlock(blockType) {
     try {
       const r = await api.post(`/proposals/${proposalId}/blocks`, { block_type: blockType })
-      setBlocks(b => [...b, r.data])
+      setBlocks(b => [...b, r])
       setShowAddBlock(false)
     } catch (err) {
       alert('Failed to add block')
@@ -419,7 +419,7 @@ export default function ProposalEditor() {
 
   async function updateBlock(blockId, data) {
     const r = await api.patch(`/proposals/${proposalId}/blocks/${blockId}`, data)
-    setBlocks(bs => bs.map(b => b.id === blockId ? { ...b, ...r.data } : b))
+    setBlocks(bs => bs.map(b => b.id === blockId ? { ...b, ...r } : b))
   }
 
   async function deleteBlock(blockId) {
@@ -444,7 +444,7 @@ export default function ProposalEditor() {
 
   async function loadAnalytics() {
     const r = await api.get(`/proposals/${proposalId}/analytics`)
-    setAnalytics(r.data)
+    setAnalytics(r)
     setShowAnalytics(true)
   }
 

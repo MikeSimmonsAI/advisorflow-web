@@ -27,7 +27,7 @@ export default function PortalAccess() {
 
     api.get(`/proposals/portal/resolve/${token}`)
       .then(r => {
-        const { view_id, proposal, branding, permissions } = r.data
+        const { view_id, proposal, branding, permissions } = r
         // Store in sessionStorage — cleared when tab is closed
         sessionStorage.setItem('portal_view_id', view_id)
         sessionStorage.setItem('portal_proposal', JSON.stringify(proposal))
@@ -36,7 +36,7 @@ export default function PortalAccess() {
         navigate(`/portal/view/${proposal.id}`, { replace: true })
       })
       .catch(err => {
-        const msg = err.response?.data?.detail || 'This link is invalid or has expired.'
+        const msg = err.message || 'This link is invalid or has expired.'
         setError(msg)
       })
   }, [token])
