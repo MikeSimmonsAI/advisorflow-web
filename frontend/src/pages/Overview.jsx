@@ -251,7 +251,7 @@ export default function Overview() {
             <span className="panel-count">14 days</span>
           </div>
           {replyActivity.length === 0 ? (
-            <div className="empty-state">No reply data yet.</div>
+            <div className="empty-state">No reply data yet. Reply activity will appear here once you've sent outreach and received responses.</div>
           ) : (
             <div className="ov-sparkline">
               {replyActivity.map((d, i) => (
@@ -278,7 +278,7 @@ export default function Overview() {
             <h2 className="panel-title">&#127942; Pipeline funnel</h2>
           </div>
           {statusFunnel.length === 0 ? (
-            <div className="empty-state">No funnel data yet.</div>
+            <div className="empty-state">No funnel data yet. Import leads on the Leads page to start populating your pipeline.</div>
           ) : (
             <div className="ov-funnel">
               {statusFunnel.map(stage => (

@@ -63,6 +63,20 @@ export default function Cadence() {
     }
   }
 
+  async function handleStartAll() {
+    if (!window.confirm('Start cadence for all eligible leads in this org that haven\'t been enrolled yet?')) return
+    setRunning(true)
+    try {
+      const result = await api.post('/cadence/start-all-eligible', {})
+      alert(`Cadence started for ${result.started} leads (${result.skipped} skipped — already enrolled or ineligible).`)
+      load()
+    } catch (err) {
+      alert(`Start all failed: ${err.message}`)
+    } finally {
+      setRunning(false)
+    }
+  }
+
   async function handleControl(cadenceStateId, action) {
     setControlling(cadenceStateId)
     try {
@@ -87,9 +101,14 @@ export default function Cadence() {
           <p className="page-subtitle">Automated re-engagement sequences — select a template or build your own rhythm.</p>
         </div>
         {isAdmin && (
-          <button className="btn btn--primary" onClick={handleRunDue} disabled={running}>
-            {running ? 'Running…' : 'Run due touches now'}
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn--secondary" onClick={handleStartAll} disabled={running}>
+              {running ? 'Working…' : '⚡ Enroll all eligible leads'}
+            </button>
+            <button className="btn btn--primary" onClick={handleRunDue} disabled={running}>
+              {running ? 'Running…' : '▶ Run due touches now'}
+            </button>
+          </div>
         )}
       </header>
 
@@ -215,6 +234,7 @@ export default function Cadence() {
             <thead>
               <tr>
                 <th>Lead</th>
+                {isAdmin && <th>Advisor</th>}
                 <th>Tier</th>
                 <th>Status</th>
                 <th>Progress</th>
@@ -234,6 +254,7 @@ export default function Cadence() {
                       </span>
                       {a.phone && <span className="cadence-phone mono">{a.phone}</span>}
                     </td>
+                    {isAdmin && <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{a.advisor_name || '—'}</td>}
                     <td>{a.tier && <TierBadge tier={a.tier} />}</td>
                     <td>
                       <span className={`cadence-status-pill cadence-status-pill--${a.status}`}>

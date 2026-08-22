@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -8,6 +8,7 @@ from typing import Optional
 from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.utils.crypto import encrypt_value
+from app.routers.audit_log_router import log_action
 
 # Only http/https URLs are safe to store — javascript:, data:, vbscript: etc.
 # are blocked to prevent stored-XSS via social-link or booking-page fields.
@@ -180,6 +181,15 @@ def update_twilio_config(
     current_user.twilio_phone_number = req.twilio_phone_number
     current_user.twilio_caller_id_name = req.twilio_caller_id_name
     db.commit()
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="settings.twilio_updated",
+        target_type="user",
+        target_id=current_user.id,
+        details={"twilio_account_sid": req.twilio_account_sid, "twilio_phone_number": req.twilio_phone_number},
+    )
     return {"success": True}
 
 
@@ -220,6 +230,15 @@ def admin_assign_twilio(
         target.twilio_auth_token_encrypted = encrypt_value(req.twilio_auth_token)
 
     db.commit()
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="settings.admin_assign_twilio",
+        target_type="user",
+        target_id=user_id,
+        details={"twilio_phone_number": req.twilio_phone_number, "assigned_by": current_user.id},
+    )
     return {
         "success": True,
         "user_id": user_id,
@@ -441,6 +460,16 @@ def admin_update_profile(
 
     db.commit()
     db.refresh(target)
+    changed_fields = {k: v for k, v in req.model_dump().items() if v is not None and k not in ("twilio_auth_token", "profile_photo_url")}
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="admin.profile_updated",
+        target_type="user",
+        target_id=user_id,
+        details=changed_fields,
+    )
     return {
         "success": True,
         "user_id": target.id,
@@ -488,3 +517,187 @@ def admin_get_profile(
         "google_calendar_connected": target.google_calendar_connected,
         "microsoft_365_connected": target.microsoft_365_connected,
     }
+
+
+# ── Per-org appointment types ────────────────────────────────────────────────
+
+_UNIVERSAL_APPT_TYPES = [
+    "General Consultation",
+    "New Web Lead",
+    "Walk-In",
+    "Phone Call",
+    "Video Call",
+    "Referral Appointment",
+    "Follow-Up Appointment",
+]
+
+INDUSTRY_APPT_TYPES: dict = {
+    "funeral": _UNIVERSAL_APPT_TYPES + [
+        "Pre-Need Planning Consultation",
+        "Pre-Planning Consultation",
+        "At-Need Arrangement Conference",
+        "Immediate Need Consultation",
+        "Urgent Arrangement Consultation",
+        "Family File Review",
+        "Property Ownership Review",
+        "Property Transfer Appointment",
+        "Cemetery Property Consultation",
+        "Marker & Memorial Consultation",
+        "Memorial Planning Consultation",
+        "Memorial Flower Review",
+        "Contract Review Appointment",
+        "Family Services Appointment",
+        "Family Services Consultation",
+        "New Family Consultation",
+        "Insurance & Benefits Review",
+        "Veterans Benefits Consultation",
+    ],
+    "fiber": _UNIVERSAL_APPT_TYPES + [
+        "New Service Consultation",
+        "Installation Appointment",
+        "Service Upgrade Consultation",
+        "Billing Review",
+        "Tech Support Visit",
+        "Door-to-Door Canvass",
+        "Business Account Consultation",
+        "Contract Renewal",
+        "Equipment Swap",
+        "Cancellation Retention Call",
+    ],
+    "roofing": _UNIVERSAL_APPT_TYPES + [
+        "Estimate Appointment",
+        "Roof Inspection",
+        "Storm Damage Assessment",
+        "Contract Signing",
+        "Material Selection Meeting",
+        "Project Walkthrough",
+        "Insurance Claim Review",
+        "Post-Job Inspection",
+    ],
+    "insurance": _UNIVERSAL_APPT_TYPES + [
+        "New Policy Consultation",
+        "Benefits & Coverage Consultation",
+        "Policy Review",
+        "Annual Review",
+        "Insurance & Benefits Review",
+        "Life Insurance Consultation",
+        "Medicare Review",
+        "Veterans Benefits Consultation",
+        "Claims Assistance",
+        "Policy Renewal",
+    ],
+    "real_estate": _UNIVERSAL_APPT_TYPES + [
+        "Buyer Consultation",
+        "Seller Consultation",
+        "Home Showing",
+        "Offer Review",
+        "Contract Signing",
+        "Closing Walkthrough",
+        "Market Analysis Review",
+        "Investment Property Consultation",
+    ],
+    "dental": _UNIVERSAL_APPT_TYPES + [
+        "New Patient Exam",
+        "Routine Cleaning",
+        "Consultation",
+        "Treatment Plan Review",
+        "Cosmetic Consultation",
+        "Orthodontic Consultation",
+        "Emergency Visit",
+        "Follow-Up Appointment",
+    ],
+    "custom": _UNIVERSAL_APPT_TYPES + [
+        "Discovery Call",
+        "Strategy Session",
+        "Onboarding Meeting",
+        "Check-In",
+        "Demo",
+    ],
+}
+
+# Fallback used when org industry is unknown
+DEFAULT_APPT_TYPES = INDUSTRY_APPT_TYPES["funeral"]
+
+
+def _resolve_appt_org(current_user: User, org_id: Optional[str], db) -> "Organization":
+    """Return the org to operate on. Super/god admin can pass org_id to manage any org."""
+    from app.models.models import Organization
+    if org_id and current_user.role in ("super_admin", "god_admin"):
+        org = db.query(Organization).filter_by(id=org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found.")
+        return org
+    return db.query(Organization).filter_by(id=current_user.organization_id).first()
+
+
+@router.get("/appointment-types")
+def get_appointment_types(
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return this org's configured appointment types (falls back to industry defaults).
+    Super admin / god admin can pass ?org_id= to inspect any org's types.
+    """
+    import json
+    org = _resolve_appt_org(current_user, org_id, db)
+    if org and org.appointment_types:
+        try:
+            types = json.loads(org.appointment_types)
+            if isinstance(types, list) and types:
+                return {"appointment_types": types, "is_custom": True}
+        except Exception:
+            pass
+    industry = (org.industry or "funeral") if org else "funeral"
+    defaults = INDUSTRY_APPT_TYPES.get(industry, INDUSTRY_APPT_TYPES["funeral"])
+    return {"appointment_types": defaults, "is_custom": False}
+
+
+class ApptTypesRequest(BaseModel):
+    appointment_types: list[str]
+
+
+@router.put("/appointment-types")
+def update_appointment_types(
+    req: ApptTypesRequest,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save org-specific appointment type list. Admin only.
+    Super admin / god admin can pass ?org_id= to manage any org.
+    """
+    import json
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    if not req.appointment_types:
+        raise HTTPException(status_code=400, detail="At least one appointment type required.")
+    org = _resolve_appt_org(current_user, org_id, db)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    org.appointment_types = json.dumps(req.appointment_types)
+    db.commit()
+    log_action(db, org.id, current_user.id,
+               action="settings.appointment_types_updated", target_type="organization",
+               target_id=str(org.id))
+    return {"appointment_types": req.appointment_types, "is_custom": True}
+
+
+@router.delete("/appointment-types")
+def reset_appointment_types(
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reset to industry defaults.
+    Super admin / god admin can pass ?org_id= to manage any org.
+    """
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    org = _resolve_appt_org(current_user, org_id, db)
+    if org:
+        org.appointment_types = None
+        db.commit()
+    industry = (org.industry or "funeral") if org else "funeral"
+    defaults = INDUSTRY_APPT_TYPES.get(industry, INDUSTRY_APPT_TYPES["funeral"])
+    return {"appointment_types": defaults, "is_custom": False}

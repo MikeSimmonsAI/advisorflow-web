@@ -173,6 +173,11 @@ export default function Pipeline() {
       {/* OVERVIEW TAB */}
       {tab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {!loading && !forecast && !stats && (
+            <div className="empty-state">
+              Pipeline data couldn't be loaded. Try refreshing, or launch your first AI pipeline using the <strong>Launch</strong> tab above.
+            </div>
+          )}
           {/* AI Forecast */}
           {forecast && (
             <section className="panel">
@@ -463,21 +468,28 @@ export default function Pipeline() {
                   </tr>
                 </thead>
                 <tbody>
-                  {leads.filter(l => l.status !== 'dnc' && !l.is_duplicate).slice(0, 200).map(lead => (
-                    <tr key={lead.id}>
-                      <td><input type="checkbox" checked={selectedLeads.has(lead.id)}
-                        onChange={e => {
-                          const next = new Set(selectedLeads)
-                          e.target.checked ? next.add(lead.id) : next.delete(lead.id)
-                          setSelectedLeads(next)
-                        }} /></td>
-                      <td style={{ fontWeight: 600 }}>{lead.first_name} {lead.last_name}</td>
-                      <td className="mono" style={{ fontSize: 12 }}>{lead.phone || '—'}</td>
-                      <td style={{ fontSize: 12 }}>{lead.tier || '—'}</td>
-                      <td style={{ fontSize: 12 }}>{lead.status}</td>
-                      <td style={{ fontSize: 12 }}>{lead.source_year || '—'}</td>
-                    </tr>
-                  ))}
+                  {leads.filter(l => l.status !== 'dnc' && !l.is_duplicate).length === 0
+                    ? (
+                      <tr><td colSpan="6" style={{ textAlign: 'center', padding: '24px 12px', color: 'var(--text-secondary)', fontSize: 13 }}>
+                        No leads available to launch. Import leads on the Leads page first, then return here to start your AI pipeline.
+                      </td></tr>
+                    )
+                    : leads.filter(l => l.status !== 'dnc' && !l.is_duplicate).slice(0, 200).map(lead => (
+                      <tr key={lead.id}>
+                        <td><input type="checkbox" checked={selectedLeads.has(lead.id)}
+                          onChange={e => {
+                            const next = new Set(selectedLeads)
+                            e.target.checked ? next.add(lead.id) : next.delete(lead.id)
+                            setSelectedLeads(next)
+                          }} /></td>
+                        <td style={{ fontWeight: 600 }}>{lead.first_name} {lead.last_name}</td>
+                        <td className="mono" style={{ fontSize: 12 }}>{lead.phone || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{lead.tier || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{lead.status}</td>
+                        <td style={{ fontSize: 12 }}>{lead.source_year || '—'}</td>
+                      </tr>
+                    ))
+                  }
                 </tbody>
               </table>
             </div>

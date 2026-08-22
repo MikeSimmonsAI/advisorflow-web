@@ -112,6 +112,7 @@ def register_org(
         full_name=req.admin_full_name.strip(),
         role="org_admin",
         is_active=True,
+        must_change_password=False,  # self-service signup — user set their own password
         created_at=datetime.utcnow(),
     )
     db.add(user)
@@ -125,7 +126,7 @@ def register_org(
     # Refresh user from DB so SQLAlchemy populates all fields (id, role, etc.)
     # before passing to create_access_token, which expects a User model object.
     db.refresh(user)
-    token = create_access_token(user)
+    token = create_access_token(user, db)
 
     return OnboardingRegisterResponse(
         access_token=token,

@@ -129,6 +129,13 @@ export default function Templates() {
 
       {loading ? (
         <div className="empty-state">Loading templates…</div>
+      ) : Object.keys(grouped).length === 0 ? (
+        <div className="empty-state">
+          <strong>No message templates yet.</strong>
+          <p style={{ marginTop: 8, color: 'var(--text-secondary)', maxWidth: 440 }}>
+            Templates are generated automatically from your tier definitions — go to <strong>Tier Definitions</strong> to create or seed your first templates, or import leads to trigger auto-generation.
+          </p>
+        </div>
       ) : (
         <div className="template-groups">
           {Object.entries(grouped).map(([track, channels]) => (

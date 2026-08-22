@@ -32,6 +32,7 @@ from app.routers import (
 )
 from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
+from app.routers import proposal_router
 from app.routers import reports_router, crm_router
 from app.routers.crm_native_router import router as crm_native_router
 from app.routers.survey_router import router as survey_router
@@ -99,6 +100,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
+    "https://advisorflow-booking.vercel.app",
     "https://bookaboost.com",
     "https://bookaboost.live",
     "https://app.bookaboost.live",
@@ -345,6 +347,7 @@ app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
+app.include_router(proposal_router.router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
@@ -402,6 +405,34 @@ async def _ai_conversation_loop():
                 # Isolation: continue to next org regardless of this error
 
         await asyncio.sleep(120)  # 2 minutes
+
+
+async def _cadence_loop():
+    """Run due SMS cadence touches every hour — all orgs at once.
+
+    run_due_cadences already applies with_for_update(skip_locked=True) so
+    concurrent invocations (e.g. a manual admin trigger) cannot double-send.
+    All exceptions are caught so a bad row never crashes the web server.
+    """
+    from app.services.cadence_service import run_due_cadences
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("cadence_loop")
+    await asyncio.sleep(90)  # brief startup delay — offset from other loops
+    while True:
+        db = SessionLocal()
+        try:
+            result = run_due_cadences(db)  # organization_id=None → all orgs
+            if result.get("sent"):
+                _logger.info(
+                    "cadence_loop: sent=%s completed=%s errors=%s",
+                    result.get("sent", 0), result.get("completed", 0), result.get("errors", 0),
+                )
+        except Exception as exc:
+            _logger.error("cadence_loop: error: %s", exc)
+        finally:
+            db.close()
+        await asyncio.sleep(3600)  # 1 hour
 
 
 @app.on_event("startup")
@@ -523,7 +554,7 @@ async def on_startup():
         try:
             with engine.connect() as conn:
                 conn.execute(_text(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE "
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE, full_name='MDG Testing' "
                     "WHERE email=:email"
                 ), {"email": _god_admin_email})
                 conn.commit()
@@ -556,6 +587,7 @@ async def on_startup():
     # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
     asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
     asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
+    asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
 
 
 @app.get("/health")

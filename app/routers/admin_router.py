@@ -12,10 +12,135 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.deps import get_db, require_admin
-from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization
+from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization, TierDefinition
 from app.services.auth_service import hash_password
 from app.services.dedup_service import normalize_phone, normalize_last_name
 from app.routers.audit_log_router import log_action
+
+# ── Industry-specific tier presets ────────────────────────────────────────────
+# Each entry: (tier_key, tier_label, track_key, track_label, ai_tone_context, sort_order)
+INDUSTRY_TIERS = {
+    "funeral": [
+        ("pre_need", "Pre-Need", "pre_need_lock_price", "Pre-Need Lock Price",
+         "Lead is planning ahead for end-of-life arrangements. Focus on price lock benefits and peace of mind.", 1),
+        ("at_need", "At-Need", "at_need_support", "At-Need Support",
+         "Lead has an immediate need due to a recent passing. Respond with urgency and compassion.", 2),
+        ("aftercare", "Aftercare", "aftercare_follow_up", "Aftercare Follow-Up",
+         "Lead is a past family we served. Reconnect with grief support resources and future planning.", 3),
+        ("pre_need_general", "Pre-Need General", "pre_need_general", "Pre-Need General",
+         "General pre-planning lead without specific urgency. Educate on the benefits of pre-arrangement.", 4),
+    ],
+    "fiber": [
+        ("hot_mover", "Hot Mover", "high_urgency", "High Urgency",
+         "Lead is moving soon and needs new internet service immediately. Emphasize fast installation and no contracts.", 1),
+        ("interest_confirmed", "Interest Confirmed", "warm_follow_up", "Warm Follow-Up",
+         "Lead expressed clear interest in switching providers. Ready to discuss speed, pricing, and promotions.", 2),
+        ("comparison_shopping", "Comparison Shopping", "competitive_pitch", "Competitive Pitch",
+         "Lead is comparing multiple providers. Focus on speed, reliability, and price differentiators vs the competition.", 3),
+        ("needs_follow_up", "Needs Follow-Up", "gentle_follow_up", "Gentle Follow-Up",
+         "Lead requested a callback or needs more time. Keep the door open without pressure.", 4),
+    ],
+    "roofing": [
+        ("storm_damage", "Storm Damage", "urgent_inspection", "Urgent Inspection",
+         "Lead has recent storm or hail damage. Urgent inspection needed before insurance claim deadlines.", 1),
+        ("inspection_requested", "Inspection Requested", "inspection_scheduled", "Inspection Scheduled",
+         "Lead agreed to a free roof inspection. Confirm the appointment and prepare the team.", 2),
+        ("quote_ready", "Quote Ready", "conversion", "Conversion Ready",
+         "Lead has had an inspection and is ready for a formal quote. Focus on value and financing options.", 3),
+        ("long_term_plan", "Long-Term Plan", "nurture", "Long-Term Nurture",
+         "Lead is planning a roof replacement in 6-12 months. Keep warm with occasional check-ins.", 4),
+    ],
+    "insurance": [
+        ("hot_lead", "Hot Lead", "immediate_outreach", "Immediate Outreach",
+         "Lead requested a quote or callback. Follow up immediately while interest is high.", 1),
+        ("warm_prospect", "Warm Prospect", "soft_pitch", "Soft Pitch",
+         "Lead is generally interested in coverage. Guide them through options without pressure.", 2),
+        ("needs_review", "Needs Review", "needs_review", "Needs Review",
+         "Lead data needs verification or tier assignment before outreach can begin.", 3),
+        ("annual_review", "Annual Review", "annual_check_in", "Annual Check-In",
+         "Existing client due for annual policy review. Reconnect and assess coverage adequacy.", 4),
+    ],
+    "health_insurance": [
+        ("hot_lead", "Hot Lead", "immediate_outreach", "Immediate Outreach",
+         "Lead requested a health insurance quote or has an urgent coverage need. Contact immediately.", 1),
+        ("open_enrollment", "Open Enrollment", "enrollment_window", "Enrollment Window",
+         "Lead is in or approaching open enrollment. Guide them through plan options and deadlines.", 2),
+        ("life_event", "Life Event", "life_event_outreach", "Life Event Outreach",
+         "Lead experienced a qualifying life event (job change, marriage, baby). Help them update coverage.", 3),
+        ("annual_review", "Annual Review", "annual_check_in", "Annual Check-In",
+         "Existing client due for annual plan review. Compare options and ensure adequate coverage.", 4),
+    ],
+    "medicare": [
+        ("turning_65", "Turning 65", "birthday_outreach", "Birthday Outreach",
+         "Lead is approaching Medicare eligibility. Reach out before the enrollment window opens.", 1),
+        ("plan_comparison", "Plan Comparison", "plan_guidance", "Plan Guidance",
+         "Lead is actively comparing Medicare Advantage and Supplement options. Provide clear guidance.", 2),
+        ("enrollment_ready", "Enrollment Ready", "enrollment_support", "Enrollment Support",
+         "Lead has decided to enroll. Assist with plan selection and paperwork.", 3),
+        ("existing_member", "Existing Member", "member_check_in", "Member Check-In",
+         "Existing Medicare client in the annual review or plan change period. Reconnect and assess needs.", 4),
+    ],
+    "real_estate": [
+        ("active_buyer", "Active Buyer", "buyer_outreach", "Buyer Outreach",
+         "Lead is actively searching for a property with a defined timeline and budget.", 1),
+        ("seller_lead", "Seller Lead", "listing_pitch", "Listing Pitch",
+         "Lead is considering listing their property. Focus on market analysis and home valuation.", 2),
+        ("future_buyer", "Future Buyer", "nurture", "Long-Term Nurture",
+         "Lead is interested in buying but timeline is 6+ months out. Keep warm with market updates.", 3),
+        ("past_client", "Past Client", "referral_ask", "Referral Ask",
+         "Previous client — check in for repeat business, referrals, or investment property opportunities.", 4),
+    ],
+    "auto_repair": [
+        ("immediate_need", "Immediate Need", "urgent_service", "Urgent Service",
+         "Lead has an active vehicle issue requiring immediate attention. Offer quick turnaround and transparent pricing.", 1),
+        ("scheduled_service", "Scheduled Service", "appointment_reminder", "Appointment Reminder",
+         "Lead has an upcoming service appointment. Confirm and set expectations for drop-off and timeline.", 2),
+        ("maintenance_due", "Maintenance Due", "maintenance_outreach", "Maintenance Outreach",
+         "Lead's vehicle is due for routine maintenance. Remind them of the service interval and offer a convenient time.", 3),
+        ("past_customer", "Past Customer", "win_back", "Win-Back",
+         "Lead was a previous customer. Re-engage with a service reminder, seasonal special, or loyalty offer.", 4),
+    ],
+    "solar": [
+        ("hot_lead", "Hot Lead", "urgent_follow_up", "Urgent Follow-Up",
+         "Lead expressed strong interest and has high utility bills. Contact immediately while motivation is high.", 1),
+        ("site_visit_ready", "Site Visit Ready", "site_assessment", "Site Assessment",
+         "Lead agreed to a free home solar assessment. Confirm the visit and prepare the site evaluation.", 2),
+        ("proposal_sent", "Proposal Sent", "proposal_follow_up", "Proposal Follow-Up",
+         "Lead received a solar proposal. Follow up on questions, financing options, and incentive deadlines.", 3),
+        ("long_term_interest", "Long-Term Interest", "nurture", "Long-Term Nurture",
+         "Lead is interested but waiting on better incentives or timing. Nurture with updates on savings and incentives.", 4),
+    ],
+}
+GENERIC_TIERS = [
+    ("hot_lead", "Hot Lead", "high_priority", "High Priority",
+     "Lead has expressed strong interest. Follow up immediately.", 1),
+    ("warm_lead", "Warm Lead", "standard_follow_up", "Standard Follow-Up",
+     "Lead has shown interest but needs more nurturing before making a decision.", 2),
+    ("cold_lead", "Cold Lead", "low_priority", "Low Priority",
+     "Lead has minimal engagement. Keep in rotation with occasional touchpoints.", 3),
+    ("needs_review", "Needs Review", "needs_review", "Needs Review",
+     "Lead data needs verification or tier assignment before outreach begins.", 4),
+]
+
+
+def _seed_industry_tiers(db: Session, org: Organization):
+    """Seed TierDefinition rows for an org based on their industry. Safe to call on existing orgs — only adds missing tiers."""
+    industry = (org.industry or "general").lower()
+    presets = INDUSTRY_TIERS.get(industry, GENERIC_TIERS)
+    existing_keys = {t.tier_key for t in db.query(TierDefinition).filter(TierDefinition.organization_id == org.id).all()}
+    for tier_key, tier_label, track_key, track_label, ai_tone_context, sort_order in presets:
+        if tier_key not in existing_keys:
+            db.add(TierDefinition(
+                organization_id=org.id,
+                tier_key=tier_key,
+                tier_label=tier_label,
+                track_key=track_key,
+                track_label=track_label,
+                ai_tone_context=ai_tone_context,
+                sort_order=sort_order,
+                is_active=True,
+            ))
+    db.flush()
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -23,13 +148,13 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.get("/dashboard")
 def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
-    Mike's master view - KPIs across every advisor in the organization.
-    org_admin sees their own org; super_admin (Mike, eventually) can be
-    extended to cross-org once North Star Memorial Group comes online.
+    Master view - KPIs across every advisor. god_admin sees ALL orgs aggregated;
+    org_admin/super_admin see their own org only.
     """
-    org_id = current_user.organization_id
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
 
-    advisors = db.query(User).filter(User.organization_id == org_id, User.role == "advisor").all()
+    advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role == "advisor").all()
 
     per_advisor_stats = []
     for advisor in advisors:
@@ -41,23 +166,29 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
             .filter(Lead.assigned_to_id == advisor.id, Reply.is_hot == True)
             .scalar()
         )
+        org_name = None
+        if is_god:
+            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+            org_name = org.name if org else None
         per_advisor_stats.append({
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
+            "organization_name": org_name,
             "leads_owned": lead_count,
             "messages_sent": sent_count,
             "hot_replies": hot_count,
         })
 
-    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id == org_id).scalar()
+    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar()
     total_duplicates = (
         db.query(func.count(Lead.id))
-        .filter(Lead.organization_id == org_id, Lead.is_duplicate == True)
+        .filter(Lead.organization_id.in_(org_ids), Lead.is_duplicate == True)
         .scalar()
     )
 
     return {
-        "organization_id": org_id,
+        "organization_id": current_user.organization_id if not is_god else "all",
+        "is_god_view": is_god,
         "total_leads": total_leads,
         "total_duplicates_prevented": total_duplicates,
         "advisors": per_advisor_stats,
@@ -123,6 +254,14 @@ def all_org_leads(
 # ---------------------------------------------------------------------------
 
 HOT_REPLY_CLASSIFICATIONS = (ReplyClassification.INTERESTED, ReplyClassification.CALLBACK)
+
+
+def _get_org_ids(db: Session, current_user: User) -> list:
+    """Return org IDs to scope queries to.
+    god_admin sees ALL organizations; everyone else is scoped to their own org."""
+    if current_user.role == "god_admin":
+        return [str(row[0]) for row in db.query(Organization.id).all()]
+    return [str(current_user.organization_id)]
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:
@@ -208,20 +347,28 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
 
 @router.get("/dashboard/metrics")
 def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Org-scoped advisor quality metrics for the upgraded Manager Command Dashboard."""
-    org_id = current_user.organization_id
+    """Advisor quality metrics. god_admin sees all orgs aggregated; others see their own org."""
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
+
     advisors = (
         db.query(User)
-        .filter(User.organization_id == org_id, User.role == "advisor")
+        .filter(User.organization_id.in_(org_ids), User.role == "advisor")
         .order_by(User.full_name.asc())
         .all()
     )
 
-    advisor_rows = [_advisor_metrics(db, org_id, advisor) for advisor in advisors]
+    advisor_rows = []
+    for advisor in advisors:
+        row = _advisor_metrics(db, str(advisor.organization_id), advisor)
+        if is_god:
+            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
+            row["organization_name"] = org.name if org else None
+        advisor_rows.append(row)
 
     totals = {
         "advisor_id": "org_total",
-        "advisor_name": "Organization total",
+        "advisor_name": "All Organizations" if is_god else "Organization total",
         "leads_owned": sum(row["leads_owned"] for row in advisor_rows),
         "messages_sent": sum(row["messages_sent"] for row in advisor_rows),
         "replies": sum(row["replies"] for row in advisor_rows),
@@ -229,7 +376,7 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
         "booked_leads": sum(row["booked_leads"] for row in advisor_rows),
         "dnc_leads": sum(row["dnc_leads"] for row in advisor_rows),
         "duplicate_leads_prevented": db.query(func.count(Lead.id)).filter(
-            Lead.organization_id == org_id,
+            Lead.organization_id.in_(org_ids),
             Lead.is_duplicate == True,
         ).scalar() or 0,
     }
@@ -239,7 +386,8 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
     totals["dnc_rate"] = _safe_rate(totals["dnc_leads"], totals["leads_owned"])
 
     return {
-        "organization_id": org_id,
+        "organization_id": current_user.organization_id if not is_god else "all",
+        "is_god_view": is_god,
         "totals": totals,
         "advisors": advisor_rows,
     }
@@ -247,31 +395,32 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
 
 @router.get("/dashboard/funnel")
 def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Org-wide lead funnel counts from existing Lead/Message/Reply/LeadOutcome data."""
-    org_id = current_user.organization_id
+    """Lead funnel counts. god_admin sees all orgs aggregated; others see their own org."""
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
 
-    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id == org_id).scalar() or 0
+    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar() or 0
 
     sent = db.query(func.count(distinct(Lead.id))).join(Message, Message.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
     ).scalar() or 0
 
     replied = db.query(func.count(distinct(Lead.id))).join(Reply, Reply.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
     ).scalar() or 0
 
     hot_interested = db.query(func.count(distinct(Lead.id))).join(Reply, Reply.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
         ((Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)),
     ).scalar() or 0
 
     booked = db.query(func.count(Lead.id)).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
         Lead.status == "booked",
     ).scalar() or 0
 
     sold = db.query(func.count(distinct(Lead.id))).join(LeadOutcome, LeadOutcome.lead_id == Lead.id).filter(
-        Lead.organization_id == org_id,
+        Lead.organization_id.in_(org_ids),
         LeadOutcome.resulted_in_sale == True,
     ).scalar() or 0
 
@@ -285,7 +434,8 @@ def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends
     ]
 
     return {
-        "organization_id": org_id,
+        "organization_id": current_user.organization_id if not is_god else "all",
+        "is_god_view": is_god,
         "total_leads": total_leads,
         "sent": sent,
         "replied": replied,
@@ -1012,6 +1162,7 @@ class FixContactInfoRequest(BaseModel):
     email: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+    unflag_duplicate: bool | None = None  # set True to clear is_duplicate flag
 
 
 def _lead_summary(lead: Lead) -> dict[str, Any]:
@@ -1194,6 +1345,45 @@ def potential_duplicate_leads(
     return results
 
 
+@router.get("/leads/flagged-duplicates")
+def flagged_duplicate_leads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Return all leads already flagged as is_duplicate=True for this org.
+    These are leads caught at import time or when manually added.
+    Shown in a separate section of Lead Cleanup so admins can review/delete them.
+    """
+    dupes = (
+        db.query(Lead)
+        .filter(
+            Lead.organization_id == current_user.organization_id,
+            Lead.is_duplicate == True,
+        )
+        .order_by(Lead.created_at.desc())
+        .limit(1000)
+        .all()
+    )
+    return [
+        {
+            "id": l.id,
+            "first_name": l.first_name,
+            "last_name": l.last_name,
+            "phone": l.phone,
+            "email": l.email,
+            "tier": l.tier,
+            "status": l.status,
+            "source_file": l.source_file,
+            "source_year": l.source_year,
+            "import_list_name": l.import_list_name,
+            "imported_by_name": getattr(l, "imported_by_name", None),
+            "created_at": l.created_at.isoformat() if l.created_at else None,
+        }
+        for l in dupes
+    ]
+
+
 @router.post("/leads/merge", response_model=MergeLeadsResponse)
 def merge_leads(
     req: MergeLeadsRequest,
@@ -1315,7 +1505,7 @@ def fix_lead_contact_info(
     duplicate match against an unrelated lead, AND prevent a real
     duplicate from being caught in the first place.
     """
-    if req.phone is None and req.email is None and req.first_name is None and req.last_name is None:
+    if req.phone is None and req.email is None and req.first_name is None and req.last_name is None and req.unflag_duplicate is None:
         raise HTTPException(status_code=400, detail="Provide at least one field to update.")
 
     lead = (
@@ -1356,6 +1546,12 @@ def fix_lead_contact_info(
             raise HTTPException(status_code=400, detail="last_name cannot be blank.")
         lead.last_name = cleaned_last
         registry_needs_resync = True
+
+    if req.unflag_duplicate:
+        lead.is_duplicate = False
+        lead.duplicate_of_lead_id = None
+        if lead.status in ("dnc",):
+            lead.status = "new"  # re-activate so it can enter the cadence
 
     if registry_needs_resync:
         _apply_contact_registry_after_contact_fix(db, lead)
@@ -1458,6 +1654,8 @@ def provision_client(
         must_change_password=(generated_password is not None),
     )
     db.add(new_supervisor)
+    # Seed industry-appropriate tiers for this org
+    _seed_industry_tiers(db, new_org)
     db.commit()
     db.refresh(new_org)
     db.refresh(new_supervisor)
@@ -1486,6 +1684,26 @@ def provision_client(
         temp_password=generated_password,
         message=f"Client '{req.org_name}' provisioned successfully.",
     )
+
+
+@router.post("/orgs/{org_id}/seed-industry-tiers")
+def seed_industry_tiers_for_org(
+    org_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    Seed (or back-fill) industry-appropriate TierDefinition rows for an existing org.
+    Only adds tiers that don't already exist — never deletes or modifies existing tiers.
+    """
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    _seed_industry_tiers(db, org)
+    db.commit()
+    industry = (org.industry or "general").lower()
+    seeded = INDUSTRY_TIERS.get(industry, GENERIC_TIERS)
+    return {"seeded_industry": industry, "tier_count": len(seeded), "org_id": org_id}
 
 
 @router.get("/organizations")

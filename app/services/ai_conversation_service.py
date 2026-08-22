@@ -100,6 +100,9 @@ CRITICAL RULES:
 - Personalize using the lead's name, tier, and history.
 - CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
 
+HOW TO INTRODUCE THE ADVISOR:
+{advisor_intro_instruction}
+
 TONE: {tone_instruction}
 TOUCH ANGLE: {touch_angle_instruction}
 {offer_hook_line}
@@ -117,30 +120,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 {{"subject": "email subject line", "body": "2-3 sentence email body only, no sign-off, no URLs", "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
 """
 
-REPLY_SYSTEM_PROMPT = """You are an AI assistant helping a Family Service Advisor respond to a lead's email reply on behalf of {org_name}.
+REPLY_SYSTEM_PROMPT = """You are an AI assistant helping {advisor_name} at {org_name} respond to a lead's email reply.
 
-The lead replied. Generate the ideal response to keep the conversation moving toward booking.
+The lead replied. Generate the smartest, most human response to move this conversation forward.
 
 CRITICAL RULES:
-- Read the lead's reply carefully. Respond directly to what they said.
-- Be SMART — think about what this person actually needs right now.
-- Compassionate and human. Never salesy.
+- Read the lead's reply carefully. Respond DIRECTLY to what they actually said — not to a generic script.
+- Compassionate and human. Never salesy, never robotic.
 - 2-3 sentences max. No filler.
-- If they show ANY interest → offer to book immediately.
-- If they ask a question → answer it and gently ask if they'd like to schedule.
+- Objection handling — respond with care, not pressure:
+  * "already have one / covered" → Acknowledge sincerely. Offer a no-pressure second-opinion or free review angle.
+  * "send info / not ready" → Offer one genuinely useful fact, then ask one easy question.
+  * "too busy / not a good time" → Respect it. Offer to follow up when convenient.
+  * "not interested" → Set should_stop=true. Close gracefully: acknowledge and leave the door open.
+  * "how much / price" → Don't quote numbers. Invite a conversation to understand their situation.
+- If they show clear interest → offer to schedule, include should_book=true.
+- If they ask a question → answer it specifically, then gently ask if they'd like to schedule.
 - Never reveal you are AI.
-- CRITICAL: Do NOT include any sign-off, closing, or signature whatsoever. No "Best regards", "Take care", "Sincerely", no name, no company name. Write ONLY the 2-3 sentence body and STOP.
+- CRITICAL: Do NOT include any sign-off, closing, or signature. Write ONLY the 2-3 sentence body and STOP.
 
 Relationship context: {relationship_context}
-ADVISOR: {advisor_name}
-ORGANIZATION: {org_name}
-LEAD: {first_name} {last_name}
-APPOINTMENT TYPE: {appt_label}
+ADVISOR: {advisor_name}  |  ORGANIZATION: {org_name}
+LEAD: {first_name} {last_name}  |  APPOINTMENT TYPE: {appt_label}
 ADDITIONAL LEAD CONTEXT:
 {lead_context}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
-{{"subject": "reply subject", "body": "your reply body, 2-3 sentences, no sign-off, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
+{{"subject": "reply subject", "body": "2-3 sentence reply, no sign-off, no URLs", "should_book": false, "should_stop": false, "stop_reason": "", "escalate": false, "escalate_reason": "", "confidence": 90}}
 """
 
 TONE_MAP = {
@@ -151,7 +157,11 @@ TONE_MAP = {
 }
 
 TOUCH_ANGLE_MAP = {
-    "warm_intro": "Introduce yourself warmly. Explain why you're reaching out specifically for them. Make it personal.",
+    "warm_intro": (
+        "First contact. Use the HOW TO INTRODUCE THE ADVISOR instruction above precisely. "
+        "Be warm and specific — mention why you're reaching out for THIS person (their tier, source, or context). "
+        "One clear, simple ask at the end. No pressure. No filler. Sound like a person, not a template."
+    ),
     "value_proposition": "Focus on what your organization can do for them. What peace of mind looks like. Don't ask yet.",
     "soft_reference": "Reference your previous email naturally ('I reached out a few days ago...'). Try a completely different angle.",
     "checkin": "Simple, low-pressure check-in. Just making sure they got your message. No ask.",
@@ -209,17 +219,19 @@ Best regards,<br>
 
 def _strip_signoff(body: str) -> str:
     """Remove any AI-generated sign-off from the email body.
-    GPT sometimes adds closings despite being told not to — strip them here."""
+    GPT sometimes adds closings despite being told not to — strip them here.
+    Handles both newline-separated and inline sign-offs."""
     import re
+    # Match sign-off phrases whether they follow a newline OR inline punctuation/space
     signoff_patterns = [
-        r'\n+\s*(best regards|warm regards|kind regards|sincerely|take care|'
+        r'[\n,.]?\s*(best regards|warm regards|kind regards|sincerely|take care|'
         r'thanks|thank you|looking forward|yours truly|respectfully|with care|'
         r'cordially|cheers)[,.]?.*',
     ]
     for pat in signoff_patterns:
         body = re.sub(pat, '', body, flags=re.IGNORECASE | re.DOTALL)
-    # Also strip trailing [Your Name], [Name], placeholder lines
-    body = re.sub(r'\n+\s*\[.*?\].*', '', body, flags=re.DOTALL)
+    # Strip trailing [Your Name], [Name], placeholder lines
+    body = re.sub(r'[\n,.]?\s*\[.*?\].*', '', body, flags=re.DOTALL)
     return body.strip()
 
 
@@ -228,13 +240,11 @@ def _strip_signoff(body: str) -> str:
 
 
 def _get_booking_url(db: Session, lead: Lead, advisor: User) -> str:
-    existing = (
-        db.query(BookingLink)
-        .filter(BookingLink.lead_id == lead.id, BookingLink.status == "pending")
-        .order_by(BookingLink.created_at.desc())
-        .first()
-    )
-    link = existing or create_booking_link(db, lead, advisor)
+    # Create a fresh link for this AI touch.
+    # IMPORTANT: do NOT expire previous pending links — if the lead already received
+    # an earlier email with a booking button, that link must still work when they click it.
+    # Each AI touch gets its own link; all remain valid until the lead books.
+    link = create_booking_link(db, lead, advisor)
     return f"{BOOKING_BASE_URL}/book/{link.token}"
 
 
@@ -377,39 +387,16 @@ def _check_escalation(text: str) -> tuple:
     return False, ""
 
 
-def _send_email_via_graph(advisor: User, to_email: str, subject: str, body: str):
-    import httpx
-    from app.utils.crypto import decrypt_value
+def _send_email_resend(db: Session, advisor: User, to_email: str, subject: str, body: str):
+    """Send via Resend using the org's configured API key / from address.
+    Raises on failure so callers can catch and handle."""
+    from app.services.email_service import send_email_via_provider
+    from app.models.models import Organization
 
-    resp = httpx.post(
-        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-        data={
-            "client_id": os.environ.get("MICROSOFT_CLIENT_ID"),
-            "client_secret": os.environ.get("MICROSOFT_CLIENT_SECRET"),
-            "refresh_token": decrypt_value(advisor.microsoft_oauth_refresh_token_encrypted),
-            "grant_type": "refresh_token",
-            "scope": "offline_access Mail.Read Mail.Send User.Read",
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    access_token = resp.json()["access_token"]
-
-    send_resp = httpx.post(
-        "https://graph.microsoft.com/v1.0/me/sendMail",
-        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-        json={
-            "message": {
-                "subject": subject,
-                "body": {"contentType": "HTML", "content": body.replace('\n', '<br>')},
-                "toRecipients": [{"emailAddress": {"address": to_email}}],
-            },
-            "saveToSentItems": True,
-        },
-        timeout=15,
-    )
-    if send_resp.status_code not in (200, 201, 202):
-        raise Exception(f"Graph sendMail failed: {send_resp.status_code} {send_resp.text[:300]}")
+    org = db.query(Organization).filter_by(id=advisor.organization_id).first()
+    result = send_email_via_provider(to_email, subject, body, org=org)
+    if not result["success"]:
+        raise Exception(f"Resend send failed: {result.get('error', 'unknown error')}")
 
 
 def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, advisor: User, reason: str, reply_body: str):
@@ -432,9 +419,41 @@ def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, 
 {'<p><strong>Their message:</strong> ' + reply_body[:500] + '</p>' if reply_body else ''}
 <br><a href="{frontend_url}/leads/{lead.id}" style="background:#1a5fa8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;">View Lead & Respond →</a>
 <p style="color:#94a3b8;font-size:12px;margin-top:16px;">{get_brand_name(db, str(advisor.organization_id))} AI paused this conversation. Review and respond manually or click Resume AI on the lead page.</p>"""
-        _send_email_via_graph(advisor, notification_email, subject, body)
+        _send_email_resend(db, advisor, notification_email, subject, body)
     except Exception as e:
         logger.error("Escalation alert failed: %s", e)
+
+
+def _build_advisor_intro_instruction(advisor_name: str, org_name: str) -> str:
+    """
+    Generates a clear directive for how the AI should introduce the advisor in the email.
+    Handles the common case where advisor full_name == org_name (e.g. both "MDG Testing")
+    so the AI never writes "My name is X with X."
+    """
+    # Normalize for comparison (lowercase, strip extra whitespace)
+    adv_norm = (advisor_name or "").strip().lower()
+    org_norm = (org_name or "").strip().lower()
+
+    if not advisor_name or advisor_name.strip() == "Your Advisor":
+        return (
+            f"Introduce yourself as a Family Service Advisor at {org_name}. "
+            f"Do NOT say your name — just reference the organization."
+        )
+
+    if adv_norm == org_norm:
+        # Advisor name IS the org name — introducing with "with" would be redundant
+        return (
+            f"Your name is {advisor_name} and you represent {org_name}. "
+            f"IMPORTANT: Do NOT write 'My name is {advisor_name} with {org_name}' — they are the same. "
+            f"Instead just say something like 'I'm {advisor_name}' or 'I'm reaching out from {org_name}' — pick one, not both."
+        )
+
+    # Normal case — advisor has a distinct name from the org
+    return (
+        f"Your name is {advisor_name} and you work at {org_name}. "
+        f"When introducing yourself for the first time, say something like "
+        f"'My name is {advisor_name}, a Family Service Advisor at {org_name}' — natural and specific."
+    )
 
 
 def generate_touch_email(
@@ -484,15 +503,18 @@ def generate_touch_email(
         offer_hook_line = ""
 
     org_name = _get_org_name(db, advisor)
+    advisor_name = advisor.full_name or "Your Advisor"
     lead_context = _build_lead_context(lead)
+    advisor_intro = _build_advisor_intro_instruction(advisor_name, org_name)
     system = SMART_SYSTEM_PROMPT.format(
         relationship_context=relationship_context,
         ai_direction=direction,
         appt_label=appt_label,
+        advisor_intro_instruction=advisor_intro,
         tone_instruction=TONE_MAP.get(tone, TONE_MAP["warm"]),
         touch_angle_instruction=TOUCH_ANGLE_MAP.get(angle, ""),
         offer_hook_line=offer_hook_line,
-        advisor_name=advisor.full_name or "Your Advisor",
+        advisor_name=advisor_name,
         org_name=org_name,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
@@ -558,14 +580,18 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
         relationship_context=relationship_context,
         lead_context=lead_context,
     )
-    user_msg = f"Conversation history:\n{history}\n\nLead's latest reply:\n{reply_body}\n\nGenerate your response now."
+    user_msg = (
+        f"Full conversation history (read this carefully — it is your context):\n{history}\n\n"
+        f"Lead's latest reply:\n{reply_body}\n\n"
+        f"Now generate your response, addressing exactly what they said."
+    )
 
     try:
         response = _get_client().chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-            temperature=0.5,
-            max_tokens=300,
+            temperature=0.65,
+            max_tokens=350,
         )
         raw = response.choices[0].message.content.strip()
         clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
@@ -612,8 +638,21 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
 
         org_name = _get_org_name(db, advisor)
         clean_body = _strip_signoff(email_data["body"])
-        html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name)
-        _send_email_via_graph(advisor, lead.email, email_data["subject"], html_body)
+        # Booking button: touch 0 (first), and touches 6+ (personal, final_soft).
+        # Middle touches are pure conversation — no CTA, let the relationship build.
+        _BUTTON_TOUCHES = {0, 6, 7, 8}
+        extra_html = ""
+        if touch_number in _BUTTON_TOUCHES:
+            booking_url = _get_booking_url(db, lead, advisor)
+            extra_html = (
+                f'<br><br>'
+                f'<a href="{booking_url}" '
+                f'style="display:inline-block;background:#1a5fa8;color:#ffffff;padding:12px 28px;'
+                f'border-radius:6px;text-decoration:none;font-weight:700;font-size:15px;">'
+                f'Schedule a Time &rarr;</a>'
+            )
+        html_body = _build_email_html(clean_body, advisor.full_name or "Your Advisor", org_name, extra_html=extra_html)
+        _send_email_resend(db, advisor, lead.email, email_data["subject"], html_body)
 
         msg = EmailMessage(
             id=str(uuid.uuid4()),
@@ -909,7 +948,7 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
     try:
         clean_body = _strip_signoff(body)
         html_body = _build_email_html(clean_body, advisor_name, org_name)
-        _send_email_via_graph(advisor, lead.email, subject, html_body)
+        _send_email_resend(db, advisor, lead.email, subject, html_body)
 
         msg = EmailMessage(
             id=str(uuid.uuid4()),
@@ -957,11 +996,6 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
             _escalate_conversation(db, conv, lead, advisor, "Lead replied but has no email address on file", reply_body)
             return {"action": "escalated", "reason": "no_email"}
 
-        if not advisor.microsoft_365_connected:
-            logger.warning("Post-booking reply for lead %s but advisor email not connected — escalating", lead.id)
-            _escalate_conversation(db, conv, lead, advisor, "Post-booking reply received but advisor email not connected", reply_body)
-            return {"action": "escalated", "reason": "email_not_connected"}
-
         return _handle_post_booking_reply(db, lead, advisor, reply_body, conv)
     # ────────────────────────────────────────────────────────────────────────
 
@@ -997,7 +1031,7 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         )
         html_booking = _build_email_html(clean_booking_body, advisor.full_name or "Your Advisor", org_name, extra_html=booking_btn)
         try:
-            _send_email_via_graph(advisor, lead.email, result["subject"], html_booking)
+            _send_email_resend(db, advisor, lead.email, result["subject"], html_booking)
             conv.stage = "booking_sent"
             conv.booking_link_sent_at = datetime.utcnow()
             db.commit()
@@ -1010,7 +1044,7 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         org_name = _get_org_name(db, advisor)
         clean_reply = _strip_signoff(result["body"])
         html_reply = _build_email_html(clean_reply, advisor.full_name or "Your Advisor", org_name)
-        _send_email_via_graph(advisor, lead.email, result["subject"], html_reply)
+        _send_email_resend(db, advisor, lead.email, result["subject"], html_reply)
         msg = EmailMessage(
             id=str(uuid.uuid4()),
             lead_id=lead.id,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, fetchAndStoreBranding, getCurrentUser } from '../api/client'
+import { api, fetchAndStoreBranding, getCurrentUser, getOrgContext } from '../api/client'
 import '../styles/shared.css'
 import './OrgSettings.css'
 
@@ -64,11 +64,16 @@ const TIER_COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'neutral']
 
 export default function OrgSettings() {
   const user = getCurrentUser()
-  const isSuperAdmin = user?.role === 'super_admin'
+  const isSuperAdmin = user?.role === 'super_admin' || user?.role === 'god_admin'
 
-  // Super admin org selector
+  // Super admin org selector — seed from active org view context so god admin
+  // who entered Fiber Cartel's org view sees Fiber Cartel's settings immediately.
   const [allOrgs, setAllOrgs] = useState([])
-  const [selectedOrgId, setSelectedOrgId] = useState(null)
+  const [selectedOrgId, setSelectedOrgId] = useState(() => {
+    if (!isSuperAdmin) return null
+    const ctx = getOrgContext()
+    return ctx?.orgId || null
+  })
 
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -119,13 +124,21 @@ export default function OrgSettings() {
   const [orgTwilioSaved, setOrgTwilioSaved] = useState(false)
   const [orgTwilioError, setOrgTwilioError] = useState('')
 
+  // Booking page contact info
+  const [orgName, setOrgName] = useState('')
+  const [orgAddress, setOrgAddress] = useState('')
+  const [orgPhone, setOrgPhone] = useState('')
+  const [savingContact, setSavingContact] = useState(false)
+  const [contactSaved, setContactSaved] = useState(false)
+
   // Load all orgs for super admin selector
   useEffect(() => {
     if (!isSuperAdmin) return
     api.get('/admin/organizations')
       .then(orgs => {
         setAllOrgs(orgs)
-        if (orgs.length > 0) setSelectedOrgId(orgs[0].id)
+        // Only fall back to orgs[0] if no org was pre-selected from org view context
+        setSelectedOrgId(prev => prev || (orgs.length > 0 ? orgs[0].id : null))
       })
       .catch(() => {})
   }, [isSuperAdmin])
@@ -157,6 +170,9 @@ export default function OrgSettings() {
         setFromEmail(data.from_email || '')
         setResendApiKeySet(!!data.resend_api_key_set)
         setResendApiKey('')  // Never pre-populate — only write when user explicitly enters it
+        setOrgName(data.name || '')
+        setOrgAddress(data.org_address || '')
+        setOrgPhone(data.org_phone || '')
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -277,7 +293,6 @@ export default function OrgSettings() {
     setOrgTwilioError('')
     try {
       if (!orgTwilioSid.trim() || !orgTwilioToken.trim()) {
-        // Phone-only update if credentials already configured
         if (orgTwilioConfigured) {
           await api.patch(`/org-settings/twilio/phone${orgQuery}`, {
             org_twilio_phone_number: orgTwilioPhone.trim(),
@@ -305,6 +320,26 @@ export default function OrgSettings() {
       setOrgTwilioError(err.message)
     } finally {
       setSavingOrgTwilio(false)
+    }
+  }
+
+  async function saveContactInfo() {
+    setSavingContact(true)
+    setContactSaved(false)
+    setError('')
+    try {
+      const result = await api.patch(`/org-settings/contact${orgQuery}`, {
+        name: orgName || null,
+        org_address: orgAddress || null,
+        org_phone: orgPhone || null,
+      })
+      if (result.name) setOrgName(result.name)
+      setContactSaved(true)
+      setTimeout(() => setContactSaved(false), 3000)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingContact(false)
     }
   }
 
@@ -339,8 +374,8 @@ export default function OrgSettings() {
         </div>
       </header>
 
-      {/* Super admin org selector */}
-      {isSuperAdmin && (
+      {/* Super admin org selector — hidden when already in an org view (banner handles context) */}
+      {isSuperAdmin && !getOrgContext() && (
         <div className="panel" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
           <label style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>Managing org:</label>
           <select
@@ -366,7 +401,7 @@ export default function OrgSettings() {
       {error && <div className="os-error">{error}</div>}
       {success && <div className="os-success">{success}</div>}
 
-      {(!isSuperAdmin || (isSuperAdmin && selectedOrgId && !loading)) && (
+      {(!isSuperAdmin || (isSuperAdmin && (selectedOrgId || getOrgContext()) && !loading)) && (
         <>
           <div className="os-grid">
             <section className="panel os-section">
@@ -653,11 +688,7 @@ export default function OrgSettings() {
             <div className="os-field-row" style={{ gap: 12, marginTop: 12 }}>
               <div style={{ flex: 1 }}>
                 <label className="os-label">Number type</label>
-                <select
-                  className="os-input"
-                  value={orgTwilioNumberType}
-                  onChange={e => setOrgTwilioNumberType(e.target.value)}
-                >
+                <select className="os-input" value={orgTwilioNumberType} onChange={e => setOrgTwilioNumberType(e.target.value)}>
                   <option value="toll_free">Toll-free (8XX) — TFV approved</option>
                   <option value="10dlc">10DLC — local 10-digit (A2P registered)</option>
                   <option value="short_code">Short code</option>
@@ -695,6 +726,38 @@ export default function OrgSettings() {
               {savingOrgTwilio ? 'Saving…' : orgTwilioSaved ? '✓ Saved' : 'Save shared number'}
             </button>
           </section>
+
+        {/* ── Booking Page Info ── */}
+        <section className="panel os-section" style={{ marginTop: 16 }}>
+          <div className="panel-header"><h2 className="panel-title">📅 Booking Page Info</h2></div>
+          <p className="os-hint">
+            This info appears in the header of your booking page and in confirmation emails.
+          </p>
+          <label className="os-label">
+            Organization name
+            <input className="os-input" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Acme Funeral Home" />
+          </label>
+          <label className="os-label">
+            Office address
+            <input className="os-input" value={orgAddress} onChange={(e) => setOrgAddress(e.target.value)} placeholder="e.g. 123 Main St, Springfield, IL 62701" />
+          </label>
+          <label className="os-label">
+            Office phone
+            <input className="os-input" value={orgPhone} onChange={(e) => setOrgPhone(e.target.value)} placeholder="e.g. (555) 123-4567" />
+          </label>
+          <button className="btn btn--primary" onClick={saveContactInfo} disabled={savingContact} style={{ marginTop: 8 }}>
+            {savingContact ? 'Saving…' : contactSaved ? '✓ Saved' : 'Save booking page info'}
+          </button>
+        </section>
+
+        {/* ── Appointment Types ── */}
+        <AppointmentTypesSection orgQuery={orgQuery} />
+
+        {/* ── CRM Pipeline Stages ── */}
+        <CRMStagesSection orgQuery={orgQuery} />
+
+        {/* ── CRM Custom Fields ── */}
+        <CRMCustomFieldsSection />
 
         {/* ── Demo Data Seed (super admin only) ── */}
         {isSuperAdmin && selectedOrgId && (
@@ -743,5 +806,350 @@ function SeedDemoButton({ orgId }) {
       )}
       {status === 'error' && <div style={{ color: '#f87171', fontSize: 13 }}>{err}</div>}
     </div>
+  )
+}
+
+// ── Appointment Types ─────────────────────────────────────────────────────
+function AppointmentTypesSection({ orgQuery }) {
+  const [types, setTypes] = useState([])
+  const [isCustom, setIsCustom] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [newType, setNewType] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    api.get(`/settings/appointment-types${orgQuery}`)
+      .then(d => {
+        setTypes(d.appointment_types || [])
+        setIsCustom(!!d.is_custom)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [orgQuery])
+
+  function addType() {
+    const t = newType.trim()
+    if (!t) return
+    if (types.includes(t)) { setErr('That type already exists'); return }
+    setTypes(prev => [...prev, t])
+    setNewType('')
+    setErr('')
+  }
+
+  function removeType(idx) {
+    setTypes(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function moveUp(idx) {
+    if (idx === 0) return
+    setTypes(prev => { const a = [...prev]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; return a })
+  }
+
+  function moveDown(idx) {
+    setTypes(prev => {
+      if (idx >= prev.length - 1) return prev
+      const a = [...prev]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; return a
+    })
+  }
+
+  async function save() {
+    setErr(''); setSaving(true)
+    try {
+      const d = await api.put(`/settings/appointment-types${orgQuery}`, { appointment_types: types })
+      setTypes(d.appointment_types || types)
+      setIsCustom(true)
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+    } catch (e) { setErr(e.message || 'Save failed') }
+    finally { setSaving(false) }
+  }
+
+  async function reset() {
+    if (!window.confirm('Reset appointment types to system defaults?')) return
+    setResetting(true)
+    try {
+      const d = await api.delete(`/settings/appointment-types${orgQuery}`)
+      setTypes(d.appointment_types || [])
+      setIsCustom(false)
+    } catch (e) { setErr(e.message || 'Reset failed') }
+    finally { setResetting(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h2 className="panel-title">📋 Appointment Types</h2>
+          <p className="os-hint" style={{ marginTop: 2 }}>
+            These options appear in the "Booking type" dropdown when creating a booking link.
+            {isCustom ? ' Using custom types.' : ' Using system defaults.'}
+          </p>
+        </div>
+        {isCustom && (
+          <button className="btn btn--secondary" onClick={reset} disabled={resetting} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+            {resetting ? 'Resetting…' : '↺ Reset to defaults'}
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
+        {types.map((t, i) => (
+          <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 3 }}>
+              <button onClick={() => moveUp(i)} disabled={i === 0} style={{ padding: '3px 7px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 5, cursor: 'pointer', fontSize: 11, opacity: i === 0 ? 0.3 : 1 }}>↑</button>
+              <button onClick={() => moveDown(i)} disabled={i === types.length - 1} style={{ padding: '3px 7px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 5, cursor: 'pointer', fontSize: 11, opacity: i === types.length - 1 ? 0.3 : 1 }}>↓</button>
+            </div>
+            <span style={{ flex: 1, fontSize: 13, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-color)' }}>{t}</span>
+            <button onClick={() => removeType(i)} disabled={types.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 5, cursor: 'pointer', color: '#ef4444', fontSize: 12, opacity: types.length <= 1 ? 0.3 : 1 }}>✕</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <input
+          className="os-input"
+          style={{ flex: 1, marginBottom: 0 }}
+          value={newType}
+          onChange={(e) => { setNewType(e.target.value); setErr('') }}
+          onKeyDown={(e) => e.key === 'Enter' && addType()}
+          placeholder="Add a new appointment type…"
+        />
+        <button className="btn btn--secondary" onClick={addType} disabled={!newType.trim()} style={{ fontSize: 13, whiteSpace: 'nowrap' }}>+ Add</button>
+      </div>
+
+      {err && <div style={{ color: 'var(--signal-red)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      <button className="btn btn--primary" onClick={save} disabled={saving || types.length === 0} style={{ fontSize: 13 }}>
+        {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save appointment types'}
+      </button>
+    </section>
+  )
+}
+
+// ── CRM Pipeline Stages ───────────────────────────────────────────────────
+function CRMStagesSection({ orgQuery }) {
+  const COLORS = ['#64748b','#6366f1','#f59e0b','#ef4444','#10b981','#3b82f6','#f97316','#8b5cf6','#ec4899','#14b8a6']
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [stages, setStages] = useState([])
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`/api/crm-native/stages${orgQuery}`, { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
+      .then(r => r.json()).then(d => {
+        setData(d)
+        setStages(d.stages || [])
+      }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  function addStage() {
+    setStages(s => [...s, { key: `stage_${Date.now()}`, label: 'New Stage', color: COLORS[s.length % COLORS.length] }])
+  }
+
+  function removeStage(idx) {
+    setStages(s => s.filter((_, i) => i !== idx))
+  }
+
+  function moveUp(idx) {
+    if (idx === 0) return
+    setStages(s => { const a = [...s]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; return a })
+  }
+
+  function moveDown(idx) {
+    setStages(s => { if (idx >= s.length - 1) return s; const a = [...s]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; return a })
+  }
+
+  async function save() {
+    setErr(''); setSaving(true)
+    try {
+      const res = await fetch('/api/crm-native/stages', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
+        body: JSON.stringify({ stages }),
+      })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Save failed') }
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function reset() {
+    if (!confirm('Reset to industry default stages?')) return
+    setResetting(true)
+    try {
+      const res = await fetch('/api/crm-native/stages/reset', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
+      })
+      const d = await res.json()
+      setStages(d.stages || [])
+      setData(prev => ({ ...prev, is_custom: false }))
+    } catch (e) { setErr(e.message) }
+    finally { setResetting(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 className="panel-title">CRM Pipeline Stages</h2>
+          <p className="os-hint" style={{ marginTop: 2 }}>
+            Define the stages contacts move through in your CRM.
+            {data?.is_custom ? ' Custom stages active.' : ` Using ${data?.industry || 'default'} industry defaults.`}
+          </p>
+        </div>
+        {data?.is_custom && (
+          <button className="btn btn--secondary" onClick={reset} disabled={resetting} style={{ fontSize: 12 }}>
+            {resetting ? 'Resetting…' : 'Reset to default'}
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        {stages.map((s, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="color" value={s.color || '#64748b'} onChange={e => setStages(ss => ss.map((x,j) => j===i ? {...x, color: e.target.value} : x))} style={{ width: 36, height: 34, border: 'none', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
+            <input
+              className="os-input"
+              style={{ flex: 1, marginBottom: 0 }}
+              value={s.label}
+              onChange={e => setStages(ss => ss.map((x,j) => j===i ? {...x, label: e.target.value} : x))}
+              placeholder="Stage name"
+            />
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button onClick={() => moveUp(i)} disabled={i===0} style={{ padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', opacity: i===0?0.3:1 }}>↑</button>
+              <button onClick={() => moveDown(i)} disabled={i===stages.length-1} style={{ padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', opacity: i===stages.length-1?0.3:1 }}>↓</button>
+              <button onClick={() => removeStage(i)} disabled={stages.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#ef4444', opacity: stages.length<=1?0.3:1 }}>✕</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {err && <div style={{ color: 'var(--signal-red)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button className="btn btn--secondary" onClick={addStage} style={{ fontSize: 13 }}>+ Add Stage</button>
+        <button className="btn btn--primary" onClick={save} disabled={saving} style={{ fontSize: 13 }}>
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Stages'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ── CRM Custom Fields ─────────────────────────────────────────────────────
+const FIELD_TYPES = [
+  { value: 'text',     label: 'Text' },
+  { value: 'number',   label: 'Number' },
+  { value: 'dropdown', label: 'Dropdown' },
+  { value: 'date',     label: 'Date' },
+]
+
+function CRMCustomFieldsSection() {
+  const [fields, setFields] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/crm-native/custom-fields', { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
+      .then(r => r.json()).then(d => setFields(Array.isArray(d) ? d : []))
+      .catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  function addField() {
+    setFields(f => [...f, { key: `field_${Date.now()}`, label: '', type: 'text', options: '' }])
+  }
+
+  function removeField(idx) {
+    setFields(f => f.filter((_, i) => i !== idx))
+  }
+
+  function update(idx, patch) {
+    setFields(f => f.map((x, i) => i === idx ? { ...x, ...patch } : x))
+  }
+
+  async function save() {
+    setErr(''); setSaving(true)
+    const cleaned = fields.map(f => ({
+      key: f.key,
+      label: f.label.trim(),
+      type: f.type,
+      options: f.type === 'dropdown' ? (f.options || '').split(',').map(o => o.trim()).filter(Boolean) : undefined,
+    }))
+    if (cleaned.some(f => !f.label)) { setErr('All fields need a label'); setSaving(false); return }
+    try {
+      const res = await fetch('/api/crm-native/custom-fields', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
+        body: JSON.stringify({ fields: cleaned }),
+      })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Save failed') }
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header">
+        <h2 className="panel-title">CRM Custom Fields</h2>
+        <p className="os-hint" style={{ marginTop: 2 }}>
+          Add industry-specific fields to every contact record. All fields are optional.
+          For example: Vehicle make/model for auto shops, Current ISP for fiber, Policy type for insurance.
+        </p>
+      </div>
+      {fields.length === 0 && (
+        <p style={{ color: 'var(--text-tertiary)', fontSize: 13, marginBottom: 12 }}>No custom fields yet. Add fields specific to your industry below.</p>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+        {fields.map((f, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <input
+              className="os-input"
+              style={{ flex: '1 1 140px', marginBottom: 0, minWidth: 120 }}
+              placeholder="Field name (e.g. Vehicle Make)"
+              value={f.label}
+              onChange={e => update(i, { label: e.target.value })}
+            />
+            <select
+              className="os-input"
+              style={{ flex: '0 0 120px', marginBottom: 0 }}
+              value={f.type}
+              onChange={e => update(i, { type: e.target.value })}
+            >
+              {FIELD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            {f.type === 'dropdown' && (
+              <input
+                className="os-input"
+                style={{ flex: '1 1 200px', marginBottom: 0, minWidth: 160 }}
+                placeholder="Options (comma separated)"
+                value={f.options || ''}
+                onChange={e => update(i, { options: e.target.value })}
+              />
+            )}
+            <button onClick={() => removeField(i)} style={{ padding: '6px 10px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#ef4444', whiteSpace: 'nowrap' }}>Remove</button>
+          </div>
+        ))}
+      </div>
+      {err && <div style={{ color: 'var(--signal-red)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button className="btn btn--secondary" onClick={addField} style={{ fontSize: 13 }}>+ Add Field</button>
+        <button className="btn btn--primary" onClick={save} disabled={saving || fields.length === 0} style={{ fontSize: 13 }}>
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Fields'}
+        </button>
+      </div>
+    </section>
   )
 }

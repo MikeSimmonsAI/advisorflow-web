@@ -56,7 +56,8 @@ const APPT_TYPE_MAP = {
   general:           'Family Services Appointment',
 }
 
-const APPT_TYPE_OPTIONS = [
+// Fallback list — overridden by org-specific types fetched from the API
+const DEFAULT_APPT_TYPE_OPTIONS = [
   'Pre-Need Planning Consultation',
   'Pre-Planning Consultation',
   'At-Need Arrangement Conference',
@@ -227,6 +228,8 @@ export default function LeadDetail() {
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const [resendingLink, setResendingLink] = useState(false)
+  const [resendLinkMsg, setResendLinkMsg] = useState(null) // {ok, text}
   const [aiConvStatus, setAiConvStatus] = useState(null)
   const [aiConvLoading, setAiConvLoading] = useState(false)
   const [aiConvChannel, setAiConvChannel] = useState('email')
@@ -252,6 +255,7 @@ export default function LeadDetail() {
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
   const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'calls' | 'timeline'
+  const [apptTypeOptions, setApptTypeOptions] = useState(DEFAULT_APPT_TYPE_OPTIONS)
   const timelineRef = useRef(null)
 
   // Manual flagging
@@ -313,6 +317,13 @@ export default function LeadDetail() {
     // Also load activity log in background
     loadActivity(true)
   }
+
+  // Load org-specific appointment types once on mount
+  useEffect(() => {
+    api.get('/settings/appointment-types')
+      .then(d => { if (d?.appointment_types?.length) setApptTypeOptions(d.appointment_types) })
+      .catch(() => {}) // silently fall back to defaults
+  }, [])
 
   // Initial load
   useEffect(() => { load() }, [leadId])
@@ -576,6 +587,20 @@ export default function LeadDetail() {
       alert(`Failed to cancel: ${err.message}`)
     } finally {
       setCancelling(false)
+    }
+  }
+
+  async function handleResendBookingLink() {
+    setResendingLink(true)
+    setResendLinkMsg(null)
+    try {
+      const res = await api.post(`/leads/${leadId}/resend-booking-link`, {})
+      setResendLinkMsg({ ok: true, text: `Booking link sent to ${res.email_sent_to}` })
+      load() // refresh booking panel
+    } catch (err) {
+      setResendLinkMsg({ ok: false, text: err.message || 'Failed to send booking link' })
+    } finally {
+      setResendingLink(false)
     }
   }
 
@@ -1087,8 +1112,9 @@ export default function LeadDetail() {
             {/* Appointment type dropdown — visible for both SMS and email */}
             {canSend && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <label style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', fontWeight: 600 }}>
-                  📅 Appt type
+                <label style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', fontWeight: 600 }}
+                  title="Sets the appointment type on the booking link — what the lead sees on the booking page">
+                  📅 Booking type
                 </label>
                 <select
                   className="filter-select"
@@ -1096,7 +1122,7 @@ export default function LeadDetail() {
                   value={apptLabel}
                   onChange={(e) => setApptLabel(e.target.value)}
                 >
-                  {APPT_TYPE_OPTIONS.map((opt) => (
+                  {apptTypeOptions.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
@@ -1442,6 +1468,35 @@ export default function LeadDetail() {
               {booking.status === 'pending' && (
                 <p className="lead-detail-info-text">Link sent — waiting for lead to pick a time.</p>
               )}
+              {booking.status === 'cancelled' && (
+                <p className="lead-detail-info-text" style={{ color: 'var(--text-secondary)' }}>
+                  Booking was cancelled. Send a fresh link to reschedule.
+                </p>
+              )}
+
+              {/* Resend link — show for pending, cancelled, or expired states */}
+              {booking.status !== 'booked' && (
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button
+                    className="btn btn--primary"
+                    style={{ width: '100%', fontSize: 13 }}
+                    onClick={handleResendBookingLink}
+                    disabled={resendingLink}
+                  >
+                    {resendingLink ? 'Sending…' : '🔗 Resend Booking Link'}
+                  </button>
+                  {resendLinkMsg && (
+                    <p style={{
+                      fontSize: 12,
+                      color: resendLinkMsg.ok ? 'var(--color-success, #22c55e)' : 'var(--color-danger, #ef4444)',
+                      margin: 0,
+                    }}>
+                      {resendLinkMsg.ok ? '✓ ' : '✗ '}{resendLinkMsg.text}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {booking.status === 'booked' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <button
@@ -1449,7 +1504,7 @@ export default function LeadDetail() {
                     style={{ width: '100%', fontSize: 13 }}
                     onClick={() => setShowCaseFile(true)}
                   >
-                    📁 Open Case File
+                    📋 Open Client Record
                   </button>
                   <button
                     className="btn btn--danger"
@@ -1493,13 +1548,41 @@ export default function LeadDetail() {
           </section>
 
           {/* ── Case File (always accessible, not just booked) ── */}
+          {!booking && lead.email && (
+            <section className="panel lead-detail-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">🔗 Booking Link</h2>
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
+                No booking link sent yet. Send one directly to this lead's inbox.
+              </p>
+              <button
+                className="btn btn--primary"
+                style={{ width: '100%', fontSize: 13 }}
+                onClick={handleResendBookingLink}
+                disabled={resendingLink}
+              >
+                {resendingLink ? 'Sending…' : '🔗 Send Booking Link'}
+              </button>
+              {resendLinkMsg && (
+                <p style={{
+                  fontSize: 12,
+                  color: resendLinkMsg.ok ? 'var(--color-success, #22c55e)' : 'var(--color-danger, #ef4444)',
+                  marginTop: 8, marginBottom: 0,
+                }}>
+                  {resendLinkMsg.ok ? '✓ ' : '✗ '}{resendLinkMsg.text}
+                </p>
+              )}
+            </section>
+          )}
+
           {!booking && (
             <section className="panel lead-detail-panel">
               <div className="panel-header">
-                <h2 className="panel-title">📁 Case File</h2>
+                <h2 className="panel-title">📋 Client Record</h2>
               </div>
               <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
-                Record appointment outcomes, products discussed, policy details, and next steps.
+                Record appointment outcomes, products discussed, and next steps for this client.
               </p>
               <button
                 className="btn btn--primary"

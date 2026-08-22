@@ -95,25 +95,46 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
     The Vercel booking frontend calls this to get booking details by token.
     """
     from app.models.models import Lead, Organization
+    # Look up by token only — do NOT filter by status.
+    # The AI cadence may have issued multiple links for the same lead; all remain
+    # valid until a booking is confirmed. The booking app checks `status` in the
+    # response to decide whether to show "already booked" vs. the booking form.
     booking = db.query(BookingLink).filter(
         BookingLink.token == token,
-        BookingLink.status == "pending",
     ).first()
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking link not found or already used")
+        raise HTTPException(status_code=404, detail="Booking link not found")
 
     lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
     advisor = db.query(User).filter(User.id == booking.user_id).first()
     org = db.query(Organization).filter(Organization.id == booking.organization_id).first() if hasattr(booking, 'organization_id') else None
 
+    # Decode the token payload to get appointment type/label
+    import base64, json as _json
+    appt_label = "Appointment"
+    appt_duration = 30
+    lead_phone = lead.phone if lead else ""
+    try:
+        payload_part = token.split("~")[0]
+        padded = payload_part + "=" * (-len(payload_part) % 4)
+        decoded = _json.loads(base64.urlsafe_b64decode(padded).decode())
+        appt_label = decoded.get("appt_label", decoded.get("appt_type", "Appointment"))
+        appt_duration = decoded.get("duration", 30)
+    except Exception:
+        pass
+
     return {
         "token": token,
         "booking_id": booking.id,
+        "advisor_id": booking.user_id,
         "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Guest",
+        "lead_phone": lead_phone,
         "advisor_name": advisor.full_name if advisor else "Your Advisor",
         "org_name": org.name if org else "",
         "org_address": org.org_address if org and hasattr(org, 'org_address') else "",
         "org_phone": org.org_phone if org and hasattr(org, 'org_phone') else "",
+        "appt_label": appt_label,
+        "appt_duration": appt_duration,
         "status": booking.status,
         "created_at": booking.created_at,
     }
@@ -354,6 +375,50 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             logger.exception("booking-confirmed: notification email error: %s", e)
             email_result = {"success": False, "error": str(e)}
 
+    # ── Auto-create Client Record (case file) entry for the appointment ─────────
+    # This is what the advisor sees in the "Client Record" panel on the lead.
+    # The appointment date/time is auto-populated from the booking so they don't
+    # have to enter it manually. They just open it and fill in outcome + notes.
+    case_file_result = {"success": False, "note": "skipped"}
+    if booking and lead and advisor and event_start:
+        try:
+            import uuid as _uuid
+            _now = datetime.utcnow()
+            _cf_id = str(_uuid.uuid4())
+            from sqlalchemy import text as _text
+            db.execute(_text("""
+                INSERT INTO appointment_case_files (
+                    id, lead_id, organization_id, recorded_by_id, booking_link_id,
+                    appointment_date, appointment_type, outcome_type,
+                    products_discussed, products_sold,
+                    chk_id_verified, chk_beneficiary_named, chk_app_signed,
+                    chk_payment_collected, chk_illustrations_reviewed, chk_medical_history,
+                    chk_hipaa_signed, chk_replacement_form, chk_beneficiary_reviewed, chk_riders_explained,
+                    referral_potential, case_status, created_at, updated_at
+                ) VALUES (
+                    :id, :lead_id, :org, :recorded_by, :booking_link_id,
+                    :appointment_date, :appointment_type, NULL,
+                    '[]', '[]',
+                    FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,
+                    FALSE, 'open', :created_at, :updated_at
+                )
+            """), {
+                "id": _cf_id,
+                "lead_id": booking.lead_id,
+                "org": advisor.organization_id,
+                "recorded_by": advisor.id,
+                "booking_link_id": booking.id,
+                "appointment_date": event_start,
+                "appointment_type": "in_person",  # default — advisor can change in the record
+                "created_at": _now,
+                "updated_at": _now,
+            })
+            case_file_result = {"success": True, "case_file_id": _cf_id}
+            logger.info("booking-confirmed: auto-created case file %s for lead %s", _cf_id, booking.lead_id)
+        except Exception as e:
+            logger.warning("booking-confirmed: could not auto-create case file: %s", e)
+            case_file_result = {"success": False, "error": str(e)}
+
     db.commit()
 
     response_payload = {
@@ -362,6 +427,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         "google_calendar": google_calendar_result,
         "sms": sms_result,
         "email": email_result,
+        "case_file": case_file_result,
         "lead_name": lead_name,
         "slot": slot_display,
     }
@@ -679,6 +745,212 @@ def list_calendar_events(
 
     events.sort(key=lambda e: e["booked_time"])
     return events
+
+
+@router.get("/slots")
+def get_available_slots(
+    advisor_id: str = Query(...),
+    date: str = Query(..., description="YYYY-MM-DD"),
+    token: str = Query(..., description="Booking token for authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Public endpoint — no auth required (token proves the link is valid).
+    Returns available 30-minute appointment slots for a given advisor on a given date.
+
+    Checks:
+      1. Token is valid and belongs to this advisor
+      2. Date is Mon-Fri, within 14 days from today
+      3. Microsoft 365 calendar busy times (if connected)
+      4. Google Calendar busy times (if connected)
+      5. Existing booked/confirmed BookingLink records for that day
+
+    Returns list of available slot start times in ISO 8601 (UTC) format.
+    """
+    from datetime import date as date_cls, timedelta, timezone
+    import httpx
+
+    # ── Validate token ────────────────────────────────────────────────────────
+    booking = db.query(BookingLink).filter(BookingLink.token == token).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking link not found")
+    if booking.user_id != advisor_id:
+        raise HTTPException(status_code=403, detail="Token does not match advisor")
+
+    # ── Parse & validate date ─────────────────────────────────────────────────
+    try:
+        target_date = date_cls.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    today = date_cls.today()
+    max_date = today + timedelta(days=14)
+    if target_date < today:
+        raise HTTPException(status_code=400, detail="Date is in the past")
+    if target_date > max_date:
+        raise HTTPException(status_code=400, detail="Date is more than 14 days out")
+    if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
+        return {"date": date, "slots": [], "reason": "Weekend — no appointments"}
+
+    advisor = db.query(User).filter(User.id == advisor_id).first()
+    if not advisor:
+        raise HTTPException(status_code=404, detail="Advisor not found")
+
+    # ── Build all candidate 30-min slots 9am-5pm Central ─────────────────────
+    # We work in UTC internally; Chicago is UTC-5 (CST) / UTC-6 (CDT).
+    # Simple approach: treat 9am-5pm as the window and generate slots.
+    # The booking page will display in local time; we return ISO UTC strings.
+    from datetime import datetime as dt_cls
+    # Naive datetimes representing 9:00 AM - 4:30 PM on the target date (local office hours)
+    # We store/return as naive ISO strings and let the frontend format them for display.
+    slot_hour_start = 9
+    slot_hour_end = 17  # 5pm, last slot starts at 4:30
+    candidate_slots = []
+    for hour in range(slot_hour_start, slot_hour_end):
+        for minute in [0, 30]:
+            if hour == slot_hour_end - 1 and minute == 30:
+                break  # skip 4:30pm start (would end at 5pm, that's fine actually — keep it)
+            candidate_slots.append(dt_cls(target_date.year, target_date.month, target_date.day, hour, minute))
+    # Include 4:30pm
+    candidate_slots.append(dt_cls(target_date.year, target_date.month, target_date.day, 16, 30))
+
+    # ── Remove slots already booked via BookingLink ───────────────────────────
+    day_start = dt_cls(target_date.year, target_date.month, target_date.day, 0, 0)
+    day_end = dt_cls(target_date.year, target_date.month, target_date.day, 23, 59)
+    existing_bookings = db.query(BookingLink).filter(
+        BookingLink.user_id == advisor_id,
+        BookingLink.status.in_(["booked", "confirmed"]),
+        BookingLink.booked_time >= day_start,
+        BookingLink.booked_time <= day_end,
+    ).all()
+
+    booked_times = set()
+    for b in existing_bookings:
+        if b.booked_time:
+            bt = b.booked_time
+            if hasattr(bt, 'tzinfo') and bt.tzinfo:
+                bt = bt.replace(tzinfo=None)
+            booked_times.add((bt.hour, bt.minute))
+
+    available = [s for s in candidate_slots if (s.hour, s.minute) not in booked_times]
+
+    # ── Check Microsoft 365 calendar for busy times ───────────────────────────
+    if advisor.microsoft_365_connected and advisor.microsoft_oauth_refresh_token_encrypted:
+        try:
+            from app.services.microsoft_email_service import _get_fresh_access_token
+            access_token = _get_fresh_access_token(advisor)
+            # calendarView returns events overlapping the time window
+            window_start = f"{date}T00:00:00"
+            window_end = f"{date}T23:59:59"
+            resp = httpx.get(
+                "https://graph.microsoft.com/v1.0/me/calendarView",
+                params={
+                    "startDateTime": window_start,
+                    "endDateTime": window_end,
+                    "$select": "start,end,showAs",
+                    "$top": "50",
+                },
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                ms_events = resp.json().get("value", [])
+                busy_ranges = []
+                for ev in ms_events:
+                    if ev.get("showAs") in ("free", "workingElsewhere"):
+                        continue
+                    try:
+                        ev_start = dt_cls.fromisoformat(ev["start"]["dateTime"].replace("Z", ""))
+                        ev_end = dt_cls.fromisoformat(ev["end"]["dateTime"].replace("Z", ""))
+                        busy_ranges.append((ev_start, ev_end))
+                    except Exception:
+                        continue
+                # Filter slots that overlap any busy range
+                def overlaps(slot_start, busy_ranges):
+                    slot_end = slot_start.replace(minute=slot_start.minute + 30) if slot_start.minute == 0 else slot_start.replace(hour=slot_start.hour + 1, minute=0)
+                    for b_start, b_end in busy_ranges:
+                        if slot_start < b_end and slot_end > b_start:
+                            return True
+                    return False
+                available = [s for s in available if not overlaps(s, busy_ranges)]
+            else:
+                logger.warning("MS365 calendarView returned %s for advisor %s", resp.status_code, advisor_id)
+        except Exception as e:
+            logger.warning("Could not fetch MS365 calendar for slots: %s", e)
+
+    # ── Check Google Calendar for busy times ──────────────────────────────────
+    if getattr(advisor, 'google_calendar_connected', False) and getattr(advisor, 'google_oauth_refresh_token_encrypted', None):
+        try:
+            from app.services.calendar_service import _get_google_credentials
+            from googleapiclient.discovery import build
+            creds = _get_google_credentials(advisor)
+            service = build("calendar", "v3", credentials=creds)
+            window_start_iso = f"{date}T00:00:00Z"
+            window_end_iso = f"{date}T23:59:59Z"
+            events_result = service.events().list(
+                calendarId="primary",
+                timeMin=window_start_iso,
+                timeMax=window_end_iso,
+                singleEvents=True,
+                orderBy="startTime",
+            ).execute()
+            gcal_events = events_result.get("items", [])
+            gcal_busy = []
+            for ev in gcal_events:
+                transparency = ev.get("transparency", "opaque")
+                if transparency == "transparent":
+                    continue
+                start_str = ev.get("start", {}).get("dateTime", "")
+                end_str = ev.get("end", {}).get("dateTime", "")
+                if start_str and end_str:
+                    try:
+                        gcal_busy.append((
+                            dt_cls.fromisoformat(start_str.replace("Z", "")),
+                            dt_cls.fromisoformat(end_str.replace("Z", "")),
+                        ))
+                    except Exception:
+                        continue
+
+            def gcal_overlaps(slot_start, busy_ranges):
+                slot_end = slot_start.replace(minute=slot_start.minute + 30) if slot_start.minute == 0 else slot_start.replace(hour=slot_start.hour + 1, minute=0)
+                for b_start, b_end in busy_ranges:
+                    if slot_start < b_end and slot_end > b_start:
+                        return True
+                return False
+
+            available = [s for s in available if not gcal_overlaps(s, gcal_busy)]
+        except Exception as e:
+            logger.warning("Could not fetch Google Calendar for slots: %s", e)
+
+    # ── If slot is today, remove slots that are in the past ──────────────────
+    # Slots are expressed as Central Time (9am-5pm CT); we must compare in CT.
+    # The server runs UTC, so utcnow() must be converted to Central before comparison.
+    try:
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        from datetime import timezone as _tz
+        _central = _ZoneInfo('America/Chicago')
+        _today_ct = dt_cls.now(_tz.utc).astimezone(_central).date()
+    except Exception:
+        _today_ct = today  # fallback to UTC date if zoneinfo unavailable
+
+    if target_date == _today_ct:
+        try:
+            now_central = dt_cls.now(_tz.utc).astimezone(_central).replace(tzinfo=None)
+        except Exception:
+            now_central = dt_cls.utcnow()
+        from datetime import timedelta as td
+        # Add a 2-hour buffer so advisor has time to prepare
+        cutoff_time = now_central + td(hours=2)
+        available = [
+            s for s in available
+            if dt_cls(_today_ct.year, _today_ct.month, _today_ct.day, s.hour, s.minute) >= cutoff_time
+        ]
+
+    return {
+        "date": date,
+        "advisor_id": advisor_id,
+        "slots": [s.strftime("%Y-%m-%dT%H:%M:00") for s in available],
+    }
 
 
 @router.post("/send-reminders")

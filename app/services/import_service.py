@@ -302,6 +302,7 @@ def import_leads_from_excel(
     source_category: str = None,     # e.g. "crm_export", "referral", "web_form"
     campaign_purpose: str = None,    # e.g. "file_review", "markers", "pre_need", "event_invite"
     offer_hook: str = None,          # e.g. "lunch_and_learn", "free_tour", "free_space", "custom"
+    imported_by_name: str = None,    # full name of user who ran this import
 ) -> dict:
     """
     Full import pipeline: parse -> route by tier/channel -> dedup check
@@ -395,6 +396,7 @@ def import_leads_from_excel(
             relationship_type=relationship_type or "cold_lead",
             import_list_name=import_list_name or None,
             source_category=source_category or None,
+            imported_by_name=imported_by_name or None,
             custom_fields=_merge_custom_fields(
                 row.get("custom_fields"),
                 email_quality_issue,
@@ -480,6 +482,21 @@ def import_leads_from_excel(
         db.rollback()
     else:
         db.commit()
+        # Auto-start cadence for every eligible lead in this batch.
+        # start_cadence() handles its own eligibility checks (skips DNC,
+        # duplicates, needs_tier_review, email_only) so it's safe to call
+        # on the full created_leads list — it just no-ops on ineligibles.
+        try:
+            from app.services.cadence_service import start_cadence
+            cadence_started = 0
+            for lead in created_leads:
+                state = start_cadence(db, lead)
+                if state:
+                    cadence_started += 1
+            if cadence_started:
+                db.commit()
+        except Exception:
+            pass  # cadence auto-start is best-effort — never fail the import over it
 
     return {
         "total_rows": len(rows),

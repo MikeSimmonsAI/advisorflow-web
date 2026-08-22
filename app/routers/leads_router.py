@@ -143,6 +143,7 @@ def confirm_upload(
             import_list_name=import_list_name,
             campaign_purpose=campaign_purpose,
             offer_hook=offer_hook,
+            imported_by_name=current_user.full_name or current_user.email,
         )
     finally:
         os.unlink(tmp_path)
@@ -160,6 +161,7 @@ def list_import_batches(
         db.query(
             Lead.source_file,
             Lead.import_list_name,
+            Lead.imported_by_name,
             func.count(Lead.id).label("lead_count"),
             func.min(Lead.created_at).label("imported_at"),
         )
@@ -167,7 +169,7 @@ def list_import_batches(
             Lead.organization_id == current_user.organization_id,
             Lead.source_file.isnot(None),
         )
-        .group_by(Lead.source_file, Lead.import_list_name)
+        .group_by(Lead.source_file, Lead.import_list_name, Lead.imported_by_name)
         .order_by(func.min(Lead.created_at).desc())
         .all()
     )
@@ -175,6 +177,7 @@ def list_import_batches(
         {
             "source_file": r.source_file,
             "import_list_name": r.import_list_name,
+            "imported_by_name": r.imported_by_name,
             "lead_count": r.lead_count,
             "imported_at": r.imported_at.isoformat() if r.imported_at else None,
         }
@@ -341,8 +344,8 @@ def list_leads(
         Lead.status, Lead.tier, Lead.message_track, Lead.source_file,
         Lead.source_year, Lead.is_duplicate, Lead.assigned_to_id,
         Lead.engagement_temperature, Lead.relationship_type,
-        Lead.contact_channel, Lead.import_list_name, Lead.created_at,
-        Lead.organization_id, Lead.case_status,
+        Lead.contact_channel, Lead.import_list_name, Lead.imported_by_name,
+        Lead.created_at, Lead.organization_id, Lead.case_status,
         Lead.manual_flag, Lead.manual_flag_reason,
         Lead.last_messaged_at,
     ]
@@ -351,8 +354,8 @@ def list_leads(
         "status", "tier", "message_track", "source_file",
         "source_year", "is_duplicate", "assigned_to_id",
         "engagement_temperature", "relationship_type",
-        "contact_channel", "import_list_name", "created_at",
-        "organization_id", "case_status",
+        "contact_channel", "import_list_name", "imported_by_name",
+        "created_at", "organization_id", "case_status",
         "manual_flag", "manual_flag_reason",
         "last_messaged_at",
     ]
@@ -994,6 +997,16 @@ def bulk_delete_duplicate_leads(
 
     db.commit()
 
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="lead.bulk_delete_duplicates",
+        target_type="organization",
+        target_id=current_user.organization_id,
+        details={"deleted_count": count},
+    )
+
     return {"deleted": count, "message": f"Permanently deleted {count} duplicate leads."}
 
 
@@ -1515,3 +1528,106 @@ def sms_optin(
     db.refresh(lead)
 
     return {"success": True, "lead_id": lead.id, "action": "created"}
+
+
+# ── Resend booking link ───────────────────────────────────────────────────────
+
+@router.post("/{lead_id}/resend-booking-link")
+def resend_booking_link(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate a fresh booking link for a lead and email it to them.
+
+    Expires any existing pending booking links so there's always exactly
+    one active link per lead. Works regardless of the current AI conversation
+    state — advisors can resend manually at any time.
+    """
+    import uuid as _uuid
+    from app.models.models import EmailMessage, Organization
+    from app.services.sms_service import create_booking_link, BOOKING_BASE_URL
+    from app.services.email_service import send_email_via_provider
+    from app.services.ai_conversation_service import _build_email_html
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.status == "dnc":
+        raise HTTPException(status_code=400, detail="Lead is on the Do Not Contact list")
+    if not lead.email:
+        raise HTTPException(status_code=400, detail="Lead has no email address on file")
+
+    # Expire any stale pending links so there's only one active at a time
+    stale = db.query(BookingLink).filter(
+        BookingLink.lead_id == lead.id,
+        BookingLink.status == "pending",
+    ).all()
+    for s in stale:
+        s.status = "expired"
+    db.flush()
+
+    # Create fresh link
+    link = create_booking_link(db, lead, current_user)
+    booking_url = f"{BOOKING_BASE_URL}/book/{link.token}"
+
+    # Build the email
+    org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+    org_name = org.name if org else "our organization"
+    advisor_name = current_user.full_name or "Your Advisor"
+    first_name = lead.first_name or "there"
+
+    body_text = (
+        f"Hi {first_name}, I wanted to make sure you have a convenient way to schedule "
+        f"your appointment with us. Use the button below to pick a time that works for you — "
+        f"it only takes a minute."
+    )
+
+    booking_btn = (
+        f'<br><br>'
+        f'<a href="{booking_url}" '
+        f'style="display:inline-block;background:#1a5fa8;color:#ffffff;padding:12px 28px;'
+        f'border-radius:6px;text-decoration:none;font-weight:700;font-size:15px;">'
+        f'Schedule a Time &rarr;</a>'
+    )
+
+    html_body = _build_email_html(body_text, advisor_name, org_name, extra_html=booking_btn)
+    subject = f"Your scheduling link, {first_name}"
+
+    result = send_email_via_provider(lead.email, subject, html_body, org=org)
+    if not result["success"]:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Email send failed: {result.get('error', 'unknown error')}",
+        )
+
+    # Log in email history
+    msg = EmailMessage(
+        id=str(_uuid.uuid4()),
+        lead_id=lead.id,
+        sender_id=current_user.id,
+        subject=subject,
+        body_html=html_body,
+        status="sent",
+        provider_message_id=result.get("provider_message_id"),
+        sent_at=datetime.utcnow(),
+    )
+    db.add(msg)
+
+    # Bump lead status to "sent" if still "new"
+    if lead.status == "new":
+        lead.status = "sent"
+    lead.last_messaged_at = datetime.utcnow()
+
+    db.commit()
+
+    return {
+        "success": True,
+        "booking_url": booking_url,
+        "email_sent_to": lead.email,
+        "link_id": link.id,
+    }

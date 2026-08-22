@@ -72,6 +72,10 @@ export default function Leads() {
   const [searchQuery, setSearchQuery] = useState('')
   const [tierFilter, setTierFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortDir, setSortDir] = useState('desc')
+  const [leadsPage, setLeadsPage] = useState(1)
+  const LEADS_PAGE_SIZE = 100
 
   const [selected, setSelected] = useState(new Set())
   const [bulkMessage, setBulkMessage] = useState('')
@@ -308,11 +312,57 @@ export default function Leads() {
         return name.includes(q) || email.includes(q) || (qDigits.length > 0 && phoneDigits.includes(qDigits))
       })
     }
+    // Sort
+    result = [...result].sort((a, b) => {
+      let av = a[sortBy], bv = b[sortBy]
+      if (sortBy === 'created_at' || sortBy === 'last_messaged_at') {
+        av = av ? new Date(av).getTime() : 0
+        bv = bv ? new Date(bv).getTime() : 0
+      } else if (typeof av === 'string') {
+        av = (av || '').toLowerCase()
+        bv = (bv || '').toLowerCase()
+      } else {
+        av = av ?? ''
+        bv = bv ?? ''
+      }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1
+      if (av > bv) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
     return result
-  }, [baseLeads, tierFilter, statusFilter, searchQuery])
+  }, [baseLeads, tierFilter, statusFilter, searchQuery, sortBy, sortDir])
 
   const sendableLeads = filteredLeads.filter((l) => l.phone && l.status !== 'dnc' && !l.is_duplicate)
   const sendableSelectedIds = Array.from(selected).filter((id) => sendableLeads.some((l) => l.id === id))
+
+  const leadsPageCount = Math.max(1, Math.ceil(filteredLeads.length / LEADS_PAGE_SIZE))
+  const pagedLeads = filteredLeads.slice((leadsPage - 1) * LEADS_PAGE_SIZE, leadsPage * LEADS_PAGE_SIZE)
+
+  function toggleSort(col) {
+    if (sortBy === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(col)
+      setSortDir('asc')
+    }
+    setLeadsPage(1)
+  }
+
+  function SortTh({ col, children, style }) {
+    const active = sortBy === col
+    return (
+      <th
+        onClick={() => toggleSort(col)}
+        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(style || {}) }}
+        title={`Sort by ${col}`}
+      >
+        {children}
+        <span style={{ marginLeft: 4, opacity: active ? 1 : 0.3, fontSize: 10 }}>
+          {active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
+        </span>
+      </th>
+    )
+  }
 
   function toggleSelect(id) {
     const next = new Set(selected)
@@ -890,14 +940,14 @@ export default function Leads() {
               type="text"
               placeholder="Search by name, phone, or email…"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setLeadsPage(1) }}
               className="leads-search-input"
             />
           </div>
-          <select className="filter-select" value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
+          <select className="filter-select" value={tierFilter} onChange={(e) => { setTierFilter(e.target.value); setLeadsPage(1) }}>
             {TIER_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
-          <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setLeadsPage(1) }}>
             {STATUS_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
           {importBatches.length > 0 && (
@@ -994,18 +1044,19 @@ export default function Leads() {
                     />
                   </th>
                 )}
-                <th>Name</th>
+                <SortTh col="first_name">Name</SortTh>
                 <th>Phone</th>
                 <th>Email</th>
-                <th>Tier</th>
-                <th>Status</th>
+                <SortTh col="tier">Tier</SortTh>
+                <SortTh col="status">Status</SortTh>
                 <th>Source</th>
+                <SortTh col="last_messaged_at">Last Msg</SortTh>
                 <th></th>
                 {view === 'review' && <th>Assign tier</th>}
               </tr>
             </thead>
             <tbody>
-              {filteredLeads.slice(0, 200).map((lead) => {
+              {pagedLeads.map((lead) => {
                 const initials = `${(lead.first_name || '?')[0]}${(lead.last_name || '?')[0]}`.toUpperCase()
                 const isSelected = selected.has(lead.id)
                 return (
@@ -1039,8 +1090,17 @@ export default function Leads() {
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>
                     <td className="mono leads-secondary" style={{ fontSize: 11 }}>
-                      {lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 20) : '—'}
-                      {lead.source_year ? ` (${lead.source_year})` : ''}
+                      <div>{lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 22) : '—'}</div>
+                      {lead.imported_by_name && (
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
+                          {lead.imported_by_name}
+                        </div>
+                      )}
+                      {lead.created_at && (
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                          {new Date(lead.created_at).toLocaleDateString()}
+                        </div>
+                      )}
                     </td>
                     <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                       {/* Flag dropdown */}
@@ -1102,6 +1162,25 @@ export default function Leads() {
           </table>
         )}
       </section>
+
+      {/* ── Pagination ── */}
+      {filteredLeads.length > LEADS_PAGE_SIZE && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+          <button
+            className="btn btn--secondary"
+            disabled={leadsPage <= 1}
+            onClick={() => setLeadsPage(p => Math.max(1, p - 1))}
+          >← Prev</button>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {(leadsPage - 1) * LEADS_PAGE_SIZE + 1}–{Math.min(leadsPage * LEADS_PAGE_SIZE, filteredLeads.length)} of {filteredLeads.length}
+          </span>
+          <button
+            className="btn btn--secondary"
+            disabled={leadsPage >= leadsPageCount}
+            onClick={() => setLeadsPage(p => Math.min(leadsPageCount, p + 1))}
+          >Next →</button>
+        </div>
+      )}
 
       {/* ── Manually Flagged Leads Section ── */}
       {(flaggedLeads.length > 0 || flaggedVisible) && (

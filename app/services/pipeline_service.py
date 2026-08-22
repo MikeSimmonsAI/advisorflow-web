@@ -106,15 +106,33 @@ def _notify_fsa_sms(advisor: User, message: str) -> None:
 # ── Conversation history ──────────────────────────────────────────────────────
 
 def _get_conversation(db: Session, lead_id: str) -> tuple[str, str]:
-    """Returns (history_text, latest_inbound_reply)"""
-    messages = db.query(Message).filter(Message.lead_id == lead_id).order_by(Message.sent_at.asc()).all()
-    replies = db.query(Reply).filter(Reply.lead_id == lead_id).order_by(Reply.received_at.asc()).all()
-
+    """Returns (history_text, latest_inbound_reply).
+    Merges SMS messages, email messages, and all replies into one chronological thread
+    so the SMS AI has full cross-channel context — it won't be blind to prior email outreach."""
     events = []
+
+    # Outbound SMS
+    messages = db.query(Message).filter(Message.lead_id == lead_id).order_by(Message.sent_at.asc()).all()
     for m in messages:
-        events.append({"dir": "out", "body": m.body, "ts": m.sent_at})
+        events.append({"dir": "out", "channel": "SMS", "body": (m.body or "")[:300], "ts": m.sent_at})
+
+    # Outbound emails (import inline to avoid circular)
+    try:
+        from app.models.models import EmailMessage
+        emails = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).order_by(EmailMessage.sent_at.asc()).all()
+        import re as _re
+        for em in emails:
+            body = _re.sub(r'<[^>]+>', ' ', em.body_html or '').strip()[:200]
+            events.append({"dir": "out", "channel": "Email", "body": body, "ts": em.sent_at})
+    except Exception:
+        pass
+
+    # All inbound replies (email + SMS)
+    replies = db.query(Reply).filter(Reply.lead_id == lead_id).order_by(Reply.received_at.asc()).all()
     for r in replies:
-        events.append({"dir": "in", "body": r.body, "ts": r.received_at})
+        channel = (r.source or "SMS").upper()
+        events.append({"dir": "in", "channel": channel, "body": (r.body or "")[:300], "ts": r.received_at})
+
     events.sort(key=lambda e: e["ts"] or datetime.min)
 
     latest_inbound = ""
@@ -124,8 +142,8 @@ def _get_conversation(db: Session, lead_id: str) -> tuple[str, str]:
             break
 
     history = "\n".join(
-        f"{'Advisor' if e['dir'] == 'out' else 'Lead'}: {e['body']}"
-        for e in events[-12:]
+        f"{'Advisor [' + e['channel'] + ']' if e['dir'] == 'out' else 'Lead [' + e['channel'] + ']'}: {e['body']}"
+        for e in events[-14:]
     )
     return history or "No prior conversation.", latest_inbound
 
@@ -167,55 +185,55 @@ RELATIONSHIP_TYPE_CONTEXT = {
 }
 
 PIPELINE_PROMPT = """You are an AI managing SMS conversations for a service business advisor.
+You must sound like a thoughtful human — never robotic, never generic, never pushy.
 
-━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
+━━━ BINDING CONSTRAINTS ━━━
 Relationship context: {relationship_context}
-
-User's AI direction (FOLLOW THIS EXACTLY — it overrides your defaults):
-{ai_direction}
+AI direction (FOLLOW EXACTLY — overrides defaults): {ai_direction}
 
 ━━━ CONTEXT ━━━
-Advisor: {advisor_name}
-Business: {org_name}
+Advisor: {advisor_name}  |  Business: {org_name}
 Industry: {industry_context}
-Lead type: {lead_type}
-Tone: {tone}
-
-Lead: {first_name} {last_name}
+Lead: {first_name} {last_name}  |  Type: {lead_type}  |  Tone: {tone}
+Lead notes: {lead_notes}
 Booking link: {booking_url}
 
-Conversation history:
+━━━ CONVERSATION (read all of it) ━━━
 {history}
 
 Latest message from lead:
 {latest_inbound}
 
-━━━ INSTRUCTIONS ━━━
-1. The relationship context above defines what you can and cannot assume about this person.
-2. The user's AI direction is a COMMAND — follow it precisely, do not override it.
-3. Only work toward booking naturally after following the user's direction.
-4. If no conversation exists yet, write the FIRST outreach message based on the above.
+━━━ RESPONSE RULES ━━━
+1. Relationship context defines your familiarity level — respect it exactly.
+2. AI direction is a command — follow it, do not override.
+3. Read what the lead actually said. Respond to THAT, not to a generic script.
+4. Objection handling — if the lead objects, use these approaches:
+   - "already have one / covered" → Acknowledge, pivot to a free review/second opinion angle, no pressure.
+   - "send more info / not ready" → Offer a simple fact or one-sentence value, then ask one easy question.
+   - "too busy" → Acknowledge, offer a 5-minute call or ask when works better.
+   - "not interested" → Respect it gracefully: "Totally understand. If anything changes, I'm here." — set should_stop=true.
+   - "how much / price" → Don't quote numbers. Invite a conversation: "It really depends on your situation — worth a quick chat."
+5. Only include booking link when the lead is clearly ready or it's a natural next step.
+6. If no conversation exists yet, write the first outreach message.
+7. Never reveal you are AI.
+8. Keep messages under 300 characters. Shorter is better for SMS.
 
-Respond with JSON only:
+Respond with JSON only (no markdown, no backticks):
 {{
-  "reply": "The exact message to send (under 320 chars, sound human)",
-  "confidence": 92,
+  "reply": "exact message to send, natural human tone, under 300 chars",
+  "confidence": 88,
   "should_stop": false,
   "stop_reason": null,
   "intent": "interested",
-  "reasoning": "One sentence explaining your response choice",
-  "include_booking_link": true,
-  "stage": "booking_sent"
+  "reasoning": "one sentence: why this response",
+  "include_booking_link": false,
+  "stage": "ai_responding"
 }}
 
 Intent options: interested | objection | callback_request | question | not_interested | dnc | booked | unknown
 Stage options: outreach_sent | replied | ai_responding | booking_sent | booked | stopped | dnc
-
-Additional rules:
-- confidence: 0-100. Be honest. Complex objections: 60-75. Clear interest: 85-95.
-- should_stop: true ONLY if lead is booked, said DNC/STOP, or clearly not interested after multiple attempts
-- Never reveal you are AI
-- Keep messages under 320 characters"""
+confidence: 0-100. Honest. Complex objection: 55-75. Clear interest: 85-95. should_stop only for DNC/STOP, booked, or definitively not interested."""
 
 
 def analyze_and_respond(
@@ -266,6 +284,16 @@ def analyze_and_respond(
     if not ai_direction.strip():
         ai_direction = "(none — use relationship context and tone to guide the message)"
 
+    # Build lead notes context — advisor notes + tier give the AI meaningful personalization
+    lead_notes_parts = []
+    if lead.tier:
+        lead_notes_parts.append(f"Tier: {lead.tier}")
+    if getattr(lead, 'notes', None) and lead.notes.strip():
+        lead_notes_parts.append(f"Advisor notes: {lead.notes.strip()[:250]}")
+    if getattr(lead, 'source_year', None):
+        lead_notes_parts.append(f"Record year: {lead.source_year}")
+    lead_notes = " | ".join(lead_notes_parts) if lead_notes_parts else "None"
+
     prompt = PIPELINE_PROMPT.format(
         relationship_context=relationship_context,
         advisor_name=advisor.full_name or "your advisor",
@@ -276,6 +304,7 @@ def analyze_and_respond(
         ai_direction=ai_direction,
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
+        lead_notes=lead_notes,
         booking_url=booking_url,
         history=history,
         latest_inbound=latest_inbound or "No reply yet — send initial outreach",
@@ -283,10 +312,10 @@ def analyze_and_respond(
 
     try:
         response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            max_tokens=300,
+            temperature=0.65,
+            max_tokens=350,
         )
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()

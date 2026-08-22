@@ -63,10 +63,65 @@ function ContactCard({ contact, stages, onClick }) {
   )
 }
 
+// ── Custom Fields renderer (shared between panel and modal) ───────────────
+function CustomFieldsBlock({ fields, data, onChange }) {
+  if (!fields || fields.length === 0) return null
+  return (
+    <section className="crm-section">
+      <h3 className="crm-section-title">Additional Info</h3>
+      <div className="crm-form-grid">
+        {fields.map(f => {
+          const val = data[f.key] ?? ''
+          const handleChange = v => onChange({ ...data, [f.key]: v })
+          if (f.type === 'dropdown' && f.options?.length) {
+            return (
+              <label key={f.key}>
+                {f.label}
+                <select value={val} onChange={e => handleChange(e.target.value)}>
+                  <option value="">— select —</option>
+                  {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </label>
+            )
+          }
+          if (f.type === 'number') {
+            return (
+              <label key={f.key}>
+                {f.label}
+                <input type="number" value={val} onChange={e => handleChange(e.target.value)} />
+              </label>
+            )
+          }
+          if (f.type === 'date') {
+            return (
+              <label key={f.key}>
+                {f.label}
+                <input type="date" value={val} onChange={e => handleChange(e.target.value)} />
+              </label>
+            )
+          }
+          // default: text
+          return (
+            <label key={f.key}>
+              {f.label}
+              <input type="text" value={val} onChange={e => handleChange(e.target.value)} />
+            </label>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 // ── Detail Panel ───────────────────────────────────────────────────────────
-function ContactPanel({ contact, stages, onClose, onSave, onDelete }) {
+function ContactPanel({ contact, stages, customFields, onClose, onSave, onDelete }) {
   const stageList = stages || FALLBACK_STAGES
   const [form, setForm] = useState({ ...contact })
+  const [customData, setCustomData] = useState(
+    typeof contact.custom_data === 'object' && contact.custom_data !== null
+      ? contact.custom_data
+      : (typeof contact.custom_data === 'string' ? JSON.parse(contact.custom_data || '{}') : {})
+  )
   const [note, setNote] = useState('')
   const [notes, setNotes] = useState([])
   const [notesLoading, setNotesLoading] = useState(true)
@@ -89,7 +144,7 @@ function ContactPanel({ contact, stages, onClose, onSave, onDelete }) {
   const handleSave = async () => {
     setSaving(true); setErr('')
     try {
-      const updated = await api.patch(`/crm-native/contacts/${contact.id}`, form)
+      const updated = await api.patch(`/crm-native/contacts/${contact.id}`, { ...form, custom_data: customData })
       onSave(updated)
     } catch (e) {
       setErr(e.message || 'Save failed')
@@ -183,6 +238,8 @@ function ContactPanel({ contact, stages, onClose, onSave, onDelete }) {
             </div>
           </section>
 
+          <CustomFieldsBlock fields={customFields} data={customData} onChange={setCustomData} />
+
           <section className="crm-section">
             <h3 className="crm-section-title">Notes</h3>
             <div className="crm-note-input">
@@ -227,10 +284,11 @@ function ContactPanel({ contact, stages, onClose, onSave, onDelete }) {
 }
 
 // ── Create Contact Modal ───────────────────────────────────────────────────
-function CreateModal({ stages, onClose, onCreate }) {
+function CreateModal({ stages, customFields, onClose, onCreate }) {
   const stageList = stages || FALLBACK_STAGES
-  const blank = { first_name: '', last_name: '', phone: '', email: '', address_street: '', address_city: '', address_state: '', address_zip: '', stage: 'inquiry' }
+  const blank = { first_name: '', last_name: '', phone: '', email: '', address_street: '', address_city: '', address_state: '', address_zip: '', stage: stageList[0]?.key || 'inquiry' }
   const [form, setForm] = useState(blank)
+  const [customData, setCustomData] = useState({})
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
@@ -238,7 +296,7 @@ function CreateModal({ stages, onClose, onCreate }) {
     if (!form.first_name && !form.last_name && !form.phone) { setErr('Name or phone required'); return }
     setSaving(true); setErr('')
     try {
-      const res = await api.post('/crm-native/contacts', form)
+      const res = await api.post('/crm-native/contacts', { ...form, custom_data: customData })
       onCreate(res)
       onClose()
     } catch (e) {
@@ -286,6 +344,7 @@ function CreateModal({ stages, onClose, onCreate }) {
               </select>
             </label>
           </div>
+          <CustomFieldsBlock fields={customFields} data={customData} onChange={setCustomData} />
           {err && <div className="crm-error">{err}</div>}
         </div>
         <div className="crm-panel-footer">
@@ -302,6 +361,7 @@ export default function CRM() {
   const user = getCurrentUser()
 
   const [stages, setStages] = useState(FALLBACK_STAGES)
+  const [customFields, setCustomFields] = useState([])
   const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -327,7 +387,16 @@ export default function CRM() {
   }
 
   useEffect(() => {
-    api.get('/crm-native/stages').then(s => { if (Array.isArray(s)) setStages(s) }).catch(() => {})
+    api.get('/crm-native/stages')
+      .then(res => {
+        // endpoint returns {stages:[...], is_custom, industry, ...}
+        const arr = Array.isArray(res) ? res : (res && Array.isArray(res.stages) ? res.stages : null)
+        if (arr && arr.length) setStages(arr)
+      })
+      .catch(() => {})
+    api.get('/crm-native/custom-fields')
+      .then(res => { if (Array.isArray(res)) setCustomFields(res) })
+      .catch(() => {})
     fetchContacts()
   }, [])
 
@@ -492,6 +561,7 @@ export default function CRM() {
         <ContactPanel
           contact={selected}
           stages={stages}
+          customFields={customFields}
           onClose={() => setSelected(null)}
           onSave={handleSave}
           onDelete={handleDelete}
@@ -500,6 +570,7 @@ export default function CRM() {
       {showCreate && (
         <CreateModal
           stages={stages}
+          customFields={customFields}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />

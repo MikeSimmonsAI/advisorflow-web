@@ -195,6 +195,8 @@ COLUMNS_TO_ADD = [
     ("organizations", "industry", "VARCHAR DEFAULT 'funeral'"),
     # Per-org tier config JSON — used by TierDefinition feature
     ("organizations", "tier_config", "TEXT"),
+    # Per-org appointment type options — JSON array of strings for the Appt type dropdown
+    ("organizations", "appointment_types", "TEXT"),
     # AI lead quality note — Phase 2 field added to Lead model
     ("leads", "ai_lead_quality_note", "TEXT"),
     # Reply review tracking — when a reply was reviewed/actioned by an advisor
@@ -215,6 +217,14 @@ COLUMNS_TO_ADD = [
     ("crm_contacts", "updated_at", "TIMESTAMP DEFAULT NOW()"),
     ("crm_contacts", "last_contacted_at", "TIMESTAMP"),
     ("crm_contacts", "is_archived", "BOOLEAN DEFAULT FALSE"),
+    # Custom CRM stages per org — JSON array of {key, label, color}
+    ("organizations", "crm_stages", "TEXT"),
+    # Custom field schema per org — JSON array of {key, label, type, options?}
+    ("organizations", "crm_custom_fields", "TEXT"),
+    # Custom field values per contact — JSON object {field_key: value}
+    ("crm_contacts", "custom_data", "TEXT"),
+    # Who uploaded each lead batch (full name of the user who ran the import)
+    ("leads", "imported_by_name", "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -292,6 +302,16 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sender_id ON email_messages(sender_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_lead_id       ON replies(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_received_at   ON replies(received_at)",
+    # booking_links — looked up by lead, by org, and by slug
+    "CREATE INDEX IF NOT EXISTS ix_booking_links_lead_id       ON booking_links(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_booking_links_organization_id ON booking_links(organization_id)",
+    "CREATE INDEX IF NOT EXISTS ix_booking_links_slug          ON booking_links(slug)",
+    # audit_log_entries — heavily filtered by org, action, actor, and time
+    "CREATE INDEX IF NOT EXISTS ix_audit_log_org_created ON audit_log_entries(organization_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_audit_log_actor       ON audit_log_entries(actor_user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_audit_log_action      ON audit_log_entries(action)",
+    # suppression_entries — looked up by org and by phone for every outbound send
+    "CREATE INDEX IF NOT EXISTS ix_suppression_org_phone ON suppression_entries(organization_id, phone)",
 ]
 
 
@@ -579,6 +599,39 @@ def run_auto_migrations(engine) -> None:
         except (OperationalError, ProgrammingError) as e:
             conn.rollback()
             print(f"[auto_migrate] appointment_case_files table note: {e}")
+
+    # ── proposal_tokens.protect_content column ────────────────────────────────
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE proposal_tokens ADD COLUMN IF NOT EXISTS protect_content BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            conn.commit()
+            print("[auto_migrate] proposal_tokens.protect_content ensured.")
+    except (OperationalError, ProgrammingError) as e:
+        conn.rollback()
+        print(f"[auto_migrate] proposal_tokens.protect_content note: {e}")
+
+    # ── proposal_files table ──────────────────────────────────────────────────
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS proposal_files (
+                    id              VARCHAR PRIMARY KEY,
+                    organization_id VARCHAR NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                    proposal_id     VARCHAR NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+                    filename        VARCHAR NOT NULL,
+                    content_type    VARCHAR NOT NULL,
+                    file_size       INTEGER NOT NULL,
+                    file_data       BYTEA   NOT NULL,
+                    created_at      TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+            print("[auto_migrate] proposal_files table ensured.")
+    except (OperationalError, ProgrammingError) as e:
+        conn.rollback()
+        print(f"[auto_migrate] proposal_files table note: {e}")
 
     # ONE-TIME ORG RENAME: Restland → Greenland (idempotent — no-op if already done)
     try:

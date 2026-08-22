@@ -211,7 +211,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
     try {
       const r = await api.post(`/case-file/${selectedFileId}/crm-push`)
       const ok = r?.results?.filter(x => x.ok).length
-      showToast(ok ? `Pushed to ${ok} CRM connection(s) ✓` : 'No active CRM connections found')
+      showToast(ok ? `Exported to ${ok} external CRM ✓` : 'No external CRM configured — your data is saved in AdvisorFlow. Set up HubSpot/GHL in Settings → Integrations to enable this.')
     } catch (e) {
       showToast(e?.message || 'CRM push failed', 'error')
     } finally {
@@ -251,7 +251,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
         {/* Header */}
         <div className="cf-header">
           <div className="cf-header-left">
-            <div className="cf-header-title">📁 Case File</div>
+            <div className="cf-header-title">📋 Client Record</div>
             <div className="cf-header-sub">
               {lead?.first_name} {lead?.last_name}
               {lead?.phone && <span className="cf-header-phone"> · {lead.phone}</span>}
@@ -526,8 +526,9 @@ export default function CaseFile({ lead, onClose, onSaved }) {
             {selectedFileId && (
               <>
                 <div className={`cf-btn cf-btn--crm ${crmPushing ? 'cf-btn--loading' : ''}`}
-                  onClick={crmPushing ? null : handleCrmPush}>
-                  {crmPushing ? '⏳ Pushing...' : '🔗 Push to CRM'}
+                  onClick={crmPushing ? null : handleCrmPush}
+                  title="Sync to an external CRM (HubSpot, Salesforce, GoHighLevel). Set up in Settings → Integrations. Your data is already saved in AdvisorFlow.">
+                  {crmPushing ? '⏳ Pushing...' : '🔗 Export to External CRM'}
                 </div>
                 <div className="cf-btn cf-btn--danger" onClick={() => setShowCloseModal(true)}>
                   🔒 Close Case
@@ -539,7 +540,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
             <div className="cf-btn cf-btn--ghost" onClick={onClose}>Cancel</div>
             <div className={`cf-btn cf-btn--primary ${saving ? 'cf-btn--loading' : ''}`}
               onClick={saving ? null : handleSave}>
-              {saving ? '⏳ Saving...' : selectedFileId ? '💾 Save Changes' : '💾 Create Case File'}
+              {saving ? '⏳ Saving...' : selectedFileId ? '💾 Save Changes' : '💾 Create Client Record'}
             </div>
           </div>
         </div>

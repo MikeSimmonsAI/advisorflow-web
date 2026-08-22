@@ -146,7 +146,7 @@ def email_only_queue(
             )
         )
 
-    return query.order_by(Lead.created_at.desc(), Lead.last_name.asc(), Lead.first_name.asc()).all()
+    return query.order_by(Lead.created_at.desc(), Lead.last_name.asc(), Lead.first_name.asc()).limit(1000).all()
 
 
 # ── Email with flyer/attachment ───────────────────────────────────────────────

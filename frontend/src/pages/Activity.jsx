@@ -41,15 +41,17 @@ export default function Activity() {
   const navigate = useNavigate()
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState('')
   const [channel, setChannel]   = useState('all')   // all | sms | email
   const [days, setDays]         = useState(30)
   const [search, setSearch]     = useState('')
 
   function load() {
     setLoading(true)
+    setError('')
     api.get(`/activity/sent?limit=300&days=${days}`)
-      .then(setItems)
-      .catch(() => setItems([]))
+      .then(data => { setItems(Array.isArray(data) ? data : []); setError('') })
+      .catch(err => { setError(err.message || 'Failed to load activity feed. Check your connection and try again.'); setItems([]) })
       .finally(() => setLoading(false))
   }
 
@@ -89,6 +91,21 @@ export default function Activity() {
           Every SMS and email you've sent — with delivery confirmation for SMS.
         </p>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div style={{
+          marginBottom: 16, padding: '12px 16px',
+          border: '1px solid var(--border-danger)', borderRadius: 'var(--radius-md)',
+          background: 'var(--signal-red-dim)', color: 'var(--signal-red)',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ flex: 1 }}>⚠ {error}</span>
+          <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={load}>
+            ↻ Retry
+          </button>
+        </div>
+      )}
 
       {/* Stats strip */}
       <div className="panel" style={{ display: 'flex', gap: 0, padding: 0, overflow: 'hidden', marginBottom: 16 }}>
