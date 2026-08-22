@@ -177,6 +177,41 @@ def send_email_via_provider(
         return {"success": False, "provider_message_id": None, "error": str(e)}
 
 
+def send_email(
+    db: Session,
+    org_id: str,
+    to_email: str,
+    to_name: str,
+    subject: str,
+    body: str,
+) -> dict:
+    """
+    Generic transactional email sender used by proposal_router and other
+    non-lead-outreach surfaces. Looks up the org to use its Resend credentials
+    so the email comes from the correct brand domain.
+
+    `body` is plain text / markdown — wrapped in minimal HTML for delivery.
+    Returns the result dict from send_email_via_provider.
+    """
+    from app.models.models import Organization
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+
+    # Convert newlines to <br> and **bold** to <strong> for a basic HTML render
+    body_html = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    body_html = body_html.replace("\n", "<br>")
+    # **text** → <strong>text</strong>
+    import re
+    body_html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", body_html)
+    body_html = f"<div style='font-family:sans-serif;font-size:15px;line-height:1.6;color:#222;max-width:600px'>{body_html}</div>"
+
+    return send_email_via_provider(
+        to_email=to_email,
+        subject=subject,
+        body_html=body_html,
+        org=org,
+    )
+
+
 def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     """Sends one email to a lead and logs it. Raises ValueError if the lead has no email."""
     if not lead.email:
