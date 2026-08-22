@@ -1,30 +1,80 @@
 """
 SMS Service - Twilio integration
-Each advisor (User) has their own Twilio Account SID, Auth Token, and
-phone number stored on their profile. This service sends FROM that
-advisor's number, optionally with a Caller ID Name configured
-(e.g. "Restland Cemetery" instead of just digits showing up).
 
-Per Mike's walkthrough:
-  - Lead receives SMS from advisor's Twilio number (with caller ID name if set)
-  - Message includes a booking link (stateless token, matches the existing
-    advisorflow-booking.vercel.app pattern)
-  - Lead can reply to that same Twilio number -> captured as a Reply
-  - Message can also mention the advisor's personal cell as an alternate
-    contact method, written directly into the template text
+Credential resolution order (per send):
+  1. Advisor's own Twilio account SID + auth token + phone number (personal number)
+  2. Org-level shared Twilio credentials (toll-free or 10DLC fallback)
+     → all advisors in the org send FROM the shared number; advisor name appears
+       in the message body so the lead knows who's reaching out.
+
+This makes it trivial to:
+  - Run a single shared toll-free number during demos / early launch
+  - Move to per-advisor 10DLC numbers later without changing any send logic
+  - Support large enterprise clients (e.g. SCI) with one 10DLC brand/campaign
+    covering hundreds of advisors, each getting their own local number only when
+    that scale makes sense
+
+Number type (twilio_number_type / org_twilio_number_type):
+  "toll_free"  → (8XX) numbers, TFV approval required (already done for 844-917-2171)
+  "10dlc"      → local 10-digit numbers, A2P brand+campaign registration required
+  "short_code" → 5-6 digit shared/dedicated short codes (high-volume only)
+  All three are just phone numbers from Twilio's API perspective — the type field
+  is informational only and used in dashboards/reporting, not in send logic.
 """
 
 import os
 from datetime import datetime
 from twilio.rest import Client
 from sqlalchemy.orm import Session
-from app.models.models import User, Lead, Message, BookingLink
+from app.models.models import User, Lead, Message, BookingLink, Organization
 from app.utils.crypto import decrypt_value
 
 BOOKING_BASE_URL = os.environ.get("BOOKING_BASE_URL", "https://advisorflow-booking.vercel.app")
 
 
-def get_twilio_client(advisor: User) -> Client:
+def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str | None]:
+    """
+    Returns (twilio_client, from_phone, caller_id_name).
+
+    Resolution order:
+      1. Advisor's personal Twilio credentials (their own number)
+      2. Org-level shared credentials (toll-free / 10DLC fallback)
+
+    Raises ValueError if neither is configured.
+    """
+    # --- 1. Advisor-level ---
+    if advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+        token = decrypt_value(advisor.twilio_auth_token_encrypted)
+        client = Client(advisor.twilio_account_sid, token)
+        return client, advisor.twilio_phone_number, advisor.twilio_caller_id_name
+
+    # --- 2. Org-level fallback ---
+    org: Organization | None = db.query(Organization).filter(
+        Organization.id == advisor.organization_id
+    ).first()
+    if (
+        org
+        and org.org_twilio_account_sid
+        and org.org_twilio_auth_token_encrypted
+        and org.org_twilio_phone_number
+    ):
+        token = decrypt_value(org.org_twilio_auth_token_encrypted)
+        client = Client(org.org_twilio_account_sid, token)
+        return client, org.org_twilio_phone_number, org.org_twilio_caller_id_name
+
+    raise ValueError(
+        f"No Twilio credentials configured for advisor '{advisor.full_name}' "
+        f"or their organization. Set a personal number in Settings → Twilio, "
+        f"or ask an admin to configure a shared org number in Org Settings."
+    )
+
+
+# Legacy helper kept for any callers that only need the client object
+def get_twilio_client(advisor: User, db: Session | None = None) -> Client:
+    if db is not None:
+        client, _, _ = _resolve_twilio_creds(advisor, db)
+        return client
+    # Backwards-compat path (no db): advisor must have personal creds
     if not advisor.twilio_account_sid or not advisor.twilio_auth_token_encrypted:
         raise ValueError(f"Advisor {advisor.full_name} has no Twilio credentials configured.")
     auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
@@ -187,7 +237,7 @@ def send_sms(
 
     body = render_template(template, lead, advisor, booking_url)
 
-    client = get_twilio_client(advisor)
+    client, from_phone, _ = _resolve_twilio_creds(advisor, db)
     # StatusCallback: Twilio will POST delivery receipts to this endpoint.
     # Only set it when the env var is configured — avoids noise in local dev.
     status_callback_url = None
@@ -197,7 +247,7 @@ def send_sms(
 
     create_kwargs = dict(
         body=body,
-        from_=advisor.twilio_phone_number,
+        from_=from_phone,
         to=lead.phone,
     )
     if status_callback_url:
@@ -250,11 +300,11 @@ def send_mms(
 
     body = render_template(template, lead, advisor, booking_url)
 
-    client = get_twilio_client(advisor)
+    client, from_phone, _ = _resolve_twilio_creds(advisor, db)
     _api_base = os.environ.get("API_BASE_URL", "")
     mms_kwargs = dict(
         body=body,
-        from_=advisor.twilio_phone_number,
+        from_=from_phone,
         to=lead.phone,
         media_url=[media_url],
     )

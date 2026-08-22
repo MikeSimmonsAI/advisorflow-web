@@ -108,6 +108,17 @@ export default function OrgSettings() {
   const [emailSenderSaved, setEmailSenderSaved] = useState(false)
   const [emailSenderError, setEmailSenderError] = useState('')
 
+  // Org-level shared Twilio (toll-free / 10DLC)
+  const [orgTwilioSid, setOrgTwilioSid] = useState('')
+  const [orgTwilioToken, setOrgTwilioToken] = useState('')
+  const [orgTwilioPhone, setOrgTwilioPhone] = useState('')
+  const [orgTwilioCallerId, setOrgTwilioCallerId] = useState('')
+  const [orgTwilioNumberType, setOrgTwilioNumberType] = useState('toll_free')
+  const [orgTwilioConfigured, setOrgTwilioConfigured] = useState(false)
+  const [savingOrgTwilio, setSavingOrgTwilio] = useState(false)
+  const [orgTwilioSaved, setOrgTwilioSaved] = useState(false)
+  const [orgTwilioError, setOrgTwilioError] = useState('')
+
   // Load all orgs for super admin selector
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -149,6 +160,18 @@ export default function OrgSettings() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
+
+    // Load org Twilio config separately (never returns the auth token)
+    api.get(`/org-settings/twilio${orgQuery}`)
+      .then(t => {
+        setOrgTwilioPhone(t.org_twilio_phone_number || '')
+        setOrgTwilioCallerId(t.org_twilio_caller_id_name || '')
+        setOrgTwilioNumberType(t.org_twilio_number_type || 'toll_free')
+        setOrgTwilioConfigured(t.org_twilio_configured || false)
+        setOrgTwilioSid('')
+        setOrgTwilioToken('')
+      })
+      .catch(() => {})
   }, [selectedOrgId, isSuperAdmin])
 
   async function saveBranding() {
@@ -245,6 +268,43 @@ export default function OrgSettings() {
       setEmailSenderError(err.message)
     } finally {
       setSavingEmailSender(false)
+    }
+  }
+
+  async function saveOrgTwilio() {
+    setSavingOrgTwilio(true)
+    setOrgTwilioSaved(false)
+    setOrgTwilioError('')
+    try {
+      if (!orgTwilioSid.trim() || !orgTwilioToken.trim()) {
+        // Phone-only update if credentials already configured
+        if (orgTwilioConfigured) {
+          await api.patch(`/org-settings/twilio/phone${orgQuery}`, {
+            org_twilio_phone_number: orgTwilioPhone.trim(),
+            org_twilio_caller_id_name: orgTwilioCallerId.trim() || null,
+            org_twilio_number_type: orgTwilioNumberType,
+          })
+        } else {
+          throw new Error('Account SID and Auth Token are required for first-time setup.')
+        }
+      } else {
+        await api.put(`/org-settings/twilio${orgQuery}`, {
+          org_twilio_account_sid: orgTwilioSid.trim(),
+          org_twilio_auth_token: orgTwilioToken.trim(),
+          org_twilio_phone_number: orgTwilioPhone.trim(),
+          org_twilio_caller_id_name: orgTwilioCallerId.trim() || null,
+          org_twilio_number_type: orgTwilioNumberType,
+        })
+        setOrgTwilioConfigured(true)
+        setOrgTwilioSid('')
+        setOrgTwilioToken('')
+      }
+      setOrgTwilioSaved(true)
+      setTimeout(() => setOrgTwilioSaved(false), 3000)
+    } catch (err) {
+      setOrgTwilioError(err.message)
+    } finally {
+      setSavingOrgTwilio(false)
     }
   }
 
@@ -577,6 +637,62 @@ export default function OrgSettings() {
               style={{ marginTop: 10 }}
             >
               {savingEmailSender ? 'Saving…' : emailSenderSaved ? '✓ Saved' : 'Save email sender'}
+            </button>
+          </section>
+
+        {/* ── Org-level shared Twilio (toll-free / 10DLC) ── */}
+          <section className="panel os-section" style={{ marginTop: 16 }}>
+            <div className="panel-header">
+              <h2 className="panel-title">📱 Shared SMS number</h2>
+            </div>
+            <p className="os-hint">
+              Advisors without a personal Twilio number automatically send from this shared number.
+              {orgTwilioConfigured && <span style={{ color: 'var(--signal-green, #22c55e)', marginLeft: 6 }}>✓ Configured</span>}
+            </p>
+
+            <div className="os-field-row" style={{ gap: 12, marginTop: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">Number type</label>
+                <select
+                  className="os-input"
+                  value={orgTwilioNumberType}
+                  onChange={e => setOrgTwilioNumberType(e.target.value)}
+                >
+                  <option value="toll_free">Toll-free (8XX) — TFV approved</option>
+                  <option value="10dlc">10DLC — local 10-digit (A2P registered)</option>
+                  <option value="short_code">Short code</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">Phone number (E.164)</label>
+                <input className="os-input" placeholder="+18449172171" value={orgTwilioPhone} onChange={e => setOrgTwilioPhone(e.target.value)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">Caller ID name (optional)</label>
+                <input className="os-input" placeholder="EvoSys Pro" value={orgTwilioCallerId} onChange={e => setOrgTwilioCallerId(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="os-field-row" style={{ gap: 12, marginTop: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">
+                  Twilio Account SID
+                  {orgTwilioConfigured && !orgTwilioSid && <span className="os-hint" style={{ marginLeft: 6 }}>(leave blank to keep existing)</span>}
+                </label>
+                <input className="os-input" placeholder="ACxxxxxxxxxxxxxxxx" value={orgTwilioSid} onChange={e => setOrgTwilioSid(e.target.value)} autoComplete="off" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">
+                  Auth Token
+                  {orgTwilioConfigured && !orgTwilioToken && <span className="os-hint" style={{ marginLeft: 6 }}>(leave blank to keep existing)</span>}
+                </label>
+                <input className="os-input" type="password" placeholder="••••••••••••••••" value={orgTwilioToken} onChange={e => setOrgTwilioToken(e.target.value)} autoComplete="new-password" />
+              </div>
+            </div>
+
+            {orgTwilioError && <p style={{ color: 'var(--signal-red, #ff4d4f)', fontSize: 12, marginTop: 6 }}>{orgTwilioError}</p>}
+            <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={saveOrgTwilio} disabled={savingOrgTwilio || !orgTwilioPhone.trim()}>
+              {savingOrgTwilio ? 'Saving…' : orgTwilioSaved ? '✓ Saved' : 'Save shared number'}
             </button>
           </section>
 

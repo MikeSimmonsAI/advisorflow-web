@@ -597,3 +597,22 @@ def run_auto_migrations(engine) -> None:
     # God-admin role enforcement is handled in main.py on_startup via
     # GOD_ADMIN_EMAIL env var (never hardcoded). Password is set once through
     # the app and is not touched by migrations.
+
+    # Org-level shared Twilio credentials (toll-free / 10DLC fallback)
+    _org_twilio_cols = {
+        "org_twilio_account_sid":          "VARCHAR",
+        "org_twilio_auth_token_encrypted": "VARCHAR",
+        "org_twilio_phone_number":         "VARCHAR",
+        "org_twilio_caller_id_name":       "VARCHAR",
+        "org_twilio_number_type":          "VARCHAR DEFAULT 'toll_free'",
+    }
+    for col, col_type in _org_twilio_cols.items():
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE organizations ADD COLUMN IF NOT EXISTS {col} {col_type}"
+                ))
+                conn.commit()
+        except (OperationalError, ProgrammingError) as e:
+            print(f"[auto_migrate] organizations.{col} note: {e}")
+    print("[auto_migrate] org-level Twilio columns ensured.")

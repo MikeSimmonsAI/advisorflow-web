@@ -233,6 +233,18 @@ class Organization(Base):
     from_email = Column(String, nullable=True)       # e.g. "support@bookaboost.live"
     resend_api_key = Column(String, nullable=True)   # org-specific Resend API key
 
+    # Org-level shared Twilio credentials — used as fallback when an advisor
+    # has no personal Twilio number configured.  Supports both toll-free and
+    # 10DLC numbers; twilio_number_type distinguishes them for reporting.
+    # All advisors in the org send FROM this shared number when no personal
+    # number is set, with their name in the message body.
+    org_twilio_account_sid        = Column(String, nullable=True)
+    org_twilio_auth_token_encrypted = Column(String, nullable=True)  # encrypted at rest
+    org_twilio_phone_number       = Column(String, nullable=True)   # e.g. "+18449172171"
+    org_twilio_caller_id_name     = Column(String, nullable=True)   # e.g. "EvoSys Pro"
+    # "toll_free" | "10dlc" | "short_code" — informational, used in dashboards
+    org_twilio_number_type        = Column(String, nullable=True, default="toll_free")
+
     platform = relationship("Platform", back_populates="organizations")
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")

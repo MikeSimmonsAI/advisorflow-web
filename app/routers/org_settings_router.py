@@ -288,3 +288,86 @@ def update_enabled_features(
         org.enabled_features = json.dumps(req.enabled_features)
     db.commit()
     return {"updated": True, "enabled_features": req.enabled_features}
+
+
+# ---------------------------------------------------------------------------
+# Org-level shared Twilio configuration
+# Supports toll-free (TFV approved) and 10DLC numbers as a shared sender
+# fallback for advisors who don't have personal Twilio numbers configured.
+# ---------------------------------------------------------------------------
+
+class OrgTwilioRead(BaseModel):
+    org_twilio_phone_number:   Optional[str] = None
+    org_twilio_caller_id_name: Optional[str] = None
+    org_twilio_number_type:    Optional[str] = None   # "toll_free" | "10dlc" | "short_code"
+    org_twilio_configured:     bool = False
+
+
+class OrgTwilioUpdate(BaseModel):
+    org_twilio_account_sid:    str
+    org_twilio_auth_token:     str                    # plaintext — encrypted before storage
+    org_twilio_phone_number:   str                    # E.164 e.g. "+18449172171"
+    org_twilio_caller_id_name: Optional[str] = None
+    org_twilio_number_type:    Optional[str] = "toll_free"
+
+
+class OrgTwilioPhoneUpdate(BaseModel):
+    """Lightweight update — change phone/caller-id without re-entering the auth token."""
+    org_twilio_phone_number:   str
+    org_twilio_caller_id_name: Optional[str] = None
+    org_twilio_number_type:    Optional[str] = None
+
+
+@router.get("/twilio", response_model=OrgTwilioRead)
+def get_org_twilio(
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Return the org's shared Twilio config (auth token is never returned)."""
+    org = _resolve_org(current_user, org_id, db)
+    return OrgTwilioRead(
+        org_twilio_phone_number=org.org_twilio_phone_number,
+        org_twilio_caller_id_name=org.org_twilio_caller_id_name,
+        org_twilio_number_type=org.org_twilio_number_type or "toll_free",
+        org_twilio_configured=bool(
+            org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted
+        ),
+    )
+
+
+@router.put("/twilio")
+def update_org_twilio(
+    req: OrgTwilioUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Save org-level Twilio credentials (auth token is encrypted at rest)."""
+    from app.utils.crypto import encrypt_value
+    org = _resolve_org(current_user, org_id, db)
+    org.org_twilio_account_sid          = req.org_twilio_account_sid.strip()
+    org.org_twilio_auth_token_encrypted = encrypt_value(req.org_twilio_auth_token)
+    org.org_twilio_phone_number         = req.org_twilio_phone_number.strip()
+    org.org_twilio_caller_id_name       = req.org_twilio_caller_id_name
+    org.org_twilio_number_type          = req.org_twilio_number_type or "toll_free"
+    db.commit()
+    return {"updated": True, "org_twilio_phone_number": org.org_twilio_phone_number}
+
+
+@router.patch("/twilio/phone")
+def update_org_twilio_phone(
+    req: OrgTwilioPhoneUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Update phone number / caller ID only — does not require re-entering the auth token."""
+    org = _resolve_org(current_user, org_id, db)
+    org.org_twilio_phone_number   = req.org_twilio_phone_number.strip()
+    if req.org_twilio_caller_id_name is not None:
+        org.org_twilio_caller_id_name = req.org_twilio_caller_id_name
+    if req.org_twilio_number_type is not None:
+        org.org_twilio_number_type = req.org_twilio_number_type
+    db.commit()
+    return {"updated": True}
