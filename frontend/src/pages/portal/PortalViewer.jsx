@@ -17,6 +17,14 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 
+// ── URL resolver: ensures /proposals/files/{id} hits the backend, not the SPA ─
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
+function resolveFileUrl(url) {
+  if (!url) return url
+  if (url.startsWith('/')) return API_BASE + url
+  return url
+}
+
 // ── Markdown renderer (lightweight, no external lib) ─────────────────────────
 function renderMarkdown(text) {
   if (!text) return ''
@@ -51,6 +59,7 @@ function TextBlock({ block }) {
 function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) {
   const [loaded, setLoaded] = useState(false)
   if (!block.file_url) return null
+  const src = resolveFileUrl(block.file_url)
   return (
     <div>
       {block.content && (
@@ -67,7 +76,7 @@ function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) 
         position: 'relative',
       }}>
         <img
-          src={block.file_url}
+          src={src}
           alt={block.content || 'Image'}
           onLoad={() => setLoaded(true)}
           draggable={false}
@@ -84,7 +93,7 @@ function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) 
       </div>
       {canDownload && block.file_url && (
         <button
-          onClick={() => { window.open(block.file_url, '_blank'); onDownload() }}
+          onClick={() => { window.open(src, '_blank'); onDownload() }}
           style={{
             marginTop: 12, background: 'none',
             border: '1px solid rgba(255,255,255,0.12)',
@@ -103,6 +112,7 @@ function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) 
 function PdfBlock({ block, onDownload, canDownload }) {
   const [expanded, setExpanded] = useState(false)
   if (!block.file_url) return null
+  const src = resolveFileUrl(block.file_url)
   return (
     <div style={{
       border: '1px solid rgba(255,255,255,0.1)',
@@ -148,7 +158,7 @@ function PdfBlock({ block, onDownload, canDownload }) {
           </button>
           {canDownload && (
             <button
-              onClick={() => { window.open(block.file_url, '_blank'); onDownload() }}
+              onClick={() => { window.open(src, '_blank'); onDownload() }}
               style={{
                 background: 'rgba(25,214,124,0.1)',
                 border: '1px solid rgba(25,214,124,0.3)',
@@ -164,7 +174,7 @@ function PdfBlock({ block, onDownload, canDownload }) {
       {/* Inline PDF viewer */}
       {expanded && (
         <iframe
-          src={`${block.file_url}#toolbar=0&navpanes=0`}
+          src={`${src}#toolbar=0&navpanes=0`}
           title={block.content || 'Document'}
           style={{ width: '100%', height: 600, border: 'none', display: 'block' }}
         />
@@ -555,6 +565,7 @@ export default function PortalViewer() {
         ::-webkit-scrollbar-thumb { background: rgba(8,124,255,0.25); border-radius: 4px; }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
         .portal-block { animation: fadeInUp 0.5s ease both; }
+        @media (max-width: 700px) { .portal-grid { grid-template-columns: 1fr !important; } }
       `}</style>
 
       {/* Top bar */}
@@ -660,15 +671,25 @@ export default function PortalViewer() {
         </div>
       </div>
 
-      {/* Content blocks */}
-      <div style={{
-        maxWidth: 760, margin: '0 auto', padding: '0 32px 120px',
+      {/* Content blocks — 2-column grid, full-width for pdf/video/divider/site */}
+      <div className="portal-grid" style={{
+        maxWidth: 1120, margin: '0 auto', padding: '0 32px 120px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, 1fr)',
+        gap: '28px',
+        alignItems: 'start',
       }}>
-        {proposal.blocks.map((block, idx) => (
+        {proposal.blocks.map((block, idx) => {
+          const fullWidth = ['pdf', 'video', 'divider', 'website_url'].includes(block.block_type)
+          return (
           <div
             key={block.id}
             className="portal-block"
-            style={{ animationDelay: `${0.15 * idx}s`, marginBottom: block.block_type === 'divider' ? 40 : 56 }}
+            style={{
+              animationDelay: `${0.15 * idx}s`,
+              gridColumn: fullWidth ? '1 / -1' : undefined,
+              marginBottom: block.block_type === 'divider' ? 0 : 0,
+            }}
           >
             {block.block_type === 'text'        && <TextBlock block={block} />}
             {block.block_type === 'image'       && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} protected={protectContent.current} />}
@@ -678,7 +699,8 @@ export default function PortalViewer() {
             {block.block_type === 'cta'         && <CtaBlock block={block} />}
             {block.block_type === 'website_url' && <WebsiteUrlBlock block={block} />}
           </div>
-        ))}
+          )
+        })}
 
         {proposal.blocks.length === 0 && (
           <div style={{ textAlign: 'center', color: '#334', padding: '80px 0', fontSize: 14 }}>
