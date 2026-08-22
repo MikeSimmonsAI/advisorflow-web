@@ -4,21 +4,17 @@ import { api, setOrgContext } from '../api/client'
 import './OrgManager.css'
 
 const ALL_FEATURES = [
-  // Core admin tools
   { key: 'master_dashboard', label: 'Master Dashboard' },
   { key: 'reports',          label: 'Reports' },
   { key: 'users',            label: 'Users' },
   { key: 'availability',     label: 'Availability' },
   { key: 'campaigns',        label: 'Campaigns' },
-  // CRM
+  { key: 'crm',              label: 'CRM (Contact Management)' },
   { key: 'crm_connectors',   label: 'CRM Connectors (GoHighLevel / HubSpot)' },
-  // Lead tools
   { key: 'lead_cleanup',     label: 'Lead Cleanup' },
-  // System config
   { key: 'tier_config',      label: 'Tier Config' },
   { key: 'a2p_10dlc',        label: 'A2P 10DLC Registration' },
   { key: 'branding_settings',label: 'Branding & Settings' },
-  // Compliance
   { key: 'compliance',       label: 'Compliance' },
   { key: 'audit_log',        label: 'Audit Log' },
 ]
@@ -41,12 +37,25 @@ function getBelowPlanCount(plan, currentFeatures) {
   return missing.length
 }
 
+// Color per platform slug — new platforms get a neutral fallback
+const PLATFORM_COLORS = {
+  bookaboost:    { bg: 'rgba(47,182,255,0.15)', border: 'rgba(47,182,255,0.4)',  text: '#2fb6ff' },
+  evosyspro:     { bg: 'rgba(30,240,168,0.15)', border: 'rgba(30,240,168,0.4)',  text: '#1ef0a8' },
+  harmonyhustle: { bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.4)',  text: '#f59e0b' },
+}
+const PLATFORM_COLOR_DEFAULT = { bg: 'rgba(148,163,184,0.15)', border: 'rgba(148,163,184,0.4)', text: '#94a3b8' }
+
+function platformColor(slug) {
+  return PLATFORM_COLORS[slug] || PLATFORM_COLOR_DEFAULT
+}
+
 export default function OrgManager() {
   const [orgs, setOrgs] = useState([])
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  const [platformFilter, setPlatformFilter] = useState('all')
   const [expanded, setExpanded] = useState({})
   const [featuresExpanded, setFeaturesExpanded] = useState({})
   const [orgFeatures, setOrgFeatures] = useState({})
@@ -76,6 +85,15 @@ export default function OrgManager() {
     }
     load()
   }, [])
+
+  // Derive unique platforms from org list
+  const platforms = Array.from(
+    new Map(
+      orgs
+        .filter(o => o.platform_slug)
+        .map(o => [o.platform_slug, { slug: o.platform_slug, name: o.platform_name || o.platform_slug }])
+    ).values()
+  ).sort((a, b) => a.name.localeCompare(b.name))
 
   function handleEnterOrg(org) {
     setOrgContext(org.id, org.name)
@@ -139,169 +157,234 @@ export default function OrgManager() {
     return acc
   }, {})
 
-  const filtered = orgs.filter(o =>
-    !search || o.name.toLowerCase().includes(search.toLowerCase())
-  )
+  // Filter orgs by platform tab + search
+  const filtered = orgs.filter(o => {
+    const matchesPlatform = platformFilter === 'all' || o.platform_slug === platformFilter || (!o.platform_slug && platformFilter === 'unassigned')
+    const matchesSearch = !search || o.name.toLowerCase().includes(search.toLowerCase())
+    return matchesPlatform && matchesSearch
+  })
 
-  if (loading) return <div className="org-manager-loading">Loading organizations...</div>
-  if (error) return <div className="org-manager-error">Error: {error}</div>
+  // Group filtered orgs by platform for display
+  const grouped = filtered.reduce((acc, org) => {
+    const key = org.platform_slug || 'unassigned'
+    if (!acc[key]) acc[key] = { name: org.platform_name || (org.platform_slug ? org.platform_slug : 'Unassigned'), slug: key, orgs: [] }
+    acc[key].orgs.push(org)
+    return acc
+  }, {})
+  const groups = Object.values(grouped).sort((a, b) => {
+    if (a.slug === 'unassigned') return 1
+    if (b.slug === 'unassigned') return -1
+    return a.name.localeCompare(b.name)
+  })
+
+  if (loading) return <div className="org-manager-loading">Loading organizations…</div>
+  if (error)   return <div className="org-manager-error">Error: {error}</div>
 
   return (
     <div className="org-manager">
+      {/* ── Header ── */}
       <div className="org-manager-header">
         <div>
           <h1 className="org-manager-title">Org Manager</h1>
-          <p className="org-manager-subtitle">{orgs.length} organization{orgs.length !== 1 ? 's' : ''} on the platform</p>
+          <p className="org-manager-subtitle">
+            {orgs.length} org{orgs.length !== 1 ? 's' : ''} across {platforms.length} platform{platforms.length !== 1 ? 's' : ''}
+          </p>
         </div>
         <input
           className="org-manager-search"
-          placeholder="Search organizations..."
+          placeholder="Search organizations…"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
       </div>
 
-      {filtered.length === 0 && (
-        <div className="org-manager-empty">No organizations match your search.</div>
-      )}
-
-      <div className="org-grid">
-        {filtered.map(org => {
-          const orgUsers = usersByOrg[org.id] || []
-          const isExpanded = expanded[org.id]
-          const isFeatExpanded = featuresExpanded[org.id]
-          const adminCount = orgUsers.filter(u => u.role === 'org_admin').length
-          const advisorCount = orgUsers.filter(u => u.role === 'advisor').length
-          const features = orgFeatures[org.id]
-
+      {/* ── Platform filter tabs ── */}
+      <div className="org-platform-tabs">
+        <button
+          className={`org-platform-tab ${platformFilter === 'all' ? 'org-platform-tab--active' : ''}`}
+          onClick={() => setPlatformFilter('all')}
+        >
+          All <span className="org-tab-count">{orgs.length}</span>
+        </button>
+        {platforms.map(p => {
+          const color = platformColor(p.slug)
+          const count = orgs.filter(o => o.platform_slug === p.slug).length
           return (
-            <div key={org.id} className={`org-card ${!org.is_active ? 'org-card--inactive' : ''}`}>
-              <div className="org-card-top">
-                <div className="org-card-name-row">
-                  <h2 className="org-card-name">{org.name}</h2>
-                  {!org.is_active && <span className="org-badge org-badge--inactive">Inactive</span>}
-                </div>
-                <div className="org-card-badges">
-                  <span className={`org-badge org-badge--plan org-badge--${(org.plan || 'trial').toLowerCase()}`}>
-                    {org.plan || 'trial'}
-                  </span>
-                  <span className="org-badge org-badge--industry">{org.industry || 'general'}</span>
-                </div>
-              </div>
-
-              <div className="org-card-stats">
-                <div className="org-stat">
-                  <span className="org-stat-value">{orgUsers.length}</span>
-                  <span className="org-stat-label">users</span>
-                </div>
-                <div className="org-stat">
-                  <span className="org-stat-value">{adminCount}</span>
-                  <span className="org-stat-label">admins</span>
-                </div>
-                <div className="org-stat">
-                  <span className="org-stat-value">{advisorCount}</span>
-                  <span className="org-stat-label">advisors</span>
-                </div>
-              </div>
-              <div className="org-card-slug">/{org.slug}</div>
-
-              <div className="org-card-actions">
-                <div className="org-expand-toggle" onClick={() => toggleExpand(org.id)}>
-                  {isExpanded ? '\u25be Hide team' : `\u25b8 Team (${orgUsers.length})`}
-                </div>
-                <div className="org-expand-toggle" onClick={() => toggleFeaturesExpand(org.id)}>
-                  {isFeatExpanded ? '\u25be Hide features' : '\u2699\ufe0f Features'}
-                </div>
-                <button
-                  type="button"
-                  className="org-enter-btn"
-                  onClick={() => handleEnterOrg(org)}
-                  title={`View BookaBoost as ${org.name}`}
-                >
-                  Enter Org \u2192
-                </button>
-              </div>
-
-              {isFeatExpanded && (
-                <div className="org-features-section">
-                  <div className="org-features-header">
-                    <span className="org-features-title">
-                      Admin Feature Access{' '}
-                      {features === null
-                        ? <span className="org-features-status org-features-status--all">All enabled</span>
-                        : <span className="org-features-status">{features.length}/{ALL_FEATURES.length} enabled</span>
-                      }
-                      {(() => {
-                        const below = getBelowPlanCount((org.plan || 'trial').toLowerCase(), features)
-                        return below > 0 ? (
-                          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--signal-amber)', fontWeight: 700, background: 'rgba(234,179,8,0.1)', padding: '2px 7px', borderRadius: 10 }}>
-                            ⚠ {below} below {getPlanLabel(org.plan)} plan
-                          </span>
-                        ) : null
-                      })()}
-                    </span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        type="button"
-                        style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                        onClick={() => applyPlanDefaults(org)}
-                        disabled={saving[org.id]}
-                        title={`Apply default features for ${getPlanLabel(org.plan)} plan`}
-                      >
-                        Apply {getPlanLabel(org.plan)} defaults
-                      </button>
-                      <button type="button" className="org-features-grant-all" onClick={() => grantAll(org.id)}>
-                        Grant All
-                      </button>
-                    </div>
-                  </div>
-                  <div className="org-features-grid">
-                    {ALL_FEATURES.map(f => {
-                      const checked = features === null || features.includes(f.key)
-                      return (
-                        <label key={f.key} className="org-feature-checkbox">
-                          <input type="checkbox" checked={checked} onChange={() => toggleFeature(org.id, f.key)} />
-                          <span>{f.label}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                  <button
-                    type="button"
-                    className="org-features-save"
-                    onClick={() => saveFeatures(org.id)}
-                    disabled={saving[org.id]}
-                  >
-                    {saving[org.id] ? 'Saving...' : 'Save Features'}
-                  </button>
-                </div>
-              )}
-
-              {isExpanded && (
-                <div className="org-user-list">
-                  {orgUsers.length === 0 && (
-                    <p className="org-user-empty">No users in this org yet.</p>
-                  )}
-                  {orgUsers.map(u => (
-                    <div key={u.id} className={`org-user-row ${!u.is_active ? 'org-user-row--inactive' : ''}`}>
-                      <div className="org-user-avatar">{(u.full_name || '?')[0].toUpperCase()}</div>
-                      <div className="org-user-info">
-                        <span className="org-user-name">{u.full_name}</span>
-                        <span className="org-user-email">{u.email}</span>
-                      </div>
-                      <div className="org-user-right">
-                        <span className={`role-tag role-tag--${u.role}`}>{u.role.replace(/_/g, ' ')}</span>
-                        {!u.is_active && <span className="org-badge org-badge--inactive">off</span>}
-                        {u.must_change_password && <span className="org-badge org-badge--warn">setup</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button
+              key={p.slug}
+              className={`org-platform-tab ${platformFilter === p.slug ? 'org-platform-tab--active' : ''}`}
+              style={platformFilter === p.slug ? { borderColor: color.border, color: color.text } : {}}
+              onClick={() => setPlatformFilter(p.slug)}
+            >
+              <span
+                className="org-platform-dot"
+                style={{ background: color.text }}
+              />
+              {p.name}
+              <span className="org-tab-count">{count}</span>
+            </button>
           )
         })}
+        {orgs.some(o => !o.platform_slug) && (
+          <button
+            className={`org-platform-tab ${platformFilter === 'unassigned' ? 'org-platform-tab--active' : ''}`}
+            onClick={() => setPlatformFilter('unassigned')}
+          >
+            Unassigned <span className="org-tab-count">{orgs.filter(o => !o.platform_slug).length}</span>
+          </button>
+        )}
       </div>
+
+      {filtered.length === 0 && (
+        <div className="org-manager-empty">No organizations match your filter.</div>
+      )}
+
+      {/* ── Grouped org cards ── */}
+      {groups.map(group => {
+        const color = platformColor(group.slug)
+        return (
+          <div key={group.slug} className="org-platform-group">
+            {/* Only show group header when showing all platforms */}
+            {platformFilter === 'all' && (
+              <div className="org-platform-group-header" style={{ borderColor: color.border }}>
+                <span className="org-platform-group-dot" style={{ background: color.text }} />
+                <span className="org-platform-group-name" style={{ color: color.text }}>{group.name}</span>
+                <span className="org-platform-group-count">{group.orgs.length} org{group.orgs.length !== 1 ? 's' : ''}</span>
+              </div>
+            )}
+
+            <div className="org-grid">
+              {group.orgs.map(org => {
+                const orgUsers = usersByOrg[org.id] || []
+                const isExpanded = expanded[org.id]
+                const isFeatExpanded = featuresExpanded[org.id]
+                const adminCount = orgUsers.filter(u => u.role === 'org_admin').length
+                const advisorCount = orgUsers.filter(u => u.role === 'advisor').length
+                const features = orgFeatures[org.id]
+                const pColor = platformColor(org.platform_slug)
+
+                return (
+                  <div key={org.id} className={`org-card ${!org.is_active ? 'org-card--inactive' : ''}`}
+                    style={{ borderTopColor: pColor.text, borderTopWidth: 2 }}
+                  >
+                    <div className="org-card-top">
+                      <div className="org-card-name-row">
+                        <h2 className="org-card-name">{org.name}</h2>
+                        {!org.is_active && <span className="org-badge org-badge--inactive">Inactive</span>}
+                      </div>
+                      <div className="org-card-badges">
+                        {/* Platform badge */}
+                        {org.platform_name && (
+                          <span
+                            className="org-badge org-badge--platform"
+                            style={{ background: pColor.bg, border: `1px solid ${pColor.border}`, color: pColor.text }}
+                          >
+                            {org.platform_name}
+                          </span>
+                        )}
+                        <span className={`org-badge org-badge--plan org-badge--${(org.plan || 'trial').toLowerCase()}`}>
+                          {org.plan || 'trial'}
+                        </span>
+                        <span className="org-badge org-badge--industry">{org.industry || 'general'}</span>
+                      </div>
+                    </div>
+
+                    <div className="org-card-stats">
+                      <div className="org-stat">
+                        <span className="org-stat-value">{orgUsers.length}</span>
+                        <span className="org-stat-label">users</span>
+                      </div>
+                      <div className="org-stat">
+                        <span className="org-stat-value">{adminCount}</span>
+                        <span className="org-stat-label">admins</span>
+                      </div>
+                      <div className="org-stat">
+                        <span className="org-stat-value">{advisorCount}</span>
+                        <span className="org-stat-label">advisors</span>
+                      </div>
+                    </div>
+                    <div className="org-card-slug">/{org.slug}</div>
+
+                    <div className="org-card-actions">
+                      <div className="org-expand-toggle" onClick={() => toggleExpand(org.id)}>
+                        {isExpanded ? '▾ Hide team' : `▸ Team (${orgUsers.length})`}
+                      </div>
+                      <div className="org-expand-toggle" onClick={() => toggleFeaturesExpand(org.id)}>
+                        {isFeatExpanded ? '▾ Hide features' : '⚙️ Features'}
+                      </div>
+                      <button
+                        type="button"
+                        className="org-enter-btn"
+                        onClick={() => handleEnterOrg(org)}
+                      >
+                        Enter Org →
+                      </button>
+                    </div>
+
+                    {isFeatExpanded && (
+                      <div className="org-features-section">
+                        <div className="org-features-header">
+                          <span className="org-features-title">
+                            Admin Feature Access{' '}
+                            {features === null
+                              ? <span className="org-features-status org-features-status--all">All enabled</span>
+                              : <span className="org-features-status">{features.length}/{ALL_FEATURES.length} enabled</span>
+                            }
+                          </span>
+                          <button type="button" className="org-features-grant-all" onClick={() => grantAll(org.id)}>
+                            Grant All
+                          </button>
+                        </div>
+                        <div className="org-features-grid">
+                          {ALL_FEATURES.map(f => {
+                            const checked = features === null || features.includes(f.key)
+                            return (
+                              <label key={f.key} className="org-feature-checkbox">
+                                <input type="checkbox" checked={checked} onChange={() => toggleFeature(org.id, f.key)} />
+                                <span>{f.label}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                        <button
+                          type="button"
+                          className="org-features-save"
+                          onClick={() => saveFeatures(org.id)}
+                          disabled={saving[org.id]}
+                        >
+                          {saving[org.id] ? 'Saving…' : 'Save Features'}
+                        </button>
+                      </div>
+                    )}
+
+                    {isExpanded && (
+                      <div className="org-user-list">
+                        {orgUsers.length === 0 && (
+                          <p className="org-user-empty">No users in this org yet.</p>
+                        )}
+                        {orgUsers.map(u => (
+                          <div key={u.id} className={`org-user-row ${!u.is_active ? 'org-user-row--inactive' : ''}`}>
+                            <div className="org-user-avatar">{(u.full_name || '?')[0].toUpperCase()}</div>
+                            <div className="org-user-info">
+                              <span className="org-user-name">{u.full_name}</span>
+                              <span className="org-user-email">{u.email}</span>
+                            </div>
+                            <div className="org-user-right">
+                              <span className={`role-tag role-tag--${u.role}`}>{u.role.replace(/_/g, ' ')}</span>
+                              {!u.is_active && <span className="org-badge org-badge--inactive">off</span>}
+                              {u.must_change_password && <span className="org-badge org-badge--warn">setup</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

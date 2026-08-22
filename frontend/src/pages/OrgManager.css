@@ -381,3 +381,86 @@
 }
 .org-features-save:hover { opacity: 0.85; }
 .org-features-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Platform filter tabs ── */
+.org-platform-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.org-platform-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.org-platform-tab:hover {
+  border-color: var(--border-hover, rgba(255,255,255,0.2));
+  color: var(--text, #e2e8f0);
+}
+.org-platform-tab--active {
+  background: rgba(255,255,255,0.06);
+  color: var(--text, #e2e8f0);
+  border-color: rgba(255,255,255,0.25);
+}
+.org-platform-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.org-tab-count {
+  background: rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+/* ── Platform group header ── */
+.org-platform-group {
+  margin-bottom: 32px;
+}
+.org-platform-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid;
+}
+.org-platform-group-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.org-platform-group-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.org-platform-group-count {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  margin-left: auto;
+}
+
+/* ── Platform badge on org card ── */
+.org-badge--platform {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+}

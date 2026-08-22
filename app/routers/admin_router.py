@@ -2320,6 +2320,14 @@ def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(re
         )
         user_counts = {row.organization_id: row.cnt for row in rows}
 
+    # Fetch platform names in one query for display in OrgManager
+    from app.models.models import Platform
+    platform_ids = [o.platform_id for o in orgs if getattr(o, "platform_id", None)]
+    platforms = {}
+    if platform_ids:
+        for p in db.query(Platform).filter(Platform.id.in_(platform_ids)).all():
+            platforms[p.id] = {"name": p.name, "slug": p.slug}
+
     return [
         {
             "id": o.id,
@@ -2332,6 +2340,9 @@ def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(re
             "created_at": o.created_at,
             "user_count": user_counts.get(o.id, 0),
             "enabled_features": __import__("json").loads(o.enabled_features) if getattr(o, "enabled_features", None) else None,
+            "platform_id":   getattr(o, "platform_id", None),
+            "platform_name": platforms.get(o.platform_id, {}).get("name") if getattr(o, "platform_id", None) else None,
+            "platform_slug": platforms.get(o.platform_id, {}).get("slug") if getattr(o, "platform_id", None) else None,
         }
         for o in orgs
     ]
