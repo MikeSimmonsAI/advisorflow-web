@@ -152,6 +152,8 @@ class SendInviteRequest(BaseModel):
     expires_hours: int = 72
     # optional personal note appended to email body
     personal_note: Optional[str] = None
+    # content protection: disables right-click, drag, download, text selection in portal
+    protect_content: bool = False
 
 
 class ViewPingRequest(BaseModel):
@@ -449,6 +451,7 @@ def send_proposal_invite(
         recipient_email=req.recipient_email,
         recipient_name=req.recipient_name,
         expires_at=expires_at,
+        protect_content=req.protect_content,
         created_at=_utcnow(),
     )
     db.add(portal_token)
@@ -732,7 +735,8 @@ def resolve_portal_token(
         "branding": branding,
         # Tells the client whether to show download buttons etc.
         "permissions": {
-            "can_download": True,
+            "can_download": not portal_token.protect_content,
+            "protect_content": portal_token.protect_content,
         },
     }
 

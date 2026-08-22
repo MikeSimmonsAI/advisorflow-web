@@ -600,6 +600,18 @@ def run_auto_migrations(engine) -> None:
             conn.rollback()
             print(f"[auto_migrate] appointment_case_files table note: {e}")
 
+    # ── proposal_tokens.protect_content column ────────────────────────────────
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE proposal_tokens ADD COLUMN IF NOT EXISTS protect_content BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            conn.commit()
+            print("[auto_migrate] proposal_tokens.protect_content ensured.")
+    except (OperationalError, ProgrammingError) as e:
+        conn.rollback()
+        print(f"[auto_migrate] proposal_tokens.protect_content note: {e}")
+
     # ── proposal_files table ──────────────────────────────────────────────────
     try:
         with engine.connect() as conn:

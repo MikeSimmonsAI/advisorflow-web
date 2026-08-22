@@ -48,7 +48,7 @@ function TextBlock({ block }) {
   )
 }
 
-function ImageBlock({ block, onDownload, canDownload }) {
+function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) {
   const [loaded, setLoaded] = useState(false)
   if (!block.file_url) return null
   return (
@@ -64,13 +64,23 @@ function ImageBlock({ block, onDownload, canDownload }) {
         background: 'rgba(0,0,0,0.3)',
         opacity: loaded ? 1 : 0,
         transition: 'opacity 0.4s ease',
+        position: 'relative',
       }}>
         <img
           src={block.file_url}
           alt={block.content || 'Image'}
           onLoad={() => setLoaded(true)}
+          draggable={false}
           style={{ width: '100%', display: 'block', maxHeight: 600, objectFit: 'contain' }}
         />
+        {/* Transparent overlay blocks right-click → Save Image */}
+        {isProtected && (
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'transparent',
+            zIndex: 1,
+          }} onContextMenu={e => e.preventDefault()} />
+        )}
       </div>
       {canDownload && block.file_url && (
         <button
@@ -375,6 +385,7 @@ export default function PortalViewer() {
   const pingRef = useRef(null)
   const containerRef = useRef(null)
   const canDownload = useRef(true)
+  const protectContent = useRef(false)
 
   // Load from sessionStorage (set by PortalAccess)
   useEffect(() => {
@@ -396,6 +407,7 @@ export default function PortalViewer() {
       setProposal(p)
       viewIdRef.current = viewId
       canDownload.current = perms.can_download !== false
+      protectContent.current = !!perms.protect_content
 
       // Fade in
       setTimeout(() => setRevealed(true), 80)
@@ -425,6 +437,42 @@ export default function PortalViewer() {
       }).catch(() => {})
     }, 15000)
     return () => clearInterval(pingRef.current)
+  }, [proposal])
+
+  // Content protection
+  useEffect(() => {
+    if (!proposal || !protectContent.current) return
+
+    // Disable right-click
+    const blockContext = e => e.preventDefault()
+    document.addEventListener('contextmenu', blockContext)
+
+    // Disable drag on images
+    const blockDrag = e => e.preventDefault()
+    document.addEventListener('dragstart', blockDrag)
+
+    // Block Ctrl+S, Ctrl+P, Ctrl+U, Ctrl+A
+    const blockKeys = e => {
+      if (e.ctrlKey || e.metaKey) {
+        if (['s', 'p', 'u', 'a'].includes(e.key.toLowerCase())) {
+          e.preventDefault()
+          return false
+        }
+      }
+    }
+    document.addEventListener('keydown', blockKeys)
+
+    // CSS: disable text selection and image drag
+    document.body.style.userSelect = 'none'
+    document.body.style.webkitUserSelect = 'none'
+
+    return () => {
+      document.removeEventListener('contextmenu', blockContext)
+      document.removeEventListener('dragstart', blockDrag)
+      document.removeEventListener('keydown', blockKeys)
+      document.body.style.userSelect = ''
+      document.body.style.webkitUserSelect = ''
+    }
   }, [proposal])
 
   // Final close event on unload
@@ -529,8 +577,19 @@ export default function PortalViewer() {
             EvoSys Pro
           </span>
         </div>
-        <div style={{ fontSize: 12, color: '#445' }}>
-          Secure Proposal Portal
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {protectContent.current && (
+            <div style={{
+              fontSize: 11, color: '#445',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 6, padding: '3px 8px',
+              letterSpacing: '0.03em',
+            }}>
+              🔒 Protected
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: '#445' }}>Secure Proposal Portal</div>
         </div>
       </div>
 
@@ -612,7 +671,7 @@ export default function PortalViewer() {
             style={{ animationDelay: `${0.15 * idx}s`, marginBottom: block.block_type === 'divider' ? 40 : 56 }}
           >
             {block.block_type === 'text'        && <TextBlock block={block} />}
-            {block.block_type === 'image'       && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
+            {block.block_type === 'image'       && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} protected={protectContent.current} />}
             {block.block_type === 'pdf'         && <PdfBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
             {block.block_type === 'video'       && <VideoBlock block={block} />}
             {block.block_type === 'divider'     && <DividerBlock />}

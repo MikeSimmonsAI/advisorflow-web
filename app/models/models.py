@@ -1267,6 +1267,10 @@ class ProposalToken(Base):
     # Revocation: set to a past datetime to hard-block the token
     revoked_at      = Column(DateTime, nullable=True)
 
+    # Content protection: disables right-click, drag, download buttons,
+    # text selection, and keyboard save/print shortcuts in the portal
+    protect_content = Column(Boolean, default=False, nullable=False)
+
     created_at      = Column(DateTime, default=datetime.utcnow)
 
     proposal        = relationship("Proposal", back_populates="tokens")

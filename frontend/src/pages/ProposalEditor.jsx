@@ -302,6 +302,7 @@ function SendModal({ proposal, onClose, onSent }) {
     recipient_name: proposal.client_name || '',
     personal_note: '',
     expires_hours: 72,
+    protect_content: false,
   })
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState(null)
@@ -412,6 +413,43 @@ function SendModal({ proposal, onClose, onSent }) {
                 }}
               />
             </div>
+            {/* Content protection toggle */}
+            <div
+              onClick={() => setForm(p => ({ ...p, protect_content: !p.protect_content }))}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                background: form.protect_content ? 'rgba(8,124,255,0.08)' : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${form.protect_content ? 'rgba(8,124,255,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                borderRadius: 10, padding: '12px 14px',
+                cursor: 'pointer', marginBottom: 20,
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+            >
+              {/* Toggle pill */}
+              <div style={{
+                width: 36, height: 20, borderRadius: 10, flexShrink: 0,
+                background: form.protect_content ? 'var(--signal-blue, #087cff)' : 'rgba(255,255,255,0.12)',
+                position: 'relative', transition: 'background 0.2s',
+              }}>
+                <div style={{
+                  position: 'absolute', top: 2,
+                  left: form.protect_content ? 18 : 2,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: '#fff',
+                  transition: 'left 0.2s',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: form.protect_content ? '#fff' : '#aab' }}>
+                  🔒 Protect content
+                </div>
+                <div style={{ fontSize: 11, color: '#556', marginTop: 2 }}>
+                  Disables right-click, download, drag, text copy, and print shortcuts
+                </div>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: 12 }}>
               <button
                 type="button"
