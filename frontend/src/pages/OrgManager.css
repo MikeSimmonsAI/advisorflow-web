@@ -507,3 +507,62 @@
   color: var(--text-muted, #64748b);
   font-style: italic;
 }
+
+/* ── Inline org name editing ── */
+.org-name-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.org-name-input {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(47,182,255,0.5);
+  background: var(--bg-secondary, rgba(255,255,255,0.06));
+  color: var(--text-primary, #e2e8f0);
+  outline: none;
+}
+
+.org-name-save-btn,
+.org-name-cancel-btn {
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.org-name-save-btn {
+  background: rgba(47,182,255,0.2);
+  color: #2fb6ff;
+}
+
+.org-name-save-btn:hover:not(:disabled) {
+  background: rgba(47,182,255,0.35);
+}
+
+.org-name-cancel-btn {
+  background: rgba(148,163,184,0.15);
+  color: #94a3b8;
+}
+
+.org-name-cancel-btn:hover {
+  background: rgba(148,163,184,0.25);
+}
+
+.org-name-edit-hint {
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.org-card-name:hover .org-name-edit-hint {
+  opacity: 1;
+}

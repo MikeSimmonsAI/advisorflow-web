@@ -62,6 +62,8 @@ export default function OrgManager() {
   const [orgFeatures, setOrgFeatures] = useState({})
   const [saving, setSaving] = useState({})
   const [platformSaving, setPlatformSaving] = useState({})
+  const [editingName, setEditingName] = useState({})   // { [orgId]: draftName }
+  const [nameSaving, setNameSaving] = useState({})
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -137,6 +139,29 @@ export default function OrgManager() {
       alert('Failed to save: ' + e.message)
     } finally {
       setSaving(prev => ({ ...prev, [orgId]: false }))
+    }
+  }
+
+  function startEditName(org) {
+    setEditingName(prev => ({ ...prev, [org.id]: org.name }))
+  }
+
+  function cancelEditName(orgId) {
+    setEditingName(prev => { const n = { ...prev }; delete n[orgId]; return n })
+  }
+
+  async function saveOrgName(orgId) {
+    const newName = (editingName[orgId] || '').trim()
+    if (!newName) return
+    setNameSaving(prev => ({ ...prev, [orgId]: true }))
+    try {
+      await api.put(`/admin/organizations/${orgId}`, { name: newName })
+      setOrgs(prev => prev.map(o => o.id === orgId ? { ...o, name: newName } : o))
+      cancelEditName(orgId)
+    } catch (e) {
+      alert('Failed to rename: ' + e.message)
+    } finally {
+      setNameSaving(prev => ({ ...prev, [orgId]: false }))
     }
   }
 
@@ -292,7 +317,28 @@ export default function OrgManager() {
                   >
                     <div className="org-card-top">
                       <div className="org-card-name-row">
-                        <h2 className="org-card-name">{org.name}</h2>
+                        {editingName[org.id] !== undefined ? (
+                          <div className="org-name-edit">
+                            <input
+                              className="org-name-input"
+                              value={editingName[org.id]}
+                              autoFocus
+                              onChange={e => setEditingName(prev => ({ ...prev, [org.id]: e.target.value }))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveOrgName(org.id)
+                                if (e.key === 'Escape') cancelEditName(org.id)
+                              }}
+                            />
+                            <button className="org-name-save-btn" onClick={() => saveOrgName(org.id)} disabled={nameSaving[org.id]}>
+                              {nameSaving[org.id] ? '…' : '✓'}
+                            </button>
+                            <button className="org-name-cancel-btn" onClick={() => cancelEditName(org.id)}>✕</button>
+                          </div>
+                        ) : (
+                          <h2 className="org-card-name" title="Click to rename" onClick={() => startEditName(org)} style={{ cursor: 'pointer' }}>
+                            {org.name} <span className="org-name-edit-hint">✏️</span>
+                          </h2>
+                        )}
                         {!org.is_active && <span className="org-badge org-badge--inactive">Inactive</span>}
                       </div>
                       <div className="org-card-badges">
