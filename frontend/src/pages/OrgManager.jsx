@@ -18,15 +18,29 @@ const ALL_FEATURES = [
   { key: 'compliance',       label: 'Compliance' },
   { key: 'audit_log',        label: 'Audit Log' },
 ]
+// Plan tiers — matches BookaBoost / EvoSys Pro pricing
+const PLANS = [
+  { value: 'trial',        label: 'Trial',        price: null },
+  { value: 'starter',      label: 'Starter',      price: '$500/mo' },
+  { value: 'growth',       label: 'Growth',       price: '$1,000/mo' },
+  { value: 'professional', label: 'Professional', price: '$2,000/mo' },
+  { value: 'enterprise',   label: 'Enterprise',   price: 'Custom' },
+]
+
 // Features each plan tier includes by default
 const PLAN_FEATURES = {
-  trial: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log'],
-  standard: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc'],
-  enterprise: null, // null = all features
+  trial:        ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log'],
+  starter:      ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns'],
+  growth:       ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc'],
+  professional: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc', 'crm', 'crm_connectors'],
+  enterprise:   null, // null = all features
+  // legacy alias kept so existing orgs on 'standard' still work
+  standard:     ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc'],
 }
 
 function getPlanLabel(plan) {
-  return { trial: 'TRIAL', standard: 'STANDARD', enterprise: 'ENTERPRISE' }[plan] || (plan || 'TRIAL').toUpperCase()
+  const found = PLANS.find(p => p.value === plan)
+  return found ? found.label.toUpperCase() : (plan || 'TRIAL').toUpperCase()
 }
 
 function getBelowPlanCount(plan, currentFeatures) {
@@ -62,6 +76,7 @@ export default function OrgManager() {
   const [orgFeatures, setOrgFeatures] = useState({})
   const [saving, setSaving] = useState({})
   const [platformSaving, setPlatformSaving] = useState({})
+  const [planSaving, setPlanSaving] = useState({})
   const [editingName, setEditingName] = useState({})   // { [orgId]: draftName }
   const [nameSaving, setNameSaving] = useState({})
   const navigate = useNavigate()
@@ -139,6 +154,18 @@ export default function OrgManager() {
       alert('Failed to save: ' + e.message)
     } finally {
       setSaving(prev => ({ ...prev, [orgId]: false }))
+    }
+  }
+
+  async function saveOrgPlan(orgId, newPlan) {
+    setPlanSaving(prev => ({ ...prev, [orgId]: true }))
+    try {
+      await api.put(`/admin/organizations/${orgId}`, { plan: newPlan })
+      setOrgs(prev => prev.map(o => o.id === orgId ? { ...o, plan: newPlan } : o))
+    } catch (e) {
+      alert('Failed to update plan: ' + e.message)
+    } finally {
+      setPlanSaving(prev => ({ ...prev, [orgId]: false }))
     }
   }
 
@@ -352,10 +379,28 @@ export default function OrgManager() {
                           </span>
                         )}
                         <span className={`org-badge org-badge--plan org-badge--${(org.plan || 'trial').toLowerCase()}`}>
-                          {org.plan || 'trial'}
+                          {getPlanLabel(org.plan || 'trial')}
                         </span>
                         <span className="org-badge org-badge--industry">{org.industry || 'general'}</span>
                       </div>
+                    </div>
+
+                    {/* ── Plan selector ── */}
+                    <div className="org-platform-assign">
+                      <label className="org-platform-assign-label">Plan</label>
+                      <select
+                        className="org-platform-assign-select org-plan-select"
+                        value={org.plan || 'trial'}
+                        disabled={planSaving[org.id]}
+                        onChange={e => saveOrgPlan(org.id, e.target.value)}
+                      >
+                        {PLANS.map(p => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}{p.price ? ` — ${p.price}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {planSaving[org.id] && <span className="org-platform-saving">Saving…</span>}
                     </div>
 
                     {/* ── Platform assignment ── */}

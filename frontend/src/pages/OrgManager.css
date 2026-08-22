@@ -112,10 +112,14 @@
   letter-spacing: 0.03em;
   white-space: nowrap;
 }
-.org-badge--plan { background: var(--signal-blue-dim); color: var(--signal-blue); }
-.org-badge--trial { background: rgba(120,120,120,0.12); color: var(--text-secondary); }
-.org-badge--standard { background: var(--signal-blue-dim); color: var(--signal-blue); }
-.org-badge--enterprise { background: rgba(120,220,100,0.12); color: #5ce87c; }
+.org-badge--plan        { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.org-badge--trial       { background: rgba(120,120,120,0.12); color: var(--text-secondary); }
+.org-badge--starter     { background: rgba(47,182,255,0.12);  color: #2fb6ff; }
+.org-badge--growth      { background: rgba(139,92,246,0.12);  color: #a78bfa; }
+.org-badge--professional{ background: rgba(245,158,11,0.12);  color: #fbbf24; }
+.org-badge--enterprise  { background: rgba(120,220,100,0.12); color: #5ce87c; }
+/* legacy */
+.org-badge--standard    { background: var(--signal-blue-dim); color: var(--signal-blue); }
 .org-badge--industry { background: rgba(255,200,80,0.1); color: #c8a020; }
 .org-badge--inactive { background: rgba(240,80,80,0.12); color: #f55; }
 .org-badge--warn { background: rgba(255,170,0,0.12); color: #fa0; }
