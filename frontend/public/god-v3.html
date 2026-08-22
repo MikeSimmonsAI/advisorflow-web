@@ -218,10 +218,10 @@ body.god #main{margin-top:calc(36px + var(--top-h) + var(--intel-h));height:calc
 </div>
 
 <div id="intel">
-  <span class="intel-prefix">⌘ INTEL</span>
+  <span class="intel-prefix">⌘ SEARCH</span>
   <div class="intel-div"></div>
-  <input class="intel-input" id="intel-input" placeholder="Navigate or query: 'orgs' · 'leads hot' · 'new org' · 'revenue' …" autocomplete="off" onkeydown="handleIntelKey(event)">
-  <span class="intel-hint">↵ execute · esc clear</span>
+  <input class="intel-input" id="intel-input" placeholder="Type to navigate: 'orgs' · 'leads' · 'revenue' · 'health' · 'new org' · 'new user' · 'refresh'" autocomplete="off" onkeydown="handleIntelKey(event)">
+  <span class="intel-hint">↵ go · esc clear</span>
 </div>
 
 <div id="main">
@@ -658,7 +658,9 @@ async function loadRealData(){
       STATE.organizations=orgsData.orgs.map(o=>{
         const pRow=platforms.find(p=>p.id===o.platform_id);
         const slug=pRow?pRow.slug:'bookaboost';
-        const entry={id:o.id,name:o.name,shortName:o.name.split(' ')[0],platform:slug,leads:o.lead_count||0,users:o.user_count||0,mrr:o.plan==='trial'?0:297,plan:o.plan||'trial',status:o.is_active?'active':'inactive',automation:true,appointments:Math.floor((o.lead_count||0)*0.11),generatedValue:(o.plan==='trial'?0:297)*400};
+        const planMrr={trial:0,starter:500,growth:1000,professional:2000,enterprise:2000,pro:297};
+        const mrrVal=planMrr[o.plan]??0;
+        const entry={id:o.id,name:o.name,shortName:o.name.split(' ')[0],platform:slug,leads:o.lead_count||0,users:o.user_count||0,mrr:mrrVal,plan:o.plan||'trial',status:o.is_active?'active':'inactive',automation:true,appointments:Math.floor((o.lead_count||0)*0.11),generatedValue:mrrVal*400};
         orgById[o.id]=entry;return entry;
       });
     }
@@ -673,6 +675,13 @@ async function loadRealData(){
       STATE.cadences=cadencesData.cadences;
     }
     STATE.kpis.mrr=STATE.organizations.reduce((s,o)=>s+o.mrr,0);
+    STATE.kpis.bookings=STATE.organizations.reduce((s,o)=>s+(o.appointments||0),0);
+    // Seed forecasting sliders from real data (leads per month estimate)
+    const leadsPerMonth=Math.max(10,Math.min(500,Math.round(STATE.kpis.totalLeads/3)));
+    const avgMrr=STATE.organizations.filter(o=>o.mrr>0).reduce((s,o)=>s+o.mrr,0)||0;
+    const avgDeal=avgMrr>0?Math.round(avgMrr*12/Math.max(1,STATE.kpis.bookings)):2400;
+    STATE._seedLeadsPerMonth=leadsPerMonth;
+    STATE._seedAvgDeal=Math.min(10000,Math.max(500,avgDeal));
     renderScreen(STATE.currentScreen);
     buildScopeBar();
     showToast('success','Data loaded','Live backend data synced');
@@ -883,6 +892,9 @@ function renderConversation(){
     const bookRate=c.book_rate!=null?c.book_rate:(c.bookRate??0);
     const label=c.org_name??c.name??'Unknown';
     const templates=c.templates_count!=null?`<div style="font-size:11px;color:var(--text-3);margin-top:2px">${c.templates_count} template${c.templates_count!==1?'s':''} configured</div>`:'';
+    const orgId=c.org_id||'';
+    const enterBtn=orgId?`<button class="btn btn-xs btn-gold" onclick="enterOrg('${orgId}','${label.replace(/'/g,"\\'")}')">→ Enter Org</button>`:'';
+    const configBtn=orgId?`<button class="btn btn-xs" onclick="openCadenceConfigDrawer('${orgId}','${label.replace(/'/g,"\\'")}')">⚙ Configure</button>`:'';
     return `<div class="card mb16">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
         <div style="flex:1">
@@ -892,12 +904,13 @@ function renderConversation(){
         </div>
         <span class="badge badge-${statusCls}">${c.status.toUpperCase()}</span>
       </div>
-      <div class="grid-4">
+      <div class="grid-4" style="margin-bottom:12px">
         <div><div class="kpi-label">Enrolled</div><div class="mono" style="font-size:18px;font-weight:700">${enrolled.toLocaleString()}</div></div>
         <div><div class="kpi-label">Active Now</div><div class="mono t-blue" style="font-size:18px;font-weight:700">${activeCount.toLocaleString()}</div></div>
         <div><div class="kpi-label">Reply Rate</div><div class="mono t-amber" style="font-size:18px;font-weight:700">${Math.round(replyRate*100)}%</div></div>
         <div><div class="kpi-label">Book Rate</div><div class="mono t-green" style="font-size:18px;font-weight:700">${Math.round(bookRate*100)}%</div></div>
       </div>
+      <div style="display:flex;gap:8px">${enterBtn}${configBtn}</div>
     </div>`;
   }).join('');
 }
@@ -929,6 +942,11 @@ function renderBrands(){
 // FORECASTING
 // ══════════════════════════════════════
 function updateForecast(){
+  // Seed slider defaults from real data on first render
+  const lSlider=document.getElementById('sl-leads-pm');
+  const dSlider=document.getElementById('sl-deal-val');
+  if(lSlider&&STATE._seedLeadsPerMonth&&!lSlider._seeded){lSlider.value=STATE._seedLeadsPerMonth;lSlider._seeded=true;}
+  if(dSlider&&STATE._seedAvgDeal&&!dSlider._seeded){dSlider.value=STATE._seedAvgDeal;dSlider._seeded=true;}
   const conv=parseInt(document.getElementById('sl-conversion')?.value||22)/100;
   const deal=parseInt(document.getElementById('sl-deal-val')?.value||2400);
   const leads=parseInt(document.getElementById('sl-leads-pm')?.value||80);
@@ -1199,6 +1217,7 @@ function openDrawer(type,data){
     case 'org-detail':{
       const o=data;
       const pm=PM[o.platform]||{label:o.platform,color:'#4a9eff'};
+      const planColors={trial:'badge-trial',starter:'badge-pro',growth:'badge-pro',professional:'badge-pro',enterprise:'badge-god',pro:'badge-pro'};
       t.textContent=o.name;
       b.innerHTML=`
         <div class="grid-2 mb16">
@@ -1208,9 +1227,14 @@ function openDrawer(type,data){
           <div class="card card-sm"><div class="kpi-label">Gen. Value</div><div class="kpi-value t-gold">$${(o.generatedValue||0).toLocaleString()}</div></div>
         </div>
         <div class="fg"><div class="fl">Platform</div><div style="color:${pm.color};font-weight:600">${pm.label}</div></div>
-        <div class="fg"><div class="fl">Plan</div><span class="badge badge-${o.plan==='pro'?'pro':'trial'}">${(o.plan||'').toUpperCase()}</span></div>
-        <div class="fg"><div class="fl">Status</div><span class="badge badge-${o.status}">${o.status}</span></div>`;
-      f.innerHTML=`<button class="btn btn-primary" onclick="setScope('${o.platform}');closeDrawer();nav('leads')">View Leads</button><button class="btn btn-red" onclick="showToast('warning','Suspended','${o.name} suspended');closeDrawer()">Suspend</button><button class="btn" onclick="closeDrawer()">Close</button>`;
+        <div class="fg"><div class="fl">Plan</div><span class="badge ${planColors[o.plan]||'badge-trial'}">${(o.plan||'trial').toUpperCase()}</span></div>
+        <div class="fg"><div class="fl">Status</div><span class="badge badge-${o.status}">${o.status}</span></div>
+        <div class="sep"></div>
+        <div class="fh" style="color:var(--text-2)">⚡ Enter Org navigates you into this org's workspace. Suspend blocks all org users immediately — you can reactivate anytime.</div>`;
+      const suspBtn=o.status==='inactive'
+        ?`<button class="btn btn-green btn-sm" onclick="reactivateOrg('${o.id}',this)">↑ Reactivate</button>`
+        :`<button class="btn btn-red btn-sm" onclick="suspendOrg('${o.id}',this)">⊘ Suspend</button>`;
+      f.innerHTML=`<button class="btn btn-gold btn-sm" onclick="enterOrg('${o.id}')">→ Enter Org</button><button class="btn btn-primary btn-sm" onclick="setScope('${o.platform}');closeDrawer();nav('leads')">View Leads</button>${suspBtn}<button class="btn btn-sm" onclick="closeDrawer()">Close</button>`;
       break;}
   }
 }
@@ -1270,13 +1294,87 @@ async function submitCreateBrand(){
   }catch(e){showToast('error','Create failed',e.message);}
 }
 
-function submitCreateCadence(){
+async function submitCreateCadence(){
   const name=document.getElementById('d-cad-name')?.value?.trim();
   const platform=document.getElementById('d-cad-platform')?.value;
+  const sms=document.getElementById('d-cad-sms')?.value?.trim();
   if(!name){showToast('error','Missing field','Cadence name required');return;}
+  // Templates are configured at the org level via Org Settings, not at the god level.
+  // Save locally and show guidance.
   STATE.cadences.push({id:Date.now(),name,platform,status:'draft',sent:0,openRate:0,replyRate:0,bookRate:0});
   closeDrawer();renderConversation();
-  showToast('success','Cadence Created',name+' saved as draft');
+  showToast('success','Cadence Draft Saved',name+' · Configure templates in Org Settings → Cadence');
+  logAction('create_cadence',name,platform);
+}
+
+async function enterOrg(orgId){
+  const org=STATE.organizations.find(o=>String(o.id)===String(orgId));
+  const orgName=org?org.name:'Org';
+  try{
+    await apiPost('/god/orgs/'+orgId+'/impersonate',{});
+    try{localStorage.setItem('god_entered_org',JSON.stringify({id:orgId,name:orgName}));}catch(e){}
+    showToast('success','Entering Org','Navigating to '+orgName+'…');
+    setTimeout(()=>{window.top.location.href='/';},600);
+    logAction('enter_org',orgName,'god');
+  }catch(e){
+    showToast('error','Enter Org Failed',e.message);
+  }
+}
+
+async function suspendOrg(orgId,btn){
+  const org=STATE.organizations.find(o=>String(o.id)===String(orgId));
+  const orgName=org?org.name:'Organization';
+  if(!confirm('Suspend '+orgName+'?\n\nAll users in this org will be blocked from logging in. You can reactivate at any time.'))return;
+  if(btn){btn.disabled=true;btn.textContent='…';}
+  try{
+    await apiPost('/god/orgs/'+orgId+'/deactivate',{});
+    if(org) org.status='inactive';
+    closeDrawer();renderOrgs();
+    showToast('warning','Org Suspended',orgName+' has been deactivated');
+    logAction('suspend_org',orgName,'global');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='⊘ Suspend';}
+    showToast('error','Suspend Failed',e.message);
+  }
+}
+
+async function reactivateOrg(orgId,btn){
+  const org=STATE.organizations.find(o=>String(o.id)===String(orgId));
+  const orgName=org?org.name:'Organization';
+  if(btn){btn.disabled=true;btn.textContent='…';}
+  try{
+    await apiPost('/god/orgs/'+orgId+'/activate',{});
+    if(org) org.status='active';
+    closeDrawer();renderOrgs();
+    showToast('success','Org Reactivated',orgName+' is now active');
+    logAction('reactivate_org',orgName,'global');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='↑ Reactivate';}
+    showToast('error','Reactivate Failed',e.message);
+  }
+}
+
+function openCadenceConfigDrawer(orgId,orgName){
+  const t=document.getElementById('d-title');
+  const b=document.getElementById('d-body');
+  const f=document.getElementById('d-foot');
+  const overlay=document.getElementById('overlay');
+  const drawer=document.getElementById('drawer');
+  overlay.style.display='block';
+  drawer.classList.add('open');
+  t.textContent='Cadence Config — '+orgName;
+  b.innerHTML=`
+    <div style="margin-bottom:16px;font-size:13px;color:var(--text-2)">Cadence templates are managed at the org level, inside the org's Settings page.</div>
+    <div class="card card-sm" style="margin-bottom:14px;border-color:rgba(30,240,168,0.2);background:rgba(30,240,168,0.04)">
+      <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:6px">To configure SMS/Email templates:</div>
+      <ol style="font-size:12px;color:var(--text-2);padding-left:16px;display:flex;flex-direction:column;gap:4px">
+        <li>Click "→ Enter Org" to navigate into this org's workspace</li>
+        <li>Go to <strong>Settings → Cadence Templates</strong></li>
+        <li>Add/edit SMS and email sequences for outreach</li>
+      </ol>
+    </div>
+    <div class="fh" style="color:var(--text-3)">Org ID: ${orgId}</div>`;
+  f.innerHTML=`<button class="btn btn-gold" style="flex:1" onclick="enterOrg('${orgId}')">→ Enter Org</button><button class="btn" onclick="closeDrawer()">Close</button>`;
 }
 
 // ══════════════════════════════════════

@@ -567,6 +567,38 @@ def god_activate_user(
     return {"user_id": user_id, "email": target.email, "is_active": True}
 
 
+@router.post("/orgs/{org_id}/deactivate")
+def god_deactivate_org(
+    org_id: str,
+    god:    User = Depends(require_god),
+    db:     Session = Depends(get_db),
+):
+    """Suspend an organization — blocks all org users from accessing the platform."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org.is_active = False
+    db.commit()
+    log.info("AUDIT: god_admin %s suspended org %s (%s)", god.email, org.name, org_id)
+    return {"org_id": org_id, "name": org.name, "is_active": False}
+
+
+@router.post("/orgs/{org_id}/activate")
+def god_activate_org(
+    org_id: str,
+    god:    User = Depends(require_god),
+    db:     Session = Depends(get_db),
+):
+    """Reactivate a previously suspended organization."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org.is_active = True
+    db.commit()
+    log.info("AUDIT: god_admin %s reactivated org %s (%s)", god.email, org.name, org_id)
+    return {"org_id": org_id, "name": org.name, "is_active": True}
+
+
 @router.post("/orgs/{org_id}/impersonate")
 def god_impersonate_org(
     org_id: str,
