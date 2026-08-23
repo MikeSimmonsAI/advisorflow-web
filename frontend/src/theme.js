@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AdvisorFlow Platform Theme Detection
  * ---------------------------------------
  * Reads window.location.hostname at load time and returns the correct
@@ -6,14 +6,14 @@
  * This file is the single place that makes it look different per brand.
  *
  * Brand detection order:
- *   1. evosyspro  → app.evosyspro.live  (dark navy, electric blue, green)
- *   2. harmonyhustle → app.harmonyhustle.com (TBD — real estate)
- *   3. default    → app.bookaboost.live + localhost (BookaBoost existing theme)
+ *   1. evosyspro  â†’ app.evosyspro.live  (dark navy, electric blue, green)
+ *   2. harmonyhustle â†’ app.harmonyhustle.com (TBD â€” real estate)
+ *   3. default    â†’ app.bookaboost.live + localhost (BookaBoost existing theme)
  *
  * How it works:
  *   applyTheme() injects a data-theme attribute on <html>.
  *   CSS in index.css uses [data-theme="evosyspro"] overrides.
- *   No JavaScript theme state to manage — pure CSS variable overrides.
+ *   No JavaScript theme state to manage â€” pure CSS variable overrides.
  */
 
 export const THEMES = {
@@ -84,7 +84,7 @@ export function initTheme() {
 }
 
 /**
- * Brand config per theme — logos, display names, support emails, colors.
+ * Brand config per theme â€” logos, display names, support emails, colors.
  * Used in Layout.jsx to render the correct sidebar logo and brand name.
  */
 export const BRAND_CONFIG = {
@@ -105,7 +105,7 @@ export const BRAND_CONFIG = {
     shortName: 'E',
     supportEmail: 'support@evosyspro.live',
     accentColor: '#087cff',
-    logoUrl: 'https://evosyspro.live/assets/evosys-logo.png',
+    logoUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMjAgNjAiPjxyZWN0IHg9IjAiIHk9IjQiIHdpZHRoPSI1MiIgaGVpZ2h0PSI1MiIgcng9IjEwIiBmaWxsPSIjMDg3Y2ZmIi8+PHJlY3QgeD0iMTMiIHk9IjE2IiB3aWR0aD0iMjYiIGhlaWdodD0iNSIgcng9IjIuNSIgZmlsbD0id2hpdGUiLz48cmVjdCB4PSIxMyIgeT0iMjciIHdpZHRoPSIyMCIgaGVpZ2h0PSI1IiByeD0iMi41IiBmaWxsPSJ3aGl0ZSIvPjxyZWN0IHg9IjEzIiB5PSIzOSIgd2lkdGg9IjI2IiBoZWlnaHQ9IjUiIHJ4PSIyLjUiIGZpbGw9IndoaXRlIi8+PHRleHQgeD0iNjQiIHk9IjI4IiBmb250LWZhbWlseT0iQXJpYWwsSGVsdmV0aWNhLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMwODdjZmYiPkV2b1N5czwvdGV4dD48dGV4dCB4PSI2NCIgeT0iNTAiIGZvbnQtZmFtaWx5PSJBcmlhbCxIZWx2ZXRpY2Esc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjQwMCIgZmlsbD0iIzdhYjNmZiIgbGV0dGVyLXNwYWNpbmc9IjEiPlBSTzwvdGV4dD48L3N2Zz4=',
   },
   [THEMES.HARMONYHUSTLE]: {
     displayName: 'Harmony Hustle',
