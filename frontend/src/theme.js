@@ -99,6 +99,7 @@ export const BRAND_CONFIG = {
     shortName: 'BB',
     supportEmail: 'support@bookaboost.live',
     accentColor: '#c9973d',
+    websiteUrl: 'https://bookaboost.live',
   },
   [THEMES.EVOSYSPRO]: {
     displayName: 'EvoSys Pro',
@@ -106,11 +107,13 @@ export const BRAND_CONFIG = {
     supportEmail: 'support@evosyspro.live',
     accentColor: '#087cff',
     logoUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMjAgNjAiPjxyZWN0IHg9IjAiIHk9IjQiIHdpZHRoPSI1MiIgaGVpZ2h0PSI1MiIgcng9IjEwIiBmaWxsPSIjMDg3Y2ZmIi8+PHJlY3QgeD0iMTMiIHk9IjE2IiB3aWR0aD0iMjYiIGhlaWdodD0iNSIgcng9IjIuNSIgZmlsbD0id2hpdGUiLz48cmVjdCB4PSIxMyIgeT0iMjciIHdpZHRoPSIyMCIgaGVpZ2h0PSI1IiByeD0iMi41IiBmaWxsPSJ3aGl0ZSIvPjxyZWN0IHg9IjEzIiB5PSIzOSIgd2lkdGg9IjI2IiBoZWlnaHQ9IjUiIHJ4PSIyLjUiIGZpbGw9IndoaXRlIi8+PHRleHQgeD0iNjQiIHk9IjI4IiBmb250LWZhbWlseT0iQXJpYWwsSGVsdmV0aWNhLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMwODdjZmYiPkV2b1N5czwvdGV4dD48dGV4dCB4PSI2NCIgeT0iNTAiIGZvbnQtZmFtaWx5PSJBcmlhbCxIZWx2ZXRpY2Esc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjQwMCIgZmlsbD0iIzdhYjNmZiIgbGV0dGVyLXNwYWNpbmc9IjEiPlBSTzwvdGV4dD48L3N2Zz4=',
+    websiteUrl: 'https://evosyspro.live',
   },
   [THEMES.HARMONYHUSTLE]: {
     displayName: 'Harmony Hustle',
     shortName: 'HH',
     supportEmail: 'support@harmonyhustle.com',
     accentColor: '#10b981',
+    websiteUrl: 'https://harmonyhustle.com',
   },
 }
