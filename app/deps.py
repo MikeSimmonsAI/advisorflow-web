@@ -17,16 +17,6 @@ _log = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./advisorflow.db")
 
 # ── Connection pool hardening ──────────────────────────────────────────────
-# Each Render service gets its own isolated pool. A slow or runaway org
-# query cannot starve another platform's connections because each service
-# only holds connections from its own pool.
-#
-# pool_size     = base connections kept open (5 is safe for Render Starter)
-# max_overflow  = burst connections above pool_size (total max = 15)
-# pool_timeout  = raise after 30s waiting for a free connection (vs hanging forever)
-# pool_recycle  = replace connections every 30 min (avoids stale/dropped connections)
-# pool_pre_ping = verify connection is alive before handing it out (prevents "connection closed" errors)
-#
 _is_sqlite = "sqlite" in DATABASE_URL
 _pool_kwargs = (
     {"connect_args": {"check_same_thread": False}}
@@ -63,9 +53,7 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
-    # Single-session enforcement: reject tokens from previous logins.
-    # jti is present on all tokens issued after the session_token migration.
-    # Tokens without jti (legacy) are accepted until they expire naturally.
+    # Single-session enforcement
     token_jti = payload.get("jti")
     if token_jti and user.session_token != token_jti:
         raise HTTPException(
@@ -73,10 +61,7 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             detail="Session expired. Please log in again.",
         )
 
-    # Enforce must_change_password server-side: any endpoint other than
-    # /auth/change-password and /auth/login is blocked until the user sets a
-    # real password. The frontend shows a modal but we must also block at the
-    # API level so a motivated user can't skip it with raw HTTP calls.
+    # Enforce must_change_password server-side
     if user.must_change_password:
         path = request.url.path
         if not path.startswith("/auth/"):
@@ -85,24 +70,26 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="You must change your password before continuing. Use /auth/change-password."
             )
 
-    # Cross-org context override: allows the platform OWNER (god_admin only) to
-    # "enter" any org's data without logging in as that org's user.
-    # super_admin is intentionally excluded — a super_admin is scoped to their
-    # own org only and has no cross-org visibility. Only god_admin can traverse
-    # platform-wide. expunge() detaches the user object from SQLAlchemy's session
-    # BEFORE we mutate organization_id so the change is never written to the DB.
+    # Cross-org context: god_admin can view any org's data or see ALL orgs combined.
+    # expunge() detaches the user from the SQLAlchemy session BEFORE any mutation
+    # so changes are never written back to the DB.
     if user.role == "god_admin":
         org_override = request.headers.get("X-Org-Override")
+        db.expunge(user)  # always detach first
         if org_override:
             target_org = db.query(Organization).filter(Organization.id == org_override).first()
             if target_org:
                 _log.info(
-                    "AUDIT: super_admin %s (id=%s) activated X-Org-Override -> org=%s from IP=%s",
+                    "AUDIT: god_admin %s (id=%s) activated X-Org-Override -> org=%s from IP=%s",
                     user.email, user.id, org_override,
                     request.client.host if request.client else "unknown",
                 )
-                db.expunge(user)
                 user.organization_id = org_override
+        else:
+            # No org selected — "All Orgs" god mode.
+            # Routers check this flag and skip the org filter, returning data
+            # across all organizations. The flag is never persisted.
+            user._god_all_orgs = True
 
     return user
 
@@ -114,11 +101,7 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def require_god(user: User = Depends(get_current_user)) -> User:
-    """OWNER_CONTROL_PLANE guard — only god_admin accounts pass this.
-    Used on all AdvisorFlow Command Center endpoints. Returns 403 to
-    anyone else, including super_admins, with no information about what
-    the endpoint does or that AdvisorFlow exists.
-    """
+    """OWNER_CONTROL_PLANE guard — only god_admin accounts pass this."""
     if user.role != "god_admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return user

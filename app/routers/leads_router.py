@@ -360,7 +360,11 @@ def list_leads(
         "last_messaged_at",
     ]
 
-    query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)
+    # god_admin in "All Orgs" mode (no X-Org-Override) sees leads from every org
+    if getattr(current_user, '_god_all_orgs', False):
+        query = db.query(*COLS)
+    else:
+        query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)
     if not is_manager:
         query = query.filter(Lead.assigned_to_id == current_user.id)
     if status_filter:

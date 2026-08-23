@@ -31,24 +31,18 @@ def sent_activity(
     """
     Unified activity feed: last N sends (SMS + email) for this advisor's org,
     merged newest-first. Includes delivery status for SMS.
-
-    Used by:
-    - Activity.jsx — the full activity log page
-    - Leads list "sent today" badge (filter by lead_id + today's date client-side)
+    god_admin with no org selected sees activity across ALL orgs.
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
-
     is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    god_all = getattr(current_user, '_god_all_orgs', False)
 
     # ── SMS sends ──────────────────────────────────────────────────────────
-    sms_query = (
-        db.query(Message, Lead)
-        .join(Lead, Message.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            Message.sent_at >= cutoff,
-        )
-    )
+    sms_base = db.query(Message, Lead).join(Lead, Message.lead_id == Lead.id)
+    sms_filters = [Message.sent_at >= cutoff]
+    if not god_all:
+        sms_filters.append(Lead.organization_id == current_user.organization_id)
+    sms_query = sms_base.filter(*sms_filters)
     if not is_manager:
         sms_query = sms_query.filter(Message.sender_id == current_user.id)
     sms_rows = sms_query.order_by(Message.sent_at.desc()).limit(limit).all()
@@ -70,14 +64,11 @@ def sent_activity(
     ]
 
     # ── Email sends ────────────────────────────────────────────────────────
-    email_query = (
-        db.query(EmailMessage, Lead)
-        .join(Lead, EmailMessage.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            EmailMessage.sent_at >= cutoff,
-        )
-    )
+    email_base = db.query(EmailMessage, Lead).join(Lead, EmailMessage.lead_id == Lead.id)
+    email_filters = [EmailMessage.sent_at >= cutoff]
+    if not god_all:
+        email_filters.append(Lead.organization_id == current_user.organization_id)
+    email_query = email_base.filter(*email_filters)
     if not is_manager:
         email_query = email_query.filter(EmailMessage.sender_id == current_user.id)
     email_rows = email_query.order_by(EmailMessage.sent_at.desc()).limit(limit).all()
@@ -91,7 +82,7 @@ def sent_activity(
             "lead_phone": lead.phone,
             "lead_email": lead.email,
             "subject": msg.subject,
-            "body_preview": None,  # don't send full HTML body here
+            "body_preview": None,
             "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
             "delivery_status": msg.status or "sent",
             "delivery_status_at": None,
