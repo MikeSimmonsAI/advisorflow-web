@@ -112,13 +112,13 @@ function ThemeToggle() {
   const isBrandTheme = PLATFORM_THEME !== THEMES.BOOKABOOST
   const [dark, setDark] = useState(() => {
     if (isBrandTheme) return true
-    const saved = localStorage.getItem('bb_theme')
+    const saved = localStorage.getItem('af_theme')
     return saved !== 'light'
   })
   useEffect(() => {
     if (isBrandTheme) return
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
-    localStorage.setItem('bb_theme', dark ? 'dark' : 'light')
+    localStorage.setItem('af_theme', dark ? 'dark' : 'light')
   }, [dark, isBrandTheme])
   if (isBrandTheme) return null
   return (

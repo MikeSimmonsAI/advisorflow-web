@@ -3,7 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BookaBoost</title>
+    <!-- Brand detection runs before anything renders — sets correct tab title immediately -->
+    <script>
+      (function () {
+        var h = location.hostname.toLowerCase()
+        document.title = h.includes('evosyspro')     ? 'EvoSys Pro'
+                       : h.includes('advisorflow')   ? 'AdvisorFlow'
+                       : h.includes('harmonyhustle') ? 'Harmony Hustle'
+                       : 'BookaBoost'
+      })()
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -57,12 +66,30 @@
     <div id="bb-splash">
       <div class="bb-splash-logo">
         <div class="bb-splash-pulse"></div>
-        BookaBoost
+        <span id="bb-splash-name"></span>
       </div>
       <div class="bb-splash-bar">
         <div class="bb-splash-bar-fill"></div>
       </div>
     </div>
+
+    <!-- Fill splash with the correct brand name and accent color before React mounts -->
+    <script>
+      (function () {
+        var h = location.hostname.toLowerCase()
+        var name  = 'BookaBoost', color = '#c9973d'
+        if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '#087cff' }
+        if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '#f59e0b' }
+        if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '#10b981' }
+        var el = document.getElementById('bb-splash-name')
+        if (el) el.textContent = name
+        var pulse = document.querySelector('.bb-splash-pulse')
+        if (pulse) {
+          pulse.style.background = color
+          pulse.style.boxShadow  = '0 0 0 0 ' + color + '99'
+        }
+      })()
+    </script>
 
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
