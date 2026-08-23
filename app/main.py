@@ -11,6 +11,9 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 import asyncio
 import os
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env before any app imports read os.environ
+
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse

@@ -39,3 +39,4 @@ npm-debug.log*
 # Render / deployment secrets
 *.pem
 test_audit.db
+advisorflow.db

@@ -610,7 +610,7 @@ const KEYWORDS={
 // ══════════════════════════════════════
 // API
 // ══════════════════════════════════════
-const BASE='https://advisorflow-backend.onrender.com';
+const BASE=window.location.hostname==='localhost'?'http://localhost:8000':'https://advisorflow-backend.onrender.com';
 function tok(){try{return localStorage.getItem('bookaboost_token')||'';}catch(e){return '';}}
 async function apiGet(path){
   const r=await fetch(BASE+path,{headers:{'Authorization':'Bearer '+tok()}});
