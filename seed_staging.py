@@ -64,9 +64,9 @@ first_names = ['Marcus','Diane','Robert','Patricia','Kevin','Sandra','Tyrone','G
                'James','Shirley','David','Tamika','Carlos','Felicia','Brian','Monique']
 last_names  = ['Johnson','Williams','Brown','Davis','Miller','Wilson','Moore','Taylor',
                'Anderson','Thomas','Jackson','White','Harris','Martin','Thompson','Garcia']
-tiers   = ['A','A','A','B','B','B','C','C','D']
-temps   = ['hot','hot','warm','warm','warm','cold','cold']
-statuses= ['new','contacted','appointment_set','appointment_kept','sale','no_answer','not_interested']
+tiers    = ['A','A','A','B','B','B','C','C','D']
+temps    = ['HOT','HOT','WARM','WARM','WARM','COLD','COLD']   # enum values
+statuses = ['new','contacted','appointment_set','appointment_kept','sale','no_answer','not_interested']
 
 def rphone(): return f"+1469555{random.randint(1000,9999)}"
 def remail(fn,ln): return f"{fn.lower()}.{ln.lower()}{random.randint(10,99)}@testlead.example"
