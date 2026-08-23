@@ -228,7 +228,9 @@ export default function GodOrganizations({ onEnterOrg }) {
         api.get(`/god/orgs?${params}`),
         api.get('/god/stats'),
       ])
-      setOrgs(orgsRes.data)
+      // API returns {total, orgs: [...]} — extract the array
+      const orgsArray = Array.isArray(orgsRes.data) ? orgsRes.data : (orgsRes.data?.orgs || [])
+      setOrgs(orgsArray)
       setStats(statsRes.data)
     } catch (e) {
       console.error('Failed to load orgs', e)
