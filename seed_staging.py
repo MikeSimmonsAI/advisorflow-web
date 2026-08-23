@@ -88,14 +88,14 @@ for org_id, count in [(restland_id,40),(harmony_id,35),(evosys_id,15)]:
 execute_values(cur,
     """INSERT INTO leads
        (id, organization_id, first_name, last_name, phone, email,
-        tier, engagement_temperature, status, assigned_to, created_at, updated_at)
+        tier, engagement_temperature, status, assigned_to_id, created_at, updated_at)
        VALUES %s ON CONFLICT DO NOTHING""",
     leads_data
 )
 print(f"  Leads: {len(leads_data)}")
 
 # ── 4. Messages ───────────────────────────────────────────────────────────────
-cur.execute("SELECT id, organization_id, assigned_to FROM leads WHERE assigned_to IS NOT NULL LIMIT 60")
+cur.execute("SELECT id, organization_id, assigned_to_id FROM leads WHERE assigned_to_id IS NOT NULL LIMIT 60")
 lead_rows = cur.fetchall()
 
 bodies = [
@@ -107,10 +107,10 @@ bodies = [
 ]
 
 messages = []
-for lead_id, org_id, assigned_to in lead_rows:
+for lead_id, org_id, assigned_to_id in lead_rows:
     for _ in range(random.randint(1,4)):
         messages.append((
-            uid(), lead_id, assigned_to,
+            uid(), lead_id, assigned_to_id,
             random.choice(bodies),
             random.choice(['delivered','delivered','delivered','sent','failed']),
             ago(days=random.randint(0,30), hours=random.randint(0,23)),
@@ -124,6 +124,5 @@ print(f"  Messages: {len(messages)}")
 
 conn.commit()
 conn.close()
-
 print("\n✅ Done! Staging seeded:")
-print("  3 orgs | 7 advisors (password: Newpc!1me) | 90 leads | ~150 messages")
+print("  3 orgs | 7 advisors (password: Newpc!1me) | 90 leads | messages added")
