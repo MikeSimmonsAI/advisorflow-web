@@ -3,14 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Brand detection runs before anything renders — sets correct tab title immediately -->
+    <!-- Brand detection runs before anything renders — sets tab title and favicon immediately -->
     <script>
       (function () {
         var h = location.hostname.toLowerCase()
-        document.title = h.includes('evosyspro')     ? 'EvoSys Pro'
-                       : h.includes('advisorflow')   ? 'AdvisorFlow'
-                       : h.includes('harmonyhustle') ? 'Harmony Hustle'
-                       : 'BookaBoost'
+        var name  = 'BookaBoost'
+        var color = '%23c9973d'
+        var letter = 'BB'
+        var fsize  = '13'
+        if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '%23087cff'; letter = 'E';  fsize = '18' }
+        if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '%23f59e0b'; letter = 'AF'; fsize = '14' }
+        if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '%2310b981'; letter = 'HH'; fsize = '13' }
+        document.title = name
+        // Inject favicon immediately — before JS bundle loads
+        var svg = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='" + color + "'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='" + fsize + "' font-weight='700' fill='white' text-anchor='middle'%3E" + letter + "%3C/text%3E%3C/svg%3E"
+        var link = document.createElement('link')
+        link.rel  = 'icon'
+        link.type = 'image/svg+xml'
+        link.href = 'data:image/svg+xml,' + svg
+        document.head.appendChild(link)
       })()
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -97,7 +108,6 @@
       // Remove splash once React has painted its first frame
       document.addEventListener('DOMContentLoaded', function() {
         var splash = document.getElementById('bb-splash');
-        // Wait for React to mount — observe #root having children
         var obs = new MutationObserver(function() {
           if (document.getElementById('root').children.length > 0) {
             splash.classList.add('fade');
