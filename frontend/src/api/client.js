@@ -1,15 +1,39 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
 
+// ── Brand-neutral localStorage keys ──────────────────────────────────────────
+// All keys use the "af_" prefix — no white-label brand name ever appears in
+// storage. Migration helpers read the old "bookaboost_*" / "bb_*" keys once,
+// copy the value to the new key, and delete the old one so existing sessions
+// survive the rename without being logged out.
+
+const KEY_TOKEN    = 'af_token'
+const KEY_USER     = 'af_user'
+const KEY_BRANDING = 'af_branding'
+
+function _migrate(newKey, ...oldKeys) {
+  if (localStorage.getItem(newKey) !== null) return
+  for (var i = 0; i < oldKeys.length; i++) {
+    var val = localStorage.getItem(oldKeys[i])
+    if (val !== null) {
+      localStorage.setItem(newKey, val)
+      oldKeys.forEach(function(k) { localStorage.removeItem(k) })
+      return
+    }
+  }
+}
+
 function getToken() {
-  return localStorage.getItem('bookaboost_token')
+  _migrate(KEY_TOKEN, 'bookaboost_token')
+  return localStorage.getItem(KEY_TOKEN)
 }
 
 export function setToken(token) {
-  localStorage.setItem('bookaboost_token', token)
+  localStorage.setItem(KEY_TOKEN, token)
 }
 
 export function clearToken() {
-  localStorage.removeItem('bookaboost_token')
+  localStorage.removeItem(KEY_TOKEN)
+  localStorage.removeItem('bookaboost_token') // clean up legacy key if present
 }
 
 /**
@@ -101,7 +125,7 @@ export async function login(email, password) {
   }
   const data = await res.json()
   setToken(data.access_token)
-  localStorage.setItem('bookaboost_user', JSON.stringify({
+  localStorage.setItem(KEY_USER, JSON.stringify({
     full_name: data.full_name, role: data.role, organization_id: data.organization_id,
     must_change_password: data.must_change_password,
   }))
@@ -112,11 +136,12 @@ export function setMustChangePassword(value) {
   const user = getCurrentUser()
   if (!user) return
   user.must_change_password = value
-  localStorage.setItem('bookaboost_user', JSON.stringify(user))
+  localStorage.setItem(KEY_USER, JSON.stringify(user))
 }
 
 export function getCurrentUser() {
-  const raw = localStorage.getItem('bookaboost_user')
+  _migrate(KEY_USER, 'bookaboost_user')
+  const raw = localStorage.getItem(KEY_USER)
   return raw ? JSON.parse(raw) : null
 }
 
@@ -133,8 +158,10 @@ export async function logout() {
     } catch { /* silent — we're logging out regardless */ }
   }
   clearToken()
-  localStorage.removeItem('bookaboost_user')
-  localStorage.removeItem('bb_branding')
+  localStorage.removeItem(KEY_USER)
+  localStorage.removeItem('bookaboost_user') // clean up legacy key
+  localStorage.removeItem(KEY_BRANDING)
+  localStorage.removeItem('bb_branding')     // clean up legacy key
 }
 
 // ── Keep-alive ────────────────────────────────────────────────────────────────
@@ -218,7 +245,7 @@ export async function fetchAndStoreBranding() {
       support_email: data.support_email || null,
       email_sender_name: data.email_sender_name || null,
     }
-    localStorage.setItem('bb_branding', JSON.stringify(branding))
+    localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
     applyBrandingCSS(branding)
     applyBrandingDOM(branding)
     return branding
@@ -236,7 +263,7 @@ export async function fetchAndStoreBranding() {
         support_email: null,
         email_sender_name: null,
       }
-      localStorage.setItem('bb_branding', JSON.stringify(branding))
+      localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
       applyBrandingCSS(branding)
       applyBrandingDOM(branding)
       return branding
@@ -245,7 +272,8 @@ export async function fetchAndStoreBranding() {
 }
 
 export function getBranding() {
-  const raw = localStorage.getItem('bb_branding')
+  _migrate(KEY_BRANDING, 'bb_branding')
+  const raw = localStorage.getItem(KEY_BRANDING)
   return raw ? JSON.parse(raw) : null
 }
 
@@ -304,17 +332,20 @@ function hexToRgba(hex, alpha) {
 
 // ── Org Context (super admin only) ───────────────────────────────────────────
 
-const ORG_CONTEXT_KEY = 'bb_org_context'
+const ORG_CONTEXT_KEY = 'af_org_context'
 
 export function setOrgContext(orgId, orgName) {
   localStorage.setItem(ORG_CONTEXT_KEY, JSON.stringify({ orgId, orgName }))
 }
 
 export function getOrgContext() {
+  // Migrate legacy key
+  _migrate(ORG_CONTEXT_KEY, 'bb_org_context')
   const raw = localStorage.getItem(ORG_CONTEXT_KEY)
   return raw ? JSON.parse(raw) : null
 }
 
 export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
+  localStorage.removeItem('bb_org_context') // clean up legacy key
 }

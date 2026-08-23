@@ -112,13 +112,13 @@ function ThemeToggle() {
   const isBrandTheme = PLATFORM_THEME !== THEMES.BOOKABOOST
   const [dark, setDark] = useState(() => {
     if (isBrandTheme) return true
-    const saved = localStorage.getItem('bb_theme')
+    const saved = localStorage.getItem('af_theme')
     return saved !== 'light'
   })
   useEffect(() => {
     if (isBrandTheme) return
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
-    localStorage.setItem('bb_theme', dark ? 'dark' : 'light')
+    localStorage.setItem('af_theme', dark ? 'dark' : 'light')
   }, [dark, isBrandTheme])
   if (isBrandTheme) return null
   return (
@@ -134,6 +134,7 @@ export default function Layout({ children }) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [profilePhoto, setProfilePhoto] = useState(null)
+  const [logoFailed, setLogoFailed] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
   const isGodAdmin = user?.role === 'god_admin'
   const isElevated = isSuperAdmin || isGodAdmin
@@ -210,6 +211,9 @@ export default function Layout({ children }) {
     ? (PLATFORM_BRAND.logoUrl || null)
     : (branding?.brand_logo_url || PLATFORM_BRAND.logoUrl || null)
 
+  // Reset logo failure state when the URL changes (e.g. org switch)
+  useEffect(() => { setLogoFailed(false) }, [logoUrl])
+
   return (
     <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
       <button type="button" className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu">
@@ -227,8 +231,13 @@ export default function Layout({ children }) {
               </div>
               <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', paddingLeft: 28 }}>God Mode</span>
             </div>
-          ) : logoUrl ? (
-            <img src={logoUrl} alt={brandName} style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }} />
+          ) : logoUrl && !logoFailed ? (
+            <img
+              src={logoUrl}
+              alt={brandName}
+              style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
+              onError={() => setLogoFailed(true)}
+            />
           ) : (
             <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
           )}
