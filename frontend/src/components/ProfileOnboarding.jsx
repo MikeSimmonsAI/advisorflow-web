@@ -67,6 +67,10 @@ export default function ProfileOnboarding() {
     api.get('/settings/profile').then(setProfile).catch(() => {})
   }, [])
 
+  // god_admin and super_admin don't need to complete a profile —
+  // they're platform operators, not advisors with clients.
+  if (user?.role === 'god_admin' || user?.role === 'super_admin') return null
+
   if (!profile) return null
 
   const items = checkItems(profile, user)
