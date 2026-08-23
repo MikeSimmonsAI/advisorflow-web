@@ -41,7 +41,7 @@ export function detectTheme() {
 
 /**
  * Apply the detected theme to the document root.
- * Sets data-theme attribute + updates the browser tab title.
+ * Sets data-theme attribute + updates the browser tab title + injects favicon.
  */
 export function applyTheme(theme) {
   if (typeof document === 'undefined') return
@@ -55,6 +55,22 @@ export function applyTheme(theme) {
     [THEMES.BOOKABOOST]:   'BookaBoost',
   }
   document.title = titles[theme] || 'BookaBoost'
+
+  // Inject per-brand favicon as inline SVG data URI so every brand gets
+  // a tab icon regardless of whether a hosted image exists.
+  const favicons = {
+    [THEMES.EVOSYSPRO]:     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23087cff'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3EE%3C/text%3E%3C/svg%3E",
+    [THEMES.BOOKABOOST]:    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23c9973d'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3EBB%3C/text%3E%3C/svg%3E",
+    [THEMES.ADVISORFLOW]:   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f59e0b'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='white' text-anchor='middle'%3EAF%3C/text%3E%3C/svg%3E",
+    [THEMES.HARMONYHUSTLE]: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2310b981'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3EHH%3C/text%3E%3C/svg%3E",
+  }
+  let link = document.querySelector("link[rel~='icon']")
+  if (!link) {
+    link = document.createElement('link')
+    link.rel = 'icon'
+    document.head.appendChild(link)
+  }
+  link.href = favicons[theme] || favicons[THEMES.BOOKABOOST]
 }
 
 /**
