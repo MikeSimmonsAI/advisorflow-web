@@ -39,6 +39,7 @@ import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
 import SetupIntegrations from './pages/SetupIntegrations'
 import GodCommandCenter from './pages/GodCommandCenter'
+import Billing from './pages/Billing'
 import GodShell from './pages/GodShell'
 import GodOrganizations from './pages/GodOrganizations'
 import { getCurrentUser, startKeepAlive, api } from './api/client'
@@ -107,15 +108,14 @@ export default function App() {
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />} />
-        <Route path="/" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
-        <Route path="/overview" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
-        <Route path="/workqueue" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
         <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
         <Route path="/cadence" element={<ProtectedRoute><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute><EmailQueue /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+        <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute requireAdmin><Reports /></ProtectedRoute>} />
         <Route path="/campaigns" element={<ProtectedRoute requireAdmin><CampaignBuilder /></ProtectedRoute>} />
@@ -139,6 +139,7 @@ export default function App() {
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
+        <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />
