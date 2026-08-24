@@ -29,8 +29,9 @@ const NAV_ITEMS = [
 
 // Admin-only nav items — always visible to org_admin and above (no feature flag)
 const ADMIN_ONLY_NAV_ITEMS = [
-  { to: '/cadence', label: 'Cadence', icon: 'repeat' },
-  { to: '/system-health', label: 'System Health', icon: 'activity' },
+  { to: '/billing',      label: 'Billing',       icon: 'credit-card' },
+  { to: '/cadence',      label: 'Cadence',        icon: 'repeat' },
+  { to: '/system-health',label: 'System Health',  icon: 'activity' },
 ]
 
 const ADMIN_NAV_ITEMS = [
@@ -45,7 +46,6 @@ const ADMIN_NAV_ITEMS = [
   { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
   { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
   { to: '/audit-log',        label: 'Audit Log',          icon: 'activity',     featureKey: 'audit_log' },
-  { to: '/billing',          label: 'Billing',            icon: 'credit-card',  featureKey: null },
 ]
 
 // Platform Admin — super admin only, always visible
