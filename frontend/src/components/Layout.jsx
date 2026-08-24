@@ -14,7 +14,8 @@ const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 
 // Advisor-level nav — every logged-in user sees these
 const NAV_ITEMS = [
-  { to: '/', label: 'Overview', icon: 'grid' },
+  { to: '/', label: 'Work Queue', icon: 'list' },
+  { to: '/overview', label: 'Overview', icon: 'grid' },
   { to: '/leads', label: 'Leads', icon: 'users' },
   { to: '/replies', label: 'Replies', icon: 'message' },
   { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
@@ -391,16 +392,6 @@ export default function Layout({ children }) {
               <div className="user-role">{user?.role?.replace('_', ' ')}</div>
             </div>
           </div>
-          {PLATFORM_BRAND.websiteUrl && (
-            <a
-              href={PLATFORM_BRAND.websiteUrl}
-              className="back-to-website-btn"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ← Back to website
-            </a>
-          )}
           <button className="logout-btn" onClick={handleLogout}>Sign out</button>
         </div>
       </aside>
