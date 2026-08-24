@@ -528,7 +528,26 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("Stripe columns migration note: %s", e)
 
-    # 3c. Appointment reminder tracking columns on booking_links (IF NOT EXISTS)
+    # 3c. Booking / availability settings columns on users (IF NOT EXISTS)
+    try:
+        with engine.connect() as conn:
+            conn.execute(_text("""
+                ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS appt_duration_minutes       INTEGER DEFAULT 30,
+                    ADD COLUMN IF NOT EXISTS buffer_minutes               INTEGER DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS max_bookings_per_day         INTEGER DEFAULT 8,
+                    ADD COLUMN IF NOT EXISTS available_start_time         VARCHAR DEFAULT '09:00',
+                    ADD COLUMN IF NOT EXISTS available_end_time           VARCHAR DEFAULT '17:00',
+                    ADD COLUMN IF NOT EXISTS available_days               VARCHAR DEFAULT '0,1,2,3,4',
+                    ADD COLUMN IF NOT EXISTS booking_timezone             VARCHAR DEFAULT 'America/Chicago',
+                    ADD COLUMN IF NOT EXISTS booking_confirmation_message TEXT    NULL;
+            """))
+            conn.commit()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Booking settings columns migration note: %s", e)
+
+    # 3d. Appointment reminder tracking columns on booking_links (IF NOT EXISTS)
     try:
         with engine.connect() as conn:
             conn.execute(_text("""
@@ -604,7 +623,7 @@ async def on_startup():
         try:
             with engine.connect() as conn:
                 conn.execute(_text(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE, full_name='MDG Testing' "
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE "
                     "WHERE email=:email"
                 ), {"email": _god_admin_email})
                 conn.commit()
