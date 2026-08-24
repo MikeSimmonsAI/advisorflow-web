@@ -42,6 +42,7 @@ import GodCommandCenter from './pages/GodCommandCenter'
 import Billing from './pages/Billing'
 import GodShell from './pages/GodShell'
 import GodOrganizations from './pages/GodOrganizations'
+import LeadScraper from './pages/LeadScraper'
 import { getCurrentUser, startKeepAlive, api } from './api/client'
 
 function isAuthenticated() {
@@ -137,6 +138,7 @@ export default function App() {
         <Route path="/tier-definitions" element={<ProtectedRoute requireAdmin><TierDefinitions /></ProtectedRoute>} />
         <Route path="/10dlc" element={<ProtectedRoute requireAdmin><DLCRegistration /></ProtectedRoute>} />
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
+        <Route path="/scraper" element={<ProtectedRoute requireAdmin><LeadScraper /></ProtectedRoute>} />
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
         <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
