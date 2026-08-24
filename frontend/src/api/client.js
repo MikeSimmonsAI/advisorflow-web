@@ -71,13 +71,10 @@ async function request(path, options = {}, attempt = 0) {
   try {
     res = await fetch(`${API_BASE}${path}`, { ...options, headers })
   } catch (networkErr) {
-    // Network-level failure (server unreachable, CORS preflight blocked, etc.)
-    // Retry up to MAX_RETRIES times — handles Render cold start wake-up delay
     if (attempt < MAX_RETRIES) {
       await sleep(RETRY_DELAY_MS)
       return request(path, options, attempt + 1)
     }
-    // Exhausted retries — surface a cleaner message than the raw browser error
     throw new Error('Unable to reach the server. Please check your connection or try again in a moment.')
   }
 
@@ -293,21 +290,6 @@ export function getBranding() {
   return raw ? JSON.parse(raw) : null
 }
 
-export async function refreshCurrentUser() {
-  try {
-    const profile = await api.get('/settings/profile')
-    const stored = getCurrentUser()
-    if (stored && profile?.role) {
-      stored.role = profile.role
-      if (profile.full_name) stored.full_name = profile.full_name
-      localStorage.setItem(KEY_USER, JSON.stringify(stored))
-    }
-    return profile || null
-  } catch {
-    return null
-  }
-}
-
 
 export function applyBrandingCSS(branding) {
   if (!branding) return
@@ -377,24 +359,8 @@ export function getOrgContext() {
   return raw ? JSON.parse(raw) : null
 }
 
-export async function refreshCurrentUser() {
-  try {
-    const profile = await api.get('/settings/profile')
-    const stored = getCurrentUser()
-    if (stored && profile?.role) {
-      stored.role = profile.role
-      if (profile.full_name) stored.full_name = profile.full_name
-      localStorage.setItem(KEY_USER, JSON.stringify(stored))
-    }
-    return profile || null
-  } catch {
-    return null
-  }
-}
-
 
 export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
   localStorage.removeItem('bb_org_context') // clean up legacy key
 }
-
