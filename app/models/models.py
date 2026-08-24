@@ -258,6 +258,12 @@ class Organization(Base):
     # "toll_free" | "10dlc" | "short_code" — informational, used in dashboards
     org_twilio_number_type        = Column(String, nullable=True, default="toll_free")
 
+    # Stripe billing — populated by billing_router.py on checkout/webhook
+    stripe_customer_id      = Column(String, nullable=True)
+    stripe_subscription_id  = Column(String, nullable=True)
+    stripe_plan_interval    = Column(String, nullable=True)  # 'month' | 'year'
+    billing_status          = Column(String, nullable=True)  # 'active' | 'past_due' | 'canceled' | 'trialing'
+
     platform = relationship("Platform", back_populates="organizations")
     users = relationship("User", back_populates="organization")
     leads = relationship("Lead", back_populates="organization")
