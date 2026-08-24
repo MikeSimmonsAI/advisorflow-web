@@ -11,7 +11,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Optional
 
-from app.deps import get_db, require_admin
+from app.deps import get_db, require_admin, require_super_admin, get_platform_org_ids
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization, TierDefinition
 from app.services.auth_service import hash_password
 from app.services.dedup_service import normalize_phone, normalize_last_name
@@ -258,10 +258,8 @@ HOT_REPLY_CLASSIFICATIONS = (ReplyClassification.INTERESTED, ReplyClassification
 
 def _get_org_ids(db: Session, current_user: User) -> list:
     """Return org IDs to scope queries to.
-    god_admin sees ALL organizations; everyone else is scoped to their own org."""
-    if current_user.role == "god_admin":
-        return [str(row[0]) for row in db.query(Organization.id).all()]
-    return [str(current_user.organization_id)]
+    god_admin → all orgs; super_admin → platform-scoped orgs; everyone else → own org."""
+    return get_platform_org_ids(current_user, db)
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:
@@ -593,7 +591,17 @@ class UserResponseWithOrg(BaseModel):
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Lists users. God/super admin sees ALL users across every org; org_admin sees their own org only."""
     if current_user.role in ("super_admin", "god_admin"):
-        users = db.query(User).order_by(User.organization_id.asc(), User.created_at.asc()).all()
+        scoped_org_ids = get_platform_org_ids(current_user, db)
+        if current_user.role == "god_admin":
+            users = db.query(User).order_by(User.organization_id.asc(), User.created_at.asc()).all()
+        else:
+            # super_admin: platform-scoped only
+            users = (
+                db.query(User)
+                .filter(User.organization_id.in_(scoped_org_ids))
+                .order_by(User.organization_id.asc(), User.created_at.asc())
+                .all()
+            )
         org_ids = {u.organization_id for u in users}
         orgs_by_id = {
             o.id: o.name
@@ -806,15 +814,7 @@ class ResetPasswordResponse(BaseModel):
     temp_password: str
 
 
-def require_super_admin(current_user: User = Depends(require_admin)) -> User:
-    """
-    Stricter than require_admin - super_admin and god_admin pass.
-    god_admin sits above super_admin and must never be blocked by this gate.
-    """
-    from fastapi import HTTPException
-    if current_user.role not in ("super_admin", "god_admin"):
-        raise HTTPException(status_code=403, detail="Only the super admin can perform this action.")
-    return current_user
+# require_super_admin is imported from app.deps — platform-scoped, shared across routers
 
 
 class ResetPasswordRequest(BaseModel):
