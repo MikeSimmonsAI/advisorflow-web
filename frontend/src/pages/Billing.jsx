@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import api from '../api';
+import { api } from '../api/client';
 
 const PLANS = [
   {
@@ -49,7 +49,7 @@ export default function Billing() {
 
   useEffect(() => {
     api.get('/billing/subscription')
-      .then(r => setSub(r.data))
+      .then(r => setSub(r))
       .catch(() => setSub(null))
       .finally(() => setLoading(false));
   }, []);
@@ -57,10 +57,10 @@ export default function Billing() {
   async function handleCheckout(planKey) {
     setActionLoading(planKey);
     try {
-      const { data } = await api.post('/billing/checkout', { plan: planKey, interval });
-      window.location.href = data.checkout_url;
+      const result = await api.post('/billing/checkout', { plan: planKey, interval });
+      window.location.href = result.checkout_url;
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Could not start checkout. Try again.');
+      alert(e?.message || 'Could not start checkout. Try again.');
       setActionLoading(null);
     }
   }
@@ -68,10 +68,10 @@ export default function Billing() {
   async function handlePortal() {
     setActionLoading('portal');
     try {
-      const { data } = await api.post('/billing/portal');
-      window.location.href = data.portal_url;
+      const result = await api.post('/billing/portal');
+      window.location.href = result.portal_url;
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Could not open billing portal.');
+      alert(e?.message || 'Could not open billing portal.');
       setActionLoading(null);
     }
   }
