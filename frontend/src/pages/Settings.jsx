@@ -25,6 +25,18 @@ export default function Settings() {
   const [bookingSaved, setBookingSaved] = useState(false)
   const [bookingCopied, setBookingCopied] = useState(false)
 
+  // Booking / availability settings
+  const [apptDuration, setApptDuration] = useState(30)
+  const [bufferMin, setBufferMin] = useState(0)
+  const [maxBookings, setMaxBookings] = useState(8)
+  const [startTime, setStartTime] = useState('09:00')
+  const [endTime, setEndTime] = useState('17:00')
+  const [availDays, setAvailDays] = useState([0, 1, 2, 3, 4])
+  const [bookingTz, setBookingTz] = useState('America/Chicago')
+  const [bookingConfirmMsg, setBookingConfirmMsg] = useState('')
+  const [savingBookingSettings, setSavingBookingSettings] = useState(false)
+  const [bookingSettingsSaved, setBookingSettingsSaved] = useState(false)
+
   // Notifications
   const [notifyEmail, setNotifyEmail] = useState('')
   const [notifyOnHot, setNotifyOnHot] = useState(true)
@@ -73,6 +85,14 @@ export default function Settings() {
       setNotifyEmail(p.notification_email || '')
       setNotifyOnHot(p.notify_on_hot_reply)
       setBookingUrl(p.booking_page_url || '')
+      setApptDuration(p.appt_duration_minutes || 30)
+      setBufferMin(p.buffer_minutes || 0)
+      setMaxBookings(p.max_bookings_per_day || 8)
+      setStartTime(p.available_start_time || '09:00')
+      setEndTime(p.available_end_time || '17:00')
+      setAvailDays((p.available_days || '0,1,2,3,4').split(',').map(Number))
+      setBookingTz(p.booking_timezone || 'America/Chicago')
+      setBookingConfirmMsg(p.booking_confirmation_message || '')
       setPhotoPreview(p.profile_photo_url || null)
       setDisplayName(p.full_name || '')
       setLoading(false)
@@ -123,6 +143,29 @@ export default function Settings() {
       setBookingCopied(true)
       setTimeout(() => setBookingCopied(false), 2000)
     })
+  }
+
+  async function saveBookingSettings(e) {
+    e.preventDefault()
+    setSavingBookingSettings(true)
+    setBookingSettingsSaved(false)
+    try {
+      await api.patch('/settings/booking', {
+        appt_duration_minutes: apptDuration,
+        buffer_minutes: bufferMin,
+        max_bookings_per_day: maxBookings,
+        available_start_time: startTime,
+        available_end_time: endTime,
+        available_days: availDays.join(','),
+        booking_timezone: bookingTz,
+        booking_confirmation_message: bookingConfirmMsg || null,
+      })
+      setBookingSettingsSaved(true)
+    } catch (err) {
+      alert(`Failed to save: ${err.message}`)
+    } finally {
+      setSavingBookingSettings(false)
+    }
   }
 
   async function saveTwilio(e) {
@@ -702,6 +745,94 @@ export default function Settings() {
             {bookingSaved && <span className="settings-saved">Saved</span>}
             <button className="btn btn--primary" type="submit" disabled={savingBooking}>
               {savingBooking ? 'Saving…' : 'Save booking link'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* ── Booking Settings ── */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">📅 Booking Settings</h2>
+        </div>
+        <p className="settings-help">
+          Control your availability and how appointments are booked through your BookaBoost scheduling link.
+        </p>
+        <form onSubmit={saveBookingSettings} className="settings-form">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
+            <label className="settings-label">
+              Appointment duration (min)
+              <input type="number" className="settings-input" min={5} max={480} value={apptDuration}
+                onChange={e => setApptDuration(Number(e.target.value))} />
+            </label>
+            <label className="settings-label">
+              Buffer between appts (min)
+              <input type="number" className="settings-input" min={0} max={120} value={bufferMin}
+                onChange={e => setBufferMin(Number(e.target.value))} />
+            </label>
+            <label className="settings-label">
+              Max bookings per day
+              <input type="number" className="settings-input" min={1} max={50} value={maxBookings}
+                onChange={e => setMaxBookings(Number(e.target.value))} />
+            </label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginTop: 4 }}>
+            <label className="settings-label">
+              Available from
+              <input type="time" className="settings-input" value={startTime}
+                onChange={e => setStartTime(e.target.value)} />
+            </label>
+            <label className="settings-label">
+              Available until
+              <input type="time" className="settings-input" value={endTime}
+                onChange={e => setEndTime(e.target.value)} />
+            </label>
+            <label className="settings-label">
+              Timezone
+              <select className="settings-input" value={bookingTz} onChange={e => setBookingTz(e.target.value)}>
+                <option value="America/Chicago">Central (CT)</option>
+                <option value="America/New_York">Eastern (ET)</option>
+                <option value="America/Denver">Mountain (MT)</option>
+                <option value="America/Los_Angeles">Pacific (PT)</option>
+                <option value="America/Phoenix">Arizona (MST)</option>
+                <option value="America/Anchorage">Alaska (AKT)</option>
+                <option value="Pacific/Honolulu">Hawaii (HT)</option>
+              </select>
+            </label>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <label className="settings-label" style={{ marginBottom: 6 }}>Available days</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d, i) => {
+                const checked = availDays.includes(i)
+                return (
+                  <label key={d} style={{
+                    display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer',
+                    background: checked ? 'var(--accent)' : 'var(--bg-secondary)',
+                    color: checked ? '#fff' : 'var(--text-primary)',
+                    padding: '5px 14px', borderRadius: 20, userSelect: 'none',
+                    border: '1px solid var(--border)', transition: 'background 0.15s',
+                  }}>
+                    <input type="checkbox" style={{ display: 'none' }} checked={checked}
+                      onChange={() => setAvailDays(prev =>
+                        checked ? prev.filter(x => x !== i) : [...prev, i].sort((a, b) => a - b)
+                      )} />
+                    {d}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+          <label className="settings-label" style={{ marginTop: 4 }}>
+            Booking confirmation message <span className="settings-optional">sent to lead after booking</span>
+            <textarea className="settings-input" rows={3} value={bookingConfirmMsg}
+              onChange={e => setBookingConfirmMsg(e.target.value)}
+              placeholder="e.g. Thank you for scheduling with us! We look forward to seeing you." />
+          </label>
+          <div className="settings-actions">
+            {bookingSettingsSaved && <span className="settings-saved">Saved ✓</span>}
+            <button className="btn btn--primary" type="submit" disabled={savingBookingSettings}>
+              {savingBookingSettings ? 'Saving…' : 'Save booking settings'}
             </button>
           </div>
         </form>
