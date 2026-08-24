@@ -424,7 +424,7 @@ export default function OrgSettings() {
                     e.currentTarget.style.borderColor = ''
                     const file = e.dataTransfer.files[0]
                     if (!file || !file.type.startsWith('image/')) return
-                    if (file.size > 500 * 1024) { alert('Logo must be under 500KB'); return }
+                    if (file.size > 5 * 1024 * 1024) { alert('Logo must be under 5MB'); return }
                     const reader = new FileReader()
                     reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
                     reader.readAsDataURL(file)
@@ -434,14 +434,14 @@ export default function OrgSettings() {
                 >
                   {brandLogoUrl
                     ? <img src={brandLogoUrl} alt="Logo preview" style={{ maxHeight: 52, maxWidth: 160, objectFit: 'contain', borderRadius: 6 }} onError={(e) => e.target.style.display='none'} />
-                    : <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>🖼 Drop logo here or <span style={{ color: 'var(--signal-blue, #2fb6ff)' }}>browse</span><div style={{ fontSize: 11, marginTop: 4 }}>PNG · JPG · SVG · WEBP · max 500KB</div></div>
+                    : <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>🖼 Drop logo here or <span style={{ color: 'var(--signal-blue, #2fb6ff)' }}>browse</span><div style={{ fontSize: 11, marginTop: 4 }}>PNG · JPG · SVG · WEBP · max 5MB</div></div>
                   }
                 </div>
                 <input id="os-logo-input" type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }}
                   onChange={(e) => {
                     const file = e.target.files[0]
                     if (!file) return
-                    if (file.size > 500 * 1024) { alert('Logo must be under 500KB'); return }
+                    if (file.size > 5 * 1024 * 1024) { alert('Logo must be under 5MB'); return }
                     const reader = new FileReader()
                     reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
                     reader.readAsDataURL(file)
