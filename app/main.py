@@ -48,6 +48,7 @@ from app.routers.fiber_leads_router import router as fiber_leads_router
 from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
 from app.routers.timeline_router import router as timeline_router
+from app.routers.lead_scraper_router import router as lead_scraper_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
@@ -347,6 +348,7 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
+app.include_router(lead_scraper_router)
 app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
