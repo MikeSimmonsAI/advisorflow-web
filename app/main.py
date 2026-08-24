@@ -562,13 +562,19 @@ async def on_startup():
             _init_pw = _os.environ.get("GOD_ADMIN_INIT_PW", "GodMode2024!")
             _pw_hash = _bcrypt.hashpw(_init_pw.encode(), _bcrypt.gensalt()).decode()
             with engine.connect() as conn:
-                # Create the account only if it does not already exist
+                # Ensure a god-level organization exists first (idempotent)
+                conn.execute(_text("""
+                    INSERT INTO organizations (id, name, slug, plan, is_active)
+                    SELECT 'org-god-platform', 'AdvisorFlow Platform', 'advisorflow-platform', 'god', TRUE
+                    WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = 'advisorflow-platform')
+                """))
+                # Create the god_admin user only if they don't already exist
                 conn.execute(_text("""
                     INSERT INTO users (id, organization_id, email, full_name, password_hash,
                                        role, is_active, must_change_password, failed_login_attempts)
                     SELECT
                         gen_random_uuid(),
-                        (SELECT id FROM organizations ORDER BY created_at LIMIT 1),
+                        'org-god-platform',
                         :email,
                         'Mike Simmons',
                         :pw_hash,
