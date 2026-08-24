@@ -145,6 +145,22 @@ export function getCurrentUser() {
   return raw ? JSON.parse(raw) : null
 }
 
+export async function refreshCurrentUser() {
+  try {
+    const profile = await api.get('/settings/profile')
+    const stored = getCurrentUser()
+    if (stored && profile?.role) {
+      stored.role = profile.role
+      if (profile.full_name) stored.full_name = profile.full_name
+      localStorage.setItem(KEY_USER, JSON.stringify(stored))
+    }
+    return profile || null
+  } catch {
+    return null
+  }
+}
+
+
 export async function logout() {
   // Tell the server to invalidate the session immediately (clears session_token).
   // Best-effort — if the network call fails the local state is still cleared.
@@ -277,6 +293,22 @@ export function getBranding() {
   return raw ? JSON.parse(raw) : null
 }
 
+export async function refreshCurrentUser() {
+  try {
+    const profile = await api.get('/settings/profile')
+    const stored = getCurrentUser()
+    if (stored && profile?.role) {
+      stored.role = profile.role
+      if (profile.full_name) stored.full_name = profile.full_name
+      localStorage.setItem(KEY_USER, JSON.stringify(stored))
+    }
+    return profile || null
+  } catch {
+    return null
+  }
+}
+
+
 export function applyBrandingCSS(branding) {
   if (!branding) return
   const root = document.documentElement
@@ -345,7 +377,24 @@ export function getOrgContext() {
   return raw ? JSON.parse(raw) : null
 }
 
+export async function refreshCurrentUser() {
+  try {
+    const profile = await api.get('/settings/profile')
+    const stored = getCurrentUser()
+    if (stored && profile?.role) {
+      stored.role = profile.role
+      if (profile.full_name) stored.full_name = profile.full_name
+      localStorage.setItem(KEY_USER, JSON.stringify(stored))
+    }
+    return profile || null
+  } catch {
+    return null
+  }
+}
+
+
 export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
   localStorage.removeItem('bb_org_context') // clean up legacy key
 }
+
