@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
@@ -132,7 +132,7 @@ function ThemeToggle() {
 }
 
 export default function Layout({ children }) {
-  const user = getCurrentUser()
+  const [user, setUser] = useState(() => getCurrentUser())
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -195,9 +195,10 @@ export default function Layout({ children }) {
   }, [isElevated, location.pathname])
 
   useEffect(() => {
-    api.get('/settings/profile').then(p => {
+    refreshCurrentUser().then(p => {
       if (p?.profile_photo_url) setProfilePhoto(p.profile_photo_url)
-    }).catch(() => {})
+      setUser(getCurrentUser())
+    })
   }, [])
 
   function closeSidebar() { if (window.innerWidth <= 1024) setSidebarOpen(false) }
