@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Brand detection runs before anything renders — sets tab title and favicon immediately -->
+    <script>
+      (function () {
+        var h = location.hostname.toLowerCase()
+        var name  = 'BookaBoost'
+        var color = '%23c9973d'
+        var letter = 'BB'
+        var fsize  = '13'
+        if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '%23087cff'; letter = 'E';  fsize = '18' }
+        if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '%23f59e0b'; letter = 'AF'; fsize = '14' }
+        if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '%2310b981'; letter = 'HH'; fsize = '13' }
+        document.title = name
+        // Inject favicon immediately — before JS bundle loads
+        var svg = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='" + color + "'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='" + fsize + "' font-weight='700' fill='white' text-anchor='middle'%3E" + letter + "%3C/text%3E%3C/svg%3E"
+        var link = document.createElement('link')
+        link.rel  = 'icon'
+        link.type = 'image/svg+xml'
+        link.href = 'data:image/svg+xml,' + svg
+        document.head.appendChild(link)
+      })()
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+      /* Instant splash — shown while JS bundle loads, hidden once React mounts */
+      body { margin: 0; background: #0d1021; }
+      #bb-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: #0d1021;
+        transition: opacity 0.3s ease;
+      }
+      #bb-splash.fade { opacity: 0; pointer-events: none; }
+      .bb-splash-logo {
+        display: flex; align-items: center; gap: 10px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.5px;
+        margin-bottom: 28px;
+      }
+      .bb-splash-pulse {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #2fb6ff;
+        box-shadow: 0 0 0 0 rgba(47,182,255,0.6);
+        animation: bb-pulse 1.4s ease-out infinite;
+      }
+      @keyframes bb-pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(47,182,255,0.7); }
+        70%  { box-shadow: 0 0 0 10px rgba(47,182,255,0); }
+        100% { box-shadow: 0 0 0 0 rgba(47,182,255,0); }
+      }
+      .bb-splash-bar {
+        width: 160px; height: 3px; border-radius: 2px;
+        background: rgba(255,255,255,0.08); overflow: hidden;
+      }
+      .bb-splash-bar-fill {
+        height: 100%; border-radius: 2px;
+        background: linear-gradient(90deg, #2fb6ff, #1ef0a8);
+        animation: bb-slide 1.2s ease-in-out infinite;
+        transform-origin: left;
+      }
+      @keyframes bb-slide {
+        0%   { transform: translateX(-100%) scaleX(0.4); }
+        50%  { transform: translateX(60%) scaleX(0.8); }
+        100% { transform: translateX(200%) scaleX(0.4); }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-DhJgJzM4.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DPPihjfR.css">
+  </head>
+  <body>
+    <!-- Instant splash shown while React JS bundle loads -->
+    <div id="bb-splash">
+      <div class="bb-splash-logo">
+        <div class="bb-splash-pulse"></div>
+        <span id="bb-splash-name"></span>
+      </div>
+      <div class="bb-splash-bar">
+        <div class="bb-splash-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- Fill splash with the correct brand name and accent color before React mounts -->
+    <script>
+      (function () {
+        var h = location.hostname.toLowerCase()
+        var name  = 'BookaBoost', color = '#c9973d'
+        if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '#087cff' }
+        if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '#f59e0b' }
+        if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '#10b981' }
+        var el = document.getElementById('bb-splash-name')
+        if (el) el.textContent = name
+        var pulse = document.querySelector('.bb-splash-pulse')
+        if (pulse) {
+          pulse.style.background = color
+          pulse.style.boxShadow  = '0 0 0 0 ' + color + '99'
+        }
+      })()
+    </script>
+
+    <div id="root"></div>
+    <script>
+      // Remove splash once React has painted its first frame
+      document.addEventListener('DOMContentLoaded', function() {
+        var splash = document.getElementById('bb-splash');
+        var obs = new MutationObserver(function() {
+          if (document.getElementById('root').children.length > 0) {
+            splash.classList.add('fade');
+            setTimeout(function() { splash.remove(); }, 350);
+            obs.disconnect();
+          }
+        });
+        obs.observe(document.getElementById('root'), { childList: true });
+      });
+    </script>
+  </body>
+</html>
