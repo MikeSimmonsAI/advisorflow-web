@@ -299,10 +299,9 @@ def ping():
     return {"status": "ok"}
 
 
-# ── Public endpoint for landing page demo requests (no auth required)
-@app.get("/leads/demo-request")
-def demo_request_docs():
-    return {"message": "POST to this endpoint to submit a demo request"}
+# ── Public endpoint for landing page demo requests — handled by leads_router ──
+# POST /leads/demo-request is implemented in leads_router.py (DemoRequestPayload).
+# LEAD_NOTIFY_EMAILS env var (comma-separated) controls who gets notified.
 
 
 # ── All app routers
