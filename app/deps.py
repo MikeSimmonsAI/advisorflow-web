@@ -100,8 +100,34 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    """Platform-operator guard — super_admin and god_admin pass.
+    god_admin sits above super_admin and is never blocked by this gate."""
+    if user.role not in ("super_admin", "god_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    return user
+
+
 def require_god(user: User = Depends(get_current_user)) -> User:
     """OWNER_CONTROL_PLANE guard — only god_admin accounts pass this."""
     if user.role != "god_admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return user
+
+
+def get_platform_org_ids(user: User, db) -> list:
+    """Return org IDs scoped to the user's access level:
+    - god_admin  → all orgs across all platforms
+    - super_admin → all orgs on their platform only (via platform_id)
+    - org_admin  → their own org only
+    """
+    if user.role == "god_admin":
+        return [str(row[0]) for row in db.query(Organization.id).all()]
+    if user.role == "super_admin" and getattr(user, "platform_id", None):
+        return [
+            str(row[0])
+            for row in db.query(Organization.id)
+            .filter(Organization.platform_id == user.platform_id)
+            .all()
+        ]
+    return [str(user.organization_id)]
