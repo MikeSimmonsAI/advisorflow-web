@@ -163,6 +163,44 @@ def update_own_profile(
     return {"success": True, "full_name": current_user.full_name}
 
 
+class BookingSettingsRequest(BaseModel):
+    appt_duration_minutes: Optional[int] = None
+    buffer_minutes: Optional[int] = None
+    max_bookings_per_day: Optional[int] = None
+    available_start_time: Optional[str] = None
+    available_end_time: Optional[str] = None
+    available_days: Optional[str] = None
+    booking_timezone: Optional[str] = None
+    booking_confirmation_message: Optional[str] = None
+
+
+@router.patch("/booking")
+def update_booking_settings(
+    req: BookingSettingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Self-service booking / availability settings for any authenticated advisor."""
+    if req.appt_duration_minutes is not None:
+        current_user.appt_duration_minutes = req.appt_duration_minutes
+    if req.buffer_minutes is not None:
+        current_user.buffer_minutes = req.buffer_minutes
+    if req.max_bookings_per_day is not None:
+        current_user.max_bookings_per_day = req.max_bookings_per_day
+    if req.available_start_time is not None:
+        current_user.available_start_time = req.available_start_time.strip()
+    if req.available_end_time is not None:
+        current_user.available_end_time = req.available_end_time.strip()
+    if req.available_days is not None:
+        current_user.available_days = req.available_days.strip()
+    if req.booking_timezone is not None:
+        current_user.booking_timezone = req.booking_timezone.strip()
+    if req.booking_confirmation_message is not None:
+        current_user.booking_confirmation_message = req.booking_confirmation_message.strip() or None
+    db.commit()
+    return {"success": True}
+
+
 @router.put("/twilio")
 def update_twilio_config(
     req: TwilioConfigRequest,
