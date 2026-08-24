@@ -574,6 +574,11 @@ class BookingLink(Base):
     expires_at = Column(DateTime, nullable=True)
     review_request_sent_at = Column(DateTime, nullable=True)  # set by review_request_cron
 
+    # Appointment reminder tracking — set by appointment_reminder_cron.py
+    confirmation_sent   = Column(Boolean, default=False)  # immediate lead confirmation on booking
+    reminder_24hr_sent  = Column(Boolean, default=False)  # 24-hour reminder to lead
+    reminder_1hr_sent   = Column(Boolean, default=False)  # 1-hour reminder to lead
+
 
 # ---------------------------------------------------------------------------
 # LeadOutcome - the "what does this family actually have/not have" tracker
