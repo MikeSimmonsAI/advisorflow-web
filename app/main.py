@@ -52,6 +52,7 @@ from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
+from app.routers.billing_router import router as billing_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -351,6 +352,7 @@ app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
+app.include_router(billing_router)
 app.include_router(proposal_router.router)
 
 
@@ -496,7 +498,22 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("pipeline_conversations migration note: %s", e)
 
-    # 3b. Ensure all performance-critical indexes exist on the leads table.
+    # 3b. Stripe billing columns on organizations (IF NOT EXISTS)
+    try:
+        with engine.connect() as conn:
+            conn.execute(_text("""
+                ALTER TABLE organizations
+                    ADD COLUMN IF NOT EXISTS stripe_customer_id     VARCHAR,
+                    ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR,
+                    ADD COLUMN IF NOT EXISTS stripe_plan_interval   VARCHAR,
+                    ADD COLUMN IF NOT EXISTS billing_status         VARCHAR;
+            """))
+            conn.commit()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Stripe columns migration note: %s", e)
+
+    # 3c. Ensure all performance-critical indexes exist on the leads table.
     #     CREATE INDEX IF NOT EXISTS is idempotent — safe to run on every startup.
     #     These cover the filter + sort combos the leads page uses most.
     _index_migrations = [
