@@ -441,6 +441,22 @@ async def _cadence_loop():
         await asyncio.sleep(3600)  # 1 hour
 
 
+async def _appointment_reminder_loop():
+    """Send 24hr and 1hr appointment reminders to leads. Runs every 15 min."""
+    from app.crons.appointment_reminder_cron import run_appointment_reminder_cron
+    import logging as _log
+    _logger = _log.getLogger("appointment_reminder_cron")
+    await asyncio.sleep(45)  # brief startup delay — offset from other loops
+    while True:
+        try:
+            sent = run_appointment_reminder_cron(engine)
+            if sent:
+                _logger.info("appointment_reminder_cron: sent %d reminders", sent)
+        except Exception as exc:
+            _logger.error("appointment_reminder_cron error: %s", exc)
+        await asyncio.sleep(900)  # 15 minutes
+
+
 @app.on_event("startup")
 async def on_startup():
     # 1. Create any brand-new tables
@@ -513,7 +529,21 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("Stripe columns migration note: %s", e)
 
-    # 3c. Ensure all performance-critical indexes exist on the leads table.
+    # 3c. Appointment reminder tracking columns on booking_links (IF NOT EXISTS)
+    try:
+        with engine.connect() as conn:
+            conn.execute(_text("""
+                ALTER TABLE booking_links
+                    ADD COLUMN IF NOT EXISTS confirmation_sent   BOOLEAN DEFAULT FALSE,
+                    ADD COLUMN IF NOT EXISTS reminder_24hr_sent  BOOLEAN DEFAULT FALSE,
+                    ADD COLUMN IF NOT EXISTS reminder_1hr_sent   BOOLEAN DEFAULT FALSE;
+            """))
+            conn.commit()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("BookingLink reminder columns migration note: %s", e)
+
+    # 3d. Ensure all performance-critical indexes exist on the leads table.
     #     CREATE INDEX IF NOT EXISTS is idempotent — safe to run on every startup.
     #     These cover the filter + sort combos the leads page uses most.
     _index_migrations = [
@@ -606,9 +636,10 @@ async def on_startup():
         _logging.getLogger(__name__).warning("Platform seed note: %s", e)
 
     # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
-    asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
-    asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
-    asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
+    asyncio.create_task(_review_request_loop())          # Google review SMS    — every 30 min
+    asyncio.create_task(_ai_conversation_loop())         # AI lead touches      — every 2 min
+    asyncio.create_task(_cadence_loop())                 # SMS cadence touches  — every 1 hr
+    asyncio.create_task(_appointment_reminder_loop())    # Appt reminders       — every 15 min
 
 
 @app.get("/health")
