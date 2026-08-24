@@ -550,25 +550,47 @@ async def on_startup():
             "SUPER_ADMIN_EMAIL env var not set — skipping super_admin role grant on startup."
         )
 
-    # 4b. Ensure the god_admin account has the correct role.
+    # 4b. Ensure the god_admin account exists and has the correct role.
     #     GOD_ADMIN_EMAIL must be set in Render env vars (never hardcoded).
+    #     If the account doesn't exist yet it is created with the password from
+    #     GOD_ADMIN_INIT_PW env var (falls back to "GodMode2024!").
     #     This runs on every startup — idempotent, safe.
     _god_admin_email = _os.environ.get("GOD_ADMIN_EMAIL", "")
     if _god_admin_email:
         try:
+            import bcrypt as _bcrypt
+            _init_pw = _os.environ.get("GOD_ADMIN_INIT_PW", "GodMode2024!")
+            _pw_hash = _bcrypt.hashpw(_init_pw.encode(), _bcrypt.gensalt()).decode()
             with engine.connect() as conn:
+                # Create the account only if it does not already exist
+                conn.execute(_text("""
+                    INSERT INTO users (id, organization_id, email, full_name, password_hash,
+                                       role, is_active, must_change_password, failed_login_attempts)
+                    SELECT
+                        gen_random_uuid(),
+                        (SELECT id FROM organizations ORDER BY created_at LIMIT 1),
+                        :email,
+                        'Mike Simmons',
+                        :pw_hash,
+                        'god_admin',
+                        TRUE,
+                        FALSE,
+                        0
+                    WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = :email)
+                """), {"email": _god_admin_email, "pw_hash": _pw_hash})
+                # Always ensure the role is correct (upgrades pre-existing accounts too)
                 conn.execute(_text(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE, full_name='MDG Testing' "
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE, full_name='Mike Simmons' "
                     "WHERE email=:email"
                 ), {"email": _god_admin_email})
                 conn.commit()
         except Exception as e:
             import logging as _logging
-            _logging.getLogger(__name__).warning("God admin role migration note: %s", e)
+            _logging.getLogger(__name__).warning("God admin upsert note: %s", e)
     else:
         import logging as _logging
         _logging.getLogger(__name__).warning(
-            "GOD_ADMIN_EMAIL env var not set — skipping god_admin role grant on startup."
+            "GOD_ADMIN_EMAIL env var not set — skipping god_admin upsert on startup."
         )
 
     # 5. Seed default Platform records (idempotent — ON CONFLICT DO NOTHING)
