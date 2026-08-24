@@ -54,11 +54,12 @@ function mustChangePassword() {
   return !!user?.must_change_password
 }
 
-function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false }) {
+function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false, requireGodAdmin = false }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
   const role = user?.role
+  if (requireGodAdmin && role !== 'god_admin') return <Navigate to="/" replace />
   if (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
   if (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
   return <Layout>{children}</Layout>
@@ -138,10 +139,10 @@ export default function App() {
         <Route path="/tier-definitions" element={<ProtectedRoute requireAdmin><TierDefinitions /></ProtectedRoute>} />
         <Route path="/10dlc" element={<ProtectedRoute requireAdmin><DLCRegistration /></ProtectedRoute>} />
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
-        <Route path="/scraper" element={<ProtectedRoute requireAdmin><LeadScraper /></ProtectedRoute>} />
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
         <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
+        <Route path="/scraper" element={<ProtectedRoute requireGodAdmin><LeadScraper /></ProtectedRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />
