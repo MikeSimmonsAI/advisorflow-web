@@ -625,4 +625,58 @@ async def on_startup():
 @app.get("/health")
 def health_check():
     return {"status": "ok", "phase": "1"}
+
+
+@app.post("/internal/bootstrap-god-admin")
+def bootstrap_god_admin(secret: str, request: Request):
+    """One-time god_admin seed endpoint. Remove after first use."""
+    import os as _os2, bcrypt as _bcrypt2, uuid as _uuid2
+    from app.deps import engine as _engine2
+    from sqlalchemy import text as _text2
+
+    expected = _os2.environ.get("BOOTSTRAP_SECRET", "")
+    if not expected or secret != expected:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Invalid secret")
+
+    email = _os2.environ.get("GOD_ADMIN_EMAIL", "mike@simmonsstrong.com")
+    pw = _os2.environ.get("GOD_ADMIN_INIT_PW", "GodMode2024!")
+    pw_hash = _bcrypt2.hashpw(pw.encode(), _bcrypt2.gensalt()).decode()
+    results = []
+    try:
+        with _engine2.connect() as conn:
+            # Check existing
+            existing = conn.execute(_text2("SELECT email, role FROM users WHERE email=:e"), {"e": email}).fetchone()
+            results.append(f"existing_user: {existing}")
+
+            # Org check/create
+            org = conn.execute(_text2("SELECT id FROM organizations WHERE slug='advisorflow-platform'")).fetchone()
+            results.append(f"existing_org: {org}")
+            if not org:
+                conn.execute(_text2(
+                    "INSERT INTO organizations (id, name, slug, plan, is_active) VALUES ('org-god-platform', 'AdvisorFlow Platform', 'advisorflow-platform', 'god', TRUE)"
+                ))
+                results.append("org created")
+
+            org_id = org[0] if org else 'org-god-platform'
+
+            # User create/update
+            if not existing:
+                uid = str(_uuid2.uuid4())
+                conn.execute(_text2(
+                    "INSERT INTO users (id, organization_id, email, full_name, password_hash, role, is_active, must_change_password, failed_login_attempts) "
+                    "VALUES (:id, :org_id, :email, 'Mike Simmons', :pw_hash, 'god_admin', TRUE, FALSE, 0)"
+                ), {"id": uid, "org_id": org_id, "email": email, "pw_hash": pw_hash})
+                results.append(f"user created with id={uid}")
+            else:
+                conn.execute(_text2(
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE, is_active=TRUE WHERE email=:e"
+                ), {"e": email})
+                results.append("user role updated to god_admin")
+
+            conn.commit()
+    except Exception as e:
+        results.append(f"ERROR: {e}")
+
+    return {"results": results, "email": email, "password": pw}
 # touched Thu Jul  9 12:08:59 UTC 2026
