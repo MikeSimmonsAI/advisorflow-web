@@ -234,6 +234,23 @@ export default function Layout({ children }) {
               </div>
               <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', paddingLeft: 28 }}>God Mode</span>
             </div>
+          ) : isSuperAdmin ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              {logoUrl && !logoFailed ? (
+                <img
+                  src={logoUrl}
+                  alt={brandName}
+                  style={{ height: 56, maxWidth: 160, objectFit: 'contain', borderRadius: 6, display: 'block' }}
+                  onError={() => setLogoFailed(true)}
+                />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <SignalPulse color="blue" size={9} />
+                  <span className="brand-mark">{brandName}</span>
+                </div>
+              )}
+              <span style={{ fontSize: 10, color: 'var(--accent, #2fb6ff)', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', opacity: 0.8 }}>Platform Admin</span>
+            </div>
           ) : logoUrl && !logoFailed ? (
             <img
               src={logoUrl}
