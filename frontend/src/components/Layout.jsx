@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
@@ -29,8 +29,9 @@ const NAV_ITEMS = [
 
 // Admin-only nav items — always visible to org_admin and above (no feature flag)
 const ADMIN_ONLY_NAV_ITEMS = [
-  { to: '/cadence', label: 'Cadence', icon: 'repeat' },
-  { to: '/system-health', label: 'System Health', icon: 'activity' },
+  { to: '/billing',      label: 'Billing',       icon: 'credit-card' },
+  { to: '/cadence',      label: 'Cadence',        icon: 'repeat' },
+  { to: '/system-health',label: 'System Health',  icon: 'activity' },
 ]
 
 const ADMIN_NAV_ITEMS = [
@@ -82,6 +83,8 @@ function Icon({ name }) {
     layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
     thermometer: <><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" /></>,
     database: <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
+    'credit-card': <><rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" /></>,
+    search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -129,7 +132,7 @@ function ThemeToggle() {
 }
 
 export default function Layout({ children }) {
-  const user = getCurrentUser()
+  const [user, setUser] = useState(() => getCurrentUser())
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -192,8 +195,9 @@ export default function Layout({ children }) {
   }, [isElevated, location.pathname])
 
   useEffect(() => {
-    api.get('/settings/profile').then(p => {
+    refreshCurrentUser().then(p => {
       if (p?.profile_photo_url) setProfilePhoto(p.profile_photo_url)
+      setUser(getCurrentUser())
     }).catch(() => {})
   }, [])
 
@@ -326,6 +330,20 @@ export default function Layout({ children }) {
                   </div>
                 )}
               </div>
+
+              <NavLink to="/scraper"
+                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                style={({ isActive }) => ({
+                  color: isActive ? '#f59e0b' : '#d97706',
+                  background: isActive ? 'rgba(245,158,11,0.12)' : 'transparent',
+                  borderLeft: isActive ? '3px solid #f59e0b' : '3px solid transparent',
+                  fontWeight: 600,
+                })}
+                onClick={closeSidebar}
+              >
+                <Icon name="search" />
+                Lead Scraper
+              </NavLink>
 
               <div className="nav-divider" />
             </>
