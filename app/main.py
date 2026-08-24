@@ -670,9 +670,10 @@ def bootstrap_god_admin(secret: str, request: Request):
                 results.append(f"user created with id={uid}")
             else:
                 conn.execute(_text2(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE, is_active=TRUE WHERE email=:e"
-                ), {"e": email})
-                results.append("user role updated to god_admin")
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE, is_active=TRUE, "
+                    "password_hash=:pw_hash, failed_login_attempts=0 WHERE email=:e"
+                ), {"e": email, "pw_hash": pw_hash})
+                results.append("user role updated and password reset to GOD_ADMIN_INIT_PW")
 
             conn.commit()
     except Exception as e:
