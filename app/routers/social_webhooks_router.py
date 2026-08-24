@@ -373,6 +373,82 @@ async def tiktok_webhook_receive(
     return {"received": True, "lead_id": lead.id}
 
 
+# ── Google Ads Lead Form Extension Endpoints ──────────────────────────────────
+
+@router.get("/google")
+def google_ads_webhook_verify(
+    google_key: str = Query(None),
+    org_token: Optional[str] = Query(None),
+):
+    """
+    Google Ads Lead Form webhook verification. Google GETs this URL after
+    you register it in the Google Ads Lead Form Extension settings.
+    It expects a 200 OK response (with the google_key echoed back).
+    """
+    return {"google_key": google_key}
+
+
+@router.post("/google")
+async def google_ads_webhook_receive(
+    request: Request,
+    org_token: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Receives Google Ads Lead Form Extension submissions.
+    Google sends lead data directly in the request body as JSON.
+
+    Standard fields Google sends:
+      lead_id, form_id, campaign_id, google_key,
+      user_column_data (list of {column_name, string_value})
+    """
+    org = _get_org_by_token(db, org_token)
+
+    try:
+        body = await request.body()
+        payload = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    logger.info("google_ads_webhook: org=%s payload=%s", org.id, payload)
+
+    first_name, last_name, phone, email = "", "", None, None
+
+    # Extract from user_column_data list (primary Google Ads format)
+    for col in payload.get("user_column_data") or []:
+        col_name = (col.get("column_name") or col.get("column_id") or "").lower()
+        col_val = col.get("string_value") or col.get("value") or ""
+        if col_name in ("full_name", "name"):
+            parts = str(col_val).split(" ", 1)
+            first_name = parts[0]
+            last_name = parts[1] if len(parts) > 1 else ""
+        elif col_name in ("first_name", "given_name"):
+            first_name = str(col_val)
+        elif col_name in ("last_name", "family_name"):
+            last_name = str(col_val)
+        elif col_name in ("phone_number", "phone"):
+            phone = str(col_val)
+        elif col_name == "email":
+            email = str(col_val)
+
+    # Fallback: top-level fields
+    if not first_name:
+        first_name = payload.get("first_name") or ""
+    if not last_name:
+        last_name = payload.get("last_name") or ""
+    if not phone:
+        phone = payload.get("phone") or payload.get("phone_number")
+    if not email:
+        email = payload.get("email")
+
+    lead = _upsert_social_lead(
+        db, org, first_name, last_name, phone, email,
+        source="google_ads",
+        source_ref=str(payload.get("lead_id") or payload.get("form_id") or ""),
+    )
+    return {"received": True, "lead_id": lead.id}
+
+
 # ── Utility: generate/return webhook URLs for org settings UI ─────────────────
 
 @router.get("/token")
@@ -403,4 +479,5 @@ def get_or_create_webhook_token(
         "social_webhook_token": token,
         "meta_webhook_url": f"{base_url}/webhooks/meta?org_token={token}",
         "tiktok_webhook_url": f"{base_url}/webhooks/tiktok?org_token={token}",
+        "google_webhook_url": f"{base_url}/webhooks/google?org_token={token}",
     }
