@@ -1436,6 +1436,123 @@ def flag_lead(
     return {"flagged": bool(payload.flag_type), "flag_type": payload.flag_type}
 
 
+# ── PUBLIC: Demo request from bookaboost.live (no auth required) ─────────────
+# Called by the "Request a Demo" form on the bookaboost.live marketing site.
+# Stores a lead record in the default org and fires a notification email to
+# every address in the LEAD_NOTIFY_EMAILS env var (comma-separated).
+# Set in Render: mike@simmonsstrong.com,ctinatorres80@gmail.com,blakerehani@gmail.com
+
+class DemoRequestPayload(BaseModel):
+    first_name: str
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    industry: Optional[str] = None
+    message: Optional[str] = None
+
+
+_DEMO_CORS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+}
+
+
+@router.options("/demo-request")
+def demo_request_preflight():
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content={}, headers=_DEMO_CORS)
+
+
+@router.post("/demo-request", status_code=201)
+def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
+    """
+    Public endpoint — no auth required. CORS open to any origin.
+    Accepts a demo request from bookaboost.live and fires notification
+    emails to LEAD_NOTIFY_EMAILS (comma-separated env var).
+    """
+    import uuid as _uuid
+    from fastapi.responses import JSONResponse
+    from app.models.models import Organization
+
+    # Store in first active org as a web_lead
+    org = db.query(Organization).filter(Organization.is_active == True).first()
+    if org:
+        lead = Lead(
+            id=str(_uuid.uuid4()),
+            organization_id=org.id,
+            first_name=(payload.first_name or "").strip(),
+            last_name=(payload.last_name or "").strip() or None,
+            email=payload.email,
+            phone=payload.phone,
+            status="new",
+            tier="web_lead",
+            source_file="demo_request",
+            message_track="new_inquiry_intro",
+            notes=(
+                f"[Demo Request]\n"
+                f"Company: {payload.company or 'n/a'}\n"
+                f"Industry: {payload.industry or 'n/a'}\n"
+                f"Message: {payload.message or 'n/a'}"
+            ),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(lead)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    # Fire notification emails
+    notify_raw = os.environ.get("LEAD_NOTIFY_EMAILS", "")
+    notify_addrs = [e.strip() for e in notify_raw.split(",") if e.strip()]
+    if notify_addrs:
+        try:
+            import resend
+            api_key = os.environ.get("RESEND_API_KEY", "")
+            from_addr = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")
+            if api_key:
+                resend.api_key = api_key
+                html_body = f"""
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#222;">
+  <h2 style="color:#1565c0;margin-bottom:16px;">New Demo Request — BookaBoost</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;width:120px;">Name</td>
+        <td>{payload.first_name} {payload.last_name or ''}</td></tr>
+    <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;">Email</td>
+        <td>{payload.email or '—'}</td></tr>
+    <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;">Phone</td>
+        <td>{payload.phone or '—'}</td></tr>
+    <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;">Company</td>
+        <td>{payload.company or '—'}</td></tr>
+    <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;">Industry</td>
+        <td>{payload.industry or '—'}</td></tr>
+    <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;">Message</td>
+        <td>{payload.message or '—'}</td></tr>
+  </table>
+  <p style="margin-top:20px;font-size:12px;color:#888;">
+    Sent from bookaboost.live demo request form.
+  </p>
+</div>"""
+                resend.Emails.send({
+                    "from": from_addr,
+                    "to": notify_addrs,
+                    "subject": f"New Demo Request: {payload.first_name} {payload.last_name or ''} ({payload.company or payload.email or 'unknown'})",
+                    "html": html_body,
+                })
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger(__name__).error("demo_request notify email failed: %s", exc)
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        content={"success": True, "message": "Demo request received. We'll be in touch soon!"},
+        headers=_DEMO_CORS,
+    )
+
+
 # ── PUBLIC: SMS opt-in form submission (no auth required) ─────────────────────
 # Called by advisorflow-booking.vercel.app/optin when a lead submits the
 # SMS consent form. Required for Twilio A2P 10DLC carrier verification.
