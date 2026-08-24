@@ -48,12 +48,10 @@ from app.routers.fiber_leads_router import router as fiber_leads_router
 from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
 from app.routers.timeline_router import router as timeline_router
-from app.routers.lead_scraper_router import router as lead_scraper_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
-from app.routers.billing_router import router as billing_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -300,9 +298,10 @@ def ping():
     return {"status": "ok"}
 
 
-# ── Public endpoint for landing page demo requests — handled by leads_router ──
-# POST /leads/demo-request is implemented in leads_router.py (DemoRequestPayload).
-# LEAD_NOTIFY_EMAILS env var (comma-separated) controls who gets notified.
+# ── Public endpoint for landing page demo requests (no auth required)
+@app.get("/leads/demo-request")
+def demo_request_docs():
+    return {"message": "POST to this endpoint to submit a demo request"}
 
 
 # ── All app routers
@@ -348,12 +347,10 @@ app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
-app.include_router(lead_scraper_router)
 app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
-app.include_router(billing_router)
 app.include_router(proposal_router.router)
 
 
@@ -442,22 +439,6 @@ async def _cadence_loop():
         await asyncio.sleep(3600)  # 1 hour
 
 
-async def _appointment_reminder_loop():
-    """Send 24hr and 1hr appointment reminders to leads. Runs every 15 min."""
-    from app.crons.appointment_reminder_cron import run_appointment_reminder_cron
-    import logging as _log
-    _logger = _log.getLogger("appointment_reminder_cron")
-    await asyncio.sleep(45)  # brief startup delay — offset from other loops
-    while True:
-        try:
-            sent = run_appointment_reminder_cron(engine)
-            if sent:
-                _logger.info("appointment_reminder_cron: sent %d reminders", sent)
-        except Exception as exc:
-            _logger.error("appointment_reminder_cron error: %s", exc)
-        await asyncio.sleep(900)  # 15 minutes
-
-
 @app.on_event("startup")
 async def on_startup():
     # 1. Create any brand-new tables
@@ -515,55 +496,7 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("pipeline_conversations migration note: %s", e)
 
-    # 3b. Stripe billing columns on organizations (IF NOT EXISTS)
-    try:
-        with engine.connect() as conn:
-            conn.execute(_text("""
-                ALTER TABLE organizations
-                    ADD COLUMN IF NOT EXISTS stripe_customer_id     VARCHAR,
-                    ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR,
-                    ADD COLUMN IF NOT EXISTS stripe_plan_interval   VARCHAR,
-                    ADD COLUMN IF NOT EXISTS billing_status         VARCHAR;
-            """))
-            conn.commit()
-    except Exception as e:
-        import logging as _logging
-        _logging.getLogger(__name__).warning("Stripe columns migration note: %s", e)
-
-    # 3c. Booking / availability settings columns on users (IF NOT EXISTS)
-    try:
-        with engine.connect() as conn:
-            conn.execute(_text("""
-                ALTER TABLE users
-                    ADD COLUMN IF NOT EXISTS appt_duration_minutes       INTEGER DEFAULT 30,
-                    ADD COLUMN IF NOT EXISTS buffer_minutes               INTEGER DEFAULT 0,
-                    ADD COLUMN IF NOT EXISTS max_bookings_per_day         INTEGER DEFAULT 8,
-                    ADD COLUMN IF NOT EXISTS available_start_time         VARCHAR DEFAULT '09:00',
-                    ADD COLUMN IF NOT EXISTS available_end_time           VARCHAR DEFAULT '17:00',
-                    ADD COLUMN IF NOT EXISTS available_days               VARCHAR DEFAULT '0,1,2,3,4',
-                    ADD COLUMN IF NOT EXISTS booking_timezone             VARCHAR DEFAULT 'America/Chicago',
-                    ADD COLUMN IF NOT EXISTS booking_confirmation_message TEXT    NULL;
-            """))
-            conn.commit()
-    except Exception as e:
-        import logging as _logging
-        _logging.getLogger(__name__).warning("Booking settings columns migration note: %s", e)
-
-    # 3d. Appointment reminder tracking columns on booking_links (IF NOT EXISTS)
-    try:
-        with engine.connect() as conn:
-            conn.execute(_text("""
-                ALTER TABLE booking_links
-                    ADD COLUMN IF NOT EXISTS confirmation_sent   BOOLEAN DEFAULT FALSE,
-                    ADD COLUMN IF NOT EXISTS reminder_24hr_sent  BOOLEAN DEFAULT FALSE,
-                    ADD COLUMN IF NOT EXISTS reminder_1hr_sent   BOOLEAN DEFAULT FALSE;
-            """))
-            conn.commit()
-    except Exception as e:
-        import logging as _logging
-        _logging.getLogger(__name__).warning("BookingLink reminder columns migration note: %s", e)
-
-    # 3d. Ensure all performance-critical indexes exist on the leads table.
+    # 3b. Ensure all performance-critical indexes exist on the leads table.
     #     CREATE INDEX IF NOT EXISTS is idempotent — safe to run on every startup.
     #     These cover the filter + sort combos the leads page uses most.
     _index_migrations = [
@@ -617,25 +550,47 @@ async def on_startup():
             "SUPER_ADMIN_EMAIL env var not set — skipping super_admin role grant on startup."
         )
 
-    # 4b. Ensure the god_admin account has the correct role.
+    # 4b. Ensure the god_admin account exists and has the correct role.
     #     GOD_ADMIN_EMAIL must be set in Render env vars (never hardcoded).
+    #     If the account doesn't exist yet it is created with the password from
+    #     GOD_ADMIN_INIT_PW env var (falls back to "GodMode2024!").
     #     This runs on every startup — idempotent, safe.
     _god_admin_email = _os.environ.get("GOD_ADMIN_EMAIL", "")
     if _god_admin_email:
         try:
+            import bcrypt as _bcrypt
+            _init_pw = _os.environ.get("GOD_ADMIN_INIT_PW", "GodMode2024!")
+            _pw_hash = _bcrypt.hashpw(_init_pw.encode(), _bcrypt.gensalt()).decode()
             with engine.connect() as conn:
+                # Create the account only if it does not already exist
+                conn.execute(_text("""
+                    INSERT INTO users (id, organization_id, email, full_name, password_hash,
+                                       role, is_active, must_change_password, failed_login_attempts)
+                    SELECT
+                        gen_random_uuid(),
+                        (SELECT id FROM organizations ORDER BY created_at LIMIT 1),
+                        :email,
+                        'Mike Simmons',
+                        :pw_hash,
+                        'god_admin',
+                        TRUE,
+                        FALSE,
+                        0
+                    WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = :email)
+                """), {"email": _god_admin_email, "pw_hash": _pw_hash})
+                # Always ensure the role is correct (upgrades pre-existing accounts too)
                 conn.execute(_text(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE "
+                    "UPDATE users SET role='god_admin', must_change_password=FALSE, full_name='Mike Simmons' "
                     "WHERE email=:email"
                 ), {"email": _god_admin_email})
                 conn.commit()
         except Exception as e:
             import logging as _logging
-            _logging.getLogger(__name__).warning("God admin role migration note: %s", e)
+            _logging.getLogger(__name__).warning("God admin upsert note: %s", e)
     else:
         import logging as _logging
         _logging.getLogger(__name__).warning(
-            "GOD_ADMIN_EMAIL env var not set — skipping god_admin role grant on startup."
+            "GOD_ADMIN_EMAIL env var not set — skipping god_admin upsert on startup."
         )
 
     # 5. Seed default Platform records (idempotent — ON CONFLICT DO NOTHING)
@@ -656,10 +611,9 @@ async def on_startup():
         _logging.getLogger(__name__).warning("Platform seed note: %s", e)
 
     # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
-    asyncio.create_task(_review_request_loop())          # Google review SMS    — every 30 min
-    asyncio.create_task(_ai_conversation_loop())         # AI lead touches      — every 2 min
-    asyncio.create_task(_cadence_loop())                 # SMS cadence touches  — every 1 hr
-    asyncio.create_task(_appointment_reminder_loop())    # Appt reminders       — every 15 min
+    asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
+    asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
+    asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
 
 
 @app.get("/health")
