@@ -101,11 +101,26 @@ class ConciergeRequest(BaseModel):
     messages: List[Message] = Field(..., max_length=20)
 
 
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+}
+
+
+@router.options("/chat")
+async def concierge_chat_preflight():
+    """Handle CORS preflight for the public concierge chat endpoint."""
+    return JSONResponse(content={}, headers=_CORS_HEADERS)
+
+
 @router.post("/chat")
 async def concierge_chat(req: ConciergeRequest, request: Request):
     """
     Public endpoint — no auth. Called from bookaboost.live static site.
     Routes visitor messages through OpenAI with BookaBoost system prompt.
+    CORS headers are set explicitly here (Access-Control-Allow-Origin: *)
+    so this endpoint works from any origin without credentials.
     """
     _check_rate_limit(request)
     try:
@@ -122,11 +137,12 @@ async def concierge_chat(req: ConciergeRequest, request: Request):
         )
 
         reply = response.choices[0].message.content.strip()
-        return JSONResponse(content={"reply": reply})
+        return JSONResponse(content={"reply": reply}, headers=_CORS_HEADERS)
 
     except Exception as e:
         logger.error("Concierge error: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"error": "Unable to connect. Please request a demo directly."}
+            content={"error": "Unable to connect. Please request a demo directly."},
+            headers=_CORS_HEADERS,
         )
