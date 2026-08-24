@@ -41,7 +41,6 @@ const ADMIN_NAV_ITEMS = [
   { to: '/crm',              label: 'CRM',                icon: 'database',     featureKey: null },
   { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: null },
   { to: '/lead-cleanup',     label: 'Lead Cleanup',       icon: 'users',        featureKey: 'lead_cleanup' },
-  { to: '/scraper',          label: 'Lead Scraper',       icon: 'search',       featureKey: null },
   { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
   { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
   { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
@@ -330,6 +329,20 @@ export default function Layout({ children }) {
                   </div>
                 )}
               </div>
+
+              <NavLink to="/scraper"
+                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                style={({ isActive }) => ({
+                  color: isActive ? '#f59e0b' : '#d97706',
+                  background: isActive ? 'rgba(245,158,11,0.12)' : 'transparent',
+                  borderLeft: isActive ? '3px solid #f59e0b' : '3px solid transparent',
+                  fontWeight: 600,
+                })}
+                onClick={closeSidebar}
+              >
+                <Icon name="search" />
+                Lead Scraper
+              </NavLink>
 
               <div className="nav-divider" />
             </>
