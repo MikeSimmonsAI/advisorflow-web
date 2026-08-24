@@ -419,6 +419,72 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             logger.warning("booking-confirmed: could not auto-create case file: %s", e)
             case_file_result = {"success": False, "error": str(e)}
 
+    # ── Store booked_time so the reminder cron can find this booking ─────────
+    if booking and event_start and not booking.booked_time:
+        booking.booked_time = event_start
+
+    # ── Send confirmation SMS to lead ─────────────────────────────────────────
+    lead_sms_result = {"success": False, "note": "skipped"}
+    if lead and lead.phone and advisor:
+        try:
+            from twilio.rest import Client as TwilioClient
+            from app.utils.crypto import decrypt_value
+            _brand = get_brand_name(db, str(advisor.organization_id))
+            _lead_name = f"{lead.first_name or ''}".strip() or "there"
+            _sms_text = (
+                f"Hi {_lead_name}, your {appt_label} is confirmed"
+                + (f" for {slot_display}" if slot_display else "")
+                + f". We look forward to seeing you. — {_brand}"
+            )
+            # Use org Twilio if available, fall back to advisor Twilio
+            _sid = (getattr(org, 'org_twilio_account_sid', None) or advisor.twilio_account_sid) if org else advisor.twilio_account_sid
+            _tok_enc = (getattr(org, 'org_twilio_auth_token_encrypted', None) or advisor.twilio_auth_token_encrypted) if org else advisor.twilio_auth_token_encrypted
+            _from = (getattr(org, 'org_twilio_phone_number', None) or advisor.twilio_phone_number) if org else advisor.twilio_phone_number
+            if _sid and _tok_enc and _from:
+                _auth = decrypt_value(_tok_enc)
+                TwilioClient(_sid, _auth).messages.create(body=_sms_text, from_=_from, to=lead.phone)
+                if booking:
+                    booking.confirmation_sent = True
+                lead_sms_result = {"success": True}
+                logger.info("booking-confirmed: lead confirmation SMS sent to %s", lead.phone)
+            else:
+                lead_sms_result = {"success": False, "note": "no Twilio creds"}
+        except Exception as e:
+            logger.exception("booking-confirmed: lead SMS error: %s", e)
+            lead_sms_result = {"success": False, "error": str(e)}
+
+    # ── Send confirmation email to lead ───────────────────────────────────────
+    lead_email_result = {"success": False, "note": "skipped"}
+    if lead and getattr(lead, 'email', None) and org:
+        try:
+            import resend as _resend
+            _brand = get_brand_name(db, str(advisor.organization_id))
+            _lead_name_full = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "there"
+            _resend_key = getattr(org, 'resend_api_key', None) or os.environ.get("RESEND_API_KEY")
+            _from_addr = getattr(org, 'from_email', None) or os.environ.get("EMAIL_FROM_ADDRESS", f"support@bookaboost.live")
+            if _resend_key:
+                _resend.api_key = _resend_key
+                _resend.Emails.send({
+                    "from": f"{_brand} <{_from_addr}>",
+                    "to": [lead.email],
+                    "subject": f"Your {appt_label} is Confirmed",
+                    "html": (
+                        f"<p>Hi {_lead_name_full},</p>"
+                        f"<p>Your <strong>{appt_label}</strong> has been confirmed"
+                        + (f" for <strong>{slot_display}</strong>" if slot_display else "")
+                        + f".</p>"
+                        f"<p>If you need to reschedule, please call us or reply to this email.</p>"
+                        f"<p>We look forward to seeing you!<br>— The {_brand} Team</p>"
+                    ),
+                })
+                lead_email_result = {"success": True}
+                logger.info("booking-confirmed: lead confirmation email sent to %s", lead.email)
+            else:
+                lead_email_result = {"success": False, "note": "no Resend key"}
+        except Exception as e:
+            logger.exception("booking-confirmed: lead email error: %s", e)
+            lead_email_result = {"success": False, "error": str(e)}
+
     db.commit()
 
     response_payload = {
@@ -427,6 +493,8 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         "google_calendar": google_calendar_result,
         "sms": sms_result,
         "email": email_result,
+        "lead_sms": lead_sms_result,
+        "lead_email": lead_email_result,
         "case_file": case_file_result,
         "lead_name": lead_name,
         "slot": slot_display,
