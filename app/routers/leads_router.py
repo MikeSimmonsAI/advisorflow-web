@@ -1439,8 +1439,7 @@ def flag_lead(
 # ── PUBLIC: Demo request from bookaboost.live (no auth required) ─────────────
 # Called by the "Request a Demo" form on the bookaboost.live marketing site.
 # Stores a lead record in the default org and fires a notification email to
-# every address in the LEAD_NOTIFY_EMAILS env var (comma-separated).
-# Set in Render: mike@simmonsstrong.com,ctinatorres80@gmail.com,blakerehani@gmail.com
+# every address in the LEAD_NOTIFY_EMAILS env var (comma-separated, set in Render).
 
 class DemoRequestPayload(BaseModel):
     first_name: str
