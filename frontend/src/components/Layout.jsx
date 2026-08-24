@@ -198,7 +198,7 @@ export default function Layout({ children }) {
     refreshCurrentUser().then(p => {
       if (p?.profile_photo_url) setProfilePhoto(p.profile_photo_url)
       setUser(getCurrentUser())
-    })
+    }).catch(() => {})
   }, [])
 
   function closeSidebar() { if (window.innerWidth <= 1024) setSidebarOpen(false) }
@@ -234,23 +234,6 @@ export default function Layout({ children }) {
                 <span className="brand-mark" style={{ color: '#f59e0b', letterSpacing: '0.04em' }}>AdvisorFlow</span>
               </div>
               <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', paddingLeft: 28 }}>God Mode</span>
-            </div>
-          ) : isSuperAdmin ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              {logoUrl && !logoFailed ? (
-                <img
-                  src={logoUrl}
-                  alt={brandName}
-                  style={{ height: 56, maxWidth: 160, objectFit: 'contain', borderRadius: 6, display: 'block' }}
-                  onError={() => setLogoFailed(true)}
-                />
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <SignalPulse color="blue" size={9} />
-                  <span className="brand-mark">{brandName}</span>
-                </div>
-              )}
-              <span style={{ fontSize: 10, color: 'var(--accent, #2fb6ff)', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', opacity: 0.8 }}>Platform Admin</span>
             </div>
           ) : logoUrl && !logoFailed ? (
             <img
@@ -425,7 +408,17 @@ export default function Layout({ children }) {
               <div className="user-name">{user?.full_name || 'Unknown'}</div>
               <div className="user-role">{user?.role?.replace('_', ' ')}</div>
             </div>
-          </div>
+          </div>          {PLATFORM_BRAND.websiteUrl && (
+            <a
+              href={PLATFORM_BRAND.websiteUrl}
+              className="back-to-website-btn"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ? Back to website
+            </a>
+          )}
+          
           <button className="logout-btn" onClick={handleLogout}>Sign out</button>
         </div>
       </aside>
