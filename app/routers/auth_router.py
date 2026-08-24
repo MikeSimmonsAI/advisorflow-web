@@ -147,6 +147,12 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     )
 
 
+@router.post("/verify", response_model=TokenResponse)
+def verify(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Alias for /auth/login — keeps older frontend builds working."""
+    return login(request, form_data, db)
+
+
 @router.post("/refresh")
 def refresh_token(
     db: Session = Depends(get_db),
