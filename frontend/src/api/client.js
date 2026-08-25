@@ -1,7 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
+﻿const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
 
-// ── Brand-neutral localStorage keys ──────────────────────────────────────────
-// All keys use the "af_" prefix — no white-label brand name ever appears in
+// â”€â”€ Brand-neutral localStorage keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// All keys use the "af_" prefix â€” no white-label brand name ever appears in
 // storage. Migration helpers read the old "bookaboost_*" / "bb_*" keys once,
 // copy the value to the new key, and delete the old one so existing sessions
 // survive the rename without being logged out.
@@ -45,8 +45,8 @@ export function clearToken() {
  * this surfaces as a hard "Failed to fetch" error on every page.
  *
  * Retry policy:
- *  - Only retries TypeError (network-level failure — no response from server)
- *  - Does NOT retry HTTP errors (401, 403, 404, 500, etc.) — those are real
+ *  - Only retries TypeError (network-level failure â€” no response from server)
+ *  - Does NOT retry HTTP errors (401, 403, 404, 500, etc.) â€” those are real
  *  - Up to MAX_RETRIES attempts with RETRY_DELAY_MS between each
  *  - Auth errors (401) redirect to login immediately, no retry
  */
@@ -57,7 +57,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function request(path, options = {}, attempt = 0) {
+async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   const token = getToken()
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = `Bearer ${token}`
@@ -78,9 +78,20 @@ async function request(path, options = {}, attempt = 0) {
     throw new Error('Unable to reach the server. Please check your connection or try again in a moment.')
   }
 
+
   if (res.status === 401) {
-    clearToken()
-    window.location.href = '/login'
+    // Retry once after 2 s before giving up. Absorbs cold-start/token-race 401s.
+    if (attempt === 0) {
+      await sleep(2000)
+      const freshToken = getToken()
+      if (freshToken) return request(path, options, 1, skipRedirect)
+    }
+    // Only redirect once -- prevent parallel 401s queuing multiple redirects.
+    if (!skipRedirect && !window._af_redirecting) {
+      window._af_redirecting = true
+      clearToken()
+      window.location.href = '/login'
+    }
     throw new Error('Session expired')
   }
 
@@ -99,7 +110,7 @@ async function request(path, options = {}, attempt = 0) {
 }
 
 export const api = {
-  get: (path) => request(path, { method: 'GET' }),
+  get: (path, opts = {}) => request(path, { method: 'GET', ...opts }, 0, opts.skipRedirect || false),
   post: (path, body) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) }),
   put: (path, body) => request(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body) }),
   patch: (path, body) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body) }),
@@ -144,7 +155,7 @@ export function getCurrentUser() {
 
 export async function refreshCurrentUser() {
   try {
-    const profile = await api.get('/settings/profile')
+    const profile = await api.get('/settings/profile', { skipRedirect: true })
     const stored = getCurrentUser()
     if (stored && profile?.role) {
       stored.role = profile.role
@@ -160,7 +171,7 @@ export async function refreshCurrentUser() {
 
 export async function logout() {
   // Tell the server to invalidate the session immediately (clears session_token).
-  // Best-effort — if the network call fails the local state is still cleared.
+  // Best-effort â€” if the network call fails the local state is still cleared.
   const token = getToken()
   if (token) {
     try {
@@ -168,7 +179,7 @@ export async function logout() {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       })
-    } catch { /* silent — we're logging out regardless */ }
+    } catch { /* silent â€” we're logging out regardless */ }
   }
   clearToken()
   localStorage.removeItem(KEY_USER)
@@ -177,7 +188,7 @@ export async function logout() {
   localStorage.removeItem('bb_branding')     // clean up legacy key
 }
 
-// ── Keep-alive ────────────────────────────────────────────────────────────────
+// â”€â”€ Keep-alive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Ping the backend every 14 minutes so Render free-tier never sleeps while
 // an advisor has the app open. Call startKeepAlive() after login,
 // stopKeepAlive() after logout.
@@ -190,7 +201,7 @@ export function startKeepAlive() {
     try {
       await fetch(`${API_BASE}/ping`)
     } catch {
-      // Silent — this is best-effort, not critical
+      // Silent â€” this is best-effort, not critical
     }
   }, 14 * 60 * 1000) // 14 minutes
 }
@@ -202,7 +213,7 @@ export function stopKeepAlive() {
   }
 }
 
-// ── Token refresh loop ────────────────────────────────────────────────────────
+// â”€â”€ Token refresh loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // JWT lifetime is 2 hours. While the app is open, silently refresh every 30
 // minutes so an active user is never kicked. If the refresh fails (401 = server
 // kicked the session) the request() handler above will redirect to /login on the
@@ -229,7 +240,7 @@ export function startRefreshLoop() {
       // Non-2xx (401 = session was force-killed server-side): don't redirect here.
       // The next real API call will 401 and the request() handler redirects to /login.
     } catch {
-      // Network error — silent. The user is still "using" the app; the 2-hr JWT
+      // Network error â€” silent. The user is still "using" the app; the 2-hr JWT
       // stays valid until the server rejects it.
     }
   }, REFRESH_INTERVAL_MS)
@@ -242,12 +253,12 @@ export function stopRefreshLoop() {
   }
 }
 
-// ── Branding ─────────────────────────────────────────────────────────────────
+// â”€â”€ Branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function fetchAndStoreBranding() {
   try {
     // Primary source: per-org branding set by god_admin in Command Center
-    const data = await api.get('/branding/org')
+    const data = await api.get('/branding/org', { skipRedirect: true })
     const branding = {
       brand_name: data.brand_name || null,
       brand_logo_url: data.brand_logo_url || null,
@@ -265,7 +276,7 @@ export async function fetchAndStoreBranding() {
   } catch {
     // Fall back to org-settings for backward compat
     try {
-      const data = await api.get('/org-settings/')
+      const data = await api.get('/org-settings/', { skipRedirect: true })
       const branding = {
         brand_name: data.brand_name || data.name || null,
         brand_logo_url: data.brand_logo_url || null,
@@ -344,7 +355,7 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-// ── Org Context (super admin only) ───────────────────────────────────────────
+// â”€â”€ Org Context (super admin only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ORG_CONTEXT_KEY = 'af_org_context'
 
@@ -364,3 +375,6 @@ export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
   localStorage.removeItem('bb_org_context') // clean up legacy key
 }
+
+
+
