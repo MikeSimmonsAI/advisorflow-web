@@ -15,7 +15,7 @@ import SalesShell from './SalesShell'
 import FindTeamTime from './FindTeamTime'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
-  money, dateTime, dueLabel,
+  money, dateTime, dueLabel, wallDateTime,
 } from './parts'
 
 const CONF_TONE = {
@@ -43,10 +43,8 @@ function Meetings({ opp, onFind, onConfirm, onCancel, saving }) {
         <div className="sw-row" key={a.id}>
           <div>
             <b>
-              {new Date(a.starts_at_local || a.starts_at).toLocaleString(undefined, {
-                weekday: 'short', month: 'short', day: 'numeric',
-                hour: 'numeric', minute: '2-digit',
-              })} · {a.meeting_type || 'Meeting'}
+              {wallDateTime(a.starts_at_local || a.starts_at)} ·{' '}
+              {a.meeting_type || 'Meeting'}
             </b>
             <p>
               {a.duration_minutes} min · {a.timezone} ·{' '}

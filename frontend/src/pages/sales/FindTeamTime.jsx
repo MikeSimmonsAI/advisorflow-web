@@ -11,26 +11,11 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
-import { Chip, ErrorBar } from './parts'
+import { Chip, ErrorBar, wallTime, wallDay } from './parts'
 
 function isoDate(d) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
     .toISOString().slice(0, 10)
-}
-
-function localLabel(iso) {
-  // The server sends the wall clock in the team's timezone already resolved.
-  const d = new Date(iso)
-  if (isNaN(d)) return iso
-  return d.toLocaleString(undefined, {
-    weekday: 'short', month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit',
-  })
-}
-
-function dayKey(iso) {
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 }
 
 export default function FindTeamTime({ opportunity, onClose, onBooked }) {
@@ -136,7 +121,10 @@ export default function FindTeamTime({ opportunity, onClose, onBooked }) {
     if (!result?.slots) return []
     const out = []
     result.slots.forEach(s => {
-      const k = dayKey(s.starts_at)
+      // starts_at_local is the wall clock the SERVER resolved in the team's
+      // timezone. Grouping on the raw UTC instant would put a late-afternoon
+      // meeting on the wrong day for anyone west of the team.
+      const k = wallDay(s.starts_at_local || s.starts_at)
       const last = out[out.length - 1]
       if (last && last.day === k) last.slots.push(s)
       else out.push({ day: k, slots: [s] })
@@ -271,8 +259,7 @@ export default function FindTeamTime({ opportunity, onClose, onBooked }) {
                                 ? 'Also free: ' + s.optional_available.map(o => o.full_name).join(', ')
                                 : undefined}>
                         {booking === s.starts_at ? 'Booking…'
-                          : new Date(s.starts_at).toLocaleTimeString(undefined,
-                              { hour: 'numeric', minute: '2-digit' })}
+                          : wallTime(s.starts_at_local || s.starts_at)}
                         {optional.length > 0 && (
                           <span style={{ marginLeft: 6, opacity: 0.65, fontWeight: 400 }}>
                             +{s.optional_available_count}/{optional.length}

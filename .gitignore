@@ -48,3 +48,7 @@ advisorflow.db
 scripts/*.json
 scripts/god_snapshot.json
 deploy_log.txt
+
+# Local Sales Workspace demo database (scripts/demo_local_scheduling.py).
+# Development fixture only - never production data.
+demo_sales.db

@@ -16,15 +16,13 @@ import SalesShell from './SalesShell'
 import NewProspect from './NewProspect'
 import {
   Card, Chip, Metric, Empty, ErrorBar,
-  money, dateTime, dueLabel,
+  money, dateTime, dueLabel, wallTime,
 } from './parts'
 
-/** The team-timezone wall clock the server already resolved for us. */
+/** The team-timezone wall clock the server already resolved — see parts.jsx
+ *  for why this must not go through `new Date(iso)`. */
 function apptTime(a) {
-  const iso = a.starts_at_local || a.starts_at
-  const d = new Date(iso)
-  if (isNaN(d)) return ''
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return wallTime(a.starts_at_local || a.starts_at)
 }
 
 const CONF_TONE = {

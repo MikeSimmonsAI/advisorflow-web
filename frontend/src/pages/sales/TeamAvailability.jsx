@@ -11,7 +11,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import FindTeamTime from './FindTeamTime'
-import { Card, Chip, ErrorBar, Empty } from './parts'
+import { Card, Chip, ErrorBar, Empty, wallDateTime } from './parts'
 
 const START_HOUR = 8
 const END_HOUR = 19
@@ -22,9 +22,16 @@ function isoDate(d) {
     .toISOString().slice(0, 10)
 }
 
+/** The API sends naive UTC with no suffix; adding 'Z' is what makes Intl's
+ *  timeZone conversion below correct rather than off by the viewer's offset. */
+function asUtc(iso) {
+  const s = String(iso)
+  return new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z')
+}
+
 /** Where a UTC instant sits on the grid, in that member's own timezone. */
 function offsetPx(iso, tz) {
-  const d = new Date(iso)
+  const d = asUtc(iso)
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false,
   }).formatToParts(d)
@@ -36,7 +43,7 @@ function offsetPx(iso, tz) {
 function timeLabel(iso, tz) {
   return new Intl.DateTimeFormat(undefined, {
     timeZone: tz, hour: 'numeric', minute: '2-digit',
-  }).format(new Date(iso))
+  }).format(asUtc(iso))
 }
 
 export default function TeamAvailability() {
@@ -98,7 +105,7 @@ export default function TeamAvailability() {
               <Chip tone="green">Booked</Chip>
               <b style={{ marginLeft: 8, fontSize: 12 }}>{booked.title}</b>
               <div className="sw-subtle" style={{ marginTop: 4 }}>
-                {new Date(booked.starts_at).toLocaleString()} ·{' '}
+                {wallDateTime(booked.starts_at_local || booked.starts_at)} ·{' '}
                 {booked.participants.map(p => p.full_name).join(', ')}
               </div>
             </div>

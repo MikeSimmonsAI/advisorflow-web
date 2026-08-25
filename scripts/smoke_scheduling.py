@@ -390,6 +390,20 @@ def api_tests():
     ID["slot1"] = body["slots"][0]["starts_at"]
     ID["slot2"] = body["slots"][-1]["starts_at"]
 
+    # The API must send BOTH the UTC instant and the resolved wall clock. The UI
+    # renders the wall clock: a naive UTC string handed to JS's Date() is read as
+    # browser-local, which is what once made a 9am Chicago meeting display as 2pm.
+    s0 = body["slots"][0]
+    check("each slot carries the resolved local wall clock",
+          "starts_at_local" in s0 and s0["starts_at_local"], s0)
+    check("the wall clock differs from the UTC instant (a real conversion happened)",
+          s0["starts_at_local"] != s0["starts_at"], s0)
+    check("the wall clock lands inside working hours",
+          9 <= datetime.fromisoformat(s0["starts_at_local"]).hour < 17,
+          s0["starts_at_local"])
+    check("the response states which timezone that wall clock is in",
+          body["timezone"] == CHI, body["timezone"])
+
     # Carve Michael's morning out and prove it removes exactly those slots.
     db = SessionLocal()
     pm = prof_of(db, "u-michael")

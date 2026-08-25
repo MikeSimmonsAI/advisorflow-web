@@ -82,6 +82,54 @@ export function ErrorBar({ error, onRetry }) {
   )
 }
 
+// ── time formatting ─────────────────────────────────────────────────────────
+//
+// The API sends naive datetimes with NO timezone suffix: instants are naive
+// UTC ("2026-08-26T14:00:00") and `*_local` fields are the already-resolved
+// wall clock in the team's timezone ("2026-08-26T09:00:00").
+//
+// `new Date("2026-08-26T09:00:00")` interprets that as the BROWSER's local
+// time. For an instant that is simply wrong, and for a resolved wall clock it
+// is right only by luck when the viewer happens to sit in the team's zone —
+// which is exactly the bug that made a 9am Chicago meeting render as 2pm.
+//
+// So: never hand a naive string to Date and hope. `parseNaive` rebuilds the
+// components into a Date used purely as a formatting vehicle, so the wall clock
+// the server resolved is the wall clock displayed, wherever the viewer is.
+
+export function parseNaive(iso) {
+  if (!iso) return null
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/)
+  if (!m) {
+    const d = new Date(iso)
+    return isNaN(d) ? null : d
+  }
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+                  Number(m[4]), Number(m[5]))
+}
+
+/** "9:00 AM" from a resolved local wall clock. */
+export function wallTime(iso) {
+  const d = parseNaive(iso)
+  return d ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''
+}
+
+/** "Wednesday, Aug 26" from a resolved local wall clock. */
+export function wallDay(iso) {
+  const d = parseNaive(iso)
+  return d ? d.toLocaleDateString(undefined,
+    { weekday: 'long', month: 'short', day: 'numeric' }) : ''
+}
+
+/** "Wed, Aug 26, 9:00 AM" from a resolved local wall clock. */
+export function wallDateTime(iso) {
+  const d = parseNaive(iso)
+  return d ? d.toLocaleString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  }) : ''
+}
+
 // ── formatting ──────────────────────────────────────────────────────────────
 
 export function money(v) {
