@@ -1,6 +1,7 @@
 import time
 import threading
 from collections import defaultdict
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from app.deps import get_db, get_current_user
 from app.limiter import limiter
 from app.services.auth_service import authenticate_user, create_access_token, hash_password, verify_password
 from app.models.models import User, Organization, Platform
+from app.models.sales_models import Membership, BrandSalesOrg, SCOPE_BRAND_SALES_ORG
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -62,7 +64,11 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     role: str
     full_name: str
-    organization_id: str
+    # OPTIONAL as of Aug 25 2026. A brand-sales user has no customer tenancy,
+    # so this is legitimately null. It was a required `str`, which meant such a
+    # user authenticated successfully and then the RESPONSE failed validation,
+    # returning 500 on a correct password.
+    organization_id: Optional[str] = None
     must_change_password: bool = False
 
 
@@ -100,6 +106,47 @@ def _detect_platform_slug(request: Request) -> str | None:
     return "bookaboost"
 
 
+def _user_platform_slugs(db: Session, user: User) -> set:
+    """Every platform this user is entitled to log in from.
+
+    Two independent sources, because a person can belong to either domain — or,
+    like Mike, to both:
+
+      · CUSTOMER TENANCY — their organization's platform. Legacy orgs with no
+        platform_id keep defaulting to 'bookaboost', unchanged behaviour.
+      · BRAND SALES — the platform behind each active brand_sales_org
+        membership. A salesperson HAS no organization, so this is the only
+        source they have.
+
+    Returns an empty set for a user with neither. The caller must treat that as
+    a refusal: before this existed, a NULL-org user fell through to the
+    'bookaboost' legacy default, which both locked EvoSys Pro salespeople out of
+    their own domain AND let them in on someone else's.
+    """
+    slugs = set()
+
+    if user.organization_id:
+        org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+        if org:
+            plat = (db.query(Platform).filter(Platform.id == org.platform_id).first()
+                    if org.platform_id else None)
+            # Legacy orgs predate platforms and have always been BookaBoost.
+            slugs.add(plat.slug if plat else "bookaboost")
+
+    sales_rows = (
+        db.query(Platform.slug)
+        .join(BrandSalesOrg, BrandSalesOrg.platform_id == Platform.id)
+        .join(Membership, Membership.scope_id == BrandSalesOrg.id)
+        .filter(Membership.user_id == user.id,
+                Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                Membership.is_active.is_(True),
+                BrandSalesOrg.is_active.is_(True))
+        .all()
+    )
+    slugs.update(r[0] for r in sales_rows)
+    return slugs
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Rate-limit check BEFORE hitting the DB so we don't waste queries on locked-out attackers
@@ -124,12 +171,14 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         if request_platform == "advisorflow":
             raise HTTPException(status_code=401, detail="Incorrect email or password")
         if request_platform is not None:
-            # Look up the org's platform
-            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
-            org_platform = db.query(Platform).filter(Platform.id == org.platform_id).first() if (org and org.platform_id) else None
-            org_slug = org_platform.slug if org_platform else "bookaboost"  # legacy orgs default to bookaboost
+            # Which platforms is this person entitled to? Customer tenancy AND
+            # brand-sales membership both count; a salesperson has only the
+            # latter. An empty set means neither — refuse rather than fall back
+            # to a default, which is how a NULL-org user used to land on the
+            # wrong brand's domain.
+            allowed_slugs = _user_platform_slugs(db, user)
 
-            if org_slug != request_platform:
+            if request_platform not in allowed_slugs:
                 # Return the same error as a bad password — don't leak that the
                 # account exists on a different platform.
                 raise HTTPException(
