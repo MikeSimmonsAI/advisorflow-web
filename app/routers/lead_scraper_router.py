@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_god
 from app.models.models import Lead, Organization, User
 from app.utils.crypto import decrypt_value
 
@@ -69,11 +69,21 @@ class ValidatedPhone(BaseModel):
 
 class ExistsRequest(BaseModel):
     phones: List[str] = Field(..., max_items=200)
+    # Dedup must be checked against the SAME org the leads will import into,
+    # otherwise the duplicate check is meaningless.
+    target_org_id: Optional[str] = None
+    organization_id: Optional[str] = None  # accepted synonym
 
 
 class ImportRequest(BaseModel):
     leads: List[ScrapedBusiness]
     list_name: Optional[str] = None
+    # Which organization these scraped leads belong to. God mode scrapes on
+    # behalf of a client org, so the target must be explicit. Falls back to the
+    # org selected via the X-Org-Override switcher; never silently defaults to
+    # the god platform org.
+    target_org_id: Optional[str] = None
+    organization_id: Optional[str] = None  # accepted synonym
 
 
 # -- Helpers ------------------------------------------------------------------
@@ -165,10 +175,43 @@ def _get_twilio_creds(current_user: User, db: Session) -> tuple:
 
 # -- Endpoints ----------------------------------------------------------------
 
+GOD_PLATFORM_ORG_ID = "org-god-platform"
+
+
+def _resolve_target_org(requested_org_id, current_user: User, db: Session) -> str:
+    """Work out which organization scraped leads belong to.
+
+    God mode scrapes on behalf of a client org. Getting this wrong means leads
+    silently land in the god platform org and look like they vanished, so this
+    refuses to guess: either the request names an org, or the god admin has one
+    selected in the org switcher (X-Org-Override).
+    """
+    org_id = requested_org_id or current_user.organization_id
+
+    if getattr(current_user, "_god_all_orgs", False) and not requested_org_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No organization selected. Pick a client org in the switcher, "
+                   "or pass organization_id, before importing scraped leads.",
+        )
+
+    if not org_id or org_id == GOD_PLATFORM_ORG_ID:
+        raise HTTPException(
+            status_code=400,
+            detail="Scraped leads must be imported into a client organization, "
+                   "not the god platform org. Pass organization_id.",
+        )
+
+    if not db.query(Organization).filter(Organization.id == org_id).first():
+        raise HTTPException(status_code=404, detail="Organization %s not found." % org_id)
+
+    return org_id
+
+
 @router.post("/search")
 async def scrape_search(
     req: ScrapeSearchRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_god),
 ):
     """Search Google Places for businesses matching the query + optional location."""
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
@@ -214,7 +257,7 @@ async def scrape_search(
 def scrape_validate(
     req: ValidateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_god),
 ):
     """Run Twilio Lookup v2 on a list of phone numbers."""
     account_sid, auth_token = _get_twilio_creds(current_user, db)
@@ -237,10 +280,10 @@ def scrape_validate(
 def scrape_exists(
     req: ExistsRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_god),
 ):
     """Return the set of phone numbers that already exist as leads in this org."""
-    org_id = current_user.organization_id
+    org_id = _resolve_target_org(req.target_org_id or req.organization_id, current_user, db)
     phones = [p for p in req.phones if p]
     if not phones:
         return {"existing_phones": []}
@@ -257,10 +300,10 @@ def scrape_exists(
 def scrape_import(
     req: ImportRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_god),
 ):
     """Import scraped businesses as leads. Deduplicates by phone within the org."""
-    org_id = current_user.organization_id
+    org_id = _resolve_target_org(req.target_org_id or req.organization_id, current_user, db)
     list_name = req.list_name or "Lead Scraper Import"
     imported = 0
     skipped = 0

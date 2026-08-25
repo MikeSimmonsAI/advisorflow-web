@@ -246,6 +246,15 @@ class Organization(Base):
     from_email = Column(String, nullable=True)       # e.g. "support@bookaboost.live"
     resend_api_key = Column(String, nullable=True)   # org-specific Resend API key
 
+    # Social lead-capture webhook credentials. These columns already exist in the
+    # database (added via auto_migrate.py) but were missing from this model, which
+    # made every /webhooks/* endpoint fail with AttributeError before it ran.
+    social_webhook_token     = Column(String, nullable=True)  # per-org URL token
+    meta_page_access_token   = Column(String, nullable=True)  # Graph API lead fetch
+    meta_webhook_verify_token = Column(String, nullable=True) # hub.verify_token
+    meta_app_secret          = Column(String, nullable=True)  # HMAC signature check
+    tiktok_webhook_secret    = Column(String, nullable=True)
+
     # Org-level shared Twilio credentials — used as fallback when an advisor
     # has no personal Twilio number configured.  Supports both toll-free and
     # 10DLC numbers; twilio_number_type distinguishes them for reporting.

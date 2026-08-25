@@ -156,7 +156,9 @@ export default function LeadScraper() {
       const data = await api.post('/scraper/import', {
         leads,
         list_name: listName || 'Lead Scraper Import',
-        target_org_id: parseInt(targetOrgId, 10),
+        // Org ids are strings (e.g. "org-god-platform"); parseInt turned them into
+        // NaN, which serialized to null and lost the target org entirely.
+        target_org_id: String(targetOrgId),
       })
       setImportResult(data)
       setSel(new Set())

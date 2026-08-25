@@ -52,6 +52,8 @@ from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
+from app.routers.billing_router import router as billing_router
+from app.routers.lead_scraper_router import router as lead_scraper_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -105,9 +107,12 @@ ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
     "https://advisorflow-booking.vercel.app",
     "https://bookaboost.com",
+    "https://www.bookaboost.com",
     "https://bookaboost.live",
+    "https://www.bookaboost.live",
     "https://app.bookaboost.live",
     "https://evosyspro.live",
+    "https://www.evosyspro.live",
     "https://app.evosyspro.live",
     "http://localhost:5173",
     "http://localhost:5174",
@@ -351,6 +356,11 @@ app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(email_tracking_router)
+# Stripe billing: /billing/plans is public; subscription/checkout/portal are
+# org_admin+ (each org manages its own card); /billing/all is god_admin only.
+app.include_router(billing_router)
+# Lead Scraper: god_admin only, enforced server-side inside the router.
+app.include_router(lead_scraper_router)
 app.include_router(proposal_router.router)
 
 
@@ -553,14 +563,21 @@ async def on_startup():
     # 4b. Ensure the god_admin account exists and has the correct role.
     #     GOD_ADMIN_EMAIL must be set in Render env vars (never hardcoded).
     #     If the account doesn't exist yet it is created with the password from
-    #     GOD_ADMIN_INIT_PW env var (falls back to "GodMode2024!").
+    #     the GOD_ADMIN_INIT_PW env var. There is NO hardcoded fallback: when
+    #     that var is unset we skip account creation entirely and only ensure
+    #     the role on an account that already exists.
     #     This runs on every startup — idempotent, safe.
     _god_admin_email = _os.environ.get("GOD_ADMIN_EMAIL", "")
     if _god_admin_email:
         try:
             import bcrypt as _bcrypt
-            _init_pw = _os.environ.get("GOD_ADMIN_INIT_PW", "GodMode2024!")
-            _pw_hash = _bcrypt.hashpw(_init_pw.encode(), _bcrypt.gensalt()).decode()
+            # No hardcoded fallback. If GOD_ADMIN_INIT_PW is unset we never seed a
+            # password — we only ensure the role on an account that already exists.
+            _init_pw = _os.environ.get("GOD_ADMIN_INIT_PW", "")
+            _pw_hash = (
+                _bcrypt.hashpw(_init_pw.encode(), _bcrypt.gensalt()).decode()
+                if _init_pw else None
+            )
             with engine.connect() as conn:
                 # Ensure a god-level organization exists first (idempotent)
                 conn.execute(_text("""
@@ -568,8 +585,11 @@ async def on_startup():
                     SELECT 'org-god-platform', 'AdvisorFlow Platform', 'advisorflow-platform', 'god', TRUE
                     WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = 'advisorflow-platform')
                 """))
-                # Create the god_admin user only if they don't already exist
-                conn.execute(_text("""
+                # Create the god_admin user only if they don't already exist.
+                # Skipped when GOD_ADMIN_INIT_PW is unset, so we never create an
+                # account with an empty password. The role UPDATE below still runs.
+                if _pw_hash:
+                  conn.execute(_text("""
                     INSERT INTO users (id, organization_id, email, full_name, password_hash,
                                        role, is_active, must_change_password, failed_login_attempts)
                     SELECT
@@ -627,57 +647,4 @@ def health_check():
     return {"status": "ok", "phase": "1"}
 
 
-@app.post("/internal/bootstrap-god-admin")
-def bootstrap_god_admin(secret: str, request: Request):
-    """One-time god_admin seed endpoint. Remove after first use."""
-    import os as _os2, bcrypt as _bcrypt2, uuid as _uuid2
-    from app.deps import engine as _engine2
-    from sqlalchemy import text as _text2
-
-    expected = _os2.environ.get("BOOTSTRAP_SECRET", "")
-    if not expected or secret != expected:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Invalid secret")
-
-    email = _os2.environ.get("GOD_ADMIN_EMAIL", "mike@simmonsstrong.com")
-    pw = _os2.environ.get("GOD_ADMIN_INIT_PW", "GodMode2024!")
-    pw_hash = _bcrypt2.hashpw(pw.encode(), _bcrypt2.gensalt()).decode()
-    results = []
-    try:
-        with _engine2.connect() as conn:
-            # Check existing
-            existing = conn.execute(_text2("SELECT email, role FROM users WHERE email=:e"), {"e": email}).fetchone()
-            results.append(f"existing_user: {existing}")
-
-            # Org check/create
-            org = conn.execute(_text2("SELECT id FROM organizations WHERE slug='advisorflow-platform'")).fetchone()
-            results.append(f"existing_org: {org}")
-            if not org:
-                conn.execute(_text2(
-                    "INSERT INTO organizations (id, name, slug, plan, is_active) VALUES ('org-god-platform', 'AdvisorFlow Platform', 'advisorflow-platform', 'god', TRUE)"
-                ))
-                results.append("org created")
-
-            org_id = org[0] if org else 'org-god-platform'
-
-            # User create/update
-            if not existing:
-                uid = str(_uuid2.uuid4())
-                conn.execute(_text2(
-                    "INSERT INTO users (id, organization_id, email, full_name, password_hash, role, is_active, must_change_password, failed_login_attempts) "
-                    "VALUES (:id, :org_id, :email, 'Mike Simmons', :pw_hash, 'god_admin', TRUE, FALSE, 0)"
-                ), {"id": uid, "org_id": org_id, "email": email, "pw_hash": pw_hash})
-                results.append(f"user created with id={uid}")
-            else:
-                conn.execute(_text2(
-                    "UPDATE users SET role='god_admin', must_change_password=FALSE, is_active=TRUE, "
-                    "password_hash=:pw_hash, failed_login_attempts=0 WHERE email=:e"
-                ), {"e": email, "pw_hash": pw_hash})
-                results.append("user role updated and password reset to GOD_ADMIN_INIT_PW")
-
-            conn.commit()
-    except Exception as e:
-        results.append(f"ERROR: {e}")
-
-    return {"results": results, "email": email, "password": pw}
 # touched Thu Jul  9 12:08:59 UTC 2026
