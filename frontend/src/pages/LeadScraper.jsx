@@ -1,17 +1,34 @@
-import { useState, useCallback } from 'react'
-import { api } from '../api/client'
+import { useState, useEffect, useCallback } from 'react'
+import { api, getCurrentUser } from '../api/client'
 
 const TC = { mobile: '#22c55e', landline: '#f59e0b', voip: '#8b5cf6', unknown: '#6b7280' }
 const CH = { sms: { color: '#22c55e', label: 'SMS' }, email: { color: '#3b82f6', label: 'Email' }, voice: { color: '#f59e0b', label: 'Voice' } }
 
-const PRESETS = [
-  { label: 'Funeral Homes', query: 'funeral homes', icon: '🏛' },
-  { label: 'Insurance Agents', query: 'insurance agency', icon: '🛡' },
-  { label: 'Financial Advisors', query: 'financial advisor', icon: '📊' },
-  { label: 'Law Firms', query: 'law firm', icon: '⚖' },
-  { label: 'Real Estate', query: 'real estate agent', icon: '🏠' },
-  { label: 'Accountants', query: 'CPA accounting firm', icon: '🧾' },
+// Miles to meters conversion
+const MILE_OPTIONS = [
+  { miles: 1,   meters: 1609  },
+  { miles: 3,   meters: 4828  },
+  { miles: 5,   meters: 8047  },
+  { miles: 10,  meters: 16093 },
+  { miles: 15,  meters: 24140 },
+  { miles: 25,  meters: 40234 },
+  { miles: 50,  meters: 80467 },
 ]
+
+const PRESETS = [
+  { label: 'Funeral Homes',      query: 'funeral homes',          icon: '🏛' },
+  { label: 'Insurance Agents',   query: 'insurance agency',       icon: '🛡' },
+  { label: 'Financial Advisors', query: 'financial advisor',      icon: '📊' },
+  { label: 'Real Estate',        query: 'real estate agent',      icon: '🏠' },
+  { label: 'Car Dealerships',    query: 'car dealership',         icon: '🚗' },
+  { label: 'Fiber / ISP',        query: 'internet service provider', icon: '📡' },
+  { label: 'Law Firms',          query: 'law firm',               icon: '⚖' },
+  { label: 'Accountants',        query: 'CPA accounting firm',    icon: '🧾' },
+  { label: 'Chiropractors',      query: 'chiropractor',           icon: '🦴' },
+  { label: 'Roofing Companies',  query: 'roofing contractor',     icon: '🏗' },
+]
+
+const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY']
 
 function Stars({ rating }) {
   if (!rating) return <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>
@@ -46,38 +63,64 @@ const IS = { padding: '8px 12px', borderRadius: 6, border: '1px solid var(--bord
 const BTN = (color = '#3b82f6', extra = {}) => ({ padding: '8px 16px', borderRadius: 6, border: 'none', background: color, color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap', ...extra })
 
 export default function LeadScraper() {
-  const [query, setQuery] = useState('')
-  const [loc, setLoc] = useState('')
-  const [radius, setRadius] = useState(8000)
-  const [maxR, setMaxR] = useState(20)
-  const [searching, setSearching] = useState(false)
-  const [results, setResults] = useState([])
-  const [sel, setSel] = useState(new Set())
-  const [existing, setExisting] = useState(new Set())   // phones already in system
+  const user = getCurrentUser()
+  const [query, setQuery]       = useState('')
+  const [city, setCity]         = useState('')
+  const [state, setState]       = useState('')
+  const [zip, setZip]           = useState('')
+  const [radiusMi, setRadiusMi] = useState(5)   // displayed in miles; converted to meters on submit
+  const [maxR, setMaxR]         = useState(20)
+  const [searching, setSearching]   = useState(false)
+  const [results, setResults]       = useState([])
+  const [sel, setSel]               = useState(new Set())
+  const [existing, setExisting]     = useState(new Set())
   const [validating, setValidating] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [listName, setListName] = useState('')
+  const [importing, setImporting]   = useState(false)
+  const [listName, setListName]     = useState('')
   const [importResult, setImportResult] = useState(null)
-  const [err, setErr] = useState('')
+  const [err, setErr]               = useState('')
   const [searchMeta, setSearchMeta] = useState(null)
+
+  // Org assignment
+  const [orgs, setOrgs]               = useState([])
+  const [targetOrgId, setTargetOrgId] = useState('')
+  const [orgsLoading, setOrgsLoading] = useState(false)
+
+  useEffect(() => {
+    setOrgsLoading(true)
+    api.get('/god/orgs?limit=200')
+      .then(data => {
+        const list = Array.isArray(data) ? data : (data?.orgs || [])
+        setOrgs(list)
+        if (list.length > 0) setTargetOrgId(String(list[0].id))
+      })
+      .catch(() => {})
+      .finally(() => setOrgsLoading(false))
+  }, [])
+
+  function buildLocation() {
+    const parts = [city.trim(), state.trim(), zip.trim()].filter(Boolean)
+    return parts.join(', ')
+  }
 
   async function handleSearch(e) {
     e.preventDefault()
     if (!query.trim()) return
+    const loc = buildLocation()
+    const radiusMeters = MILE_OPTIONS.find(o => o.miles === radiusMi)?.meters || 8047
     setSearching(true); setResults([]); setSel(new Set()); setExisting(new Set()); setImportResult(null); setErr('')
     try {
       const data = await api.post('/scraper/search', {
         query: query.trim(),
-        location: loc.trim() || undefined,
-        radius_meters: radius,
+        location: loc || undefined,
+        radius_meters: radiusMeters,
         max_results: maxR,
       })
       const res = data.results || []
       setResults(res)
       setSearchMeta({ query: data.query, total: data.total })
-      if (!res.length) { setErr('No results found. Try a broader query or location.'); return }
+      if (!res.length) { setErr('No results found. Try a broader query or different location.'); return }
 
-      // Check which phones already exist in the org
       const phones = res.map(r => r.phone).filter(Boolean)
       if (phones.length) {
         const ex = await api.post('/scraper/exists', { phones })
@@ -97,12 +140,7 @@ export default function LeadScraper() {
       const updated = [...results]
       idxs.forEach((ri, vi) => {
         const info = data.results?.[vi] || {}
-        updated[ri] = {
-          ...updated[ri],
-          phone_type: info.phone_type,
-          channel: info.phone_type === 'mobile' ? 'sms' : (updated[ri].website ? 'email' : 'voice'),
-          validated: true,
-        }
+        updated[ri] = { ...updated[ri], phone_type: info.phone_type, channel: info.phone_type === 'mobile' ? 'sms' : (updated[ri].website ? 'email' : 'voice'), validated: true }
       })
       setResults(updated)
     } catch (ex) { setErr(ex?.detail || 'Validation failed. Check Twilio credentials.') }
@@ -111,10 +149,15 @@ export default function LeadScraper() {
 
   async function handleImport() {
     if (!sel.size) { setErr('Select at least one result to import.'); return }
+    if (!targetOrgId) { setErr('Select a target organization.'); return }
     const leads = results.filter((_, i) => sel.has(i))
     setImporting(true); setErr('')
     try {
-      const data = await api.post('/scraper/import', { leads, list_name: listName || 'Lead Scraper Import' })
+      const data = await api.post('/scraper/import', {
+        leads,
+        list_name: listName || 'Lead Scraper Import',
+        target_org_id: parseInt(targetOrgId, 10),
+      })
       setImportResult(data)
       setSel(new Set())
     } catch (ex) { setErr(ex?.detail || 'Import failed.') }
@@ -123,46 +166,65 @@ export default function LeadScraper() {
 
   function toggle(i) { setSel(p => { const s = new Set(p); s.has(i) ? s.delete(i) : s.add(i); return s }) }
 
-  const newOnly = results.filter((r, i) => !existing.has(r.phone))
-  const smsReady = results.filter(r => r.phone_type === 'mobile' || (!r.phone_type && r.phone))
-
   return (
-    <div style={{ maxWidth: 1150, margin: '0 auto', padding: '0 16px 40px' }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 16px 40px' }}>
       {/* Header */}
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Lead Scraper</h1>
         <p style={{ color: 'var(--text-muted)', marginTop: 4, fontSize: 14 }}>
-          Find local businesses via Google Places, validate phones, then import directly into your leads.
+          Find local businesses via Google Places → validate phones → import to any org.
         </p>
       </div>
 
       {/* Quick presets */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        {PRESETS.map(p => (
-          <button key={p.label} onClick={() => setQuery(p.query)}
-            style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '1px solid var(--border)', background: query === p.query ? 'var(--accent,#3b82f6)' : 'var(--surface-2)', color: query === p.query ? '#fff' : 'var(--text)', cursor: 'pointer', fontWeight: 500 }}>
-            {p.icon} {p.label}
-          </button>
-        ))}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Industry Presets</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {PRESETS.map(p => (
+            <button key={p.label} onClick={() => setQuery(p.query)}
+              style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '1px solid var(--border)', background: query === p.query ? 'var(--accent,#3b82f6)' : 'var(--surface-2)', color: query === p.query ? '#fff' : 'var(--text)', cursor: 'pointer', fontWeight: 500 }}>
+              {p.icon} {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Search form */}
-      <form onSubmit={handleSearch} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
+      <form onSubmit={handleSearch} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginBottom: 16, marginTop: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Search</div>
+
+        {/* Query */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Business Type / Search Query</label>
+          <input style={IS} value={query} onChange={e => setQuery(e.target.value)} placeholder='e.g. "funeral homes" or "financial advisors near me"' required />
+        </div>
+
+        {/* Location row */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Location</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Search Query</label>
-            <input style={IS} value={query} onChange={e => setQuery(e.target.value)} placeholder='e.g. "funeral homes" or "financial advisors"' required />
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>City</label>
+            <input style={IS} value={city} onChange={e => setCity(e.target.value)} placeholder="Dallas" />
           </div>
           <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Location / City</label>
-            <input style={IS} value={loc} onChange={e => setLoc(e.target.value)} placeholder="Dallas, TX" />
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>State</label>
+            <select value={state} onChange={e => setState(e.target.value)} style={{ ...IS }}>
+              <option value="">— State —</option>
+              {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>ZIP <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+            <input style={IS} value={zip} onChange={e => setZip(e.target.value)} placeholder="75201" maxLength={10} />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+
+        {/* Radius + max + search */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Radius (m)</label>
-            <select value={radius} onChange={e => setRadius(+e.target.value)} style={{ ...IS, width: 130 }}>
-              {[[1000,'1 km'],[3000,'3 km'],[5000,'5 km'],[8000,'8 km'],[15000,'15 km'],[25000,'25 km'],[40000,'40 km']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Radius</label>
+            <select value={radiusMi} onChange={e => setRadiusMi(+e.target.value)} style={{ ...IS, width: 120 }}>
+              {MILE_OPTIONS.map(({ miles }) => <option key={miles} value={miles}>{miles} {miles === 1 ? 'mile' : 'miles'}</option>)}
             </select>
           </div>
           <div>
@@ -174,6 +236,11 @@ export default function LeadScraper() {
           <button type="submit" disabled={searching || !query.trim()} style={{ ...BTN('#3b82f6', { opacity: searching || !query.trim() ? .6 : 1, padding: '8px 24px' }) }}>
             {searching ? '🔍 Searching...' : '🔍 Search'}
           </button>
+          {city && state && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>
+              📍 {[city, state, zip].filter(Boolean).join(', ')} · {radiusMi} mi radius
+            </span>
+          )}
         </div>
       </form>
 
@@ -189,11 +256,9 @@ export default function LeadScraper() {
           <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               <strong style={{ color: 'var(--text)' }}>{results.length}</strong> found
-              {existing.size > 0 && <> · <span style={{ color: '#f59e0b' }}>{existing.size} already in leads</span></>}
+              {existing.size > 0 && <> · <span style={{ color: '#f59e0b' }}>{existing.size} already in system</span></>}
               {sel.size > 0 && <> · <strong style={{ color: 'var(--text)' }}>{sel.size}</strong> selected</>}
             </div>
-
-            {/* Selection shortcuts */}
             <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
               {[
                 ['All', () => setSel(new Set(results.map((_,i)=>i)))],
@@ -241,7 +306,7 @@ export default function LeadScraper() {
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ fontWeight: 600 }}>{r.name || '—'}</div>
-                          {isDupe && <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, marginTop: 2 }}>✓ Already in leads</div>}
+                          {isDupe && <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, marginTop: 2 }}>✓ Already in system</div>}
                         </td>
                         <td style={{ padding: '10px 12px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                           {r.phone || <span style={{ color: 'var(--text-muted)' }}>No phone</span>}
@@ -251,16 +316,10 @@ export default function LeadScraper() {
                             <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, background: (TC[r.phone_type] || '#6b7280') + '22', color: TC[r.phone_type] || '#6b7280', border: `1px solid ${(TC[r.phone_type] || '#6b7280')}44` }}>
                               {r.phone_type}
                             </span>
-                          ) : r.phone ? (
-                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>unvalidated</span>
-                          ) : '—'}
+                          ) : r.phone ? <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>unvalidated</span> : '—'}
                         </td>
                         <td style={{ padding: '10px 12px' }}>
-                          {r.channel ? (
-                            <span style={{ fontSize: 12, fontWeight: 700, color: (CH[r.channel] || {}).color || 'var(--text)' }}>
-                              {(CH[r.channel] || {}).label || r.channel}
-                            </span>
-                          ) : '—'}
+                          {r.channel ? <span style={{ fontSize: 12, fontWeight: 700, color: (CH[r.channel] || {}).color || 'var(--text)' }}>{(CH[r.channel] || {}).label || r.channel}</span> : '—'}
                         </td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                           <Stars rating={r.rating} />
@@ -286,8 +345,8 @@ export default function LeadScraper() {
           {/* Import panel */}
           <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>Import to Leads</h3>
-            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)' }}>
-              {sel.size} selected · duplicates are skipped automatically
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-muted)' }}>
+              {sel.size} selected · duplicates skipped automatically
             </p>
 
             {importResult && (
@@ -298,12 +357,26 @@ export default function LeadScraper() {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <input value={listName} onChange={e => setListName(e.target.value)}
-                placeholder="List name (e.g. Dallas Funeral Homes Aug 2026)"
-                style={{ ...IS, flex: 1 }} />
-              <button onClick={handleImport} disabled={importing || !sel.size}
-                style={{ ...BTN('#22c55e', { opacity: importing || !sel.size ? .6 : 1, padding: '8px 22px' }) }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'flex-end' }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Target Organization</label>
+                {orgsLoading ? (
+                  <div style={{ ...IS, color: 'var(--text-muted)' }}>Loading orgs…</div>
+                ) : (
+                  <select value={targetOrgId} onChange={e => setTargetOrgId(e.target.value)} style={IS}>
+                    <option value="">— Select org —</option>
+                    {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                )}
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>List Name</label>
+                <input value={listName} onChange={e => setListName(e.target.value)}
+                  placeholder="e.g. Dallas Funeral Homes Aug 2026"
+                  style={IS} />
+              </div>
+              <button onClick={handleImport} disabled={importing || !sel.size || !targetOrgId}
+                style={{ ...BTN('#22c55e', { opacity: importing || !sel.size || !targetOrgId ? .6 : 1, padding: '8px 22px', alignSelf: 'flex-end' }) }}>
                 {importing ? 'Importing...' : `Import ${sel.size} Lead${sel.size !== 1 ? 's' : ''}`}
               </button>
             </div>

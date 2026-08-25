@@ -42,6 +42,7 @@ export default function Billing() {
   const [interval, setInterval] = useState('month');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
+  const [err, setErr] = useState('');
   const [searchParams] = useSearchParams();
 
   const success = searchParams.get('success') === '1';
@@ -55,23 +56,25 @@ export default function Billing() {
   }, []);
 
   async function handleCheckout(planKey) {
+    setErr('');
     setActionLoading(planKey);
     try {
       const result = await api.post('/billing/checkout', { plan: planKey, interval });
       window.location.href = result.checkout_url;
     } catch (e) {
-      alert(e?.message || 'Could not start checkout. Try again.');
+      setErr(e?.message || 'Plan selection failed. Contact your platform administrator to activate this plan.');
       setActionLoading(null);
     }
   }
 
   async function handlePortal() {
+    setErr('');
     setActionLoading('portal');
     try {
       const result = await api.post('/billing/portal');
       window.location.href = result.portal_url;
     } catch (e) {
-      alert(e?.message || 'Could not open billing portal.');
+      setErr(e?.message || 'Could not open billing portal. Contact your platform administrator.');
       setActionLoading(null);
     }
   }
@@ -101,6 +104,19 @@ export default function Billing() {
           Checkout canceled. No changes were made.
         </div>
       )}
+      {err && (
+        <div style={{ background: '#ef444420', border: '1px solid #ef4444', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#ef4444', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <span>⚠️</span>
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Action required</div>
+            <div style={{ fontSize: 14 }}>{err}</div>
+            <div style={{ fontSize: 13, marginTop: 8, color: '#aaa' }}>
+              To activate or change your plan, contact your platform administrator at{' '}
+              <a href="mailto:support@bookaboost.live" style={{ color: '#ef4444' }}>support@bookaboost.live</a>.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Current plan summary */}
       <div style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: '12px', padding: '24px', marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
@@ -125,6 +141,12 @@ export default function Billing() {
         </div>
       </div>
 
+      {/* Admin contact notice */}
+      <div style={{ background: 'rgba(47,182,255,0.06)', border: '1px solid rgba(47,182,255,0.2)', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', fontSize: '13px', color: '#6aa8cc', display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span>ℹ️</span>
+        <span>Plan changes are processed by your platform administrator. Click <strong style={{ color: '#2fb6ff' }}>Select Plan</strong> below to request a plan, or email <a href="mailto:support@bookaboost.live" style={{ color: '#2fb6ff' }}>support@bookaboost.live</a>.</span>
+      </div>
+
       {/* Billing interval toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
         <span style={{ fontSize: '14px', color: interval === 'month' ? '#fff' : '#888' }}>Monthly</span>
@@ -141,7 +163,7 @@ export default function Billing() {
           const isCurrent = currentPlan === plan.key;
           const price = interval === 'year' ? Math.round(plan.price * 11 / 12) : plan.price;
           return (
-            <div key={plan.key} style={{ background: '#1a1a2e', border: `1px solid ${isCurrent ? plan.color : plan.popular ? '#2a2a4a' : '#2a2a4a'}`, borderRadius: '12px', padding: '24px', position: 'relative', boxShadow: isCurrent ? `0 0 0 2px ${plan.color}` : 'none' }}>
+            <div key={plan.key} style={{ background: '#1a1a2e', border: `1px solid ${isCurrent ? plan.color : '#2a2a4a'}`, borderRadius: '12px', padding: '24px', position: 'relative', boxShadow: isCurrent ? `0 0 0 2px ${plan.color}` : 'none' }}>
               {plan.popular && !isCurrent && (
                 <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: '#1ef0a8', color: '#000', fontSize: '11px', fontWeight: '700', padding: '3px 12px', borderRadius: '20px' }}>MOST POPULAR</div>
               )}
@@ -156,7 +178,7 @@ export default function Billing() {
               </div>
               <button onClick={() => handleCheckout(plan.key)} disabled={isCurrent || actionLoading === plan.key}
                 style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: isCurrent ? '#2a2a4a' : plan.color, color: isCurrent ? '#888' : '#000', fontWeight: '700', fontSize: '14px', cursor: isCurrent ? 'not-allowed' : 'pointer' }}>
-                {actionLoading === plan.key ? 'Redirecting…' : isCurrent ? 'Current Plan' : 'Select Plan'}
+                {actionLoading === plan.key ? 'Processing…' : isCurrent ? 'Current Plan' : 'Select Plan'}
               </button>
             </div>
           );

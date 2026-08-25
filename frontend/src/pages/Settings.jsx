@@ -75,6 +75,7 @@ export default function Settings() {
   const [assignForm, setAssignForm] = useState({ sid: '', authToken: '', phone: '', callerIdName: '' })
   const [assignSaving, setAssignSaving] = useState(false)
   const [assignResult, setAssignResult] = useState(null) // { advisorId, success, message }
+  const [advisorSearch, setAdvisorSearch] = useState('')
 
   useEffect(() => {
     api.get('/settings/profile').then((p) => {
@@ -494,6 +495,17 @@ export default function Settings() {
           {advisorsLoading ? (
             <div className="empty-state">Loading advisors…</div>
           ) : (
+            <>
+              {/* Search / filter */}
+              <div style={{ marginBottom: 12 }}>
+                <input
+                  className="settings-input"
+                  placeholder="Search by name or phone…"
+                  value={advisorSearch}
+                  onChange={e => setAdvisorSearch(e.target.value)}
+                  style={{ maxWidth: 320 }}
+                />
+              </div>
             <table className="data-table" style={{ marginBottom: 16 }}>
               <thead>
                 <tr>
@@ -505,7 +517,15 @@ export default function Settings() {
                 </tr>
               </thead>
               <tbody>
-                {advisors.map(advisor => {
+                {advisors
+                  .filter(a => {
+                    if (!advisorSearch.trim()) return true
+                    const q = advisorSearch.toLowerCase()
+                    return (a.full_name || '').toLowerCase().includes(q) ||
+                           (a.twilio_phone_number || '').includes(q) ||
+                           (a.email || '').toLowerCase().includes(q)
+                  })
+                  .map(advisor => {
                   const configured = !!advisor.twilio_phone_number
                   const isEditing = assigningFor === advisor.id
                   return (
@@ -610,6 +630,7 @@ export default function Settings() {
                 })}
               </tbody>
             </table>
+            </>
           )}
 
           <p className="settings-help">

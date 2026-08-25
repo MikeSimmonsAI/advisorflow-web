@@ -136,6 +136,9 @@ export default function Layout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Non-admin regular advisors start collapsed; admins start expanded
+  const isAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || user?.role === 'god_admin'
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => !isAdmin)
   const [profilePhoto, setProfilePhoto] = useState(null)
   const [logoFailed, setLogoFailed] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -225,27 +228,50 @@ export default function Layout({ children }) {
       </button>
       <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
-      <aside className="sidebar" style={isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}}>
-        <div className="sidebar-brand" style={isGodAdmin ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}}>
+      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', overflow: 'hidden', ...(isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
+        <div className="sidebar-brand" style={{ position: 'relative', ...(isGodAdmin ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}) }}>
           {isGodAdmin ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 20, lineHeight: 1 }}>⚡</span>
-                <span className="brand-mark" style={{ color: '#f59e0b', letterSpacing: '0.04em' }}>AdvisorFlow</span>
+            sidebarCollapsed ? (
+              <span style={{ fontSize: 22, lineHeight: 1 }}>⚡</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20, lineHeight: 1 }}>⚡</span>
+                  <span className="brand-mark" style={{ color: '#f59e0b', letterSpacing: '0.04em' }}>AdvisorFlow</span>
+                </div>
+                <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', paddingLeft: 28 }}>God Mode</span>
               </div>
-              <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', paddingLeft: 28 }}>God Mode</span>
-            </div>
+            )
           ) : logoUrl && !logoFailed ? (
-            <img
-              src={logoUrl}
-              alt={brandName}
-              style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
-              onError={() => setLogoFailed(true)}
-            />
+            sidebarCollapsed ? null : (
+              <img
+                src={logoUrl}
+                alt={brandName}
+                style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
+                onError={() => setLogoFailed(true)}
+              />
+            )
           ) : (
-            <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
+            sidebarCollapsed ? (
+              <SignalPulse color="blue" size={9} />
+            ) : (
+              <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
+            )
           )}
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed(c => !c)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              position: 'absolute', right: 6, bottom: 6,
+              background: 'none', border: 'none', color: '#777', cursor: 'pointer',
+              fontSize: 18, padding: '2px 5px', borderRadius: 4, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            {sidebarCollapsed ? '›' : '‹'}
+          </button>
         </div>
 
         <nav className="sidebar-nav">
@@ -261,15 +287,16 @@ export default function Layout({ children }) {
                   fontWeight: 600,
                 })}
                 onClick={closeSidebar}
+                title="Command Center"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
-                Command Center
+                {!sidebarCollapsed && 'Command Center'}
               </NavLink>
 
               {/* Org switcher — lets god_admin enter any org's regular app view */}
-              <div className="god-org-picker" style={{ position: 'relative', padding: '6px 10px' }}>
+              {!sidebarCollapsed && <div className="god-org-picker" style={{ position: 'relative', padding: '6px 10px' }}>
                 <button
                   type="button"
                   onClick={() => setOrgPickerOpen(o => !o)}
@@ -329,7 +356,7 @@ export default function Layout({ children }) {
                     ))}
                   </div>
                 )}
-              </div>
+              </div>}
 
               <NavLink to="/scraper"
                 className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
@@ -340,9 +367,10 @@ export default function Layout({ children }) {
                   fontWeight: 600,
                 })}
                 onClick={closeSidebar}
+                title="Lead Scraper"
               >
                 <Icon name="search" />
-                Lead Scraper
+                {!sidebarCollapsed && 'Lead Scraper'}
               </NavLink>
 
               <div className="nav-divider" />
@@ -353,8 +381,9 @@ export default function Layout({ children }) {
             <NavLink key={item.to} to={item.to} end={item.to === '/'}
               className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
               onClick={closeSidebar}
+              title={sidebarCollapsed ? item.label : undefined}
             >
-              <Icon name={item.icon} />{item.label}
+              <Icon name={item.icon} />{!sidebarCollapsed && item.label}
             </NavLink>
           ))}
 
@@ -365,16 +394,18 @@ export default function Layout({ children }) {
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
-                  <Icon name={item.icon} />{item.label}
+                  <Icon name={item.icon} />{!sidebarCollapsed && item.label}
                 </NavLink>
               ))}
               {ADMIN_NAV_ITEMS.filter(item => isFeatureEnabled(item.featureKey)).map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
-                  <Icon name={item.icon} />{item.label}
+                  <Icon name={item.icon} />{!sidebarCollapsed && item.label}
                 </NavLink>
               ))}
             </>
@@ -383,13 +414,14 @@ export default function Layout({ children }) {
           {(user?.role === 'super_admin' || isGodAdmin) && (
             <>
               <div className="nav-divider" />
-              <div className="nav-section-label" style={isGodAdmin ? { color: '#b45309' } : {}}>Platform Admin</div>
+              {!sidebarCollapsed && <div className="nav-section-label" style={isGodAdmin ? { color: '#b45309' } : {}}>Platform Admin</div>}
               {SUPER_ADMIN_NAV_ITEMS.map((item) => (
                 <NavLink key={item.to} to={item.to}
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
-                  <Icon name={item.icon} />{item.label}
+                  <Icon name={item.icon} />{!sidebarCollapsed && item.label}
                 </NavLink>
               ))}
             </>
@@ -397,18 +429,21 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="user-chip">
+          <div className="user-chip" title={sidebarCollapsed ? (user?.full_name || 'Unknown') : undefined}>
             <div className="user-avatar">
               {profilePhoto
                 ? <img src={profilePhoto} alt={user?.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
                 : (user?.full_name || '?')[0]
               }
             </div>
-            <div>
-              <div className="user-name">{user?.full_name || 'Unknown'}</div>
-              <div className="user-role">{user?.role?.replace('_', ' ')}</div>
-            </div>
-          </div>          {PLATFORM_BRAND.websiteUrl && (
+            {!sidebarCollapsed && (
+              <div>
+                <div className="user-name">{user?.full_name || 'Unknown'}</div>
+                <div className="user-role">{user?.role?.replace('_', ' ')}</div>
+              </div>
+            )}
+          </div>
+          {!sidebarCollapsed && PLATFORM_BRAND.websiteUrl && (
             <a
               href={PLATFORM_BRAND.websiteUrl}
               className="back-to-website-btn"
@@ -418,8 +453,7 @@ export default function Layout({ children }) {
               ? Back to website
             </a>
           )}
-          
-          <button className="logout-btn" onClick={handleLogout}>Sign out</button>
+          {!sidebarCollapsed && <button className="logout-btn" onClick={handleLogout}>Sign out</button>}
         </div>
       </aside>
 
