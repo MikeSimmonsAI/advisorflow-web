@@ -107,18 +107,31 @@ const CSS = `
 .gm-btn.gm-gold-btn:hover{background:#2a2109;border-color:#8a6f20}
 /* ── nav rail ──────────────────────────────────────────────────────────── */
 .gm-nav-item{
-  display:flex;align-items:center;gap:11px;padding:9px 16px;text-decoration:none;
+  display:flex;align-items:center;gap:9px;padding:9px 14px;text-decoration:none;
   font-size:12.5px;letter-spacing:.02em;border-left:2px solid transparent;
   color:#5c7a96;transition:color .14s ease,background .14s ease;white-space:nowrap;
+  min-width:0;
 }
 .gm-nav-item:hover{color:#8ab4cc;background:rgba(47,182,255,.03)}
 .gm-nav-item.gm-active{color:var(--gm-blue);background:rgba(47,182,255,.06);border-left-color:var(--gm-blue);font-weight:600}
 .gm-nav-item.gm-unbuilt{color:#3f556e}
 .gm-nav-item.gm-unbuilt:hover{color:#5c7a96;background:rgba(47,182,255,.02)}
-.gm-nav-tag{
-  margin-left:auto;font-size:7.5px;letter-spacing:.09em;color:#43607d;
-  border:1px solid #23394f;border-radius:3px;padding:1px 4px;flex:none;
+/* The label takes the room that is left and is the ONLY thing allowed to
+   shrink. Without min-width:0 a flex child refuses to go below its content
+   width, so the label pushed the NEEDS BUILD tag out of the rail instead of
+   ellipsising — which is what was clipping "Pipeline & Cadence" and
+   "Audit & Security". */
+.gm-nav-label{
+  flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+.gm-nav-tag{
+  margin-left:6px;font-size:7px;letter-spacing:.06em;color:#43607d;
+  border:1px solid #23394f;border-radius:3px;padding:1px 3px;flex:0 0 auto;
+}
+/* Jump-to links: the same row shape, dimmer, so they read as leaving God Mode
+   rather than as another God screen. */
+.gm-nav-item.gm-jump{color:#4a6482;font-size:12px}
+.gm-nav-item.gm-jump:hover{color:#8ab4cc;background:rgba(47,182,255,.04)}
 `
 
 let injected = false

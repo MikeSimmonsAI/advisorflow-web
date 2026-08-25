@@ -16,6 +16,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, logout } from '../api/client'
+import { detectTheme, BRAND_CONFIG } from '../theme'
 import GodStyles from './god/GodStyles'
 
 function Ico({ d, size = 16, children }) {
@@ -46,7 +47,27 @@ const ICONS = {
   logout:    'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   arrowLeft: 'M19 12H5M12 19l-7-7 7-7',
   chevron:   'M9 18l6-6-6-6',
+  grid:      'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  briefcase: 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16',
+  globe:     'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
+  external:  'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3',
 }
+
+/**
+ * Where the owner can jump FROM God Mode.
+ *
+ * `external: true` opens a new tab, so God Mode is still sitting there when you
+ * come back. Internal jumps navigate in place — every destination renders
+ * GodReturnBar for a god_admin, so there is always a way back without signing
+ * in again. That round trip is the whole point; a one-way link is worse than
+ * no link.
+ */
+const JUMP = [
+  { label: 'Customer App',    path: '/',       icon: 'grid',
+    hint: 'The tenant application, as an organization sees it' },
+  { label: 'Sales Workspace', path: '/sales',  icon: 'briefcase',
+    hint: 'EvoSys Pro brand sales — pipeline, scheduling, opportunities' },
+]
 
 /** built:false → destination has no <Route> yet. Shown, but marked, never faked. */
 const NAV = [
@@ -103,7 +124,19 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   const isActive = (path) =>
     path === '/god' ? location.pathname === '/god' : location.pathname.startsWith(path)
   const current = NAV.find(n => isActive(n.path))
-  const railW = collapsed ? 62 : 220
+  // 248, not 220. At 220 the label had ~93px left after the icon, the gap and
+  // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
+  // "Audit & Security" were all being ellipsised.
+  const railW = collapsed ? 62 : 248
+
+  // The marketing site for whichever brand this domain is. The AdvisorFlow
+  // (god) brand deliberately has no websiteUrl — there is no public AdvisorFlow
+  // site — so fall back to EvoSys Pro rather than rendering a dead link.
+  const brand = BRAND_CONFIG[detectTheme()] || {}
+  const websiteUrl = brand.websiteUrl || BRAND_CONFIG.evosyspro?.websiteUrl
+  const websiteLabel = brand.websiteUrl
+    ? (brand.displayName || 'Website')
+    : (BRAND_CONFIG.evosyspro?.displayName || 'Website')
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#02050a', color: '#c8d6e5',
@@ -161,15 +194,51 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             return (
               <NavLink key={path} to={path} title={collapsed ? label + (built ? '' : ' — needs build') : undefined}
                 className={`gm-nav-item ${active ? 'gm-active' : ''} ${built ? '' : 'gm-unbuilt'}`}
-                style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '10px 0' : '9px 16px' }}
+                style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '10px 0' : '9px 14px' }}
               >
                 <Ico d={ICONS[icon]} size={14} />
-                {!collapsed && <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>}
+                {!collapsed && <span className="gm-nav-label">{label}</span>}
                 {!collapsed && !built && <span className="gm-nav-tag">NEEDS BUILD</span>}
               </NavLink>
             )
           })}
         </nav>
+
+        {/* ── Jump to the other sides of the platform ──
+            Internal links go in-place; every destination shows GodReturnBar to
+            a god_admin so the trip is never one-way. The website opens in a new
+            tab, which leaves this window sitting on God Mode. */}
+        <div style={{ borderTop: '1px solid rgba(78,157,211,.14)', padding: '8px 0', flexShrink: 0 }}>
+          {!collapsed && (
+            <div style={{ color: '#33506e', fontSize: 8.5, letterSpacing: '.16em',
+                          padding: '2px 14px 7px', fontWeight: 700 }}>
+              JUMP TO
+            </div>
+          )}
+          {JUMP.map(({ label, path, icon, hint }) => (
+            <NavLink key={path} to={path} className="gm-nav-item gm-jump"
+              title={collapsed ? label + ' — ' + hint : hint}
+              style={{ justifyContent: collapsed ? 'center' : 'flex-start',
+                       padding: collapsed ? '10px 0' : '9px 14px' }}
+            >
+              <Ico d={ICONS[icon]} size={14} />
+              {!collapsed && <span className="gm-nav-label">{label}</span>}
+            </NavLink>
+          ))}
+          {websiteUrl && (
+            <a href={websiteUrl} target="_blank" rel="noopener noreferrer"
+              className="gm-nav-item gm-jump"
+              title={collapsed ? websiteLabel + ' website — opens in a new tab'
+                               : 'Opens in a new tab, so God Mode stays open here'}
+              style={{ justifyContent: collapsed ? 'center' : 'flex-start',
+                       padding: collapsed ? '10px 0' : '9px 14px' }}
+            >
+              <Ico d={ICONS.globe} size={14} />
+              {!collapsed && <span className="gm-nav-label">{websiteLabel} Site</span>}
+              {!collapsed && <Ico d={ICONS.external} size={11} />}
+            </a>
+          )}
+        </div>
 
         {/* Footer — owner identity + role */}
         <div style={{ padding: collapsed ? '12px 0' : '12px 16px', borderTop: '1px solid rgba(78,157,211,.14)',

@@ -13,6 +13,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { api, logout } from '../../api/client'
+import GodReturnBar from '../../components/GodReturnBar'
 import SalesStyles from './SalesStyles'
 import { initials, ErrorBar } from './parts'
 
@@ -72,6 +73,9 @@ export default function SalesShell({ title, subtitle, actions, children }) {
     return (
       <div className="sw-scope">
         <SalesStyles />
+        {/* Especially here. This is the screen you land on when the server says
+            no, and it is exactly where being stranded would hurt most. */}
+        <GodReturnBar context="the Sales Workspace" />
         <div style={{ padding: 60, maxWidth: 560, margin: '0 auto' }}>
           <h2 style={{ fontSize: 18, margin: '0 0 10px' }}>Sales workspace unavailable</h2>
           <ErrorBar error={error} onRetry={load} />
@@ -149,6 +153,8 @@ export default function SalesShell({ title, subtitle, actions, children }) {
         </aside>
 
         <main className="sw-main">
+          {/* god_admin only — the way back to the Command Center. */}
+          <GodReturnBar context="the Sales Workspace" />
           <header className="sw-topbar">
             <div>
               <h1>{title}</h1>

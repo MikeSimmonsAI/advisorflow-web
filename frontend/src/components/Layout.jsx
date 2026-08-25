@@ -5,6 +5,7 @@ import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
+import GodReturnBar from './GodReturnBar'
 import './Layout.css'
 
 // Detect which platform brand is running on this hostname — resolved once at module
@@ -464,7 +465,7 @@ export default function Layout({ children }) {
               target="_blank"
               rel="noopener noreferrer"
             >
-              ? Back to website
+              ↗ Back to website
             </a>
           )}
           {!sidebarCollapsed && <button className="logout-btn" onClick={handleLogout}>Sign out</button>}
@@ -472,6 +473,9 @@ export default function Layout({ children }) {
       </aside>
 
       <div className="content-area">
+        {/* god_admin only. God Mode can launch into this app; without a way
+            back, that was a one-way trip needing a retyped URL or a re-login. */}
+        <GodReturnBar context="the customer app" />
         <header className="top-bar">
           <LiveClock />
           <div className="top-bar-right">
