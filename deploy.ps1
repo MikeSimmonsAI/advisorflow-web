@@ -25,9 +25,25 @@ param(
 $ErrorActionPreference = "Continue"
 $REPO = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Render API key: env var first, falls back to the committed value.
-# TODO rotate this key and delete the fallback -- it is in git history.
-$RKEY = if ($env:RENDER_API_KEY) { $env:RENDER_API_KEY } else { "rnd_OwUxCBblW8GJOx9Sb4XqEo0o9S8A" }
+# Render API key: MUST come from the environment. There is no fallback.
+#
+# A key was previously hardcoded here and this repository is PUBLIC, so it was
+# readable by anyone at raw.githubusercontent.com with no authentication. It is
+# still present in git history -- removing it from HEAD does NOT revoke it.
+# THE KEY IT REPLACED MUST BE ROTATED IN THE RENDER DASHBOARD.
+#
+# Set it once per machine (PowerShell, persists across sessions):
+#   [Environment]::SetEnvironmentVariable("RENDER_API_KEY","<new key>","User")
+# Then open a new terminal.
+$RKEY = $env:RENDER_API_KEY
+if (-not $RKEY) {
+    Write-Host ""
+    Write-Host "  RENDER_API_KEY is not set. Steps 1-5 can still run, but step 6"
+    Write-Host "  cannot trigger the static frontend deploy."
+    Write-Host "  Set it with:"
+    Write-Host '    [Environment]::SetEnvironmentVariable("RENDER_API_KEY","<key>","User")'
+    Write-Host ""
+}
 $FRONTEND_SVC = "srv-d8rslocvikkc738v7ocg"   # advisorflow-frontend (static site)
 $BACKEND_SVC  = "srv-d8rsm2kvikkc738v8470"   # advisorflow-backend (auto-deploys on push)
 
