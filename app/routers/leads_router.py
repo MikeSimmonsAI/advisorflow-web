@@ -1273,7 +1273,12 @@ def update_lead_fields(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    if current_user.role == "advisor" and lead.assigned_to_id != current_user.id:
+    # ALLOWLIST, not a denylist. This was `role == "advisor"`, which meant any
+    # role outside the ladder (e.g. the grantable-but-unguarded "viewer", or any
+    # future role) silently skipped the ownership check and could edit every
+    # lead in the org. Name the roles allowed to bypass; everyone else is owner-only.
+    if current_user.role not in ("org_admin", "super_admin", "god_admin") \
+            and lead.assigned_to_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only edit your own leads")
 
     if payload.first_name is not None:
@@ -1356,7 +1361,9 @@ def delete_lead(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    if current_user.role == "advisor" and lead.assigned_to_id != current_user.id:
+    # ALLOWLIST, not a denylist — same reasoning as the edit guard above.
+    if current_user.role not in ("org_admin", "super_admin", "god_admin") \
+            and lead.assigned_to_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only delete your own leads")
 
     log_action(db, current_user.organization_id, current_user.id, action="lead.delete", target_type="lead", target_id=lead_id)
