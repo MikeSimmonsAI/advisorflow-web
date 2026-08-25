@@ -43,3 +43,7 @@ npm-debug.log*
 *.pem
 test_audit.db
 advisorflow.db
+
+# Production data snapshots - contain real org names and user emails. Repo is public.
+scripts/*.json
+scripts/god_snapshot.json
