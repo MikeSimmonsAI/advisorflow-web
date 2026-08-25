@@ -172,15 +172,45 @@ STAGE_CONTACTED  = "contacted"
 STAGE_DISCOVERY  = "discovery"
 STAGE_DEMO_BUILD = "demo_build"
 STAGE_PROPOSAL   = "demo_proposal"
+STAGE_CLOSING    = "closing"
 STAGE_WON        = "won"
 STAGE_ONBOARDING = "onboarding"
 STAGE_LIVE       = "live"
 STAGE_LOST       = "lost"
 
+# ORDERED. The pipeline board renders in this order and "days in stage" and
+# forward/backward stage moves are computed from the index, so do not reorder
+# without checking both. `lost` is deliberately NOT in here: it is an exit, not
+# a column position, and lives beside the board.
 OPPORTUNITY_STAGES = (
     STAGE_PROSPECT, STAGE_CONTACTED, STAGE_DISCOVERY, STAGE_DEMO_BUILD,
-    STAGE_PROPOSAL, STAGE_WON, STAGE_ONBOARDING, STAGE_LIVE,
+    STAGE_PROPOSAL, STAGE_CLOSING, STAGE_WON, STAGE_ONBOARDING, STAGE_LIVE,
 )
+
+ALL_STAGES = OPPORTUNITY_STAGES + (STAGE_LOST,)
+
+# Human labels live with the vocabulary so the API and the UI cannot drift.
+STAGE_LABELS = {
+    STAGE_PROSPECT:   "Prospect",
+    STAGE_CONTACTED:  "Contacted / Qualified",
+    STAGE_DISCOVERY:  "Discovery",
+    STAGE_DEMO_BUILD: "Demo Build",
+    STAGE_PROPOSAL:   "Demo / Proposal",
+    STAGE_CLOSING:    "Closing",
+    STAGE_WON:        "Won",
+    STAGE_ONBOARDING: "Onboarding",
+    STAGE_LIVE:       "Live / Completed",
+    STAGE_LOST:       "Lost",
+}
+
+# Demo build lifecycle (Opportunity.demo_status).
+DEMO_NOT_REQUESTED = "not_requested"
+DEMO_REQUESTED     = "requested"
+DEMO_IN_PROGRESS   = "in_progress"
+DEMO_READY         = "ready"
+DEMO_DELIVERED     = "delivered"
+DEMO_STATUSES = (DEMO_NOT_REQUESTED, DEMO_REQUESTED, DEMO_IN_PROGRESS,
+                 DEMO_READY, DEMO_DELIVERED)
 
 
 class Opportunity(Base):
@@ -232,7 +262,19 @@ class Opportunity(Base):
     # Lifecycle stamps
     contacted_at            = Column(DateTime, nullable=True)
     discovery_completed_at  = Column(DateTime, nullable=True)
-    demo_status             = Column(String, nullable=True)
+    # ── Demo build ──────────────────────────────────────────────────────────
+    # The salesperson must be able to see whether their demo is being built
+    # WITHOUT calling Mike to ask. That is the whole reason these live on the
+    # opportunity rather than in someone's head.
+    demo_status             = Column(String, nullable=True)   # DEMO_STATUSES
+    demo_owner_user_id      = Column(String, ForeignKey("users.id"), nullable=True)
+    demo_requested_at       = Column(DateTime, nullable=True)
+    demo_due_at             = Column(DateTime, nullable=True)
+    demo_ready_at           = Column(DateTime, nullable=True)
+    demo_requirements       = Column(Text, nullable=True)
+    demo_url                = Column(String, nullable=True)
+    demo_notes              = Column(Text, nullable=True)     # internal, not customer-facing
+
     proposal_status         = Column(String, nullable=True)
     proposal_sent_at        = Column(DateTime, nullable=True)
     won_at                  = Column(DateTime, nullable=True)
@@ -268,6 +310,7 @@ class DiscoveryRecord(Base):
     opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
                             nullable=False, unique=True)
 
+    business_description  = Column(Text, nullable=True)
     business_goals        = Column(Text, nullable=True)
     current_process       = Column(Text, nullable=True)
     current_tools         = Column(Text, nullable=True)
@@ -277,7 +320,33 @@ class DiscoveryRecord(Base):
     appointment_process   = Column(Text, nullable=True)
     follow_up_process     = Column(Text, nullable=True)
     required_integrations = Column(Text, nullable=True)
+    automation_opportunities = Column(Text, nullable=True)
+    desired_outcome       = Column(Text, nullable=True)
+    # What the demo builder actually needs. Kept here rather than only on the
+    # Opportunity because it is captured DURING discovery, by the person in the
+    # room, and copied forward when the demo is requested.
+    demo_requirements     = Column(Text, nullable=True)
     opportunity_notes     = Column(Text, nullable=True)
+
+    # The ordered field list the discovery form renders from. Adding a question
+    # means adding a column above and a line here — never a migration to a
+    # generic key/value bag, which would make discovery unqueryable.
+    FIELDS = (
+        ("business_description",     "Business description"),
+        ("business_goals",           "Goals"),
+        ("current_process",          "Current process"),
+        ("current_tools",            "Current systems / tools"),
+        ("bottlenecks",              "Bottlenecks / challenges"),
+        ("lead_sources",             "Lead sources"),
+        ("team_size",                "Team size"),
+        ("appointment_process",      "Appointment process"),
+        ("follow_up_process",        "Communication / follow-up process"),
+        ("required_integrations",    "Required integrations"),
+        ("automation_opportunities", "Automation opportunities"),
+        ("desired_outcome",          "Desired outcome"),
+        ("demo_requirements",        "Demo requirements"),
+        ("opportunity_notes",        "Additional notes"),
+    )
 
     completed_at   = Column(DateTime, nullable=True)
     completed_by   = Column(String, ForeignKey("users.id"), nullable=True)

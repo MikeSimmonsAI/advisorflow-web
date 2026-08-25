@@ -43,6 +43,9 @@ import Billing from './pages/Billing'
 import GodShell from './pages/GodShell'
 import GodOrganizations from './pages/GodOrganizations'
 import LeadScraper from './pages/LeadScraper'
+import MyDay from './pages/sales/MyDay'
+import MyPipeline from './pages/sales/MyPipeline'
+import OpportunityDetail from './pages/sales/OpportunityDetail'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, api } from './api/client'
 
 function isAuthenticated() {
@@ -64,6 +67,38 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   if (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
   if (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
   return <Layout>{children}</Layout>
+}
+
+/**
+ * SalesRoute — the Sales Workspace frame, deliberately NOT the tenant Layout.
+ *
+ * A brand-sales user has no customer organization, so wrapping them in Layout
+ * would hand them a nav pointing at tenant data they must never see. The real
+ * authorization is server-side in app/services/sales_access.py; SalesShell
+ * calls /sales/me and shows a plain refusal if the server says no.
+ */
+function SalesRoute({ children }) {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  return <>{children}</>
+}
+
+/**
+ * Where "/" goes.
+ *
+ * A user with no organization_id is a brand-sales user: the tenant Overview is
+ * not merely the wrong home for them, it is a screen belonging to the other
+ * domain. Send them to their own workspace instead. god_admin keeps the tenant
+ * home because Mike legitimately operates across both.
+ */
+function HomeRedirect() {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  const user = getCurrentUser()
+  if (user && user.role !== 'god_admin' && !user.organization_id) {
+    return <Navigate to="/sales" replace />
+  }
+  return <ProtectedRoute><Overview /></ProtectedRoute>
 }
 
 function GodRoute({ children }) {
@@ -114,7 +149,11 @@ export default function App() {
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />} />
-        <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
+        <Route path="/" element={<HomeRedirect />} />
+        {/* ── Sales Workspace ── brand-sales members; guarded server-side ── */}
+        <Route path="/sales" element={<SalesRoute><MyDay /></SalesRoute>} />
+        <Route path="/sales/pipeline" element={<SalesRoute><MyPipeline /></SalesRoute>} />
+        <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />

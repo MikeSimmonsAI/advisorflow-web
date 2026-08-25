@@ -59,6 +59,7 @@ from app.routers.god_router import router as god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
+from app.routers.sales_router import router as sales_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -366,6 +367,11 @@ app.include_router(email_tracking_router)
 app.include_router(billing_router)
 # Lead Scraper: god_admin only, enforced server-side inside the router.
 app.include_router(lead_scraper_router)
+# Sales Workspace: brand-sales members only. Guarded SERVER-SIDE by
+# require_sales_member / require_sales_manager inside the router, plus a
+# per-record check on every opportunity read. Hiding the nav item is not
+# access control — the Lead Scraper already taught us that.
+app.include_router(sales_router)
 app.include_router(proposal_router.router)
 
 

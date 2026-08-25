@@ -180,6 +180,27 @@ COLUMNS_TO_ADD = [
     ("leads", "sms_consent_ip", "VARCHAR"),
     ("leads", "sms_consent_text", "TEXT"),
     ("leads", "sms_consent_source", "VARCHAR"),
+
+    # ── Sales Workspace, Checkpoint 1 (Aug 25 2026) ────────────────────────
+    # `opportunities` and `discovery_records` were created by create_all() in
+    # Phase 1, so they now EXIST in production and create_all() will never add
+    # a column to them. Every field below therefore has to come through here.
+    #
+    # Demo build state — so a rep can see whether their demo is being built
+    # without calling the owner to ask.
+    ("opportunities", "demo_owner_user_id", "VARCHAR"),
+    ("opportunities", "demo_requested_at",  "TIMESTAMP"),
+    ("opportunities", "demo_due_at",        "TIMESTAMP"),
+    ("opportunities", "demo_ready_at",      "TIMESTAMP"),
+    ("opportunities", "demo_requirements",  "TEXT"),
+    ("opportunities", "demo_url",           "VARCHAR"),
+    ("opportunities", "demo_notes",         "TEXT"),
+    # Discovery questions that were missing from the Phase 1 shape. All
+    # nullable — an existing discovery record stays valid with them empty.
+    ("discovery_records", "business_description",     "TEXT"),
+    ("discovery_records", "automation_opportunities", "TEXT"),
+    ("discovery_records", "desired_outcome",          "TEXT"),
+    ("discovery_records", "demo_requirements",        "TEXT"),
     # Platform isolation — added when Platform model was introduced.
     # platform_id on organizations and users links each org/user to their brand platform.
     ("organizations", "platform_id", "VARCHAR"),
