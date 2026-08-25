@@ -1,0 +1,45 @@
+﻿
+==============================================
+  AdvisorFlow Deploy
+  feat(tenancy): users.organization_id nullable for non-tenant users; shared tenant-write guard; leads.is_test 
+excluded from outreach; god_create_user no longer guesses an org
+==============================================
+
+[1/6] Saving current work...
+git : warning: in the working copy of 'deploy.ps1', LF will be replaced by CRLF the next time Git touches it
+At C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web\deploy.ps1:65 char:1
++ git add -A
++ ~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: in the... Git touches it:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: in the working copy of 'app/services/tenancy.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/services/test_records.py', LF will be replaced by CRLF the next time Git touches 
+it
+warning: in the working copy of 'scripts/check_sales_identities.py', LF will be replaced by CRLF the next time Git 
+touches it
+warning: in the working copy of 'scripts/check_schlueter_lead.py', LF will be replaced by CRLF the next time Git 
+touches it
+warning: in the working copy of 'scripts/smoke_tenancy.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/verify_sales_tables.py', LF will be replaced by CRLF the next time Git 
+touches it
+  Committed uncommitted changes on main
+  Shipping commit: 18b929dfdf65f0de13317dbf18d0eb20077ec7da
+[2/6] Syncing main branch...
+git : From https://github.com/MikeSimmonsAI/advisorflow-web
+At C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web\deploy.ps1:80 char:1
++ git fetch origin main
++ ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (From https://gi...advisorflow-web:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ * branch            main       -> FETCH_HEAD
+  main fast-forwarded (local commits preserved)
+[3/6] Running smoke tests...
+    ALL SMOKE CHECKS PASSED
+    ALL MOUNT + GUARD CHECKS PASSED
+    ALL REQUEST SMOKE CHECKS PASSED
+    ALL SALES SCHEMA CHECKS PASSED
+    ALL TENANCY REGRESSION TESTS PASSED
+  Smoke tests OK
+[4/6] Building frontend...
