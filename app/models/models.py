@@ -287,7 +287,21 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+
+    # NULLABLE as of Aug 25 2026 — approved architectural change.
+    #
+    # The old schema assumed every human belongs to a customer organization.
+    # That is no longer true: brand-sales staff sell the product and never use a
+    # customer tenant, and some global/god users have no tenant either.
+    #
+    #   organization_id SET   → customer-tenant user
+    #   organization_id NULL  → non-tenant user; access comes from `memberships`
+    #
+    # A NULL here is NOT "unknown org" — it is a positive assertion that this
+    # person has no customer tenancy. Never backfill it to make a query simpler,
+    # and never let a write path default it. Tenant writes are gated by
+    # app/services/tenancy.py; see claude/SALES_WORKSPACE_ARCHITECTURE.md.
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     must_change_password = Column(Boolean, default=True)
@@ -483,6 +497,23 @@ class Lead(Base):
     # Post-appointment case management — "open" until the appointment outcome is resolved
     # Values: open, pending_outcome, sold, lost, follow_up, closed
     case_status = Column(String, default="open", nullable=True)
+
+    # ---- INTERNAL TEST RECORD --------------------------------------------
+    # True = a staff member or QA fixture, NOT a real prospect.
+    #
+    # Exists because internal testers end up in production lead tables. A real
+    # example: the EvoSys Pro Sales Manager sat in a funeral home's pre-need
+    # queue with SMS enabled — one "start cadence for all eligible leads" away
+    # from receiving automated funeral nurture messages.
+    #
+    # A lead with is_test = True MUST be excluded from:
+    #   bulk cadence enrolment · campaigns · production SMS and email ·
+    #   automated outreach · any reporting meant to reflect real performance
+    #
+    # Enforce via is_outreach_eligible() in app/services/test_records.py rather
+    # than re-deriving the rule at each call site.
+    is_test = Column(Boolean, default=False, nullable=False)
+    test_note = Column(String, nullable=True)   # why it is flagged, and by whom
 
     # Denormalized timestamp of most recent outbound message (SMS or email).
     # Updated by sms_service.send_sms() and email_router send endpoints.

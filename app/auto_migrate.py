@@ -171,6 +171,10 @@ COLUMNS_TO_ADD = [
     # anywhere, despite the docs listing these as mandatory. Adding the columns
     # is the storage half; the capture-and-check logic still has to be written
     # at every opt-in point and before every send.
+    # Internal test records — staff and QA fixtures living in production lead
+    # tables. Excluded from every outreach path; see Lead.is_test.
+    ("leads", "is_test", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("leads", "test_note", "VARCHAR"),
     ("leads", "sms_consent", "BOOLEAN DEFAULT FALSE"),
     ("leads", "sms_consent_timestamp", "TIMESTAMP"),
     ("leads", "sms_consent_ip", "VARCHAR"),
@@ -325,6 +329,24 @@ INDEXES_TO_CREATE = [
 ]
 
 
+# Columns whose NOT NULL constraint must be RELAXED.
+#
+# COLUMNS_TO_ADD can only add; it cannot change an existing column. Dropping a
+# NOT NULL is backward-safe in exactly one direction: every existing row already
+# satisfies the looser rule, and code that always supplied a value keeps working.
+# It is NOT reversible without first proving no NULLs exist, so only relax a
+# constraint the data model genuinely no longer requires.
+#
+# Postgres only. SQLite cannot drop NOT NULL without rebuilding the table, and
+# does not need to — local/test databases are built fresh from the models by
+# create_all(), which already reflects nullable=True.
+NULLABILITY_TO_RELAX = [
+    # Brand-sales staff and some global/god users have no customer tenant at all.
+    # See User.organization_id and claude/SALES_WORKSPACE_ARCHITECTURE.md.
+    ("users", "organization_id"),
+]
+
+
 def run_auto_migrations(engine) -> None:
     """
     Called once from main.py's startup handler, right after
@@ -362,6 +384,30 @@ def run_auto_migrations(engine) -> None:
                 # the whole app on startup. Each statement is independent.
                 print(f"[auto_migrate] Skipped {table}.{column}: {e}")
         conn.commit()
+
+        if not is_sqlite:
+            # Relax NOT NULL where the data model no longer requires it.
+            # Idempotent: information_schema is consulted first, so this is a
+            # genuine no-op once applied. SQLite is skipped - it cannot drop a
+            # NOT NULL without rebuilding the table, and local/test databases
+            # are created fresh from the models, which already say nullable.
+            for table, column in NULLABILITY_TO_RELAX:
+                try:
+                    nullable = conn.execute(text(
+                        "SELECT is_nullable FROM information_schema.columns "
+                        "WHERE table_name = :table AND column_name = :column"
+                    ), {"table": table, "column": column}).scalar()
+
+                    if nullable == "NO":
+                        conn.execute(text(
+                            f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL;"
+                        ))
+                        conn.commit()
+                        print(f"[auto_migrate] Relaxed NOT NULL on {table}.{column}.")
+                    # else: already nullable, or the column/table does not exist yet.
+                except (OperationalError, ProgrammingError) as e:
+                    conn.rollback()
+                    print(f"[auto_migrate] Skipped NOT NULL relax for {table}.{column}: {e}")
 
         if not is_sqlite:
             # Real, one-time column-type conversions - enum columns that

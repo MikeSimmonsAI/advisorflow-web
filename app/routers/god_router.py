@@ -226,11 +226,29 @@ def god_create_user(body: UserCreate, god: User = Depends(require_god), db: Sess
         row = db.execute(text("SELECT o.id FROM organizations o JOIN platforms p ON o.platform_id=p.id WHERE p.slug=:slug LIMIT 1"),
                          {"slug": body.platform_slug}).fetchone()
         if row: org_id = row[0]
+    # NEVER auto-select an organization.
+    #
+    # This previously fell back to "the first organization in the database",
+    # which would have silently placed the EvoSys Pro sales team inside a funeral
+    # home customer tenant. A user's tenancy is a deliberate decision, never a
+    # convenience default.
+    #
+    #   tenant role (advisor/org_admin/super_admin) → organization_id REQUIRED
+    #   non-tenant role (god_admin, brand-sales)    → organization_id may be NULL,
+    #                                                 access comes from memberships
+    TENANT_ROLES = {"advisor", "org_admin", "super_admin"}
     if not org_id:
-        first_org = db.query(Organization).order_by(Organization.created_at).first()
-        if not first_org:
-            raise HTTPException(status_code=400, detail="No organizations exist yet.")
-        org_id = first_org.id
+        if body.role in TENANT_ROLES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"role '{body.role}' is a customer-tenant role and requires an "
+                    "explicit org_id or platform_slug. Refusing to guess an "
+                    "organization."
+                ),
+            )
+        # Non-tenant user: organization_id stays NULL on purpose.
+        org_id = None
     temp_pw = _temp_password()
     user = User(organization_id=org_id, email=body.email.strip().lower(),
                 full_name=body.full_name.strip(), password_hash=hash_password(temp_pw),

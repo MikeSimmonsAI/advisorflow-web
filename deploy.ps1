@@ -111,6 +111,10 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "SMOKE IMPORT FAILED - not deploying."; exit 1 }
     python scripts\smoke_requests.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "SMOKE REQUESTS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_sales_models.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "SALES SCHEMA CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_tenancy.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "TENANCY REGRESSION FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 
