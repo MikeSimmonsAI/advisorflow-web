@@ -43,10 +43,11 @@ import Billing from './pages/Billing'
 import GodShell from './pages/GodShell'
 import GodOrganizations from './pages/GodOrganizations'
 import LeadScraper from './pages/LeadScraper'
-import { getCurrentUser, startKeepAlive, api } from './api/client'
+import { getCurrentUser, startKeepAlive, startRefreshLoop, api } from './api/client'
 
 function isAuthenticated() {
-  return !!localStorage.getItem('bookaboost_token')
+  // Check both keys: af_token is the current key, bookaboost_token is the legacy key.
+  return !!(localStorage.getItem('af_token') || localStorage.getItem('bookaboost_token'))
 }
 
 function mustChangePassword() {
@@ -97,7 +98,10 @@ function GodModeLayout({ children }) {
 
 export default function App() {
   useEffect(() => {
-    if (isAuthenticated()) startKeepAlive()
+    if (isAuthenticated()) {
+      startKeepAlive()      // ping every 14 min to prevent Render cold starts
+      startRefreshLoop()    // refresh JWT every 30 min so session never expires
+    }
   }, [])
 
   return (

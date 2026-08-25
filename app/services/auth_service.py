@@ -32,7 +32,7 @@ if len(_jwt_secret) < 32:
     )
 JWT_SECRET = _jwt_secret
 JWT_ALGORITHM = "HS256"
-TOKEN_EXPIRY_HOURS = 2   # 2-hour lifetime; frontend refreshes every 30 min while active
+TOKEN_EXPIRY_HOURS = 24  # 24-hour lifetime; frontend refreshes every 30 min while active
 
 
 def hash_password(plain_password: str) -> str:
