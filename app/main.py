@@ -24,6 +24,11 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text as _text
 from app.deps import engine
 from app.models.models import Base
+# Sales Workspace models register themselves on the SAME Base. This import is
+# REQUIRED and is not decorative: Base.metadata.create_all() below only creates
+# tables whose module has been imported, so dropping this line makes every
+# sales table silently never appear. See claude/SALES_WORKSPACE_ARCHITECTURE.md.
+import app.models.sales_models  # noqa: F401  (imported for side effects)
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,

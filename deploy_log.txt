@@ -1,8 +1,0 @@
-﻿
-==============================================
-  AdvisorFlow Deploy
-  fix(sidebar): inline overflow:hidden was overriding CSS and blocking all nav scrolling; move scroll to .sidebar-nav 
-with min-height:0; add collapsed rail styles; persist collapse
-==============================================
-
-[1/6] Saving current work...
