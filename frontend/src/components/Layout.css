@@ -68,7 +68,45 @@
   flex-direction: column;
   gap: 4px;
   flex: 1;
+
+  /* The nav owns vertical scrolling, so the brand block and footer stay pinned
+     while a long nav list (god_admin sees ~30 items) scrolls independently.
+
+     min-height:0 is REQUIRED and is not optional styling: a flex child defaults
+     to min-height:auto and therefore refuses to shrink below its content, so
+     overflow-y here does nothing without it. Removing it silently makes every
+     nav item below the fold unreachable. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(47,182,255,0.18) transparent;
 }
+.sidebar-nav::-webkit-scrollbar { width: 6px; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(47,182,255,0.18);
+  border-radius: 3px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(47,182,255,0.32); }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Collapsed rail ──────────────────────────────────────────────────────
+   Layout.jsx already omits the label text when sidebarCollapsed is true, so
+   nothing here needs to hide text — these rules only stop a 60px rail from
+   inheriting the 220px rail's padding and gaps, which is what previously made
+   collapsing look broken rather than deliberate. */
+.sidebar--collapsed { padding: 22px 6px; }
+.sidebar--collapsed .nav-item,
+.sidebar--collapsed .nav-group-trigger {
+  justify-content: center;
+  gap: 0;
+  padding: 11px 0;
+}
+.sidebar--collapsed .nav-item--active { border-left-width: 2px; }
+.sidebar--collapsed .nav-section-label,
+.sidebar--collapsed .nav-divider { display: none; }
+.sidebar--collapsed .sidebar-brand { padding: 8px 0 18px; justify-content: center; }
+.sidebar--collapsed .sidebar-footer { align-items: center; text-align: center; }
 
 .nav-item {
   position: relative;

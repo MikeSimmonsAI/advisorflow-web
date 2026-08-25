@@ -138,7 +138,21 @@ export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   // Non-admin regular advisors start collapsed; admins start expanded
   const isAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || user?.role === 'god_admin'
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => !isAdmin)
+  // Remembered per browser so the choice survives a reload. Falls back to the
+  // old behaviour (advisors start collapsed, admins expanded) on first visit,
+  // and tolerates storage being unavailable in private mode.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      const saved = localStorage.getItem('af_sidebar_collapsed')
+      if (saved === '1') return true
+      if (saved === '0') return false
+    } catch { /* storage blocked */ }
+    return !isAdmin
+  })
+  useEffect(() => {
+    try { localStorage.setItem('af_sidebar_collapsed', sidebarCollapsed ? '1' : '0') }
+    catch { /* storage blocked */ }
+  }, [sidebarCollapsed])
   const [profilePhoto, setProfilePhoto] = useState(null)
   const [logoFailed, setLogoFailed] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -228,7 +242,7 @@ export default function Layout({ children }) {
       </button>
       <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
-      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', overflow: 'hidden', ...(isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
+      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', ...(isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
         <div className="sidebar-brand" style={{ position: 'relative', ...(isGodAdmin ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}) }}>
           {isGodAdmin ? (
             sidebarCollapsed ? (
