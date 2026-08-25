@@ -53,7 +53,7 @@ export default function GodCommandCenter() {
 
   useEffect(() => {
     api.get('/god/stats')
-      .then(r => setStats(r.data))
+      .then(r => setStats(r))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
