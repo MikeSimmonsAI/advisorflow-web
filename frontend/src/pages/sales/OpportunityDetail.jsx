@@ -13,6 +13,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import FindTeamTime from './FindTeamTime'
+import ApptSyncPanel from './ApptSyncPanel'
+import RescheduleDialog from './RescheduleDialog'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
   money, dateTime, dueLabel, wallDateTime,
@@ -27,7 +29,7 @@ const CONF_TONE = {
  * Meetings on this deal, booked through the shared-availability finder so every
  * required person was actually free.
  */
-function Meetings({ opp, onFind, onConfirm, onCancel, saving }) {
+function Meetings({ opp, onFind, onConfirm, onCancel, onMove, saving }) {
   const appts = opp.appointments || []
   return (
     <Card title="MEETINGS"
@@ -58,6 +60,10 @@ function Meetings({ opp, onFind, onConfirm, onCancel, saving }) {
             {a.confirmation_status !== 'confirmed' && a.status === 'scheduled' && (
               <button className="sw-tiny sw-primary" disabled={saving}
                       onClick={() => onConfirm(a.id)}>Confirm</button>
+            )}
+            {a.status === 'scheduled' && (
+              <button className="sw-tiny" disabled={saving}
+                      onClick={() => onMove(a)}>Move</button>
             )}
             {a.status === 'scheduled' && (
               <button className="sw-tiny" disabled={saving}
@@ -335,6 +341,10 @@ export default function OpportunityDetail() {
   const [nextAction, setNextAction] = useState('')
   const [nextDue, setNextDue] = useState('')
   const [finding, setFinding] = useState(false)
+  // The appointment being moved, or null. Holds the whole object rather than an
+  // id because the reschedule dialog needs its participants and duration to run
+  // the same shared-availability search the original booking used.
+  const [moving, setMoving] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -515,12 +525,19 @@ export default function OpportunityDetail() {
         <div>
           <Meetings opp={opp} saving={saving}
                     onFind={() => setFinding(true)}
-                    onConfirm={confirmAppt} onCancel={cancelAppt} />
+                    onConfirm={confirmAppt} onCancel={cancelAppt}
+                    onMove={setMoving} />
 
+          {moving && (
+            <RescheduleDialog appt={moving}
+                              onClose={() => setMoving(null)}
+                              onDone={load} />
+          )}
+
+          {/* Checkpoint 3: this was a NotBuilt placeholder. It is now real —
+              every state below comes from an actual provider call. */}
           <div className="sw-mt">
-            <Card title="CALENDAR SYNC" sub="Outlook / Google">
-              <NotBuilt label="NOT BUILT YET" block={opp.calendar_sync} />
-            </Card>
+            <ApptSyncPanel opp={opp} onChanged={load} />
           </div>
 
           <div className="sw-mt">

@@ -33,6 +33,10 @@ import app.models.sales_models  # noqa: F401  (imported for side effects)
 # line makes availability_profiles / sales_appointments / participants silently
 # never appear, and the sales workspace loses scheduling with no error.
 import app.models.scheduling_models  # noqa: F401  (imported for side effects)
+# Calendar sync models — same Base, same reason. Without this import the
+# calendar_connections / external_busy_blocks / confirmation-token tables are
+# never created and external sync silently has nowhere to write.
+import app.models.calendar_models  # noqa: F401  (imported for side effects)
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
@@ -65,6 +69,7 @@ from app.routers.billing_router import router as billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
 from app.routers.sales_router import router as sales_router
 from app.routers.sales_scheduling_router import router as sales_scheduling_router
+from app.routers.calendar_connections_router import router as calendar_connections_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -382,6 +387,9 @@ app.include_router(sales_router)
 # booking surface (calendar_router / booking_links) — a brand-sales meeting has
 # no customer organization and the two never share a table.
 app.include_router(sales_scheduling_router)
+# Per-USER calendar connection state (Checkpoint 3). A connection belongs to a
+# person, not a tenant — every route in here reads only the caller's own rows.
+app.include_router(calendar_connections_router)
 app.include_router(proposal_router.router)
 
 

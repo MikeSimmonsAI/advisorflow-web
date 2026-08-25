@@ -13,7 +13,8 @@ different system and is not touched.
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -41,6 +42,9 @@ from app.services import availability as av
 from app.services.meeting_roles import (
     ensure_meeting_types, resolve_meeting_slots, brand_members,
 )
+from app.models.calendar_models import SYNC_LABELS, SYNC_NEEDS_ATTENTION
+from app.services import appointment_sync as apsync
+from app.services import appointment_invites as apinvite
 
 router = APIRouter(prefix="/sales", tags=["sales-scheduling"])
 
@@ -159,11 +163,30 @@ def _appt_out(db: Session, appt: SalesAppointment, viewer: User) -> dict:
             "role_label": SLOT_LABELS.get(p.role_slot, p.role_slot),
             "is_required": bool(p.is_required),
             "attendance_status": p.attendance_status,
-            # Checkpoint 3. Reported honestly as absent rather than omitted.
+            # Checkpoint 3. Reported honestly rather than omitted: the UI must
+            # be able to distinguish "on their Outlook calendar" from "we
+            # emailed them an invite" from "we could not reach their calendar".
             "calendar_synced": bool(p.external_event_id),
             "calendar_provider": p.external_calendar_provider,
+            "sync_status": p.sync_status,
+            "sync_label": SYNC_LABELS.get(p.sync_status, p.sync_status),
+            "sync_error": p.sync_error,
+            "sync_attempts": p.sync_attempts,
+            "sync_last_attempt": p.sync_last_attempt,
+            "external_synced_at": p.external_synced_at,
+            "ics_sent_at": p.ics_sent_at,
+            "needs_attention": p.sync_status in SYNC_NEEDS_ATTENTION,
         } for p, u in parts],
         "viewer_is_participant": any(p.user_id == viewer.id for p, _ in parts),
+        # One number the appointment card can render without walking the list.
+        "sync_needs_attention": sum(
+            1 for p, _ in parts if p.sync_status in SYNC_NEEDS_ATTENTION),
+        "prospect_invite_sent_at": appt.prospect_invite_sent_at,
+        "prospect_invite_error": appt.prospect_invite_error,
+        "rescheduled_count": appt.rescheduled_count or 0,
+        "rescheduled_at": appt.rescheduled_at,
+        "previous_starts_at": appt.previous_starts_at,
+        "reschedule_reason": appt.reschedule_reason,
         "cancelled_at": appt.cancelled_at,
         "cancel_reason": appt.cancel_reason,
         "created_at": appt.created_at,
@@ -683,7 +706,43 @@ def create_appointment(body: BookIn,
                        "Refresh the openings and pick another time.")
         raise
     db.refresh(appt)
+
+    # ── Calendar sync + prospect invitation ─────────────────────────────────
+    # AFTER the commit, deliberately. The meeting is booked, saved and blocking
+    # everyone's time before a single vendor is contacted. Nothing below can
+    # un-book it: both calls swallow their own failures and record them on the
+    # rows, so a Microsoft outage produces a meeting flagged "needs attention",
+    # never a lost booking or a 500 to the person who just booked it.
+    _push_appointment(db, appt, user, kind="invite")
+
+    db.refresh(appt)
     return _appt_out(db, appt, user)
+
+
+def _push_appointment(db: Session, appt: SalesAppointment, user: User,
+                      kind: str = "invite") -> dict:
+    """Sync the internal team's calendars and email the prospect.
+
+    One place, so booking and rescheduling cannot drift apart. Never raises —
+    every failure mode inside is already recorded on the appointment or the
+    participant rows, which is what the UI reads.
+    """
+    sync_report, invite_report = None, None
+    try:
+        sync_report = apsync.sync_appointment(db, appt, organizer=user)
+    except Exception:
+        # The orchestrator is not supposed to raise. If it ever does, the
+        # booking still stands and the sales workspace still shows the meeting.
+        import logging
+        logging.getLogger(__name__).exception(
+            "appointment sync raised for %s", appt.id)
+    try:
+        invite_report = apinvite.send_prospect_invitation(db, appt, kind=kind)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "prospect invitation raised for %s", appt.id)
+    return {"sync": sync_report, "invite": invite_report}
 
 
 @router.get("/appointments")
@@ -742,6 +801,140 @@ def _load_appt(db: Session, appt_id: str, user: User) -> SalesAppointment:
             raise HTTPException(status_code=403,
                                 detail="This meeting belongs to another representative.")
     return appt
+
+
+# ── PUBLIC prospect confirmation ────────────────────────────────────────────
+#
+# DECLARED BEFORE `/appointments/{appt_id}`. The three-segment path would not
+# actually be captured by the two-segment one, but route order in this file is
+# the only thing protecting that, and a future `/appointments/confirm` (no
+# token) would silently resolve as appt_id="confirm". Keeping these first makes
+# the protection independent of anyone noticing the segment count.
+#
+# NO AUTHENTICATION. A prospect has no account and must never be asked for one.
+# The token IS the authorisation, which is why it is CSPRNG-generated, scoped to
+# a single appointment, expiring, and revocable.
+
+_CONFIRM_PAGE_CSS = (
+    "body{font-family:-apple-system,Segoe UI,Arial,sans-serif;background:#f8fafc;"
+    "margin:0;padding:40px 16px;color:#111827}"
+    ".card{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;"
+    "border-radius:12px;padding:28px}"
+    "h1{font-size:20px;margin:0 0 6px}.muted{color:#6b7280;font-size:14px}"
+    ".when{font-size:17px;font-weight:600;margin:18px 0}"
+    "button{font:inherit;font-weight:600;padding:12px 20px;border-radius:8px;"
+    "border:1px solid transparent;cursor:pointer;margin-right:10px}"
+    ".yes{background:#1d4ed8;color:#fff}.no{background:#fff;border-color:#d1d5db;color:#374151}"
+)
+
+
+def _confirm_page(title: str, body_html: str) -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>%s</title><style>%s</style></head>"
+        "<body><div class='card'>%s</div></body></html>" % (title, _CONFIRM_PAGE_CSS, body_html)
+    )
+
+
+@router.get("/appointments/confirm/{token}", include_in_schema=False)
+def prospect_confirm_page(token: str, db: Session = Depends(get_db)):
+    """Render the confirmation page. CHANGES NOTHING.
+
+    This is a GET and it must stay side-effect free. Corporate mail scanners
+    (Safe Links, Proofpoint, Mimecast) fetch every link in an inbound message.
+    If confirming happened here, a security appliance would auto-confirm a large
+    share of invitations within seconds of delivery and the prospect's real
+    answer would never be recorded — while the salesperson saw a confirmation
+    nobody made.
+    """
+    from html import escape as _esc
+    row, appt, err = apinvite.resolve_token(db, token)
+    if err:
+        return _confirm_page("Meeting", "<h1>%s</h1><p class='muted'>Please contact "
+                                        "whoever arranged this meeting.</p>" % _esc(err))
+
+    ident = apinvite.brand_identity(db, appt)
+    when = _esc(apinvite._local_when(appt))
+    who = _esc(ident.get("name") or "us")
+
+    if appt.status == APPT_CANCELLED:
+        return _confirm_page("Meeting cancelled",
+                             "<h1>This meeting has been cancelled</h1>"
+                             "<p class='muted'>No action is needed.</p>")
+
+    already = ""
+    if appt.confirmation_status == CONF_CONFIRMED:
+        already = "<p class='muted'>You have already confirmed. You can change your answer below.</p>"
+    elif appt.confirmation_status == CONF_DECLINED:
+        already = "<p class='muted'>You previously declined. You can change your answer below.</p>"
+
+    phone = ident.get("support_phone")
+    contact = ("<p class='muted'>Need a different time? Call %s.</p>" % _esc(phone)) if phone else ""
+
+    body = (
+        "<h1>%s</h1><p class='muted'>with %s</p>"
+        "<p class='when'>%s</p>%s"
+        "<form method='post' action='/sales/appointments/confirm/%s'>"
+        "<button class='yes' name='action' value='confirm' type='submit'>Yes, I'll be there</button>"
+        "<button class='no' name='action' value='decline' type='submit'>I can't make it</button>"
+        "</form>%s"
+    ) % (_esc(appt.title or "Your meeting"), who, when, already, _esc(token), contact)
+    return _confirm_page("Confirm your meeting", body)
+
+
+@router.post("/appointments/confirm/{token}", include_in_schema=False)
+async def prospect_confirm_submit(token: str, request: Request,
+                                  db: Session = Depends(get_db)):
+    """Record the prospect's answer. The only endpoint here that changes state.
+
+    Accepts a form POST from the page above. Still unauthenticated — the token
+    is the authorisation — but a POST is not prefetched by link scanners, which
+    is the whole reason the action lives here and not on the GET.
+    """
+    from html import escape as _esc
+    row, appt, err = apinvite.resolve_token(db, token)
+    if err:
+        return _confirm_page("Meeting", "<h1>%s</h1>" % _esc(err))
+
+    action = ""
+    try:
+        form = await request.form()
+        action = str(form.get("action") or "")
+    except Exception:
+        action = ""
+
+    if appt.status == APPT_CANCELLED:
+        return _confirm_page("Meeting cancelled",
+                             "<h1>This meeting has been cancelled</h1>"
+                             "<p class='muted'>No action is needed.</p>")
+
+    client_ip = request.client.host if request.client else None
+    result = apinvite.redeem_token(db, row, appt, action, ip=client_ip)
+    if not result.get("ok"):
+        return _confirm_page("Meeting", "<h1>Something went wrong</h1>"
+                                        "<p class='muted'>Please try the link again.</p>")
+
+    if appt.opportunity_id:
+        # The prospect is not a user, so `actor_user_id` stays NULL. Recording a
+        # staff member here would misattribute the action.
+        db.add(OpportunityEvent(
+            opportunity_id=appt.opportunity_id, event_type="confirmation",
+            summary="Prospect %sed the meeting" % result["action"],
+            detail="via confirmation link", actor_user_id=None))
+    db.commit()
+
+    ident = apinvite.brand_identity(db, appt)
+    phone = ident.get("support_phone")
+    tail = ("<p class='muted'>Need to change something? Call %s.</p>"
+            % _esc(phone)) if phone else ""
+    if result["action"] == "confirm":
+        return _confirm_page("Confirmed",
+                             "<h1>You're confirmed</h1><p class='when'>%s</p>%s"
+                             % (_esc(apinvite._local_when(appt)), tail))
+    return _confirm_page("Thanks for letting us know",
+                         "<h1>Thanks for letting us know</h1>"
+                         "<p class='muted'>We've told the team you can't make it.</p>%s" % tail)
 
 
 @router.get("/appointments/{appt_id}")
@@ -819,5 +1012,161 @@ def cancel_appointment(appt_id: str, body: CancelIn,
             summary="Meeting cancelled", detail=appt.cancel_reason,
             actor_user_id=user.id))
     db.commit()
+
+    # ── Propagate the cancellation outward ──────────────────────────────────
+    # After the commit, same reasoning as booking. A cancellation that only
+    # changes our own row is the worst of the three outcomes: everyone still
+    # holds the meeting, nobody knows it is off, and somebody dials in. Both
+    # calls record their own failures rather than raising.
+    try:
+        apsync.cancel_appointment_sync(db, appt, organizer=user)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "cancel sync raised for %s", appt.id)
+    try:
+        apinvite.send_prospect_invitation(db, appt, kind="cancel")
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "cancel notice raised for %s", appt.id)
+
     db.refresh(appt)
     return _appt_out(db, appt, user)
+
+
+class RescheduleIn(BaseModel):
+    # datetime, matching BookIn — `_parse_dt` accepts only a real datetime and
+    # rejects a bare string, so declaring this as `str` would have made every
+    # reschedule fail with "starts_at must be a datetime".
+    starts_at: datetime
+    duration_minutes: Optional[int] = Field(None, ge=5, le=480)
+    reason: Optional[str] = None
+    notify: bool = True
+
+
+@router.post("/appointments/{appt_id}/reschedule")
+def reschedule_appointment(appt_id: str, body: RescheduleIn,
+                           user: User = Depends(require_sales_member),
+                           db: Session = Depends(get_db)):
+    """Move a meeting. MOVES the row; never cancel-and-recreate.
+
+    Recreating would mint a new appointment id, which would orphan the
+    prospect's confirmation link, break every stored provider event id into a
+    duplicate, and split the opportunity timeline into two unrelated halves.
+    Moving keeps all three intact, which is why the provider layer's
+    update-in-place path exists at all.
+    """
+    appt = _load_appt(db, appt_id, user)
+    if appt.status == APPT_CANCELLED:
+        raise HTTPException(status_code=400,
+                            detail="This meeting is cancelled. Book a new one instead.")
+
+    starts_at = _parse_dt(body.starts_at, "starts_at")
+    duration = body.duration_minutes or int(
+        (appt.ends_at - appt.starts_at).total_seconds() // 60)
+    if duration <= 0:
+        raise HTTPException(status_code=400, detail="Duration must be positive.")
+    ends_at = starts_at + timedelta(minutes=duration)
+
+    if ends_at <= datetime.utcnow():
+        raise HTTPException(status_code=400, detail="That time is already in the past.")
+    if starts_at == appt.starts_at and ends_at == appt.ends_at:
+        return _appt_out(db, appt, user)
+
+    parts = (db.query(AppointmentParticipant)
+             .filter(AppointmentParticipant.appointment_id == appt.id).all())
+    user_ids = [p.user_id for p in parts]
+
+    # The meeting must not be treated as blocking ITSELF at its new time.
+    conflicts = av.find_conflicts(db, user_ids, starts_at, ends_at,
+                                  exclude_appointment_id=appt.id)
+    if conflicts:
+        names = sorted({c["user_name"] for c in conflicts})
+        raise HTTPException(
+            status_code=409,
+            detail="Already booked at that time: %s. Pick another opening." % ", ".join(names))
+
+    previous = appt.starts_at
+    appt.previous_starts_at = previous
+    appt.starts_at = starts_at
+    appt.ends_at = ends_at
+    appt.rescheduled_count = (appt.rescheduled_count or 0) + 1
+    appt.rescheduled_at = datetime.utcnow()
+    appt.reschedule_reason = (body.reason or "").strip() or None
+    # A moved meeting is not a confirmed meeting. The prospect agreed to a time
+    # that no longer exists, so carrying the old confirmation forward would show
+    # the rep a "confirmed" meeting nobody has actually agreed to.
+    appt.confirmation_status = CONF_PENDING
+    appt.confirmed_at = None
+    appt.confirmed_by = None
+
+    for p in parts:
+        u = db.query(User).filter(User.id == p.user_id).first()
+        if u is None:
+            continue
+        prof = av.get_or_create_profile(db, u)
+        bs, be = av.buffered_window(prof, starts_at, ends_at)
+        p.busy_start_at, p.busy_end_at = bs, be
+
+    if appt.opportunity_id:
+        db.add(OpportunityEvent(
+            opportunity_id=appt.opportunity_id, event_type="appointment_rescheduled",
+            summary="Meeting moved",
+            detail="%s → %s" % (
+                av.utc_to_local(previous, appt.timezone).strftime("%b %d, %Y %I:%M %p"),
+                av.utc_to_local(starts_at, appt.timezone).strftime("%b %d, %Y %I:%M %p")),
+            actor_user_id=user.id))
+
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        if "sales_participant_no_overlap" in str(e).lower() or "exclusion" in str(e).lower():
+            raise HTTPException(
+                status_code=409,
+                detail="Someone booked one of these participants moments ago. "
+                       "Refresh the openings and pick another time.")
+        raise
+    db.refresh(appt)
+
+    if body.notify:
+        _push_appointment(db, appt, user, kind="reschedule")
+        db.refresh(appt)
+    return _appt_out(db, appt, user)
+
+
+@router.post("/appointments/{appt_id}/resync")
+def resync_appointment_sync(appt_id: str,
+                            user_id: Optional[str] = Query(None),
+                            user: User = Depends(require_sales_member),
+                            db: Session = Depends(get_db)):
+    """Manual retry for participants whose calendar sync needs attention.
+
+    Exists because a sync failure is invisible by nature — the meeting looks
+    fine in AdvisorFlow and nobody finds out until someone does not show up.
+    This is the button that closes that gap.
+    """
+    appt = _load_appt(db, appt_id, user)
+    report = apsync.retry_failed_sync(db, appt, organizer=user, user_id=user_id)
+    db.refresh(appt)
+    out = _appt_out(db, appt, user)
+    out["sync_report"] = report
+    return out
+
+
+@router.post("/appointments/{appt_id}/resend-invitation")
+def resend_prospect_invitation(appt_id: str,
+                               user: User = Depends(require_sales_member),
+                               db: Session = Depends(get_db)):
+    """Re-send the prospect's invitation. Reuses the SAME confirmation token, so
+    a link the prospect already has keeps working."""
+    appt = _load_appt(db, appt_id, user)
+    if not appt.prospect_email:
+        raise HTTPException(status_code=400,
+                            detail="This meeting has no prospect email address.")
+    report = apinvite.send_prospect_invitation(db, appt, kind="invite")
+    db.refresh(appt)
+    out = _appt_out(db, appt, user)
+    out["invite_report"] = report
+    return out

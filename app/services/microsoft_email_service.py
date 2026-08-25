@@ -51,7 +51,19 @@ MICROSOFT_REDIRECT_URI = os.environ.get("MICROSOFT_REDIRECT_URI", "https://<your
 # accounts, but this keeps the door open without requiring a
 # tenant-specific config.
 AUTHORITY = "https://login.microsoftonline.com/common"
-SCOPES = "offline_access Mail.Send User.Read"  # offline_access is REQUIRED for a refresh token to be issued at all
+# offline_access is REQUIRED for a refresh token to be issued at all.
+#
+# Calendars.ReadWrite added Aug 25 2026 for the scheduling sync: the same
+# refresh token now backs both Mail.Send and calendar writes, so there is one
+# Microsoft connection per user rather than two.
+#
+# MIGRATION NOTE — this is not retroactive. A user who consented BEFORE this
+# line changed holds a token whose grant covers mail only. Their token keeps
+# working for email and Graph answers calendar calls with 403; the calendar
+# provider maps that to error_code 'scope' so the UI can tell them to
+# reconnect, which is the only thing that fixes it. Requesting a scope does not
+# grant it to consent already given.
+SCOPES = "offline_access Mail.Send User.Read Calendars.ReadWrite"
 
 
 def get_microsoft_authorization_url(advisor_user_id: str) -> str:

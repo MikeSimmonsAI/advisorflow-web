@@ -37,7 +37,8 @@ from app.models.sales_models import (                            # noqa: E402
 from app.models.scheduling_models import (                       # noqa: E402
     AvailabilityProfile, AvailabilityWindow, AvailabilityBlock,
     MeetingType, SalesAppointment, AppointmentParticipant,
-    BLOCK_RECURRING, BLOCK_TIME_OFF, APPT_CANCELLED, CONF_PENDING, CONF_CONFIRMED,
+    BLOCK_RECURRING, BLOCK_TIME_OFF, APPT_SCHEDULED, APPT_CANCELLED,
+    CONF_PENDING, CONF_CONFIRMED,
 )
 from app.services.auth_service import hash_password              # noqa: E402
 from app.services import availability as av                      # noqa: E402
@@ -763,9 +764,135 @@ def api_tests():
     db.close()
 
 
+def reschedule_tests():
+    """Checkpoint 3 — moving a meeting through the API.
+
+    Lives here rather than in smoke_calendar_sync.py because rescheduling is a
+    SCHEDULING operation: it re-runs the conflict check, recomputes buffers and
+    resets confirmation. The calendar-sync consequences are tested there.
+    """
+    c = TestClient(app)
+    blake = token(c, "blake@example.com")
+
+    print("\n[A19] Reschedule — the meeting MOVES, it is not recreated")
+    db = SessionLocal()
+    # Must be one Blake is actually ON. A rep may only touch their own meetings,
+    # which is a guard worth not accidentally testing around.
+    blake_appt_ids = [r[0] for r in db.query(AppointmentParticipant.appointment_id)
+                      .filter(AppointmentParticipant.user_id == "u-blake").all()]
+    appt = (db.query(SalesAppointment)
+            .filter(SalesAppointment.status == APPT_SCHEDULED,
+                    SalesAppointment.id.in_(blake_appt_ids or [""]))
+            .order_by(SalesAppointment.starts_at.asc()).first())
+    if appt is None:
+        check("a scheduled appointment exists to reschedule", False, "none found")
+        db.close()
+        return
+    appt_id = appt.id
+    original_start = appt.starts_at
+    duration = int((appt.ends_at - appt.starts_at).total_seconds() // 60)
+    user_ids = [p.user_id for p in db.query(AppointmentParticipant)
+                .filter(AppointmentParticipant.appointment_id == appt_id).all()]
+    total_before = db.query(SalesAppointment).count()
+    db.close()
+
+    # The current slot must be offered back — the meeting must not block itself.
+    r = c.post("/sales/availability/find", headers=blake, json={
+        "duration_minutes": duration, "required_user_ids": user_ids,
+        "date_from": str(original_start.date()), "date_to": str(original_start.date()),
+        "exclude_appointment_id": appt_id})
+    check("excluding the meeting from its own search is accepted",
+          r.status_code == 200, r.status_code)
+    offered = [s["starts_at"] for s in r.json().get("slots", [])]
+    check("its own current slot is offered back as free",
+          original_start.isoformat() in offered,
+          (original_start.isoformat(), offered[:3]))
+
+    r = c.post("/sales/availability/find", headers=blake, json={
+        "duration_minutes": duration, "required_user_ids": user_ids,
+        "date_from": str(original_start.date()), "date_to": str(original_start.date())})
+    without = [s["starts_at"] for s in r.json().get("slots", [])]
+    check("WITHOUT the exclusion its own slot is correctly blocked",
+          original_start.isoformat() not in without,
+          original_start.isoformat())
+
+    target = next((s for s in offered if s != original_start.isoformat()), None)
+    check("another opening exists to move to", target is not None, offered[:3])
+    if target is None:
+        return
+
+    # notify=False so this test needs no email provider or calendar fake.
+    r = c.post("/sales/appointments/%s/reschedule" % appt_id, headers=blake,
+               json={"starts_at": target, "reason": "Prospect asked", "notify": False})
+    check("the reschedule succeeds", r.status_code == 200, r.text[:300])
+    body = r.json()
+    check("the appointment KEEPS its id (moved, not recreated)",
+          body["id"] == appt_id, body["id"])
+    check("the new time is stored", body["starts_at"] == target, body["starts_at"])
+    check("the previous time is remembered",
+          body["previous_starts_at"] == original_start.isoformat(),
+          body["previous_starts_at"])
+    check("the move is counted", body["rescheduled_count"] == 1, body["rescheduled_count"])
+    check("the reason is recorded", body["reschedule_reason"] == "Prospect asked")
+    # A prospect agreed to a time that no longer exists.
+    check("confirmation is reset to pending by a move",
+          body["confirmation_status"] == CONF_PENDING, body["confirmation_status"])
+
+    db = SessionLocal()
+    check("NO second appointment was created",
+          db.query(SalesAppointment).count() == total_before,
+          (total_before, db.query(SalesAppointment).count()))
+    parts = (db.query(AppointmentParticipant)
+             .filter(AppointmentParticipant.appointment_id == appt_id).all())
+    moved = datetime.fromisoformat(target)
+    check("every participant's blocking window moved with it",
+          all(p.busy_start_at <= moved and p.busy_end_at >= moved for p in parts),
+          [(p.busy_start_at, p.busy_end_at) for p in parts])
+    check("participants still block", all(p.is_blocking for p in parts))
+    db.close()
+
+    print("\n[A20] Reschedule guard rails")
+    r = c.post("/sales/appointments/%s/reschedule" % appt_id, headers=blake,
+               json={"starts_at": "2020-01-01T10:00:00", "notify": False})
+    check("a move into the past is refused", r.status_code == 400, r.status_code)
+    r = c.post("/sales/appointments/%s/reschedule" % appt_id, headers=blake,
+               json={"starts_at": target, "notify": False})
+    check("moving to the time it already occupies is a no-op, not an error",
+          r.status_code == 200 and r.json()["rescheduled_count"] == 1,
+          r.json().get("rescheduled_count"))
+    r = c.post("/sales/appointments/%s/reschedule" % appt_id,
+               json={"starts_at": target, "notify": False})
+    check("rescheduling requires authentication", r.status_code in (401, 403), r.status_code)
+    r = c.post("/sales/appointments/does-not-exist/reschedule", headers=blake,
+               json={"starts_at": target, "notify": False})
+    check("rescheduling an unknown meeting is a 404", r.status_code == 404, r.status_code)
+
+    print("\n[A21] Calendar connections are per USER")
+    r = c.get("/sales/calendar/connections", headers=blake)
+    check("a member can read their own connections", r.status_code == 200, r.status_code)
+    body = r.json()
+    check("every provider is listed, connected or not",
+          len(body["connections"]) >= 2, body["connections"])
+    check("an unconnected user is honestly reported as such",
+          all(cn["state"] == "not_connected" for cn in body["connections"]), body)
+    check("the active provider falls back to email invitations",
+          body["uses_email_fallback"] is True, body["active_provider"])
+    check("no token or secret is ever serialized",
+          "token" not in r.text.lower() or "refresh" not in r.text.lower(), r.text[:200])
+    r = c.get("/sales/calendar/connections")
+    check("reading connections requires authentication",
+          r.status_code in (401, 403), r.status_code)
+    r = c.post("/sales/calendar/connections/pigeon-post/test", headers=blake, json={})
+    check("an unknown provider is refused", r.status_code == 404, r.status_code)
+    r = c.post("/sales/calendar/connections/microsoft/test", headers=blake, json={})
+    check("testing a provider that is not connected is refused clearly",
+          r.status_code == 400, r.status_code)
+
+
 def main():
     engine_tests()
     api_tests()
+    reschedule_tests()
     print("\n" + "=" * 68)
     if FAILURES:
         print("FAILED (%d):" % len(FAILURES))

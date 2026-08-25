@@ -250,7 +250,8 @@ def free_intervals_for_user(db: Session, user: User,
                             now_utc: Optional[datetime] = None,
                             duration_minutes: int = 0,
                             exclude_appointment_id: Optional[str] = None,
-                            ignore_notice: bool = False) -> List[Interval]:
+                            ignore_notice: bool = False,
+                            include_external: bool = True) -> List[Interval]:
     """When this one person is genuinely free, in naive UTC.
 
     Order matters: build the working day, then subtract everything that removes
@@ -302,6 +303,26 @@ def free_intervals_for_user(db: Session, user: User,
     # 4. Existing meetings, buffer-expanded.
     cut.extend(busy_intervals_for_user(db, user.id, start_utc, end_utc,
                                        exclude_appointment_id))
+
+    # 4b. External calendar commitments (Checkpoint 3).
+    #
+    # Read from the CACHE only — this function never calls Microsoft or Google.
+    # A shared search across four people must not become four vendor round
+    # trips, and a Graph outage must not slow down the scheduler. The refresh
+    # is a separate, explicit step the caller runs first.
+    #
+    # This is a plain subtraction like every other rule above: external busy
+    # time is not a special case in the engine, it is just more intervals.
+    if include_external:
+        from app.services.external_busy import external_busy_intervals
+        ext = external_busy_intervals(db, user.id, start_utc, end_utc)
+        if ext:
+            # Padded with this person's own buffers, the same as their internal
+            # meetings are at booking time. Being back-to-back with an outside
+            # meeting is no different from being back-to-back with one of ours.
+            pre = timedelta(minutes=prof.buffer_before_minutes or 0)
+            post = timedelta(minutes=prof.buffer_after_minutes or 0)
+            cut.extend([(s - pre, e + post) for s, e in ext])
 
     free = subtract_intervals(working, cut)
 

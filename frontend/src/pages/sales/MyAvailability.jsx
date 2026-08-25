@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import { Card, Chip, ErrorBar, dateTime } from './parts'
+import CalendarConnections from './CalendarConnections'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
@@ -185,6 +186,12 @@ export default function MyAvailability() {
           </div>
 
           <div>
+            {/* First in this column deliberately. A connected calendar changes
+                what every setting below it actually means — external
+                commitments become part of the availability these rules shape. */}
+            <CalendarConnections />
+
+            <div className="sw-mt" />
             <Card title="BOOKING RULES">
               <div className="sw-field">
                 <label>TIMEZONE</label>

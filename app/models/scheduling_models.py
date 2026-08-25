@@ -287,7 +287,22 @@ class SalesAppointment(Base):
     meeting_provider = Column(String, nullable=True)   # zoom | meet | teams | phone | in_person
     meeting_url      = Column(String, nullable=True)
     location         = Column(String, nullable=True)
+    # INTERNAL. Never sent to the prospect and never written into a provider
+    # event body the prospect can read.
     notes            = Column(Text, nullable=True)
+
+    # ── Prospect-facing invitation (Checkpoint 3) ───────────────────────────
+    prospect_invite_sent_at = Column(DateTime, nullable=True)
+    prospect_invite_error   = Column(Text, nullable=True)
+
+    # ── Reschedule history ──────────────────────────────────────────────────
+    # A reschedule MOVES this row rather than cancelling and recreating, so the
+    # opportunity timeline, the confirmation token and the provider event ids
+    # all survive. These record that it happened.
+    rescheduled_count     = Column(Integer, default=0, nullable=False)
+    rescheduled_at        = Column(DateTime, nullable=True)
+    previous_starts_at    = Column(DateTime, nullable=True)
+    reschedule_reason     = Column(Text, nullable=True)
 
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -337,12 +352,21 @@ class AppointmentParticipant(Base):
     busy_end_at   = Column(DateTime, nullable=False)
     is_blocking   = Column(Boolean, default=True, nullable=False)
 
-    # Checkpoint 3 (Microsoft, then Google). Present now so the boundary is
-    # visible and nothing has to be migrated to add it later. NOT populated —
-    # no calendar sync exists yet and none is faked.
-    external_calendar_provider = Column(String, nullable=True)
-    external_event_id          = Column(String, nullable=True)
-    external_synced_at         = Column(DateTime, nullable=True)
+    # ── External calendar sync (Checkpoint 3) ───────────────────────────────
+    # Per PARTICIPANT, not per appointment: each attendee gets their own event
+    # on their own calendar, under their own OAuth grant. One person's provider
+    # failing must never affect anybody else's copy or the appointment itself.
+    external_calendar_provider = Column(String, nullable=True)   # microsoft | google | ics
+    external_event_id          = Column(String, nullable=True)   # the id retry keys on
+    external_synced_at         = Column(DateTime, nullable=True) # last SUCCESS
+
+    # sync_status is the single field the UI reads. `not_connected` is a normal
+    # resting state, not an error — it routes to the .ics fallback.
+    sync_status        = Column(String, default="not_connected", nullable=False)
+    sync_attempts      = Column(Integer, default=0, nullable=False)
+    sync_last_attempt  = Column(DateTime, nullable=True)
+    sync_error         = Column(Text, nullable=True)   # message only, never a token
+    ics_sent_at        = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -201,6 +201,34 @@ COLUMNS_TO_ADD = [
     ("discovery_records", "automation_opportunities", "TEXT"),
     ("discovery_records", "desired_outcome",          "TEXT"),
     ("discovery_records", "demo_requirements",        "TEXT"),
+
+    # ── External calendar sync, Checkpoint 3 (Aug 25 2026) ─────────────────
+    # sales_appointments and sales_appointment_participants were created by
+    # create_all() in Checkpoint 2, so they EXIST in production now and
+    # create_all() will never add a column to them.
+    ("sales_appointment_participants", "external_calendar_provider", "VARCHAR"),
+    ("sales_appointment_participants", "external_event_id", "VARCHAR"),
+    ("sales_appointment_participants", "external_synced_at", "TIMESTAMP"),
+    ("sales_appointment_participants", "sync_status",
+     "VARCHAR NOT NULL DEFAULT 'not_connected'"),
+    ("sales_appointment_participants", "sync_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("sales_appointment_participants", "sync_last_attempt", "TIMESTAMP"),
+    ("sales_appointment_participants", "sync_error", "TEXT"),
+    ("sales_appointment_participants", "ics_sent_at", "TIMESTAMP"),
+    ("sales_appointments", "prospect_invite_sent_at", "TIMESTAMP"),
+    ("sales_appointments", "prospect_invite_error", "TEXT"),
+    ("sales_appointments", "rescheduled_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("sales_appointments", "rescheduled_at", "TIMESTAMP"),
+    ("sales_appointments", "previous_starts_at", "TIMESTAMP"),
+    ("sales_appointments", "reschedule_reason", "TEXT"),
+    # calendar_connections is a NEW table, so create_all() builds it complete on
+    # first deploy and these three are redundant there. They are listed anyway
+    # because they were added after the table was first written, and a database
+    # created between those two moments has the table WITHOUT them — which
+    # create_all() will never repair.
+    ("calendar_connections", "busy_window_start", "TIMESTAMP"),
+    ("calendar_connections", "busy_window_end", "TIMESTAMP"),
+    ("calendar_connections", "busy_fetched_at", "TIMESTAMP"),
     # Platform isolation — added when Platform model was introduced.
     # platform_id on organizations and users links each org/user to their brand platform.
     ("organizations", "platform_id", "VARCHAR"),
