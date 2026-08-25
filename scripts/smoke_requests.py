@@ -4,7 +4,11 @@
 # scraper refuses unauthenticated callers.
 import os, sys
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./advisorflow.db")
+# FORCE sqlite. Not setdefault - this script starts the app via TestClient,
+# which runs the startup hooks, which run auto_migrate. If it inherited a
+# production DATABASE_URL from the shell it would execute migrations against
+# the live database. Never relax this to setdefault.
+os.environ["DATABASE_URL"] = "sqlite:///./advisorflow.db"
 os.environ.setdefault("JWT_SECRET", "local" + "0" * 60)
 os.environ.setdefault("SECRET_KEY", "local" + "0" * 60)
 

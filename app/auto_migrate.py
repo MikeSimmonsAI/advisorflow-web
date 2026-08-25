@@ -166,6 +166,16 @@ COLUMNS_TO_ADD = [
     # so each org's outbound email genuinely comes from their own domain.
     ("organizations", "from_email", "VARCHAR"),
     ("organizations", "resend_api_key", "VARCHAR"),
+    # SMS consent of record — A2P 10DLC / TCPA. Verified missing from the
+    # production database on Aug 25 2026: there was no queryable consent record
+    # anywhere, despite the docs listing these as mandatory. Adding the columns
+    # is the storage half; the capture-and-check logic still has to be written
+    # at every opt-in point and before every send.
+    ("leads", "sms_consent", "BOOLEAN DEFAULT FALSE"),
+    ("leads", "sms_consent_timestamp", "TIMESTAMP"),
+    ("leads", "sms_consent_ip", "VARCHAR"),
+    ("leads", "sms_consent_text", "TEXT"),
+    ("leads", "sms_consent_source", "VARCHAR"),
     # Platform isolation — added when Platform model was introduced.
     # platform_id on organizations and users links each org/user to their brand platform.
     ("organizations", "platform_id", "VARCHAR"),

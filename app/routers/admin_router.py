@@ -1714,8 +1714,18 @@ def list_organizations(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
-    """List all orgs — super_admin only, for the provision client page."""
-    orgs = db.query(Organization).order_by(Organization.created_at.desc()).all()
+    """List orgs for the Provision Client page, scoped to the caller's platform.
+
+    god_admin sees all; a super_admin sees only their own platform's orgs.
+    Before Aug 25 2026 this returned EVERY org on EVERY platform.
+    """
+    allowed_ids = get_platform_org_ids(current_user, db)
+    orgs = (
+        db.query(Organization)
+        .filter(Organization.id.in_(allowed_ids))
+        .order_by(Organization.created_at.desc())
+        .all()
+    ) if allowed_ids else []
     return [
         {
             "id": o.id,
@@ -2308,9 +2318,20 @@ def wipe_demo_data(
 
 @router.get("/orgs")
 def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(require_super_admin)):
-    """Returns all organizations with user counts. Super admin only."""
+    """Returns organizations with user counts, scoped to the caller's platform.
+
+    god_admin sees every org on every platform. A super_admin sees only the orgs
+    on their own platform - a BookaBoost operator must never see EvoSys Pro orgs.
+    Before Aug 25 2026 this returned EVERY org to any super_admin.
+    """
     from sqlalchemy import func as sqlfunc
-    orgs = db.query(Organization).order_by(Organization.name.asc()).all()
+    allowed_ids = get_platform_org_ids(current_user, db)
+    orgs = (
+        db.query(Organization)
+        .filter(Organization.id.in_(allowed_ids))
+        .order_by(Organization.name.asc())
+        .all()
+    ) if allowed_ids else []
     org_ids = [o.id for o in orgs]
 
     user_counts = {}

@@ -489,6 +489,17 @@ class Lead(Base):
     # Used for "sent today" badge on Leads list.
     last_messaged_at = Column(DateTime, nullable=True)
 
+    # ---- SMS consent of record (A2P 10DLC / TCPA) -------------------------
+    # Do NOT send marketing SMS to a lead without sms_consent = True.
+    # sms_consent_text stores the EXACT wording the person agreed to, because
+    # in a carrier or TCPA dispute the wording is the evidence.
+    # sms_consent_source records where it came from (web form, verbal, import).
+    sms_consent           = Column(Boolean, default=False)
+    sms_consent_timestamp = Column(DateTime, nullable=True)
+    sms_consent_ip        = Column(String, nullable=True)
+    sms_consent_text      = Column(Text, nullable=True)
+    sms_consent_source    = Column(String, nullable=True)
+
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

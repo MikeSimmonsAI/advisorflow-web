@@ -3,7 +3,8 @@
 # and assert the security-sensitive routes are gone. Never touches production.
 import os, sys
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./advisorflow.db")
+# FORCE sqlite - never inherit a production DATABASE_URL from the shell.
+os.environ["DATABASE_URL"] = "sqlite:///./advisorflow.db"
 os.environ.setdefault("JWT_SECRET", "local" + "0" * 60)
 os.environ.setdefault("SECRET_KEY", "local" + "0" * 60)
 
