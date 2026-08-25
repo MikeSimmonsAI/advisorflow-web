@@ -119,6 +119,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "SALES LOGIN CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_sales_workspace.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "SALES WORKSPACE CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_scheduling.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "SCHEDULING CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

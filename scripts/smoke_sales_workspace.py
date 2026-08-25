@@ -167,15 +167,26 @@ def main():
           bme["brand_sales_org"]["slug"] == "bookaboost-sales", bme["brand_sales_org"])
 
     # ── 3. scheduling reports unavailable, never a false empty ──────────────
-    print("\n[3] Unbuilt scheduling is declared, not faked")
+    print("\n[3] Scheduling is live; only calendar push is still declared unbuilt")
+    # Checkpoint 2 replaced the {available:false} markers on the appointment
+    # fields with real data. An empty list here now genuinely means "nothing
+    # booked" — the opposite claim from what these fields used to make.
     day = c.get("/sales/my-day", headers=rep).json()
-    for key in ("todays_appointments", "next_appointment", "needs_confirmation"):
-        blk = day.get(key)
-        check("%s reports unavailable" % key,
-              isinstance(blk, dict) and blk.get("available") is False, blk)
+    for key in ("todays_appointments", "needs_confirmation"):
+        check("%s is a real list, not an unavailable marker" % key,
+              isinstance(day.get(key), list), day.get(key))
+    check("next_appointment is null when nothing is booked",
+          day.get("next_appointment") is None, day.get("next_appointment"))
+    check("calendar push IS still declared unbuilt",
+          isinstance(day.get("calendar_sync"), dict)
+          and day["calendar_sync"].get("available") is False, day.get("calendar_sync"))
+    check("/sales/me reports scheduling as available",
+          c.get("/sales/me", headers=rep).json()["scheduling"]["available"] is True)
     check("my-day metrics are real numbers",
           isinstance(day["metrics"]["active_opportunities"], int), day["metrics"])
     check("empty pipeline starts at zero", day["metrics"]["active_opportunities"] == 0)
+    check("appointment metrics start at zero",
+          day["metrics"]["appointments_today"] == 0, day["metrics"])
 
     # ── 4. create + rep isolation ───────────────────────────────────────────
     print("\n[4] Rep isolation")

@@ -28,10 +28,11 @@ export function useSales() {
 const NAV = [
   { to: '/sales',           label: 'My Day',            icon: '⌂', end: true },
   { to: '/sales/pipeline',  label: 'My Pipeline',       icon: '⇢', countKey: 'active_opportunities' },
-  { to: '/sales/prospects', label: 'Prospects',         icon: '◎', soon: true },
-  { to: '/sales/team',      label: 'Team Availability', icon: '▦', soon: true },
+  { to: '/sales/team',      label: 'Team Availability', icon: '▦' },
+  { to: '/sales/availability', label: 'My Availability', icon: '◷' },
+  // Checkpoint 4. Rendered visibly disabled rather than hidden so the shape of
+  // the workspace is legible without anything unfinished being clickable.
   { to: '/sales/onboarding', label: 'Sold / Onboarding', icon: '✓', soon: true },
-  { to: '/sales/availability', label: 'My Availability', icon: '◷', soon: true },
 ]
 
 export default function SalesShell({ title, subtitle, actions, children }) {

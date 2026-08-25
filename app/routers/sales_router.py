@@ -39,21 +39,29 @@ from app.models.sales_models import (
     STAGE_PROPOSAL, STAGE_CLOSING, STAGE_WON, STAGE_ONBOARDING, STAGE_LIVE,
     STAGE_LOST, DEMO_REQUESTED, DEMO_READY,
 )
+from app.models.scheduling_models import (
+    SalesAppointment, AppointmentParticipant, MeetingType,
+    APPT_CANCELLED, CONF_PENDING, CONF_SENT,
+)
 from app.services.sales_access import (
     require_sales_member, require_sales_manager,
     assert_can_view_opportunity, assert_can_edit_opportunity, assert_can_reassign,
     sales_org_ids, sales_memberships, is_sales_manager, is_god,
 )
+from app.services import availability as _av
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
-# Checkpoint 2 builds the scheduling engine. Until it exists, anything that
-# would need it reports this instead of an empty list, so the UI can say
-# "not built yet" rather than "you have no meetings" — which is a lie that
-# looks identical.
-SCHEDULING_NOT_BUILT = {
+# Scheduling SHIPPED in Checkpoint 2. Everything that used to report
+# {available:false} now returns real appointment data, and an empty result now
+# genuinely means "no meetings", which is a different statement from the one
+# this constant used to make. Kept only as the shape for capabilities that are
+# still genuinely absent (calendar push — Checkpoint 3).
+CALENDAR_SYNC_NOT_BUILT = {
     "available": False,
-    "reason": "The scheduling engine lands in Checkpoint 2. No appointment data exists yet.",
+    "reason": "External calendar push (Microsoft 365, then Google, then .ics) "
+              "lands in Checkpoint 3. The AdvisorFlow appointment is the source "
+              "of truth and is not synced anywhere yet.",
 }
 
 
@@ -136,9 +144,31 @@ def _attention(opp: Opportunity) -> Optional[str]:
     return None
 
 
-def _card(opp: Opportunity, db: Session) -> dict:
+def next_appt_map(db: Session, opps) -> dict:
+    """opportunity_id -> its next upcoming appointment, in ONE query.
+
+    Built per request and threaded into `_card` rather than looked up per card:
+    a 40-deal board would otherwise fire 40 extra queries to draw one line of
+    text on each tile.
+    """
+    ids = [o.id for o in opps]
+    if not ids:
+        return {}
+    rows = (db.query(SalesAppointment)
+            .filter(SalesAppointment.opportunity_id.in_(ids),
+                    SalesAppointment.status != APPT_CANCELLED,
+                    SalesAppointment.ends_at >= datetime.utcnow())
+            .order_by(SalesAppointment.starts_at.asc()).all())
+    out = {}
+    for a in rows:
+        out.setdefault(a.opportunity_id, a)   # first = soonest, given the sort
+    return out
+
+
+def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None) -> dict:
     """The shape both My Pipeline and My Day render. One serializer so a card
     can never mean two different things on two screens."""
+    nxt = (appts or {}).get(opp.id)
     return {
         "id": opp.id,
         "company_name": opp.company_name,
@@ -162,9 +192,66 @@ def _card(opp: Opportunity, db: Session) -> dict:
         "demo_due_at": opp.demo_due_at,
         "attention": _attention(opp),
         "updated_at": opp.updated_at,
-        # Scheduling is Checkpoint 2. These are explicitly null, not "none today".
-        "next_appointment": None,
-        "confirmation_status": None,
+        # Real, as of Checkpoint 2. None here means "nothing booked", which is
+        # now a fact rather than a placeholder.
+        "next_appointment": {
+            "id": nxt.id, "title": nxt.title, "starts_at": nxt.starts_at,
+            "timezone": nxt.timezone,
+            "starts_at_local": _av.utc_to_local(nxt.starts_at, nxt.timezone),
+        } if nxt else None,
+        "confirmation_status": nxt.confirmation_status if nxt else None,
+    }
+
+
+def _visible_sales_appointments(db: Session, user: User, org):
+    """Appointment visibility, mirroring opportunity visibility exactly.
+
+    A rep sees meetings they are ON, plus meetings attached to a deal they own
+    (so an owner is never blind to a call a manager booked for their deal).
+    A manager sees the whole brand.
+    """
+    q = db.query(SalesAppointment).filter(
+        SalesAppointment.brand_sales_org_id == org.id)
+    if is_sales_manager(user, db, org.id):
+        return q
+    own_appt_ids = [r[0] for r in db.query(AppointmentParticipant.appointment_id)
+                    .filter(AppointmentParticipant.user_id == user.id).all()]
+    own_opp_ids = [r[0] for r in db.query(Opportunity.id)
+                   .filter(Opportunity.owner_user_id == user.id).all()]
+    return q.filter(SalesAppointment.id.in_(own_appt_ids or [""])
+                    | SalesAppointment.opportunity_id.in_(own_opp_ids or [""]))
+
+
+def _appt_brief(db: Session, a: SalesAppointment) -> dict:
+    """The compact appointment shape My Day and the opportunity record render.
+
+    Deliberately lighter than the scheduling router's full serializer — a My Day
+    list of twelve meetings should not fan out into dozens of participant
+    queries for detail nobody reads on that screen.
+    """
+    parts = (db.query(AppointmentParticipant, User)
+             .join(User, User.id == AppointmentParticipant.user_id)
+             .filter(AppointmentParticipant.appointment_id == a.id).all())
+    mt = (db.query(MeetingType).filter(MeetingType.id == a.meeting_type_id).first()
+          if a.meeting_type_id else None)
+    return {
+        "id": a.id,
+        "title": a.title,
+        "starts_at": a.starts_at,
+        "ends_at": a.ends_at,
+        "timezone": a.timezone,
+        "starts_at_local": _av.utc_to_local(a.starts_at, a.timezone),
+        "duration_minutes": int((a.ends_at - a.starts_at).total_seconds() // 60),
+        "status": a.status,
+        "confirmation_status": a.confirmation_status,
+        "meeting_type": mt.name if mt else None,
+        "meeting_type_key": mt.key if mt else None,
+        "opportunity_id": a.opportunity_id,
+        "prospect_name": a.prospect_name,
+        "prospect_company": a.prospect_company,
+        "meeting_url": a.meeting_url,
+        "participants": [{"user_id": u.id, "full_name": u.full_name,
+                          "is_required": bool(p.is_required)} for p, u in parts],
     }
 
 
@@ -317,7 +404,10 @@ def sales_me(brand_sales_org_id: Optional[str] = Query(None),
             "override_deal_value": manager,
         },
         "stages": [{"key": s, "label": STAGE_LABELS[s]} for s in OPPORTUNITY_STAGES],
-        "scheduling": SCHEDULING_NOT_BUILT,
+        # Scheduling is LIVE as of Checkpoint 2 — see /sales/availability/* and
+        # /sales/appointments. Calendar push to Outlook/Google is not.
+        "scheduling": {"available": True},
+        "calendar_sync": CALENDAR_SYNC_NOT_BUILT,
     }
 
 
@@ -387,6 +477,34 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     for o in open_opps:
         stage_counts[o.stage] = stage_counts.get(o.stage, 0) + 1
 
+    # ── real appointments (Checkpoint 2) ────────────────────────────────────
+    # Scoped exactly like the pipeline: a rep sees meetings they are on or that
+    # belong to a deal they own; a manager sees the brand.
+    tz = org.timezone or "America/Chicago"
+    today_local = _av.utc_to_local(now, tz).date()
+    day_start = _av.local_to_utc(today_local, 0, tz)
+    day_end = _av.local_to_utc(today_local + timedelta(days=1), 0, tz)
+
+    appt_q = _visible_sales_appointments(db, user, org).filter(
+        SalesAppointment.status != APPT_CANCELLED)
+    todays = (appt_q.filter(SalesAppointment.starts_at >= day_start,
+                            SalesAppointment.starts_at < day_end)
+              .order_by(SalesAppointment.starts_at.asc()).all())
+    upcoming = (appt_q.filter(SalesAppointment.ends_at >= now)
+                .order_by(SalesAppointment.starts_at.asc()).limit(25).all())
+    unconfirmed = [a for a in upcoming
+                   if a.confirmation_status in (CONF_PENDING, CONF_SENT)]
+
+    def kind(a):
+        mt = (db.query(MeetingType).filter(MeetingType.id == a.meeting_type_id).first()
+              if a.meeting_type_id else None)
+        return (mt.key or "") if mt else ""
+
+    discoveries_today = [a for a in todays if "discovery" in kind(a)]
+    demos_today = [a for a in todays if "demo" in kind(a)]
+
+    appt_map = next_appt_map(db, open_opps)
+
     return {
         "brand_sales_org": {"id": org.id, "name": org.name,
                             "timezone": org.timezone},
@@ -397,10 +515,14 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
             "demos_to_build": len(demos_to_build),
             "won_this_month": len(won_this_month),
             "won_value_this_month": won_value,
+            "appointments_today": len(todays),
+            "needs_confirmation": len(unconfirmed),
+            "discoveries_today": len(discoveries_today),
+            "demos_today": len(demos_today),
         },
-        "follow_ups_due": [_card(o, db) for o in follow_ups[:12]],
-        "deals_needing_action": [_card(o, db) for o in needs_action[:12]],
-        "demos_to_build": [_card(o, db) for o in demos_to_build[:12]],
+        "follow_ups_due": [_card(o, db, appt_map) for o in follow_ups[:12]],
+        "deals_needing_action": [_card(o, db, appt_map) for o in needs_action[:12]],
+        "demos_to_build": [_card(o, db, appt_map) for o in demos_to_build[:12]],
         "stage_counts": stage_counts,
         "recent_activity": [{
             "id": e.id, "opportunity_id": e.opportunity_id,
@@ -408,11 +530,16 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
             "detail": e.detail, "occurred_at": e.occurred_at,
             "actor_name": _user_name(db, e.actor_user_id),
         } for e in recent],
-        # Explicitly unavailable rather than an empty list that reads as "clear".
-        "todays_appointments": SCHEDULING_NOT_BUILT,
-        "next_appointment": SCHEDULING_NOT_BUILT,
-        "needs_confirmation": SCHEDULING_NOT_BUILT,
-        "my_availability": SCHEDULING_NOT_BUILT,
+        # REAL appointment data. An empty list here now means "no meetings",
+        # which it did not mean in Checkpoint 1.
+        "todays_appointments": [_appt_brief(db, a) for a in todays],
+        "next_appointment": _appt_brief(db, upcoming[0]) if upcoming else None,
+        "needs_confirmation": [_appt_brief(db, a) for a in unconfirmed[:12]],
+        "discoveries_today": [_appt_brief(db, a) for a in discoveries_today],
+        "demos_today": [_appt_brief(db, a) for a in demos_today],
+        "upcoming_appointments": [_appt_brief(db, a) for a in upcoming[:12]],
+        # Still genuinely absent — see the constant.
+        "calendar_sync": CALENDAR_SYNC_NOT_BUILT,
     }
 
 
@@ -445,7 +572,8 @@ def list_opportunities(brand_sales_org_id: Optional[str] = Query(None),
         q = q.filter(Opportunity.stage != STAGE_LOST)
 
     rows = q.order_by(Opportunity.stage_changed_at.desc().nullslast()).all()
-    cards = [_card(o, db) for o in rows]
+    appts = next_appt_map(db, rows)
+    cards = [_card(o, db, appts) for o in rows]
 
     by_stage = {s: [] for s in OPPORTUNITY_STAGES}
     lost = []
@@ -514,7 +642,7 @@ def create_opportunity(body: OpportunityCreate,
                      (" · " + opp.contact_name) if opp.contact_name else ""))
     db.commit()
     db.refresh(opp)
-    return _card(opp, db)
+    return _card(opp, db, {})
 
 
 # ── Opportunity detail ──────────────────────────────────────────────────────
@@ -551,7 +679,11 @@ def get_opportunity(opp_id: str,
         return {"id": p.id, "name": p.name, "key": p.key,
                 "price": _money(p.price), "is_custom": bool(p.is_custom)} if p else None
 
-    card = _card(opp, db)
+    upcoming_appts = (db.query(SalesAppointment)
+                      .filter(SalesAppointment.opportunity_id == opp.id,
+                              SalesAppointment.status != APPT_CANCELLED)
+                      .order_by(SalesAppointment.starts_at.asc()).all())
+    card = _card(opp, db, next_appt_map(db, [opp]))
     card.update({
         "brand_sales_org": {"id": org.id, "name": org.name} if org else None,
         "website": opp.website,
@@ -596,7 +728,9 @@ def get_opportunity(opp_id: str,
         } for e in events],
         "can_reassign": is_sales_manager(user, db, opp.brand_sales_org_id),
         "can_override_value": is_sales_manager(user, db, opp.brand_sales_org_id),
-        "scheduling": SCHEDULING_NOT_BUILT,
+        # Real meetings on this deal. Empty means none booked.
+        "appointments": [_appt_brief(db, a) for a in upcoming_appts],
+        "calendar_sync": CALENDAR_SYNC_NOT_BUILT,
     })
     return card
 

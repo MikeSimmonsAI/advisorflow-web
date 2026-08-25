@@ -46,6 +46,8 @@ import LeadScraper from './pages/LeadScraper'
 import MyDay from './pages/sales/MyDay'
 import MyPipeline from './pages/sales/MyPipeline'
 import OpportunityDetail from './pages/sales/OpportunityDetail'
+import MyAvailability from './pages/sales/MyAvailability'
+import TeamAvailability from './pages/sales/TeamAvailability'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, api } from './api/client'
 
 function isAuthenticated() {
@@ -154,6 +156,8 @@ export default function App() {
         <Route path="/sales" element={<SalesRoute><MyDay /></SalesRoute>} />
         <Route path="/sales/pipeline" element={<SalesRoute><MyPipeline /></SalesRoute>} />
         <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
+        <Route path="/sales/team" element={<SalesRoute><TeamAvailability /></SalesRoute>} />
+        <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />

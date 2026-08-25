@@ -368,6 +368,51 @@ NULLABILITY_TO_RELAX = [
 ]
 
 
+# Postgres-only DDL that cannot be expressed portably in the models.
+#
+# Each entry is (label, sql). Run in order, each in its own transaction, each
+# failure logged and skipped — exactly like every other list in this file. All
+# of these must be idempotent on their own terms.
+#
+# THE DOUBLE-BOOKING CONSTRAINT
+# -----------------------------
+# Two people must not be able to book Michael for overlapping meetings. The
+# service layer checks for a conflict inside the booking transaction, which
+# catches every ordinary case and works on SQLite too — but two concurrent
+# requests can both pass that check before either commits. Only the database
+# can settle that race.
+#
+# `busy_start_at`/`busy_end_at` on a participant row are the meeting window
+# already expanded by that person's buffers, so the range here is exactly the
+# time they are unavailable. `is_blocking` is false for cancelled meetings, so
+# cancelling frees the slot without deleting history.
+#
+# Requires btree_gist (for the `user_id WITH =` half). If the extension cannot
+# be created — a managed Postgres that forbids it — the constraint is skipped
+# and the in-transaction check remains the protection. That is a real
+# degradation, so it is logged loudly rather than passing silently.
+POSTGRES_ONLY_DDL = [
+    ("btree_gist extension",
+     "CREATE EXTENSION IF NOT EXISTS btree_gist"),
+    ("no-overlap constraint on sales_appointment_participants", """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'sales_participant_no_overlap'
+            ) THEN
+                ALTER TABLE sales_appointment_participants
+                    ADD CONSTRAINT sales_participant_no_overlap
+                    EXCLUDE USING gist (
+                        user_id WITH =,
+                        tsrange(busy_start_at, busy_end_at, '[)') WITH &&
+                    ) WHERE (is_blocking);
+            END IF;
+        END $$;
+    """),
+]
+
+
 def run_auto_migrations(engine) -> None:
     """
     Called once from main.py's startup handler, right after
@@ -429,6 +474,21 @@ def run_auto_migrations(engine) -> None:
                 except (OperationalError, ProgrammingError) as e:
                     conn.rollback()
                     print(f"[auto_migrate] Skipped NOT NULL relax for {table}.{column}: {e}")
+
+            # Postgres-only DDL: btree_gist plus the participant no-overlap
+            # exclusion constraint that makes a double-booking race impossible.
+            # See POSTGRES_ONLY_DDL for why this cannot live in the models.
+            # SQLite skips it and relies on the in-transaction check alone.
+            for _label, _sql in POSTGRES_ONLY_DDL:
+                try:
+                    conn.execute(text(_sql))
+                    conn.commit()
+                    print(f"[auto_migrate] OK: {_label}")
+                except (OperationalError, ProgrammingError) as e:
+                    conn.rollback()
+                    print(f"[auto_migrate] !! DEGRADED - could not apply {_label}: {e}")
+                    print("[auto_migrate] !! Double-booking now relies on the in-transaction "
+                          "check alone; a concurrent race could slip through.")
 
         if not is_sqlite:
             # Real, one-time column-type conversions - enum columns that

@@ -1,10 +1,13 @@
 /**
  * My Day — the salesperson's home screen.
  *
- * Every number and every row here comes from /sales/my-day, computed from real
- * opportunity data. The appointment-shaped sections render NotBuilt, because
- * the scheduling engine is Checkpoint 2 and an empty "Today's Schedule" would
- * read as "you have nothing on" rather than "this does not exist yet".
+ * Every number and every row comes from /sales/my-day, computed from real
+ * opportunity and appointment data.
+ *
+ * As of Checkpoint 2 the appointment panels are live. An empty "Today's
+ * Schedule" now means the salesperson has nothing booked — which is a different
+ * statement from the "not built yet" this screen used to make, and the empty
+ * state says so.
  */
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -12,9 +15,51 @@ import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import NewProspect from './NewProspect'
 import {
-  Card, Chip, Metric, Empty, NotBuilt, ErrorBar,
+  Card, Chip, Metric, Empty, ErrorBar,
   money, dateTime, dueLabel,
 } from './parts'
+
+/** The team-timezone wall clock the server already resolved for us. */
+function apptTime(a) {
+  const iso = a.starts_at_local || a.starts_at
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+const CONF_TONE = {
+  confirmed: 'green', declined: 'red', no_show: 'red',
+  cancelled: 'red', sent: 'amber', pending: 'amber',
+}
+
+export function ConfChip({ status }) {
+  if (!status) return null
+  return <Chip tone={CONF_TONE[status]}>{String(status).replace('_', ' ')}</Chip>
+}
+
+function ApptRow({ appt, onOpen, onConfirm }) {
+  return (
+    <div className="sw-row">
+      <button className="sw-rowlink"
+              onClick={() => appt.opportunity_id && onOpen(appt.opportunity_id)}>
+        <b>{apptTime(appt)} · {appt.prospect_company || appt.title}</b>
+        <p>
+          {appt.meeting_type || 'Meeting'}
+          {appt.participants?.length
+            ? ' · ' + appt.participants.map(p => p.full_name.split(' ')[0]).join(', ')
+            : ''}
+        </p>
+      </button>
+      <div className="sw-actions">
+        <ConfChip status={appt.confirmation_status} />
+        {onConfirm && appt.confirmation_status !== 'confirmed' && (
+          <button className="sw-tiny sw-primary"
+                  onClick={() => onConfirm(appt.id)}>Confirm</button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function OppRow({ opp, onOpen, note }) {
   const due = dueLabel(opp.next_action_due_at)
@@ -55,6 +100,16 @@ export default function MyDay() {
   const open = id => nav('/sales/opportunities/' + id)
   const m = data?.metrics || {}
 
+  /** Mark a meeting confirmed. Records the source as a staff action — that is
+   *  weaker evidence than a prospect clicking a link, and the API stores which. */
+  async function confirm(id) {
+    try {
+      await api.post('/sales/appointments/' + id + '/confirmation',
+                     { confirmation_status: 'confirmed', source: 'staff_manual' })
+      await load()
+    } catch (e) { setError(e.message || 'Could not confirm.') }
+  }
+
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long', month: 'long', day: 'numeric',
   })
@@ -89,7 +144,12 @@ export default function MyDay() {
                 attn={!!m.demos_to_build} />
         <Metric label="WON THIS MONTH" value={m.won_this_month ?? '—'}
                 sub={m.won_value_this_month ? money(m.won_value_this_month) + ' booked' : null} />
-        <Metric label="APPOINTMENTS TODAY" value="—" sub="scheduling: Checkpoint 2" />
+        <Metric label="APPOINTMENTS TODAY" value={m.appointments_today ?? '—'}
+                sub={m.appointments_today
+                  ? (m.discoveries_today || 0) + ' discovery · ' + (m.demos_today || 0) + ' demo'
+                  : null} />
+        <Metric label="NEEDS CONFIRMATION" value={m.needs_confirmation ?? '—'}
+                attn={!!m.needs_confirmation} />
       </div>
 
       <div className="sw-grid2">
@@ -131,18 +191,52 @@ export default function MyDay() {
         </div>
 
         <div>
-          <Card title="TODAY'S SCHEDULE" sub="Appointments">
-            <NotBuilt label="SCHEDULING NOT BUILT YET" block={data?.todays_appointments} />
-            <p className="sw-subtle" style={{ marginTop: 10, lineHeight: 1.7 }}>
-              Checkpoint 2 brings the availability engine, shared multi-person time
-              finding, and appointment creation. Until then no appointment data
-              exists — this panel will not show a false empty schedule.
-            </p>
+          {data?.next_appointment && (
+            <div style={{ marginBottom: 16 }}>
+              <Card title="UP NEXT" sub={data.next_appointment.meeting_type || 'Meeting'}>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>
+                  {apptTime(data.next_appointment)}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6 }}>
+                  {data.next_appointment.prospect_company || data.next_appointment.title}
+                </div>
+                <div className="sw-subtle" style={{ marginTop: 4 }}>
+                  {data.next_appointment.participants.map(p => p.full_name).join(' · ')}
+                </div>
+                <div className="sw-chips" style={{ marginTop: 10 }}>
+                  <ConfChip status={data.next_appointment.confirmation_status} />
+                  <Chip>{data.next_appointment.duration_minutes} min</Chip>
+                </div>
+                {data.next_appointment.opportunity_id && (
+                  <button className="sw-btn sw-mt" style={{ width: '100%' }}
+                          onClick={() => open(data.next_appointment.opportunity_id)}>
+                    Open the deal
+                  </button>
+                )}
+              </Card>
+            </div>
+          )}
+
+          <Card title="TODAY'S SCHEDULE"
+                sub={data ? (data.metrics.discoveries_today || 0) + ' discovery · '
+                            + (data.metrics.demos_today || 0) + ' demo' : 'Appointments'}
+                bodyless>
+            {loading && !data ? <div className="sw-card-b sw-subtle">Loading…</div>
+              : data?.todays_appointments?.length
+                ? data.todays_appointments.map(a => (
+                    <ApptRow key={a.id} appt={a} onOpen={open} />))
+                : <Empty title="Nothing booked today">
+                    Use <b>Find Team Time</b> on any opportunity to book a discovery
+                    or demo with everyone who needs to be there.
+                  </Empty>}
           </Card>
 
           <div className="sw-mt">
-            <Card title="NEEDS CONFIRMATION" sub="Meeting confirmation">
-              <NotBuilt label="NOT BUILT YET" block={data?.needs_confirmation} />
+            <Card title="NEEDS CONFIRMATION" sub="Booked but not yet confirmed" bodyless>
+              {data?.needs_confirmation?.length
+                ? data.needs_confirmation.map(a => (
+                    <ApptRow key={a.id} appt={a} onOpen={open} onConfirm={confirm} />))
+                : <Empty title="Everything upcoming is confirmed" />}
             </Card>
           </div>
 

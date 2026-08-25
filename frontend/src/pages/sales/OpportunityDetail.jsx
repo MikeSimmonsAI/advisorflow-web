@@ -12,10 +12,65 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
+import FindTeamTime from './FindTeamTime'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
   money, dateTime, dueLabel,
 } from './parts'
+
+const CONF_TONE = {
+  confirmed: 'green', declined: 'red', no_show: 'red',
+  cancelled: 'red', sent: 'amber', pending: 'amber',
+}
+
+/**
+ * Meetings on this deal, booked through the shared-availability finder so every
+ * required person was actually free.
+ */
+function Meetings({ opp, onFind, onConfirm, onCancel, saving }) {
+  const appts = opp.appointments || []
+  return (
+    <Card title="MEETINGS"
+          sub="Booked through Find Team Time — everyone required was free"
+          right={<button className="sw-btn sw-primary" onClick={onFind}>Find Team Time</button>}
+          bodyless>
+      {appts.length === 0 ? (
+        <Empty title="No meetings booked">
+          <b>Find Team Time</b> picks the meeting type, resolves who must attend
+          from their roles, and returns only the times when all of them are free.
+        </Empty>
+      ) : appts.map(a => (
+        <div className="sw-row" key={a.id}>
+          <div>
+            <b>
+              {new Date(a.starts_at_local || a.starts_at).toLocaleString(undefined, {
+                weekday: 'short', month: 'short', day: 'numeric',
+                hour: 'numeric', minute: '2-digit',
+              })} · {a.meeting_type || 'Meeting'}
+            </b>
+            <p>
+              {a.duration_minutes} min · {a.timezone} ·{' '}
+              {a.participants.map(p => p.full_name).join(', ')}
+            </p>
+          </div>
+          <div className="sw-actions">
+            <Chip tone={CONF_TONE[a.confirmation_status]}>
+              {String(a.confirmation_status || '').replace('_', ' ')}
+            </Chip>
+            {a.confirmation_status !== 'confirmed' && a.status === 'scheduled' && (
+              <button className="sw-tiny sw-primary" disabled={saving}
+                      onClick={() => onConfirm(a.id)}>Confirm</button>
+            )}
+            {a.status === 'scheduled' && (
+              <button className="sw-tiny" disabled={saving}
+                      onClick={() => onCancel(a.id)}>Cancel</button>
+            )}
+          </div>
+        </div>
+      ))}
+    </Card>
+  )
+}
 
 const DEMO_STATUSES = [
   ['', '—'],
@@ -281,6 +336,7 @@ export default function OpportunityDetail() {
   const [note, setNote] = useState('')
   const [nextAction, setNextAction] = useState('')
   const [nextDue, setNextDue] = useState('')
+  const [finding, setFinding] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -312,6 +368,25 @@ export default function OpportunityDetail() {
     try { setOpp(await api.put('/sales/opportunities/' + oppId + '/discovery',
                                { ...vals, mark_complete: !!complete })) }
     catch (e) { setError(e.message || 'Save failed.') }
+    finally { setSaving(false) }
+  }
+
+  async function confirmAppt(id) {
+    setSaving(true); setError(null)
+    try {
+      await api.post('/sales/appointments/' + id + '/confirmation',
+                     { confirmation_status: 'confirmed', source: 'staff_manual' })
+      await load()
+    } catch (e) { setError(e.message || 'Could not confirm.') }
+    finally { setSaving(false) }
+  }
+
+  async function cancelAppt(id) {
+    setSaving(true); setError(null)
+    try {
+      await api.post('/sales/appointments/' + id + '/cancel', {})
+      await load()
+    } catch (e) { setError(e.message || 'Could not cancel.') }
     finally { setSaving(false) }
   }
 
@@ -349,10 +424,21 @@ export default function OpportunityDetail() {
         <>
           <button className="sw-btn" onClick={() => nav('/sales/pipeline')}>← Pipeline</button>
           <button className="sw-btn" onClick={load} disabled={loading}>Refresh</button>
+          <button className="sw-btn sw-primary" onClick={() => setFinding(true)}>
+            Find Team Time
+          </button>
         </>
       }
     >
       <ErrorBar error={error} onRetry={load} />
+
+      {finding && (
+        <FindTeamTime
+          opportunity={opp}
+          onClose={() => setFinding(false)}
+          onBooked={() => { setFinding(false); load() }}
+        />
+      )}
 
       <div className="sw-card">
         <div className="sw-card-b sw-head">
@@ -429,9 +515,15 @@ export default function OpportunityDetail() {
         </div>
 
         <div>
-          <Card title="NEXT MEETING" sub="Scheduling">
-            <NotBuilt label="SCHEDULING NOT BUILT YET" block={opp.scheduling} />
-          </Card>
+          <Meetings opp={opp} saving={saving}
+                    onFind={() => setFinding(true)}
+                    onConfirm={confirmAppt} onCancel={cancelAppt} />
+
+          <div className="sw-mt">
+            <Card title="CALENDAR SYNC" sub="Outlook / Google">
+              <NotBuilt label="NOT BUILT YET" block={opp.calendar_sync} />
+            </Card>
+          </div>
 
           <div className="sw-mt">
             <Card title="ADD TO TIMELINE" sub="Logged against this record, permanently">
