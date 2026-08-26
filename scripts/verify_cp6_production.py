@@ -55,8 +55,16 @@ def check(label, ok, detail=""):
         FAIL.append(label)
 
 
-def scalar(c, sql, **kw):
-    return c.execute(text(sql), kw).scalar()
+def scalar(conn, sql, **params):
+    """First column of the first row.
+
+    The connection parameter is `conn`, not `c`: it used to be `c`, and a bind
+    parameter named `:c` was then passed as `scalar(c, sql, c=col)` - two values
+    for the same argument, and a TypeError on the second section. Naming the
+    connection something no bind parameter would plausibly be called is what
+    stops that recurring.
+    """
+    return conn.execute(text(sql), params).scalar()
 
 
 with engine.connect() as c:
@@ -76,7 +84,8 @@ with engine.connect() as c:
     for col in ("platform_id", "brand_sales_org_id", "before_state",
                 "after_state", "note"):
         n = scalar(c, "SELECT COUNT(*) FROM information_schema.columns "
-                      "WHERE table_name='audit_log_entries' AND column_name=:c", c=col)
+                      "WHERE table_name='audit_log_entries' AND column_name=:col",
+                   col=col)
         check("column audit_log_entries.%s added" % col, n == 1, n)
     nullable = scalar(c, "SELECT is_nullable FROM information_schema.columns "
                          "WHERE table_name='audit_log_entries' "
