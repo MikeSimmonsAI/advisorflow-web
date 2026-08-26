@@ -50,7 +50,9 @@ from app.services.sales_access import require_sales_member, is_god
 from app.services import staff_activation as staff_access
 from app.services import sales_staff
 from app.models.staff_models import StaffActivation, PURPOSE_SETUP, PURPOSE_RESET
-from app.models.sales_models import Membership, SCOPE_BRAND_SALES_ORG, BRAND_SALES_ROLES
+from app.models.sales_models import (
+    Membership, SCOPE_BRAND_SALES_ORG, BRAND_SALES_ROLES, ROLE_SALES_MANAGER,
+)
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/god/ops", tags=["God Mode — Operations"])
@@ -573,6 +575,14 @@ def _sales_team_rows(db: Session, brand_sales_org_id: str):
             "reports_to_user_id": m.reports_to_user_id,
             "reports_to_name": mgr_names.get(m.reports_to_user_id),
             "last_login_at": u.last_login_at,
+            # Whether this person may be NAMED as somebody's reporting manager.
+            # Computed here rather than inferred in the browser from the role
+            # string, so the dropdown and `assert_manager_ok` can never disagree
+            # about who is eligible - and so no screen has to interpret a role
+            # for itself, which is a habit that turns into a permission decision
+            # sooner or later.
+            "can_be_reporting_manager": (m.role == ROLE_SALES_MANAGER
+                                         and bool(m.is_active) and bool(u.is_active)),
             "access": staff_access.access_state(db, u),
         })
     return out

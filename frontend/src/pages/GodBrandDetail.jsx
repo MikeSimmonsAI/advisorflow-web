@@ -30,11 +30,12 @@ export default function GodBrandDetail() {
     .then(r => setTeam(r.team || []))
     .catch(() => setTeam([]))
 
-  // Who can be named as somebody's reporting manager: active managers of THIS
-  // brand only. The server refuses anyone else, so offering a wider list would
-  // just be a dropdown that produces errors.
-  const managers = (team || []).filter(
-    t => t.role === 'sales_manager' && t.membership_is_active && t.user_is_active)
+  // Who can be named as somebody's reporting manager. The SERVER decides this
+  // and sends a flag; the browser does not interpret a role string to work it
+  // out. That keeps this dropdown and `assert_manager_ok` from ever disagreeing
+  // about who is eligible, and keeps this screen out of the business of reading
+  // roles at all — a habit that becomes a permission decision eventually.
+  const managers = (team || []).filter(t => t.can_be_reporting_manager)
 
   // Role, reporting line and active state all go through the one PATCH, so the
   // table always redraws from the server's answer rather than from what the
@@ -268,7 +269,10 @@ export default function GodBrandDetail() {
                     </select>
                   </td>
                   <td data-label="Manager">
-                    {u.role === 'sales_manager'
+                    {/* A manager reports to nobody inside their own brand, so
+                        the cell is a dash rather than an empty control. The
+                        server clears the line on promotion for the same reason. */}
+                    {u.can_be_reporting_manager
                       ? <span className="go-badge">—</span>
                       : (
                         <select
