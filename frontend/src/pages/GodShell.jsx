@@ -72,6 +72,11 @@ const JUMP = [
 /** built:false → destination has no <Route> yet. Shown, but marked, never faked. */
 const NAV = [
   { label: 'Command Center',   path: '/god',               icon: 'command',  built: true  },
+  // Checkpoint 6 — the operating layer. These are the screens the owner lives
+  // in day to day, so they sit directly under the Command Center.
+  { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending', built: true  },
+  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',   built: true  },
+  { label: 'Customers',        path: '/god/customers',      icon: 'globe',    built: true  },
   { label: 'Platforms',        path: '/god/platforms',     icon: 'layers',   built: false },
   { label: 'Organizations',    path: '/god/organizations', icon: 'building', built: true  },
   { label: 'Users',            path: '/god/users-all',     icon: 'users',    built: false },
@@ -83,7 +88,7 @@ const NAV = [
   { label: 'Billing',          path: '/god/billing',       icon: 'dollar',   built: false },
   { label: 'Feature Flags',    path: '/god/features',      icon: 'flag',     built: false },
   { label: 'Integrations',     path: '/god/integrations',  icon: 'link',     built: false },
-  { label: 'Audit & Security', path: '/god/audit',         icon: 'shield',   built: false },
+  { label: 'Audit & Security', path: '/god/audit',         icon: 'shield',   built: true  },
   { label: 'System Settings',  path: '/god/settings',      icon: 'settings', built: false },
 ]
 
@@ -102,6 +107,37 @@ function LiveClock() {
 }
 
 const RAIL_KEY = 'af_god_rail_collapsed'
+const MOBILE_MAX = 900
+
+/**
+ * True when the viewport is phone-sized.
+ *
+ * The rail is a fixed 248px column in a flex row. On a 390px phone that leaves
+ * 142px for the whole control plane, which is what the first Checkpoint 6
+ * mobile screenshots showed: a full-height nav with the content sheared off the
+ * right edge. Below MOBILE_MAX the rail becomes an overlay drawer that starts
+ * closed, so the content gets the whole screen and the navigation is a tap away.
+ */
+function useIsMobile() {
+  const [m, setM] = useState(() => {
+    try { return window.matchMedia('(max-width: ' + MOBILE_MAX + 'px)').matches }
+    catch (_) { return false }
+  })
+  useEffect(() => {
+    let mq
+    try { mq = window.matchMedia('(max-width: ' + MOBILE_MAX + 'px)') } catch (_) { return }
+    const on = e => setM(e.matches)
+    // Safari below 14 has addListener only.
+    if (mq.addEventListener) mq.addEventListener('change', on)
+    else mq.addListener(on)
+    setM(mq.matches)
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', on)
+      else mq.removeListener(on)
+    }
+  }, [])
+  return m
+}
 
 export default function GodShell({ children, orgSession = null, onExitOrgSession }) {
   const navigate = useNavigate()
@@ -119,6 +155,12 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
     })
   }
 
+  const isMobile = useIsMobile()
+  const [drawer, setDrawer] = useState(false)
+  // Any navigation closes the drawer. Leaving it open over the screen the user
+  // just asked for is the classic mobile-nav bug.
+  useEffect(() => { setDrawer(false) }, [location.pathname])
+
   function handleLogout() { logout(); navigate('/login') }
 
   const isActive = (path) =>
@@ -127,7 +169,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   // 248, not 220. At 220 the label had ~93px left after the icon, the gap and
   // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
   // "Audit & Security" were all being ellipsised.
-  const railW = collapsed ? 62 : 248
+  const railW = isMobile ? 264 : (collapsed ? 62 : 248)
 
   // The marketing site for whichever brand this domain is. The AdvisorFlow
   // (god) brand deliberately has no websiteUrl — there is no public AdvisorFlow
@@ -144,9 +186,20 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
       <GodStyles />
 
       {/* ── Rail ── */}
+      {/* On a phone the rail leaves the flex row entirely and becomes an overlay,
+          so the content is not competing with it for width. */}
+      {isMobile && drawer ? (
+        <div onClick={() => setDrawer(false)}
+             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 40 }} />
+      ) : null}
       <aside style={{ width: railW, minWidth: railW, background: 'linear-gradient(180deg,rgba(3,9,17,.98),rgba(4,12,22,.98))',
                       borderRight: '1px solid rgba(78,157,211,.17)', display: 'flex', flexDirection: 'column',
-                      flexShrink: 0, transition: 'width .16s ease' }}>
+                      flexShrink: 0, transition: 'transform .18s ease, width .16s ease',
+                      ...(isMobile ? {
+                        position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 41,
+                        transform: drawer ? 'none' : 'translateX(-100%)',
+                        boxShadow: drawer ? '0 0 40px rgba(0,0,0,.6)' : 'none',
+                      } : {}) }}>
 
         {/* Brand */}
         <div style={{ padding: collapsed ? '18px 0 14px' : '20px 16px 16px',
@@ -176,6 +229,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
 
         {/* Collapse toggle */}
         <button onClick={toggleRail}
+          hidden={isMobile}
           title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           style={{ background: 'none', border: 'none', borderBottom: '1px solid rgba(78,157,211,.10)',
@@ -272,9 +326,17 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
         <header style={{ height: 44, background: '#06101d', borderBottom: '1px solid rgba(72,147,200,.18)',
           display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16, flexShrink: 0 }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <span style={{ color: '#2a4060', fontSize: '11px' }}>ADVISORFLOW</span>
-            <span style={{ color: '#1a3050' }}>/</span>
-            <span style={{ color: '#4a7090', fontSize: '11px', letterSpacing: '0.04em' }}>
+            {isMobile ? (
+              <button onClick={() => setDrawer(d => !d)} aria-label="Navigation"
+                      style={{ background: 'none', border: '1px solid rgba(78,157,211,.28)',
+                               borderRadius: 6, color: '#7fb2d8', cursor: 'pointer',
+                               padding: '4px 9px', fontSize: 14, lineHeight: 1,
+                               fontFamily: 'inherit', flexShrink: 0 }}>☰</button>
+            ) : null}
+            {!isMobile ? <span style={{ color: '#2a4060', fontSize: '11px' }}>ADVISORFLOW</span> : null}
+            {!isMobile ? <span style={{ color: '#1a3050' }}>/</span> : null}
+            <span style={{ color: '#4a7090', fontSize: '11px', letterSpacing: '0.04em',
+                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {(current?.label || 'GOD MODE').toUpperCase()}
             </span>
             {current && !current.built && (

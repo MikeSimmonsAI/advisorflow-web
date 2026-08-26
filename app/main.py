@@ -48,6 +48,12 @@ import app.models.meeting_models  # noqa: F401  (imported for side effects)
 # route that reads them 404s outside APP_ENV=demo.
 import app.models.integration_models  # noqa: F401  (imported for side effects)
 import app.models.demo_models  # noqa: F401  (imported for side effects)
+# Implementation / provisioning models (Checkpoint 6) - same Base, same reason.
+# Without this import implementations / implementation_milestones /
+# customer_activations are never created and Won -> Customer provisioning has
+# nowhere to write. These tables plus Opportunity.customer_organization_id are
+# the ONLY places the brand-sales tree and the customer-tenant tree meet.
+import app.models.implementation_models  # noqa: F401  (imported for side effects)
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
@@ -75,6 +81,10 @@ from app.routers.timeline_router import router as timeline_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
+# Checkpoint 6 control plane: sales operations, Won -> Customer provisioning,
+# implementation lifecycle and the control-plane audit view. Separate module
+# from god_router so the whole Checkpoint 6 surface reads as one thing.
+from app.routers.god_ops_router import router as god_ops_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
@@ -386,6 +396,7 @@ app.include_router(contacts_router)
 app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
+app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(email_tracking_router)
 # Stripe billing: /billing/plans is public; subscription/checkout/portal are
 # org_admin+ (each org manages its own card); /billing/all is god_admin only.

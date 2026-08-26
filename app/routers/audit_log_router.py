@@ -40,6 +40,12 @@ def log_action(
     target_type: str,
     target_id: str,
     details: Any | None = None,
+    platform_id: str | None = None,
+    brand_sales_org_id: str | None = None,
+    before: Any | None = None,
+    after: Any | None = None,
+    note: str | None = None,
+    commit: bool = True,
 ) -> AuditLogEntry:
     """
     Persist an audit event.
@@ -47,6 +53,20 @@ def log_action(
     Keep this helper small and boring on purpose: other routers/services can
     call it after completing sensitive actions like lead reassignment,
     password resets, suppression changes, template edits, imports, etc.
+
+    CHECKPOINT 6 ADDED FIVE OPTIONAL ARGUMENTS AND CHANGED NOTHING ELSE.
+    Every existing call site keeps working untouched — `organization_id` is
+    still the first positional argument and still lands in the same column.
+
+    `platform_id` / `brand_sales_org_id` exist because control-plane actions
+    belong to a brand or a platform rather than to a customer tenant, and
+    provisioning belongs to all three at once. `before` / `after` / `note`
+    exist because "who changed this, from what, to what, and why" is what an
+    audit trail is for.
+
+    `commit=False` is for callers already inside a transaction that must
+    succeed or fail as one unit. The default stays True so no existing caller
+    changes behaviour.
     """
     entry = AuditLogEntry(
         organization_id=organization_id,
@@ -55,16 +75,28 @@ def log_action(
         target_type=target_type.strip(),
         target_id=target_id,
         details=_details_to_text(details),
+        platform_id=platform_id,
+        brand_sales_org_id=brand_sales_org_id,
+        before_state=_details_to_text(before) if before is not None else None,
+        after_state=_details_to_text(after) if after is not None else None,
+        note=note,
     )
     db.add(entry)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(entry)
     return entry
 
 
 class AuditLogEntryOut(BaseModel):
     id: str
-    organization_id: str
+    # Nullable since Checkpoint 6 — a control-plane action has no customer
+    # tenant. Left as `str | None` rather than defaulted to an empty string so
+    # "this did not happen inside a tenant" stays distinguishable from "the
+    # tenant is unknown".
+    organization_id: str | None = None
     actor_user_id: str
     actor_name: str | None = None  # resolved separately, see list_audit_log - a raw UUID fragment alone doesn't tell an admin who actually did this
     action: str

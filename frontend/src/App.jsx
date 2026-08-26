@@ -50,6 +50,17 @@ import GodCommandCenter from './pages/GodCommandCenter'
 import Billing from './pages/Billing'
 import GodShell from './pages/GodShell'
 import GodOrganizations from './pages/GodOrganizations'
+// Checkpoint 6 — God Mode operations. Separate files from the Command Center
+// so the whole Checkpoint 6 surface can be read as one thing.
+import GodSalesOps from './pages/GodSalesOps'
+import GodBrandDetail from './pages/GodBrandDetail'
+import GodProvision from './pages/GodProvision'
+import GodImplementations from './pages/GodImplementations'
+import GodImplementationDetail from './pages/GodImplementationDetail'
+import GodCustomers from './pages/GodCustomers'
+import GodControlAudit from './pages/GodControlAudit'
+import SalesImplementations from './pages/SalesImplementations'
+import Activate from './pages/Activate'
 import LeadScraper from './pages/LeadScraper'
 import MyDay from './pages/sales/MyDay'
 import MyPipeline from './pages/sales/MyPipeline'
@@ -160,6 +171,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        {/* Public by necessity: the invited customer has no account yet. */}
+        <Route path="/activate" element={<Activate />} />
         <Route path="/setup-integrations" element={<SetupIntegrations />} />
         {/* ── PUBLIC customer surfaces ── no ProtectedRoute, by design ──
             A customer has no account. The token in the URL is the whole
@@ -193,6 +206,7 @@ export default function App() {
             /sales/manager/* is gated by require_sales_manager server-side, so a
             rep who reaches this URL gets a refusal from the API, not a screen. */}
         <Route path="/sales/manager" element={<SalesRoute><ManagerCommand /></SalesRoute>} />
+        <Route path="/sales/onboarding" element={<SalesRoute><SalesImplementations /></SalesRoute>} />
         <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
         <Route path="/sales/team" element={<SalesRoute><TeamAvailability /></SalesRoute>} />
         <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />
@@ -231,6 +245,13 @@ export default function App() {
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />
+        <Route path="/god/sales-operations" element={<GodRoute><GodModeLayout><GodSalesOps /></GodModeLayout></GodRoute>} />
+        <Route path="/god/brands/:brandId" element={<GodRoute><GodModeLayout><GodBrandDetail /></GodModeLayout></GodRoute>} />
+        <Route path="/god/provision/:oppId" element={<GodRoute><GodModeLayout><GodProvision /></GodModeLayout></GodRoute>} />
+        <Route path="/god/implementations" element={<GodRoute><GodModeLayout><GodImplementations /></GodModeLayout></GodRoute>} />
+        <Route path="/god/implementations/:implId" element={<GodRoute><GodModeLayout><GodImplementationDetail /></GodModeLayout></GodRoute>} />
+        <Route path="/god/customers" element={<GodRoute><GodModeLayout><GodCustomers /></GodModeLayout></GodRoute>} />
+        <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

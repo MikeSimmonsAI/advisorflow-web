@@ -815,6 +815,99 @@ def list_calendar_events(
     return events
 
 
+# ── the public booking page's external-calendar read ────────────────────────
+#
+# THIS REPLACED TWO FAIL-OPEN BRANCHES. Until Checkpoint 6 this route "checked"
+# Google by importing `calendar_service._get_google_credentials`, a function that
+# has never existed. The ImportError was caught by a bare `except Exception`
+# thirty lines below, logged as a warning, and the candidate slot list was left
+# UNTOUCHED - so a Google-connected advisor with a full calendar was offered to
+# the public at every slot, silently, forever.
+#
+# The Microsoft branch had the identical shape: a raw Graph call whose failure
+# path also left the slot list untouched. A refresh-token expiry there produced
+# exactly the same wrong answer. Both are gone.
+#
+# There is deliberately NO new Google code here. The read goes through
+# `calendar_providers`, the tested registry that already backs the tenant Retell
+# bridge and the sales scheduling engine, via `tenant_scheduling.external_busy` -
+# one call for the whole window instead of the legacy route's up-to-255 live HTTP
+# probes, and an ERROR RETURNED rather than swallowed.
+#
+# The 9am-5pm America/Chicago window is preserved exactly as it was. Fixing the
+# busy read is this change; re-timezoning the public booking page is not, and
+# doing both at once would make a regression impossible to attribute.
+
+BOOKING_TZ_NAME = "America/Chicago"
+
+
+def _booking_window_busy(db: Session, advisor: User, target_date):
+    """Busy intervals for the advisor's booking day, in NAIVE LOCAL wall time.
+
+    Returns `(intervals, error_code)`.
+
+      * `([], None)`        - nothing blocking, or no external calendar connected
+                              at all. The second is a legitimate state, not a
+                              failure: the advisor's own BookingLink rows still
+                              apply.
+      * `(..., "unreadable")` and friends - the calendar is connected and we
+                              could NOT read it. The caller must return no slots.
+                              Never an empty busy list, which would mean "free".
+
+    Local wall time on the way out because every slot in this route is a naive
+    local datetime, and mixing the two is its own class of bug.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(BOOKING_TZ_NAME)
+    except Exception:
+        # No tz database. Refuse rather than silently comparing UTC busy times
+        # against local slots and handing out an appointment during a funeral.
+        logger.error("zoneinfo unavailable; cannot safely read booking availability")
+        return [], "no_timezone_database"
+
+    day_start_local = _dt(target_date.year, target_date.month, target_date.day, 0, 0)
+    day_end_local = day_start_local + _td(days=1)
+    start_utc = day_start_local.replace(tzinfo=tz).astimezone(_tz_utc()).replace(tzinfo=None)
+    end_utc = day_end_local.replace(tzinfo=tz).astimezone(_tz_utc()).replace(tzinfo=None)
+
+    org = None
+    if getattr(advisor, "organization_id", None):
+        from app.models.models import Organization
+        org = db.query(Organization).filter(
+            Organization.id == advisor.organization_id).first()
+
+    from app.services.tenant_scheduling import external_busy
+    intervals, err = external_busy(db, advisor, org, start_utc, end_utc)
+    if err:
+        return [], err
+
+    out = []
+    for iv in (intervals or []):
+        s_utc = getattr(iv, "starts_at", None)
+        e_utc = getattr(iv, "ends_at", None)
+        if s_utc is None or e_utc is None:
+            continue
+        try:
+            s_local = s_utc.replace(tzinfo=_tz_utc()).astimezone(tz).replace(tzinfo=None) \
+                if s_utc.tzinfo is None else s_utc.astimezone(tz).replace(tzinfo=None)
+            e_local = e_utc.replace(tzinfo=_tz_utc()).astimezone(tz).replace(tzinfo=None) \
+                if e_utc.tzinfo is None else e_utc.astimezone(tz).replace(tzinfo=None)
+        except Exception:
+            # An interval we cannot place in time is an interval we cannot rule
+            # out. Treat the whole read as unreadable rather than dropping it.
+            logger.warning("unparseable busy interval for advisor %s", advisor.id)
+            return [], "unreadable"
+        out.append((s_local, e_local))
+    return out, None
+
+
+def _tz_utc():
+    from datetime import timezone as _timezone
+    return _timezone.utc
+
+
 @router.get("/slots")
 def get_available_slots(
     advisor_id: str = Query(...),
@@ -829,14 +922,17 @@ def get_available_slots(
     Checks:
       1. Token is valid and belongs to this advisor
       2. Date is Mon-Fri, within 14 days from today
-      3. Microsoft 365 calendar busy times (if connected)
-      4. Google Calendar busy times (if connected)
-      5. Existing booked/confirmed BookingLink records for that day
+      3. The advisor's connected external calendar (Microsoft or Google), read
+         once for the whole day through the tested provider registry
+      4. Existing booked/confirmed BookingLink records for that day
 
-    Returns list of available slot start times in ISO 8601 (UTC) format.
+    FAILS CLOSED. If the advisor has a calendar connected and it cannot be read,
+    this returns NO slots and a reason - never the whole day as free. See
+    `_booking_window_busy` for the two fail-open bugs this replaced.
+
+    Returns available slot start times as naive local ISO 8601 strings.
     """
     from datetime import date as date_cls, timedelta, timezone
-    import httpx
 
     # ── Validate token ────────────────────────────────────────────────────────
     booking = db.query(BookingLink).filter(BookingLink.token == token).first()
@@ -902,93 +998,36 @@ def get_available_slots(
 
     available = [s for s in candidate_slots if (s.hour, s.minute) not in booked_times]
 
-    # ── Check Microsoft 365 calendar for busy times ───────────────────────────
-    if advisor.microsoft_365_connected and advisor.microsoft_oauth_refresh_token_encrypted:
-        try:
-            from app.services.microsoft_email_service import _get_fresh_access_token
-            access_token = _get_fresh_access_token(advisor)
-            # calendarView returns events overlapping the time window
-            window_start = f"{date}T00:00:00"
-            window_end = f"{date}T23:59:59"
-            resp = httpx.get(
-                "https://graph.microsoft.com/v1.0/me/calendarView",
-                params={
-                    "startDateTime": window_start,
-                    "endDateTime": window_end,
-                    "$select": "start,end,showAs",
-                    "$top": "50",
-                },
-                headers={"Authorization": f"Bearer {access_token}"},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                ms_events = resp.json().get("value", [])
-                busy_ranges = []
-                for ev in ms_events:
-                    if ev.get("showAs") in ("free", "workingElsewhere"):
-                        continue
-                    try:
-                        ev_start = dt_cls.fromisoformat(ev["start"]["dateTime"].replace("Z", ""))
-                        ev_end = dt_cls.fromisoformat(ev["end"]["dateTime"].replace("Z", ""))
-                        busy_ranges.append((ev_start, ev_end))
-                    except Exception:
-                        continue
-                # Filter slots that overlap any busy range
-                def overlaps(slot_start, busy_ranges):
-                    slot_end = slot_start.replace(minute=slot_start.minute + 30) if slot_start.minute == 0 else slot_start.replace(hour=slot_start.hour + 1, minute=0)
-                    for b_start, b_end in busy_ranges:
-                        if slot_start < b_end and slot_end > b_start:
-                            return True
-                    return False
-                available = [s for s in available if not overlaps(s, busy_ranges)]
-            else:
-                logger.warning("MS365 calendarView returned %s for advisor %s", resp.status_code, advisor_id)
-        except Exception as e:
-            logger.warning("Could not fetch MS365 calendar for slots: %s", e)
+    # ── External calendar (Microsoft or Google) via the tested provider ──────
+    #
+    # ONE call for the whole day, and it FAILS CLOSED. See _booking_window_busy
+    # above for what this replaced and why.
+    busy_local, busy_err = _booking_window_busy(db, advisor, target_date)
+    if busy_err:
+        # Connected, and we could not read it. Offering the whole day as free
+        # here is what the old code did; it is also how a family books on top of
+        # a service. No slots, and a reason the page can show.
+        logger.warning("booking slots: calendar unreadable for advisor %s (%s)",
+                       advisor_id, busy_err)
+        return {
+            "date": date,
+            "advisor_id": advisor_id,
+            "slots": [],
+            "reason": "Calendar is temporarily unavailable. Please try again shortly.",
+            "calendar_error": busy_err,
+        }
 
-    # ── Check Google Calendar for busy times ──────────────────────────────────
-    if getattr(advisor, 'google_calendar_connected', False) and getattr(advisor, 'google_oauth_refresh_token_encrypted', None):
-        try:
-            from app.services.calendar_service import _get_google_credentials
-            from googleapiclient.discovery import build
-            creds = _get_google_credentials(advisor)
-            service = build("calendar", "v3", credentials=creds)
-            window_start_iso = f"{date}T00:00:00Z"
-            window_end_iso = f"{date}T23:59:59Z"
-            events_result = service.events().list(
-                calendarId="primary",
-                timeMin=window_start_iso,
-                timeMax=window_end_iso,
-                singleEvents=True,
-                orderBy="startTime",
-            ).execute()
-            gcal_events = events_result.get("items", [])
-            gcal_busy = []
-            for ev in gcal_events:
-                transparency = ev.get("transparency", "opaque")
-                if transparency == "transparent":
-                    continue
-                start_str = ev.get("start", {}).get("dateTime", "")
-                end_str = ev.get("end", {}).get("dateTime", "")
-                if start_str and end_str:
-                    try:
-                        gcal_busy.append((
-                            dt_cls.fromisoformat(start_str.replace("Z", "")),
-                            dt_cls.fromisoformat(end_str.replace("Z", "")),
-                        ))
-                    except Exception:
-                        continue
+    if busy_local:
+        from datetime import timedelta as _td30
 
-            def gcal_overlaps(slot_start, busy_ranges):
-                slot_end = slot_start.replace(minute=slot_start.minute + 30) if slot_start.minute == 0 else slot_start.replace(hour=slot_start.hour + 1, minute=0)
-                for b_start, b_end in busy_ranges:
-                    if slot_start < b_end and slot_end > b_start:
-                        return True
-                return False
+        def _slot_blocked(slot_start):
+            slot_end = slot_start + _td30(minutes=30)
+            for b_start, b_end in busy_local:
+                if slot_start < b_end and slot_end > b_start:
+                    return True
+            return False
 
-            available = [s for s in available if not gcal_overlaps(s, gcal_busy)]
-        except Exception as e:
-            logger.warning("Could not fetch Google Calendar for slots: %s", e)
+        available = [s for s in available if not _slot_blocked(s)]
 
     # ── If slot is today, remove slots that are in the past ──────────────────
     # Slots are expressed as Central Time (9am-5pm CT); we must compare in CT.

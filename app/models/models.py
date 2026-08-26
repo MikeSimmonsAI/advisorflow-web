@@ -731,7 +731,21 @@ class AuditLogEntry(Base):
     __tablename__ = "audit_log_entries"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    # NULLABLE SINCE CHECKPOINT 6, and that is the whole reason control-plane
+    # actions can be audited at all.
+    #
+    # This column was NOT NULL, and every index on the table is prefixed by it.
+    # A god_admin and a brand-sales user both have `users.organization_id =
+    # NULL` by design, so neither could physically write a row here — provisioning
+    # a customer, changing a brand's manager, or marking an implementation Live
+    # would have been unauditable. `provision_client` only ever got away with an
+    # audit write because a super_admin happens to have a tenant, and its call
+    # sits inside `except Exception: pass`, so a failure would have been silent.
+    #
+    # Relaxing it does not weaken tenant auditing: every existing caller still
+    # passes an organization_id, and the tenant-facing /audit-log route still
+    # filters by it. It only permits the rows that previously could not exist.
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     actor_user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     action = Column(String, nullable=False)  # e.g. "lead_reassigned", "password_reset"
@@ -739,11 +753,33 @@ class AuditLogEntry(Base):
     target_id = Column(String, nullable=False)
     details = Column(Text, nullable=True)
 
+    # ── Checkpoint 6: the other two contexts an action can belong to ──
+    #
+    # An action is scoped to a customer tenant, a brand's sales organisation, or
+    # a whole platform — and provisioning is the one operation that spans all
+    # three. Separate columns rather than one polymorphic pair, because "show me
+    # everything that happened to this brand" must be an indexed query and not a
+    # scan with a string comparison in it.
+    platform_id = Column(String, ForeignKey("platforms.id"), nullable=True)
+    brand_sales_org_id = Column(String, nullable=True)
+
+    # Before/after of what actually changed, and why. `details` remains free
+    # JSON for everything else; these three exist because "who changed the
+    # implementation owner, from whom, to whom, and on what grounds" is the
+    # question an audit trail is for, and reconstructing it from a details blob
+    # is guesswork.
+    before_state = Column(Text, nullable=True)
+    after_state = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (
         Index("ix_audit_log_org_created_at", "organization_id", "created_at"),
         Index("ix_audit_log_org_action", "organization_id", "action"),
+        Index("ix_audit_log_brand_created", "brand_sales_org_id", "created_at"),
+        Index("ix_audit_log_platform_created", "platform_id", "created_at"),
+        Index("ix_audit_log_target", "target_type", "target_id"),
     )
 
 

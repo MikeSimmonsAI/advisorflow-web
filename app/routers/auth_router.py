@@ -268,3 +268,58 @@ def change_password(
     real_user.must_change_password = False
     db.commit()
     return {"success": True}
+
+
+# ══ customer activation (Checkpoint 6 §9 / §10) ═════════════════════════════
+#
+# The customer's first administrator sets their OWN password here, using a
+# one-time link an operator sent them. No temporary password exists at any point
+# - the account was created with a random secret that was hashed and discarded
+# inside one function and is knowable to nobody, including this codebase.
+#
+# Both routes are public by necessity: the person using them has no account they
+# can log into yet. They are therefore rate limited, and every rejection returns
+# the SAME message, so a token cannot be probed for "expired" versus "never
+# existed" and an email address cannot be confirmed by trying links.
+
+class ActivationAcceptRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.get("/activation")
+@limiter.limit("20/hour")
+def activation_preview(request: Request, token: str, db: Session = Depends(get_db)):
+    """Confirm a link is live and say who it is for, before they type a password.
+
+    Returns the invited person's own name, their own email and their own
+    organisation's name - all three of which they already know. It returns no
+    user id, no organisation id, no role and nothing about the sale.
+    """
+    from app.services import customer_activation as _act
+    from app.models.models import Organization as _Org
+
+    row = _act.resolve(db, token)
+    user = db.query(User).filter(User.id == row.user_id).first()
+    org = db.query(_Org).filter(_Org.id == row.organization_id).first()
+    if user is None or org is None or not user.is_active:
+        raise HTTPException(status_code=400,
+                            detail="This activation link is invalid or has expired.")
+    return {"full_name": user.full_name, "email": user.email,
+            "organization_name": org.name, "expires_at": row.expires_at}
+
+
+@router.post("/activation/accept")
+@limiter.limit("10/hour")
+def activation_accept(request: Request, req: ActivationAcceptRequest,
+                      db: Session = Depends(get_db)):
+    """Exchange the one-time token for a password the customer chose.
+
+    Deliberately does NOT return a session token. The customer logs in through
+    the normal front door afterwards, which keeps every login through one code
+    path with one set of lockout, single-session and audit behaviour.
+    """
+    from app.services import customer_activation as _act
+    user = _act.accept(db, req.token, req.new_password)
+    return {"ok": True, "email": user.email,
+            "message": "Password set. You can now sign in."}

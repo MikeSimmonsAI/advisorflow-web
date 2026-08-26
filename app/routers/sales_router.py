@@ -1009,3 +1009,69 @@ def sales_team(brand_sales_org_id: Optional[str] = Query(None),
              "role_label": "Sales Manager" if m.role == ROLE_SALES_MANAGER
                            else "Sales Representative"}
             for u, m in rows]
+
+
+# ══ post-Won visibility (Checkpoint 6 §15 / §16) ════════════════════════════
+#
+# The salesperson does not vanish at Won. They get a PROJECTION of the
+# implementation - status, owner, target date, blocked yes/no, percent - and
+# nothing else. What they explicitly do not get: the customer's leads, the
+# customer's users, the customer's communications, the internal implementation
+# notes, or the blocker's text. `implementation_service.sales_projection` is the
+# whitelist, assembled server-side, and these routes never return the ORM object.
+
+@router.get("/implementations")
+def my_implementations(user: User = Depends(require_sales_member),
+                       db: Session = Depends(get_db)):
+    """Post-Won status for every deal this user is entitled to see.
+
+    A rep sees the deals they sold. A manager sees every implementation in their
+    own brand sales orgs - and only theirs, so a manager of one brand probing
+    another brand's ids gets nothing back rather than a permission message that
+    confirms the id exists.
+    """
+    from app.models.implementation_models import Implementation
+    from app.services.implementation_service import sales_projection
+    from app.services.sales_access import sales_org_ids, is_sales_manager, is_god
+
+    q = db.query(Implementation)
+    if not is_god(user):
+        allowed = sales_org_ids(user, db)
+        if not allowed:
+            return []
+        manager_orgs = [o for o in allowed if is_sales_manager(user, db, o)]
+        if manager_orgs:
+            q = q.filter(or_(Implementation.brand_sales_org_id.in_(manager_orgs),
+                             Implementation.sold_by_user_id == user.id))
+        else:
+            q = q.filter(Implementation.sold_by_user_id == user.id)
+    rows = q.order_by(Implementation.created_at.desc()).limit(500).all()
+    return [sales_projection(db, i) for i in rows]
+
+
+@router.get("/opportunities/{opportunity_id}/implementation")
+def opportunity_implementation(opportunity_id: str,
+                               user: User = Depends(require_sales_member),
+                               db: Session = Depends(get_db)):
+    """Where the customer got to, for one deal.
+
+    Authorised through the SAME `assert_can_view_opportunity` that guards every
+    other view of this record, so post-Won visibility can never be wider than
+    pre-Won visibility was.
+    """
+    from app.models.implementation_models import Implementation
+    from app.services.implementation_service import sales_projection
+
+    opp = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    assert_can_view_opportunity(user, opp, db)
+
+    impl = (db.query(Implementation)
+              .filter(Implementation.opportunity_id == opp.id).first())
+    if impl is None:
+        return {"provisioned": False,
+                "is_won": opp.status == "won",
+                "message": ("Won — awaiting provisioning." if opp.status == "won"
+                            else "Not won yet.")}
+    return {"provisioned": True, **sales_projection(db, impl)}

@@ -28,12 +28,28 @@ DAYS_AHEAD = 14
 MAX_PER_SLOT = 2
 
 
+def _12h(t) -> str:
+    """'9:00 AM', not '09:00 AM' — without strftime's %-I.
+
+    `%-I` and `%-d` are glibc extensions. They work on Render and raise
+    `ValueError: Invalid format string` on Windows, which is where this code is
+    written and tested. `calendar_providers/ics.py` already strips zero-padding
+    by hand for exactly this reason; this is the same fix reaching the two call
+    sites in this module that never got it.
+
+    Found when the Checkpoint 6 §30 test suite became the first test ever to
+    call `/availability/slots/{advisor_id}` successfully on Windows — before it
+    was authenticated, nothing exercised it.
+    """
+    return "%s:%s %s" % (str(int(t.strftime("%I"))), t.strftime("%M"), t.strftime("%p"))
+
+
 def _fmt_slot_label(d: date, time_str: str) -> str:
     """e.g. 'Monday, Jul 14 at 9:00 AM'"""
     from datetime import datetime as dt
     h, m = map(int, time_str.split(":"))
     t = dt(d.year, d.month, d.day, h, m)
-    return f"{d.strftime('%A, %b %d')} at {t.strftime('%-I:%M %p').lstrip('0') or '12:00 AM'}"
+    return "%s at %s" % (d.strftime("%A, %b %d"), _12h(t))
 
 
 def _is_blocked_by_rule(check_date: date, time_str: str, blocks: list) -> bool:
@@ -107,19 +123,59 @@ def _check_outlook_conflict(access_token: str, slot_date: date, slot_time: str) 
     return False
 
 
-@router.get("/slots/{advisor_id}")
-def get_available_slots(advisor_id: str, db: Session = Depends(get_db)):
+def _assert_can_read_advisor(current_user: User, advisor: Optional[User]) -> User:
+    """The advisor this caller is allowed to look at, or 404.
+
+    CROSS-TENANT AND NON-EXISTENT RETURN THE SAME 404, deliberately. A 403 for a
+    real id and a 404 for a fake one turns this endpoint into an oracle that
+    confirms whether a given advisor id exists on the platform, which is exactly
+    the leak that closing it was supposed to prevent.
+
+    god_admin reads any advisor. Everyone else reads advisors inside their OWN
+    organization. A user with no organization - a brand-sales identity, whose
+    `organization_id IS NULL` is a positive assertion that they belong to no
+    tenant - can read only themselves, and gets nothing from a tenant they do
+    not belong to.
     """
-    Public endpoint — no auth required.
+    not_found = HTTPException(status_code=404, detail="Advisor not found")
+    if advisor is None:
+        raise not_found
+    if getattr(current_user, "role", None) == "god_admin":
+        return advisor
+    if current_user.organization_id is None:
+        if advisor.id != current_user.id:
+            raise not_found
+        return advisor
+    if advisor.organization_id != current_user.organization_id:
+        raise not_found
+    return advisor
+
+
+@router.get("/slots/{advisor_id}")
+def get_available_slots(
+    advisor_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
     Returns available booking slots for an advisor for the next 14 days.
-    Checks: advisor blocks, BookaBoost booking count (max 2), Outlook calendar.
-    Called by Vercel booking app to show available times.
+    Checks: advisor blocks, booking count (max 2), Outlook calendar.
+
+    AUTHENTICATED SINCE CHECKPOINT 6. This was anonymous, and its docstring
+    claimed the Vercel booking app called it. A survey of that app found it does
+    not: the public booking flow is `/calendar/booking/{token}` →
+    `/calendar/slots` → `/calendar/booking-confirmed`, all of which are
+    token-authorised and untouched by this change. The only real caller is the
+    authenticated advisor frontend (`Availability.jsx`), which has always sent
+    its JWT.
+
+    Anonymous callers now get 401 from `get_current_user`. Cross-tenant callers
+    get 404 - see `_assert_can_read_advisor` for why not 403.
     """
     from datetime import date as date_cls, datetime as dt
 
     advisor = db.query(User).filter(User.id == advisor_id).first()
-    if not advisor:
-        raise HTTPException(status_code=404, detail="Advisor not found")
+    advisor = _assert_can_read_advisor(current_user, advisor)
 
     # Get advisor's availability blocks
     blocks = db.query(AdvisorAvailabilityBlock).filter(
@@ -447,7 +503,7 @@ def _cancel_bookings_in_range(db: Session, advisor: User, start: date, end: date
                 from app.services.sms_service import send_raw_sms
                 msg = (
                     f"Hi {lead.first_name or 'there'}, your appointment on "
-                    f"{booking.booked_time.strftime('%A, %B %d at %-I:%M %p')} "
+                    f"{booking.booked_time.strftime('%A, %B %d')} at {_12h(booking.booked_time)} "
                     f"has been rescheduled. Your advisor will reach out to set a new time. "
                     f"We apologize for the inconvenience."
                 )

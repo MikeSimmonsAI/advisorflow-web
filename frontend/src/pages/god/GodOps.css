@@ -1,0 +1,259 @@
+/* God Mode — Checkpoint 6 operations surface.
+ *
+ * Scoped under .go-scope, matching the convention the other sheets already
+ * follow: `gm-` God Mode shell, `sw-` Sales Workspace, `dc-` Demo Console,
+ * `go-` this. A rule here cannot reach a tenant screen or the sales workspace.
+ *
+ * DENSE ON DESKTOP, STACKED ON MOBILE (§31). The owner runs this from a desk
+ * most days and from a phone on the days it matters most, so tables become
+ * cards below 900px rather than scrolling sideways. Nothing is hidden at any
+ * width - every action survives the collapse.
+ */
+
+.go-scope {
+  --go-bg: #0d1117;
+  --go-panel: #151b24;
+  --go-panel-2: #1b232e;
+  --go-line: #26303d;
+  --go-text: #e6edf3;
+  --go-dim: #8b98a8;
+  --go-amber: #f5b942;
+  --go-green: #3fb950;
+  --go-blue: #58a6ff;
+  --go-red: #f85149;
+  --go-purple: #bc8cff;
+
+  color: var(--go-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  padding: 20px;
+  min-height: 100%;
+}
+
+@media (max-width: 900px) { .go-scope { padding: 12px; } }
+
+.go-head { display: flex; align-items: flex-start; justify-content: space-between;
+           gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.go-head h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+.go-head p { margin: 5px 0 0; color: var(--go-dim); font-size: 13px; max-width: 62ch; }
+
+.go-back { background: none; border: 1px solid var(--go-line); color: var(--go-dim);
+           border-radius: 7px; padding: 6px 11px; font-size: 12px; cursor: pointer; }
+.go-back:hover { color: var(--go-text); border-color: var(--go-blue); }
+
+/* ── KPI tiles ───────────────────────────────────────────────────────────── */
+
+.go-kpis { display: grid; gap: 10px; margin-bottom: 20px;
+           grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+.go-kpi { background: var(--go-panel); border: 1px solid var(--go-line);
+          border-radius: 10px; padding: 13px 14px; }
+.go-kpi .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+             color: var(--go-dim); }
+.go-kpi .v { font-size: 25px; font-weight: 700; margin-top: 5px; line-height: 1.1; }
+.go-kpi .s { font-size: 11px; color: var(--go-dim); margin-top: 3px; }
+.go-kpi.alert .v { color: var(--go-amber); }
+.go-kpi.good  .v { color: var(--go-green); }
+
+/* ── panels ──────────────────────────────────────────────────────────────── */
+
+.go-panel { background: var(--go-panel); border: 1px solid var(--go-line);
+            border-radius: 11px; margin-bottom: 16px; overflow: hidden; }
+.go-panel > h2 { margin: 0; padding: 13px 15px; font-size: 13px; font-weight: 650;
+                 text-transform: uppercase; letter-spacing: 0.7px;
+                 border-bottom: 1px solid var(--go-line); display: flex;
+                 align-items: center; gap: 9px; }
+.go-panel > h2 .count { background: var(--go-panel-2); color: var(--go-dim);
+                        border-radius: 20px; padding: 1px 9px; font-size: 11px;
+                        letter-spacing: 0; }
+.go-panel > h2 .count.hot { background: rgba(245,185,66,.15); color: var(--go-amber); }
+.go-body { padding: 14px 15px; }
+
+.go-empty { padding: 22px 15px; color: var(--go-dim); font-size: 13px; text-align: center; }
+
+/* ── tables that become cards ────────────────────────────────────────────── */
+
+.go-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.go-table th { text-align: left; font-size: 11px; text-transform: uppercase;
+               letter-spacing: 0.5px; color: var(--go-dim); font-weight: 600;
+               padding: 9px 15px; border-bottom: 1px solid var(--go-line); }
+.go-table td { padding: 11px 15px; border-bottom: 1px solid var(--go-line);
+               vertical-align: middle; }
+.go-table tr:last-child td { border-bottom: none; }
+.go-table tr.clickable { cursor: pointer; }
+.go-table tr.clickable:hover td { background: var(--go-panel-2); }
+.go-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) {
+  .go-table thead { display: none; }
+  .go-table, .go-table tbody, .go-table tr, .go-table td { display: block; width: 100%; }
+  .go-table tr { border-bottom: 1px solid var(--go-line); padding: 4px 0; }
+  .go-table td { border: none; padding: 5px 14px; display: flex;
+                 justify-content: space-between; gap: 14px; }
+  .go-table td::before { content: attr(data-label); color: var(--go-dim);
+                         font-size: 11px; text-transform: uppercase;
+                         letter-spacing: 0.5px; flex-shrink: 0; }
+  .go-table .num { text-align: right; }
+}
+
+/* ── brand cards ─────────────────────────────────────────────────────────── */
+
+.go-brands { display: grid; gap: 12px;
+             grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
+.go-brand { background: var(--go-panel); border: 1px solid var(--go-line);
+            border-radius: 11px; padding: 15px; cursor: pointer; }
+.go-brand:hover { border-color: var(--go-blue); }
+.go-brand h3 { margin: 0 0 2px; font-size: 15px; font-weight: 650; }
+.go-brand .plat { font-size: 11px; color: var(--go-dim); text-transform: uppercase;
+                  letter-spacing: 0.6px; }
+.go-brand .stats { display: grid; grid-template-columns: repeat(3, 1fr);
+                   gap: 9px; margin: 13px 0 0; }
+.go-brand .stats div { background: var(--go-panel-2); border-radius: 7px;
+                       padding: 8px 9px; }
+.go-brand .stats b { display: block; font-size: 17px; font-weight: 700; }
+.go-brand .stats span { font-size: 10px; color: var(--go-dim);
+                        text-transform: uppercase; letter-spacing: 0.4px; }
+.go-attn { margin: 12px 0 0; padding: 0; list-style: none; }
+.go-attn li { font-size: 12px; color: var(--go-amber); padding: 3px 0 3px 15px;
+              position: relative; }
+.go-attn li::before { content: '▲'; position: absolute; left: 0; font-size: 9px; top: 5px; }
+
+/* ── badges ──────────────────────────────────────────────────────────────── */
+
+.go-badge { display: inline-block; padding: 2px 9px; border-radius: 20px;
+            font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+            background: var(--go-panel-2); color: var(--go-dim);
+            border: 1px solid var(--go-line); white-space: nowrap; }
+.go-badge.live    { background: rgba(63,185,80,.14);  color: var(--go-green);  border-color: rgba(63,185,80,.3); }
+.go-badge.blocked { background: rgba(248,81,73,.14);  color: var(--go-red);    border-color: rgba(248,81,73,.3); }
+.go-badge.ready   { background: rgba(88,166,255,.14); color: var(--go-blue);   border-color: rgba(88,166,255,.3); }
+.go-badge.warn    { background: rgba(245,185,66,.14); color: var(--go-amber);  border-color: rgba(245,185,66,.3); }
+.go-badge.new     { background: rgba(188,140,255,.14);color: var(--go-purple); border-color: rgba(188,140,255,.3); }
+
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+
+.go-btn { background: var(--go-blue); color: #06121f; border: none;
+          border-radius: 7px; padding: 8px 14px; font-size: 13px; font-weight: 650;
+          cursor: pointer; }
+.go-btn:hover { filter: brightness(1.1); }
+.go-btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.go-btn.ghost { background: none; border: 1px solid var(--go-line); color: var(--go-text); }
+.go-btn.ghost:hover { border-color: var(--go-blue); }
+.go-btn.go { background: var(--go-green); }
+.go-btn.danger { background: var(--go-red); color: #fff; }
+.go-btn.sm { padding: 5px 10px; font-size: 12px; }
+.go-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── forms ───────────────────────────────────────────────────────────────── */
+
+.go-fields { display: grid; gap: 12px;
+             grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.go-field label { display: block; font-size: 11px; text-transform: uppercase;
+                  letter-spacing: 0.5px; color: var(--go-dim); margin-bottom: 5px; }
+/* EVERY SELECTOR IN THIS BLOCK IS PREFIXED WITH .go-scope ON PURPOSE.
+ *
+ * `index.css` carries a site-wide tenant theme rule:
+ *
+ *     [data-theme="bookaboost"] select, [data-theme="bookaboost"] option {
+ *       background: #fff; color: #1a1108;
+ *     }
+ *
+ * and the app sets that attribute on the document root. `[data-theme=...]
+ * select` has the same specificity as `.go-field select`, so on a tie the later
+ * sheet wins - which is the theme's, giving God Mode white dropdowns on a black
+ * page. It showed up in the first round of Checkpoint 6 screenshots. Adding
+ * `.go-scope` takes these to two classes plus a type and settles it by
+ * specificity rather than by import order, which is not something a page should
+ * be relying on. Do not remove the prefix.
+ *
+ * `color-scheme: dark` is separate and also needed: it is what makes the OPEN
+ * dropdown list, the date picker's calendar and the scrollbars render dark. */
+.go-scope { color-scheme: dark; }
+
+.go-scope .go-field input,
+.go-scope .go-field select,
+.go-scope .go-field textarea {
+  width: 100%; background-color: var(--go-bg); border: 1px solid var(--go-line);
+  border-radius: 7px; padding: 8px 10px; color: var(--go-text);
+  font-size: 13px; font-family: inherit; box-sizing: border-box;
+  appearance: none; -webkit-appearance: none;
+}
+.go-scope .go-field select,
+.go-scope .go-ms select,
+.go-scope .go-filters select {
+  /* The caret has to be drawn back on once appearance is removed. */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b98a8' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+  padding-right: 28px;
+}
+/* The open list, which is an <option> and inherits nothing from its <select>. */
+.go-scope select option {
+  background-color: var(--go-panel);
+  color: var(--go-text);
+}
+.go-scope .go-field input:focus, .go-scope .go-field select:focus,
+.go-scope .go-field textarea:focus {
+  outline: none; border-color: var(--go-blue);
+}
+.go-field .hint { font-size: 11px; color: var(--go-dim); margin-top: 4px; }
+.go-field.full { grid-column: 1 / -1; }
+
+/* ── read-only fact list ─────────────────────────────────────────────────── */
+
+.go-facts { display: grid; gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.go-fact { background: var(--go-panel-2); border-radius: 8px; padding: 9px 11px; }
+.go-fact .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+              color: var(--go-dim); }
+.go-fact .v { font-size: 13px; margin-top: 3px; word-break: break-word; }
+.go-fact .v.none { color: var(--go-dim); font-style: italic; }
+
+/* ── milestones ──────────────────────────────────────────────────────────── */
+
+.go-ms { list-style: none; margin: 0; padding: 0; }
+.go-ms li { display: flex; align-items: center; gap: 11px; padding: 10px 15px;
+            border-bottom: 1px solid var(--go-line); flex-wrap: wrap; }
+.go-ms li:last-child { border-bottom: none; }
+.go-ms .lab { flex: 1; min-width: 150px; font-size: 13px; }
+.go-ms .lab small { display: block; color: var(--go-dim); font-size: 11px; margin-top: 2px; }
+.go-scope .go-ms select { background-color: var(--go-bg); border: 1px solid var(--go-line);
+                border-radius: 6px; color: var(--go-text); padding: 5px 8px; font-size: 12px;
+                appearance: none; -webkit-appearance: none; }
+
+.go-bar { height: 6px; background: var(--go-panel-2); border-radius: 4px;
+          overflow: hidden; margin-top: 7px; }
+.go-bar i { display: block; height: 100%; background: var(--go-green); }
+
+/* ── warnings / notices ──────────────────────────────────────────────────── */
+
+.go-note { border-radius: 9px; padding: 11px 13px; font-size: 13px;
+           margin-bottom: 14px; line-height: 1.5; }
+.go-note.warn { background: rgba(245,185,66,.1); border: 1px solid rgba(245,185,66,.32);
+                color: var(--go-amber); }
+.go-note.err  { background: rgba(248,81,73,.1);  border: 1px solid rgba(248,81,73,.32);
+                color: var(--go-red); }
+.go-note.ok   { background: rgba(63,185,80,.1);  border: 1px solid rgba(63,185,80,.32);
+                color: var(--go-green); }
+.go-note ul { margin: 7px 0 0; padding-left: 18px; }
+
+/* The one-time activation link. Deliberately loud: it is shown once and the
+   operator has to notice that before navigating away. */
+.go-secret { background: var(--go-bg); border: 1px dashed var(--go-amber);
+             border-radius: 8px; padding: 11px; margin-top: 10px;
+             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+             font-size: 12px; word-break: break-all; color: var(--go-text); }
+
+/* ── timeline ────────────────────────────────────────────────────────────── */
+
+.go-tl { list-style: none; margin: 0; padding: 0; }
+.go-tl li { padding: 10px 15px; border-bottom: 1px solid var(--go-line); font-size: 13px; }
+.go-tl li:last-child { border-bottom: none; }
+.go-tl .when { color: var(--go-dim); font-size: 11px; }
+.go-tl .who { color: var(--go-blue); }
+
+.go-filters { display: flex; gap: 9px; flex-wrap: wrap; margin-bottom: 14px; }
+.go-scope .go-filters select, .go-scope .go-filters input {
+  background-color: var(--go-panel); border: 1px solid var(--go-line); border-radius: 7px;
+  color: var(--go-text); padding: 7px 10px; font-size: 12px;
+  appearance: none; -webkit-appearance: none;
+}

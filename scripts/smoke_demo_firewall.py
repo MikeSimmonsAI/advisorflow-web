@@ -133,11 +133,35 @@ def s2_boot_refusal():
     except UnsafeEnvironment:
         check("A DEMO WITH NO FIREWALL REFUSES TO BOOT", True)
 
+    # A configured outbound proxy defeats the socket firewall, because the
+    # socket's destination becomes the proxy - which listens on loopback, which
+    # the firewall must allow. Discovered in Checkpoint 6 while running this
+    # suite inside a proxied sandbox, where the SDK assertions below failed with
+    # ProxyError instead of OutboundBlocked. The demo now refuses to boot.
+    _saved_proxy = {n: os.environ.get(n) for n in env.PROXY_ENV_VARS}
+    for n in env.PROXY_ENV_VARS:
+        os.environ.pop(n, None)
     try:
         env.assert_safe(firewall_installed=True)
         check("a correctly configured demo boots", True)
     except UnsafeEnvironment as e:
         check("a correctly configured demo boots", False, e)
+
+    os.environ["HTTPS_PROXY"] = "http://user:secret@localhost:3128"
+    try:
+        env.assert_safe(firewall_installed=True)
+        check("A DEMO BEHIND A PROXY REFUSES TO BOOT", False,
+              "assert_safe returned instead of raising")
+    except UnsafeEnvironment as e:
+        check("A DEMO BEHIND A PROXY REFUSES TO BOOT", True)
+        check("the proxy refusal names the variable, never its credentials",
+              "HTTPS_PROXY" in str(e) and "secret" not in str(e), str(e)[:200])
+    os.environ.pop("HTTPS_PROXY", None)
+    check("configured_proxies() reports nothing when none are set",
+          env.configured_proxies() == [], env.configured_proxies())
+    for n, v in _saved_proxy.items():
+        if v is not None:
+            os.environ[n] = v
 
     os.environ["APP_ENV"] = "production"
     os.environ["DATABASE_URL"] = "postgresql://u:p@advisorflow-db.render.com:5432/af"
@@ -179,10 +203,24 @@ def s3_require_demo():
 
 def s4_providers():
     print("\n[4] Every real provider fails closed")
+    from app.services import environment as _env
+    from app.services import demo_firewall as _fw0
+    _fw0.reset_log()
+    _installed0 = _fw0.install()
+    check("the firewall installs", _installed0 and _fw0.is_installed())
+    _proxies = _env.configured_proxies()
+    if _proxies:
+        # Not a pass and not a failure: this environment cannot answer the
+        # question. Every client below would reach the proxy on loopback, which
+        # the firewall allows by design, so a "blocked" result here would prove
+        # the proxy works rather than that the firewall does. Said out loud
+        # rather than skipped quietly - and the boot refusal added in section 2
+        # is what makes this configuration unable to run a demo at all.
+        print("     SKIP  provider blocking is untestable behind a proxy (%s)."
+              % ", ".join(_proxies))
+        print("           A demo now REFUSES TO BOOT in this configuration; see [2].")
+        return
     from app.services import demo_firewall as fw
-    fw.reset_log()
-    installed = fw.install()
-    check("the firewall installs", installed and fw.is_installed())
 
     # A raw socket first: if this got out, nothing below would mean anything.
     def raw():

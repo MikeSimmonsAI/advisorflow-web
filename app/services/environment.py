@@ -101,6 +101,31 @@ def looks_like_production_db(url: Optional[str] = None) -> bool:
     return any(marker in host for marker in PRODUCTION_DB_MARKERS)
 
 
+# Environment variables that redirect outbound traffic through a local proxy.
+# These are the demo firewall's blind spot, discovered in Checkpoint 6: the
+# firewall matches on the SOCKET's destination, and a proxied client's socket
+# destination is the proxy itself. When the proxy listens on loopback - which
+# every sidecar and every corporate agent does - the destination is `localhost`,
+# which the firewall must allow so the app can reach its own database and health
+# checks. The connection is therefore permitted, and the proxy then forwards it
+# to Twilio.
+#
+# There is no way to distinguish "loopback because it is the database" from
+# "loopback because it is a proxy to the whole internet" at the socket layer.
+# So the demo refuses to boot when a proxy is configured, exactly as it refuses
+# to boot when the firewall failed to install. Render sets none of these, so
+# this changes nothing about how the demo actually runs.
+PROXY_ENV_VARS = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY", "GRPC_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "ftp_proxy", "grpc_proxy",
+)
+
+
+def configured_proxies() -> list:
+    """Names of proxy variables that are set to a non-empty value."""
+    return [n for n in PROXY_ENV_VARS if (os.environ.get(n) or "").strip()]
+
+
 def assert_safe(firewall_installed: bool = False) -> None:
     """Called once at startup. Raises rather than logs."""
     env = current()
@@ -118,6 +143,18 @@ def assert_safe(firewall_installed: bool = False) -> None:
         raise UnsafeEnvironment(
             "APP_ENV=demo but the outbound firewall did not install. Refusing "
             "to start rather than run a demo that can reach real providers.")
+
+    proxies = configured_proxies()
+    if proxies:
+        # Names only. A proxy URL routinely carries credentials, and a refusal
+        # message that prints them writes them into the log it was trying to
+        # protect.
+        raise UnsafeEnvironment(
+            "APP_ENV=demo but an outbound proxy is configured (%s). A proxy "
+            "makes the socket-level firewall ineffective, because every "
+            "outbound call reaches the proxy on loopback and the proxy - not "
+            "this process - decides where it goes. Refusing to start. Unset "
+            "these before running the demo." % ", ".join(proxies))
 
     log.warning("APP_ENV=demo - outbound network calls are BLOCKED and demo "
                 "routes are ENABLED. Database host: %s", database_host())

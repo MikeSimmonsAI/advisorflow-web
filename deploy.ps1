@@ -139,6 +139,12 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "DEMO MODE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_demo_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "DEMO FRONTEND CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_checkpoint6.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "CHECKPOINT 6 CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_checkpoint6_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "CHECKPOINT 6 FRONTEND CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_legacy_hardening.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "LEGACY HARDENING CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

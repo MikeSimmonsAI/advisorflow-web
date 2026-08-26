@@ -105,7 +105,18 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
       const data = await res.json()
       detail = data.detail || detail
     } catch {}
-    throw new Error(detail)
+    // `detail` is a string on almost every route, but FastAPI lets it be an
+    // object and a few routes use that to return structured refusals - the
+    // Checkpoint 6 launch route returns a message plus a list of warnings.
+    // `new Error(object)` produces the message "[object Object]", throwing that
+    // information away at exactly the moment somebody needs to read it, so the
+    // raw value is carried alongside. Existing callers reading `err.message`
+    // are unaffected: a string detail still becomes the message.
+    const err = new Error(typeof detail === 'string' ? detail
+                          : (detail && detail.message) || 'Request failed')
+    err.detail = detail
+    err.status = res.status
+    throw err
   }
 
   const contentType = res.headers.get('content-type') || ''

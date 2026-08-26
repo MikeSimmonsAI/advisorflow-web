@@ -62,3 +62,12 @@ demo_local.db
 # it is still a database file and has no business in the repository.
 demo_env.db
 demo_firewall_test.db
+# Checkpoint 6 staging scratch (tarballs used to move source to a test box)
+.cp6tmp/
+cp6_local.db
+cp6check.db
+
+# SQLite rollback journals / WAL from local test runs
+*.db-journal
+*.db-wal
+*.db-shm

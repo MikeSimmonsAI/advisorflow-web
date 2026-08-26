@@ -347,6 +347,14 @@ COLUMNS_TO_ADD = [
     ("integration_request_logs", "organization_id", "VARCHAR"),
     ("integration_request_logs", "booking_link_id", "VARCHAR"),
     ("integration_request_logs", "lead_id", "VARCHAR"),
+    # Checkpoint 6 — the audit engine learns about the control plane. Same
+    # table, same helper; these columns are what let a god_admin or a
+    # brand-sales actor be audited at all. See models.AuditLogEntry.
+    ("audit_log_entries", "platform_id", "VARCHAR"),
+    ("audit_log_entries", "brand_sales_org_id", "VARCHAR"),
+    ("audit_log_entries", "before_state", "TEXT"),
+    ("audit_log_entries", "after_state", "TEXT"),
+    ("audit_log_entries", "note", "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -469,6 +477,14 @@ NULLABILITY_TO_RELAX = [
     # while passing on a fresh SQLite. `scope_kind()` is what keeps "both NULL"
     # from becoming a legal state.
     ("integration_credentials", "brand_sales_org_id"),
+    # Checkpoint 6. This column shipped NOT NULL when every audited action
+    # happened inside a customer tenant. A god_admin and a brand-sales user
+    # both have users.organization_id = NULL by design, so provisioning a
+    # customer, reassigning a brand manager or marking an implementation Live
+    # could not be audited at all — the INSERT would violate NOT NULL. Every
+    # existing caller still passes a tenant id; this only permits the rows that
+    # previously could not exist.
+    ("audit_log_entries", "organization_id"),
 ]
 
 

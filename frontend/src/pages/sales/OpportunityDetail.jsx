@@ -371,10 +371,19 @@ export default function OpportunityDetail() {
   }, [oppId])
 
   useEffect(() => { load() }, [load])
+  // Checkpoint 6 §15 — what happened after Won. A coarse, read-only projection
+  // assembled server-side; this component never sees tenant data and could not
+  // display it if it wanted to. Failing quietly is right: an opportunity that
+  // was never won has nothing to show, and that is not an error worth a banner.
+  const [postWon, setPostWon] = useState(null)
   useEffect(() => {
     api.get('/sales/packages').then(setPackages).catch(() => setPackages([]))
     api.get('/sales/team').then(setTeam).catch(() => setTeam([]))
   }, [])
+  useEffect(() => {
+    api.get('/sales/opportunities/' + oppId + '/implementation')
+      .then(setPostWon).catch(() => setPostWon(null))
+  }, [oppId])
 
   async function patch(body) {
     setSaving(true); setError(null)
@@ -451,6 +460,43 @@ export default function OpportunityDetail() {
       }
     >
       <ErrorBar error={error} onRetry={load} />
+
+      {postWon && postWon.provisioned ? (
+        <div className="sw-card" style={{ marginBottom: 14 }}>
+          <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase',
+                       letterSpacing: '.6px' }}>After the sale</h3>
+          <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', fontSize: 13 }}>
+            <div><strong>{postWon.customer_organization_name}</strong>
+              <div className="sw-subtle">Customer organisation</div></div>
+            <div><strong>{postWon.status_label}</strong>
+              <div className="sw-subtle">Status</div></div>
+            <div><strong>{postWon.implementation_owner || 'unassigned'}</strong>
+              <div className="sw-subtle">Implementation owner</div></div>
+            <div><strong>{postWon.percent_complete}%</strong>
+              <div className="sw-subtle">Onboarding complete</div></div>
+            <div><strong>{postWon.is_live
+              ? 'Live'
+              : (postWon.target_launch_date
+                 ? new Date(postWon.target_launch_date).toLocaleDateString()
+                 : 'not set')}</strong>
+              <div className="sw-subtle">{postWon.is_live ? 'Launched' : 'Target launch'}</div></div>
+          </div>
+          {postWon.is_blocked ? (
+            <p className="sw-subtle" style={{ marginBottom: 0 }}>
+              This implementation is currently blocked. The implementation owner has the detail.
+            </p>
+          ) : null}
+        </div>
+      ) : postWon && postWon.is_won ? (
+        <div className="sw-card" style={{ marginBottom: 14 }}>
+          <h3 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase',
+                       letterSpacing: '.6px' }}>After the sale</h3>
+          <p className="sw-subtle" style={{ margin: 0 }}>
+            Won — awaiting provisioning. A customer organisation is created
+            deliberately, not automatically.
+          </p>
+        </div>
+      ) : null}
 
       {finding && (
         <FindTeamTime

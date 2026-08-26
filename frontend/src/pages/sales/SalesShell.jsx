@@ -33,7 +33,7 @@ const NAV = [
   { to: '/sales/availability', label: 'My Availability', icon: '◷' },
   // Checkpoint 4. Rendered visibly disabled rather than hidden so the shape of
   // the workspace is legible without anything unfinished being clickable.
-  { to: '/sales/onboarding', label: 'Sold / Onboarding', icon: '✓', soon: true },
+  { to: '/sales/onboarding', label: 'Sold / Onboarding', icon: '✓' },
 ]
 
 // Checkpoint 5. Shown only to a manager — `permission` names the flag on
