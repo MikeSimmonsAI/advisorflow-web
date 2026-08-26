@@ -504,6 +504,24 @@ async def _cadence_loop():
 
 @app.on_event("startup")
 async def on_startup():
+    # 0. THE ENVIRONMENT BOUNDARY. Before the database is touched, before a
+    #    migration runs, before a single router can serve anything.
+    #
+    #    In the demo environment this installs a default-deny egress firewall
+    #    and then REFUSES TO BOOT if either the firewall did not install or the
+    #    database looks like production. Both failures raise out of here on
+    #    purpose: a demo process that came up attached to real data, or with no
+    #    firewall, is far more dangerous than one that will not start at all.
+    #
+    #    In production and staging this is a no-op beyond one log line. Nothing
+    #    below it changes behaviour for a non-demo process.
+    from app.services import environment as _env
+    _firewall_ok = False
+    if _env.is_demo():
+        from app.services import demo_firewall as _fw
+        _firewall_ok = _fw.install()
+    _env.assert_safe(firewall_installed=_firewall_ok)
+
     # 1. Create any brand-new tables
     Base.metadata.create_all(bind=engine)
 
