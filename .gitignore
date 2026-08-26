@@ -56,3 +56,9 @@ demo_sales.db
 # Local sales-execution demo database (scripts/demo_env.py), used to drive the
 # UI for screenshots. Development fixture only - never production data.
 demo_local.db
+
+# Local Demo Mode database (scripts/demo_local.bat). Holds only synthetic
+# scenario data with reserved 555-01xx numbers and example.com addresses, but
+# it is still a database file and has no business in the repository.
+demo_env.db
+demo_firewall_test.db

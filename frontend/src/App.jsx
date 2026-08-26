@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useEffect, useState, cloneElement } from 'react'
 import Layout from './components/Layout'
+import DemoBanner from './components/DemoBanner'
+import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
 // Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
@@ -150,6 +152,11 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      {/* DEMO MODE BANNER — above every shell, inside the router because it
+          links to the console. Renders nothing at all unless the BACKEND says
+          this process is the demo environment, so a production bundle has no
+          demo affordance in its DOM to find. */}
+      <DemoBanner />
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
@@ -170,6 +177,14 @@ export default function App() {
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />} />
+        {/* Demo Console. Registered in every build; the page itself asks the
+            backend which environment answered and renders a plain "not
+            available" panel outside the demo — and every control endpoint it
+            would call 404s there regardless. Authentication is required, and
+            the page additionally refuses anyone who is not a platform owner,
+            because Demo Mode does not relax permissions. */}
+        <Route path="/demo" element={
+          isAuthenticated() ? <DemoConsole /> : <Navigate to="/login" replace />} />
         <Route path="/" element={<HomeRedirect />} />
         {/* ── Sales Workspace ── brand-sales members; guarded server-side ── */}
         <Route path="/sales" element={<SalesRoute><MyDay /></SalesRoute>} />

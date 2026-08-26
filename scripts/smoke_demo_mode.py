@@ -417,6 +417,31 @@ def s8_reset_safety(db):
     db.delete(survivor)
     db.commit()
 
+    # THE OPERATOR MUST SURVIVE A FULL RESET.
+    #
+    # An earlier version gave the demo operator a `demo-` prefixed id, so
+    # pressing "Reset everything" deleted the account of the person pressing it
+    # and logged them out mid-presentation. Found by actually using the button.
+    op_src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "demo_operator.py"), encoding="utf-8").read()
+    import re as _re
+    ids = _re.findall(r'^OPERATOR\w*_ID = "([^"]+)"', op_src, _re.M)
+    check("the operator seeder defines its ids", len(ids) >= 2, ids)
+    check("NO OPERATOR ID CARRIES THE DEMO PREFIX - reset must not log the "
+          "operator out", all(not i.startswith("demo-") for i in ids), ids)
+
+    # Prove it against the live sweep rather than only in the source.
+    db.add(User(id=ids[0] + "-probe", organization_id=None,
+                email="operator-probe@example.com", full_name="Operator Probe",
+                password_hash="x", role="god_admin", is_active=True))
+    db.commit()
+    runner.reset_all(db)
+    survived = db.query(User).filter(User.id == ids[0] + "-probe").first()
+    check("AN OPERATOR-SHAPED ID SURVIVES reset_all", survived is not None)
+    if survived:
+        db.delete(survived)
+        db.commit()
+
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                             "app", "services", "demo_runner.py"),
                encoding="utf-8").read()
