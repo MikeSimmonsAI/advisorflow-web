@@ -30,6 +30,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import text                                        # noqa: E402
 from app.deps import engine                                        # noqa: E402
+from app.models.models import Base                                 # noqa: E402
+import app.models.sales_models                                     # noqa: E402,F401
+import app.models.scheduling_models                                # noqa: E402,F401
+import app.models.calendar_models                                  # noqa: E402,F401
+import app.models.meeting_models                                   # noqa: E402,F401
+import app.models.integration_models                               # noqa: E402,F401
 from app.auto_migrate import (                                     # noqa: E402
     COLUMNS_TO_ADD, NULLABILITY_TO_RELAX, run_auto_migrations,
 )
@@ -97,7 +103,15 @@ def columns(conn, table):
 
 def main():
     print("\n[1] The pre-tenant schema, as production has it today")
+    # Build the WHOLE schema first, then put just these two tables back to
+    # their previous shape. Production is a full database with two stale
+    # tables in it, not two tables alone — and the migration touches other
+    # tables on its way past, so a bare fixture would exercise a path that
+    # does not exist anywhere.
+    Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS integration_credentials"))
+        conn.execute(text("DROP TABLE IF EXISTS integration_request_logs"))
         conn.execute(text(OLD_CREDENTIALS))
         conn.execute(text(OLD_LOGS))
         conn.commit()

@@ -883,7 +883,12 @@ def run_auto_migrations(engine) -> None:
             ))
             conn.commit()
     except Exception as e:
-        print(f"[auto_migrate] Restland→Greenland rename note: {e}")
+        # ASCII arrow deliberately. This line runs inside an exception handler
+        # on every boot; on a console whose codepage is not UTF-8 (any plain
+        # Windows shell) a U+2192 here raises UnicodeEncodeError *while
+        # reporting an error*, turning a skipped no-op migration into a hard
+        # crash. Render is UTF-8 so production never saw it — a local run did.
+        print(f"[auto_migrate] Restland->Greenland rename note: {e}")
 
     # ONE-TIME PASSWORD RESET BLOCK REMOVED — security fix 2026-08-20
     # Reason: this block committed a bcrypt hash to source control and ran on
