@@ -287,6 +287,51 @@ class ActivationAcceptRequest(BaseModel):
     new_password: str
 
 
+# -- brand-sales / staff access activation -----------------------------------
+#
+# Separate from the customer activation routes because it reads a separate
+# table. `customer_activations.organization_id` is NOT NULL, which is right for
+# a tenant invitation and structurally wrong for a brand-sales user whose
+# `organization_id` is NULL on purpose. See app/models/staff_models.py.
+#
+# The two token families are distinguishable by their leading characters -
+# `act_` for a customer, `stf_` for staff - so the front end routes on the
+# token itself rather than guessing or trying both.
+
+class StaffActivationAcceptRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.get("/staff-activation")
+@limiter.limit("20/hour")
+def staff_activation_preview(request: Request, token: str,
+                             db: Session = Depends(get_db)):
+    """Confirm a sales access link is live and say who it is for.
+
+    Returns the person's own name, their own email and the brand - all of which
+    they already know. No user id, no role, no membership internals.
+    """
+    from app.services import staff_activation as _staff
+    return _staff.preview(db, token)
+
+
+@router.post("/staff-activation/accept")
+@limiter.limit("10/hour")
+def staff_activation_accept(request: Request, req: StaffActivationAcceptRequest,
+                            db: Session = Depends(get_db)):
+    """Exchange the one-time token for a password the person chose.
+
+    Deliberately returns no session token: they sign in through the normal front
+    door afterwards, so every login keeps one code path with one set of lockout,
+    single-session and audit behaviour.
+    """
+    from app.services import staff_activation as _staff
+    user = _staff.accept(db, req.token, req.new_password)
+    return {"ok": True, "email": user.email,
+            "message": "Password set. You can now sign in."}
+
+
 @router.get("/activation")
 @limiter.limit("20/hour")
 def activation_preview(request: Request, token: str, db: Session = Depends(get_db)):

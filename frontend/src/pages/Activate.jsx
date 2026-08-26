@@ -1,5 +1,7 @@
 /**
- * Customer activation — the first thing a new customer's administrator sees.
+ * Access activation — the first screen a new customer admin OR a
+ * brand-sales user sees. One page, two token families, routed by the token's
+ * own prefix so neither has to be guessed.
  *
  * Public by necessity: they have no account to log into yet. It takes a one-time
  * token from the URL, confirms who the invitation is for, and lets them set
@@ -24,6 +26,17 @@ import './Activate.css'
 
 const GENERIC = 'This activation link is invalid or has expired.'
 
+// Two token families reach this page, and they live in two different tables:
+//   act_...  a CUSTOMER admin joining their tenant   -> /auth/activation
+//   stf_...  a BRAND-SALES user unlocking their login -> /auth/staff-activation
+//
+// The token says which. Routing on the prefix means no guessing and no
+// try-one-then-the-other, which would leak which family a token belongs to by
+// timing and would double every rate-limit hit.
+function apiBaseFor(token) {
+  return (token || '').startsWith('stf_') ? '/auth/staff-activation' : '/auth/activation'
+}
+
 export default function Activate() {
   const [params] = useSearchParams()
   const nav = useNavigate()
@@ -37,7 +50,7 @@ export default function Activate() {
 
   useEffect(() => {
     if (!token) { setErr(GENERIC); return }
-    api.get('/auth/activation?token=' + encodeURIComponent(token))
+    api.get(apiBaseFor(token) + '?token=' + encodeURIComponent(token))
       .then(setInvite)
       .catch(e => setErr(e.message || GENERIC))
   }, [token])
@@ -47,7 +60,7 @@ export default function Activate() {
     if (pw !== pw2) { setErr('The two passwords do not match.'); return }
     setBusy(true); setErr('')
     try {
-      await api.post('/auth/activation/accept', { token, new_password: pw })
+      await api.post(apiBaseFor(token) + '/accept', { token, new_password: pw })
       setDone(true)
     } catch (ex) {
       setErr(ex.message || 'Could not set your password.')
@@ -98,9 +111,18 @@ export default function Activate() {
       <div className="act-card">
         <h1>Set your password</h1>
         <p className="lede">
-          Welcome, {invite.full_name}. You're being set up as an administrator for{' '}
-          <strong>{invite.organization_name}</strong>. Choose a password — nobody
-          else has ever had one for this account.
+          {invite.purpose === 'reset' ? (
+            <>Welcome back, {invite.full_name}. Choose a new password for your{' '}
+              <strong>{invite.workspace || invite.organization_name}</strong> access.</>
+          ) : invite.workspace ? (
+            <>Welcome, {invite.full_name}. You're being set up in the{' '}
+              <strong>{invite.workspace}</strong> sales workspace. Choose a password —
+              nobody else has ever had one for this account.</>
+          ) : (
+            <>Welcome, {invite.full_name}. You're being set up as an administrator for{' '}
+              <strong>{invite.organization_name}</strong>. Choose a password — nobody
+              else has ever had one for this account.</>
+          )}
         </p>
 
         {err ? <div className="act-note err">{err}</div> : null}

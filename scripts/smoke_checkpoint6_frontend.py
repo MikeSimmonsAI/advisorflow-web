@@ -198,6 +198,37 @@ def main():
     check("a string detail still becomes the message",
           "typeof detail === 'string'" in client)
 
+    print("\n--- brand-sales access activation UI " + "-" * 34)
+    act = read("pages", "Activate.jsx")
+    # One page serves two token families that live in two different tables.
+    # Routing on the token's own prefix is what stops it guessing, or trying one
+    # then the other - which would leak which family a token belongs to and
+    # double every rate-limit hit.
+    check("the activation page routes on the token prefix",
+          "apiBaseFor" in act and "stf_" in act, "no prefix routing")
+    check("it targets both activation endpoints",
+          "/auth/staff-activation" in act and "/auth/activation" in act)
+    check("it still stores no session on success", "setToken" not in act)
+    check("the copy does not call a sales rep an administrator",
+          "sales workspace" in act and "invite.purpose === 'reset'" in act)
+
+    brand = read("pages", "GodBrandDetail.jsx")
+    check("the brand screen has a Sales team panel",
+          'title="Sales team"' in brand)
+    check("it can generate a setup link",
+          "/god/ops/sales-users/" in brand and "setup-link" in brand)
+    check("it can revoke one", "/god/ops/staff-activations/" in brand)
+    check("it labels the one-time link as shown once",
+          "shown once" in brand.lower())
+    check("it never writes the link to storage",
+          "localStorage" not in brand and "sessionStorage" not in brand)
+    check("it surfaces a brand-sales user wrongly inside a tenant",
+          "inside a customer tenant" in brand)
+    check("it reports whether each person can actually sign in",
+          "has_signed_in" in brand)
+    for bad in ("temp_password", "temporary password"):
+        check("the brand screen never mentions %s" % bad, bad not in brand)
+
     print("\n" + "=" * 74)
     if FAILURES:
         print("FAILED (%d):" % len(FAILURES))

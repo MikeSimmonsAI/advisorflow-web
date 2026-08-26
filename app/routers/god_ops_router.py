@@ -47,6 +47,9 @@ from app.services import provisioning as prov
 from app.services import implementation_service as impls
 from app.services import customer_activation as activation
 from app.services.sales_access import require_sales_member, is_god
+from app.services import staff_activation as staff_access
+from app.models.staff_models import StaffActivation, PURPOSE_SETUP, PURPOSE_RESET
+from app.models.sales_models import Membership, SCOPE_BRAND_SALES_ORG, BRAND_SALES_ROLES
 from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/god/ops", tags=["God Mode — Operations"])
@@ -522,6 +525,133 @@ def revoke_invite(activation_id: str,
         raise HTTPException(status_code=404, detail="Invitation not found.")
     act = activation.revoke(db, act, user)
     return {"activation": {"id": act.id, "status": act.status, "revoked_at": act.revoked_at}}
+
+
+# ══ sales team access (brand-sales login activation) ════════════════════════
+#
+# These routes use `require_sales_member` at the door and then
+# `staff_access.assert_can_manage_sales_access` on the record, so god can act on any
+# brand and a sales MANAGER can act only on their own. A rep reaching them gets
+# 403 from the record check, not from the door - the door cannot know which
+# brand is being asked about until the record is resolved.
+
+
+def _sales_team_rows(db: Session, brand_sales_org_id: str):
+    """Everyone with a brand-sales membership here, with their real access state."""
+    mem = (db.query(Membership)
+             .filter(Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                     Membership.scope_id == brand_sales_org_id,
+                     Membership.role.in_(BRAND_SALES_ROLES))
+             .order_by(Membership.role, Membership.created_at).all())
+    out = []
+    for m in mem:
+        u = db.query(User).filter(User.id == m.user_id).first()
+        if u is None:
+            continue
+        out.append({
+            "user_id": u.id,
+            "full_name": u.full_name,
+            "email": u.email,
+            "user_is_active": bool(u.is_active),
+            # Surfaced because a non-NULL value here would mean a brand-sales
+            # identity had been placed inside a customer tenant, which is a
+            # thing the operator needs to SEE rather than have hidden.
+            "organization_id": u.organization_id,
+            "membership_id": m.id,
+            "role": m.role,
+            "membership_is_active": bool(m.is_active),
+            "access": staff_access.access_state(db, u),
+        })
+    return out
+
+
+@router.get("/brands/{brand_sales_org_id}/sales-team")
+def sales_team(brand_sales_org_id: str,
+               db: Session = Depends(get_db),
+               user: User = Depends(require_sales_member)):
+    """Who sells this brand, and whether each of them can actually log in."""
+    bso = db.query(BrandSalesOrg).filter(BrandSalesOrg.id == brand_sales_org_id).first()
+    if bso is None:
+        raise HTTPException(status_code=404, detail="Brand sales organisation not found.")
+    staff_access.assert_can_manage_sales_access(user, bso.id, db)
+    return {"brand_sales_org": {"id": bso.id, "name": bso.name, "slug": bso.slug},
+            "team": _sales_team_rows(db, bso.id)}
+
+
+class SetupLinkRequest(BaseModel):
+    brand_sales_org_id: str
+    purpose: str = PURPOSE_SETUP          # "setup" | "reset"
+    ttl_hours: int = Field(default=staff_access.DEFAULT_TTL_HOURS, ge=1, le=720)
+    base_url: Optional[str] = None
+
+
+@router.post("/sales-users/{user_id}/setup-link")
+def sales_setup_link(user_id: str, req: SetupLinkRequest,
+                     db: Session = Depends(get_db),
+                     user: User = Depends(require_sales_member)):
+    """Generate a one-time access link for an EXISTING brand-sales user.
+
+    THE RESPONSE CONTAINS THE LINK EXACTLY ONCE. It is not stored, not audited
+    and not recoverable; a lost link is replaced by generating another, which
+    revokes this one. No password is created, changed, returned or emailed.
+
+    This route creates nothing but the link. It does not create users, it does
+    not create or modify memberships, and it cannot set `organization_id` - the
+    activation table has no such column.
+    """
+    bso = (db.query(BrandSalesOrg)
+             .filter(BrandSalesOrg.id == req.brand_sales_org_id).first())
+    if bso is None:
+        raise HTTPException(status_code=404, detail="Brand sales organisation not found.")
+    staff_access.assert_can_manage_sales_access(user, bso.id, db)
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # The person must already hold a membership in THIS brand. That is what
+    # stops this route being a back door for handing a login to somebody who
+    # does not sell here - it grants no access of its own, so it must only ever
+    # unlock access that already exists.
+    holds = (db.query(Membership)
+               .filter(Membership.user_id == target.id,
+                       Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                       Membership.scope_id == bso.id,
+                       Membership.role.in_(BRAND_SALES_ROLES),
+                       Membership.is_active.is_(True))
+               .first())
+    if holds is None:
+        raise HTTPException(
+            status_code=409,
+            detail="That user has no active sales membership in this brand. "
+                   "An access link unlocks existing access; it does not grant it.")
+
+    row, raw = staff_access.issue(db, target, user,
+                           brand_sales_org_id=bso.id,
+                           purpose=req.purpose, ttl_hours=req.ttl_hours)
+    return {
+        "user": {"id": target.id, "full_name": target.full_name,
+                 "email": target.email, "role": holds.role},
+        "activation": {"id": row.id, "purpose": row.purpose,
+                       "expires_at": row.expires_at, "prefix": row.token_prefix,
+                       "send_count": row.send_count},
+        "setup_url": staff_access.activation_url(req.base_url, raw),
+        "warning": "Shown once and not recoverable. No password was created or changed.",
+    }
+
+
+@router.post("/staff-activations/{activation_id}/revoke")
+def revoke_sales_link(activation_id: str,
+                      db: Session = Depends(get_db),
+                      user: User = Depends(require_sales_member)):
+    row = (db.query(StaffActivation)
+             .filter(StaffActivation.id == activation_id).first())
+    if row is None:
+        raise HTTPException(status_code=404, detail="Link not found.")
+    staff_access.assert_can_manage_sales_access(user, row.brand_sales_org_id, db)
+    row = staff_access.revoke(db, row, user)
+    return {"activation": {"id": row.id, "status": row.status,
+                           "revoked_at": row.revoked_at}}
 
 
 # ══ customer organisations ══════════════════════════════════════════════════
