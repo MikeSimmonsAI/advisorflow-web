@@ -778,9 +778,16 @@ def test_static():
 
     rsrc = inspect.getsource(ir)
     n_routes = rsrc.count("@router.")
-    check("EVERY INTEGRATION ROUTE IS GATED BY require_retell",
-          rsrc.count("Depends(require_retell)") == n_routes,
-          (rsrc.count("Depends(require_retell)"), n_routes))
+    # The surface now carries a second tenancy tree, so "gated" means gated by
+    # ONE OF the two kind-specific dependencies — never ungated. The intent of
+    # this assertion is unchanged: no route here is reachable without an
+    # integration credential of a specific, declared kind.
+    n_brand = rsrc.count("Depends(require_retell)")
+    n_tenant = rsrc.count("Depends(require_retell_tenant)")
+    check("EVERY INTEGRATION ROUTE IS GATED BY A KIND-SPECIFIC DEPENDENCY",
+          n_brand + n_tenant == n_routes, (n_brand, n_tenant, n_routes))
+    check("the brand-sales routes are still gated by require_retell",
+          n_brand == 3, n_brand)
     check("no integration route accepts a user JWT",
           "get_current_user" not in rsrc and "require_sales" not in rsrc)
     check("every route declares a rate limit",
