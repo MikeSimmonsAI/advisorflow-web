@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Organization
 
 router = APIRouter(prefix="/10dlc", tags=["10dlc"])
@@ -97,7 +97,7 @@ def _status_response(org: Organization) -> dict:
 @router.get("/status")
 def get_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Returns current A2P 10DLC registration status for this org."""
     _require_admin(current_user)
@@ -108,7 +108,7 @@ def get_status(
 @router.post("/create-messaging-service")
 def create_messaging_service(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Step 1 — Creates a Twilio Messaging Service for this org (or returns
@@ -162,7 +162,7 @@ class BrandRequest(BaseModel):
 def register_brand(
     req: BrandRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Step 2 — Submits A2P brand registration to Twilio/TCR.
@@ -241,7 +241,7 @@ class CampaignRequest(BaseModel):
 def register_campaign(
     req: CampaignRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Step 3 — Registers the A2P messaging campaign with Twilio/TCR.
@@ -319,7 +319,7 @@ def register_campaign(
 @router.post("/add-phone-number")
 def add_phone_number(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Step 4 — Adds the org's Twilio phone number(s) to the Messaging Service.
@@ -386,7 +386,7 @@ class PatchSIDsRequest(BaseModel):
 def patch_sids(
     req: PatchSIDsRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Admin-only: Saves known Twilio SIDs directly to the org record.
@@ -413,7 +413,7 @@ def patch_sids(
 @router.post("/refresh-status")
 def refresh_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Polls Twilio to get the current brand and campaign status, updates

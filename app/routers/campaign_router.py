@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user, require_admin
+from app.deps import get_db, get_current_user, require_admin, require_tenant_user
 from app.models.models import Campaign, Lead, Message, Reply, User
 from app.routers.audit_log_router import log_action
 
@@ -346,7 +346,7 @@ class GenerateMessageRequest(BaseModel):
 @router.get("/purposes")
 def get_purposes(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
@@ -358,7 +358,7 @@ def get_purposes(
 def generate_message(
     req: GenerateMessageRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """AI generates an opening campaign message based on purpose and tone."""
     from app.models.models import Organization
@@ -379,7 +379,7 @@ def generate_message(
 def preview_campaign_leads(
     req: CampaignBuildPreview,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Preview which leads match the filter criteria."""
     criteria = req.filter_criteria.dict(exclude_none=True)
@@ -408,7 +408,7 @@ def preview_campaign_leads(
 @router.get("/history")
 def get_campaign_history(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Return past campaigns with stats for the Campaign Builder history tab."""
     campaigns = (
@@ -461,7 +461,7 @@ def create_campaign(
 @router.get("")
 def list_campaigns(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     campaigns = (
         db.query(Campaign)
@@ -580,7 +580,7 @@ def builder_preview(
     relationship_type: Optional[str] = None,
     channel: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Preview leads matching the Campaign Builder filters. Returns full lead list. Open to all advisors."""
     is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
@@ -639,7 +639,7 @@ def builder_preview(
 def builder_send(
     req: BuilderSendRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Execute Campaign Builder send — open to all advisors.

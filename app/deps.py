@@ -4,6 +4,7 @@ Shared FastAPI dependencies: DB session injection and auth guard.
 
 import logging
 import os
+from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine
@@ -161,3 +162,103 @@ def get_platform_org_ids(user: User, db) -> list:
             .all()
         ]
     return [str(user.organization_id)]
+
+
+# ---------------------------------------------------------------------------
+# PER-RECORD PLATFORM GUARDS
+#
+# get_platform_org_ids() above scopes LIST endpoints correctly, but a guard
+# that is only applied when listing is not a boundary. A probe of the live
+# route table on Aug 26 2026 found that a super_admin on one platform could
+# read every platform, rename another platform's organization, wipe its data,
+# and reset the password of the platform OWNER - and then log in as them.
+# require_super_admin proves the caller is *a* platform operator; it says
+# nothing about *which* platform, and ten routes took a record id straight
+# from the URL and loaded it with no second question asked.
+#
+# These two loaders are that second question. Every route that accepts an
+# org_id or user_id in its path must go through one of them.
+#
+# They refuse with 404, not 403. A 403 on a record you may not touch confirms
+# the record exists, which is how you enumerate another platform's customers
+# one id at a time. update_user already used 404 for this reason; these follow it.
+# ---------------------------------------------------------------------------
+
+ELEVATED_ROLES = ("super_admin", "god_admin")
+
+
+def load_org_in_scope(db, actor: User, org_id: str) -> Organization:
+    """Load an Organization the actor is entitled to act on, else 404.
+
+    god_admin reaches every org on every platform - that is the whole point of
+    the owner control plane. Everyone else is confined to the orgs returned by
+    get_platform_org_ids, which for a super_admin means their own platform.
+    """
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    if actor.role == "god_admin":
+        return org
+    if str(org.id) not in set(get_platform_org_ids(actor, db)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    return org
+
+
+def load_user_in_scope(db, actor: User, user_id: str) -> User:
+    """Load a User the actor is entitled to administer, else 404.
+
+    Three refusals, in order of how badly they were needed:
+
+    1. NOBODY BELOW god_admin MAY TOUCH A god_admin. This is the one that
+       closes the takeover: reset-password had no such check, so any platform
+       operator could set the owner's password and sign in as the owner.
+       A god_admin acting on another god_admin is allowed - owners are peers.
+
+    2. No non-owner may administer another elevated account. Editing a peer
+       super_admin's email is the same takeover with an extra step: change the
+       address, then send yourself the reset link. Acting on your own account
+       is always fine.
+
+    3. Brand-sales identities (organization_id IS NULL by positive assertion)
+       belong to the God control plane, not to any platform admin. They are
+       also why the org comparison below is guarded: if the actor themselves
+       has no organization_id, `organization_id == actor.organization_id`
+       renders as IS NULL and would match every brand-sales user at once.
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if actor.role == "god_admin":
+        return target
+
+    if target.id == actor.id:
+        return target
+
+    if target.role in ELEVATED_ROLES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if getattr(target, "organization_id", None) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    _allowed_orgs = set(get_platform_org_ids(actor, db))
+    if not _allowed_orgs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if str(target.organization_id) not in _allowed_orgs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    return target
+
+
+def platform_ids_in_scope(actor: User, db) -> Optional[list]:
+    """Platform ids the actor may see. None means 'all of them' (god_admin only).
+
+    /admin/platforms carried the docstring "God admin only" over a
+    require_super_admin guard and returned every platform to anyone who asked,
+    which handed a BookaBoost operator the id of every other brand on the box.
+    """
+    if actor.role == "god_admin":
+        return None
+    pid = getattr(actor, "platform_id", None)
+    return [pid] if pid else []

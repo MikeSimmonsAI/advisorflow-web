@@ -28,7 +28,7 @@ from typing import Optional, List
 from datetime import datetime
 import uuid, json, logging
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead
 
 router = APIRouter(prefix="/case-file", tags=["case-file"])
@@ -176,7 +176,7 @@ async def _push_to_crm(db: Session, org_id: str, payload: dict):
 def list_case_files(
     lead_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """All case files for a lead, most recent first."""
     _require_lead(db, lead_id, current_user.organization_id)
@@ -198,7 +198,7 @@ def create_case_file(
     lead_id: str,
     req: CaseFileRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Create a new case file entry for a lead (one per appointment)."""
     lead = _require_lead(db, lead_id, current_user.organization_id)
@@ -291,7 +291,7 @@ def create_case_file(
 @router.get("/summary/org")
 def org_pipeline_summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Org-wide case file pipeline summary for reporting."""
     rows = db.execute(text("""
@@ -322,7 +322,7 @@ def org_pipeline_summary(
 def get_case_file(
     case_file_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     return _get_case_file(db, case_file_id, current_user.organization_id)
 
@@ -332,7 +332,7 @@ def update_case_file(
     case_file_id: str,
     req: CaseFileRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Update any fields on an existing case file."""
     existing = _get_case_file(db, case_file_id, current_user.organization_id)
@@ -428,7 +428,7 @@ def close_case(
     case_file_id: str,
     req: CloseRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Close the case. Sets case_status to closed_won or closed_lost on both
@@ -464,7 +464,7 @@ def close_case(
 async def crm_push(
     case_file_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Manually push this case file to all configured CRM webhooks for this org.
@@ -500,7 +500,7 @@ async def crm_push(
 
 
 @router.get("/constants/all")
-def get_constants(current_user: User = Depends(get_current_user)):
+def get_constants(current_user: User = Depends(require_tenant_user)):
     """Returns all valid enum values for the frontend dropdowns."""
     return {
         "case_statuses": CASE_STATUSES,

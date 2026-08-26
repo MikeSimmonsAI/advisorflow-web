@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User
 from app.utils.crypto import encrypt_value
 from app.routers.audit_log_router import log_action
@@ -178,7 +178,7 @@ class BookingSettingsRequest(BaseModel):
 def update_booking_settings(
     req: BookingSettingsRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Self-service booking / availability settings for any authenticated advisor."""
     if req.appt_duration_minutes is not None:
@@ -205,7 +205,7 @@ def update_booking_settings(
 def update_twilio_config(
     req: TwilioConfigRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Lets each advisor enter their own Twilio account details, so each
@@ -236,7 +236,7 @@ def admin_assign_twilio(
     user_id: str,
     req: AdminTwilioAssignRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Org admin endpoint — assign a Twilio phone number to any advisor
@@ -301,7 +301,7 @@ def update_notification_config(
 def update_booking_page(
     req: BookingPageRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Save the advisor's personal booking page URL."""
     current_user.booking_page_url = _validate_url(req.booking_page_url, "booking_page_url")
@@ -313,7 +313,7 @@ def update_booking_page(
 def update_social_links(
     req: SocialLinksRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     DEPRECATED — social links have moved to the org level (PATCH /org-settings/social-links).
@@ -392,7 +392,7 @@ class BookingSettingsRequest(BaseModel):
 def update_booking_settings(
     req: BookingSettingsRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Advisors update their own booking / scheduling preferences."""
     if req.appt_duration_minutes is not None:
@@ -443,7 +443,7 @@ def admin_update_profile(
     user_id: str,
     req: AdminProfileRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Org admin / super admin endpoint — set up any team member's full profile
@@ -525,7 +525,7 @@ def admin_update_profile(
 def admin_get_profile(
     user_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Load a user's full profile for admin editing."""
     if current_user.role not in ("org_admin", "super_admin", "god_admin"):
@@ -672,7 +672,7 @@ def _resolve_appt_org(current_user: User, org_id: Optional[str], db) -> "Organiz
 def get_appointment_types(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Return this org's configured appointment types (falls back to industry defaults).
     Super admin / god admin can pass ?org_id= to inspect any org's types.
@@ -700,7 +700,7 @@ def update_appointment_types(
     req: ApptTypesRequest,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Save org-specific appointment type list. Admin only.
     Super admin / god admin can pass ?org_id= to manage any org.
@@ -725,7 +725,7 @@ def update_appointment_types(
 def reset_appointment_types(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Reset to industry defaults.
     Super admin / god admin can pass ?org_id= to manage any org.

@@ -11,7 +11,11 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Optional
 
-from app.deps import get_db, require_admin, require_super_admin, get_platform_org_ids
+from app.deps import (
+    get_db, require_admin, require_super_admin, require_god,
+    get_platform_org_ids, load_org_in_scope, load_user_in_scope,
+    platform_ids_in_scope, ELEVATED_ROLES,
+)
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization, TierDefinition
 from app.services.auth_service import hash_password
 from app.services import staff_activation as _activation
@@ -707,14 +711,29 @@ def _get_target_user_for_admin(user_id: str, current_user: User, db: Session) ->
     - super_admin   → users in their own org only
     - org_admin     → users in their own org only
     Raises 404 if not found within scope.
+
+    Two refusals added Aug 26 2026, both about rows this filter could match
+    that it was never meant to reach:
+
+    - An elevated target. deactivate/force-logout each carried their own
+      "cannot touch a super_admin or god_admin" check, but reactivate,
+      clear-setup and the detail view did not, so the protection depended on
+      which route you happened to call. It now lives in one place.
+    - An actor with no organization_id. `organization_id == None` renders as
+      IS NULL, so an org-less caller would have matched every brand-sales
+      identity at once rather than nothing at all.
     """
     from fastapi import HTTPException
     if current_user.role == "god_admin":
         target = db.query(User).filter(User.id == user_id).first()
+    elif getattr(current_user, "organization_id", None) is None:
+        target = None
     else:
         target = db.query(User).filter(
             User.id == user_id, User.organization_id == current_user.organization_id
         ).first()
+        if target and target.role in ELEVATED_ROLES and target.id != current_user.id:
+            target = None
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     return target
@@ -850,7 +869,16 @@ def reset_user_password(
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Resets any user's password. Super admin only, cross-org.
+    Resets a user's password. Super admin only, cross-org WITHIN THE CALLER'S
+    OWN PLATFORM.
+
+    Until Aug 26 2026 this loaded the target with
+    `db.query(User).filter(User.id == user_id)` and nothing else. A probe
+    proved what that allowed: a super_admin on one platform reset the
+    god_admin's password and then logged in as the owner. Full takeover, one
+    POST, no error. load_user_in_scope is now the only way in - it refuses any
+    god_admin target for a non-owner, refuses peer super_admins, and confines
+    everyone below god to their own platform's organizations.
 
     TWO PATHS, NEITHER OF WHICH RETURNS A PASSWORD.
 
@@ -863,9 +891,7 @@ def reset_user_password(
     That replaced generating a short password and handing it to the caller.
     """
     from fastapi import HTTPException
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
+    target = load_user_in_scope(db, current_user, user_id)
 
     issued_url = None
     if req.new_password:
@@ -924,11 +950,13 @@ def update_user(
     """
     from fastapi import HTTPException
 
-    target = db.query(User).filter(
-        User.id == user_id, User.organization_id == current_user.organization_id
-    ).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Own-org scoping (this route was already correct on that point - it is the
+    # pattern the other routes were missing). What it did NOT stop was a
+    # super_admin editing a PEER super_admin in the same org: the role check
+    # further down refused a role change but left email alone, and changing a
+    # peer's email address then requesting a reset link is the same takeover
+    # with one extra step. _get_target_user_for_admin now carries both rules.
+    target = _get_target_user_for_admin(user_id, current_user, db)
 
     before = {"full_name": target.full_name, "email": target.email, "role": target.role}
 
@@ -1627,6 +1655,11 @@ class ProvisionClientRequest(BaseModel):
     brand_logo_url: str | None = None
     brand_color_primary: str | None = None
     brand_color_accent: str | None = None
+    # Which platform the new customer belongs to. Honoured for god_admin only;
+    # a super_admin always gets their own platform regardless of what is sent,
+    # because provisioning onto someone else's platform is the same boundary
+    # crossing as PATCH /orgs/{id}/platform by another route.
+    platform_id: str | None = None
 
 
 class ProvisionClientResponse(BaseModel):
@@ -1658,6 +1691,22 @@ def provision_client(
     if existing_user:
         raise HTTPException(status_code=400, detail=f"Email '{req.supervisor_email}' is already registered.")
 
+    # Which platform does this customer belong to?
+    #
+    # Before Aug 26 2026 the answer was "none" - every provisioned org was
+    # created with platform_id NULL. get_platform_org_ids only ever returns
+    # orgs WITH a platform, so a super_admin could provision a client and then
+    # not see it in their own org list, while the record sat outside every
+    # scoping decision in the system. Orphaned rows are not a boundary; they
+    # are a boundary that has not been drawn yet.
+    _resolved_platform_id = getattr(current_user, "platform_id", None)
+    if current_user.role == "god_admin":
+        _resolved_platform_id = req.platform_id  # the owner chooses, may be None
+        if _resolved_platform_id:
+            from app.models.models import Platform as _Plat
+            if not db.query(_Plat).filter(_Plat.id == _resolved_platform_id).first():
+                raise HTTPException(status_code=404, detail="Platform not found")
+
     # Create org
     new_org = Organization(
         name=req.org_name,
@@ -1665,6 +1714,7 @@ def provision_client(
         industry=req.industry,
         plan=req.plan,
         is_active=True,
+        platform_id=_resolved_platform_id,
         brand_name=req.brand_name,
         brand_logo_url=req.brand_logo_url,
         brand_color_primary=req.brand_color_primary,
@@ -1741,9 +1791,7 @@ def seed_industry_tiers_for_org(
     Seed (or back-fill) industry-appropriate TierDefinition rows for an existing org.
     Only adds tiers that don't already exist — never deletes or modifies existing tiers.
     """
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = load_org_in_scope(db, current_user, org_id)
     _seed_industry_tiers(db, org)
     db.commit()
     industry = (org.industry or "general").lower()
@@ -1804,10 +1852,14 @@ def update_organization(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
-    """Update an existing organization's details — super_admin only."""
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    """Update an existing organization's details — super_admin, own platform only.
+
+    A probe on Aug 26 2026 renamed a second platform's organization to
+    "RENAMED BY SUPER A" through this route. It read the org id out of the URL
+    and fetched it unconditionally, so every customer of every brand was
+    editable by any platform operator who could guess an id.
+    """
+    org = load_org_in_scope(db, current_user, org_id)
 
     if payload.name is not None:
         org.name = payload.name.strip()
@@ -1876,15 +1928,13 @@ def seed_demo_data(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
-    """Seed a sub-account with realistic demo data. Super admin only."""
+    """Seed a sub-account with realistic demo data. Super admin, own platform only."""
     import random, uuid as _uuid
     from datetime import datetime, timedelta
     from app.services.auth_service import hash_password
     from app.models.models import ReplyClassification
 
-    target_org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not target_org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    target_org = load_org_in_scope(db, current_user, org_id)
 
     if body is None:
         body = DemoSeedRequest()
@@ -2315,13 +2365,17 @@ def wipe_demo_data(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
-    """Delete all seeded leads, messages, replies, outcomes, and demo advisors for an org."""
+    """Delete all seeded leads, messages, replies, outcomes, and demo advisors for an org.
+
+    Super admin, own platform only. This is the most destructive route on the
+    admin surface and it was the least guarded: the Aug 26 2026 probe called it
+    against a second platform's organization and it returned 200 after deleting
+    a lead and an advisor that did not belong to the caller's platform at all.
+    """
     from sqlalchemy import delete as sql_delete
     from app.models.models import Message, Reply, LeadOutcome, CadenceState
 
-    target_org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not target_org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    target_org = load_org_in_scope(db, current_user, org_id)
 
     # Get all lead IDs for the org
     lead_ids = [r[0] for r in db.query(Lead.id).filter(Lead.organization_id == org_id).all()]
@@ -2420,9 +2474,22 @@ def list_all_orgs(db: Session = Depends(get_db), current_user: User = Depends(re
 
 @router.get("/platforms")
 def list_platforms(db: Session = Depends(get_db), current_user: User = Depends(require_super_admin)):
-    """Returns all platforms. God admin only."""
+    """Platforms the caller may see: all of them for god_admin, their own for a
+    super_admin.
+
+    The docstring here used to say "God admin only" while the guard said
+    require_super_admin and the query said "every active platform", so the
+    comment was the only thing enforcing it. A BookaBoost operator could read
+    the id and name of every other brand on the box.
+    """
     from app.models.models import Platform
-    platforms = db.query(Platform).filter(Platform.is_active == True).order_by(Platform.name.asc()).all()
+    q = db.query(Platform).filter(Platform.is_active == True)
+    allowed = platform_ids_in_scope(current_user, db)
+    if allowed is not None:
+        if not allowed:
+            return []
+        q = q.filter(Platform.id.in_(allowed))
+    platforms = q.order_by(Platform.name.asc()).all()
     return [{"id": p.id, "name": p.name, "slug": p.slug} for p in platforms]
 
 
@@ -2435,9 +2502,17 @@ def set_org_platform(
     org_id: str,
     body: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_god),
 ):
-    """Assign or unassign a platform for an org. Pass platform_id: null to unassign."""
+    """Assign or unassign a platform for an org. Pass platform_id: null to unassign.
+
+    god_admin only. The guard used to be require_super_admin while the comment
+    above said god only, and this is the single most dangerous route of the set:
+    it decides which platform an organization belongs to, which is the input to
+    every other scoping decision in the system. A super_admin who could call it
+    could move any org onto their own platform and then legitimately administer
+    it - the boundary would have rewritten itself.
+    """
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")

@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, require_admin, get_current_user
+from app.deps import get_db, require_admin, get_current_user, require_tenant_user
 from app.models.models import User, Lead, SuppressionEntry, SuppressionSource
 from app.routers.audit_log_router import log_action
 
@@ -100,7 +100,7 @@ def _build_stats(db: Session, organization_id: str) -> SuppressionStats:
 @router.get("/suppression-list", response_model=SuppressionListResponse)
 def list_suppression_entries(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),   # ALL users can view
+    current_user: User = Depends(require_tenant_user),   # ALL users can view
     limit: int = Query(default=500, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
@@ -119,7 +119,7 @@ def list_suppression_entries(
 def add_suppression_entry(
     payload: SuppressionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),   # ALL users can add
+    current_user: User = Depends(require_tenant_user),   # ALL users can add
 ):
     normalized_phone = normalize_phone(payload.phone)
 
@@ -247,7 +247,7 @@ class MasterSuppressionEntry(BaseModel):
 @router.get("/master-suppression-list")
 def master_suppression_list(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
     limit: int = Query(default=1000, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
 ):
@@ -281,7 +281,7 @@ def master_suppression_list(
 def master_suppress_all_orgs(
     payload: PermanentDNCCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     God-admin only: adds a phone number to the suppression list for EVERY

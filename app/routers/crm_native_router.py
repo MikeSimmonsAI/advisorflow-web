@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Organization, CRMContact, CRMNote, Lead
 
 router = APIRouter(prefix="/crm-native", tags=["crm-native"])
@@ -200,7 +200,7 @@ def _base_query(db: Session, user: User):
 def get_stages(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Return this org's CRM stages. Custom if configured, else industry default.
     Super admin / god admin can pass ?org_id= to inspect any org's stages.
@@ -231,7 +231,7 @@ class StagesUpdate(BaseModel):
 def update_stages(
     req: StagesUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Save custom pipeline stages for this org. org_admin+ only."""
     if not _is_manager(current_user):
@@ -252,7 +252,7 @@ def update_stages(
 @router.delete("/stages/reset")
 def reset_stages(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Reset stages back to the industry default."""
     if not _is_manager(current_user):
@@ -271,7 +271,7 @@ def reset_stages(
 @router.get("/custom-fields")
 def get_custom_fields(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Return this org's custom field schema."""
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
@@ -288,7 +288,7 @@ class CustomFieldsUpdate(BaseModel):
 def update_custom_fields(
     req: CustomFieldsUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Save custom field schema for this org. org_admin+ only."""
     if not _is_manager(current_user):
@@ -315,7 +315,7 @@ def list_contacts(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     q = _base_query(db, current_user)
     if stage:
@@ -338,7 +338,7 @@ def list_contacts(
 def get_contact(
     contact_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     contact = _base_query(db, current_user).filter(CRMContact.id == contact_id).first()
     if not contact:
@@ -372,7 +372,7 @@ class ContactCreate(BaseModel):
 def create_contact(
     req: ContactCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     stages = _get_org_stages(org) if org else GENERIC_STAGES
@@ -422,7 +422,7 @@ def update_contact(
     contact_id: str,
     req: ContactUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     contact = _base_query(db, current_user).filter(CRMContact.id == contact_id).first()
     if not contact:
@@ -453,7 +453,7 @@ def update_contact(
 def archive_contact(
     contact_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     contact = _base_query(db, current_user).filter(CRMContact.id == contact_id).first()
     if not contact:
@@ -470,7 +470,7 @@ def archive_contact(
 def get_notes(
     contact_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     contact = _base_query(db, current_user).filter(CRMContact.id == contact_id).first()
     if not contact:
@@ -488,7 +488,7 @@ def add_note(
     contact_id: str,
     req: NoteCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     contact = _base_query(db, current_user).filter(CRMContact.id == contact_id).first()
     if not contact:
@@ -507,7 +507,7 @@ def add_note(
 def create_from_lead(
     lead_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
@@ -541,7 +541,7 @@ def create_from_lead(
 @router.post("/sync-from-leads")
 def sync_leads_to_crm(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Bulk-sync all org leads into the CRM. Safe to call multiple times.

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.deps import get_db, get_current_user, require_admin
+from app.deps import get_db, get_current_user, require_admin, require_tenant_user
 from app.models.models import CadenceTemplate, CadenceTemplateTouch, User
 
 router = APIRouter(prefix="/cadence-templates", tags=["cadence-templates"])
@@ -253,7 +253,7 @@ def _seed_defaults_for_org(db: Session, organization_id: str, created_by_id: str
     return seeded
 
 @router.get("/")
-def list_templates(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_templates(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     from app.models.models import Organization as _Org
     from sqlalchemy import or_ as _or
     _org = db.query(_Org).filter(_Org.id == current_user.organization_id).first()
@@ -289,7 +289,7 @@ def list_templates(db: Session = Depends(get_db), current_user: User = Depends(g
 
 
 @router.get("/{template_id}")
-def get_template(template_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_template(template_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     t = db.query(CadenceTemplate).filter(
         CadenceTemplate.id == template_id,
         CadenceTemplate.organization_id == current_user.organization_id,

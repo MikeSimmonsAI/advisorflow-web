@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User
 from app.services import crm_service
 
@@ -143,7 +143,7 @@ def _get_connection_or_404(db: Session, conn_id: str, org_id: str) -> dict:
 @router.get("/connections")
 def list_connections(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     _require_admin(current_user)
     org_id = _get_org_id(current_user)
@@ -170,7 +170,7 @@ def list_connections(
 def create_connection(
     payload: CRMConnectionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     _require_admin(current_user)
     org_id = _get_org_id(current_user)
@@ -208,7 +208,7 @@ def update_connection(
     conn_id: str,
     payload: CRMConnectionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     _require_admin(current_user)
     org_id = _get_org_id(current_user)
@@ -249,7 +249,7 @@ def update_connection(
 def delete_connection(
     conn_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     _require_admin(current_user)
     org_id = _get_org_id(current_user)
@@ -264,7 +264,7 @@ def delete_connection(
 def test_connection(
     conn_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     _require_admin(current_user)
     org_id = _get_org_id(current_user)

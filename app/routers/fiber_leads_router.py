@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import Lead, gen_uuid
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class FiberLeadCreate(BaseModel):
 def create_fiber_lead(
     payload: FiberLeadCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_tenant_user),
 ):
     """Create a new fiber prospect lead. Must be called by a logged-in rep."""
     if not payload.verbal_sms_consent:
@@ -124,7 +124,7 @@ def create_fiber_lead(
 @router.get("")
 def list_fiber_leads(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_tenant_user),
 ):
     """Return recent fiber_field leads for this org (last 100)."""
     leads = (

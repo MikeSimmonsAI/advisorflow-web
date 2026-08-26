@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
 from app.utils.twilio_security import validate_twilio_webhook
@@ -83,7 +83,7 @@ def draft_reply_for_lead(
     lead_id: str,
     req: DraftReplyRequest = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     lead = _get_lead_for_current_org_or_404(db, lead_id, current_user)
     from app.services.draft_reply_service import draft_reply
@@ -97,7 +97,7 @@ def draft_reply_for_lead(
 
 
 @router.post("/send")
-def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -109,7 +109,7 @@ def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: U
 
 
 @router.post("/send-batch")
-def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     leads = db.query(Lead).filter(
         Lead.id.in_(req.lead_ids),
         Lead.organization_id == current_user.organization_id,
@@ -282,7 +282,7 @@ async def inbound_webhook(
 def mark_reply_reviewed(
     reply_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     reply = _get_org_reply_or_404(db, reply_id, current_user)
     reply.reviewed_at = datetime.now(timezone.utc)
@@ -304,7 +304,7 @@ def reclassify_reply(
     reply_id: str,
     req: ReclassifyReplyRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     reply = _get_org_reply_or_404(db, reply_id, current_user)
     reply.classification = req.classification
@@ -328,7 +328,7 @@ def reclassify_reply(
 def reply_activity_by_day(
     days: int = Query(14, ge=1, le=60),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Real reply-activity series for the Overview chart.
@@ -376,7 +376,7 @@ def list_replies(
     hot_only: bool = False,
     needs_attention: bool = False,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Replies screen - shows replies for leads owned by current advisor.
@@ -446,7 +446,7 @@ class MMSSendRequest(BaseModel):
 def send_mms_endpoint(
     req: MMSSendRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Send an MMS (text + image/flyer) to a single lead."""
     lead = db.query(Lead).filter(
@@ -468,7 +468,7 @@ def send_mms_endpoint(
 @router.post("/upload-media")
 async def upload_media(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Upload a flyer/image to be used in MMS or email.

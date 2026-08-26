@@ -151,6 +151,10 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "SALES WORKSPACE COMPLETION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_sales_staff.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "SALES STAFF MANAGEMENT CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_platform_boundary.py 2>&1 | Select-String "LEAK|BROKE|checks passed|HOLDS" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

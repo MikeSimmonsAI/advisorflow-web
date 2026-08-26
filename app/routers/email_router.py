@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, EmailMessage
 from app.services.email_service import send_email_to_lead, send_email_batch
 
@@ -32,7 +32,7 @@ def send_single_email(
     lead_id: str,
     req: SingleEmailRequest = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
@@ -98,7 +98,7 @@ def send_single_email(
 
 
 @router.post("/send-batch")
-def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     leads = db.query(Lead).filter(
         Lead.id.in_(req.lead_ids),
         Lead.organization_id == current_user.organization_id,
@@ -114,7 +114,7 @@ def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_
 def email_only_queue(
     search: str | None = Query(default=None, description="Optional partial name or email lookup."),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Leads routed to email outreach for the logged-in advisor.
@@ -164,7 +164,7 @@ async def send_email_with_attachment(
     body_html: str = Form(...),
     file: UploadFile = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Send an email to a lead with an optional flyer/image attachment.
@@ -228,7 +228,7 @@ def draft_email(
     lead_id: str,
     req: EmailDraftRequest = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     AI generates talking points + 3 full email draft options for a lead.
@@ -256,7 +256,7 @@ def draft_email(
 def email_sent_log(
     limit: int = Query(default=150, ge=1, le=500),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Recent email sends by this advisor — ordered newest first.
@@ -292,7 +292,7 @@ def email_sent_log(
 @router.post("/system-check")
 def email_system_check(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Full live diagnostic of the email stack for this advisor.
@@ -420,7 +420,7 @@ def email_system_check(
 @router.post("/poll-inbox")
 def poll_inbox(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Poll Microsoft 365 inbox for new replies from leads.
@@ -435,7 +435,7 @@ def poll_inbox(
 @router.post("/poll-inbox/all")
 def poll_inbox_all(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Poll inbox for all M365-connected advisors across all orgs. Super admin only."""
     if current_user.role not in ("super_admin", "god_admin"):

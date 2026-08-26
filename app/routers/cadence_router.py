@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user, require_admin
+from app.deps import get_db, get_current_user, require_admin, require_tenant_user
 from app.models.models import User, Lead, CadenceState
 from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
@@ -19,7 +19,7 @@ class CadenceControlRequest(BaseModel):
 
 
 @router.post("/start/{lead_id}")
-def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -30,7 +30,7 @@ def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user
 
 
 @router.post("/start-batch")
-def start_batch_cadence(lead_ids: list[str], db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def start_batch_cadence(lead_ids: list[str], db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     leads = db.query(Lead).filter(
         Lead.id.in_(lead_ids), Lead.organization_id == current_user.organization_id
     ).all()
@@ -55,7 +55,7 @@ def control_cadence(
     cadence_state_id: str,
     req: CadenceControlRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Pause, resume, or cancel an individual lead's cadence."""
     state = (
@@ -90,12 +90,12 @@ def control_cadence(
 
 
 @router.get("/summary")
-def cadence_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def cadence_summary(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     return get_cadence_summary(db, current_user.organization_id)
 
 
 @router.get("/health-summary")
-def cadence_health_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def cadence_health_summary(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     states = (
@@ -161,7 +161,7 @@ def start_all_eligible(db: Session = Depends(get_db), current_user: User = Depen
 
 
 @router.get("/active")
-def list_active_cadences(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_active_cadences(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     is_admin = current_user.role in ("org_admin", "super_admin", "god_admin")
     query = (
         db.query(CadenceState)

@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User
 
 router = APIRouter(prefix="/crm", tags=["crm-contacts"])
@@ -61,7 +61,7 @@ def _row_to_dict(row) -> dict:
 @router.get("/contacts")
 def list_contacts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     rows = db.execute(text(
         "SELECT * FROM crm_contacts WHERE organization_id = :org_id ORDER BY created_at DESC"
@@ -73,7 +73,7 @@ def list_contacts(
 def create_contact(
     payload: ContactCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     contact_id = str(uuid.uuid4())
     db.execute(text(
@@ -100,7 +100,7 @@ def update_contact(
     contact_id: str,
     payload: ContactUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     row = db.execute(text(
         "SELECT * FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
@@ -124,7 +124,7 @@ def update_contact(
 def delete_contact(
     contact_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     row = db.execute(text(
         "SELECT id FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
@@ -141,7 +141,7 @@ def delete_contact(
 def list_notes(
     contact_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     # Verify org ownership
     row = db.execute(text(
@@ -161,7 +161,7 @@ def add_note(
     contact_id: str,
     payload: NoteCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     row = db.execute(text(
         "SELECT id FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
