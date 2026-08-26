@@ -37,8 +37,18 @@ def gen_uuid():
 
 # ── vocabulary ──────────────────────────────────────────────────────────────
 
+# Two kinds, because there are two tenancy trees and a credential must belong to
+# exactly one of them. `retell` reaches BrandSalesOrg sales scheduling;
+# `retell_tenant` reaches a customer Organization's advisors. A key of one kind
+# is refused by every route of the other — not filtered, refused — so a funeral
+# home's voice agent has no path at all into brand-sales scheduling, and vice
+# versa. See `scope_kind` below and `require_retell` / `require_retell_tenant`.
 INTEGRATION_RETELL = "retell"
-INTEGRATION_KINDS = (INTEGRATION_RETELL,)
+INTEGRATION_RETELL_TENANT = "retell_tenant"
+INTEGRATION_KINDS = (INTEGRATION_RETELL, INTEGRATION_RETELL_TENANT)
+
+SCOPE_BRAND = "brand"
+SCOPE_TENANT = "tenant"
 
 ACTION_PING         = "ping"
 ACTION_AVAILABILITY = "availability"
@@ -76,8 +86,17 @@ class IntegrationCredential(Base):
     # SHA-256 hex of the FULL key. The key is never stored anywhere.
     key_hash   = Column(String, nullable=False)
 
+    # EXACTLY ONE of these two is set, and which one is fixed at issue time.
+    # Both are nullable at the database level because neither is universal; the
+    # invariant is enforced in `scope_kind`, which raises rather than guessing,
+    # and at the boundary by the kind-specific dependency. A row with both set
+    # or neither set is a bug that fails closed instead of resolving somewhere
+    # unexpected.
     brand_sales_org_id = Column(String, ForeignKey("brand_sales_orgs.id", ondelete="CASCADE"),
-                                nullable=False, index=True)
+                                nullable=True, index=True)
+    # The customer tenant, for `retell_tenant` keys. This is a funeral home.
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
+                             nullable=True, index=True)
     # Used when the caller names no advisor — the common case for a voice agent
     # that only ever books one person.
     default_advisor_user_id = Column(String, ForeignKey("users.id"), nullable=True)
@@ -96,6 +115,25 @@ class IntegrationCredential(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     note       = Column(Text, nullable=True)
+
+    def scope_kind(self) -> str:
+        """SCOPE_BRAND or SCOPE_TENANT. Raises on an ambiguous row.
+
+        There is no default and no preference order here on purpose. A key whose
+        scope cannot be determined must not resolve to whichever tree happens to
+        be checked first — that is precisely the mistake this whole two-column
+        arrangement exists to make impossible.
+        """
+        has_brand = bool(self.brand_sales_org_id)
+        has_tenant = bool(self.organization_id)
+        if has_brand and has_tenant:
+            raise ValueError(
+                "Credential %s is scoped to both a brand and a tenant." % self.key_prefix)
+        if has_brand:
+            return SCOPE_BRAND
+        if has_tenant:
+            return SCOPE_TENANT
+        raise ValueError("Credential %s is scoped to nothing." % self.key_prefix)
 
     def advisor_allowlist(self):
         raw = (self.allowed_advisor_ids or "").strip()
@@ -139,11 +177,21 @@ class IntegrationRequestLog(Base):
     key_prefix       = Column(String, nullable=True)
 
     action = Column(String, nullable=False)          # ping | availability | book
+    # Whichever tree this request ran in. Exactly one is ever populated, which
+    # makes "did this key ever touch the other tree?" a query rather than an
+    # argument.
     brand_sales_org_id = Column(String, nullable=True, index=True)
+    organization_id    = Column(String, nullable=True, index=True)
     advisor_user_id    = Column(String, nullable=True)
 
     external_ref   = Column(String, nullable=True)
-    appointment_id = Column(String, nullable=True)
+    # The record created, in whichever tree. A brand booking is a
+    # SalesAppointment; a tenant booking is a BookingLink. Separate columns
+    # because they are separate tables and an id that could mean either is an id
+    # nobody can safely follow.
+    appointment_id   = Column(String, nullable=True)
+    booking_link_id  = Column(String, nullable=True)
+    lead_id          = Column(String, nullable=True)
 
     success     = Column(Boolean, default=False, nullable=False)
     status_code = Column(Integer, nullable=True)

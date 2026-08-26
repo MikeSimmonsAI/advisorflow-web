@@ -2,9 +2,17 @@
 
     python scripts/integration_key.py list
     python scripts/integration_key.py brands
-    python scripts/integration_key.py issue --name "Taffiny voice" --brand bso-evo \
+    python scripts/integration_key.py tenants
+    python scripts/integration_key.py issue --name "EvoSys sales voice" --brand bso-evo \
+        --advisor <user_id> [--rate 60] [--apply]
+    python scripts/integration_key.py issue-tenant --name "Taffiny" --org <org_id> \
         --advisor <user_id> [--rate 60] [--apply]
     python scripts/integration_key.py revoke --prefix evsk_AbCdEf --apply
+
+TWO SCOPES, NEVER BOTH. `issue` produces a BRAND key (brand_sales_orgs) for
+sales scheduling. `issue-tenant` produces a TENANT key (organizations) for a
+customer's own advisors. A key of one kind is refused by every route of the
+other, so which command you run decides what the key can ever reach.
 
 THE SECRET IS PRINTED ONCE, HERE, TO THIS TERMINAL, AND NOWHERE ELSE. It is not
 written to the database (only a SHA-256 hash is), not logged, not emailed, not
@@ -32,8 +40,10 @@ from app.models.sales_models import (                              # noqa: E402
     BrandSalesOrg, Membership, SCOPE_BRAND_SALES_ORG,
     ROLE_SALES_MANAGER, ROLE_SALES_REP,
 )
+from app.models.models import Organization                         # noqa: E402
 from app.models.integration_models import (                        # noqa: E402
-    IntegrationCredential, IntegrationRequestLog, INTEGRATION_RETELL,
+    IntegrationCredential, IntegrationRequestLog,
+    INTEGRATION_RETELL, INTEGRATION_RETELL_TENANT,
 )
 from app.services.integration_auth import generate_key             # noqa: E402
 
@@ -44,8 +54,9 @@ def _fmt(c: IntegrationCredential) -> str:
         state = "REVOKED %s" % c.revoked_at.strftime("%Y-%m-%d")
     elif not c.is_active:
         state = "inactive"
-    return "  %-14s  %-28s %-16s %-9s last used %s" % (
-        c.key_prefix, (c.name or "")[:28], c.brand_sales_org_id, state,
+    scope = c.brand_sales_org_id or c.organization_id or "— UNSCOPED —"
+    return "  %-14s  %-24s %-13s %-16s %-9s last used %s" % (
+        c.key_prefix, (c.name or "")[:24], c.kind, scope, state,
         c.last_used_at.strftime("%Y-%m-%d %H:%M") if c.last_used_at else "never")
 
 
@@ -55,7 +66,8 @@ def cmd_list(db, args):
     if not rows:
         print("No integration credentials exist.")
         return
-    print("\n  %-14s  %-28s %-16s %-9s %s" % ("PREFIX", "NAME", "BRAND", "STATE", ""))
+    print("\n  %-14s  %-24s %-13s %-16s %-9s %s" % (
+        "PREFIX", "NAME", "KIND", "SCOPE", "STATE", ""))
     for c in rows:
         print(_fmt(c))
         used = (db.query(IntegrationRequestLog)
@@ -86,6 +98,123 @@ def cmd_brands(db, args):
             continue
         for u, m in members:
             print("    --advisor %-38s %-22s %s" % (u.id, (u.full_name or "")[:22], m.role))
+    print()
+
+
+def cmd_tenants(db, args):
+    """Read-only. Customer organizations and their advisors, for `issue-tenant`.
+
+    Shows which calendar each advisor's availability would actually be read
+    from, because a key pointed at an advisor with no connected calendar will
+    happily return slots that only reflect what is already in AdvisorFlow.
+    """
+    orgs = (db.query(Organization)
+            .filter(Organization.is_active.is_(True))
+            .order_by(Organization.name).all())
+    if not orgs:
+        print("No active organizations exist.")
+        return
+    for org in orgs:
+        print("\n  TENANT  %s" % (org.brand_name or org.name))
+        print("    --org %s" % org.id)
+        advisors = (db.query(User)
+                    .filter(User.organization_id == org.id,
+                            User.is_active.is_(True))
+                    .order_by(User.full_name).all())
+        if not advisors:
+            print("    (no active users)")
+            continue
+        for u in advisors:
+            cal = "none"
+            if getattr(u, "microsoft_oauth_refresh_token_encrypted", None):
+                cal = "microsoft"
+            elif getattr(u, "google_oauth_refresh_token_encrypted", None):
+                cal = "google"
+            print("    --advisor %-38s %-22s calendar=%s" % (
+                u.id, (u.full_name or "")[:22], cal))
+    print()
+
+
+def cmd_issue_tenant(db, args):
+    """Issue a credential scoped to ONE customer organization."""
+    org = db.query(Organization).filter(Organization.id == args.org).first()
+    if org is None:
+        print("No organization with id %r. Run `tenants` first." % args.org)
+        sys.exit(1)
+
+    advisor = None
+    if args.advisor:
+        advisor = db.query(User).filter(User.id == args.advisor).first()
+        if advisor is None:
+            print("No user with id %r." % args.advisor)
+            sys.exit(1)
+        if (advisor.organization_id or None) != org.id:
+            # Refuse rather than issue a key whose default advisor the bridge
+            # would reject at run time — a key that cannot work is worse than
+            # no key, because it looks like one.
+            print("%s does not belong to %s. Refusing." % (advisor.email, org.name))
+            sys.exit(1)
+        if not advisor.is_active:
+            print("%s is not active. Refusing." % advisor.email)
+            sys.exit(1)
+
+    allow = ",".join([a.strip() for a in (args.allow or "").split(",") if a.strip()])
+
+    cal = "none"
+    if advisor is not None:
+        if getattr(advisor, "microsoft_oauth_refresh_token_encrypted", None):
+            cal = "microsoft"
+        elif getattr(advisor, "google_oauth_refresh_token_encrypted", None):
+            cal = "google"
+
+    print()
+    print("  Integration : %s" % args.name)
+    print("  Kind        : %s" % INTEGRATION_RETELL_TENANT)
+    print("  Tenant      : %s (%s)" % (org.brand_name or org.name, org.id))
+    print("  Default     : %s" % (advisor.full_name if advisor else "— none —"))
+    print("  Calendar    : %s" % cal)
+    print("  Allowlist   : %s" % (allow or "any active user of this tenant"))
+    print("  Rate limit  : %d/min" % args.rate)
+    if cal == "none" and advisor is not None:
+        print()
+        print("  NOTE: this advisor has no external calendar connected. Availability")
+        print("  will reflect their AdvisorFlow bookings and blocks only.")
+    print()
+
+    if not args.apply:
+        print("  DRY RUN. Nothing written. Re-run with --apply to issue the key.")
+        print()
+        return
+
+    full, prefix, hashed = generate_key()
+    cred = IntegrationCredential(
+        name=args.name, kind=INTEGRATION_RETELL_TENANT,
+        key_prefix=prefix, key_hash=hashed,
+        # Tenant-scoped: organization_id set, brand_sales_org_id left NULL.
+        brand_sales_org_id=None,
+        organization_id=org.id,
+        default_advisor_user_id=advisor.id if advisor else None,
+        allowed_advisor_ids=allow or None,
+        rate_limit_per_minute=args.rate,
+        is_active=True, created_at=datetime.utcnow(), note=args.note)
+    db.add(cred)
+    db.commit()
+
+    _print_key(full, prefix)
+
+
+def _print_key(full: str, prefix: str) -> None:
+    print("  " + "=" * 66)
+    print("  KEY ISSUED. This is the only time it will ever be shown.")
+    print("  " + "=" * 66)
+    print()
+    print("      %s" % full)
+    print()
+    print("  Prefix (safe to share/log): %s" % prefix)
+    print("  Send it as:  Authorization: Bearer <the key above>")
+    print()
+    print("  Store it in Retell's secret field. Do not paste it into chat,")
+    print("  a ticket, a commit, or a document.")
     print()
 
 
@@ -135,7 +264,9 @@ def cmd_issue(db, args):
     cred = IntegrationCredential(
         name=args.name, kind=INTEGRATION_RETELL,
         key_prefix=prefix, key_hash=hashed,
+        # Brand-scoped: brand_sales_org_id set, organization_id left NULL.
         brand_sales_org_id=org.id,
+        organization_id=None,
         default_advisor_user_id=advisor.id if advisor else None,
         allowed_advisor_ids=allow or None,
         rate_limit_per_minute=args.rate,
@@ -143,18 +274,7 @@ def cmd_issue(db, args):
     db.add(cred)
     db.commit()
 
-    print("  " + "=" * 66)
-    print("  KEY ISSUED. This is the only time it will ever be shown.")
-    print("  " + "=" * 66)
-    print()
-    print("      %s" % full)
-    print()
-    print("  Prefix (safe to share/log): %s" % prefix)
-    print("  Send it as:  Authorization: Bearer <the key above>")
-    print()
-    print("  Store it in Retell's secret field. Do not paste it into chat,")
-    print("  a ticket, a commit, or a document.")
-    print()
+    _print_key(full, prefix)
 
 
 def cmd_revoke(db, args):
@@ -181,6 +301,16 @@ def main():
 
     sub.add_parser("list")
     sub.add_parser("brands")
+    sub.add_parser("tenants")
+
+    t = sub.add_parser("issue-tenant")
+    t.add_argument("--name", required=True, help="Human identity, shown in audit rows")
+    t.add_argument("--org", required=True, help="organizations.id — the funeral home")
+    t.add_argument("--advisor", help="users.id — the default advisor for this key")
+    t.add_argument("--allow", help="Comma-separated user ids this key may target")
+    t.add_argument("--rate", type=int, default=60)
+    t.add_argument("--note")
+    t.add_argument("--apply", action="store_true")
 
     i = sub.add_parser("issue")
     i.add_argument("--name", required=True, help="Human identity, shown in audit rows")
@@ -198,8 +328,9 @@ def main():
     args = p.parse_args()
     db = SessionLocal()
     try:
-        {"list": cmd_list, "brands": cmd_brands,
-         "issue": cmd_issue, "revoke": cmd_revoke}[args.cmd](db, args)
+        {"list": cmd_list, "brands": cmd_brands, "tenants": cmd_tenants,
+         "issue": cmd_issue, "issue-tenant": cmd_issue_tenant,
+         "revoke": cmd_revoke}[args.cmd](db, args)
     finally:
         db.close()
 

@@ -1,13 +1,24 @@
 """Machine-facing integration surface.
 
-  GET  /integrations/retell/ping           prove a key works, change nothing
-  POST /integrations/retell/availability   openings for one advisor
-  POST /integrations/retell/book           take one, having re-checked it
+  GET  /integrations/retell/ping                  prove a key works, change nothing
+  POST /integrations/retell/availability          openings for one BRAND advisor
+  POST /integrations/retell/book                  take one, having re-checked it
 
-THIS IS A BRIDGE, NOT A PRODUCT SURFACE. Three routes, one integration, one
-brand per credential. Every route is gated by `require_retell`; there is no
-route here a user JWT can open and no route elsewhere an integration key can.
-Two credential systems that cannot be swapped for each other is the point.
+  GET  /integrations/retell/tenant/ping           same, for a customer tenant
+  POST /integrations/retell/tenant/availability   openings for one TENANT advisor
+  POST /integrations/retell/tenant/book           take one, having re-checked it
+
+THIS IS A BRIDGE, NOT A PRODUCT SURFACE. Six routes, two tenancy trees, one
+scope per credential. Every route is gated by a kind-specific dependency; there
+is no route here a user JWT can open and no route elsewhere an integration key
+can. Two credential systems that cannot be swapped for each other is the point.
+
+THE TWO TREES DO NOT MEET. `/retell/*` requires a `retell` key scoped to a
+BrandSalesOrg and writes `SalesAppointment`. `/retell/tenant/*` requires a
+`retell_tenant` key scoped to a customer Organization and writes `BookingLink`.
+A key of either kind is refused — not filtered, refused, with the same opaque
+401 as an unknown key — by every route of the other. One funeral home's voice
+agent has no path to another funeral home, and none at all to brand sales.
 
 WHAT IT DELIBERATELY DOES NOT RETURN: no JWT, no calendar provider token, no
 other person's meeting titles, no opportunity internals, no lead data, no user
@@ -40,8 +51,11 @@ from app.limiter import limiter
 from app.models.integration_models import (
     IntegrationCredential, ACTION_PING, ACTION_AVAILABILITY, ACTION_BOOK,
 )
-from app.services.integration_auth import require_retell, rate_limit_key
+from app.services.integration_auth import (
+    require_retell, require_retell_tenant, rate_limit_key,
+)
 from app.services import retell_bridge as bridge
+from app.services import tenant_scheduling as tenant
 
 log = logging.getLogger(__name__)
 
@@ -196,5 +210,162 @@ def retell_book(request: Request, body: BookIn,
                      advisor_user_id=advisor.id,
                      appointment_id=out["appointment_id"],
                      row=bridge.find_prior_attempt(db, cred, ref))
+    db.commit()
+    return out
+
+
+# ── tenant request models ───────────────────────────────────────────────────
+#
+# Only fields the tenant scheduling services actually consume. There is no
+# `organization_id` here and there never will be: the tenant comes from the
+# credential, so there is nothing for a caller to widen.
+
+class TenantAvailabilityIn(BaseModel):
+    advisor_id: Optional[str] = Field(
+        None, description="Omit to use the integration's default advisor.")
+    date_from: date_cls
+    date_to: Optional[date_cls] = None
+    duration_minutes: Optional[int] = Field(None, ge=5, le=480)
+    timezone: Optional[str] = Field(
+        None, description="IANA zone for the spoken times. Defaults to the advisor's.")
+    appointment_type: Optional[str] = Field(
+        None, description="One of the location's configured appointment types.")
+
+
+class TenantBookIn(BaseModel):
+    external_ref: str = Field(..., min_length=6, max_length=120)
+    starts_at: datetime = Field(..., description="UTC instant from an availability slot.")
+    advisor_id: Optional[str] = None
+    duration_minutes: Optional[int] = Field(None, ge=5, le=480)
+    appointment_type: Optional[str] = None
+    timezone: Optional[str] = None
+    # The family. Either an existing lead_id, or enough to create one.
+    lead_id: Optional[str] = None
+    family_name: Optional[str] = None
+    family_phone: Optional[str] = None
+    family_email: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ── tenant routes ───────────────────────────────────────────────────────────
+
+@router.get("/retell/tenant/ping")
+@limiter.limit(PING_LIMIT, key_func=rate_limit_key)
+def retell_tenant_ping(request: Request,
+                       cred: IntegrationCredential = Depends(require_retell_tenant),
+                       db: Session = Depends(get_db)):
+    """Confirm a tenant key is live and see what it is scoped to. Changes nothing.
+
+    Exists so a key can be verified during setup without booking a visit into a
+    real family's afternoon to find out.
+    """
+    org = tenant.tenant_for(db, cred)
+    advisor = None
+    if cred.default_advisor_user_id:
+        try:
+            advisor = tenant.resolve_advisor(db, cred, None)
+        except HTTPException:
+            advisor = None
+
+    calendar = "none"
+    if advisor is not None:
+        try:
+            from app.services import calendar_providers as reg
+            key = reg.resolve_provider_key(db, advisor)
+            calendar = key if reg.is_external_calendar(key) else "none"
+        except Exception:
+            calendar = "unknown"
+
+    tenant.audit(db, cred, ACTION_PING, True, 200, "ping",
+                 advisor_user_id=advisor.id if advisor else None)
+    db.commit()
+    return {
+        "success": True,
+        "integration": cred.name,
+        "organization": org.brand_name or org.name,
+        "location": org.org_address or None,
+        "default_advisor_id": cred.default_advisor_user_id,
+        "default_advisor_name": advisor.full_name if advisor else None,
+        # Which calendar this advisor's availability is actually read from.
+        # 'none' means no external calendar is connected — their AdvisorFlow
+        # bookings and blocks still apply, but nothing outside the app does.
+        "advisor_calendar": calendar,
+        "advisor_timezone": (tenant.Settings(advisor).timezone if advisor
+                             else None),
+        "appointment_types": tenant.appointment_types(org),
+        "advisor_allowlist_size": len(cred.advisor_allowlist()),
+        "rate_limit_per_minute": cred.rate_limit_per_minute,
+    }
+
+
+@router.post("/retell/tenant/availability")
+@limiter.limit(AVAILABILITY_LIMIT, key_func=rate_limit_key)
+def retell_tenant_availability(request: Request, body: TenantAvailabilityIn,
+                               cred: IntegrationCredential = Depends(require_retell_tenant),
+                               db: Session = Depends(get_db)):
+    """Real openings for one tenant advisor, honouring their own settings."""
+    org = tenant.tenant_for(db, cred)
+    try:
+        advisor = tenant.resolve_advisor(db, cred, body.advisor_id)
+        out = tenant.availability(
+            db, cred, advisor, org,
+            date_from=body.date_from, date_to=body.date_to,
+            duration_minutes=body.duration_minutes,
+            timezone=body.timezone,
+            appointment_type=body.appointment_type)
+    except HTTPException as e:
+        tenant.audit(db, cred, ACTION_AVAILABILITY, False, e.status_code,
+                     str(e.detail), advisor_user_id=body.advisor_id)
+        db.commit()
+        raise
+    tenant.audit(db, cred, ACTION_AVAILABILITY, True, 200,
+                 "%d slots %s..%s" % (out["slot_count"], out["date_from"],
+                                      out["date_to"]),
+                 advisor_user_id=advisor.id)
+    db.commit()
+    return out
+
+
+@router.post("/retell/tenant/book")
+@limiter.limit(BOOK_LIMIT, key_func=rate_limit_key)
+def retell_tenant_book(request: Request, body: TenantBookIn,
+                       cred: IntegrationCredential = Depends(require_retell_tenant),
+                       db: Session = Depends(get_db)):
+    """Book a family in. Re-checked at this instant, idempotent on `external_ref`."""
+    org = tenant.tenant_for(db, cred)
+    ref = (body.external_ref or "").strip()
+    try:
+        advisor = tenant.resolve_advisor(db, cred, body.advisor_id)
+        out = tenant.book(
+            db, cred, advisor, org,
+            starts_at_utc=_naive_utc(body.starts_at),
+            external_ref=ref,
+            duration_minutes=body.duration_minutes,
+            appointment_type=body.appointment_type,
+            timezone=body.timezone,
+            lead_id=body.lead_id,
+            family_name=body.family_name,
+            family_phone=body.family_phone,
+            family_email=body.family_email,
+            notes=body.notes)
+    except HTTPException as e:
+        # `book` may already have rolled back; the audit row is written on a
+        # clean session so a refusal is still recorded.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        tenant.audit(db, cred, ACTION_BOOK, False, e.status_code, str(e.detail),
+                     advisor_user_id=body.advisor_id, external_ref=None)
+        db.commit()
+        raise
+
+    if not out.get("idempotent_replay"):
+        tenant.audit(db, cred, ACTION_BOOK, True, 200,
+                     "booked %s" % out["booking_id"],
+                     advisor_user_id=advisor.id,
+                     booking_link_id=out["booking_id"],
+                     lead_id=out.get("lead_id"),
+                     row=tenant.find_prior_attempt(db, cred, ref))
     db.commit()
     return out

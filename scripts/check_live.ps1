@@ -48,3 +48,8 @@ Probe "cal slots      " "$api/calendar/slots?advisor_id=x&date=2026-09-01&token=
 Probe     "retell ping    " "$api/integrations/retell/ping"
 ProbePost "retell avail   " "$api/integrations/retell/availability" '{"date_from":"2026-09-01"}'
 ProbePost "retell book    " "$api/integrations/retell/book" '{"external_ref":"probe-no-auth","starts_at":"2026-09-01T09:00:00"}'
+
+# The tenant half. Same rule: 401 proves deployed AND fail-closed.
+Probe     "tenant ping    " "$api/integrations/retell/tenant/ping"
+ProbePost "tenant avail   " "$api/integrations/retell/tenant/availability" '{"date_from":"2026-09-01"}'
+ProbePost "tenant book    " "$api/integrations/retell/tenant/book" '{"external_ref":"probe-no-auth","starts_at":"2026-09-01T09:00:00"}'

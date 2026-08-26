@@ -338,6 +338,15 @@ COLUMNS_TO_ADD = [
     ("crm_contacts", "custom_data", "TEXT"),
     # Who uploaded each lead batch (full name of the user who ran the import)
     ("leads", "imported_by_name", "TEXT"),
+    # Tenant-side Retell bridge. `integration_credentials` and
+    # `integration_request_logs` were created whole by create_all() on the
+    # deploy before this one, so they now EXIST and create_all() will never
+    # retroactively add a column to them. Every column below is therefore a
+    # migration, not a model change that happens to work on a fresh database.
+    ("integration_credentials", "organization_id", "VARCHAR"),
+    ("integration_request_logs", "organization_id", "VARCHAR"),
+    ("integration_request_logs", "booking_link_id", "VARCHAR"),
+    ("integration_request_logs", "lead_id", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -453,6 +462,13 @@ NULLABILITY_TO_RELAX = [
     # tenant either. Missing this relax means every upload fails on production
     # Postgres with a NOT NULL violation while passing on a fresh SQLite.
     ("proposal_files", "organization_id"),
+    # Tenant-side Retell bridge. This column shipped NOT NULL, when a
+    # credential could only ever be brand-scoped. A tenant key sets
+    # `organization_id` instead and leaves this NULL; without the relax, every
+    # tenant key insert fails on production Postgres with a NOT NULL violation
+    # while passing on a fresh SQLite. `scope_kind()` is what keeps "both NULL"
+    # from becoming a legal state.
+    ("integration_credentials", "brand_sales_org_id"),
 ]
 
 

@@ -129,6 +129,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "MANAGER WORKSPACE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_retell_bridge.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "RETELL BRIDGE CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_tenant_bridge.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "TENANT BRIDGE CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

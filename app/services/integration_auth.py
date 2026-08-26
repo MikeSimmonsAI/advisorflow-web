@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db
 from app.models.integration_models import (
     IntegrationCredential, KEY_PREFIX_LEN, INTEGRATION_RETELL,
+    INTEGRATION_RETELL_TENANT, SCOPE_BRAND, SCOPE_TENANT,
 )
 
 log = logging.getLogger(__name__)
@@ -115,6 +116,37 @@ def require_integration(request: Request,
     return cred
 
 
+def _require_kind(cred: IntegrationCredential, kind: str,
+                  scope: str) -> IntegrationCredential:
+    """Both halves must agree: the declared kind AND the actual scope columns.
+
+    Checking `kind` alone would trust a single string field to keep the two
+    tenancy trees apart. A row mislabelled by a future script — or by a bug in
+    the issuing tool — would then be admitted to the wrong tree with the wrong
+    scope id, which is the one failure this design exists to prevent. So the
+    scope columns are consulted independently and must match.
+    """
+    if (cred.kind or "") != kind:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=_REFUSED,
+                            headers={"WWW-Authenticate": "Bearer"})
+    try:
+        actual = cred.scope_kind()
+    except ValueError:
+        # Scoped to both trees or to neither. Unresolvable, so refused.
+        log.error("integration credential %s has an unusable scope", cred.key_prefix)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=_REFUSED,
+                            headers={"WWW-Authenticate": "Bearer"})
+    if actual != scope:
+        log.error("integration credential %s declares kind %r but is scoped %r",
+                  cred.key_prefix, cred.kind, actual)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=_REFUSED,
+                            headers={"WWW-Authenticate": "Bearer"})
+    return cred
+
+
 def require_retell(cred: IntegrationCredential = Depends(require_integration)
                    ) -> IntegrationCredential:
     """A key issued for a different integration cannot drive the Retell routes.
@@ -122,11 +154,15 @@ def require_retell(cred: IntegrationCredential = Depends(require_integration)
     Same refusal text as an unknown key: a caller holding the wrong kind of key
     learns only that it did not work.
     """
-    if (cred.kind or "") != INTEGRATION_RETELL:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail=_REFUSED,
-                            headers={"WWW-Authenticate": "Bearer"})
-    return cred
+    return _require_kind(cred, INTEGRATION_RETELL, SCOPE_BRAND)
+
+
+def require_retell_tenant(cred: IntegrationCredential = Depends(require_integration)
+                          ) -> IntegrationCredential:
+    """The customer-tenant half. A brand-sales key is refused here, and a tenant
+    key is refused by `require_retell` — the two surfaces share a key format and
+    nothing else."""
+    return _require_kind(cred, INTEGRATION_RETELL_TENANT, SCOPE_TENANT)
 
 
 def rate_limit_key(request: Request) -> str:
