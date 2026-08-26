@@ -1069,6 +1069,72 @@ def _run(c):
         s11_lead(c)
         s12_audit(c)
         s13_static()
+        s14_show()
+
+
+def s14_show():
+    """`integration_key.py show` is the key-free way to verify a credential.
+
+    It exists so nobody has to put a secret on a command line to answer "is
+    this pointed at the right person?". If it ever started printing something
+    secret, that reason would evaporate — hence the assertions at the end.
+    """
+    print("\n[14] Verifying a credential without handling the key")
+    import io
+    import contextlib
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "integration_key.py")
+    # The script refuses to import without DATABASE_URL, which this suite set
+    # at module load, so it picks up the same temp SQLite.
+    spec = importlib.util.spec_from_file_location("integration_key_mod", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class Args(object):
+        def __init__(self, prefix, recent=5):
+            self.prefix = prefix
+            self.recent = recent
+
+    db = SessionLocal()
+    cred = (db.query(IntegrationCredential)
+            .filter(IntegrationCredential.name == "taffiny").first())
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.cmd_show(db, Args(cred.key_prefix))
+    out = buf.getvalue()
+    db.close()
+
+    check("show reports the tenant", "Restland Memorial" in out, out[:300])
+    check("show reports the default advisor", "Grace Alvarez" in out, out[:300])
+    check("SHOW REPORTS WHICH CALENDAR IS ACTUALLY CONNECTED",
+          "Calendar    : google" in out, out[:400])
+    check("show reports the advisor's real hours",
+          "10:00-16:00" in out, out[:400])
+    check("show reports the tenant's appointment types",
+          "Family File Review" in out, out[:400])
+    check("show reports the allowlist and rate limit",
+          "Allowlist" in out and "60/min" in out, out[:400])
+    check("show reports whether Retell has called yet",
+          "Last used" in out, out[:400])
+    check("THE FULL KEY NEVER APPEARS IN show's OUTPUT",
+          KEYS["taffiny"] not in out, "secret leaked")
+    check("nor does the stored hash", cred.key_hash not in out, "hash leaked")
+
+    # A misconfigured credential must be reported as broken, not rendered as
+    # if it were usable.
+    db = SessionLocal()
+    broken = (db.query(IntegrationCredential)
+              .filter(IntegrationCredential.name == "both-scopes").first())
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.cmd_show(db, Args(broken.key_prefix))
+    out2 = buf.getvalue()
+    db.close()
+    check("A KEY SCOPED TO BOTH TREES IS REPORTED AS BROKEN",
+          "BROKEN" in out2, out2[:300])
+    check("and says to reissue it", "reissue" in out2.lower(), out2[:300])
 
 
 if __name__ == "__main__":

@@ -3,11 +3,17 @@
     python scripts/integration_key.py list
     python scripts/integration_key.py brands
     python scripts/integration_key.py tenants
+    python scripts/integration_key.py show --prefix evsk_AbCdEf12
     python scripts/integration_key.py issue --name "EvoSys sales voice" --brand bso-evo \
         --advisor <user_id> [--rate 60] [--apply]
-    python scripts/integration_key.py issue-tenant --name "Taffiny" --org <org_id> \
+    python scripts/integration_key.py issue-tenant --name "Taffiney" --org <org_id> \
         --advisor <user_id> [--rate 60] [--apply]
-    python scripts/integration_key.py revoke --prefix evsk_AbCdEf --apply
+    python scripts/integration_key.py revoke --prefix evsk_AbCdEf12 --apply
+
+VERIFY WITH `show`, NOT BY CALLING THE API. `show` takes the non-secret prefix
+and reports everything /ping would — tenant, advisor, calendar, hours, recent
+requests — with the secret nowhere in play. Putting a key on a command line to
+test it is how a key ends up in shell history and in a pasted terminal buffer.
 
 TWO SCOPES, NEVER BOTH. `issue` produces a BRAND key (brand_sales_orgs) for
 sales scheduling. `issue-tenant` produces a TENANT key (organizations) for a
@@ -24,6 +30,7 @@ in seed_evosyspro_sales.py. Read the plan, then run it again with --apply.
 """
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime
@@ -98,6 +105,120 @@ def cmd_brands(db, args):
             continue
         for u, m in members:
             print("    --advisor %-38s %-22s %s" % (u.id, (u.full_name or "")[:22], m.role))
+    print()
+
+
+def cmd_show(db, args):
+    """Everything `/ping` would report, WITHOUT touching the key.
+
+    WHY THIS EXISTS. Verifying a new credential by calling the ping route means
+    putting the secret on a command line — where it lands in shell history, in
+    a terminal scrollback, and in whatever gets copied out of that window. The
+    facts worth checking (right tenant? right advisor? is their calendar
+    actually connected?) all live in the database next to the hash, so they can
+    be read from here with nothing secret in play.
+
+    Looked up by the NON-SECRET prefix, which is printed at issue time and is
+    safe to paste anywhere.
+    """
+    cred = (db.query(IntegrationCredential)
+            .filter(IntegrationCredential.key_prefix == args.prefix).first())
+    if cred is None:
+        print("No credential with prefix %r." % args.prefix)
+        sys.exit(1)
+
+    state = "ACTIVE"
+    if cred.revoked_at is not None:
+        state = "REVOKED %s" % cred.revoked_at.strftime("%Y-%m-%d %H:%M")
+    elif not cred.is_active:
+        state = "INACTIVE"
+
+    print()
+    print("  Integration : %s" % cred.name)
+    print("  Prefix      : %s" % cred.key_prefix)
+    print("  Kind        : %s" % cred.kind)
+    print("  State       : %s" % state)
+
+    try:
+        scope = cred.scope_kind()
+    except ValueError as e:
+        print("  Scope       : BROKEN - %s" % e)
+        print("  This key is refused by every route. Revoke and reissue.")
+        print()
+        return
+
+    advisor = None
+    if cred.default_advisor_user_id:
+        advisor = (db.query(User)
+                   .filter(User.id == cred.default_advisor_user_id).first())
+
+    if scope == "tenant":
+        org = (db.query(Organization)
+               .filter(Organization.id == cred.organization_id).first())
+        print("  Tenant      : %s (%s)" % (
+            (org.brand_name or org.name) if org else "MISSING",
+            cred.organization_id))
+        if org is not None:
+            print("  Location    : %s" % (org.org_address or "- not set -"))
+            types = []
+            raw = (org.appointment_types or "").strip()
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        types = [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            print("  Appt types  : %s" % (", ".join(types) if types
+                                          else "- none configured -"))
+            if not org.is_active:
+                print("  WARNING: this organization is not active. Every call fails closed.")
+        # The advisor must belong to THIS tenant or the bridge refuses it.
+        if advisor is not None and (advisor.organization_id or None) != cred.organization_id:
+            print("  WARNING: the default advisor does not belong to this tenant.")
+            print("  Every call would return 'Advisor not found'. Revoke and reissue.")
+    else:
+        print("  Brand       : %s" % cred.brand_sales_org_id)
+
+    print("  Default     : %s" % (advisor.full_name if advisor else "- none -"))
+    if advisor is not None:
+        cal = "none"
+        if getattr(advisor, "microsoft_oauth_refresh_token_encrypted", None):
+            cal = "microsoft"
+        elif getattr(advisor, "google_oauth_refresh_token_encrypted", None):
+            cal = "google"
+        print("  Calendar    : %s" % cal)
+        print("  Timezone    : %s" % (advisor.booking_timezone or "- default -"))
+        print("  Hours       : %s-%s on days %s" % (
+            advisor.available_start_time or "09:00",
+            advisor.available_end_time or "17:00",
+            advisor.available_days or "0,1,2,3,4"))
+        if not advisor.is_active:
+            print("  WARNING: the default advisor is not active.")
+        if cal == "none":
+            print()
+            print("  NOTE: no external calendar is connected for this advisor.")
+            print("  Availability reflects AdvisorFlow bookings and blocks only.")
+
+    print("  Allowlist   : %s" % (", ".join(cred.advisor_allowlist())
+                                  or "any active member of this scope"))
+    print("  Rate limit  : %d/min" % cred.rate_limit_per_minute)
+    print("  Last used   : %s" % (
+        cred.last_used_at.strftime("%Y-%m-%d %H:%M UTC") if cred.last_used_at
+        else "never - Retell has not called yet"))
+
+    logs = (db.query(IntegrationRequestLog)
+            .filter(IntegrationRequestLog.credential_id == cred.id)
+            .order_by(IntegrationRequestLog.occurred_at.desc())
+            .limit(args.recent or 5).all())
+    total = (db.query(IntegrationRequestLog)
+             .filter(IntegrationRequestLog.credential_id == cred.id).count())
+    print("  Requests    : %d recorded" % total)
+    for r in logs:
+        print("      %s  %-12s %-3s %s" % (
+            r.occurred_at.strftime("%m-%d %H:%M"), r.action,
+            "ok" if r.success else str(r.status_code or "err"),
+            (r.detail or "")[:60]))
     print()
 
 
@@ -303,6 +424,12 @@ def main():
     sub.add_parser("brands")
     sub.add_parser("tenants")
 
+    s = sub.add_parser("show")
+    s.add_argument("--prefix", required=True,
+                   help="The NON-SECRET prefix printed at issue time")
+    s.add_argument("--recent", type=int, default=5,
+                   help="How many recent requests to list")
+
     t = sub.add_parser("issue-tenant")
     t.add_argument("--name", required=True, help="Human identity, shown in audit rows")
     t.add_argument("--org", required=True, help="organizations.id — the funeral home")
@@ -329,7 +456,8 @@ def main():
     db = SessionLocal()
     try:
         {"list": cmd_list, "brands": cmd_brands, "tenants": cmd_tenants,
-         "issue": cmd_issue, "issue-tenant": cmd_issue_tenant,
+         "show": cmd_show, "issue": cmd_issue,
+         "issue-tenant": cmd_issue_tenant,
          "revoke": cmd_revoke}[args.cmd](db, args)
     finally:
         db.close()
