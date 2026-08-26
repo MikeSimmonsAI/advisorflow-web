@@ -1,6 +1,7 @@
 """Issue, list and revoke integration service keys.
 
     python scripts/integration_key.py list
+    python scripts/integration_key.py brands
     python scripts/integration_key.py issue --name "Taffiny voice" --brand bso-evo \
         --advisor <user_id> [--rate 60] [--apply]
     python scripts/integration_key.py revoke --prefix evsk_AbCdEf --apply
@@ -60,6 +61,31 @@ def cmd_list(db, args):
         used = (db.query(IntegrationRequestLog)
                 .filter(IntegrationRequestLog.credential_id == c.id).count())
         print("                  %d requests recorded" % used)
+    print()
+
+
+def cmd_brands(db, args):
+    """Read-only. The two ids `issue` needs, without anyone writing SQL by hand
+    against production to find them."""
+    orgs = db.query(BrandSalesOrg).order_by(BrandSalesOrg.name).all()
+    if not orgs:
+        print("No brand sales orgs exist.")
+        return
+    for org in orgs:
+        print("\n  BRAND  %s" % org.name)
+        print("    --brand %s   (timezone %s)" % (org.id, org.timezone))
+        members = (db.query(User, Membership)
+                   .join(Membership, Membership.user_id == User.id)
+                   .filter(Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                           Membership.scope_id == org.id,
+                           Membership.role.in_((ROLE_SALES_MANAGER, ROLE_SALES_REP)),
+                           Membership.is_active.is_(True))
+                   .order_by(User.full_name).all())
+        if not members:
+            print("    (no active sales members)")
+            continue
+        for u, m in members:
+            print("    --advisor %-38s %-22s %s" % (u.id, (u.full_name or "")[:22], m.role))
     print()
 
 
@@ -154,6 +180,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list")
+    sub.add_parser("brands")
 
     i = sub.add_parser("issue")
     i.add_argument("--name", required=True, help="Human identity, shown in audit rows")
@@ -171,7 +198,8 @@ def main():
     args = p.parse_args()
     db = SessionLocal()
     try:
-        {"list": cmd_list, "issue": cmd_issue, "revoke": cmd_revoke}[args.cmd](db, args)
+        {"list": cmd_list, "brands": cmd_brands,
+         "issue": cmd_issue, "revoke": cmd_revoke}[args.cmd](db, args)
     finally:
         db.close()
 
