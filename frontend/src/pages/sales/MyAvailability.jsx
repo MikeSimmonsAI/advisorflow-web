@@ -10,6 +10,7 @@ import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import { Card, Chip, ErrorBar, dateTime } from './parts'
 import CalendarConnections from './CalendarConnections'
+import VideoStatus from './VideoStatus'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
@@ -190,6 +191,13 @@ export default function MyAvailability() {
                 what every setting below it actually means — external
                 commitments become part of the availability these rules shape. */}
             <CalendarConnections />
+
+            {/* Beside the calendar connections because they answer adjacent
+                questions: one is "will this meeting reach my calendar", the
+                other "will it have a video link". */}
+            <div className="sw-mt">
+              <VideoStatus />
+            </div>
 
             <div className="sw-mt" />
             <Card title="BOOKING RULES">

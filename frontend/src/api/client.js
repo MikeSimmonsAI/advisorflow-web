@@ -1,4 +1,8 @@
-﻿const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
+﻿// One canonical API base for the whole frontend — authenticated pages and the
+// public customer portal alike. Anything that talks to the backend imports this
+// rather than reading an env var of its own; a page with its own copy is a page
+// that keeps calling the old host after this one moves.
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
 
 // â”€â”€ Brand-neutral localStorage keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // All keys use the "af_" prefix â€” no white-label brand name ever appears in

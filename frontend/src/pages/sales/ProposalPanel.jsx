@@ -11,7 +11,7 @@
  * control — the API refuses a rep's discount regardless of what this renders.
  */
 import { useEffect, useState, useCallback } from 'react'
-import { api } from '../../api/client'
+import { api, API_BASE } from '../../api/client'
 import { Card, Chip, Empty, ErrorBar, dateTime } from './parts'
 
 const STATUS_TONE = {
@@ -123,6 +123,37 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
 
   const removeBlock = id => act(
     () => api.delete('/sales/proposals/' + current.id + '/blocks/' + id))
+
+  /**
+   * Upload a document, deck or image into the deal room.
+   *
+   * Sent as multipart via fetch rather than the JSON api client, and the
+   * Content-Type header is deliberately NOT set — the browser must add its own
+   * multipart boundary, and setting it by hand produces a request the server
+   * cannot parse.
+   */
+  async function upload(fileList) {
+    const f = fileList && fileList[0]
+    if (!f) return
+    setBusy(true); setError(null); setNote(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', f)
+      fd.append('label', f.name)
+      const token = localStorage.getItem('af_token')
+      const r = await fetch(API_BASE + '/sales/proposals/' + current.id + '/upload', {
+        method: 'POST',
+        headers: token ? { Authorization: 'Bearer ' + token } : {},
+        body: fd,
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(body.detail || 'That upload did not work.')
+      setNote('Added to the deal room.')
+      await load()
+      if (onChanged) await onChanged()
+    } catch (e) { setError(e.message || 'That upload did not work.') }
+    finally { setBusy(false) }
+  }
 
 
   if (!data) {
@@ -269,6 +300,21 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
                  onChange={e => setResource({ ...resource, file_url: e.target.value })} />
           <button className="sw-tiny" disabled={busy || !resource.file_url.trim()}
                   onClick={addResource}>Add</button>
+        </div>
+
+        {/* Upload. Stored as bytes in proposal_files and served through the
+            existing route — the file becomes visible to the customer only
+            because a block references it in a PUBLISHED proposal. */}
+        <div className="sw-flex" style={{ gap: 8, marginTop: 10 }}>
+          <label className="sw-tiny" style={{ cursor: busy ? 'default' : 'pointer' }}>
+            {busy ? 'Working…' : 'Upload a document'}
+            <input type="file" style={{ display: 'none' }} disabled={busy}
+                   accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.pptx,.xlsx,.doc,.ppt,.xls"
+                   onChange={e => { upload(e.target.files); e.target.value = '' }} />
+          </label>
+          <span className="sw-subtle">
+            PDF, image, Word, PowerPoint or Excel — up to 20MB
+          </span>
         </div>
         {opp.demo_url && !(p.blocks || []).some(b => b.file_url === opp.demo_url) && (
           <button className="sw-tiny" style={{ marginTop: 8 }} disabled={busy}

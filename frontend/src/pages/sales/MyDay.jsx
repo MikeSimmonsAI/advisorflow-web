@@ -66,6 +66,31 @@ function ApptRow({ appt, onOpen, onConfirm }) {
   )
 }
 
+/**
+ * One proposal that needs something doing. Carries the REASON, because a list
+ * of proposals with no explanation is a report — and My Day answers "what do I
+ * do next", not "what exists".
+ */
+function ProposalRow({ p, onOpen }) {
+  return (
+    <div className="sw-row">
+      <button className="sw-rowlink" onClick={() => onOpen(p.opportunity_id)}>
+        <b>{p.company || p.proposal_number}</b>
+        <p>
+          {p.proposal_number}{p.version > 1 ? ' v' + p.version : ''}
+          {p.amount != null ? ' · ' + money(p.amount) : ''}
+          {p.reason ? ' · ' + p.reason : ''}
+        </p>
+      </button>
+      <div className="sw-actions">
+        {p.urgency && <Chip tone={p.urgency}>{p.status_label}</Chip>}
+        <button className="sw-tiny sw-primary"
+                onClick={() => onOpen(p.opportunity_id)}>Open</button>
+      </div>
+    </div>
+  )
+}
+
 function OppRow({ opp, onOpen, note }) {
   const due = dueLabel(opp.next_action_due_at)
   return (
@@ -104,6 +129,9 @@ export default function MyDay() {
 
   const open = id => nav('/sales/opportunities/' + id)
   const m = data?.metrics || {}
+  // Proposal queues. Defaulted so the first render before data arrives does not
+  // have to guard every list separately.
+  const P = data?.proposals || {}
 
   /** Mark a meeting confirmed. Records the source as a staff action — that is
    *  weaker evidence than a prospect clicking a link, and the API stores which. */
@@ -190,6 +218,54 @@ export default function MyDay() {
                                   + (o.demo_due_at ? ' · due ' + dateTime(o.demo_due_at) : '')} />)
                 : <Empty title="No demos in the queue">
                     A demo enters this queue when an opportunity moves to Demo Build.
+                  </Empty>}
+            </Card>
+          </div>
+
+          {/* ── Proposal work (Checkpoint 4) ──────────────────────────────
+              Each queue only renders when it has something in it. An empty
+              "Proposals expiring" card every single day trains a rep to stop
+              reading this column, which costs more than it gives. The one
+              exception is "to finish", where an empty state is genuinely
+              reassuring. */}
+          {P.ready_to_send?.length > 0 && (
+            <div className="sw-mt">
+              <Card title="READY TO SEND" sub="Finished, but the customer has not seen it" bodyless>
+                {P.ready_to_send.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
+              </Card>
+            </div>
+          )}
+
+          {P.follow_up_required?.length > 0 && (
+            <div className="sw-mt">
+              <Card title="FOLLOW-UP REQUIRED" sub="They went quiet, said no, or asked for a change" bodyless>
+                {P.follow_up_required.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
+              </Card>
+            </div>
+          )}
+
+          {P.recently_viewed?.length > 0 && (
+            <div className="sw-mt">
+              <Card title="RECENTLY VIEWED" sub="They are reading it right now — call while it's warm" bodyless>
+                {P.recently_viewed.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
+              </Card>
+            </div>
+          )}
+
+          {P.expiring?.length > 0 && (
+            <div className="sw-mt">
+              <Card title="PROPOSALS EXPIRING" sub="Within the next week" bodyless>
+                {P.expiring.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
+              </Card>
+            </div>
+          )}
+
+          <div className="sw-mt">
+            <Card title="PROPOSALS TO FINISH" sub="Started and not yet sent" bodyless>
+              {P.to_finish?.length
+                ? P.to_finish.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)
+                : <Empty title="Nothing half-written">
+                    Draft proposals appear here so one never sits forgotten.
                   </Empty>}
             </Card>
           </div>

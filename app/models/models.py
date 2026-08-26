@@ -1520,8 +1520,12 @@ class ProposalFile(Base):
     __tablename__ = "proposal_files"
 
     id              = Column(String, primary_key=True, default=gen_uuid)
+    # NULLABLE as of Checkpoint 4, for the same reason as Proposal.organization_id:
+    # a file attached to a SALES proposal belongs to the brand and the deal, not
+    # to a customer tenant that does not exist until the deal is Won. Existing
+    # customer-portal uploads keep their organization_id and are unaffected.
     organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
-                             nullable=False, index=True)
+                             nullable=True, index=True)
     proposal_id     = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
                              nullable=False, index=True)
     filename        = Column(String, nullable=False)

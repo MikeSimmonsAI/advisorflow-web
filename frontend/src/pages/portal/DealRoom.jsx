@@ -16,8 +16,7 @@
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-
-const API = import.meta.env.VITE_API_URL || 'https://advisorflow-backend.onrender.com'
+import { API_BASE as API } from '../../api/client'
 
 function money(amount, currency) {
   if (amount === null || amount === undefined) return null

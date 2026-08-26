@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { api, getCurrentUser } from '../api/client'
+import { api, getCurrentUser, API_BASE } from '../api/client'
 import './CRMIntegration.css'
 
 const CRM_TYPES = [
@@ -34,7 +34,7 @@ const ALL_EVENTS = [
   { key: 'pipeline_started', label: 'Pipeline Started' },
 ]
 
-const BACKEND = import.meta.env.VITE_API_URL || 'https://advisorflow-backend.onrender.com'
+const BACKEND = API_BASE
 
 const DEFAULT_FORM = {
   name: '',

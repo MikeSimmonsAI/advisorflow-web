@@ -52,3 +52,7 @@ deploy_log.txt
 # Local Sales Workspace demo database (scripts/demo_local_scheduling.py).
 # Development fixture only - never production data.
 demo_sales.db
+
+# Local sales-execution demo database (scripts/demo_env.py), used to drive the
+# UI for screenshots. Development fixture only - never production data.
+demo_local.db

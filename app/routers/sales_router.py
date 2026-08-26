@@ -50,6 +50,7 @@ from app.services.sales_access import (
 )
 from app.services import availability as _av
 from app.services import appointment_meetings as _apmeet
+from app.services import proposal_workqueue as _pwq
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -542,9 +543,35 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
         "discoveries_today": [_appt_brief(db, a) for a in discoveries_today],
         "demos_today": [_appt_brief(db, a) for a in demos_today],
         "upcoming_appointments": [_appt_brief(db, a) for a in upcoming[:12]],
+        # ── Proposal work (Checkpoint 4) ────────────────────────────────────
+        # Six queues, each with an action and a reason. Not a proposal report:
+        # a rep opening My Day is deciding what to touch next, and a number
+        # they cannot act on competes with the ones they can.
+        "proposals": _pwq.proposal_queues(db, open_opps, now=now),
+        # A closing call today is the highest-stakes thing on the calendar, so
+        # it is surfaced separately rather than buried in the day's list.
+        "closing_today": [_appt_brief(db, a) for a in todays
+                          if "closing" in kind(a)],
         # Still genuinely absent — see the constant.
         "calendar_sync": CALENDAR_SYNC_NOT_BUILT,
     }
+
+
+@router.get("/opportunities/{opp_id}/closing")
+def opportunity_closing(opp_id: str,
+                        user: User = Depends(require_sales_member),
+                        db: Session = Depends(get_db)):
+    """The Closing workspace for one deal.
+
+    Assembled entirely from data Checkpoint 4 already produces — no new tables
+    and nothing inferred. The warnings are the point: a closing screen that
+    only shows status tells a rep what they already knew.
+    """
+    opp = db.query(Opportunity).filter(Opportunity.id == opp_id).first()
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    assert_can_view_opportunity(user, opp, db)
+    return _pwq.closing_view(db, opp)
 
 
 # ── Pipeline ────────────────────────────────────────────────────────────────

@@ -482,6 +482,34 @@ def test_publish_and_send():
         check("but the proposal IS still published and the key valid",
               row.status == "published", row.status)
         db.close()
+
+        # A dry run is a preview, and `dry_run` is settable by any caller of
+        # the endpoint. It must not leave a proposal — or a pipeline — claiming
+        # a customer received something nobody sent. Run against the same
+        # still-unsent proposal, with a working sender restored, so the only
+        # thing under test is what `dry_run` itself does.
+        email_service.send_email_via_provider = _fake_send
+        del SENT[:]
+        r = c.post("/sales/proposals/%s/send" % pid2, headers=bb,
+                   json={"dry_run": True})
+        check("a dry run succeeds", r.status_code == 200, r.text[:300])
+        body = r.json()
+        check("a dry run reports itself as a dry run", body.get("dry_run") is True)
+        check("a dry run still returns a real portal url",
+              "/portal/access/" in (body.get("portal_url") or ""))
+        check("a dry run sends NO email", len(SENT) == 0, len(SENT))
+
+        db = SessionLocal()
+        row = db.query(Proposal).filter(Proposal.id == pid2).first()
+        check("a dry run does NOT mark the proposal sent",
+              row.sales_status != PROP_SENT, row.sales_status)
+        check("a dry run leaves sent_at unstamped", row.sent_at is None, row.sent_at)
+        check("a dry run DOES publish, so the preview link is real",
+              row.status == "published", row.status)
+        opp_bb = db.query(Opportunity).filter(Opportunity.id == "opp-bb").first()
+        check("a dry run does not mirror 'sent' onto the opportunity",
+              opp_bb.proposal_sent_at is None, opp_bb.proposal_sent_at)
+        db.close()
     finally:
         email_service.send_email_via_provider = original
         del SENT[:]
@@ -999,6 +1027,163 @@ def test_host_link_and_migrations():
     # with a NOT NULL violation, while passing locally on a fresh SQLite.
     check("proposals.organization_id NOT NULL is relaxed",
           ("proposals", "organization_id") in relaxed, relaxed)
+    check("proposal_files.organization_id NOT NULL is relaxed",
+          ("proposal_files", "organization_id") in relaxed, relaxed)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10. MY DAY, CLOSING WORKSPACE, UPLOAD, VIDEO STATUS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_my_day_and_closing():
+    print("\n[10] My Day queues and the Closing workspace")
+    c = TestClient(app)
+    blake = token_for(c, "blake@example.com")
+
+    r = c.get("/sales/my-day", headers=blake)
+    check("my-day loads", r.status_code == 200, r.text[:200])
+    body = r.json()
+    check("my-day carries proposal queues", "proposals" in body, list(body.keys()))
+    P = body["proposals"]
+    for q in ("to_finish", "ready_to_send", "recently_viewed",
+              "follow_up_required", "expiring", "counts"):
+        check("my-day has the %s queue" % q, q in P, list(P.keys()))
+    check("closing meetings today is surfaced", "closing_today" in body)
+
+    # The accepted v2 is not work — it must not sit in a queue demanding action.
+    all_ids = [x["proposal_id"] for k, v in P.items() if isinstance(v, list) for x in v]
+    check("an ACCEPTED proposal is not in any work queue",
+          ID["prop2"] not in all_ids, all_ids)
+    check("a SUPERSEDED proposal is never in a queue",
+          ID["prop1"] not in all_ids, all_ids)
+
+    # Every queue row must carry a reason — that is what makes it a queue.
+    rows = [x for k, v in P.items() if isinstance(v, list) for x in v]
+    check("every queue row explains why it is there",
+          all(r.get("reason") for r in rows), rows[:2])
+
+    r = c.get("/sales/opportunities/opp-1/closing", headers=blake)
+    check("the closing view loads", r.status_code == 200, r.text[:300])
+    cv = r.json()
+    for f in ("proposal", "portal", "last_meeting", "next_meeting", "warnings",
+              "salesperson", "manager", "next_action", "stage"):
+        check("closing view has %s" % f, f in cv, list(cv.keys()))
+    check("the salesperson is named", cv["salesperson"]["full_name"] == "Blake Rehani")
+    check("the manager is resolved from the brand",
+          cv["manager"] and cv["manager"]["full_name"] == "Michael Schlueter",
+          cv["manager"])
+    check("the current proposal is the accepted v2",
+          cv["proposal"]["version"] == 2 and cv["proposal"]["status"] == PROP_ACCEPTED,
+          cv["proposal"])
+    check("the amount is carried", cv["proposal"]["amount"] == 4495.0)
+    check("portal activity is reported", cv["portal"]["event_count"] > 0, cv["portal"])
+    check("the last buyer action is named", bool(cv["portal"]["last_activity"]))
+
+    # Warnings are the point of the panel.
+    texts = " ".join(w["text"] for w in cv["warnings"])
+    check("warnings are produced", len(cv["warnings"]) > 0, cv["warnings"])
+    check("an attention count is provided", "attention_count" in cv)
+
+    # A deal with NOTHING should warn about the absence, not stay silent.
+    db = SessionLocal()
+    bare = Opportunity(id="opp-bare", brand_sales_org_id="bso-evo",
+                       owner_user_id="u-blake", company_name="Bare Co",
+                       stage="prospect", status="open")
+    db.add(bare)
+    db.commit()
+    db.close()
+    r = c.get("/sales/opportunities/opp-bare/closing", headers=blake)
+    cv2 = r.json()
+    t2 = " ".join(w["text"] for w in cv2["warnings"])
+    check("a deal with no proposal is warned about", "No proposal" in t2, t2)
+    check("a deal with no next action is warned about", "next action" in t2, t2)
+    check("a deal with nothing scheduled is warned about", "scheduled" in t2, t2)
+    check("warnings carry an action to take",
+          any(w.get("action") for w in cv2["warnings"]), cv2["warnings"])
+
+    # Isolation holds on the new endpoint too.
+    bb = token_for(c, "bbrep@example.com")
+    r = c.get("/sales/opportunities/opp-1/closing", headers=bb)
+    check("another brand cannot read the closing view",
+          r.status_code in (403, 404), r.status_code)
+    r = c.get("/sales/opportunities/opp-1/closing")
+    check("the closing view requires authentication",
+          r.status_code in (401, 403), r.status_code)
+
+
+def test_upload_and_video_status():
+    print("\n[11] File upload and video status")
+    from app.models.models import ProposalFile
+    c = TestClient(app)
+    blake = token_for(c, "blake@example.com")
+
+    # A fresh draft to attach to — v2 is accepted and therefore locked.
+    db = SessionLocal()
+    opp = db.query(Opportunity).filter(Opportunity.id == "opp-bare").first()
+    p3 = ps.create_proposal(db, opp, db.query(User).filter(User.id == "u-blake").first())
+    db.commit()
+    pid3 = p3.id
+    db.close()
+
+    files = {"file": ("sow.pdf", b"%PDF-1.4 fake statement of work", "application/pdf")}
+    r = c.post("/sales/proposals/%s/upload" % pid3, headers=blake,
+               files=files, data={"label": "Statement of work"})
+    check("a PDF can be uploaded", r.status_code == 201, r.text[:300])
+    blocks = r.json()["blocks"]
+    added = [b for b in blocks if b["block_type"] == "pdf"]
+    check("a content block is created for it", len(added) == 1, blocks)
+    check("the block points at the existing file route",
+          added[0]["file_url"].startswith("/proposals/files/"), added[0])
+    check("the label is used", added[0]["content"] == "Statement of work")
+
+    db = SessionLocal()
+    row = db.query(ProposalFile).filter(ProposalFile.proposal_id == pid3).first()
+    check("the bytes are stored", row is not None and row.file_size > 0)
+    check("an uploaded sales file has NO customer organization",
+          row.organization_id is None, row.organization_id)
+    db.close()
+
+    # An allowlist, not a blocklist — an executable served from our own domain
+    # would be a genuine problem.
+    bad = {"file": ("payload.html", b"<script>alert(1)</script>", "text/html")}
+    r = c.post("/sales/proposals/%s/upload" % pid3, headers=blake, files=bad)
+    check("an HTML upload is refused", r.status_code == 400, r.status_code)
+    bad2 = {"file": ("run.exe", b"MZ", "application/x-msdownload")}
+    r = c.post("/sales/proposals/%s/upload" % pid3, headers=blake, files=bad2)
+    check("an executable upload is refused", r.status_code == 400, r.status_code)
+    empty = {"file": ("empty.pdf", b"", "application/pdf")}
+    r = c.post("/sales/proposals/%s/upload" % pid3, headers=blake, files=empty)
+    check("an empty file is refused", r.status_code == 400, r.status_code)
+
+    bb = token_for(c, "bbrep@example.com")
+    r = c.post("/sales/proposals/%s/upload" % pid3, headers=bb, files=files)
+    check("another brand cannot upload to this proposal",
+          r.status_code == 404, r.status_code)
+    r = c.post("/sales/proposals/%s/upload" % pid3, files=files)
+    check("upload requires authentication", r.status_code in (401, 403), r.status_code)
+
+    # ── video status ────────────────────────────────────────────────────────
+    r = c.get("/sales/video/status", headers=blake)
+    check("video status loads", r.status_code == 200, r.text[:300])
+    v = r.json()
+    check("it names the provider", v["provider"] == "zoom")
+    check("it reports a state",
+          v["state"] in ("ready", "not_configured", "error"), v["state"])
+    check("it reports whether credentials exist", "has_credentials" in v)
+    check("it lists which meeting types create video",
+          any(t["requires_video"] for t in v["meeting_types"]), v["meeting_types"])
+    check("it also lists the ones that do NOT",
+          any(not t["requires_video"] for t in v["meeting_types"]))
+
+    # THE assertion: no credential may ever be serialized.
+    raw = r.text
+    check("NO ZOOM CREDENTIAL IS EVER RETURNED",
+          "test-secret" not in raw and "test-client" not in raw
+          and "test-account" not in raw and "client_secret" not in raw, raw[:300])
+
+    r = c.get("/sales/video/status")
+    check("video status requires authentication",
+          r.status_code in (401, 403), r.status_code)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1017,6 +1202,8 @@ def main():
     test_zoom()
     test_zoom_failure_and_cancel()
     test_host_link_and_migrations()
+    test_my_day_and_closing()
+    test_upload_and_video_status()
 
     print("\n" + "=" * 74)
     if FAILURES:

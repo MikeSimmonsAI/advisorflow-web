@@ -449,6 +449,10 @@ NULLABILITY_TO_RELAX = [
     # organization_id and are unaffected; this only permits the NULL that a
     # pre-sale proposal requires.
     ("proposals", "organization_id"),
+    # Same reason, one table down: a file on a sales proposal has no customer
+    # tenant either. Missing this relax means every upload fails on production
+    # Postgres with a NOT NULL violation while passing on a fresh SQLite.
+    ("proposal_files", "organization_id"),
 ]
 
 

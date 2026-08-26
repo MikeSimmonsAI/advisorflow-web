@@ -22,7 +22,9 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import (
+    APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -633,3 +635,190 @@ def deal_room_decision(token: str, body: DecisionIn, request: Request,
     db.commit()
     return {"ok": True, "action": res["action"],
             "proposal": _public_payload(db, prop)["proposal"]}
+
+
+# ── file upload ─────────────────────────────────────────────────────────────
+#
+# REUSES the existing ProposalFile storage and the existing public
+# /proposals/files/{id} serving route. Nothing about how files are stored or
+# served changes — this only adds the SALES-scoped upload path, with the brand
+# and opportunity checks the customer-org path had no need for.
+
+# What a salesperson may actually attach to a deal room. An allowlist, not a
+# blocklist: an executable or an HTML file served from our own domain is a
+# problem, and enumerating what is safe is the only way to be sure.
+ALLOWED_UPLOAD_TYPES = {
+    "application/pdf": "pdf",
+    "image/png": "image",
+    "image/jpeg": "image",
+    "image/gif": "image",
+    "image/webp": "image",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "pdf",
+    "application/msword": "pdf",
+    "application/vnd.ms-powerpoint": "pdf",
+    "application/vnd.ms-excel": "pdf",
+}
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024   # 20MB, same as the existing portal path
+
+
+@router.post("/sales/proposals/{proposal_id}/upload", status_code=201)
+async def upload_proposal_file(proposal_id: str,
+                               file: UploadFile = File(...),
+                               label: Optional[str] = Form(None),
+                               user: User = Depends(require_sales_member),
+                               db: Session = Depends(get_db)):
+    """Attach a document, deck or image to the deal room.
+
+    The file is stored as bytes in `proposal_files` — the same mechanism the
+    customer-org portal already used — and a content block is created pointing
+    at the existing public serving route.
+
+    THE BLOCK IS WHAT PUBLISHES IT. Uploading stores a file; it becomes visible
+    to the customer only because a block references it, and blocks are only
+    served for a published proposal through a live token. Nothing here bypasses
+    that rule.
+    """
+    from app.models.models import ProposalFile
+
+    prop = _load_proposal(db, proposal_id, user)
+
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    if ctype not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="That file type is not supported. Use a PDF, an image, or an "
+                   "Office document.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="That file is empty.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="That file is larger than 20MB. Link to it instead, or send a "
+                   "smaller version.")
+
+    row = ProposalFile(
+        # A sales proposal has no customer organization — that is the whole
+        # tenancy rule of this checkpoint — so this stays NULL just as it does
+        # on the proposal itself.
+        organization_id=None,
+        proposal_id=prop.id,
+        filename=(file.filename or "attachment")[:255],
+        content_type=ctype,
+        file_size=len(data),
+        file_data=data,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.flush()
+
+    last = (db.query(ProposalBlock)
+            .filter(ProposalBlock.proposal_id == prop.id)
+            .order_by(ProposalBlock.position.desc()).first())
+    db.add(ProposalBlock(
+        proposal_id=prop.id,
+        block_type=ALLOWED_UPLOAD_TYPES[ctype],
+        position=(last.position + 1) if last else 0,
+        content=(label or file.filename or "Document")[:255],
+        file_url="/proposals/files/%s" % row.id,
+        file_name=(file.filename or "attachment")[:255],
+        file_size=len(data),
+        created_at=datetime.utcnow(),
+    ))
+    db.commit()
+    db.refresh(prop)
+    return _proposal_out(db, prop, user, include_blocks=True)
+
+
+# ── video provider status ───────────────────────────────────────────────────
+
+@router.get("/sales/video/status")
+def video_provider_status(brand_sales_org_id: Optional[str] = Query(None),
+                          verify: bool = Query(False),
+                          user: User = Depends(require_sales_member),
+                          db: Session = Depends(get_db)):
+    """Is video actually working for this brand, and if not, why?
+
+    Deliberately NOT a settings screen — Checkpoint 4 does not build one. This
+    answers the one question a person actually has when a meeting has no Zoom
+    link: is it us, or is it them?
+
+    `verify=true` performs a REAL round-trip to the provider. A green tick that
+    only proves a row exists in our own database is worth nothing — the whole
+    failure mode this guards against is a UI that says CONFIGURED while every
+    meeting silently fails to provision.
+
+    NO CREDENTIAL IS EVER RETURNED. The response says whether credentials are
+    present, never what they are.
+    """
+    from app.services import meeting_providers as mreg
+    from app.models.meeting_models import PROVIDER_LABELS
+    from app.models.scheduling_models import MeetingType
+
+    org_ids = sales_org_ids(user, db)
+    bid = brand_sales_org_id or (list(org_ids)[0] if org_ids else None)
+    if not bid or bid not in org_ids:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    key = mreg.DEFAULT_PROVIDER
+    cfg = mreg.brand_config(db, bid, key)
+    provider = mreg.get_provider(db, bid, key=key)
+
+    ready, reason = (False, "No provider available")
+    if provider is not None:
+        ready, reason = provider.is_ready()
+
+    # Where the credentials came from matters operationally: an env-var setup
+    # is shared platform-wide and will NOT scale to a second brand.
+    source = "brand_config" if cfg is not None else ("environment" if ready else None)
+
+    state = "ready" if ready else "not_configured"
+    detail = None if ready else (reason or "Zoom is not configured for this brand.")
+
+    verified = None
+    if verify and provider is not None and ready:
+        result = provider.verify()
+        verified = bool(result.ok)
+        if not result.ok:
+            state = "error"
+            detail = result.error_message or "Zoom rejected the request."
+        else:
+            detail = result.error_message   # "Connected as ..."
+        if cfg is not None:
+            cfg.last_verified_at = datetime.utcnow() if result.ok else cfg.last_verified_at
+            cfg.last_error = None if result.ok else (result.error_message or "")[:1000]
+            db.commit()
+
+    types = (db.query(MeetingType)
+             .filter(MeetingType.brand_sales_org_id == bid,
+                     MeetingType.is_active.is_(True))
+             .order_by(MeetingType.sort_order.asc()).all())
+
+    return {
+        "brand_sales_org_id": bid,
+        "provider": key,
+        "provider_label": PROVIDER_LABELS.get(key, key),
+        "state": state,                    # ready | not_configured | error
+        "detail": detail,
+        "has_credentials": bool(ready),
+        "credential_source": source,
+        "verified": verified,
+        "last_verified_at": cfg.last_verified_at if cfg else None,
+        "last_error": cfg.last_error if cfg else None,
+        # Which meeting types will actually produce a room. Without this, "Zoom
+        # is ready" and "no link on my Discovery call" look contradictory when
+        # they are both true and the type simply has video switched off.
+        "meeting_types": [{
+            "id": t.id, "key": t.key, "name": t.name,
+            "requires_video": bool(t.requires_video),
+            "provider": t.video_provider or key,
+        } for t in types],
+        "setup_hint": (
+            None if ready else
+            "Create a Server-to-Server OAuth app in the Zoom admin console with "
+            "the meeting:write scope, then set ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID "
+            "and ZOOM_CLIENT_SECRET on the backend service."),
+    }

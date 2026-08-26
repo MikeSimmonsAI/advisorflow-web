@@ -16,6 +16,7 @@ import FindTeamTime from './FindTeamTime'
 import ApptSyncPanel from './ApptSyncPanel'
 import RescheduleDialog from './RescheduleDialog'
 import ProposalPanel from './ProposalPanel'
+import ClosingPanel from './ClosingPanel'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
   money, dateTime, dueLabel, wallDateTime,
@@ -539,6 +540,13 @@ export default function OpportunityDetail() {
         </div>
 
         <div>
+          {/* First in the right column: once a proposal exists, "what is
+              stopping this closing" is the question a rep opens the deal to
+              answer. */}
+          <div style={{ marginBottom: 16 }}>
+            <ClosingPanel opp={opp} />
+          </div>
+
           <Meetings opp={opp} saving={saving}
                     onFind={() => setFinding(true)}
                     onConfirm={confirmAppt} onCancel={cancelAppt}

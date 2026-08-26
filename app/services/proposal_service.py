@@ -587,8 +587,11 @@ def send_proposal(db: Session, prop: Proposal, user, recipient_email=None,
         (ident.get("app_base_url") or PUBLIC_BASE_URL).rstrip("/"), tok.token)
 
     if dry_run:
-        prop.sales_status = PROP_SENT
-        prop.sent_at = now
+        # Deliberately does NOT mark the proposal sent. Nobody received it, so
+        # claiming otherwise would put "proposal sent" on the pipeline for a
+        # customer who never got one — and `dry_run` is settable by any caller
+        # of the send endpoint, not just a test. The publish and the access key
+        # above are real, which is what makes the returned URL worth previewing.
         return {"ok": True, "sent": False, "dry_run": True,
                 "portal_url": portal_url, "error": None}
 
