@@ -202,6 +202,99 @@ const CSS = `
   .sw-metrics{grid-template-columns:repeat(2,1fr)}
   .sw-infogrid{grid-template-columns:1fr}
 }
+
+/* ── Team Command (Checkpoint 5) ─────────────────────────────────────────────
+   Built to collapse to one column on a phone rather than to be redesigned for
+   one. A manager approving a discount from a car park is the realistic case;
+   a horizontally-scrolling approval button is not a manager tool. */
+.sw-scope .sw-muted{color:var(--sw-ink2);font-size:12px}
+.sw-scope .sw-pad{padding:8px 2px}
+.sw-scope .sw-note{background:#e8f7f4;border:1px solid #b7e4dc;color:#0f7e73;
+  padding:10px 12px;border-radius:8px;margin-bottom:14px;font-size:13px}
+.sw-scope .sw-btn.sw-ghost{background:transparent;border-color:transparent;
+  color:var(--sw-ink2)}
+.sw-scope .sw-btn.sw-ghost:hover{border-color:var(--sw-line);color:var(--sw-ink)}
+.sw-scope .sw-two{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;
+  align-items:start}
+
+.sw-scope .sw-appr{border:1px solid var(--sw-line);border-radius:10px;
+  padding:12px;margin-bottom:10px;background:#fffdf7}
+.sw-scope .sw-appr-head{display:flex;justify-content:space-between;
+  align-items:center;gap:10px;margin-bottom:8px}
+.sw-scope .sw-appr-money{display:grid;grid-template-columns:repeat(3,1fr);
+  gap:8px;margin-bottom:8px}
+.sw-scope .sw-quote{margin:0 0 10px;padding:8px 12px;border-left:3px solid var(--sw-teal);
+  background:#f6fafb;color:var(--sw-ink);font-size:13px}
+.sw-scope .sw-appr-act{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sw-scope .sw-appr-act .sw-input{flex:1 1 220px;min-width:0}
+
+.sw-scope .sw-attgroup{margin-bottom:14px}
+.sw-scope .sw-attgroup-h{display:flex;align-items:center;gap:8px;
+  font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--sw-ink2);margin:0 0 6px;padding-bottom:4px;
+  border-bottom:1px solid var(--sw-line2)}
+.sw-scope .sw-attrow{display:flex;gap:10px;align-items:flex-start;
+  justify-content:space-between;padding:8px 0;
+  border-bottom:1px solid var(--sw-line2)}
+.sw-scope .sw-attrow:last-child{border-bottom:none}
+.sw-scope .sw-attrow-main{min-width:0}
+.sw-scope .sw-attrow-t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sw-scope .sw-attrow-meta{font-size:12px;color:var(--sw-ink2);margin-top:3px}
+.sw-scope .sw-do{color:var(--sw-teal-deep);font-weight:600}
+
+.sw-scope .sw-tablewrap{overflow-x:auto}
+.sw-scope .sw-table{width:100%;border-collapse:collapse;font-size:13px}
+.sw-scope .sw-table th{text-align:left;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--sw-ink2);font-weight:600;
+  padding:6px 8px;border-bottom:1px solid var(--sw-line)}
+.sw-scope .sw-table td{padding:8px;vertical-align:top;
+  border-bottom:1px solid var(--sw-line2)}
+
+.sw-scope .sw-person{border-bottom:1px solid var(--sw-line2);padding:8px 0}
+.sw-scope .sw-person:last-child{border-bottom:none}
+.sw-scope .sw-person-h,.sw-scope .sw-rep-h{display:flex;align-items:center;
+  gap:10px;margin-bottom:6px}
+.sw-scope .sw-person-h small,.sw-scope .sw-rep-h small{display:block;
+  color:var(--sw-ink2);font-size:11px}
+.sw-scope .sw-person-h .sw-count,.sw-scope .sw-rep-h .sw-chip{margin-left:auto}
+.sw-scope .sw-meet{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:4px 0 4px 42px;font-size:13px}
+.sw-scope .sw-meet-t{font-variant-numeric:tabular-nums;font-weight:600;
+  min-width:66px}
+
+.sw-scope .sw-rep{border-bottom:1px solid var(--sw-line2);padding:10px 0}
+.sw-scope .sw-rep:last-child{border-bottom:none}
+.sw-scope .sw-rep-h{cursor:pointer}
+.sw-scope .sw-rep-id{min-width:0}
+.sw-scope .sw-rep-nums{display:grid;grid-template-columns:repeat(3,1fr);
+  gap:6px;margin:6px 0}
+.sw-scope .sw-rep-foot{display:flex;justify-content:space-between;
+  align-items:center;gap:8px;flex-wrap:wrap}
+.sw-scope .sw-repdrill{margin-top:8px;border-top:1px dashed var(--sw-line);
+  padding-top:8px}
+.sw-scope .sw-drillrow{display:flex;justify-content:space-between;gap:10px;
+  align-items:center;padding:6px 0;cursor:pointer;
+  border-bottom:1px solid var(--sw-line2)}
+.sw-scope .sw-drillrow:last-child{border-bottom:none}
+.sw-scope .sw-drillrow:hover{background:#f6fafb}
+.sw-scope .sw-drillmeta{display:flex;gap:8px;align-items:center;flex-shrink:0}
+.sw-scope .sw-decided{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  padding:5px 0;font-size:13px;border-bottom:1px solid var(--sw-line2)}
+.sw-scope .sw-decided:last-child{border-bottom:none}
+
+@media(max-width:1240px){
+  .sw-two{grid-template-columns:1fr}
+  .sw-rep-nums{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:820px){
+  .sw-appr-money{grid-template-columns:1fr}
+  .sw-appr-act{flex-direction:column;align-items:stretch}
+  .sw-appr-act .sw-input{flex:1 1 auto}
+  .sw-attrow{flex-direction:column;align-items:stretch}
+  .sw-attrow .sw-btn{align-self:flex-start}
+  .sw-meet{padding-left:0}
+  .sw-rep-nums{grid-template-columns:repeat(2,1fr)}
+}
 `
 
 let injected = false

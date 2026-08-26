@@ -36,6 +36,15 @@ const NAV = [
   { to: '/sales/onboarding', label: 'Sold / Onboarding', icon: '✓', soon: true },
 ]
 
+// Checkpoint 5. Shown only to a manager — `permission` names the flag on
+// /sales/me that decides. This is presentation: /sales/manager/* is gated by
+// require_sales_manager server-side, so a rep who types the URL gets a 403,
+// not a screen. The nav item is a courtesy, never the control.
+const MANAGER_NAV = [
+  { to: '/sales/manager', label: 'Team Command', icon: '◎',
+    permission: 'view_team_pipeline', end: true },
+]
+
 export default function SalesShell({ title, subtitle, actions, children }) {
   const nav = useNavigate()
   const [ctx, setCtx] = useState(null)
@@ -142,6 +151,24 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               )
             })}
           </nav>
+
+          {MANAGER_NAV.some(i => ctx?.permissions?.[i.permission]) ? (
+            <>
+              <div className="sw-navtitle">MY TEAM</div>
+              <nav className="sw-nav">
+                {MANAGER_NAV.filter(i => ctx?.permissions?.[i.permission]).map(item => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) => (isActive ? 'sw-on' : '')}
+                  >
+                    <span>{item.icon}</span><span>{item.label}</span>
+                  </NavLink>
+                ))}
+              </nav>
+            </>
+          ) : null}
 
           <div className="sw-sidefill" />
           <div className="sw-mini">

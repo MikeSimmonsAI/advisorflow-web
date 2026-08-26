@@ -248,6 +248,16 @@ def main():
     p3 = ps.create_proposal(db, o3, blake, now=now - timedelta(hours=5))  # DRAFT
     db.commit()
 
+    # A rep waiting on their manager (Checkpoint 5). Created through the real
+    # service so the demo exercises the same validation the product does, and
+    # so the Team Command screen has a genuine decision to show rather than a
+    # hand-written row that could never have been produced by the app.
+    from app.services import pricing_approvals as appr
+    appr.create_request(db, p3, blake, -300,
+                        "They are quoting Vendor X at 1,200. I need to be close.",
+                        now=now - timedelta(hours=4))
+    db.commit()
+
     print("Demo database written to %s" % DB_PATH)
     print("  blake@evosyspro.live / %s   (rep)" % PW)
     print("  michael@evosyspro.live / %s (manager)" % PW)

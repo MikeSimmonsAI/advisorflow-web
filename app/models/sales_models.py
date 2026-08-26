@@ -374,3 +374,85 @@ class OpportunityEvent(Base):
     __table_args__ = (
         Index("ix_opportunity_events_opp_time", "opportunity_id", "occurred_at"),
     )
+
+
+# ── Pricing approval requests ────────────────────────────────────────────────
+# Checkpoint 5. Before this existed, a rep who needed a discount was told
+# "ask your manager to apply the adjustment" — an instruction to use Slack.
+# The authority itself is unchanged: a manager could always override pricing,
+# a rep never could. What was missing was a RECORD OF THE ASKING, which is why
+# a manager had nothing to approve and no way to see who was waiting on them.
+#
+# This table holds the request. It deliberately does NOT hold the outcome of
+# applying it: an approved request calls the existing apply_pricing(), so the
+# proposal's own price_override_by/_at/_reason columns and the opportunity
+# timeline stay the single source of truth for what the price actually is and
+# who changed it. Two records of the same fact would eventually disagree.
+
+APPROVAL_PENDING   = "pending"
+APPROVAL_APPROVED  = "approved"
+APPROVAL_DENIED    = "denied"
+APPROVAL_WITHDRAWN = "withdrawn"
+# The proposal moved on (was sent, superseded, or the deal closed) before anyone
+# decided. Not a decision — the question stopped being answerable.
+APPROVAL_STALE     = "stale"
+
+APPROVAL_STATUSES = (APPROVAL_PENDING, APPROVAL_APPROVED, APPROVAL_DENIED,
+                     APPROVAL_WITHDRAWN, APPROVAL_STALE)
+# Only one of these may exist per proposal at a time.
+APPROVAL_OPEN_STATUSES = (APPROVAL_PENDING,)
+
+APPROVAL_LABELS = {
+    APPROVAL_PENDING:   "Waiting on you",
+    APPROVAL_APPROVED:  "Approved",
+    APPROVAL_DENIED:    "Denied",
+    APPROVAL_WITHDRAWN: "Withdrawn",
+    APPROVAL_STALE:     "No longer applicable",
+}
+
+
+class PricingApprovalRequest(Base):
+    """A rep asking a manager to approve a price adjustment they cannot make.
+
+    Scoped by brand_sales_org_id so a manager's queue can be read with one
+    indexed query and can never span brands.
+
+    `requested_adjustment` is a signed amount against the package list price,
+    matching Proposal.adjustment exactly — a discount is negative. Storing the
+    adjustment rather than the final figure means an approval still means what
+    the rep asked for if the package price changed underneath it, instead of
+    silently approving a different discount than the one requested.
+    """
+    __tablename__ = "pricing_approval_requests"
+
+    id                 = Column(String, primary_key=True, default=gen_uuid)
+    brand_sales_org_id = Column(String, ForeignKey("brand_sales_orgs.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    opportunity_id     = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    proposal_id        = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+
+    requested_by       = Column(String, ForeignKey("users.id"), nullable=False)
+    requested_at       = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # What the rep is asking for, captured at request time so the queue reads
+    # correctly even if the proposal is edited afterwards.
+    base_amount          = Column(Numeric(12, 2), nullable=True)
+    current_adjustment   = Column(Numeric(12, 2), nullable=True)
+    requested_adjustment = Column(Numeric(12, 2), nullable=False)
+    currency             = Column(String, default="USD", nullable=True)
+    reason               = Column(Text, nullable=False)
+
+    status         = Column(String, default=APPROVAL_PENDING, nullable=False)
+    decided_by     = Column(String, ForeignKey("users.id"), nullable=True)
+    decided_at     = Column(DateTime, nullable=True)
+    decision_note  = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_pricing_approval_brand_status", "brand_sales_org_id", "status"),
+        Index("ix_pricing_approval_proposal", "proposal_id", "status"),
+    )

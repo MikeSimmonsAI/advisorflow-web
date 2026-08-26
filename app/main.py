@@ -75,6 +75,7 @@ from app.routers.sales_router import router as sales_router
 from app.routers.sales_scheduling_router import router as sales_scheduling_router
 from app.routers.calendar_connections_router import router as calendar_connections_router
 from app.routers.sales_proposal_router import router as sales_proposal_router
+from app.routers.sales_manager_router import router as sales_manager_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -401,6 +402,11 @@ app.include_router(calendar_connections_router)
 # the token is the authorization, because a customer must never need an account
 # to read what we sent them.
 app.include_router(sales_proposal_router)
+# The manager command workspace (Checkpoint 5). Every route is gated by
+# require_sales_manager and every query filters on one brand id explicitly. A
+# manager runs a team inside a brand — this router reaches no platform data, no
+# other brand, and no customer tenant.
+app.include_router(sales_manager_router)
 app.include_router(proposal_router.router)
 
 

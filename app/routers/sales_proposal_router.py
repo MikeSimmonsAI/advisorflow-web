@@ -45,6 +45,8 @@ from app.services.sales_access import (
     is_sales_manager, is_god,
 )
 from app.services import proposal_service as ps
+from app.services import pricing_approvals as _appr
+from app.routers.sales_router import _user_name
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +130,15 @@ def _proposal_out(db: Session, prop: Proposal, user: User,
             prop.price_override_reason
             if (is_god(user) or is_sales_manager(user, db, prop.brand_sales_org_id))
             else None),
+        # WHO approved it. The column was written from the first day of
+        # Checkpoint 4 and returned by nothing, so the audit trail could only be
+        # reconstructed from the timeline. Same manager-only visibility as the
+        # reason it sits beside.
+        "price_override_by_name": (
+            _user_name(db, prop.price_override_by)
+            if (prop.price_override_by
+                and (is_god(user) or is_sales_manager(user, db, prop.brand_sales_org_id)))
+            else None),
         "can_override_price": ps.can_override_price(db, user, prop.brand_sales_org_id),
         "executive_summary": prop.executive_summary,
         "business_need": prop.business_need,
@@ -151,6 +162,11 @@ def _proposal_out(db: Session, prop: Proposal, user: User,
         "updated_at": prop.updated_at,
         "editable": prop.sales_status in PROPOSAL_EDITABLE_STATUSES,
     }
+    # The rep's outstanding ask, if any (Checkpoint 5). Carried on the proposal
+    # rather than fetched separately so the panel can show "waiting on your
+    # manager" in the same render that shows the price it applies to.
+    _open_req = _appr.open_request_for(db, prop.id)
+    out["pricing_request"] = _appr.request_out(db, _open_req) if _open_req else None
     if include_blocks:
         blocks = (db.query(ProposalBlock)
                   .filter(ProposalBlock.proposal_id == prop.id)
@@ -380,6 +396,50 @@ def revoke_access(proposal_id: str,
     count = ps.revoke_access(db, prop)
     db.commit()
     return {"revoked": count}
+
+
+class PricingRequestIn(BaseModel):
+    requested_adjustment: float = Field(
+        ..., description="Signed amount against the list price. A discount is negative.")
+    reason: str
+
+
+@router.post("/sales/proposals/{proposal_id}/pricing-request", status_code=201)
+def request_pricing_approval(proposal_id: str, body: PricingRequestIn,
+                             user: User = Depends(require_sales_member),
+                             db: Session = Depends(get_db)):
+    """A rep asks their manager for a price they cannot set themselves.
+
+    This creates a QUESTION, not a price. Nothing about the proposal's amount
+    changes until a manager decides. Before Checkpoint 5 the refusal message
+    said "ask your manager", which meant the ask left the product entirely and
+    the manager had no queue.
+    """
+    prop = _load_proposal(db, proposal_id, user)
+    res = _appr.create_request(db, prop, user,
+                               body.requested_adjustment, body.reason)
+    if not res.get("ok"):
+        db.rollback()
+        raise HTTPException(status_code=400, detail=res.get("error"))
+    db.commit()
+    return _appr.request_out(db, res["request"])
+
+
+@router.post("/sales/proposals/{proposal_id}/pricing-request/withdraw")
+def withdraw_pricing_approval(proposal_id: str,
+                              user: User = Depends(require_sales_member),
+                              db: Session = Depends(get_db)):
+    """The rep no longer needs it. Only the person who asked may withdraw."""
+    prop = _load_proposal(db, proposal_id, user)
+    req = _appr.open_request_for(db, prop.id)
+    if req is None:
+        raise HTTPException(status_code=404, detail="No open request on this proposal.")
+    res = _appr.withdraw_request(db, req, user)
+    if not res.get("ok"):
+        db.rollback()
+        raise HTTPException(status_code=400, detail=res.get("error"))
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/sales/proposals/{proposal_id}/blocks", status_code=201)

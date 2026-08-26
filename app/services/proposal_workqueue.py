@@ -51,13 +51,22 @@ def _live_proposals(db: Session, opportunity_ids: List[str]):
 
 
 def _brief(db: Session, p: Proposal, opp: Optional[Opportunity],
-           reason: str = None, urgency: str = None) -> dict:
+           reason: str = None, urgency: str = None, names: dict = None) -> dict:
     """One row in a queue. Carries the REASON it is here, because a list of
-    proposals with no explanation is a report, not a work queue."""
+    proposals with no explanation is a report, not a work queue.
+
+    `names` is an optional user_id -> full_name map. A rep's own queue never
+    needed the owner (every row is theirs); a manager's does, and looking each
+    one up per row would fire a query per line of a screen. Passing the map in
+    keeps this a pure in-memory classifier with exactly one query behind it.
+    """
+    owner_id = opp.owner_user_id if opp else None
     return {
         "proposal_id": p.id,
         "opportunity_id": p.opportunity_id,
         "company": (opp.company_name if opp else None) or p.client_company,
+        "owner_user_id": owner_id,
+        "owner_name": (names or {}).get(owner_id),
         "proposal_number": p.proposal_number,
         "version": p.version or 1,
         "status": p.sales_status,
@@ -93,8 +102,18 @@ def _ago(then: Optional[datetime], now: datetime) -> str:
 
 
 def proposal_queues(db: Session, opportunities: List[Opportunity],
-                    now: Optional[datetime] = None) -> dict:
-    """The six proposal queues for My Day. Each one is a call to action."""
+                    now: Optional[datetime] = None, limit: int = 10,
+                    names: dict = None) -> dict:
+    """The six proposal queues for My Day. Each one is a call to action.
+
+    `limit` caps each list; `counts` are always the honest full totals. A rep
+    with twelve deals never noticed the cap. A manager over six reps would see
+    ten rows out of sixty and have no way to tell — so the caller that widens
+    the scope is the caller that must raise the cap.
+
+    `names` maps user_id -> full_name for owner attribution. Optional, because
+    a rep's own queue does not need it and should not pay for it.
+    """
     now = now or datetime.utcnow()
     opp_by_id = {o.id: o for o in opportunities}
     props = _live_proposals(db, list(opp_by_id.keys()))
@@ -148,12 +167,17 @@ def proposal_queues(db: Session, opportunities: List[Opportunity],
                     "Expires in %d day%s" % (int(days), "" if int(days) == 1 else "s"),
                     "red" if days <= 2 else "amber"))
 
+    if names:
+        for bucket in (to_finish, ready, viewed, follow_up, expiring):
+            for row in bucket:
+                row["owner_name"] = names.get(row.get("owner_user_id"))
+
     return {
-        "to_finish": to_finish[:10],
-        "ready_to_send": ready[:10],
-        "recently_viewed": viewed[:10],
-        "follow_up_required": follow_up[:10],
-        "expiring": expiring[:10],
+        "to_finish": to_finish[:limit],
+        "ready_to_send": ready[:limit],
+        "recently_viewed": viewed[:limit],
+        "follow_up_required": follow_up[:limit],
+        "expiring": expiring[:limit],
         "counts": {
             "to_finish": len(to_finish),
             "ready_to_send": len(ready),

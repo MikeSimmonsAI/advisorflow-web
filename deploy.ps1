@@ -125,6 +125,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "CALENDAR SYNC CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_sales_execution.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "SALES EXECUTION CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_manager_workspace.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "MANAGER WORKSPACE CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

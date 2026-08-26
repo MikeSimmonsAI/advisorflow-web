@@ -50,6 +50,9 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState(null)
   const [reason, setReason] = useState('')
+  // A rep's request for a price they cannot set (Checkpoint 5).
+  const [askReason, setAskReason] = useState('')
+  const [askAdj, setAskAdj] = useState('')
   const [resource, setResource] = useState({ block_type: 'website_url', content: '', file_url: '' })
 
   const load = useCallback(async () => {
@@ -115,6 +118,17 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
     () => api.patch('/sales/proposals/' + current.id,
                     { adjustment: Number(adj), price_reason: reason }),
     'Pricing updated.')
+
+  // Asks. Does not set a price — the manager's decision does that.
+  const askForPrice = () => act(async () => {
+    await api.post('/sales/proposals/' + current.id + '/pricing-request',
+                   { requested_adjustment: Number(askAdj), reason: askReason })
+    setAskReason(''); setAskAdj('')
+  }, 'Sent to your manager. Nothing on the proposal has changed yet.')
+
+  const withdrawAsk = () => act(
+    () => api.post('/sales/proposals/' + current.id + '/pricing-request/withdraw', {}),
+    'Request withdrawn.')
 
   const addResource = () => act(async () => {
     await api.post('/sales/proposals/' + current.id + '/blocks', resource)
@@ -240,9 +254,52 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
           </div>
         </div>
       )}
+      {/* A rep cannot set the price — but before Checkpoint 5 the only thing
+          they could do about it was leave the product and ask on Slack, which
+          left their manager with nothing to answer. This asks IN the record. */}
+      {!p.can_override_price && p.editable && !p.pricing_request && (
+        <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb',
+                      borderRadius: 8, padding: 12, marginTop: 10 }}>
+          <div className="sw-subtle" style={{ marginBottom: 8 }}>
+            Need a different price? Ask your manager. Nothing changes until they
+            approve it.
+          </div>
+          <input className="sw-input" placeholder="Why do you need it? Your manager reads this."
+                 value={askReason} onChange={e => setAskReason(e.target.value)} />
+          <div className="sw-flex" style={{ gap: 8, marginTop: 8 }}>
+            <input className="sw-input" type="number" placeholder="-500"
+                   style={{ width: 130 }} value={askAdj}
+                   onChange={e => setAskAdj(e.target.value)} />
+            <button className="sw-tiny" disabled={busy || !askReason.trim() || !askAdj}
+                    onClick={() => askForPrice()}>
+              Ask my manager
+            </button>
+          </div>
+        </div>
+      )}
+      {p.pricing_request && (
+        <div style={{ background: '#fffdf7', border: '1px solid #f0e2c0',
+                      borderRadius: 8, padding: 12, marginTop: 10 }}>
+          <b style={{ fontSize: 12 }}>Waiting on your manager</b>
+          <div className="sw-subtle" style={{ marginTop: 4 }}>
+            You asked for {money(p.pricing_request.requested_adjustment, p.currency)}
+            {' '}({money(p.pricing_request.requested_total, p.currency)} to the customer)
+            {' '}on {dateTime(p.pricing_request.requested_at)}.
+          </div>
+          <div className="sw-subtle" style={{ marginTop: 4, fontStyle: 'italic' }}>
+            “{p.pricing_request.reason}”
+          </div>
+          <button className="sw-tiny" style={{ marginTop: 8 }} disabled={busy}
+                  onClick={() => withdrawAsk()}>
+            Withdraw the request
+          </button>
+        </div>
+      )}
       {p.price_override_reason && (
         <div className="sw-subtle" style={{ marginTop: 8 }}>
-          Adjusted {dateTime(p.price_override_at)} — {p.price_override_reason}
+          Adjusted {dateTime(p.price_override_at)}
+          {p.price_override_by_name ? ` by ${p.price_override_by_name}` : ''}
+          {' — '}{p.price_override_reason}
         </div>
       )}
 

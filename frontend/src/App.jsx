@@ -51,6 +51,7 @@ import GodOrganizations from './pages/GodOrganizations'
 import LeadScraper from './pages/LeadScraper'
 import MyDay from './pages/sales/MyDay'
 import MyPipeline from './pages/sales/MyPipeline'
+import ManagerCommand from './pages/sales/ManagerCommand'
 import OpportunityDetail from './pages/sales/OpportunityDetail'
 import MyAvailability from './pages/sales/MyAvailability'
 import TeamAvailability from './pages/sales/TeamAvailability'
@@ -173,6 +174,10 @@ export default function App() {
         {/* ── Sales Workspace ── brand-sales members; guarded server-side ── */}
         <Route path="/sales" element={<SalesRoute><MyDay /></SalesRoute>} />
         <Route path="/sales/pipeline" element={<SalesRoute><MyPipeline /></SalesRoute>} />
+        {/* Manager workspace. SalesRoute only checks that someone is signed in;
+            /sales/manager/* is gated by require_sales_manager server-side, so a
+            rep who reaches this URL gets a refusal from the API, not a screen. */}
+        <Route path="/sales/manager" element={<SalesRoute><ManagerCommand /></SalesRoute>} />
         <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
         <Route path="/sales/team" element={<SalesRoute><TeamAvailability /></SalesRoute>} />
         <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />

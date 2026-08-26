@@ -167,9 +167,15 @@ def next_appt_map(db: Session, opps) -> dict:
     return out
 
 
-def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None) -> dict:
+def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None,
+          names: Optional[dict] = None) -> dict:
     """The shape both My Pipeline and My Day render. One serializer so a card
-    can never mean two different things on two screens."""
+    can never mean two different things on two screens.
+
+    `names` is an optional user_id -> full_name map. Without it this fires one
+    query per card to resolve the owner, which a rep's own board never noticed
+    and a manager's brand-wide board would feel immediately.
+    """
     nxt = (appts or {}).get(opp.id)
     return {
         "id": opp.id,
@@ -182,7 +188,8 @@ def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None) -> dict:
         "stage_label": STAGE_LABELS.get(opp.stage, opp.stage),
         "status": opp.status,
         "owner_user_id": opp.owner_user_id,
-        "owner_name": _user_name(db, opp.owner_user_id),
+        "owner_name": (names.get(opp.owner_user_id) if names is not None
+                       else _user_name(db, opp.owner_user_id)),
         "days_in_stage": _days_in_stage(opp),
         "next_action": opp.next_action,
         "next_action_due_at": opp.next_action_due_at,
