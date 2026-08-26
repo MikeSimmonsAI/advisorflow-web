@@ -14,6 +14,8 @@ from typing import Any, Optional
 from app.deps import get_db, require_admin, require_super_admin, get_platform_org_ids
 from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization, TierDefinition
 from app.services.auth_service import hash_password
+from app.services import staff_activation as _activation
+from app.models.staff_models import PURPOSE_SETUP as _PURPOSE_SETUP, PURPOSE_RESET as _PURPOSE_RESET
 from app.services.dedup_service import normalize_phone, normalize_last_name
 from app.routers.audit_log_router import log_action
 
@@ -561,17 +563,25 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool
-    temp_password: str | None = None  # only populated once, right after creation
+    # The one-time link, shown once. This REPLACED `temp_password`: a link
+    # that expires and can only be redeemed once is a different kind of
+    # secret from a live password sitting in a response body.
+    setup_url: str | None = None
 
 
-def _generate_temp_password() -> str:
+def _unknowable_password() -> str:
+    """Generated, hashed by the caller, and discarded in the same breath.
+
+    This REPLACED `_generate_temp_password`, which produced a short typeable
+    string that was then returned to the caller - so a live credential travelled
+    through an API response, a browser and whatever the admin pasted it into.
+
+    An account still needs SOME hash so that no code path treats it as
+    password-less. Nobody needs to know what it is, and now nobody can: the
+    person is reached by a one-time link and chooses their own password. Same
+    pattern as `customer_activation` and `sales_staff`.
     """
-    Generates a random temporary password for a new account, readable
-    enough to type/copy but not guessable. Always paired with
-    must_change_password=True so it's never the account's permanent
-    password.
-    """
-    return secrets.token_urlsafe(9) + "!1"
+    return secrets.token_urlsafe(48)
 
 
 class UserResponseWithOrg(BaseModel):
@@ -581,7 +591,7 @@ class UserResponseWithOrg(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool
-    temp_password: str | None = None
+    setup_url: str | None = None
     organization_id: str | None = None
     organization_name: str | None = None
     profile_photo_url: str | None = None
@@ -655,11 +665,12 @@ def create_user(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
 
-    temp_password = _generate_temp_password()
+    # No plaintext password is created or returned. See _unknowable_password.
+    secret = _unknowable_password()
     new_user = User(
         organization_id=current_user.organization_id,
         email=req.email,
-        password_hash=hash_password(temp_password),
+        password_hash=hash_password(secret),
         full_name=req.full_name,
         role=req.role,
         must_change_password=True,
@@ -673,11 +684,19 @@ def create_user(
         details={"email": new_user.email, "role": new_user.role, "created_by": current_user.full_name},
     )
 
+    # Hand the operator a one-time link instead of a password. Issued after
+    # flush so the user row exists to point at.
+    _row, _raw = _activation.issue(db, new_user, current_user,
+                                   purpose=_PURPOSE_SETUP)
+    _setup_url = _activation.activation_url(getattr(req, 'base_url', None), _raw)
+    db.commit()
+    db.refresh(new_user)
+
     return UserResponse(
         id=new_user.id, email=new_user.email, full_name=new_user.full_name,
         role=new_user.role, is_active=new_user.is_active,
         must_change_password=new_user.must_change_password,
-        temp_password=temp_password,
+        setup_url=_setup_url,
     )
 
 
@@ -811,7 +830,9 @@ def clear_setup_flag(user_id: str, db: Session = Depends(get_db), current_user: 
 
 class ResetPasswordResponse(BaseModel):
     email: str
-    temp_password: str
+    # Null when the admin supplied an explicit password (it is not echoed back),
+    # set when access was handed over as a one-time link instead.
+    setup_url: str | None = None
 
 
 # require_super_admin is imported from app.deps — platform-scoped, shared across routers
@@ -829,23 +850,37 @@ def reset_user_password(
     current_user: User = Depends(require_super_admin),
 ):
     """
-    Resets any user's password. If new_password is provided, sets it directly.
-    Otherwise auto-generates a temp password. Super admin only, cross-org.
+    Resets any user's password. Super admin only, cross-org.
+
+    TWO PATHS, NEITHER OF WHICH RETURNS A PASSWORD.
+
+    If the admin supplies `new_password` it is honoured and NOT echoed back -
+    they already know it, so returning it would only put a live credential in a
+    response body for no gain.
+
+    Otherwise the account is given a hash nobody can know and the person is
+    reached by a one-time link, the same mechanism the brand-sales flow uses.
+    That replaced generating a short password and handing it to the caller.
     """
     from fastapi import HTTPException
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
+    issued_url = None
     if req.new_password:
         if len(req.new_password) < 8:
             raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-        temp_password = req.new_password
+        secret = req.new_password
         target.must_change_password = False
     else:
-        temp_password = _generate_temp_password()
+        secret = _unknowable_password()
         target.must_change_password = True
-    target.password_hash = hash_password(temp_password)
+    target.password_hash = hash_password(secret)
+    if not req.new_password:
+        row, raw = _activation.issue(db, target, current_user,
+                                    purpose=_PURPOSE_RESET)
+        issued_url = _activation.activation_url(getattr(req, "base_url", None), raw)
     db.commit()
 
     # CRITICAL: never include temp_password in the audit details - the
@@ -857,7 +892,7 @@ def reset_user_password(
         details={"email": target.email},
     )
 
-    return ResetPasswordResponse(email=target.email, temp_password=temp_password)
+    return ResetPasswordResponse(email=target.email, setup_url=issued_url)
 
 
 # ---------------------------------------------------------------------------
@@ -1599,7 +1634,7 @@ class ProvisionClientResponse(BaseModel):
     org_name: str
     supervisor_id: str
     supervisor_email: str
-    temp_password: str | None   # returned only when we generated one
+    setup_url: str | None       # the one-time link, when we issued one
     message: str
 
 
@@ -1639,12 +1674,11 @@ def provision_client(
     db.flush()  # get new_org.id before creating user
 
     # Password — use provided or generate temp
-    generated_password = None
-    if req.supervisor_password:
-        raw_password = req.supervisor_password
-    else:
-        generated_password = _generate_temp_password()
-        raw_password = generated_password
+    # No plaintext password leaves this route. An explicitly supplied one is
+    # honoured and never echoed back; otherwise the account gets an unknowable
+    # hash and the supervisor is reached by a one-time link.
+    _issued_link = not req.supervisor_password
+    raw_password = req.supervisor_password or _unknowable_password()
 
     new_supervisor = User(
         organization_id=new_org.id,
@@ -1654,7 +1688,7 @@ def provision_client(
         role="org_admin",
         is_active=True,
         # Only force reset if we auto-generated the password; if you set it, it's ready to go
-        must_change_password=(generated_password is not None),
+        must_change_password=_issued_link,
     )
     db.add(new_supervisor)
     # Seed industry-appropriate tiers for this org
@@ -1679,12 +1713,20 @@ def provision_client(
     except Exception:
         pass  # audit log failure should never block provisioning
 
+    _provision_setup_url = None
+    if _issued_link:
+        _r, _raw = _activation.issue(db, new_supervisor, current_user,
+                                     purpose=_PURPOSE_SETUP)
+        _provision_setup_url = _activation.activation_url(
+            getattr(req, 'base_url', None), _raw)
+        db.commit()
+
     return ProvisionClientResponse(
         org_id=new_org.id,
         org_name=new_org.name,
         supervisor_id=new_supervisor.id,
         supervisor_email=new_supervisor.email,
-        temp_password=generated_password,
+        setup_url=_provision_setup_url,
         message=f"Client '{req.org_name}' provisioned successfully.",
     )
 

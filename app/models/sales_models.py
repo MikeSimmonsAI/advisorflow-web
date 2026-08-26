@@ -88,6 +88,16 @@ class Membership(Base):
     granted_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Who this person reports to WITHIN THIS SCOPE. Nullable and always will be:
+    # a manager reports to nobody here, and a rep may legitimately have no named
+    # manager yet. It is an org-chart fact, NOT an authorization input - nothing
+    # anywhere grants or withholds access based on it, and `is_sales_manager`
+    # still reads `role` alone. Putting it on the membership rather than on the
+    # user is deliberate: the same human can be a rep under one manager in one
+    # brand and something else in another, which a column on `users` could not
+    # express.
+    reports_to_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+
     __table_args__ = (
         # A user holds a given role in a given scope at most once.
         UniqueConstraint("user_id", "scope_type", "scope_id", "role",

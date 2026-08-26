@@ -48,6 +48,7 @@ from app.services import implementation_service as impls
 from app.services import customer_activation as activation
 from app.services.sales_access import require_sales_member, is_god
 from app.services import staff_activation as staff_access
+from app.services import sales_staff
 from app.models.staff_models import StaffActivation, PURPOSE_SETUP, PURPOSE_RESET
 from app.models.sales_models import Membership, SCOPE_BRAND_SALES_ORG, BRAND_SALES_ROLES
 from app.routers.audit_log_router import log_action
@@ -543,6 +544,15 @@ def _sales_team_rows(db: Session, brand_sales_org_id: str):
                      Membership.scope_id == brand_sales_org_id,
                      Membership.role.in_(BRAND_SALES_ROLES))
              .order_by(Membership.role, Membership.created_at).all())
+    # One lookup for every reporting manager named on the page, rather than a
+    # query per row. A ten-person team was firing ten extra selects to render a
+    # column that resolves from a handful of ids.
+    mgr_ids = {m.reports_to_user_id for m in mem if m.reports_to_user_id}
+    mgr_names = {}
+    if mgr_ids:
+        for mu in db.query(User).filter(User.id.in_(list(mgr_ids))).all():
+            mgr_names[mu.id] = mu.full_name
+
     out = []
     for m in mem:
         u = db.query(User).filter(User.id == m.user_id).first()
@@ -560,6 +570,9 @@ def _sales_team_rows(db: Session, brand_sales_org_id: str):
             "membership_id": m.id,
             "role": m.role,
             "membership_is_active": bool(m.is_active),
+            "reports_to_user_id": m.reports_to_user_id,
+            "reports_to_name": mgr_names.get(m.reports_to_user_id),
+            "last_login_at": u.last_login_at,
             "access": staff_access.access_state(db, u),
         })
     return out
@@ -576,6 +589,157 @@ def sales_team(brand_sales_org_id: str,
     staff_access.assert_can_manage_sales_access(user, bso.id, db)
     return {"brand_sales_org": {"id": bso.id, "name": bso.name, "slug": bso.slug},
             "team": _sales_team_rows(db, bso.id)}
+
+
+# ── adding and managing the people who sell a brand ─────────────────────────
+#
+# GOD ONLY, DELIBERATELY. Reading the team is available to that brand's sales
+# manager (`sales_team` above uses `assert_can_manage_sales_access`), but every
+# WRITE below requires `require_god`. Handing a manager the ability to mint
+# identities is a bigger grant than "runs a team", and it waits for the
+# `manage_sales_users` permission the framework does not have yet. Until then a
+# manager gets a 403 here, from the dependency, not from a hidden button.
+
+
+@router.get("/brands/{brand_sales_org_id}/identity-lookup")
+def identity_lookup(brand_sales_org_id: str,
+                    email: str = Query(...),
+                    db: Session = Depends(get_db),
+                    god: User = Depends(require_god)):
+    """Does this email already belong to somebody? Asked BEFORE anything is created.
+
+    This is the whole duplicate-prevention story: the operator types an address,
+    sees the existing human if there is one - including every membership they
+    already hold, in other brands and in customer organisations - and then
+    decides. Nothing is written by this route.
+    """
+    bso = db.query(BrandSalesOrg).filter(BrandSalesOrg.id == brand_sales_org_id).first()
+    if bso is None:
+        raise HTTPException(status_code=404, detail="Brand sales organisation not found.")
+
+    email = sales_staff.assert_email(email)
+    existing = sales_staff.find_identity(db, email)
+    if existing is None:
+        return {"exists": False, "email": email}
+
+    summary = sales_staff.identity_summary(db, existing)
+    here = sales_staff.get_membership(db, existing.id, bso.id)
+    summary["already_in_this_brand"] = here is not None
+    summary["membership_here"] = ({"id": here.id, "role": here.role,
+                                   "is_active": bool(here.is_active)}
+                                  if here else None)
+    return summary
+
+
+class AddSalesUserRequest(BaseModel):
+    email: str
+    role: str
+    full_name: Optional[str] = None       # required only when creating an identity
+    reports_to_user_id: Optional[str] = None
+    send_setup_link: bool = True
+    base_url: Optional[str] = None
+
+
+@router.post("/brands/{brand_sales_org_id}/sales-team")
+def add_sales_user(brand_sales_org_id: str, req: AddSalesUserRequest,
+                   db: Session = Depends(get_db),
+                   god: User = Depends(require_god)):
+    """Add somebody to this brand's sales team, creating them only if needed.
+
+    ONE HUMAN, ONE IDENTITY. The email is normalised and looked up first. An
+    existing person is REUSED and their other memberships are left exactly as
+    they are; only if nobody holds that address is a users row created, and then
+    with organization_id NULL and a password nobody can know.
+
+    The response carries the one-time link ONCE and never a password, because no
+    code path in `sales_staff` ever holds one.
+    """
+    bso = db.query(BrandSalesOrg).filter(BrandSalesOrg.id == brand_sales_org_id).first()
+    if bso is None:
+        raise HTTPException(status_code=404, detail="Brand sales organisation not found.")
+
+    email = sales_staff.assert_email(req.email)
+    role = sales_staff.assert_role(req.role)
+
+    user = sales_staff.find_identity(db, email)
+    created_identity = False
+    if user is None:
+        user = sales_staff.create_identity(db, email, req.full_name or "", god)
+        created_identity = True
+    elif not user.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="That user is deactivated. Reactivate the person before giving "
+                   "them a sales seat.")
+
+    membership, created_membership = sales_staff.grant_membership(
+        db, user, bso, role, god, reports_to_user_id=req.reports_to_user_id)
+
+    setup_url = None
+    activation = None
+    if req.send_setup_link:
+        row, raw = staff_access.issue(
+            db, user, god, brand_sales_org_id=bso.id,
+            purpose=PURPOSE_SETUP if created_identity else "reset")
+        setup_url = staff_access.activation_url(req.base_url, raw)
+        activation = {"id": row.id, "purpose": row.purpose,
+                      "expires_at": row.expires_at, "prefix": row.token_prefix}
+
+    db.commit()
+    db.refresh(user)
+    db.refresh(membership)
+
+    return {
+        "user": {"id": user.id, "full_name": user.full_name, "email": user.email,
+                 "organization_id": user.organization_id,
+                 "created": created_identity},
+        "membership": {"id": membership.id, "role": membership.role,
+                       "is_active": bool(membership.is_active),
+                       "reports_to_user_id": membership.reports_to_user_id,
+                       "created": created_membership},
+        "activation": activation,
+        "setup_url": setup_url,
+        "warning": ("The link is shown once and is not recoverable. No password was "
+                    "created, changed or returned."),
+        "team": _sales_team_rows(db, bso.id),
+    }
+
+
+class MembershipPatch(BaseModel):
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    # Explicit tri-state: absent means "leave it", null means "clear it".
+    reports_to_user_id: Optional[str] = Field(default=None)
+    set_reports_to: bool = False
+
+
+@router.patch("/sales-memberships/{membership_id}")
+def patch_sales_membership(membership_id: str, req: MembershipPatch,
+                           db: Session = Depends(get_db),
+                           god: User = Depends(require_god)):
+    """Change a seat: role, active state, reporting line. Never deletes it.
+
+    Deactivating is not deleting, on purpose - the row stays so owned
+    opportunities, booked meetings and every audit entry naming this person
+    survive untouched, and their memberships elsewhere are never read.
+    """
+    m = db.query(Membership).filter(Membership.id == membership_id).first()
+    if m is None or m.scope_type != SCOPE_BRAND_SALES_ORG:
+        raise HTTPException(status_code=404, detail="Membership not found.")
+
+    if req.role is not None:
+        sales_staff.change_role(db, m, req.role, god)
+    if req.set_reports_to:
+        sales_staff.set_reporting_manager(db, m, req.reports_to_user_id, god)
+    if req.is_active is not None:
+        sales_staff.set_active(db, m, req.is_active, god)
+
+    db.commit()
+    db.refresh(m)
+    return {"membership": {"id": m.id, "user_id": m.user_id, "role": m.role,
+                           "is_active": bool(m.is_active),
+                           "reports_to_user_id": m.reports_to_user_id},
+            "team": _sales_team_rows(db, m.scope_id)}
 
 
 class SetupLinkRequest(BaseModel):

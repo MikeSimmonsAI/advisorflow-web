@@ -247,10 +247,16 @@ export default function Salespeople() {
         </div>
       )}
 
+      {/* This footer used to say adding a person was "done in God Mode under
+          Sales Operations". Issuing a login was true; adding a person and
+          changing a role were not — there was no such flow anywhere, and the
+          sentence sent people to a screen that could not do it. Both now exist,
+          so the pointer is finally accurate rather than aspirational. */}
       <p className="sw-subtle" style={{ marginTop: 16 }}>
-        Adding a person, changing their sales role or issuing them a login is
-        done in God Mode under Sales Operations — deliberately not here. This
-        screen runs the team; it does not administer identities.
+        Adding a salesperson, changing their role, setting who they report to
+        and issuing their login all live in <b>God Mode → Sales Operations →
+        this brand → Sales team</b>, and are owner-only. This screen runs the
+        team; it does not administer identities.
       </p>
     </SalesShell>
   )

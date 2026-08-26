@@ -243,6 +243,45 @@
              font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
              font-size: 12px; word-break: break-all; color: var(--go-text); }
 
+/* ── add-sales-user dialog and its form controls ──────────────────────────
+   Scoped under .go-scope like everything else in this sheet, so the tenant
+   theme cannot reach in and repaint a control the way it once painted God
+   Mode's dropdowns white. */
+
+.go-scope .go-modal-back,
+.go-modal-back { position: fixed; inset: 0; z-index: 80;
+                 background: rgba(3, 7, 12, .72);
+                 display: flex; align-items: flex-start; justify-content: center;
+                 padding: 48px 16px; overflow-y: auto; }
+.go-modal { background: var(--go-panel); border: 1px solid var(--go-line);
+            border-radius: 12px; width: 100%; max-width: 620px;
+            color: var(--go-text);
+            box-shadow: 0 26px 70px rgba(0, 0, 0, .6); }
+.go-modal-h { display: flex; align-items: center; gap: 12px;
+              padding: 14px 16px; border-bottom: 1px solid var(--go-line); }
+.go-modal-h h3 { margin: 0; font-size: 14px; letter-spacing: .02em; }
+.go-modal-h .go-btn { margin-left: auto; }
+
+.go-label { display: block; font-size: 10px; font-weight: 700;
+            letter-spacing: .07em; text-transform: uppercase;
+            color: var(--go-dim); margin: 0 0 5px; }
+.go-input { width: 100%; padding: 9px 10px; font-size: 13px;
+            color: var(--go-text); background: var(--go-bg);
+            border: 1px solid var(--go-line); border-radius: 7px; }
+.go-input:focus { outline: none; border-color: var(--go-blue); }
+.go-input.sm { padding: 4px 6px; font-size: 12px; width: auto; min-width: 104px; }
+.go-input option { background: var(--go-bg); color: var(--go-text); }
+.go-hint { margin: 6px 0 0; font-size: 11px; color: var(--go-dim); line-height: 1.6; }
+
+.go-radio { display: flex; gap: 9px; align-items: flex-start; cursor: pointer;
+            border: 1px solid var(--go-line); border-radius: 9px;
+            padding: 10px 12px; margin-top: 8px; background: var(--go-bg); }
+.go-radio:hover { border-color: var(--go-blue); }
+.go-radio input { margin-top: 3px; flex: 0 0 auto; }
+.go-radio strong { display: block; font-size: 13px; }
+.go-radio small { display: block; font-size: 11px; color: var(--go-dim);
+                  margin-top: 3px; line-height: 1.55; }
+
 /* ── timeline ────────────────────────────────────────────────────────────── */
 
 .go-tl { list-style: none; margin: 0; padding: 0; }

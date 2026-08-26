@@ -36,6 +36,8 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, require_god
 from app.models.models import User, Organization, Lead, Platform, Message
 from app.services.auth_service import hash_password
+from app.services import staff_activation
+from app.models.staff_models import PURPOSE_SETUP
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +73,9 @@ class UserCreate(BaseModel):
     role: str = "super_admin"
     platform_slug: Optional[str] = None
     org_id: Optional[str] = None
+    # Where the one-time link should point. Absent gives a relative path, which
+    # is correct when the caller already knows its own host.
+    base_url: Optional[str] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -84,9 +89,15 @@ def _slugify(text: str) -> str:
     return s.strip("-")
 
 
-def _temp_password(length: int = 12) -> str:
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+def _unknowable_password() -> str:
+    """Generated, hashed by the caller, and discarded in the same breath.
+
+    This REPLACED `_temp_password`, which returned a short human-typeable string
+    that was then handed back through the API. The account needs a hash so that
+    no code path treats it as password-less; nobody needs to know what it is,
+    and now nobody can. Access arrives by one-time link.
+    """
+    return secrets.token_urlsafe(48)
 
 
 def _safe_count(db: Session, model, filters=None):
@@ -249,15 +260,38 @@ def god_create_user(body: UserCreate, god: User = Depends(require_god), db: Sess
             )
         # Non-tenant user: organization_id stays NULL on purpose.
         org_id = None
-    temp_pw = _temp_password()
+    # NO PLAINTEXT PASSWORD LEAVES THIS ROUTE.
+    #
+    # It used to return `temp_password`, which meant a real credential travelled
+    # through an API response, a browser, and whatever the operator pasted it
+    # into. The account still needs SOME hash so nothing downstream treats it as
+    # password-less, so one is generated, hashed and discarded inside this
+    # function - nobody, including the god_admin who called this, can know it.
+    #
+    # The person is reached by the one-time link instead, through the same
+    # `staff_activation` machinery the brand-sales flow uses. The link is shown
+    # exactly once and is not recoverable; a lost one is replaced by issuing
+    # another, which revokes the first.
     user = User(organization_id=org_id, email=body.email.strip().lower(),
-                full_name=body.full_name.strip(), password_hash=hash_password(temp_pw),
+                full_name=body.full_name.strip(),
+                password_hash=hash_password(_unknowable_password()),
                 role=body.role, must_change_password=True, is_active=True)
-    db.add(user); db.commit(); db.refresh(user)
+    db.add(user)
+    db.flush()
+
+    row, raw = staff_activation.issue(db, user, god, purpose=PURPOSE_SETUP)
+    setup_url = staff_activation.activation_url(body.base_url, raw)
+
+    db.commit(); db.refresh(user)
     log.info("AUDIT: god_admin %s created user %s (%s) role=%s", god.email, user.email, user.id, user.role)
     return {"id": user.id, "email": user.email, "name": user.full_name, "role": user.role,
             "is_active": user.is_active, "must_change_password": True,
-            "temp_password": temp_pw, "organization_id": user.organization_id}
+            "organization_id": user.organization_id,
+            "setup_url": setup_url,
+            "activation": {"id": row.id, "expires_at": row.expires_at,
+                           "prefix": row.token_prefix},
+            "warning": "The link is shown once and is not recoverable. No password "
+                       "was created, returned or is knowable by anyone."}
 
 
 @router.get("/stats")

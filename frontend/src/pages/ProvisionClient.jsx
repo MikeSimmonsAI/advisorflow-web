@@ -531,13 +531,27 @@ export default function ProvisionClient() {
               <div className="provision-result-row"><span>Org</span><strong>{result.org_name}</strong></div>
               <div className="provision-result-row"><span>Org ID</span><code>{result.org_id}</code></div>
               <div className="provision-result-row"><span>Supervisor Email</span><strong>{result.supervisor_email}</strong></div>
-              {result.temp_password && (
-                <div className="provision-result-row provision-result-password">
-                  <span>Temp Password</span><strong>{result.temp_password}</strong>
+              {/* This showed a live temporary password. It now shows a one-time
+                  link instead: the supervisor chooses their own password and no
+                  credential ever travels through this screen. */}
+              {result.setup_url && (
+                <div className="provision-result-row provision-result-password"
+                     style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                  <span>One-time setup link — shown once, not recoverable</span>
+                  <code style={{ wordBreak: 'break-all', fontSize: 12 }}>{result.setup_url}</code>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard && navigator.clipboard.writeText(result.setup_url)}
+                    style={{ fontSize: 12, padding: '4px 9px', cursor: 'pointer' }}
+                  >
+                    Copy link
+                  </button>
                 </div>
               )}
               <div className="provision-result-note">
-                Share the email and password with the supervisor. They'll be prompted to change their password on first login.
+                {result.setup_url
+                  ? 'Send the supervisor their link. They choose their own password — no password was created, shown or set on their behalf, and this link is not recoverable once you leave this page.'
+                  : 'You set the supervisor’s password yourself, so no link was issued. Share the credentials you chose.'}
               </div>
             </div>
           )}

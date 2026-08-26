@@ -355,6 +355,15 @@ COLUMNS_TO_ADD = [
     ("audit_log_entries", "before_state", "TEXT"),
     ("audit_log_entries", "after_state", "TEXT"),
     ("audit_log_entries", "note", "TEXT"),
+
+    # Brand-sales staff management. Who a person reports to inside one brand.
+    # `create_all()` creates TABLES only, never a column on a table that already
+    # exists - `memberships` has existed since Checkpoint 1, so the column has to
+    # be added here or it silently never appears in production.
+    #
+    # It is an org-chart fact and NOT an authorization input: no guard anywhere
+    # reads it, and `is_sales_manager` still resolves from `role` alone.
+    ("memberships", "reports_to_user_id", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

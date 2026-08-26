@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { Kpi, Panel, Empty, Fact, money, when, whenExact, StatusBadge, errText, Bar } from './god/GodOpsShared'
+import AddSalesUser from './god/AddSalesUser'
 import './god/GodOps.css'
 
 export default function GodBrandDetail() {
@@ -23,10 +24,31 @@ export default function GodBrandDetail() {
   const [team, setTeam] = useState(null)
   const [busy, setBusy] = useState('')
   const [link, setLink] = useState(null)
+  const [adding, setAdding] = useState(false)
 
   const loadTeam = () => api.get('/god/ops/brands/' + brandId + '/sales-team')
     .then(r => setTeam(r.team || []))
     .catch(() => setTeam([]))
+
+  // Who can be named as somebody's reporting manager: active managers of THIS
+  // brand only. The server refuses anyone else, so offering a wider list would
+  // just be a dropdown that produces errors.
+  const managers = (team || []).filter(
+    t => t.role === 'sales_manager' && t.membership_is_active && t.user_is_active)
+
+  // Role, reporting line and active state all go through the one PATCH, so the
+  // table always redraws from the server's answer rather than from what the
+  // browser assumed happened.
+  async function patchMembership(u, body) {
+    setBusy(u.user_id); setErr('')
+    try {
+      const r = await api.patch('/god/ops/sales-memberships/' + u.membership_id, body)
+      setTeam(r.team || [])
+    } catch (e) {
+      setErr(errText(e))
+      await loadTeam()          // put the row back to the truth
+    } finally { setBusy('') }
+  }
 
   useEffect(() => {
     api.get('/god/ops/brands/' + brandId).then(setD).catch(e => setErr(errText(e)))
@@ -47,8 +69,19 @@ export default function GodBrandDetail() {
     } catch (e) { setErr(errText(e)) } finally { setBusy('') }
   }
 
-  if (err) return <div className="go-scope"><div className="go-note err">{err}</div></div>
-  if (!d) return <div className="go-scope"><div className="go-empty">Loading…</div></div>
+  // An error BEFORE the brand loads is fatal - there is no page to draw. An
+  // error after it is not: a rejected role change used to blank the entire
+  // screen, which loses the operator's place and hides the very table that
+  // would show them what actually happened. Once `d` exists the message goes
+  // inline, above the panels, and everything else stays put.
+  if (!d) {
+    return (
+      <div className="go-scope">
+        {err ? <div className="go-note err">{err}</div>
+             : <div className="go-empty">Loading…</div>}
+      </div>
+    )
+  }
 
   const s = d.summary || {}
   const cfg = d.configuration || {}
@@ -63,6 +96,14 @@ export default function GodBrandDetail() {
              {s.is_active ? 'active' : 'inactive'}</p>
         </div>
       </div>
+
+      {err ? (
+        <div className="go-note err">
+          {err}
+          <button className="go-btn sm ghost" style={{ marginLeft: 10 }}
+                  onClick={() => setErr('')}>Dismiss</button>
+        </div>
+      ) : null}
 
       {s.attention && s.attention.length ? (
         <div className="go-note warn">
@@ -160,13 +201,46 @@ export default function GodBrandDetail() {
         </div>
       ) : null}
 
-      <Panel title="Sales team" count={team ? team.length : null}>
+      {adding ? (
+        <AddSalesUser
+          brandId={brandId}
+          brandName={s.brand_sales_org_name}
+          managers={managers}
+          onClose={() => setAdding(false)}
+          onAdded={r => {
+            setAdding(false)
+            setTeam(r.team || [])
+            if (r.setup_url) {
+              setLink({ url: r.setup_url, name: r.user.full_name, email: r.user.email,
+                        purpose: r.activation?.purpose,
+                        expires_at: r.activation?.expires_at,
+                        created: r.user.created })
+            }
+          }}
+        />
+      ) : null}
+
+      <Panel
+        title="Sales team"
+        count={team ? team.length : null}
+        actions={
+          <button className="go-btn sm" onClick={() => { setErr(''); setAdding(true) }}>
+            + Add sales user
+          </button>
+        }
+      >
         {team === null ? <Empty>Loading…</Empty>
-          : !team.length ? <Empty>Nobody holds a sales membership in this brand.</Empty> : (
+          : !team.length ? (
+            <Empty>
+              Nobody holds a sales membership in this brand yet. Use
+              <strong> + Add sales user</strong> — it looks the person up by email
+              first, so an existing account is reused rather than duplicated.
+            </Empty>
+          ) : (
           <table className="go-table">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Role</th><th>Membership</th>
-                  <th>Can sign in?</th><th>Link</th><th></th></tr>
+              <tr><th>Name</th><th>Email</th><th>Role</th><th>Manager</th>
+                  <th>Membership</th><th>Setup</th><th>Last login</th><th></th></tr>
             </thead>
             <tbody>
               {team.map(u => (
@@ -178,30 +252,58 @@ export default function GodBrandDetail() {
                       : null}
                     {u.organization_id
                       ? <div style={{ fontSize: 11, color: 'var(--go-red)', marginTop: 3 }}>
-                          inside a customer tenant — investigate</div>
+                          also inside a customer tenant — verify this is intended</div>
                       : null}
                   </td>
                   <td data-label="Email">{u.email}</td>
                   <td data-label="Role">
-                    <span className="go-badge">{u.role.replace('sales_', '')}</span>
+                    <select
+                      className="go-input sm"
+                      value={u.role}
+                      disabled={busy === u.user_id || !u.membership_is_active}
+                      onChange={e => patchMembership(u, { role: e.target.value })}
+                    >
+                      <option value="sales_rep">rep</option>
+                      <option value="sales_manager">manager</option>
+                    </select>
+                  </td>
+                  <td data-label="Manager">
+                    {u.role === 'sales_manager'
+                      ? <span className="go-badge">—</span>
+                      : (
+                        <select
+                          className="go-input sm"
+                          value={u.reports_to_user_id || ''}
+                          disabled={busy === u.user_id || !u.membership_is_active}
+                          onChange={e => patchMembership(u, {
+                            set_reports_to: true,
+                            reports_to_user_id: e.target.value || null,
+                          })}
+                        >
+                          <option value="">unassigned</option>
+                          {managers.map(m => (
+                            <option key={m.user_id} value={m.user_id}>{m.full_name}</option>
+                          ))}
+                        </select>
+                      )}
                   </td>
                   <td data-label="Membership">
                     {u.membership_is_active
                       ? <span className="go-badge live">active</span>
                       : <span className="go-badge blocked">inactive</span>}
                   </td>
-                  <td data-label="Can sign in?">
-                    {u.access.has_signed_in
-                      ? <span className="go-badge live">yes, since {when(u.access.last_login_at)}</span>
-                      : <span className="go-badge warn">never signed in</span>}
-                  </td>
-                  <td data-label="Link">
+                  <td data-label="Setup">
                     {!u.access.link ? <span className="go-badge">none issued</span>
                       : u.access.link.status === 'accepted'
                         ? <span className="go-badge live">used {when(u.access.link.accepted_at)}</span>
                         : u.access.link.is_usable
                           ? <span className="go-badge ready">live until {when(u.access.link.expires_at)}</span>
                           : <span className="go-badge">{u.access.link.status}</span>}
+                  </td>
+                  <td data-label="Last login">
+                    {u.access.has_signed_in
+                      ? when(u.access.last_login_at)
+                      : <span className="go-badge warn">never</span>}
                   </td>
                   <td data-label="">
                     <div className="go-actions">
@@ -220,9 +322,13 @@ export default function GodBrandDetail() {
                                     await loadTeam()
                                   } catch (e) { setErr(errText(e)) } finally { setBusy('') }
                                 }}>
-                          Revoke
+                          Revoke link
                         </button>
                       ) : null}
+                      <button className="go-btn sm ghost" disabled={busy === u.user_id}
+                              onClick={() => patchMembership(u, { is_active: !u.membership_is_active })}>
+                        {u.membership_is_active ? 'Deactivate' : 'Reactivate'}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -232,9 +338,13 @@ export default function GodBrandDetail() {
         )}
         <div className="go-body" style={{ borderTop: '1px solid var(--go-line)' }}>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--go-dim)' }}>
-            A link only unlocks access this person already has. It creates no user,
-            no membership and no tenant assignment, and it never reveals or sets a
-            password on their behalf. Issuing a new link revokes any outstanding one.
+            Adding looks the person up by email first: an existing account is reused
+            and its other memberships are left alone, so one human never becomes two
+            rows. A new identity is created with <em>no</em> customer organisation.
+            Deactivating a seat closes the workspace but keeps their opportunities,
+            meetings and audit history. No password is ever created, shown or set on
+            anyone's behalf — access arrives as a one-time link, and issuing a new
+            one revokes any outstanding one.
           </p>
         </div>
       </Panel>
