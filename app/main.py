@@ -41,6 +41,13 @@ import app.models.calendar_models  # noqa: F401  (imported for side effects)
 # import appointment_meetings / meeting_provider_configs are never created and
 # Zoom provisioning silently has nowhere to write.
 import app.models.meeting_models  # noqa: F401  (imported for side effects)
+# Integration credentials (Retell bridges) and demo scenario state — same Base,
+# same reason. The demo tables are created everywhere, including production,
+# and that is deliberate: the demo service runs the SAME image rather than a
+# fork that could drift. Nothing in production ever writes to them, and every
+# route that reads them 404s outside APP_ENV=demo.
+import app.models.integration_models  # noqa: F401  (imported for side effects)
+import app.models.demo_models  # noqa: F401  (imported for side effects)
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
@@ -77,6 +84,7 @@ from app.routers.calendar_connections_router import router as calendar_connectio
 from app.routers.sales_proposal_router import router as sales_proposal_router
 from app.routers.sales_manager_router import router as sales_manager_router
 from app.routers.integrations_router import router as integrations_router
+from app.routers.demo_router import router as demo_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -414,6 +422,11 @@ app.include_router(sales_manager_router)
 # per credential, every request audited. It computes no availability of its own:
 # it calls the same engine /sales/availability/find uses.
 app.include_router(integrations_router)
+# Mounted in every environment, and 404 in all but one. The routes check
+# APP_ENV themselves rather than being conditionally mounted, so production and
+# demo run the identical router table — a conditional mount would mean the two
+# environments no longer serve the same application.
+app.include_router(demo_router)
 app.include_router(proposal_router.router)
 
 

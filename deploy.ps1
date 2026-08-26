@@ -135,6 +135,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "INTEGRATION MIGRATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_demo_firewall.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "DEMO FIREWALL CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_demo_mode.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "DEMO MODE CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 
