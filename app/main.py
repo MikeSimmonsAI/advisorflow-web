@@ -76,6 +76,7 @@ from app.routers.sales_scheduling_router import router as sales_scheduling_route
 from app.routers.calendar_connections_router import router as calendar_connections_router
 from app.routers.sales_proposal_router import router as sales_proposal_router
 from app.routers.sales_manager_router import router as sales_manager_router
+from app.routers.integrations_router import router as integrations_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -407,6 +408,12 @@ app.include_router(sales_proposal_router)
 # manager runs a team inside a brand — this router reaches no platform data, no
 # other brand, and no customer tenant.
 app.include_router(sales_manager_router)
+# Machine-facing integration bridge. Authenticated by a scoped SERVICE key, not
+# a user JWT — the two credential systems are separate on purpose and neither
+# opens the other's routes. Three routes only, one brand per key, rate limited
+# per credential, every request audited. It computes no availability of its own:
+# it calls the same engine /sales/availability/find uses.
+app.include_router(integrations_router)
 app.include_router(proposal_router.router)
 
 
