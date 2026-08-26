@@ -374,10 +374,32 @@ def sales_projection(db: Session, impl: Implementation) -> Dict[str, Any]:
     owner = (db.query(User).filter(User.id == impl.owner_user_id).first()
              if impl.owner_user_id else None)
     c = completion(db, impl)
+
+    # Added for the manager's team Won / Onboarding view. Not a widening of what
+    # is sensitive: who sold it, what they sold and which company it was are
+    # facts the selling rep already holds. The coarseness this docstring protects
+    # is milestone detail, internal notes and blocker text, and none of that is
+    # here.
+    from app.models.sales_models import Opportunity, BrandPackage
+    opp = (db.query(Opportunity).filter(Opportunity.id == impl.opportunity_id).first()
+           if impl.opportunity_id else None)
+    sold_by = (db.query(User).filter(User.id == impl.sold_by_user_id).first()
+               if impl.sold_by_user_id else None)
+    pkg = (db.query(BrandPackage)
+           .filter(BrandPackage.id == opp.selected_package_id).first()
+           if opp is not None and opp.selected_package_id else None)
+
     return {
         "implementation_id": impl.id,
         "opportunity_id": impl.opportunity_id,
         "customer_organization_name": org.name if org else None,
+        "company_name": opp.company_name if opp else None,
+        "sold_by_user_id": impl.sold_by_user_id,
+        "sold_by_name": sold_by.full_name if sold_by else None,
+        "package_name": pkg.name if pkg else None,
+        "deal_value": float(opp.deal_value) if opp is not None and opp.deal_value is not None else None,
+        "won_at": opp.won_at if opp else None,
+        "brand_sales_org_id": impl.brand_sales_org_id,
         "status": impl.status,
         "status_label": _SALES_VISIBLE_STATUS.get(impl.status,
                                                   IMPLEMENTATION_STATUS_LABELS.get(impl.status, impl.status)),

@@ -17,6 +17,7 @@ import ApptSyncPanel from './ApptSyncPanel'
 import RescheduleDialog from './RescheduleDialog'
 import ProposalPanel from './ProposalPanel'
 import ClosingPanel from './ClosingPanel'
+import ReassignControl from './ReassignControl'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
   money, dateTime, dueLabel, wallDateTime,
@@ -526,7 +527,23 @@ export default function OpportunityDetail() {
 
       <div className="sw-mt sw-grid2">
         <div>
-          <Card title="RECORD">
+          <Card
+            title="RECORD"
+            /* The reassign control sits on the header of the card that already
+               shows SALES OWNER, so the fact and the action are in one place.
+               `can_reassign` is the server's own per-record answer; the button
+               does not exist for anyone else, and the endpoint refuses them
+               regardless. */
+            right={
+              <ReassignControl
+                opportunityId={opp.id}
+                canReassign={opp.can_reassign}
+                currentOwnerId={opp.owner_user_id}
+                currentOwnerName={opp.owner_name}
+                onReassigned={load}
+              />
+            }
+          >
             <div className="sw-infogrid">
               <Info label="PHONE" value={opp.phone} />
               <Info label="EMAIL" value={opp.email} />

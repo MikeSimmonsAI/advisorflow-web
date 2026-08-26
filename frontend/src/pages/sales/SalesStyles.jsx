@@ -282,9 +282,88 @@ const CSS = `
   padding:5px 0;font-size:13px;border-bottom:1px solid var(--sw-line2)}
 .sw-scope .sw-decided:last-child{border-bottom:none}
 
+/* ── Sales Workspace completion ──────────────────────────────────────────────
+   Team Calendar, Demos / Proposals, Salespeople, Prospects and the reassign
+   control. Everything below reuses the existing palette and card vocabulary;
+   nothing here introduces a second visual language for the same workspace. */
+
+/* the "— as a seller" / "— as a manager" qualifier on the nav group headings.
+   A manager is both, and the sidebar should say so rather than leave them
+   wondering why a pipeline appears in two places. */
+.sw-scope .sw-navhint{color:#42596e;letter-spacing:0;font-size:8px}
+
+/* day strip — Team Calendar */
+.sw-scope .sw-daystrip{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.sw-scope .sw-daybtn{border:1px solid var(--sw-line);background:#fff;border-radius:9px;
+  padding:8px 10px;min-width:74px;cursor:pointer;text-align:center;flex:0 0 auto}
+.sw-scope .sw-daybtn:hover{border-color:#9fb0bf}
+.sw-scope .sw-daybtn.sw-on{border-color:var(--sw-teal);background:#f1fbf9;
+  box-shadow:inset 0 -3px var(--sw-teal)}
+.sw-scope .sw-daybtn b{display:block;font-size:13px}
+.sw-scope .sw-daybtn small{display:block;font-size:9px;color:#7d8d9b;margin-top:2px}
+.sw-scope .sw-daybtn .sw-dot{display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--sw-teal);margin-top:4px}
+.sw-scope .sw-daybtn .sw-dot.sw-warn{background:var(--sw-amber)}
+
+/* one meeting row on Team Calendar */
+.sw-scope .sw-cal{display:grid;grid-template-columns:84px 1fr auto;gap:12px;
+  padding:11px 0;border-bottom:1px solid var(--sw-line2);align-items:start}
+.sw-scope .sw-cal:last-child{border-bottom:none}
+.sw-scope .sw-cal-when b{display:block;font-size:12px;font-variant-numeric:tabular-nums}
+.sw-scope .sw-cal-when small{display:block;font-size:9px;color:#8696a3;margin-top:2px}
+.sw-scope .sw-cal-main{min-width:0}
+.sw-scope .sw-cal-main b{font-size:12px}
+.sw-scope .sw-cal-meta{font-size:11px;color:var(--sw-ink2);margin-top:3px}
+.sw-scope .sw-cal-parts{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.sw-scope .sw-part{border:1px solid var(--sw-line);border-radius:20px;padding:2px 8px;
+  font-size:9px;background:#f8fafb;color:#4d6072;white-space:nowrap}
+.sw-scope .sw-part.sw-req{border-color:#b9d8f0;background:#eff7fd;color:#276c9f}
+.sw-scope .sw-part.sw-bad{border-color:#efc0c6;background:#fff2f4;color:#9d3f4b}
+.sw-scope .sw-cal-act{display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap}
+
+/* queue columns — Demos / Proposals */
+.sw-scope .sw-queues{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;
+  align-items:start}
+.sw-scope .sw-qrow{display:flex;justify-content:space-between;gap:8px;
+  align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--sw-line2);
+  cursor:pointer;width:100%;background:none;border-left:0;border-right:0;
+  border-top:0;text-align:left}
+.sw-scope .sw-qrow:last-child{border-bottom:none}
+.sw-scope .sw-qrow:hover{background:#f6fafb}
+.sw-scope .sw-qrow b{font-size:11px;display:block}
+.sw-scope .sw-qrow .sw-why{font-size:10px;color:var(--sw-ink2);margin-top:3px}
+.sw-scope .sw-qrow .sw-who{font-size:9px;color:#8696a3;margin-top:3px;display:block}
+
+/* people grid — Salespeople */
+.sw-scope .sw-people{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.sw-scope .sw-pcard{border:1px solid var(--sw-line);border-radius:11px;background:#fff;
+  padding:14px}
+.sw-scope .sw-pcard-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.sw-scope .sw-pcard-h b{font-size:12px;display:block}
+.sw-scope .sw-pcard-h small{display:block;font-size:10px;color:var(--sw-ink2)}
+.sw-scope .sw-pnums{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.sw-scope .sw-pfoot{margin-top:10px;padding-top:9px;border-top:1px solid var(--sw-line2);
+  display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* filter bar — Prospects and Team Pipeline */
+.sw-scope .sw-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  margin-bottom:14px}
+.sw-scope .sw-filters .sw-select,.sw-scope .sw-filters .sw-input{width:auto;min-width:150px}
+
+/* the reassign control */
+.sw-scope .sw-reassign{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sw-scope .sw-reassign .sw-select{min-width:190px;width:auto}
+
 @media(max-width:1240px){
   .sw-two{grid-template-columns:1fr}
   .sw-rep-nums{grid-template-columns:repeat(2,1fr)}
+  .sw-queues{grid-template-columns:repeat(2,1fr)}
+  .sw-people{grid-template-columns:1fr}
+}
+@media(max-width:900px){
+  .sw-queues{grid-template-columns:1fr}
+  .sw-cal{grid-template-columns:1fr;gap:6px}
+  .sw-cal-act{justify-content:flex-start}
 }
 @media(max-width:820px){
   .sw-appr-money{grid-template-columns:1fr}

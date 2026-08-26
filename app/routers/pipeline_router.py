@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import func
-from app.deps import get_db, get_current_user
+from app.deps import get_db, require_tenant_user
 from app.models.models import User, Lead, PipelineConversation, Organization
 from app.services.pipeline_service import (
     launch_pipeline, get_pipeline_stats, get_ai_forecast
@@ -48,7 +48,7 @@ class ForecastRequest(BaseModel):
 def launch(
     req: LaunchRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Launch AI pipeline for selected leads."""
     leads = db.query(Lead).filter(
@@ -83,7 +83,7 @@ def _is_elevated(user: User) -> bool:
 @router.get("/stats")
 def pipeline_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Get pipeline engagement stats. Advisors see only their own; admins see org-wide; god sees all orgs."""
     advisor_id = None if _is_elevated(current_user) else current_user.id
@@ -118,7 +118,7 @@ def pipeline_stats(
 @router.get("/forecast")
 def forecast(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Get AI forecast and alerts for overview dashboard."""
     advisor_id = None if _is_elevated(current_user) else current_user.id
@@ -128,7 +128,7 @@ def forecast(
 @router.get("/flagged")
 def get_flagged(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Get conversations flagged for human review. Advisors see only their own."""
     q = db.query(PipelineConversation).filter(
@@ -170,7 +170,7 @@ def approve_flagged(
     pipeline_id: str,
     req: ApproveRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Approve and optionally send the suggested response for a flagged conversation."""
     pipeline = db.query(PipelineConversation).filter(
@@ -212,7 +212,7 @@ def approve_flagged(
 def dismiss_flagged(
     pipeline_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Dismiss a flagged conversation without sending — advisor will handle manually."""
     pipeline = db.query(PipelineConversation).filter(
@@ -232,7 +232,7 @@ def dismiss_flagged(
 def get_conversations(
     stage: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Get pipeline conversations. Advisors see only their own; admins see org-wide."""
     query = db.query(PipelineConversation).filter(

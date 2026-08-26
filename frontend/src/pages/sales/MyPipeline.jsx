@@ -1,5 +1,25 @@
 /**
- * My Pipeline — the stage board.
+ * The stage board, in two scopes from ONE component.
+ *
+ *   scope="mine"  → /sales/pipeline       "My Pipeline"    — my own book
+ *   scope="team"  → /sales/team-pipeline  "Team Pipeline"  — the whole brand
+ *
+ * ONE COMPONENT ON PURPOSE. The audit found the team pipeline already existed
+ * and had done for a while: `_scoped_opportunities` drops the owner filter for
+ * a manager, so this page was ALREADY returning every deal in the brand. It was
+ * simply called "My Pipeline" and filed under MY WORK, so no manager could tell.
+ * Forking it into a second file would have created two boards that drift, to
+ * solve a labelling problem.
+ *
+ * HOW "MINE" IS ENFORCED FOR A MANAGER. The server cannot answer "just mine"
+ * for a manager without an explicit owner filter, and asking for one costs a
+ * second round trip before we know whether the caller is a manager at all. So
+ * the request is unfiltered and `scope="mine"` narrows the returned cards to
+ * this user's own. That is presentation, not access control - a manager is
+ * authorised to see every card in the response either way. A REP is never
+ * narrowed here, because the server already narrowed them, and filtering again
+ * client-side would hide the unowned prospects a rep is meant to be able to
+ * pick up.
  *
  * The stage list and its order come from the server (/sales/opportunities
  * returns `stages` in vocabulary order). The client does not own the lifecycle;
@@ -43,7 +63,7 @@ function DealCard({ opp, onOpen }) {
   )
 }
 
-export default function MyPipeline() {
+export default function MyPipeline({ scope = 'mine' }) {
   const nav = useNavigate()
   const [data, setData] = useState(null)
   const [team, setTeam] = useState([])
@@ -51,6 +71,8 @@ export default function MyPipeline() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+
+  const isTeam = scope === 'team'
 
   const load = useCallback(async (owner) => {
     setLoading(true); setError(null)
@@ -62,32 +84,65 @@ export default function MyPipeline() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load(ownerFilter) }, [load, ownerFilter])
-  useEffect(() => { api.get('/sales/team').then(setTeam).catch(() => setTeam([])) }, [])
+  useEffect(() => { load(isTeam ? ownerFilter : '') }, [load, ownerFilter, isTeam])
+  useEffect(() => {
+    if (!isTeam) return
+    api.get('/sales/team').then(setTeam).catch(() => setTeam([]))
+  }, [isTeam])
 
   const open = id => nav('/sales/opportunities/' + id)
   const isManager = !!data?.is_manager
-  const total = data?.total ?? 0
+
+  // See the header comment: narrowing a MANAGER's board to their own deals is
+  // presentation. A rep is left exactly as the server returned them.
+  const meId = data?.viewer_user_id
+  const narrow = rows => (
+    (!isTeam && isManager && meId)
+      ? (rows || []).filter(o => o.owner_user_id === meId)
+      : (rows || [])
+  )
+  const stages = (data?.stages || []).map(s => ({
+    ...s,
+    opportunities: narrow(s.opportunities),
+  })).map(s => ({ ...s, count: s.opportunities.length }))
+  const lost = narrow(data?.lost)
+  const total = stages.reduce((n, s) => n + s.count, 0)
+
+  const title = isTeam ? 'Team Pipeline' : 'My Pipeline'
+  const subtitle = isTeam
+    ? 'Every opportunity your team is working, in one board.'
+    : 'One continuous record from first contact through sale and handoff.'
 
   return (
     <SalesShell
-      title="My Pipeline"
-      subtitle="One continuous record from first contact through sale and handoff."
+      title={title}
+      subtitle={subtitle}
       actions={
         <>
-          {isManager && team.length > 0 && (
+          {isTeam && team.length > 0 && (
             <select className="sw-select" style={{ width: 190 }}
                     value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
               <option value="">Everyone on the team</option>
               {team.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
             </select>
           )}
-          <button className="sw-btn" onClick={() => load(ownerFilter)} disabled={loading}>Refresh</button>
+          <button className="sw-btn" onClick={() => load(isTeam ? ownerFilter : '')}
+                  disabled={loading}>Refresh</button>
           <button className="sw-btn sw-primary" onClick={() => setCreating(true)}>+ New Prospect</button>
         </>
       }
     >
-      <ErrorBar error={error} onRetry={() => load(ownerFilter)} />
+      <ErrorBar error={error} onRetry={() => load(isTeam ? ownerFilter : '')} />
+
+      {/* A rep who lands on the team URL gets the server's answer, which is
+          their own book — not an error and not somebody else's deals. Saying so
+          is kinder than silently showing them a board titled "Team". */}
+      {isTeam && data && !isManager && (
+        <div className="sw-note">
+          You are seeing your own opportunities. The team board is available to
+          sales managers.
+        </div>
+      )}
 
       {creating && (
         <NewProspect onClose={() => setCreating(false)}
@@ -100,12 +155,17 @@ export default function MyPipeline() {
             {total} {total === 1 ? 'opportunity' : 'opportunities'}
           </b>
           <div className="sw-subtle">
-            {isManager
-              ? 'Manager view — every opportunity in ' + (data?.brand_sales_org?.name || 'this brand') + '.'
-              : 'Your book of business.'}
+            {isTeam && isManager
+              ? 'Every opportunity in ' + (data?.brand_sales_org?.name || 'this brand')
+                + (ownerFilter
+                   ? ', filtered to ' + (team.find(t => t.id === ownerFilter)?.full_name || 'one rep') + '.'
+                   : '.')
+              : (isManager
+                 ? 'The deals you personally own. Your team’s board is under MY TEAM.'
+                 : 'Your book of business.')}
           </div>
         </div>
-        {data?.lost?.length > 0 && <Chip>{data.lost.length} lost</Chip>}
+        {lost.length > 0 && <Chip>{lost.length} lost</Chip>}
       </div>
 
       {loading && !data && <div className="sw-subtle">Loading…</div>}
@@ -122,7 +182,7 @@ export default function MyPipeline() {
 
       {data && total > 0 && (
         <div className="sw-pipeline">
-          {data.stages.map(stage => (
+          {stages.map(stage => (
             <div className="sw-stage" key={stage.key}>
               <div className="sw-stage-h">
                 <span style={{ background: 'none', padding: 0 }}>
@@ -138,11 +198,11 @@ export default function MyPipeline() {
         </div>
       )}
 
-      {data?.lost?.length > 0 && (
+      {lost.length > 0 && (
         <div className="sw-mt">
-          <div className="sw-stage-h">LOST <span>{data.lost.length}</span></div>
+          <div className="sw-stage-h">LOST <span>{lost.length}</span></div>
           <div className="sw-pipeline">
-            {data.lost.map(o => <DealCard key={o.id} opp={o} onOpen={open} />)}
+            {lost.map(o => <DealCard key={o.id} opp={o} onOpen={open} />)}
           </div>
         </div>
       )}

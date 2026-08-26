@@ -756,21 +756,43 @@ def test_post_won_visibility(c):
                    "billing_status", "recurring_amount"):
         check("rep does NOT see %s" % leaked, leaked not in proj, list(proj))
 
+    # /sales/implementations returns an OBJECT, not a bare list, as of the Sales
+    # Workspace completion: the manager's Sold / Onboarding screen needs to know
+    # whether it is looking at a team view without a second call to /sales/me.
+    # `rows_of` reads either shape so this assertion is about the SCOPING, which
+    # did not change, rather than about the envelope, which did.
+    def rows_of(resp):
+        if resp.status_code != 200:
+            return []
+        body = resp.json()
+        return body if isinstance(body, list) else body.get("implementations", [])
+
     r = c.get("/sales/implementations", headers=rep)
     check("rep lists their own implementations", r.status_code == 200, r.text[:200])
-    rows = r.json() if r.status_code == 200 else []
+    rows = rows_of(r)
     check("rep sees only deals they sold",
           all(x.get("implementation_id") for x in rows) and len(rows) >= 1, len(rows))
+    check("the rep's response does not claim manager scope",
+          r.json().get("is_manager") is False if isinstance(r.json(), dict) else True,
+          r.json() if isinstance(r.json(), dict) else "legacy list shape")
 
     r = c.get("/sales/implementations", headers=mgr)
-    mrows = r.json() if r.status_code == 200 else []
+    mrows = rows_of(r)
     check("manager sees their brand's implementations", len(mrows) >= 2, len(mrows))
     check("manager does NOT see the other brand's customer",
           all("Northside" not in (x.get("customer_organization_name") or "")
               for x in mrows), [x.get("customer_organization_name") for x in mrows])
+    check("the manager's response reports manager scope",
+          r.json().get("is_manager") is True if isinstance(r.json(), dict) else True)
+    check("...and names the salesperson, which the team view renders",
+          all("sold_by_name" in x for x in mrows), list(mrows[0]) if mrows else [])
+    check("...without widening what a rep may not see",
+          all(not any(k in x for k in ("blocker_note", "notes", "handoff",
+                                       "milestones", "billing_status"))
+              for x in mrows), list(mrows[0]) if mrows else [])
 
     r = c.get("/sales/implementations", headers=bbmgr)
-    brows = r.json() if r.status_code == 200 else []
+    brows = rows_of(r)
     check("the other brand's manager sees only their own",
           all("Greenwood" not in (x.get("customer_organization_name") or "")
               for x in brows), [x.get("customer_organization_name") for x in brows])

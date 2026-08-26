@@ -627,6 +627,11 @@ def list_opportunities(brand_sales_org_id: Optional[str] = Query(None),
 
     return {
         "brand_sales_org": {"id": org.id, "name": org.name},
+        # Who is asking. My Pipeline needs it to show a MANAGER only their own
+        # deals without a second round trip, and the stored login profile in the
+        # browser carries no user id. Not sensitive - it is the caller's own id,
+        # which they already hold in their token.
+        "viewer_user_id": user.id,
         "is_manager": is_sales_manager(user, db, org.id),
         "stages": [{
             "key": s, "label": STAGE_LABELS.get(s, s),
@@ -1035,10 +1040,12 @@ def my_implementations(user: User = Depends(require_sales_member),
     from app.services.sales_access import sales_org_ids, is_sales_manager, is_god
 
     q = db.query(Implementation)
+    manager_orgs = []
     if not is_god(user):
         allowed = sales_org_ids(user, db)
         if not allowed:
-            return []
+            return {"implementations": [], "is_manager": False, "total": 0,
+                    "brand_sales_org": None}
         manager_orgs = [o for o in allowed if is_sales_manager(user, db, o)]
         if manager_orgs:
             q = q.filter(or_(Implementation.brand_sales_org_id.in_(manager_orgs),
@@ -1046,7 +1053,17 @@ def my_implementations(user: User = Depends(require_sales_member),
         else:
             q = q.filter(Implementation.sold_by_user_id == user.id)
     rows = q.order_by(Implementation.created_at.desc()).limit(500).all()
-    return [sales_projection(db, i) for i in rows]
+
+    # Wrapped rather than returned bare so the screen can tell a manager's team
+    # view from a rep's own without a second call to /sales/me. The scoping above
+    # is unchanged - this only reports which of its two branches ran.
+    org = _resolve_context(user, db, None) if sales_org_ids(user, db) else None
+    return {
+        "implementations": [sales_projection(db, i) for i in rows],
+        "is_manager": bool(manager_orgs) or is_god(user),
+        "total": len(rows),
+        "brand_sales_org": {"id": org.id, "name": org.name} if org else None,
+    }
 
 
 @router.get("/opportunities/{opportunity_id}/implementation")

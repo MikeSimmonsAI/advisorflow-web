@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, require_tenant_user
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
 from app.services.import_service import import_leads_from_excel
 from app.services.dedup_service import normalize_phone
@@ -34,7 +34,7 @@ def preview_upload(
     campaign_purpose: Optional[str] = Form(None),   # why we're reaching out
     offer_hook: Optional[str] = Form(None),          # what we're offering
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Step 1: advisor uploads an Excel file, we run the REAL import logic
@@ -106,7 +106,7 @@ def confirm_upload(
     campaign_purpose: Optional[str] = Form(None),
     offer_hook: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
     import os as _os
@@ -154,7 +154,7 @@ def confirm_upload(
 @router.get("/import-batches")
 def list_import_batches(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Returns all import batches for this org, newest first. Includes import_list_name for display."""
     rows = (
@@ -189,7 +189,7 @@ def list_import_batches(
 def delete_import_batch(
     source_file: str = Query(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Delete all leads from a specific import batch + every dependent record
@@ -326,7 +326,7 @@ def list_leads(
     page: int = Query(1, ge=1),
     page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Advisors see only their own leads. org_admin/super_admin see all org leads.
@@ -405,7 +405,7 @@ def list_leads(
 @router.get("/flagged")
 def list_flagged_leads(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Return all manually flagged leads for this org (both bad_email and remove_all)."""
     is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
@@ -438,7 +438,7 @@ def leads_needing_tier_review(
     page: int = Query(1, ge=1),
     page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Leads imported with no Lead Type set in the source file (untyped/blank).
@@ -482,7 +482,7 @@ def set_lead_tier(
     lead_id: str,
     new_tier: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Manually assign a tier to a needs-review lead, which also sets its
@@ -529,7 +529,7 @@ def set_lead_tier(
 
 
 @router.get("/daily-briefing")
-def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     """
     Advisor-scoped daily briefing data for the Overview page.
 
@@ -617,7 +617,7 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(g
 
 
 @router.get("/engagement-breakdown")
-def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     """
     Advisor-scoped engagement temperature counts for the Overview chart.
     Uses the real Lead.engagement_temperature field; no client-side guesses.
@@ -640,7 +640,7 @@ def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Dep
 
 
 @router.get("/status-funnel")
-def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     """
     Advisor-scoped real lead status funnel for Overview.
     Only returns the stages displayed in the dashboard funnel.
@@ -675,7 +675,7 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(ge
     ]
 
 @router.get("/{lead_id}")
-def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     """Returns full contact-card detail for a single lead.
 
     Advisors can only access leads assigned to them. Org admins and above
@@ -695,7 +695,7 @@ def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = D
 
 
 @router.get("/{lead_id}/timeline")
-def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     """
     Returns the full conversation thread for one lead: every outbound
     message and every inbound reply, merged into one chronological feed,
@@ -865,7 +865,7 @@ class MessagePreviewItem(BaseModel):
 def preview_messages_for_leads(
     req: MessagePreviewRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Given a batch of lead IDs (e.g. everything just created by an
@@ -939,7 +939,7 @@ class ConfirmSendBatchRequest(BaseModel):
 def confirm_send_batch(
     req: ConfirmSendBatchRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     The actual send step, AFTER the advisor has reviewed (and possibly
@@ -976,7 +976,7 @@ def confirm_send_batch(
 @router.delete("/duplicates/bulk-delete")
 def bulk_delete_duplicate_leads(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Permanently deletes all leads flagged as duplicates (is_duplicate=True)
@@ -1018,7 +1018,7 @@ def bulk_delete_duplicate_leads(
 @router.post("/deduplicate-email-leads")
 def deduplicate_email_leads(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     One-time (and safe to re-run) cleanup: finds email-only leads in this
@@ -1162,7 +1162,7 @@ class ManualLeadCreate(BaseModel):
 def create_lead_manually(
     payload: ManualLeadCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Create a single lead manually from the Leads page UI.
@@ -1263,7 +1263,7 @@ def update_lead_fields(
     lead_id: str,
     payload: LeadFieldUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Edit basic contact fields on a lead. Advisors can edit their own; admins can edit any."""
     lead = db.query(Lead).filter(
@@ -1351,7 +1351,7 @@ def update_lead_fields(
 def delete_lead(
     lead_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Permanently delete a single lead. Advisors can delete their own leads; admins can delete any."""
     lead = db.query(Lead).filter(
@@ -1383,7 +1383,7 @@ def update_lead_type(
     lead_id: str,
     payload: LeadTypeUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """Set the lead type and/or AI direction override for a lead."""
     lead = db.query(Lead).filter(
@@ -1413,7 +1413,7 @@ def flag_lead(
     lead_id: str,
     payload: FlagLeadRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Any advisor in any org can manually flag a lead the auto-detection missed.
@@ -1663,7 +1663,7 @@ def sms_optin(
 def resend_booking_link(
     lead_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Generate a fresh booking link for a lead and email it to them.

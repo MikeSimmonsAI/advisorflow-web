@@ -23,26 +23,56 @@ export function useSales() {
   return useContext(SalesCtx)
 }
 
-// Items marked soon:true are Checkpoint 2+. They render visibly disabled with a
-// SOON marker rather than being hidden, so the rep can see the shape of the
-// workspace without being able to click into something that does not work.
+// A manager is two people at once: an individual seller with their own book,
+// and the person running a team. Splitting the nav on exactly that line is the
+// point - MY WORK is "what do I owe?", MY TEAM is "what does my team need from
+// me?". The same deal appears under both only when the manager owns it, which
+// is honest rather than duplicated.
+//
+// Items marked soon:true render visibly disabled with a marker rather than
+// being hidden, so the shape of the workspace is legible without anything
+// unfinished being clickable.
 const NAV = [
-  { to: '/sales',           label: 'My Day',            icon: '⌂', end: true },
-  { to: '/sales/pipeline',  label: 'My Pipeline',       icon: '⇢', countKey: 'active_opportunities' },
-  { to: '/sales/team',      label: 'Team Availability', icon: '▦' },
-  { to: '/sales/availability', label: 'My Availability', icon: '◷' },
-  // Checkpoint 4. Rendered visibly disabled rather than hidden so the shape of
-  // the workspace is legible without anything unfinished being clickable.
-  { to: '/sales/onboarding', label: 'Sold / Onboarding', icon: '✓' },
+  { to: '/sales',              label: 'My Day',            icon: '⌂', end: true },
+  { to: '/sales/pipeline',     label: 'My Pipeline',       icon: '⇢', countKey: 'active_opportunities' },
+  { to: '/sales/prospects',    label: 'Prospects',         icon: '◇' },
+  { to: '/sales/availability', label: 'My Availability',   icon: '◷' },
+  { to: '/sales/onboarding',   label: 'Sold / Onboarding', icon: '✓' },
 ]
 
-// Checkpoint 5. Shown only to a manager — `permission` names the flag on
-// /sales/me that decides. This is presentation: /sales/manager/* is gated by
-// require_sales_manager server-side, so a rep who types the URL gets a 403,
-// not a screen. The nav item is a courtesy, never the control.
+// Team Availability is the one item that belongs to BOTH groups by right: a rep
+// needs it to find a colleague's free time, a manager needs it to run the week.
+// Rather than render the same link twice, it moves group depending on who is
+// looking. Rendering it in both places is the "confusing duplicate link" this
+// nav is meant to avoid.
+const REP_ONLY_NAV = [
+  { to: '/sales/team', label: 'Team Availability', icon: '▦' },
+]
+
+// Shown only to a manager - `permission` names the flag on /sales/me that
+// decides. This is presentation: every one of these routes is gated
+// server-side, so a rep who types the URL gets a 403, not a screen. The nav
+// item is a courtesy, never the control.
 const MANAGER_NAV = [
-  { to: '/sales/manager', label: 'Team Command', icon: '◎',
+  { to: '/sales/manager',       label: 'Team Command',      icon: '◎',
     permission: 'view_team_pipeline', end: true },
+  { to: '/sales/calendar',      label: 'Team Calendar',     icon: '▤',
+    permission: 'view_team_pipeline' },
+  { to: '/sales/team-pipeline', label: 'Team Pipeline',     icon: '⇉',
+    permission: 'view_team_pipeline' },
+  { to: '/sales/team',          label: 'Team Availability', icon: '▦',
+    permission: 'view_team_pipeline' },
+  { to: '/sales/proposals',     label: 'Demos / Proposals', icon: '◈',
+    permission: 'view_team_pipeline' },
+  { to: '/sales/salespeople',   label: 'Salespeople',       icon: '⚇',
+    permission: 'view_team_pipeline' },
+  // Reports is genuinely not built, and its PURPOSE has not been decided yet.
+  // Team Command was built on the principle that a manager screen measuring
+  // effort instead of obstacles becomes a stick; Reports may cut against that,
+  // so it waits for a decision rather than for an engineer. Shown disabled so
+  // nobody wonders whether it is hiding somewhere.
+  { to: '/sales/reports',       label: 'Reports',           icon: '◱',
+    permission: 'view_team_pipeline', soon: true },
 ]
 
 export default function SalesShell({ title, subtitle, actions, children }) {
@@ -103,6 +133,15 @@ export default function SalesShell({ title, subtitle, actions, children }) {
   const platform = ctx?.platform?.name || ''
   const person = ctx?.user?.full_name || ''
 
+  // One source of truth for "is this person running a team", read from the
+  // server's own permission flag rather than from the role string, so the nav
+  // and the API can never disagree about who a manager is.
+  const isManager = !!ctx?.permissions?.view_team_pipeline
+  const managerNav = MANAGER_NAV.filter(i => ctx?.permissions?.[i.permission])
+  // Team Availability moves into MY TEAM for a manager, so it is never drawn
+  // twice.
+  const myWork = isManager ? NAV : [...NAV.slice(0, 3), ...REP_ONLY_NAV, ...NAV.slice(3)]
+
   return (
     <div className="sw-scope">
       <SalesStyles />
@@ -126,9 +165,11 @@ export default function SalesShell({ title, subtitle, actions, children }) {
             </div>
           </div>
 
-          <div className="sw-navtitle">MY WORK</div>
+          <div className="sw-navtitle">
+            MY WORK{isManager ? <span className="sw-navhint"> — as a seller</span> : null}
+          </div>
           <nav className="sw-nav">
-            {NAV.map(item => {
+            {myWork.map(item => {
               const count = item.countKey ? counts[item.countKey] : null
               if (item.soon) {
                 return (
@@ -152,20 +193,31 @@ export default function SalesShell({ title, subtitle, actions, children }) {
             })}
           </nav>
 
-          {MANAGER_NAV.some(i => ctx?.permissions?.[i.permission]) ? (
+          {managerNav.length ? (
             <>
-              <div className="sw-navtitle">MY TEAM</div>
+              <div className="sw-navtitle">MY TEAM<span className="sw-navhint"> — as a manager</span></div>
               <nav className="sw-nav">
-                {MANAGER_NAV.filter(i => ctx?.permissions?.[i.permission]).map(item => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    className={({ isActive }) => (isActive ? 'sw-on' : '')}
-                  >
-                    <span>{item.icon}</span><span>{item.label}</span>
-                  </NavLink>
-                ))}
+                {managerNav.map(item => {
+                  if (item.soon) {
+                    return (
+                      <a key={item.to} className="sw-disabled" aria-disabled="true"
+                         title="Deferred until its purpose is agreed — not hidden, not half-built.">
+                        <span>{item.icon}</span><span>{item.label}</span>
+                        <span className="sw-soon">LATER</span>
+                      </a>
+                    )
+                  }
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.end}
+                      className={({ isActive }) => (isActive ? 'sw-on' : '')}
+                    >
+                      <span>{item.icon}</span><span>{item.label}</span>
+                    </NavLink>
+                  )
+                })}
               </nav>
             </>
           ) : null}

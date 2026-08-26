@@ -147,6 +147,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "LEGACY HARDENING CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_staff_activation.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "STAFF ACTIVATION CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_sales_workspace_complete.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "SALES WORKSPACE COMPLETION CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

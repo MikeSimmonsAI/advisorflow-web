@@ -94,6 +94,36 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     return user
 
 
+def require_tenant_user(user: User = Depends(get_current_user)) -> User:
+    """This route belongs to a CUSTOMER TENANT. The caller must be inside one.
+
+    A brand-sales user has `organization_id = NULL` as a positive architectural
+    assertion - they sell the product, they do not use a tenant of it. Before
+    this guard existed, tenant routes accepted them and filtered on
+    `organization_id == None`, which SQLAlchemy renders as `IS NULL`. That
+    returned nothing, so the audit found 200s with empty bodies and no leak.
+
+    The reason it did not leak is that `Lead.organization_id` and
+    `PipelineConversation.organization_id` are `nullable=False`, so no row could
+    ever match - a real guarantee, but one that lives in the schema rather than
+    in any authorization decision. It would end silently the day somebody made
+    one of those columns nullable for an unrelated reason, and nothing would
+    fail a test.
+
+    So the answer is now a refusal rather than an empty list. god_admin passes:
+    the owner legitimately operates inside tenants, and `get_current_user`
+    already resolves an org for them via X-Org-Override.
+    """
+    if user.role == "god_admin":
+        return user
+    if getattr(user, "organization_id", None) is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This is a customer workspace route. Your account belongs to a "
+                   "brand sales organization, not a customer organization.")
+    return user
+
+
 def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")

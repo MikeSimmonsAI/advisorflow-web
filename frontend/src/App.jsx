@@ -68,6 +68,10 @@ import ManagerCommand from './pages/sales/ManagerCommand'
 import OpportunityDetail from './pages/sales/OpportunityDetail'
 import MyAvailability from './pages/sales/MyAvailability'
 import TeamAvailability from './pages/sales/TeamAvailability'
+import TeamCalendar from './pages/sales/TeamCalendar'
+import TeamProposals from './pages/sales/TeamProposals'
+import Salespeople from './pages/sales/Salespeople'
+import Prospects from './pages/sales/Prospects'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, api } from './api/client'
 
 function isAuthenticated() {
@@ -200,16 +204,30 @@ export default function App() {
           isAuthenticated() ? <DemoConsole /> : <Navigate to="/login" replace />} />
         <Route path="/" element={<HomeRedirect />} />
         {/* ── Sales Workspace ── brand-sales members; guarded server-side ── */}
+        {/* ── MY WORK ── every signed-in brand-sales member ── */}
         <Route path="/sales" element={<SalesRoute><MyDay /></SalesRoute>} />
-        <Route path="/sales/pipeline" element={<SalesRoute><MyPipeline /></SalesRoute>} />
-        {/* Manager workspace. SalesRoute only checks that someone is signed in;
-            /sales/manager/* is gated by require_sales_manager server-side, so a
-            rep who reaches this URL gets a refusal from the API, not a screen. */}
-        <Route path="/sales/manager" element={<SalesRoute><ManagerCommand /></SalesRoute>} />
+        {/* One component, two scopes. See the header of MyPipeline.jsx: the
+            team board is not a second page, it is this page without the
+            personal narrowing. */}
+        <Route path="/sales/pipeline" element={<SalesRoute><MyPipeline scope="mine" /></SalesRoute>} />
+        <Route path="/sales/prospects" element={<SalesRoute><Prospects /></SalesRoute>} />
+        <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />
         <Route path="/sales/onboarding" element={<SalesRoute><SalesImplementations /></SalesRoute>} />
         <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
         <Route path="/sales/team" element={<SalesRoute><TeamAvailability /></SalesRoute>} />
-        <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />
+
+        {/* ── MY TEAM ── manager surfaces ──
+            SalesRoute only checks that someone is signed in. Every route below
+            is gated server-side — /sales/manager/* by require_sales_manager,
+            the team calendar by a scope check inside the endpoint — so a rep
+            who types one of these URLs gets a refusal from the API, or their
+            own data, never somebody else's. The nav hides them; the server
+            enforces them. Those are two different jobs and both are done. */}
+        <Route path="/sales/manager" element={<SalesRoute><ManagerCommand /></SalesRoute>} />
+        <Route path="/sales/calendar" element={<SalesRoute><TeamCalendar /></SalesRoute>} />
+        <Route path="/sales/team-pipeline" element={<SalesRoute><MyPipeline scope="team" /></SalesRoute>} />
+        <Route path="/sales/proposals" element={<SalesRoute><TeamProposals /></SalesRoute>} />
+        <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
