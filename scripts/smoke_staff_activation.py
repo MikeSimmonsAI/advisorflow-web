@@ -465,6 +465,185 @@ def test_isolation_and_audit(c, god):
           not hasattr(StaffActivation, "organization_id"))
 
 
+# ── the operator script (scripts/issue_sales_setup_link.py) ─────────────────
+
+def test_operator_script():
+    """The Render-shell script that issues the very first link.
+
+    It exists because of a chicken-and-egg: the God Mode UI is the normal way
+    to do this, but nobody who could click that button could sign in. A script
+    that mints production credentials and has never been run is not something
+    to hand somebody, so it is proven here against the same fixture.
+    """
+    section("operator script: guards, refusals, and the link it prints")
+    import ast
+    import importlib.util
+    from app.services import staff_activation
+
+    src = read_src("scripts/issue_sales_setup_link.py")
+    tree = ast.parse(src)
+
+    # The SQLite refusal is only worth anything if main() actually calls it.
+    main_fn = [n for n in tree.body
+               if isinstance(n, ast.FunctionDef) and n.name == "main"]
+    check("the script defines main()", len(main_fn) == 1)
+    called_first = None
+    if main_fn:
+        for node in main_fn[0].body:
+            if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)):
+                called_first = node.value.func.id
+                break
+    check("main() calls require_production_db() before anything else",
+          called_first == "require_production_db",
+          "first call was %r" % called_first)
+
+    # It must not be able to print or set a password. The forbidden mechanism
+    # is `POST /admin/users/{id}/reset-password`, which returns a plaintext
+    # password in its body; this script must share none of its machinery.
+    printed = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id == "print"]
+    leaked = [ast.dump(n) for n in printed
+              if "password_hash" in ast.dump(n) or "raw_token" in ast.dump(n)]
+    check("no print() statement touches password_hash", not leaked, leaked[:1])
+    check("the script never imports a password hasher",
+          "hash_password" not in src)
+    check("the script sets no password field",
+          "password_hash =" not in src and "password_hash=" not in src)
+
+    # Loaded by path: scripts/ is not a package, and importing it by name would
+    # silently pick up whatever else is on sys.path.
+    _spec = importlib.util.spec_from_file_location(
+        "_issue_link_under_test",
+        os.path.join(REPO, "scripts", "issue_sales_setup_link.py"))
+    mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(mod)
+
+    # -- the refusal itself, both ways --------------------------------------
+    old = os.environ.get("DATABASE_URL")
+    try:
+        os.environ["DATABASE_URL"] = "sqlite:///./whatever.db"
+        refused = False
+        try:
+            mod.require_production_db()
+        except SystemExit as e:
+            refused = "SQLite" in str(e)
+        check("it REFUSES a SQLite DATABASE_URL", refused)
+
+        os.environ.pop("DATABASE_URL", None)
+        refused = False
+        try:
+            mod.require_production_db()
+        except SystemExit:
+            refused = True
+        check("it refuses a missing DATABASE_URL", refused)
+
+        os.environ["DATABASE_URL"] = "postgresql://user:pw@host/db"
+        ok = True
+        try:
+            mod.require_production_db()
+        except SystemExit:
+            ok = False
+        check("it ALLOWS a postgres DATABASE_URL", ok)
+    finally:
+        if old is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = old
+
+    # -- prepare(): the two endpoint guards, re-run ------------------------
+    db = SessionLocal()
+    try:
+        def refuses(actor, target, brand):
+            try:
+                mod.prepare(db, actor, target, brand)
+                return None
+            except SystemExit as e:
+                return str(e)
+            except Exception as e:          # HTTPException from guard 1
+                return getattr(e, "detail", str(e))
+
+        # Target u-locked, not Blake: the endpoint tests above already accepted
+        # a link as Blake, so his row is no longer in the locked-out state this
+        # section is about. u-locked is the same shape and nothing has redeemed
+        # a link for him, which keeps this test independent of ordering.
+        T = "locked@example.test"
+
+        actor, target, bso, holds = mod.prepare(
+            db, "god@example.test", T, "bso-evo")
+        check("god resolves a locked-out rep in EvoSys Pro",
+              target.id == "u-locked", target.id)
+        check("and reports his real membership role",
+              holds.role == ROLE_SALES_REP, holds.role)
+        check("resolving writes nothing - he is still locked out",
+              db.query(User).filter(User.id == "u-locked").first()
+              .must_change_password is True)
+        check("and his organization_id is still NULL",
+              db.query(User).filter(User.id == "u-locked").first()
+              .organization_id is None)
+
+        check("a brand can be resolved by NAME as well as id",
+              mod.prepare(db, "god@example.test", T,
+                          "EvoSys Pro Sales")[2].id == "bso-evo")
+
+        # Guard 1: authority.
+        msg = refuses("rep2@example.test", T, "bso-evo")
+        check("a REP may not issue a link", msg is not None, msg)
+        msg = refuses("bbmgr@example.test", T, "bso-evo")
+        check("another brand's manager may not issue an EvoSys link",
+              msg is not None, msg)
+        msg = refuses("cust@example.test", T, "bso-evo")
+        check("a customer admin may not issue a link", msg is not None, msg)
+
+        # Guard 2: membership. This is the back-door test.
+        msg = refuses("god@example.test", "nomem@example.test", "bso-evo")
+        check("even GOD cannot link somebody with no membership",
+              msg is not None and "does not grant it" in (msg or ""), msg)
+        msg = refuses("god@example.test", "bbmgr@example.test", "bso-evo")
+        check("a BookaBoost seller cannot be linked into EvoSys Pro",
+              msg is not None, msg)
+
+        msg = refuses("god@example.test", "nobody@example.test", "bso-evo")
+        check("an unknown target is refused", msg is not None, msg)
+        msg = refuses("nobody@example.test", "rep@example.test", "bso-evo")
+        check("an unknown actor is refused", msg is not None, msg)
+        msg = refuses("god@example.test", T, "Sales")
+        check("an ambiguous brand name is refused rather than guessed",
+              msg is not None and "matched 2" in (msg or ""), msg)
+
+        # -- and the link it would actually print ---------------------------
+        before = snapshot("u-locked")
+        _u = db.query(User).filter(User.id == "u-locked").first()
+        before_hash, before_mcp = _u.password_hash, _u.must_change_password
+        row, raw = staff_activation.issue(
+            db, target, actor, brand_sales_org_id=bso.id, purpose="setup")
+        url = staff_activation.activation_url("https://app.evosyspro.live", raw)
+        check("the printed URL carries the token on the activate page",
+              url == "https://app.evosyspro.live/activate?token=%s" % raw)
+        check("the token is the stf_ family, not the customer act_ one",
+              raw.startswith("stf_"))
+        check("the raw token is NOT what is stored",
+              row.token_hash != raw and raw not in row.token_hash)
+        check("the row it wrote carries no tenant",
+              row.brand_sales_org_id == "bso-evo"
+              and not hasattr(row, "organization_id"))
+        db.expire_all()
+        _u = db.query(User).filter(User.id == "u-locked").first()
+        check("ISSUING GRANTS NOTHING - he still cannot sign in",
+              _u.must_change_password is True and before_mcp is True
+              and _u.password_hash == before_hash)
+        check("and issuing changed no part of his identity",
+              snapshot("u-locked") == before)
+        check("and his sales role is untouched by issuing",
+              db.query(Membership).filter(
+                  Membership.user_id == "u-locked",
+                  Membership.scope_id == "bso-evo").first().role
+              == ROLE_SALES_REP)
+    finally:
+        db.close()
+
+
 def main():
     print("=" * 70)
     print("BRAND-SALES LOGIN ACTIVATION")
@@ -482,6 +661,8 @@ def main():
         test_reset_preserves_manager(c, god)
         test_token_lifecycle(c, god, used)
         test_isolation_and_audit(c, god)
+
+    test_operator_script()
 
     print("\n" + "=" * 70)
     if FAILURES:
