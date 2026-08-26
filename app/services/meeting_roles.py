@@ -130,37 +130,48 @@ def resolve_meeting_slots(db: Session, meeting_type, brand_sales_org_id: str,
 # A template, not a hardcoding: these are created per brand sales org on first
 # use and are editable rows from then on. Changing a brand's meeting types must
 # never need a migration.
+# `requires_video` (Checkpoint 4): every CUSTOMER-FACING type gets a video
+# meeting; the internal one deliberately does not. An internal pipeline review
+# does not need a Zoom room, and creating one anyway burns a concurrent-meeting
+# slot and fills the host's Zoom account with rooms nobody joins.
 DEFAULT_MEETING_TYPES = [
     {"key": "discovery", "name": "Discovery", "duration_minutes": 30,
      "required_slots": SLOT_OPPORTUNITY_OWNER,
      "optional_slots": SLOT_SALES_MANAGER,
      "description": "Qualify the business and capture discovery answers.",
+     "requires_video": True,
      "sort_order": 1},
     {"key": "discovery_60", "name": "Discovery (60 min)", "duration_minutes": 60,
      "required_slots": SLOT_OPPORTUNITY_OWNER,
      "optional_slots": ",".join([SLOT_SALES_MANAGER, SLOT_PRODUCT_SPECIALIST]),
      "description": "Longer discovery for a more complex operation.",
+     "requires_video": True,
      "sort_order": 2},
     {"key": "discovery_demo", "name": "Discovery + Demo", "duration_minutes": 60,
      "required_slots": ",".join([SLOT_OPPORTUNITY_OWNER, SLOT_SALES_MANAGER,
                                  SLOT_PRODUCT_SPECIALIST]),
      "description": "The three-person call this scheduling engine was built for.",
+     "requires_video": True,
      "sort_order": 3},
     {"key": "demo", "name": "Product Demo", "duration_minutes": 60,
      "required_slots": ",".join([SLOT_OPPORTUNITY_OWNER, SLOT_PRODUCT_SPECIALIST]),
      "optional_slots": SLOT_SALES_MANAGER,
      "description": "Tailored demo built from the discovery answers.",
+     "requires_video": True,
      "sort_order": 4},
     {"key": "proposal", "name": "Proposal Review", "duration_minutes": 30,
      "required_slots": SLOT_OPPORTUNITY_OWNER,
      "optional_slots": SLOT_SALES_MANAGER,
+     "requires_video": True,
      "sort_order": 5},
     {"key": "closing", "name": "Closing Call", "duration_minutes": 60,
      "required_slots": ",".join([SLOT_OPPORTUNITY_OWNER, SLOT_SALES_MANAGER]),
+     "requires_video": True,
      "sort_order": 6},
     {"key": "internal", "name": "Internal Sales Meeting", "duration_minutes": 30,
      "required_slots": SLOT_ANY_REP, "is_internal": True,
      "description": "Team meeting. No prospect attends.",
+     "requires_video": False,
      "sort_order": 7},
 ]
 
@@ -172,14 +183,39 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
     never resurrected on top of the user's change.
     """
     from app.models.scheduling_models import MeetingType
-    existing = {m.key for m in db.query(MeetingType).filter(
-        MeetingType.brand_sales_org_id == brand_sales_org_id).all()}
+    rows = (db.query(MeetingType)
+            .filter(MeetingType.brand_sales_org_id == brand_sales_org_id).all())
+    existing = {m.key: m for m in rows}
     created = False
     for spec in DEFAULT_MEETING_TYPES:
         if spec["key"] in existing:
             continue
         db.add(MeetingType(brand_sales_org_id=brand_sales_org_id, **spec))
         created = True
+
+    # ── one-time backfill of requires_video (Checkpoint 4) ──────────────────
+    # Idempotency by key means an ALREADY-SEEDED brand — which EvoSys Pro is in
+    # production — would never pick up `requires_video`, and would silently
+    # create no Zoom meetings forever. The column shipped with DEFAULT FALSE, so
+    # on a pre-existing row FALSE means "predates the feature", not "somebody
+    # turned it off".
+    #
+    # Guarded on updated_at == created_at, i.e. the row has NEVER been edited.
+    # The moment anyone changes a meeting type by hand, their choice is
+    # permanent and this never touches it again — which is what stops a
+    # deliberate "no video on closing calls" being undone on every startup.
+    for spec in DEFAULT_MEETING_TYPES:
+        row = existing.get(spec["key"])
+        if row is None or not spec.get("requires_video"):
+            continue
+        if getattr(row, "requires_video", False):
+            continue
+        untouched = (row.updated_at is None or row.created_at is None
+                     or row.updated_at == row.created_at)
+        if untouched:
+            row.requires_video = True
+            created = True
+
     if created:
         db.flush()
     return (db.query(MeetingType)

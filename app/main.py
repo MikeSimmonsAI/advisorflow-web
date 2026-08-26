@@ -37,6 +37,10 @@ import app.models.scheduling_models  # noqa: F401  (imported for side effects)
 # calendar_connections / external_busy_blocks / confirmation-token tables are
 # never created and external sync silently has nowhere to write.
 import app.models.calendar_models  # noqa: F401  (imported for side effects)
+# Video meeting models (Checkpoint 4) — same Base, same reason. Without this
+# import appointment_meetings / meeting_provider_configs are never created and
+# Zoom provisioning silently has nowhere to write.
+import app.models.meeting_models  # noqa: F401  (imported for side effects)
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
@@ -70,6 +74,7 @@ from app.routers.lead_scraper_router import router as lead_scraper_router
 from app.routers.sales_router import router as sales_router
 from app.routers.sales_scheduling_router import router as sales_scheduling_router
 from app.routers.calendar_connections_router import router as calendar_connections_router
+from app.routers.sales_proposal_router import router as sales_proposal_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -390,6 +395,12 @@ app.include_router(sales_scheduling_router)
 # Per-USER calendar connection state (Checkpoint 3). A connection belongs to a
 # person, not a tenant — every route in here reads only the caller's own rows.
 app.include_router(calendar_connections_router)
+# Sales proposals + the secure deal room (Checkpoint 4). Writes the SAME
+# proposal tables as proposal_router below — this is the opportunity-scoped
+# sales path, not a second portal. Its /deal-room/* half is public by design:
+# the token is the authorization, because a customer must never need an account
+# to read what we sent them.
+app.include_router(sales_proposal_router)
 app.include_router(proposal_router.router)
 
 

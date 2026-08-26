@@ -3,6 +3,12 @@ import { useEffect, useState, cloneElement } from 'react'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
+// Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
+// room; PortalAccess/PortalViewer are the pre-existing customer portal pages
+// that were built but never routed until now.
+import DealRoom from './pages/portal/DealRoom'
+import PortalAccess from './pages/portal/PortalAccess'
+import PortalViewer from './pages/portal/PortalViewer'
 import CadenceTemplates from './pages/CadenceTemplates'
 import OrgSettings from './pages/OrgSettings'
 import ChangePassword from './pages/ChangePassword'
@@ -147,6 +153,18 @@ export default function App() {
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/setup-integrations" element={<SetupIntegrations />} />
+        {/* ── PUBLIC customer surfaces ── no ProtectedRoute, by design ──
+            A customer has no account. The token in the URL is the whole
+            authorization, and the pages below never call an authenticated
+            endpoint.
+
+            NOTE: /portal/access/:token and /portal/view/:id were BUILT but
+            never routed — App.jsx had no entry for either, so every magic link
+            ever emailed hit the catch-all and silently redirected to "/". The
+            backend was always correct; the door was missing. */}
+        <Route path="/deal-room/:token" element={<DealRoom />} />
+        <Route path="/portal/access/:token" element={<PortalAccess />} />
+        <Route path="/portal/view/:proposalId" element={<PortalViewer />} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"

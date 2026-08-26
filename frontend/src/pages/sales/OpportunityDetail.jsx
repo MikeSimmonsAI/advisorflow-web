@@ -15,6 +15,7 @@ import SalesShell from './SalesShell'
 import FindTeamTime from './FindTeamTime'
 import ApptSyncPanel from './ApptSyncPanel'
 import RescheduleDialog from './RescheduleDialog'
+import ProposalPanel from './ProposalPanel'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
   money, dateTime, dueLabel, wallDateTime,
@@ -54,6 +55,16 @@ function Meetings({ opp, onFind, onConfirm, onCancel, onMove, saving }) {
             </p>
           </div>
           <div className="sw-actions">
+            {/* JOIN MEETING. Only ever the attendee link — the host link is a
+                separate, participant-gated fetch and is never in this payload. */}
+            {a.video?.join_url && a.status === 'scheduled' && (
+              <a className="sw-tiny sw-primary" href={a.video.join_url}
+                 target="_blank" rel="noopener noreferrer"
+                 style={{ textDecoration: 'none' }}>Join</a>
+            )}
+            {a.video?.needs_attention && (
+              <Chip tone="amber">{a.video.label}</Chip>
+            )}
             <Chip tone={CONF_TONE[a.confirmation_status]}>
               {String(a.confirmation_status || '').replace('_', ' ')}
             </Chip>
@@ -519,6 +530,11 @@ export default function OpportunityDetail() {
           <div className="sw-mt"><DemoBuild opp={opp} team={team} onPatch={patch} saving={saving} /></div>
           <div className="sw-mt">
             <PackageDeal opp={opp} packages={packages} onPatch={patch} saving={saving} />
+          </div>
+          {/* Checkpoint 4. Sits in the main column, after discovery/demo/package
+              — the order a deal actually moves through. */}
+          <div className="sw-mt">
+            <ProposalPanel opp={opp} packages={packages} onChanged={load} />
           </div>
         </div>
 

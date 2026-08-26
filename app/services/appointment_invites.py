@@ -69,6 +69,10 @@ BRAND_IDENTITY = {
         "from_email": "support@evosyspro.live",
         "support_phone": "469-553-7417",
         "website": "https://evosyspro.live",
+        # Where a CUSTOMER-facing link points. The frontend app, not the API —
+        # the secure deal portal is a page a human opens, and sending them to
+        # the backend host would give them a JSON error.
+        "app_base_url": "https://app.evosyspro.live",
         "accent": "#1d4ed8",
     },
 }
@@ -78,17 +82,25 @@ FALLBACK_IDENTITY = {
     "from_email": None,     # None -> the configured global FROM_EMAIL is used
     "support_phone": None,
     "website": None,
+    # Env-driven so a new brand works before it has an entry above.
+    "app_base_url": os.environ.get("FRONTEND_URL", "").rstrip("/") or None,
     "accent": "#1d4ed8",
 }
 
 
-def brand_identity(db: Session, appt: SalesAppointment) -> dict:
-    """The brand this appointment is sold under. Never raises."""
+def brand_identity_for_brand(db: Session, brand_sales_org_id: str) -> dict:
+    """The identity for a brand sales org. Never raises.
+
+    Keyed on brand id rather than on an appointment so proposals, portals and
+    any future brand-scoped email can resolve the same identity — one brand
+    means one from-address and one support number everywhere, not three
+    slightly different ones that drift apart.
+    """
     try:
         from app.models.sales_models import BrandSalesOrg
         from app.models.models import Platform
         bso = (db.query(BrandSalesOrg)
-               .filter(BrandSalesOrg.id == appt.brand_sales_org_id).first())
+               .filter(BrandSalesOrg.id == brand_sales_org_id).first())
         if bso and bso.platform_id:
             plat = db.query(Platform).filter(Platform.id == bso.platform_id).first()
             if plat and plat.slug in BRAND_IDENTITY:
@@ -100,8 +112,14 @@ def brand_identity(db: Session, appt: SalesAppointment) -> dict:
                 ident["name"] = plat.name
                 return ident
     except Exception:
-        log.exception("could not resolve brand identity for appointment %s", appt.id)
+        log.exception("could not resolve brand identity for brand %s",
+                      brand_sales_org_id)
     return dict(FALLBACK_IDENTITY)
+
+
+def brand_identity(db: Session, appt: SalesAppointment) -> dict:
+    """The brand this appointment is sold under. Never raises."""
+    return brand_identity_for_brand(db, appt.brand_sales_org_id)
 
 
 class _SendingOrg(object):

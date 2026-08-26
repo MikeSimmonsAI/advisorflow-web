@@ -229,6 +229,56 @@ COLUMNS_TO_ADD = [
     ("calendar_connections", "busy_window_start", "TIMESTAMP"),
     ("calendar_connections", "busy_window_end", "TIMESTAMP"),
     ("calendar_connections", "busy_fetched_at", "TIMESTAMP"),
+
+    # ── Sales execution, Checkpoint 4 (Aug 26 2026) ────────────────────────
+    # `proposals` and `sales_meeting_types` BOTH already exist in production, so
+    # create_all() will never add a column to either. Every one of these is
+    # required for the proposal engine and the Zoom integration to function.
+    ("sales_meeting_types", "requires_video", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("sales_meeting_types", "video_provider", "VARCHAR"),
+
+    # Sales linkage — the columns that make a customer-portal proposal usable
+    # as an Opportunity proposal without forking the table.
+    ("proposals", "brand_sales_org_id", "VARCHAR"),
+    ("proposals", "opportunity_id", "VARCHAR"),
+    ("proposals", "proposal_number", "VARCHAR"),
+    ("proposals", "version", "INTEGER NOT NULL DEFAULT 1"),
+    ("proposals", "supersedes_id", "VARCHAR"),
+    ("proposals", "sales_status", "VARCHAR"),
+    # Money. NUMERIC(12,2), never FLOAT.
+    ("proposals", "package_id", "VARCHAR"),
+    ("proposals", "base_amount", "NUMERIC(12,2)"),
+    ("proposals", "adjustment", "NUMERIC(12,2)"),
+    ("proposals", "final_amount", "NUMERIC(12,2)"),
+    ("proposals", "currency", "VARCHAR DEFAULT 'USD'"),
+    ("proposals", "price_override_by", "VARCHAR"),
+    ("proposals", "price_override_at", "TIMESTAMP"),
+    ("proposals", "price_override_reason", "TEXT"),
+    # Structured content — real columns so versions can be diffed and reported.
+    ("proposals", "executive_summary", "TEXT"),
+    ("proposals", "business_need", "TEXT"),
+    ("proposals", "objectives", "TEXT"),
+    ("proposals", "recommended_solution", "TEXT"),
+    ("proposals", "scope", "TEXT"),
+    ("proposals", "deliverables", "TEXT"),
+    ("proposals", "implementation_plan", "TEXT"),
+    ("proposals", "terms", "TEXT"),
+    # Lifecycle stamps.
+    ("proposals", "sent_at", "TIMESTAMP"),
+    ("proposals", "first_viewed_at", "TIMESTAMP"),
+    ("proposals", "last_viewed_at", "TIMESTAMP"),
+    ("proposals", "accepted_at", "TIMESTAMP"),
+    ("proposals", "declined_at", "TIMESTAMP"),
+    ("proposals", "change_requested_at", "TIMESTAMP"),
+    ("proposals", "superseded_at", "TIMESTAMP"),
+    ("proposals", "customer_response_note", "TEXT"),
+    ("proposals", "responded_by_email", "VARCHAR"),
+    # E-signature attachment point. Nothing reads these yet — they exist so
+    # acceptance does not need re-modelling when a provider is added.
+    ("proposals", "signature_provider", "VARCHAR"),
+    ("proposals", "signature_envelope_id", "VARCHAR"),
+    ("proposals", "signature_status", "VARCHAR"),
+    ("proposals", "signed_at", "TIMESTAMP"),
     # Platform isolation — added when Platform model was introduced.
     # platform_id on organizations and users links each org/user to their brand platform.
     ("organizations", "platform_id", "VARCHAR"),
@@ -393,6 +443,12 @@ NULLABILITY_TO_RELAX = [
     # Brand-sales staff and some global/god users have no customer tenant at all.
     # See User.organization_id and claude/SALES_WORKSPACE_ARCHITECTURE.md.
     ("users", "organization_id"),
+    # Checkpoint 4. A SALES proposal belongs to a brand_sales_org and an
+    # opportunity, not to a customer tenant — the customer organization does not
+    # exist until the deal is Won. Existing customer-portal proposals keep their
+    # organization_id and are unaffected; this only permits the NULL that a
+    # pre-sale proposal requires.
+    ("proposals", "organization_id"),
 ]
 
 

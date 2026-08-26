@@ -45,6 +45,7 @@ from app.services.meeting_roles import (
 from app.models.calendar_models import SYNC_LABELS, SYNC_NEEDS_ATTENTION
 from app.services import appointment_sync as apsync
 from app.services import appointment_invites as apinvite
+from app.services import appointment_meetings as apmeet
 
 router = APIRouter(prefix="/sales", tags=["sales-scheduling"])
 
@@ -157,6 +158,10 @@ def _appt_out(db: Session, appt: SalesAppointment, viewer: User) -> dict:
         "meeting_url": appt.meeting_url,
         "location": appt.location,
         "notes": appt.notes,
+        # Checkpoint 4. `meeting_out` has no field for the host URL, so no edit
+        # to this serializer can leak one — the host link is fetched separately
+        # by a participant-gated endpoint.
+        "video": apmeet.meeting_out(apmeet.get_meeting_row(db, appt.id)),
         "participants": [{
             "user_id": u.id, "full_name": u.full_name, "email": u.email,
             "role_slot": p.role_slot,
@@ -727,7 +732,17 @@ def _push_appointment(db: Session, appt: SalesAppointment, user: User,
     every failure mode inside is already recorded on the appointment or the
     participant rows, which is what the UI reads.
     """
-    sync_report, invite_report = None, None
+    sync_report, invite_report, meeting_report = None, None, None
+    # VIDEO FIRST, deliberately. Calendar sync and the prospect invitation both
+    # put `appt.meeting_url` in their bodies, so the Zoom room has to exist
+    # before either runs or the join link is missing from every invitation.
+    try:
+        meeting_report = apmeet.ensure_meeting(db, appt)
+        db.refresh(appt)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "video meeting provisioning raised for %s", appt.id)
     try:
         sync_report = apsync.sync_appointment(db, appt, organizer=user)
     except Exception:
@@ -742,7 +757,7 @@ def _push_appointment(db: Session, appt: SalesAppointment, user: User,
         import logging
         logging.getLogger(__name__).exception(
             "prospect invitation raised for %s", appt.id)
-    return {"sync": sync_report, "invite": invite_report}
+    return {"sync": sync_report, "invite": invite_report, "meeting": meeting_report}
 
 
 @router.get("/appointments")
@@ -1019,6 +1034,14 @@ def cancel_appointment(appt_id: str, body: CancelIn,
     # holds the meeting, nobody knows it is off, and somebody dials in. Both
     # calls record their own failures rather than raising.
     try:
+        # Cancel the Zoom room too. A meeting nobody cancelled is a room the
+        # prospect can still walk into after the deal is dead.
+        apmeet.cancel_meeting(db, appt, reason=appt.cancel_reason)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "video meeting cancel raised for %s", appt.id)
+    try:
         apsync.cancel_appointment_sync(db, appt, organizer=user)
     except Exception:
         import logging
@@ -1152,6 +1175,55 @@ def resync_appointment_sync(appt_id: str,
     db.refresh(appt)
     out = _appt_out(db, appt, user)
     out["sync_report"] = report
+    return out
+
+
+@router.get("/appointments/{appt_id}/host-link")
+def get_meeting_host_link(appt_id: str,
+                          user: User = Depends(require_sales_member),
+                          db: Session = Depends(get_db)):
+    """The Zoom HOST link. Deliberately its own endpoint, not a serializer field.
+
+    Zoom's start_url starts the meeting AS the host — whoever holds it can
+    impersonate the host of a real customer meeting. So it is:
+
+      · never included in `_appt_out`, any email, any .ics, or any calendar body
+      · fetched only on demand, by an explicit request
+      · restricted to PARTICIPANTS of this specific meeting
+
+    A sales manager who can VIEW the appointment still cannot take it — being
+    able to see a meeting on the team calendar is not the same as being
+    entitled to host it.
+    """
+    appt = _load_appt(db, appt_id, user)
+    on_it = (db.query(AppointmentParticipant)
+             .filter(AppointmentParticipant.appointment_id == appt.id,
+                     AppointmentParticipant.user_id == user.id).first())
+    if not on_it:
+        raise HTTPException(
+            status_code=403,
+            detail="Only a participant of this meeting can start it as host.")
+    host_url = apmeet.host_url_for(db, appt.id)
+    if not host_url:
+        raise HTTPException(status_code=404,
+                            detail="This meeting has no host link.")
+    return {"host_url": host_url}
+
+
+@router.post("/appointments/{appt_id}/video/retry")
+def retry_video_meeting(appt_id: str,
+                        user: User = Depends(require_sales_member),
+                        db: Session = Depends(get_db)):
+    """Retry provisioning after a provider failure. Idempotent — with an
+    existing provider meeting id this updates rather than creating a second."""
+    appt = _load_appt(db, appt_id, user)
+    if appt.status == APPT_CANCELLED:
+        raise HTTPException(status_code=400,
+                            detail="This meeting is cancelled.")
+    report = apmeet.ensure_meeting(db, appt)
+    db.refresh(appt)
+    out = _appt_out(db, appt, user)
+    out["video_report"] = report
     return out
 
 

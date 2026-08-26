@@ -17,7 +17,7 @@ Architecture notes:
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
-    UniqueConstraint, Index, Enum as SAEnum, LargeBinary
+    UniqueConstraint, Index, Enum as SAEnum, LargeBinary, Numeric
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
@@ -1227,12 +1227,79 @@ class RevokedToken(Base):
 # White-label note: branding_override JSON is stored now but UI controls are
 # not exposed yet. Future: per-proposal logo, accent color, company name override.
 
+# ── Sales proposal lifecycle (Checkpoint 4) ──────────────────────────────────
+# Deliberately NOT the same vocabulary as `Proposal.status` (draft/published/
+# archived), which existing customer-portal rows already use. A proposal's
+# status answers "where is this document with the buyer"; the opportunity's
+# stage answers "where is this deal". Conflating them means a viewed proposal
+# silently advances a deal nobody has agreed to.
+
+PROP_DRAFT           = "draft"
+PROP_INTERNAL_REVIEW = "internal_review"
+PROP_READY           = "ready"
+PROP_SENT            = "sent"
+PROP_VIEWED          = "viewed"
+PROP_ACCEPTED        = "accepted"
+PROP_DECLINED        = "declined"
+PROP_CHANGE_REQUESTED = "change_requested"
+PROP_EXPIRED         = "expired"
+PROP_SUPERSEDED      = "superseded"
+PROPOSAL_STATUSES = (PROP_DRAFT, PROP_INTERNAL_REVIEW, PROP_READY, PROP_SENT,
+                     PROP_VIEWED, PROP_ACCEPTED, PROP_DECLINED,
+                     PROP_CHANGE_REQUESTED, PROP_EXPIRED, PROP_SUPERSEDED)
+
+PROPOSAL_STATUS_LABELS = {
+    PROP_DRAFT: "Draft",
+    PROP_INTERNAL_REVIEW: "Internal review",
+    PROP_READY: "Ready to send",
+    PROP_SENT: "Sent",
+    PROP_VIEWED: "Viewed by customer",
+    PROP_ACCEPTED: "Accepted",
+    PROP_DECLINED: "Declined",
+    PROP_CHANGE_REQUESTED: "Change requested",
+    PROP_EXPIRED: "Expired",
+    PROP_SUPERSEDED: "Superseded",
+}
+
+# Still the live proposal on a deal. A superseded or declined one is history.
+PROPOSAL_OPEN_STATUSES = (PROP_DRAFT, PROP_INTERNAL_REVIEW, PROP_READY,
+                          PROP_SENT, PROP_VIEWED, PROP_CHANGE_REQUESTED)
+# Editing after a customer has seen it must create a new VERSION, never mutate
+# the document they are looking at.
+PROPOSAL_EDITABLE_STATUSES = (PROP_DRAFT, PROP_INTERNAL_REVIEW, PROP_READY)
+
+
 class Proposal(Base):
     __tablename__ = "proposals"
 
     id              = Column(String, primary_key=True, default=gen_uuid)
-    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+    # NULLABLE as of Checkpoint 4 (Aug 26 2026). It was NOT NULL, which made this
+    # table unusable for sales: a brand-sales rep has organization_id = NULL by
+    # design, and a pre-sale proposal must NOT point at a customer tenant that
+    # does not exist until the deal is Won.
+    #
+    # A proposal is now scoped one of two ways, never both:
+    #   organization_id     — an existing CUSTOMER's proposal (the original path)
+    #   brand_sales_org_id  — a SALES proposal against an Opportunity (Checkpoint 4)
+    #
+    # The NOT NULL is dropped in auto_migrate via NULLABILITY_TO_RELAX.
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True, index=True)
     created_by_id   = Column(String, ForeignKey("users.id"), nullable=False)
+
+    # ── Sales linkage (Checkpoint 4) ────────────────────────────────────────
+    brand_sales_org_id = Column(String, ForeignKey("brand_sales_orgs.id", ondelete="CASCADE"),
+                                nullable=True, index=True)
+    opportunity_id     = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
+                                nullable=True, index=True)
+
+    # Human-facing identity. `proposal_number` is stable across versions —
+    # EV-1007 v1 and EV-1007 v2 are the same proposal at different revisions,
+    # which is exactly how a customer talks about it on the phone.
+    proposal_number = Column(String, nullable=True, index=True)
+    version         = Column(Integer, default=1, nullable=False)
+    # The row this version replaced. Walking this backwards gives the full
+    # history without a separate revisions table.
+    supersedes_id   = Column(String, ForeignKey("proposals.id"), nullable=True)
 
     title           = Column(String, nullable=False)
     # Short subtitle shown on portal cover — e.g. "Prepared for Acme Corp"
@@ -1242,14 +1309,74 @@ class Proposal(Base):
     client_email    = Column(String, nullable=True)
     client_company  = Column(String, nullable=True)
 
-    # draft | published | archived
+    # draft | published | archived  — the ORIGINAL customer-portal vocabulary.
+    # Sales proposals use `sales_status` below instead. The two are kept apart
+    # rather than merged: existing customer rows already hold these values, and
+    # rewriting live data to fit a new state machine is how you lose history.
     status          = Column(String, default="draft", nullable=False)
+
+    # ── Sales proposal lifecycle (Checkpoint 4) ─────────────────────────────
+    # PROPOSAL STATUS IS NOT OPPORTUNITY STAGE. An opportunity can be in
+    # CLOSING while its proposal is merely VIEWED; those answer different
+    # questions and are never derived from each other.
+    sales_status    = Column(String, nullable=True)   # PROPOSAL_STATUSES
+
+    # Pricing. Numeric, not float — this is money.
+    package_id      = Column(String, ForeignKey("brand_packages.id"), nullable=True)
+    base_amount     = Column(Numeric(12, 2), nullable=True)
+    # Signed: negative is a discount, positive an add-on. Kept separate from
+    # final_amount so "what did we give away" is answerable without arithmetic
+    # against a package price that may since have changed.
+    adjustment      = Column(Numeric(12, 2), nullable=True)
+    final_amount    = Column(Numeric(12, 2), nullable=True)
+    currency        = Column(String, default="USD")
+    # Manager-only, reason-required — same authority model as the opportunity's
+    # deal_value override, reused rather than reinvented.
+    price_override_by     = Column(String, ForeignKey("users.id"), nullable=True)
+    price_override_at     = Column(DateTime, nullable=True)
+    price_override_reason = Column(Text, nullable=True)
+
+    # ── Structured content ──────────────────────────────────────────────────
+    # Real columns, not one HTML blob. A blob cannot be diffed between versions,
+    # cannot be reported on, and cannot be re-rendered in a new template.
+    executive_summary   = Column(Text, nullable=True)
+    business_need       = Column(Text, nullable=True)
+    objectives          = Column(Text, nullable=True)
+    recommended_solution = Column(Text, nullable=True)
+    scope               = Column(Text, nullable=True)
+    deliverables        = Column(Text, nullable=True)
+    implementation_plan = Column(Text, nullable=True)
+    terms               = Column(Text, nullable=True)
 
     # Future white-label: {"logo_url": "...", "accent": "#087cff", "company_name": "Acme"}
     branding_override = Column(Text, nullable=True)  # JSON string
 
     # Optional expiry for the whole proposal (not just tokens)
     expires_at      = Column(DateTime, nullable=True)
+
+    # ── Lifecycle stamps ────────────────────────────────────────────────────
+    # Separate columns rather than deriving from the event log: these are read
+    # on every pipeline screen, and a timeline scan per row does not scale.
+    sent_at       = Column(DateTime, nullable=True)
+    first_viewed_at = Column(DateTime, nullable=True)
+    last_viewed_at  = Column(DateTime, nullable=True)
+    accepted_at   = Column(DateTime, nullable=True)
+    declined_at   = Column(DateTime, nullable=True)
+    change_requested_at = Column(DateTime, nullable=True)
+    superseded_at = Column(DateTime, nullable=True)
+    # What the customer actually said, in their words. Drives the follow-up.
+    customer_response_note = Column(Text, nullable=True)
+    # Who at the customer acted, as recorded from the token they used.
+    responded_by_email = Column(String, nullable=True)
+
+    # ── E-signature attachment point (Checkpoint 4 prepares, does not build) ─
+    # A future DocuSign / Dropbox Sign / PandaDoc integration writes here. The
+    # columns exist so acceptance does not have to be re-modelled when signing
+    # arrives; nothing reads or writes them yet.
+    signature_provider     = Column(String, nullable=True)
+    signature_envelope_id  = Column(String, nullable=True)
+    signature_status       = Column(String, nullable=True)
+    signed_at              = Column(DateTime, nullable=True)
 
     # Soft-delete
     deleted_at      = Column(DateTime, nullable=True)
@@ -1480,4 +1607,84 @@ class CRMNote(Base):
 
     __table_args__ = (
         Index("ix_crm_notes_contact", "contact_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# PortalEvent — defensible buyer activity in the secure deal room.
+#
+# Checkpoint 4, Part 11. Distinct from ProposalView, which is a SESSION (opened
+# at, duration, scroll depth). This is a DISCRETE ACT: they opened the demo,
+# they downloaded the SOW, they accepted.
+#
+# ONLY EVENTS THE SERVER ACTUALLY OBSERVES.
+# Every row here is written by a request that reached our backend carrying a
+# valid token. We do not record "read the proposal" from scroll depth, "spent
+# 8 minutes considering pricing" from a timer, or anything else the browser
+# cannot prove. A sales team that learns one of these numbers is invented stops
+# trusting all of them — so the cheap, impressive, unfalsifiable metrics are
+# deliberately absent.
+# ---------------------------------------------------------------------------
+
+PORTAL_OPENED         = "portal_opened"
+PORTAL_PROPOSAL_VIEWED = "proposal_viewed"
+PORTAL_DEMO_OPENED    = "demo_opened"
+PORTAL_DOC_OPENED     = "document_opened"
+PORTAL_DOC_DOWNLOADED = "document_downloaded"
+PORTAL_LINK_OPENED    = "link_opened"
+PORTAL_ACCEPTED       = "proposal_accepted"
+PORTAL_DECLINED       = "proposal_declined"
+PORTAL_CHANGE_REQUESTED = "change_requested"
+PORTAL_EVENT_TYPES = (PORTAL_OPENED, PORTAL_PROPOSAL_VIEWED, PORTAL_DEMO_OPENED,
+                      PORTAL_DOC_OPENED, PORTAL_DOC_DOWNLOADED, PORTAL_LINK_OPENED,
+                      PORTAL_ACCEPTED, PORTAL_DECLINED, PORTAL_CHANGE_REQUESTED)
+
+PORTAL_EVENT_LABELS = {
+    PORTAL_OPENED:           "Opened the portal",
+    PORTAL_PROPOSAL_VIEWED:  "Viewed the proposal",
+    PORTAL_DEMO_OPENED:      "Opened the demo",
+    PORTAL_DOC_OPENED:       "Opened a document",
+    PORTAL_DOC_DOWNLOADED:   "Downloaded a document",
+    PORTAL_LINK_OPENED:      "Opened a link",
+    PORTAL_ACCEPTED:         "Accepted the proposal",
+    PORTAL_DECLINED:         "Declined the proposal",
+    PORTAL_CHANGE_REQUESTED: "Requested a change",
+}
+
+
+class PortalEvent(Base):
+    __tablename__ = "portal_events"
+
+    id          = Column(String, primary_key=True, default=gen_uuid)
+    proposal_id = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    # Denormalised so the opportunity timeline and the manager pipeline can read
+    # buyer activity without joining through proposals on every row.
+    opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
+                            nullable=True, index=True)
+    token_id    = Column(String, ForeignKey("proposal_tokens.id", ondelete="SET NULL"),
+                         nullable=True)
+
+    event_type  = Column(String, nullable=False)   # PORTAL_EVENT_TYPES
+    # Which block/resource, when the event is about one. Never a file's bytes.
+    block_id    = Column(String, nullable=True)
+    label       = Column(String, nullable=True)    # "Demo site", "Statement of work"
+
+    # The version the buyer was actually looking at. Without this, activity on a
+    # superseded proposal becomes indistinguishable from activity on the current
+    # one the moment a v2 is issued.
+    proposal_version = Column(Integer, nullable=True)
+
+    # Identity as far as we can honestly claim it: which token was used, and
+    # therefore which recipient we sent it to. NOT proof of who held the device.
+    recipient_email = Column(String, nullable=True)
+    # Coarse only. No raw IP is stored — it is a personal identifier we have no
+    # need for, and storing it to display "opened from Dallas" is not worth it.
+    user_agent_family = Column(String, nullable=True)
+
+    occurred_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_portal_events_prop_time", "proposal_id", "occurred_at"),
+        Index("ix_portal_events_opp_time", "opportunity_id", "occurred_at"),
     )

@@ -49,6 +49,13 @@ function ApptRow({ appt, onOpen, onConfirm }) {
         </p>
       </button>
       <div className="sw-actions">
+        {/* The whole point of My Day: open EvoSys Pro, click Join, be in the
+            meeting. No hunting through Zoom for the link. */}
+        {appt.video?.join_url && (
+          <a className="sw-tiny sw-primary" href={appt.video.join_url}
+             target="_blank" rel="noopener noreferrer"
+             style={{ textDecoration: 'none' }}>Join meeting</a>
+        )}
         <ConfChip status={appt.confirmation_status} />
         {onConfirm && appt.confirmation_status !== 'confirmed' && (
           <button className="sw-tiny sw-primary"

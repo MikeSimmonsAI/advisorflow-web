@@ -225,6 +225,20 @@ class MeetingType(Base):
     is_active   = Column(Boolean, default=True, nullable=False)
     sort_order  = Column(Integer, default=0)
 
+    # ── Video meetings (Checkpoint 4) ───────────────────────────────────────
+    # Whether booking this type should provision a video meeting. Per TYPE, not
+    # global: an internal pipeline review does not need a Zoom room, and
+    # creating one anyway burns the account's concurrent-meeting limit and fills
+    # the host's Zoom dashboard with rooms nobody joins.
+    #
+    # Defaults FALSE so an existing meeting type never silently starts creating
+    # Zoom meetings when this ships. The seed turns it on for the customer-facing
+    # types explicitly.
+    requires_video = Column(Boolean, default=False, nullable=False)
+    # Which provider, when the brand has more than one configured. NULL means
+    # "whatever the brand's default is" — the usual case.
+    video_provider = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

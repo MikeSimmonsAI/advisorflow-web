@@ -49,6 +49,7 @@ from app.services.sales_access import (
     sales_org_ids, sales_memberships, is_sales_manager, is_god,
 )
 from app.services import availability as _av
+from app.services import appointment_meetings as _apmeet
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -250,6 +251,9 @@ def _appt_brief(db: Session, a: SalesAppointment) -> dict:
         "prospect_name": a.prospect_name,
         "prospect_company": a.prospect_company,
         "meeting_url": a.meeting_url,
+        # Checkpoint 4 — what powers JOIN MEETING on My Day. Attendee link only:
+        # `meeting_out` has no field for the host url, so this cannot leak one.
+        "video": _apmeet.meeting_out(_apmeet.get_meeting_row(db, a.id)),
         "participants": [{"user_id": u.id, "full_name": u.full_name,
                           "is_required": bool(p.is_required)} for p, u in parts],
     }
