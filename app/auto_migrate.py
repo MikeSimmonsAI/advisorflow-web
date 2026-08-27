@@ -481,6 +481,10 @@ INDEXES_TO_CREATE = [
     # in the schema. Every tenant user list, every advisor cohort, every
     # customer user count and every invite check filters on it, and on Postgres
     # each one was a sequential scan of the whole users table.
+    # Rolling reports up by import list is how an operator keeps several
+    # client businesses apart inside one tenant; without this the group-by
+    # scans every lead in the org.
+    "CREATE INDEX IF NOT EXISTS ix_leads_org_import_list ON leads(organization_id, import_list_name)",
     "CREATE INDEX IF NOT EXISTS ix_users_organization_id ON users(organization_id)",
     # ...and the same filter almost always carries a role or is_active
     # predicate alongside it.

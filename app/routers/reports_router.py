@@ -314,6 +314,119 @@ def engagement_vs_conversion(
     }
 
 
+@router.get("/by-client-list")
+def by_client_list(
+    start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to 30 days before end_date"),
+    end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Performance rolled up by IMPORT LIST, which is how an operator running
+    outreach for several client businesses keeps them apart.
+
+    `Lead.import_list_name` is a label the operator types when importing - the
+    existing, already-filterable field, not a new concept. An operator working
+    for three cleaning companies imports each company's prospects under that
+    company's name, and this answers "which of my clients is actually producing"
+    without either of them ever being able to see the other.
+
+    Nothing here crosses the tenant boundary: every query is scoped by
+    `organization_id` exactly like the rest of this module, so a list belonging
+    to another customer is not merely hidden, it is not selected.
+
+    Leads with no list label are grouped under a single unlabelled row rather
+    than dropped - an operator who forgot to tag an import should see that the
+    rows exist, not silently lose them out of the totals.
+    """
+    start, end = _resolve_date_range(start_date, end_date)
+    org_ids = _get_org_ids(db, current_user)
+    is_god = current_user.role == "god_admin"
+
+    UNLABELLED = "\u2014 no list label"
+
+    def key(v):
+        return v if (v or "").strip() else UNLABELLED
+
+    # Leads created in the window, per list. This is the denominator: what the
+    # operator actually put into the system for that client.
+    received = {}
+    for name, n in (db.query(Lead.import_list_name, func.count(Lead.id))
+                    .filter(Lead.organization_id.in_(org_ids),
+                            Lead.created_at >= start, Lead.created_at <= end)
+                    .group_by(Lead.import_list_name).all()):
+        received[key(name)] = received.get(key(name), 0) + n
+
+    # Every metric below is measured against the leads MESSAGED in the window,
+    # the same basis `engagement_vs_conversion` uses, so the two reports agree.
+    lead_subq = (
+        db.query(Lead.import_list_name.label("list_name"), Message.lead_id.label("lead_id"))
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(Lead.organization_id.in_(org_ids),
+                Message.sent_at >= start, Message.sent_at <= end)
+        .distinct()
+        .subquery()
+    )
+
+    def rollup(q):
+        out = {}
+        for name, n in q.all():
+            out[key(name)] = out.get(key(name), 0) + n
+        return out
+
+    contacted = rollup(
+        db.query(lead_subq.c.list_name, func.count(distinct(lead_subq.c.lead_id)))
+        .group_by(lead_subq.c.list_name))
+
+    replied = rollup(
+        db.query(lead_subq.c.list_name, func.count(distinct(Reply.lead_id)))
+        .join(Reply, Reply.lead_id == lead_subq.c.lead_id)
+        .group_by(lead_subq.c.list_name))
+
+    hot = rollup(
+        db.query(lead_subq.c.list_name, func.count(distinct(Reply.lead_id)))
+        .join(Reply, Reply.lead_id == lead_subq.c.lead_id)
+        .filter((Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True))
+        .group_by(lead_subq.c.list_name))
+
+    booked = rollup(
+        db.query(lead_subq.c.list_name, func.count(distinct(BookingLink.lead_id)))
+        .join(BookingLink, BookingLink.lead_id == lead_subq.c.lead_id)
+        .filter(BookingLink.status == "booked")
+        .group_by(lead_subq.c.list_name))
+
+    sold = rollup(
+        db.query(lead_subq.c.list_name, func.count(distinct(LeadOutcome.lead_id)))
+        .join(LeadOutcome, LeadOutcome.lead_id == lead_subq.c.lead_id)
+        .filter(LeadOutcome.resulted_in_sale == True)
+        .group_by(lead_subq.c.list_name))
+
+    rows = []
+    for name in sorted(set(received) | set(contacted)):
+        c = contacted.get(name, 0)
+        r = replied.get(name, 0)
+        b = booked.get(name, 0)
+        rows.append({
+            "list_name": None if name == UNLABELLED else name,
+            "label": name,
+            "leads_received": received.get(name, 0),
+            "contacted": c,
+            "replies": r,
+            "hot_replies": hot.get(name, 0),
+            "booked": b,
+            "sold": sold.get(name, 0),
+            "reply_rate": round((r / c) * 100, 1) if c else 0.0,
+            "booked_rate": round((b / c) * 100, 1) if c else 0.0,
+        })
+    rows.sort(key=lambda x: (x["booked"], x["contacted"]), reverse=True)
+
+    return {
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "is_god_view": is_god,
+        "lists": rows,
+    }
+
+
 @router.get("/revenue-by-period")
 def revenue_by_period(
     start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to 30 days before end_date"),
