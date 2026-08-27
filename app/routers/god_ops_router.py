@@ -841,18 +841,65 @@ def customer_organizations(platform_id: Optional[str] = None,
 
 # ══ audit ═══════════════════════════════════════════════════════════════════
 
-CONTROL_PLANE_ACTIONS = (
-    "customer_provisioned", "customer_admin_created", "customer_admin_invited",
-    "customer_admin_invite_revoked", "customer_admin_activated",
-    "customer_user_added", "implementation_owner_assigned",
-    "implementation_status_changed", "implementation_ready_for_launch",
-    "implementation_milestone_changed", "implementation_milestone_added",
-    "customer_marked_live", "billing_configuration_changed",
-)
+# THE AUDIT FEED IS AN ALLOWLIST, ORGANISED BY CATEGORY.
+#
+# It stays an allowlist on purpose. The audit table holds every logged action in
+# the system, including ordinary tenant activity, and a control-plane view that
+# showed all of it would be a firehose nobody reads - which is the same as no
+# audit at all. The fix for "my action is invisible" is to add that action to
+# the right category here, deliberately, not to remove the filter.
+#
+# This list was stale: `data_cleanup.*` and `platform_owner.*` rows were being
+# written and committed but never appeared, so a production cleanup and a
+# platform-owner neutralisation both left records that the audit screen claimed
+# did not exist. Worse than a missing feature - a false negative in the one
+# place you look to find out what happened.
+#
+# Both the old and new names for the context actions are listed. Rows already in
+# production carry `platform_owner.enter_customer`; new ones carry
+# `platform_owner.context_entered`. Dropping the old spelling would hide history
+# that already exists.
+AUDIT_CATEGORIES = {
+    "provisioning": (
+        "customer_provisioned", "customer.created", "customer.activated",
+        "customer.deactivated", "customer.location_created",
+        "customer.location_updated", "customer.features_set",
+    ),
+    "staffing": (
+        "customer_admin_created", "customer_admin_invited",
+        "customer_admin_invite_revoked", "customer_admin_activated",
+        "customer_user_added", "customer.user_added", "customer.user_updated",
+        "customer.user_locations_set",
+    ),
+    "implementation": (
+        "implementation_owner_assigned", "implementation_status_changed",
+        "implementation_ready_for_launch", "implementation_milestone_changed",
+        "implementation_milestone_added", "customer_marked_live",
+        "billing_configuration_changed",
+    ),
+    "platform_owner": (
+        "platform_owner.context_entered", "platform_owner.context_exited",
+        "platform_owner.enter_customer", "platform_owner.exit_customer",
+        "platform_owner.neutralized",
+    ),
+    "data_lifecycle": (
+        "data_cleanup.previewed", "data_cleanup.executed",
+        "data_cleanup.failed", "data_cleanup.rolled_back",
+    ),
+}
+
+# Flat tuple for the query filter; the category is attached per row on the way
+# out so the UI can group without a second source of truth.
+CONTROL_PLANE_ACTIONS = tuple(
+    a for actions in AUDIT_CATEGORIES.values() for a in actions)
+
+_ACTION_CATEGORY = {
+    a: cat for cat, actions in AUDIT_CATEGORIES.items() for a in actions}
 
 
 @router.get("/audit")
 def control_plane_audit(action: Optional[str] = None,
+                        category: Optional[str] = None,
                         organization_id: Optional[str] = None,
                         platform_id: Optional[str] = None,
                         brand_sales_org_id: Optional[str] = None,
@@ -867,7 +914,21 @@ def control_plane_audit(action: Optional[str] = None,
     """
     q = db.query(AuditLogEntry)
     if action:
+        # Still allowlisted. Asking for a specific action by name must not be a
+        # way around the filter and into ordinary tenant activity.
+        if action not in _ACTION_CATEGORY:
+            raise HTTPException(
+                status_code=400,
+                detail="'%s' is not a control-plane action. Valid actions: %s"
+                       % (action, ", ".join(sorted(_ACTION_CATEGORY))))
         q = q.filter(AuditLogEntry.action == action)
+    elif category:
+        if category not in AUDIT_CATEGORIES:
+            raise HTTPException(
+                status_code=400,
+                detail="Unknown category '%s'. Valid: %s"
+                       % (category, ", ".join(sorted(AUDIT_CATEGORIES))))
+        q = q.filter(AuditLogEntry.action.in_(AUDIT_CATEGORIES[category]))
     else:
         q = q.filter(AuditLogEntry.action.in_(CONTROL_PLANE_ACTIONS))
     if organization_id:
@@ -885,7 +946,9 @@ def control_plane_audit(action: Optional[str] = None,
             a = db.query(User).filter(User.id == r.actor_user_id).first()
             actors[r.actor_user_id] = a.full_name if a else None
         out.append({
-            "id": r.id, "action": r.action, "at": r.created_at,
+            "id": r.id, "action": r.action,
+            "category": _ACTION_CATEGORY.get(r.action, "other"),
+            "at": r.created_at,
             "actor": actors[r.actor_user_id], "actor_user_id": r.actor_user_id,
             "target_type": r.target_type, "target_id": r.target_id,
             "organization_id": r.organization_id, "platform_id": r.platform_id,
@@ -893,4 +956,8 @@ def control_plane_audit(action: Optional[str] = None,
             "before": r.before_state, "after": r.after_state,
             "details": r.details, "note": r.note,
         })
-    return {"entries": out, "actions": list(CONTROL_PLANE_ACTIONS)}
+    return {
+        "entries": out,
+        "actions": list(CONTROL_PLANE_ACTIONS),
+        "categories": {k: list(v) for k, v in AUDIT_CATEGORIES.items()},
+    }

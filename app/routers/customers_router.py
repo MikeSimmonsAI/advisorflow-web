@@ -339,6 +339,11 @@ class CleanupRequest(BaseModel):
 
 class CleanupExecute(CleanupRequest):
     confirmation: str
+    # The plan this confirmation was typed against. Optional for callers that
+    # preview and execute in one breath, but passing it is what makes the
+    # candidate set verifiable: if the world moved in between, execute refuses
+    # rather than deleting a set nobody reviewed.
+    execution_id: Optional[str] = None
 
 
 @router.post("/cleanup/preview")
@@ -350,9 +355,32 @@ def cleanup_preview(req: CleanupRequest, db: Session = Depends(get_db),
     changes anything — it does not.
     """
     from app.services import data_cleanup
-    return data_cleanup.preview(db, rules=req.rules, org_ids=req.org_ids,
+    plan = data_cleanup.preview(db, rules=req.rules, org_ids=req.org_ids,
                                 import_batches=req.import_batches,
-                                include_manifest=req.include_manifest)
+                                include_manifest=True)
+
+    # The plan is persisted HERE, on preview, so the manifest exists on disk
+    # before anybody confirms anything. The first production cleanup's manifest
+    # lived only in a browser tab and was lost when the tab reloaded; the
+    # deletion had already happened and the record of what went with it had not.
+    row = data_cleanup.record_plan(db, user, rules=req.rules, org_ids=req.org_ids,
+                                   import_batches=req.import_batches, plan=plan)
+
+    log_action(
+        db, None, user.id,
+        action="data_cleanup.previewed", target_type="cleanup", target_id=row.id,
+        details={"execution_id": row.id, "rules": req.rules,
+                 "total_records": plan["total_records"],
+                 "lead_count": len(plan["_lead_ids"])},
+        note="Preview only. Nothing was deleted.",
+    )
+
+    lead_ids = plan.pop("_lead_ids")
+    plan["execution_id"] = row.id
+    plan["target_lead_ids"] = lead_ids
+    if not req.include_manifest:
+        plan["manifest"] = None
+    return plan
 
 
 @router.get("/cleanup/rules")
@@ -370,7 +398,38 @@ def cleanup_execute(req: CleanupExecute, db: Session = Depends(get_db),
     from app.services import data_cleanup
     return data_cleanup.execute(db, user, rules=req.rules, org_ids=req.org_ids,
                                 import_batches=req.import_batches,
-                                confirmation=req.confirmation)
+                                confirmation=req.confirmation,
+                                execution_id=req.execution_id)
+
+
+@router.get("/cleanup/history")
+def cleanup_history(limit: int = Query(50, ge=1, le=500),
+                    status: Optional[str] = Query(None),
+                    db: Session = Depends(get_db), user: User = Depends(require_god)):
+    """Every cleanup ever planned, and what became of it.
+
+    Includes previews that were never confirmed and attempts that failed. A
+    history that only lists successes cannot answer "did anyone try to delete
+    this", which is the question you ask when something is missing.
+    """
+    from app.models.cleanup_models import CleanupExecution
+    q = db.query(CleanupExecution)
+    if status:
+        q = q.filter(CleanupExecution.status == status)
+    rows = q.order_by(CleanupExecution.created_at.desc()).limit(limit).all()
+    return {"executions": [r.as_dict() for r in rows], "total": len(rows)}
+
+
+@router.get("/cleanup/history/{execution_id}")
+def cleanup_receipt(execution_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(require_god)):
+    """The full receipt for one cleanup, manifest included."""
+    from app.models.cleanup_models import CleanupExecution
+    row = (db.query(CleanupExecution)
+           .filter(CleanupExecution.id == execution_id).first())
+    if not row:
+        raise HTTPException(status_code=404, detail="Cleanup execution not found")
+    return row.as_dict(include_manifest=True)
 
 
 @router.post("/{org_id}/deactivate")

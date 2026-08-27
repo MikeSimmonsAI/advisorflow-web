@@ -38,6 +38,8 @@ organization is a different operation with different consequences and it does
 not belong behind a checkbox labelled "clean up test data".
 """
 
+import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -283,67 +285,194 @@ def preview(db: Session, *, rules: List[str], org_ids: Optional[List[str]] = Non
         "confirmation_phrase": "DELETE %d TEST RECORDS" % total,
         "manifest": (_manifest(db, leads, rules, import_batches, org_names)
                      if include_manifest else None),
+        # Internal: the exact candidate ids. `record_plan` persists these so the
+        # set that was reviewed can be compared with the set at execution time.
+        # Stripped from the HTTP response by the router.
+        "_lead_ids": [l.id for l in leads],
     }
+
+
+def record_plan(db: Session, actor: User, *, rules: List[str],
+                org_ids: Optional[List[str]], import_batches: Optional[List[str]],
+                plan: Dict[str, Any]) -> "CleanupExecution":
+    """Persist a preview as a durable, referenceable plan.
+
+    Written on PREVIEW, not on execute, so the intent exists on disk before
+    anything is destroyed. If the operator never confirms, the row simply stays
+    `previewed` - a record that somebody looked, which is worth keeping too.
+    """
+    from app.models.cleanup_models import CleanupExecution, STATUS_PREVIEWED
+
+    leads_cat = next((c for c in plan["categories"] if c["key"] == "leads"), {})
+    row = CleanupExecution(
+        actor_user_id=actor.id,
+        actor_email=getattr(actor, "email", None),
+        status=STATUS_PREVIEWED,
+        rules=json.dumps(sorted(rules)),
+        org_ids=json.dumps(org_ids or []),
+        import_batches=json.dumps(import_batches or []),
+        confirmation_phrase=plan["confirmation_phrase"],
+        target_lead_ids=json.dumps(plan["_lead_ids"]),
+        manifest=json.dumps(plan.get("manifest") or []),
+        expected_counts=json.dumps({c["key"]: c["count"] for c in plan["categories"]}),
+        expected_total=plan["total_records"],
+        excluded=json.dumps(PROTECTED),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def execute(db: Session, actor: User, *, rules: List[str],
             org_ids: Optional[List[str]] = None,
             import_batches: Optional[List[str]] = None,
-            confirmation: str) -> Dict[str, Any]:
-    """Delete exactly what the preview showed, or refuse.
+            confirmation: str,
+            execution_id: Optional[str] = None) -> Dict[str, Any]:
+    """Delete exactly what the preview showed, or refuse - and record either way.
 
     The confirmation phrase carries the record count from the preview, so a
     confirmation typed against one preview cannot authorise a different, larger
     delete that happened to arrive in between.
+
+    THE PLAN ROW IS WRITTEN AND COMMITTED BEFORE THE FIRST DELETE. That ordering
+    is the whole design: if the delete then raises, the transaction that rolls
+    back is the delete's, not the plan's, so the attempt survives its own
+    failure. The first two production runs raised IntegrityError and left no
+    trace at all; a cleanup system that only writes history on success will
+    eventually let somebody believe a deletion happened that did not.
     """
     from app.routers.audit_log_router import log_action
-    from sqlalchemy import delete as sql_delete
+    from app.models.cleanup_models import (
+        CleanupExecution, STATUS_SUCCEEDED, STATUS_FAILED, STATUS_SUPERSEDED,
+    )
 
-    plan = preview(db, rules=rules, org_ids=org_ids, import_batches=import_batches)
+    plan = preview(db, rules=rules, org_ids=org_ids, import_batches=import_batches,
+                   include_manifest=True)
     expected = plan["confirmation_phrase"]
+
+    row = None
+    if execution_id:
+        row = (db.query(CleanupExecution)
+               .filter(CleanupExecution.id == execution_id).first())
+        if row is None:
+            raise HTTPException(status_code=404, detail="Cleanup plan not found")
+        if row.actor_user_id != actor.id:
+            raise HTTPException(status_code=404, detail="Cleanup plan not found")
+        if row.status != "previewed":
+            raise HTTPException(
+                status_code=409,
+                detail="This cleanup plan is already %s and cannot be run again."
+                       % row.status)
+        # The world may have moved between preview and confirm. Refuse rather
+        # than delete a set the operator never saw.
+        if set(json.loads(row.target_lead_ids)) != set(plan["_lead_ids"]):
+            row.status = STATUS_SUPERSEDED
+            row.error = ("The set of matching records changed between preview and "
+                         "execution. Nothing was deleted; take a fresh preview.")
+            db.commit()
+            raise HTTPException(
+                status_code=409,
+                detail={"message": row.error, "execution_id": row.id})
+
     if (confirmation or "").strip() != expected:
         raise HTTPException(
             status_code=400,
             detail="Confirmation does not match. Type exactly: %s" % expected)
 
+    if row is None:
+        row = record_plan(db, actor, rules=rules, org_ids=org_ids,
+                          import_batches=import_batches, plan=plan)
+    row.confirmation_received = confirmation
+
     if plan["total_records"] == 0:
-        return {"deleted": {}, "total_deleted": 0,
+        row.status = STATUS_SUCCEEDED
+        row.executed_at = datetime.utcnow()
+        row.actual_counts = json.dumps({})
+        row.actual_total = 0
+        db.commit()
+        return {"execution_id": row.id, "deleted": {}, "total_deleted": 0,
+                "status": STATUS_SUCCEEDED, "expected_total": 0,
+                "counts_match": True, "rules_applied": rules,
+                "protected_untouched": PROTECTED,
                 "message": "Nothing matched the selected rules. Nothing was deleted."}
+
+    db.commit()   # the plan is now on disk, before anything is destroyed
 
     leads = _lead_filter(db, rules, org_ids, import_batches).all()
     lead_ids = [l.id for l in leads]
 
     deleted: Dict[str, int] = {}
-    if lead_ids:
+    try:
         # Children first, in LEAD_CHILDREN order, every one of them explicit.
         # Relying on ON DELETE CASCADE for the four that have it would delete
         # rows this function never counted and never reported - the operator
         # would confirm one number and a larger one would happen.
+        #
+        # NOTE the absence of a per-table try/except here. An earlier version
+        # swallowed each failure into `deleted[key] = 0`, which would have
+        # reported a clean partial success for a delete that half-worked. One
+        # failure now fails the whole thing, and the row records it.
         for key, model in LEAD_CHILDREN:
-            try:
-                deleted[key] = db.query(model).filter(
-                    model.lead_id.in_(lead_ids)).delete(synchronize_session=False)
-            except Exception:
-                deleted[key] = 0
+            deleted[key] = db.query(model).filter(
+                model.lead_id.in_(lead_ids)).delete(synchronize_session=False)
         deleted["leads"] = db.query(Lead).filter(
             Lead.id.in_(lead_ids)).delete(synchronize_session=False)
 
-    log_action(
-        db, None, actor.id,
-        action="data_cleanup.executed", target_type="cleanup",
-        target_id="rules:%s" % ",".join(sorted(rules)),
-        details={"rules": rules, "org_ids": org_ids or [],
-                 "import_batches": import_batches or [],
-                 "deleted": deleted, "confirmation": expected},
-        note="Scoped test-data cleanup. Organizations, users and integrations "
-             "were not touched.",
-        commit=False,
-    )
-    db.commit()
+        log_action(
+            db, None, actor.id,
+            action="data_cleanup.executed", target_type="cleanup",
+            target_id=row.id,
+            details={"execution_id": row.id, "rules": rules,
+                     "org_ids": org_ids or [], "import_batches": import_batches or [],
+                     "deleted": deleted, "confirmation": expected,
+                     "lead_count": len(lead_ids)},
+            note="Scoped test-data cleanup. Organizations, users, memberships and "
+                 "integrations were not touched.",
+            commit=False,
+        )
+        row.status = STATUS_SUCCEEDED
+        row.executed_at = datetime.utcnow()
+        row.actual_counts = json.dumps(deleted)
+        row.actual_total = sum(deleted.values())
+        db.commit()
+
+    except Exception as exc:                              # noqa: BLE001
+        # The delete is gone. The RECORD OF THE ATTEMPT must not be.
+        db.rollback()
+        fresh = (db.query(CleanupExecution)
+                 .filter(CleanupExecution.id == row.id).first())
+        if fresh is not None:
+            fresh.status = STATUS_FAILED
+            fresh.executed_at = datetime.utcnow()
+            fresh.actual_counts = json.dumps({})
+            fresh.actual_total = 0          # explicitly zero, never null-as-unknown
+            fresh.error = "%s: %s" % (type(exc).__name__, str(exc)[:900])
+            log_action(
+                db, None, actor.id,
+                action="data_cleanup.failed", target_type="cleanup",
+                target_id=fresh.id,
+                details={"execution_id": fresh.id, "rules": rules,
+                         "error": fresh.error, "records_deleted": 0},
+                note="Cleanup attempt failed and was rolled back. NOTHING was "
+                     "deleted.",
+                commit=False,
+            )
+            db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "The cleanup failed and was rolled back. Nothing was "
+                               "deleted.",
+                    "execution_id": row.id,
+                    "error": "%s: %s" % (type(exc).__name__, str(exc)[:300])})
 
     return {
+        "execution_id": row.id,
+        "status": row.status,
         "deleted": deleted,
-        "total_deleted": sum(deleted.values()),
+        "total_deleted": row.actual_total,
+        "expected_total": row.expected_total,
+        "counts_match": row.actual_total == row.expected_total,
         "rules_applied": rules,
         "protected_untouched": PROTECTED,
     }

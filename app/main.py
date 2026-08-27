@@ -63,6 +63,10 @@ import app.models.staff_models  # noqa: F401  (imported for side effects)
 # booking has nothing to route to. `create_all` only builds tables whose
 # module has been imported, and a missing table here fails silently.
 import app.models.location_models  # noqa: F401  (imported for side effects)
+# Cleanup receipts (cleanup_executions) - same Base, same reason. Without this
+# import a deletion plan has nowhere durable to live, and the manifest exists
+# only in whatever browser tab asked for it.
+import app.models.cleanup_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,

@@ -27,7 +27,8 @@ GATES = [
     "smoke_sales_workspace_complete.py", "smoke_sales_staff.py",
     "probe_platform_boundary.py", "probe_brand_owner_boundary.py",
     "probe_platform_owner.py", "probe_customer_provisioning.py",
-    "probe_data_cleanup.py", "probe_tenant_isolation.py",
+    "probe_data_cleanup.py", "probe_cleanup_receipt.py",
+    "probe_tenant_isolation.py",
     "smoke_platform_frontend.py",
 ]
 

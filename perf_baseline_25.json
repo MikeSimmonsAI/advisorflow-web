@@ -1,0 +1,308 @@
+{
+ "scale": 25,
+ "routes": {
+  "/sales/my-day": {
+   "status": 200,
+   "queries": 28,
+   "ms_median": 33.7,
+   "ms_min": 33.1,
+   "digest": "b48425a415e4b1af",
+   "top_repeated_sql": [
+    {
+     "count": 13,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 4,
+     "sql": "SELECT memberships.id AS memberships_id, memberships.user_id AS memberships_user_id, memberships.scope_type AS"
+    },
+    {
+     "count": 3,
+     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
+    },
+    {
+     "count": 3,
+     "sql": "SELECT sales_appointments.id AS sales_appointments_id, sales_appointments.brand_sales_org_id AS sales_appointm"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT brand_sales_orgs.id AS brand_sales_orgs_id, brand_sales_orgs.platform_id AS brand_sales_orgs_platform_i"
+    }
+   ]
+  },
+  "/sales/opportunities": {
+   "status": 200,
+   "queries": 108,
+   "ms_median": 109.5,
+   "ms_min": 106.6,
+   "digest": "3290da3726119e65",
+   "top_repeated_sql": [
+    {
+     "count": 101,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 4,
+     "sql": "SELECT memberships.id AS memberships_id, memberships.user_id AS memberships_user_id, memberships.scope_type AS"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT brand_sales_orgs.id AS brand_sales_orgs_id, brand_sales_orgs.platform_id AS brand_sales_orgs_platform_i"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT sales_appointments.id AS sales_appointments_id, sales_appointments.brand_sales_org_id AS sales_appointm"
+    }
+   ]
+  },
+  "/sales/implementations": {
+   "status": 200,
+   "queries": 133,
+   "ms_median": 121.7,
+   "ms_min": 121.6,
+   "digest": "005896b7cac372e2",
+   "top_repeated_sql": [
+    {
+     "count": 51,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT organizations.id AS organizations_id, organizations.name AS organizations_name, organizations.slug AS o"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT implementation_milestones.id AS implementation_milestones_id, implementation_milestones.implementation_"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
+    },
+    {
+     "count": 5,
+     "sql": "SELECT memberships.id AS memberships_id, memberships.user_id AS memberships_user_id, memberships.scope_type AS"
+    }
+   ]
+  },
+  "/god/ops/implementations": {
+   "status": 200,
+   "queries": 227,
+   "ms_median": 202.7,
+   "ms_min": 200.1,
+   "digest": "390779952ce6f947",
+   "top_repeated_sql": [
+    {
+     "count": 51,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 50,
+     "sql": "SELECT count(implementation_milestones.id) AS count_1 "
+    },
+    {
+     "count": 25,
+     "sql": "SELECT organizations.id AS organizations_id, organizations.name AS organizations_name, organizations.slug AS o"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT brand_sales_orgs.id AS brand_sales_orgs_id, brand_sales_orgs.platform_id AS brand_sales_orgs_platform_i"
+    }
+   ]
+  },
+  "/god/ops/sales-operations": {
+   "status": 200,
+   "queries": 370,
+   "ms_median": 352.3,
+   "ms_min": 316.6,
+   "digest": "26262718d9a03def",
+   "top_repeated_sql": [
+    {
+     "count": 100,
+     "sql": "SELECT customer_activations.id AS customer_activations_id, customer_activations.user_id AS customer_activation"
+    },
+    {
+     "count": 77,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 50,
+     "sql": "SELECT count(implementation_milestones.id) AS count_1 "
+    },
+    {
+     "count": 28,
+     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
+    },
+    {
+     "count": 27,
+     "sql": "SELECT platforms.id AS platforms_id, platforms.name AS platforms_name, platforms.slug AS platforms_slug, platf"
+    }
+   ]
+  },
+  "/god/ops/customer-organizations": {
+   "status": 200,
+   "queries": 127,
+   "ms_median": 97.8,
+   "ms_min": 97.1,
+   "digest": "9e17794f9a8cf42f",
+   "top_repeated_sql": [
+    {
+     "count": 25,
+     "sql": "SELECT platforms.id AS platforms_id, platforms.name AS platforms_name, platforms.slug AS platforms_slug, platf"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT implementations.id AS implementations_id, implementations.opportunity_id AS implementations_opportunity"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT brand_packages.id AS brand_packages_id, brand_packages.platform_id AS brand_packages_platform_id, brand"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT count(users.id) AS count_1 "
+    },
+    {
+     "count": 25,
+     "sql": "SELECT count(leads.id) AS count_1 "
+    }
+   ]
+  },
+  "/god/ops/won-queue": {
+   "status": 200,
+   "queries": 3,
+   "ms_median": 8.5,
+   "ms_min": 6.9,
+   "digest": "af9bad7cce504abd",
+   "top_repeated_sql": [
+    {
+     "count": 1,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT implementations.opportunity_id AS implementations_opportunity_id "
+    }
+   ]
+  },
+  "/admin/dashboard": {
+   "status": 200,
+   "queries": 305,
+   "ms_median": 243.7,
+   "ms_min": 240.4,
+   "digest": "1306bb4a24a86d7d",
+   "top_repeated_sql": [
+    {
+     "count": 77,
+     "sql": "SELECT count(leads.id) AS count_1 "
+    },
+    {
+     "count": 75,
+     "sql": "SELECT count(messages.id) AS count_1 "
+    },
+    {
+     "count": 75,
+     "sql": "SELECT count(replies.id) AS count_1 "
+    },
+    {
+     "count": 75,
+     "sql": "SELECT organizations.id AS organizations_id, organizations.name AS organizations_name, organizations.slug AS o"
+    },
+    {
+     "count": 2,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    }
+   ]
+  },
+  "/admin/dashboard/metrics": {
+   "status": 200,
+   "queries": 604,
+   "ms_median": 601.3,
+   "ms_min": 515.9,
+   "digest": "450e830972399cea",
+   "top_repeated_sql": [
+    {
+     "count": 301,
+     "sql": "SELECT count(leads.id) AS count_1 "
+    },
+    {
+     "count": 150,
+     "sql": "SELECT count(replies.id) AS count_1 "
+    },
+    {
+     "count": 75,
+     "sql": "SELECT count(messages.id) AS count_1 "
+    },
+    {
+     "count": 75,
+     "sql": "SELECT organizations.id AS organizations_id, organizations.name AS organizations_name, organizations.slug AS o"
+    },
+    {
+     "count": 2,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    }
+   ]
+  },
+  "/god/customers": {
+   "status": 200,
+   "queries": 77,
+   "ms_median": 70.8,
+   "ms_min": 67.4,
+   "digest": "7fbfb3e6c95f1470",
+   "top_repeated_sql": [
+    {
+     "count": 26,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT platforms.id AS platforms_id, platforms.name AS platforms_name, platforms.slug AS platforms_slug, platf"
+    },
+    {
+     "count": 25,
+     "sql": "SELECT count(*) AS count_1 "
+    },
+    {
+     "count": 1,
+     "sql": "SELECT organizations.id AS organizations_id, organizations.name AS organizations_name, organizations.slug AS o"
+    }
+   ]
+  },
+  "/god/platform/overview": {
+   "status": 200,
+   "queries": 4,
+   "ms_median": 9.7,
+   "ms_min": 8.5,
+   "digest": "596022dd438a4291",
+   "top_repeated_sql": [
+    {
+     "count": 1,
+     "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT platforms.id AS platforms_id, platforms.name AS platforms_name, platforms.slug AS platforms_slug, platf"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT organizations.id AS organizations_id, organizations.name AS organizations_name, organizations.slug AS o"
+    },
+    {
+     "count": 1,
+     "sql": "SELECT brand_sales_orgs.id AS brand_sales_orgs_id, brand_sales_orgs.platform_id AS brand_sales_orgs_platform_i"
+    }
+   ]
+  }
+ }
+}
