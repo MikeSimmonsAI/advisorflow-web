@@ -46,8 +46,39 @@ from sqlalchemy.orm import Session
 
 from app.models.models import (
     Organization, User, Lead, Message, Reply, LeadOutcome, CadenceState,
+    EmailMessage, BookingLink, BookingFollowup, SurveyResponse,
+    PipelineConversation, VoiceCall,
 )
 from app.services.platform_owner import GOD_PLATFORM_ORG_ID
+
+# EVERY table that references leads.id, in delete order (children first).
+#
+# The first production run of this cleanup failed, and the failure is worth
+# recording because the preview was also wrong.
+#
+# `pipeline_conversations.lead_id` and `voice_calls.lead_id` are NOT NULL with
+# no ON DELETE CASCADE. Deleting a lead they point at raises IntegrityError. The
+# exception escaped before the CORS middleware ran, so the browser reported
+# "Failed to fetch" rather than a 500 - and because the transaction rolled back,
+# nothing was deleted and a re-preview showed the same rows. Safe, but silent.
+#
+# The other four cascade at the database level, which is worse in a different
+# way: they WOULD have been deleted, and the preview never counted them. An
+# operator would have typed "DELETE 86 TEST RECORDS" and more than 86 rows would
+# have gone. Every child is now both counted and deleted explicitly, so the
+# number in the confirmation phrase is the number that actually disappears.
+LEAD_CHILDREN = [
+    ("outcomes", LeadOutcome),
+    ("replies", Reply),
+    ("messages", Message),
+    ("cadence_state", CadenceState),
+    ("email_messages", EmailMessage),        # CASCADE - was uncounted
+    ("booking_links", BookingLink),          # CASCADE - was uncounted
+    ("booking_followups", BookingFollowup),  # CASCADE - was uncounted
+    ("survey_responses", SurveyResponse),    # CASCADE - was uncounted
+    ("pipeline_conversations", PipelineConversation),  # NO CASCADE - blocked it
+    ("voice_calls", VoiceCall),                        # NO CASCADE - blocked it
+]
 
 SAMPLE_TAG = "SAMPLE_DATA"
 DEMO_PREFIX = "demo-"
@@ -137,18 +168,16 @@ def _manifest(db: Session, leads: List[Lead], rules: List[str],
             out[lead_id] = n
         return out
 
-    msgs = tally(Message)
-    reps = tally(Reply)
-    outs = tally(LeadOutcome)
-    try:
-        cads = tally(CadenceState)
-    except Exception:
-        cads = {}
+    counts = {}
+    for key, model in LEAD_CHILDREN:
+        try:
+            counts[key] = tally(model)
+        except Exception:
+            counts[key] = {}
 
     manifest = []
     for l in leads:
-        m, r, o, c = (msgs.get(l.id, 0), reps.get(l.id, 0),
-                      outs.get(l.id, 0), cads.get(l.id, 0))
+        dep = {key: counts[key].get(l.id, 0) for key, _m in LEAD_CHILDREN}
         manifest.append({
             "lead_id": l.id,
             "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip() or "(no name)",
@@ -160,10 +189,9 @@ def _manifest(db: Session, leads: List[Lead], rules: List[str],
             "test_note": l.test_note,
             "status": l.status,
             "assigned_to_id": l.assigned_to_id,
-            "dependents": {"messages": m, "replies": r,
-                           "cadence_state": c, "outcomes": o},
+            "dependents": dep,
             # The lead itself plus everything that goes with it.
-            "total_records": 1 + m + r + c + o,
+            "total_records": 1 + sum(dep.values()),
         })
     return manifest
 
@@ -219,19 +247,20 @@ def preview(db: Session, *, rules: List[str], org_ids: Optional[List[str]] = Non
                 for l in leads[:sample_limit]
             ],
         },
-        {"key": "messages", "label": "Messages", "count": count(Message),
-         "scope": [], "why": ["child of a selected lead"],
-         "dependencies": "Deleted with their lead.", "sample": []},
-        {"key": "replies", "label": "Replies", "count": count(Reply),
-         "scope": [], "why": ["child of a selected lead"],
-         "dependencies": "Deleted with their lead.", "sample": []},
-        {"key": "outcomes", "label": "Lead outcomes", "count": count(LeadOutcome),
-         "scope": [], "why": ["child of a selected lead"],
-         "dependencies": "Deleted with their lead.", "sample": []},
-        {"key": "cadence_state", "label": "Cadence state", "count": count(CadenceState),
-         "scope": [], "why": ["child of a selected lead"],
-         "dependencies": "Deleted with their lead.", "sample": []},
     ]
+    LABELS = {
+        "outcomes": "Lead outcomes", "replies": "Replies", "messages": "Messages",
+        "cadence_state": "Cadence state", "email_messages": "Email messages",
+        "booking_links": "Booking links", "booking_followups": "Booking follow-ups",
+        "survey_responses": "Survey responses",
+        "pipeline_conversations": "Pipeline conversations", "voice_calls": "Voice calls",
+    }
+    for key, model in LEAD_CHILDREN:
+        categories.append({
+            "key": key, "label": LABELS.get(key, key), "count": count(model),
+            "scope": [], "why": ["child of a selected lead"],
+            "dependencies": "Deleted with their lead.", "sample": [],
+        })
 
     total = sum(c["count"] for c in categories)
     return {
@@ -286,17 +315,16 @@ def execute(db: Session, actor: User, *, rules: List[str],
 
     deleted: Dict[str, int] = {}
     if lead_ids:
-        deleted["outcomes"] = db.query(LeadOutcome).filter(
-            LeadOutcome.lead_id.in_(lead_ids)).delete(synchronize_session=False)
-        deleted["replies"] = db.query(Reply).filter(
-            Reply.lead_id.in_(lead_ids)).delete(synchronize_session=False)
-        deleted["messages"] = db.query(Message).filter(
-            Message.lead_id.in_(lead_ids)).delete(synchronize_session=False)
-        try:
-            deleted["cadence_state"] = db.query(CadenceState).filter(
-                CadenceState.lead_id.in_(lead_ids)).delete(synchronize_session=False)
-        except Exception:
-            deleted["cadence_state"] = 0
+        # Children first, in LEAD_CHILDREN order, every one of them explicit.
+        # Relying on ON DELETE CASCADE for the four that have it would delete
+        # rows this function never counted and never reported - the operator
+        # would confirm one number and a larger one would happen.
+        for key, model in LEAD_CHILDREN:
+            try:
+                deleted[key] = db.query(model).filter(
+                    model.lead_id.in_(lead_ids)).delete(synchronize_session=False)
+            except Exception:
+                deleted[key] = 0
         deleted["leads"] = db.query(Lead).filter(
             Lead.id.in_(lead_ids)).delete(synchronize_session=False)
 

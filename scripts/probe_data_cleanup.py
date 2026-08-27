@@ -246,6 +246,22 @@ def main():
         check("...and reports exact counts", res.get("deleted", {}).get("leads") == 4,
               res.get("deleted"))
 
+        section("THE CONFIRMED NUMBER IS THE NUMBER THAT HAPPENS")
+        # The property that failed on the first production run. Four child
+        # tables cascade at the database level, so they were deleted without
+        # ever being counted; two more do NOT cascade and are NOT NULL, so the
+        # delete raised IntegrityError. Either way the operator's confirmed
+        # figure was not the figure that occurred.
+        check("total_deleted EQUALS the count in the confirmation phrase",
+              res.get("total_deleted") == 5,
+              "deleted=%s phrase said 5" % res.get("total_deleted"))
+        check("...and every child table is reported by name, not silently cascaded",
+              set(res.get("deleted", {})) >= {"messages", "replies", "outcomes",
+                                              "cadence_state", "email_messages",
+                                              "booking_links", "pipeline_conversations",
+                                              "voice_calls", "leads"},
+              sorted(res.get("deleted", {})))
+
         section("WHAT SURVIVED - the assertions that actually matter")
         for lid in ("real-a-1", "real-a-2", "real-b-1", "batch-a-1"):
             check("real lead %s survived" % lid, exists(Lead, lid))
