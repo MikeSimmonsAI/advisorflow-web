@@ -510,6 +510,125 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
 
 # ── publishing and delivery ─────────────────────────────────────────────────
 
+def _fmt_money(value, currency: str = "USD") -> Optional[str]:
+    """A price a customer reads, not a database value.
+
+    Whole dollars stay whole - "$1,497", not "$1,497.00" - because trailing
+    zeros on a headline number read like a system printed them.
+    """
+    d = _dec(value)
+    if d is None:
+        return None
+    body = "{:,.0f}".format(d) if d == d.to_integral_value() else "{:,.2f}".format(d)
+    cur = (currency or "USD").upper()
+    return ("$" + body) if cur == "USD" else ("%s %s" % (cur, body))
+
+
+def _investment_markdown(db: Session, prop: Proposal) -> Optional[str]:
+    """The commercial summary the CUSTOMER sees, built from real pricing.
+
+    Every figure here is read from the package catalogue and this proposal's
+    own negotiated amount. Nothing is typed by hand into prose, so a price can
+    never be edited in one place and left stale in the document.
+
+    Both billing options are always shown when the package has both, because
+    the customer is being asked to choose between them, and the one this
+    proposal is written against is named explicitly. The lower rate is never
+    presented as the normal price.
+    """
+    if prop.final_amount is None and not prop.package_id:
+        return None
+
+    currency = prop.currency or "USD"
+    pkg = None
+    if prop.package_id:
+        pkg = (db.query(BrandPackage)
+               .filter(BrandPackage.id == prop.package_id).first())
+
+    # What THIS proposal charges to implement, not the catalogue list price -
+    # an approved override has to survive into the document.
+    fee = _dec(prop.final_amount)
+    if fee is None and pkg is not None:
+        opp = (db.query(Opportunity)
+               .filter(Opportunity.id == prop.opportunity_id).first())
+        fee = _pp.implementation_fee(pkg, opp)
+
+    name = (getattr(pkg, "name", None) or "Platform").strip()
+    m2m = _pp.monthly_rate(pkg, _pp.BILLING_MONTH_TO_MONTH) if pkg else None
+    term_rate = _pp.monthly_rate(pkg, _pp.BILLING_TERM_AGREEMENT) if pkg else None
+    has_term = bool(pkg) and _pp.has_term_option(pkg)
+    term_months = (int(prop.contract_term_months) if prop.contract_term_months
+                   else (_pp.term_months_for(pkg) if pkg else None))
+    chosen = _pp.normalize_option(prop.billing_option, pkg)
+
+    rows = []
+    if fee is not None:
+        rows.append((
+            "%s implementation & setup" % name,
+            "%s one-time" % _fmt_money(fee, currency),
+            "Configuration and implementation of the %s system around your "
+            "existing process." % name,
+        ))
+    if m2m is not None:
+        rows.append((
+            "Standard month-to-month platform",
+            "%s/month" % _fmt_money(m2m, currency),
+            "Flexible month-to-month platform access with no service "
+            "commitment.",
+        ))
+    if has_term and term_rate is not None and term_months:
+        saving = _pp.savings_per_month(pkg)
+        detail = ("All %d months are billed monthly. No free month and no "
+                  "annual prepayment requirement." % term_months)
+        if saving is not None and saving > 0:
+            detail = ("Save %s every month. " % _fmt_money(saving, currency)) + detail
+        rows.append((
+            "%d-month service agreement" % term_months,
+            "%s/month" % _fmt_money(term_rate, currency),
+            detail,
+        ))
+
+    if not rows:
+        return None
+
+    out = ["## Investment", ""]
+    out.append("| Item | Pricing | Details |")
+    out.append("| --- | --- | --- |")
+    for item, price, detail in rows:
+        out.append("| %s | %s | %s |" % (item, price, detail))
+    out.append("")
+
+    # Name the option this proposal is written against, and total it only when
+    # there is a real commitment to total. Month-to-month has no end date, so
+    # inventing a contract value for it would be a guess dressed as a promise.
+    if chosen == _pp.BILLING_TERM_AGREEMENT and term_rate is not None and term_months:
+        rcv = term_rate * Decimal(term_months)
+        out.append("### Selected: %d-month service agreement" % term_months)
+        out.append("")
+        out.append("**%d-month platform commitment: %s** — %d monthly payments of %s."
+                   % (term_months, _fmt_money(rcv, currency), term_months,
+                      _fmt_money(term_rate, currency)))
+        if fee is not None:
+            out.append("")
+            out.append("**Total contract value: %s** — %s implementation plus %s platform."
+                       % (_fmt_money(rcv + fee, currency),
+                          _fmt_money(fee, currency),
+                          _fmt_money(rcv, currency)))
+    elif m2m is not None:
+        out.append("### Selected: month-to-month")
+        out.append("")
+        line = "**Platform: %s/month**, with no term commitment." % _fmt_money(m2m, currency)
+        if fee is not None:
+            line = ("**Platform: %s/month**, with no term commitment, plus a "
+                    "%s one-time implementation charge."
+                    % (_fmt_money(m2m, currency), _fmt_money(fee, currency)))
+        out.append(line)
+    elif fee is not None:
+        out.append("**Total: %s one-time.**" % _fmt_money(fee, currency))
+
+    return "\n".join(out).strip()
+
+
 def _sync_proposal_blocks(db: Session, prop: Proposal, now: datetime) -> None:
     """Render the structured fields into the portal's own block system.
 
@@ -556,12 +675,11 @@ def _sync_proposal_blocks(db: Session, prop: Proposal, now: datetime) -> None:
             created_at=now))
         pos += 1
 
-    if prop.final_amount is not None:
-        money = "%s %s" % (prop.currency or "USD",
-                           ("{:,.2f}".format(prop.final_amount)))
+    investment = _investment_markdown(db, prop)
+    if investment:
         db.add(ProposalBlock(
             proposal_id=prop.id, block_type="text", position=pos,
-            content="## Investment\n\n**%s**" % money,
+            content=investment,
             file_name="af-generated", created_at=now))
         pos += 1
 
