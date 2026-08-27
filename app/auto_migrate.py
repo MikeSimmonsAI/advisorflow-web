@@ -451,6 +451,30 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_audit_log_action      ON audit_log_entries(action)",
     # suppression_entries — looked up by org and by phone for every outbound send
     "CREATE INDEX IF NOT EXISTS ix_suppression_org_phone ON suppression_entries(organization_id, phone)",
+
+    # ── Performance hardening: verified missing, not guessed ────────────────
+    # Each of these was checked against the model definitions first; none of
+    # them already existed under another name.
+    #
+    # users.organization_id had NO index at all, which is the single worst gap
+    # in the schema. Every tenant user list, every advisor cohort, every
+    # customer user count and every invite check filters on it, and on Postgres
+    # each one was a sequential scan of the whole users table.
+    "CREATE INDEX IF NOT EXISTS ix_users_organization_id ON users(organization_id)",
+    # ...and the same filter almost always carries a role or is_active
+    # predicate alongside it.
+    "CREATE INDEX IF NOT EXISTS ix_users_org_role   ON users(organization_id, role)",
+    "CREATE INDEX IF NOT EXISTS ix_users_org_active ON users(organization_id, is_active)",
+
+    # leads already has ix_leads_org_advisor(organization_id, assigned_to_id),
+    # but a composite index cannot serve a query that does not filter on its
+    # LEADING column - and the master dashboard counts leads by advisor with no
+    # organisation predicate at all. That query could not use the composite one.
+    "CREATE INDEX IF NOT EXISTS ix_leads_assigned_to_id ON leads(assigned_to_id)",
+
+    # implementations.owner_user_id is indexed; sold_by_user_id is not, and the
+    # rep's own /sales/implementations view filters on exactly that column.
+    "CREATE INDEX IF NOT EXISTS ix_impl_sold_by_user_id ON implementations(sold_by_user_id)",
 ]
 
 

@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god
@@ -44,10 +45,60 @@ def _load(db: Session, org_id: str) -> Organization:
     return org
 
 
-def _brief(db: Session, org: Organization) -> Dict[str, Any]:
-    platform = (db.query(Platform).filter(Platform.id == org.platform_id).first()
-                if org.platform_id else None)
-    counts = cr.customer_user_counts(db, org.id)
+class BriefPrefetch:
+    """Platform, user counts and location counts for a whole customer list.
+
+    `_brief` cost three queries per organisation, one of which loaded every user
+    row just to count four things about them. On a list of every customer that
+    is the entire users table, once per customer.
+    """
+
+    __slots__ = ("platforms", "counts", "locations")
+
+    def __init__(self, db: Session, orgs):
+        self.platforms, self.counts, self.locations = {}, {}, {}
+        ids = sorted({o.id for o in orgs})
+        if not ids:
+            return
+        plat_ids = sorted({o.platform_id for o in orgs if o.platform_id})
+        if plat_ids:
+            self.platforms = {p.id: p for p in
+                              db.query(Platform).filter(Platform.id.in_(plat_ids)).all()}
+        # One pass over the users of every listed org. The per-org helper derives
+        # its four numbers in Python from the same rows, so this derives them the
+        # same way rather than re-expressing them as SQL that could drift.
+        for u in db.query(User).filter(User.organization_id.in_(ids)).all():
+            b = self.counts.setdefault(str(u.organization_id),
+                                       {"total": 0, "active": 0, "pending": 0, "admins": 0})
+            b["total"] += 1
+            if u.is_active:
+                b["active"] += 1
+                if u.last_login_at is None:
+                    b["pending"] += 1
+                if u.role == "org_admin":
+                    b["admins"] += 1
+        for org_id, n in (db.query(Location.organization_id, func.count(Location.id))
+                          .filter(Location.organization_id.in_(ids))
+                          .group_by(Location.organization_id).all()):
+            self.locations[str(org_id)] = int(n)
+
+    def user_counts(self, org_id):
+        return self.counts.get(str(org_id),
+                               {"total": 0, "active": 0, "pending": 0, "admins": 0})
+
+
+def _brief(db: Session, org: Organization,
+           pre: Optional["BriefPrefetch"] = None) -> Dict[str, Any]:
+    if pre is not None:
+        platform = pre.platforms.get(org.platform_id) if org.platform_id else None
+        counts = pre.user_counts(org.id)
+        location_count = pre.locations.get(str(org.id), 0)
+    else:
+        platform = (db.query(Platform).filter(Platform.id == org.platform_id).first()
+                    if org.platform_id else None)
+        counts = cr.customer_user_counts(db, org.id)
+        location_count = db.query(Location).filter(
+            Location.organization_id == org.id).count()
     return {
         "id": org.id, "name": org.name, "slug": org.slug,
         "industry": org.industry, "plan": org.plan,
@@ -55,8 +106,7 @@ def _brief(db: Session, org: Organization) -> Dict[str, Any]:
         "platform_id": org.platform_id,
         "brand": None if platform is None else platform.name,
         "user_count": counts["total"], "active_users": counts["active"],
-        "location_count": db.query(Location).filter(
-            Location.organization_id == org.id).count(),
+        "location_count": location_count,
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }
 
@@ -73,7 +123,8 @@ def list_customers(platform_id: Optional[str] = Query(None),
     if not include_inactive:
         q = q.filter(Organization.is_active == True)  # noqa: E712
     orgs = q.order_by(Organization.name.asc()).all()
-    return {"customers": [_brief(db, o) for o in orgs], "total": len(orgs)}
+    pre = BriefPrefetch(db, orgs)
+    return {"customers": [_brief(db, o, pre) for o in orgs], "total": len(orgs)}
 
 
 # ── STEP 1: create ──────────────────────────────────────────────────────────

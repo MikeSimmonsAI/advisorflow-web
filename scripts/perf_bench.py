@@ -448,7 +448,16 @@ ROUTES = [
 def run(scale, repeats, dump=None):
     build(scale)
     _freeze_row_stamps()
-    out = {"scale": scale, "routes": {}}
+    # THE BASELINE HAS A SHELF LIFE. The fixture places "today's" appointments
+    # using the real local day, because my_day resolves its own local day the
+    # same way - so a baseline captured before local midnight describes a
+    # different calendar than a run captured after it. Recording the day here
+    # lets --compare say so instead of reporting a screenful of diffs that only
+    # mean the clock moved.
+    out = {"scale": scale,
+           "fixture_local_day": str(_av.utc_to_local(datetime.utcnow(),
+                                                     "America/Chicago").date()),
+           "routes": {}}
     with TestClient(app) as c:
         who = {"god": token(c, "god@perf.test"), "mgr": token(c, "mgr@perf.test"),
                "rep": token(c, "rep@perf.test")}
@@ -514,6 +523,17 @@ def main():
         print("\n" + "=" * 92)
         print("COMPARED WITH %s (scale %s)" % (a.compare, base.get("scale")))
         print("=" * 92)
+        _base_day = base.get("fixture_local_day")
+        _now_day = res.get("fixture_local_day")
+        if _base_day and _base_day != _now_day:
+            print("")
+            print("  !! THIS BASELINE HAS EXPIRED - it was captured on %s, this run is %s."
+                  % (_base_day, _now_day))
+            print("     The fixture places today's appointments on the real local day, so")
+            print("     the two runs describe different calendars. The QUERY COUNTS below")
+            print("     are still meaningful; the OUTPUT column is NOT - re-capture the")
+            print("     baseline with --save before trusting any equivalence result.")
+            print("")
         print("%-42s %19s %19s  %s" % ("ROUTE", "QUERIES", "ms(med)", "RESULT"))
         print("-" * 92)
         regressions = 0

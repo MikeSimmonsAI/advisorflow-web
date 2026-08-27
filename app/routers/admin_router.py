@@ -162,20 +162,39 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
 
     advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role == "advisor").all()
 
+    # Three counts and an organisation lookup per advisor became three grouped
+    # counts and one organisation lookup for the whole list. These counts key on
+    # the advisor alone - unlike _advisor_metrics they carry no organisation
+    # predicate - so the group key is the advisor alone too. An advisor with
+    # nothing is absent and reads back 0, which is what COUNT(*) returned.
+    _ids = sorted({a.id for a in advisors})
+
+    def _counts(q):
+        return {} if not _ids else {str(k): int(n) for k, n in q.all()}
+
+    sent_by = _counts(db.query(Message.sender_id, func.count(Message.id))
+                        .filter(Message.sender_id.in_(_ids))
+                        .group_by(Message.sender_id))
+    leads_by = _counts(db.query(Lead.assigned_to_id, func.count(Lead.id))
+                         .filter(Lead.assigned_to_id.in_(_ids))
+                         .group_by(Lead.assigned_to_id))
+    hot_by = _counts(db.query(Lead.assigned_to_id, func.count(Reply.id))
+                       .join(Lead, Reply.lead_id == Lead.id)
+                       .filter(Lead.assigned_to_id.in_(_ids), Reply.is_hot == True)
+                       .group_by(Lead.assigned_to_id))
+    dash_org_names = {}
+    if is_god:
+        _want = sorted({a.organization_id for a in advisors if a.organization_id})
+        if _want:
+            dash_org_names = {o.id: o.name for o in
+                              db.query(Organization).filter(Organization.id.in_(_want)).all()}
+
     per_advisor_stats = []
     for advisor in advisors:
-        sent_count = db.query(func.count(Message.id)).filter(Message.sender_id == advisor.id).scalar()
-        lead_count = db.query(func.count(Lead.id)).filter(Lead.assigned_to_id == advisor.id).scalar()
-        hot_count = (
-            db.query(func.count(Reply.id))
-            .join(Lead, Reply.lead_id == Lead.id)
-            .filter(Lead.assigned_to_id == advisor.id, Reply.is_hot == True)
-            .scalar()
-        )
-        org_name = None
-        if is_god:
-            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
-            org_name = org.name if org else None
+        sent_count = sent_by.get(str(advisor.id), 0)
+        lead_count = leads_by.get(str(advisor.id), 0)
+        hot_count = hot_by.get(str(advisor.id), 0)
+        org_name = dash_org_names.get(advisor.organization_id) if is_god else None
         per_advisor_stats.append({
             "advisor_id": advisor.id,
             "advisor_name": advisor.full_name,
@@ -275,7 +294,76 @@ def _safe_rate(numerator: int, denominator: int) -> float:
     return round((numerator / denominator) * 100, 2)
 
 
-def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
+class AdvisorCounts:
+    """Every count `_advisor_metrics` needs, for a WHOLE advisor cohort, in seven
+    grouped queries instead of seven per advisor.
+
+    WHY. `/admin/dashboard/metrics` called _advisor_metrics once per advisor, and
+    each call ran seven COUNT(*) statements. At 75 advisors that is 525 counts,
+    plus one Organization lookup per advisor on the god view - 604 statements to
+    render one table. The counts themselves were always cheap; asking for them
+    one advisor at a time was not.
+
+    EQUIVALENCE. Each query below mirrors ONE of the original filters exactly,
+    including the `is_duplicate == False` predicate (which excludes NULL in SQL,
+    and still does here). Every group key is the PAIR (lead.organization_id,
+    person) rather than the person alone, because the per-advisor version scoped
+    every count to that advisor's OWN organization - grouping on the person alone
+    would silently fold in another org's rows. A pair that never appears in the
+    grouped result is absent from the dict and reads back as 0, which is what
+    `.scalar() or 0` produced before.
+    """
+
+    __slots__ = ("leads_owned", "messages_sent", "replies", "hot_replies",
+                 "booked", "dnc", "duplicates")
+
+    def __init__(self, db: Session, advisors):
+        ids = sorted({a.id for a in advisors})
+        orgs = sorted({str(a.organization_id) for a in advisors
+                       if a.organization_id is not None})
+        empty = not ids or not orgs
+
+        def grouped(q):
+            if empty:
+                return {}
+            return {(str(org), str(who)): int(n) for org, who, n in q.all()}
+
+        base_lead = lambda: (
+            db.query(Lead.organization_id, Lead.assigned_to_id, func.count(Lead.id))
+              .filter(Lead.organization_id.in_(orgs),
+                      Lead.assigned_to_id.in_(ids))
+              .group_by(Lead.organization_id, Lead.assigned_to_id))
+
+        self.leads_owned = grouped(base_lead().filter(Lead.is_duplicate == False))
+        self.booked = grouped(base_lead().filter(Lead.is_duplicate == False,
+                                                 Lead.status == "booked"))
+        self.dnc = grouped(base_lead().filter(Lead.is_duplicate == False,
+                                              Lead.status == "dnc"))
+        self.duplicates = grouped(base_lead().filter(Lead.is_duplicate == True))
+
+        self.messages_sent = grouped(
+            db.query(Lead.organization_id, Message.sender_id, func.count(Message.id))
+              .join(Lead, Message.lead_id == Lead.id)
+              .filter(Lead.organization_id.in_(orgs),
+                      Message.sender_id.in_(ids),
+                      Lead.is_duplicate == False)
+              .group_by(Lead.organization_id, Message.sender_id))
+
+        reply_q = lambda: (
+            db.query(Lead.organization_id, Lead.assigned_to_id, func.count(Reply.id))
+              .join(Lead, Reply.lead_id == Lead.id)
+              .filter(Lead.organization_id.in_(orgs),
+                      Lead.assigned_to_id.in_(ids),
+                      Lead.is_duplicate == False)
+              .group_by(Lead.organization_id, Lead.assigned_to_id))
+
+        self.replies = grouped(reply_q())
+        self.hot_replies = grouped(reply_q().filter(
+            (Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)))
+
+
+def _advisor_metrics(db: Session, organization_id: str, advisor: User,
+                     pre: Optional[AdvisorCounts] = None) -> dict:
     """
     Build quality metrics for one advisor using only existing tables.
 
@@ -287,6 +375,22 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
     - duplicate_leads_prevented follows the existing project convention:
       Lead.is_duplicate=True, set by the ContactRegistry/dedup flow.
     """
+    if pre is not None:
+        # Same numbers, already counted. The return shape below is deliberately
+        # left as the single definition of this row, so the batched path cannot
+        # drift away from the per-advisor one.
+        k = (str(organization_id), str(advisor.id))
+        leads_owned = pre.leads_owned.get(k, 0)
+        messages_sent = pre.messages_sent.get(k, 0)
+        replies = pre.replies.get(k, 0)
+        hot_replies = pre.hot_replies.get(k, 0)
+        booked_leads = pre.booked.get(k, 0)
+        dnc_leads = pre.dnc.get(k, 0)
+        duplicate_leads_prevented = pre.duplicates.get(k, 0)
+        return _advisor_row(advisor, leads_owned, messages_sent, replies,
+                            hot_replies, booked_leads, dnc_leads,
+                            duplicate_leads_prevented)
+
     leads_owned = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
@@ -332,6 +436,15 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User) -> dict:
         Lead.is_duplicate == True,
     ).scalar() or 0
 
+    return _advisor_row(advisor, leads_owned, messages_sent, replies,
+                        hot_replies, booked_leads, dnc_leads,
+                        duplicate_leads_prevented)
+
+
+def _advisor_row(advisor: User, leads_owned, messages_sent, replies, hot_replies,
+                 booked_leads, dnc_leads, duplicate_leads_prevented) -> dict:
+    """The one place an advisor metrics row is shaped. Both the per-advisor and
+    the cohort path end here, so they cannot return different keys."""
     return {
         "advisor_id": advisor.id,
         "advisor_name": advisor.full_name,
@@ -362,12 +475,22 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
         .all()
     )
 
+    counts = AdvisorCounts(db, advisors)
+    # The god view printed an organisation name per advisor and fetched the
+    # organisation again for every one of them, including the same org 3 times
+    # over for a 3-advisor customer.
+    org_names = {}
+    if is_god:
+        wanted = sorted({a.organization_id for a in advisors if a.organization_id})
+        if wanted:
+            org_names = {o.id: o.name for o in
+                         db.query(Organization).filter(Organization.id.in_(wanted)).all()}
+
     advisor_rows = []
     for advisor in advisors:
-        row = _advisor_metrics(db, str(advisor.organization_id), advisor)
+        row = _advisor_metrics(db, str(advisor.organization_id), advisor, counts)
         if is_god:
-            org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
-            row["organization_name"] = org.name if org else None
+            row["organization_name"] = org_names.get(advisor.organization_id)
         advisor_rows.append(row)
 
     totals = {

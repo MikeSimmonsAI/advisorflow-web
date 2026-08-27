@@ -104,20 +104,7 @@ def completion(db: Session, impl: Implementation) -> Dict[str, Any]:
     finish, and treating it as outstanding makes every percentage on the god
     dashboard wrong for every customer who buys less than everything.
     """
-    rows = milestones(db, impl)
-    total = len(rows)
-    settled = sum(1 for m in rows if m.status in MILESTONE_SETTLED)
-    required_open = [m for m in rows
-                     if m.is_required and m.status not in MILESTONE_SETTLED]
-    return {
-        "total": total,
-        "settled": settled,
-        "percent": int(round(100.0 * settled / total)) if total else 0,
-        "required_open": [{"key": m.key, "label": m.label, "status": m.status}
-                          for m in required_open],
-        "blocked": [{"key": m.key, "label": m.label} for m in rows
-                    if m.status == "blocked"],
-    }
+    return _completion_from(milestones(db, impl))
 
 
 def set_milestone(db: Session, impl: Implementation, actor: User, key: str,
@@ -361,7 +348,72 @@ _SALES_VISIBLE_STATUS = {
 }
 
 
-def sales_projection(db: Session, impl: Implementation) -> Dict[str, Any]:
+class SalesProjPrefetch:
+    """The six per-row lookups `sales_projection` makes, for a whole list.
+
+    Organisation, owner, seller, opportunity, package and the milestone rows
+    behind `completion()` - six queries per implementation on a screen that
+    shows up to 500 of them.
+
+    The milestone rows are fetched in ONE query ordered by (position,
+    created_at), the same ordering `milestones()` applies, and then grouped -
+    so `completion()` sees each implementation's rows in the order it always
+    saw them. That ordering feeds `required_open` and `blocked`, which are
+    lists in the response, so getting it wrong would be a silent behaviour
+    change rather than a crash.
+    """
+
+    __slots__ = ("orgs", "users", "opps", "packages", "milestones")
+
+    def __init__(self, db: Session, impls):
+        from app.models.sales_models import Opportunity, BrandPackage
+        self.orgs, self.users, self.opps = {}, {}, {}
+        self.packages, self.milestones = {}, {}
+        impls = [i for i in impls if i is not None]
+        if not impls:
+            return
+
+        def by_id(model, ids):
+            ids = sorted({i for i in ids if i})
+            if not ids:
+                return {}
+            return {r.id: r for r in db.query(model).filter(model.id.in_(ids)).all()}
+
+        self.orgs = by_id(Organization, (i.organization_id for i in impls))
+        self.users = by_id(User, [i.owner_user_id for i in impls]
+                           + [i.sold_by_user_id for i in impls])
+        self.opps = by_id(Opportunity, (i.opportunity_id for i in impls))
+        self.packages = by_id(BrandPackage,
+                              (o.selected_package_id for o in self.opps.values()))
+
+        impl_ids = sorted({i.id for i in impls})
+        for m in (db.query(ImplementationMilestone)
+                    .filter(ImplementationMilestone.implementation_id.in_(impl_ids))
+                    .order_by(ImplementationMilestone.position,
+                              ImplementationMilestone.created_at).all()):
+            self.milestones.setdefault(m.implementation_id, []).append(m)
+
+
+def _completion_from(rows) -> Dict[str, Any]:
+    """`completion()`'s body, given the milestone rows. Extracted so the batched
+    path and the per-row path compute the percentage from one piece of code."""
+    total = len(rows)
+    settled = sum(1 for m in rows if m.status in MILESTONE_SETTLED)
+    required_open = [m for m in rows
+                     if m.is_required and m.status not in MILESTONE_SETTLED]
+    return {
+        "total": total,
+        "settled": settled,
+        "percent": int(round(100.0 * settled / total)) if total else 0,
+        "required_open": [{"key": m.key, "label": m.label, "status": m.status}
+                          for m in required_open],
+        "blocked": [{"key": m.key, "label": m.label} for m in rows
+                    if m.status == "blocked"],
+    }
+
+
+def sales_projection(db: Session, impl: Implementation,
+                     pre: Optional["SalesProjPrefetch"] = None) -> Dict[str, Any]:
     """What the rep who sold it, and their manager, are allowed to see (§15/§16).
 
     Coarse by design. The rep gets to know the customer is progressing and
@@ -370,6 +422,17 @@ def sales_projection(db: Session, impl: Implementation) -> Dict[str, Any]:
     and a date, not a story - the story often names a customer's staffing
     problem, and the rep who sold the deal has no reason to hold it.
     """
+    from app.models.sales_models import Opportunity, BrandPackage
+    if pre is not None:
+        org = pre.orgs.get(impl.organization_id)
+        owner = pre.users.get(impl.owner_user_id) if impl.owner_user_id else None
+        c = _completion_from(pre.milestones.get(impl.id, []))
+        opp = pre.opps.get(impl.opportunity_id) if impl.opportunity_id else None
+        sold_by = pre.users.get(impl.sold_by_user_id) if impl.sold_by_user_id else None
+        pkg = (pre.packages.get(opp.selected_package_id)
+               if opp is not None and opp.selected_package_id else None)
+        return _sales_projection_row(impl, org, owner, c, opp, sold_by, pkg)
+
     org = db.query(Organization).filter(Organization.id == impl.organization_id).first()
     owner = (db.query(User).filter(User.id == impl.owner_user_id).first()
              if impl.owner_user_id else None)
@@ -380,7 +443,6 @@ def sales_projection(db: Session, impl: Implementation) -> Dict[str, Any]:
     # facts the selling rep already holds. The coarseness this docstring protects
     # is milestone detail, internal notes and blocker text, and none of that is
     # here.
-    from app.models.sales_models import Opportunity, BrandPackage
     opp = (db.query(Opportunity).filter(Opportunity.id == impl.opportunity_id).first()
            if impl.opportunity_id else None)
     sold_by = (db.query(User).filter(User.id == impl.sold_by_user_id).first()
@@ -389,6 +451,12 @@ def sales_projection(db: Session, impl: Implementation) -> Dict[str, Any]:
            .filter(BrandPackage.id == opp.selected_package_id).first()
            if opp is not None and opp.selected_package_id else None)
 
+    return _sales_projection_row(impl, org, owner, c, opp, sold_by, pkg)
+
+
+def _sales_projection_row(impl, org, owner, c, opp, sold_by, pkg) -> Dict[str, Any]:
+    """The one place a sales projection is shaped. Both the batched path and the
+    per-row path end here, so they cannot return different keys."""
     return {
         "implementation_id": impl.id,
         "opportunity_id": impl.opportunity_id,

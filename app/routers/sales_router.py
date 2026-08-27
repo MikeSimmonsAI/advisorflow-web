@@ -712,7 +712,10 @@ def list_opportunities(brand_sales_org_id: Optional[str] = Query(None),
 
     rows = q.order_by(Opportunity.stage_changed_at.desc().nullslast()).all()
     appts = next_appt_map(db, rows)
-    cards = [_card(o, db, appts) for o in rows]
+    # The board resolved an owner name per tile. A manager's brand-wide board is
+    # a hundred tiles, and `_card` already takes a names map for exactly this.
+    card_names = _name_map(db, [o.owner_user_id for o in rows])
+    cards = [_card(o, db, appts, card_names) for o in rows]
 
     by_stage = {s: [] for s in OPPORTUNITY_STAGES}
     lost = []
@@ -1137,7 +1140,8 @@ def my_implementations(user: User = Depends(require_sales_member),
     confirms the id exists.
     """
     from app.models.implementation_models import Implementation
-    from app.services.implementation_service import sales_projection
+    from app.services.implementation_service import (
+        sales_projection, SalesProjPrefetch)
     from app.services.sales_access import sales_org_ids, is_sales_manager, is_god
 
     q = db.query(Implementation)
@@ -1159,8 +1163,9 @@ def my_implementations(user: User = Depends(require_sales_member),
     # view from a rep's own without a second call to /sales/me. The scoping above
     # is unchanged - this only reports which of its two branches ran.
     org = _resolve_context(user, db, None) if sales_org_ids(user, db) else None
+    _impl_pre = SalesProjPrefetch(db, rows)
     return {
-        "implementations": [sales_projection(db, i) for i in rows],
+        "implementations": [sales_projection(db, i, _impl_pre) for i in rows],
         "is_manager": bool(manager_orgs) or is_god(user),
         "total": len(rows),
         "brand_sales_org": {"id": org.id, "name": org.name} if org else None,

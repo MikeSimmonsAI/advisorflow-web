@@ -366,6 +366,59 @@ def invite_state(db: Session, org_id: str) -> Dict[str, Any]:
     }
 
 
+def invite_state_bulk(db: Session, org_ids) -> Dict[str, Dict[str, Any]]:
+    """`invite_state` for many organisations at once, in two queries.
+
+    The single-org version costs one users query plus one activation lookup per
+    admin. The won-queue called it once per implementation, which is where the
+    ~100 repeated `customer_activations` selects on God Sales Operations came
+    from. Same definitions, same numbers - counted for the whole set at once.
+
+    An org with no users is absent from both queries and comes back as the same
+    all-zero / needs_invite shape the single-org version returns.
+    """
+    ids = sorted({str(o) for o in org_ids if o})
+    out = {i: {"user_count": 0, "admin_count": 0, "invites_pending": 0,
+               "invites_accepted": 0, "has_admin": False, "needs_invite": True}
+           for i in ids}
+    if not ids:
+        return out
+
+    users = (db.query(User)
+               .filter(User.organization_id.in_(ids), User.is_active.is_(True))
+               .all())
+    admins = [u for u in users if u.role in CUSTOMER_ADMIN_ROLES]
+    for u in users:
+        out[str(u.organization_id)]["user_count"] += 1
+    for u in admins:
+        out[str(u.organization_id)]["admin_count"] += 1
+
+    admin_ids = sorted({u.id for u in admins})
+    latest = {}
+    if admin_ids:
+        # Ordered oldest-first so the last write per user wins, which is the row
+        # `latest_for_user` would have returned with its DESC + first().
+        for a in (db.query(CustomerActivation)
+                    .filter(CustomerActivation.user_id.in_(admin_ids))
+                    .order_by(CustomerActivation.created_at.asc()).all()):
+            latest[a.user_id] = a
+
+    for u in admins:
+        a = latest.get(u.id)
+        if a is None:
+            continue
+        bucket = out[str(u.organization_id)]
+        if a.status == INVITE_ACCEPTED:
+            bucket["invites_accepted"] += 1
+        elif a.is_usable():
+            bucket["invites_pending"] += 1
+
+    for i in ids:
+        out[i]["has_admin"] = bool(out[i]["admin_count"])
+        out[i]["needs_invite"] = not out[i]["admin_count"]
+    return out
+
+
 def activation_url(base_url: Optional[str], raw_token: str) -> str:
     """The link the operator sends. Built from a caller-supplied base so nothing
     here hardcodes a brand's domain - Checkpoint 6 §42."""

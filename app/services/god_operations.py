@@ -41,7 +41,7 @@ from app.models.implementation_models import (
     Implementation, ImplementationMilestone,
     IMPL_LIVE, IMPL_BLOCKED, IMPL_READY_FOR_LAUNCH, MILESTONE_SETTLED,
 )
-from app.services.customer_activation import invite_state
+from app.services.customer_activation import invite_state, invite_state_bulk
 
 # An opportunity nobody has touched in this long is stalled. Not a setting: one
 # number, in one place, that every stalled count in the control plane uses, so
@@ -250,17 +250,28 @@ def decision_queues(db: Session) -> Dict[str, Any]:
                   .all())
     awaiting = [o for o in awaiting if o.id not in provisioned_opp_ids]
 
+    # Invite state for every candidate org in two queries rather than one call
+    # per implementation - the same customer was re-checked for every one of its
+    # implementations, and each check cost a query per admin.
+    candidates = [i for i in impls if i.status != IMPL_LIVE]
+    invite_states = invite_state_bulk(db, [i.organization_id for i in candidates])
     not_invited = []
-    for i in impls:
-        if i.status == IMPL_LIVE:
+    for i in candidates:
+        st = invite_states.get(str(i.organization_id))
+        if st is None:
             continue
-        st = invite_state(db, i.organization_id)
         if st["needs_invite"] or (st["has_admin"] and st["invites_pending"] == 0
                                   and st["invites_accepted"] == 0):
             not_invited.append(i)
 
+    # One prefetch across every queue. These six lists overlap heavily - the same
+    # blocked, unowned implementation appears in several of them - so without the
+    # shared row memo it was serialised once per queue it belongs to.
+    _pre = ImplPrefetch(db, list(not_invited) + list(no_owner) + list(blocked)
+                        + list(overdue) + list(ready) + list(billing_review))
+
     def _impl_rows(rows):
-        return [_implementation_row(db, i) for i in rows]
+        return [_implementation_row(db, i, _pre) for i in rows]
 
     return {
         "won_awaiting_provisioning": [
@@ -281,28 +292,104 @@ def decision_queues(db: Session) -> Dict[str, Any]:
 
 # ── implementation rows ─────────────────────────────────────────────────────
 
-def _implementation_row(db: Session, impl: Implementation) -> Dict[str, Any]:
-    org = db.query(Organization).filter(Organization.id == impl.organization_id).first()
-    opp = db.query(Opportunity).filter(Opportunity.id == impl.opportunity_id).first()
-    bso = (db.query(BrandSalesOrg).filter(BrandSalesOrg.id == impl.brand_sales_org_id).first()
-           if impl.brand_sales_org_id else None)
-    platform = (db.query(Platform).filter(Platform.id == impl.platform_id).first()
-                if impl.platform_id else None)
-    pkg = (db.query(BrandPackage).filter(BrandPackage.id == impl.package_id).first()
-           if impl.package_id else None)
-    owner = (db.query(User).filter(User.id == impl.owner_user_id).first()
-             if impl.owner_user_id else None)
-    sold_by = (db.query(User).filter(User.id == impl.sold_by_user_id).first()
-               if impl.sold_by_user_id else None)
+class ImplPrefetch:
+    """Everything `_implementation_row` needs for a LIST of implementations, in
+    seven queries instead of nine per row.
 
-    total = (db.query(func.count(ImplementationMilestone.id))
-               .filter(ImplementationMilestone.implementation_id == impl.id).scalar() or 0)
-    settled = (db.query(func.count(ImplementationMilestone.id))
-                 .filter(ImplementationMilestone.implementation_id == impl.id,
-                         ImplementationMilestone.status.in_(MILESTONE_SETTLED)).scalar() or 0)
+    WHY. The row serializer did nine independent lookups - organisation,
+    opportunity, brand sales org, platform, package, owner, sold-by, and two
+    milestone counts. `implementations()` called it once per row, so a 25-row
+    board cost 227 statements, and the won-queue called it again across SIX
+    overlapping lists, re-serialising the same blocked implementation up to four
+    times.
+
+    Nothing here changes what a row contains. It changes how many times the same
+    handful of parent rows are fetched. Rows are memoised by implementation id,
+    so an implementation appearing in four queues is built once.
+    """
+
+    __slots__ = ("orgs", "opps", "bsos", "platforms", "packages", "users",
+                 "milestones", "_rows")
+
+    def __init__(self, db: Session, impls):
+        self.orgs, self.opps, self.bsos = {}, {}, {}
+        self.platforms, self.packages, self.users = {}, {}, {}
+        self.milestones = {}
+        self._rows = {}
+        impls = [i for i in impls if i is not None]
+        if not impls:
+            return
+
+        def by_id(model, ids):
+            ids = sorted({i for i in ids if i})
+            if not ids:
+                return {}
+            return {r.id: r for r in db.query(model).filter(model.id.in_(ids)).all()}
+
+        self.orgs = by_id(Organization, (i.organization_id for i in impls))
+        self.opps = by_id(Opportunity, (i.opportunity_id for i in impls))
+        self.bsos = by_id(BrandSalesOrg, (i.brand_sales_org_id for i in impls))
+        self.platforms = by_id(Platform, (i.platform_id for i in impls))
+        self.packages = by_id(BrandPackage, (i.package_id for i in impls))
+        # Owners and sellers come from the same table, so they are one query.
+        self.users = by_id(User, [i.owner_user_id for i in impls]
+                           + [i.sold_by_user_id for i in impls])
+
+        impl_ids = sorted({i.id for i in impls})
+        # Two counts per implementation become two grouped counts for all of
+        # them. An implementation with no milestones is simply absent and reads
+        # back as 0 - which is what `.scalar() or 0` produced before.
+        for impl_id, n in (db.query(ImplementationMilestone.implementation_id,
+                                    func.count(ImplementationMilestone.id))
+                           .filter(ImplementationMilestone.implementation_id.in_(impl_ids))
+                           .group_by(ImplementationMilestone.implementation_id).all()):
+            self.milestones[impl_id] = [int(n), 0]
+        for impl_id, n in (db.query(ImplementationMilestone.implementation_id,
+                                    func.count(ImplementationMilestone.id))
+                           .filter(ImplementationMilestone.implementation_id.in_(impl_ids),
+                                   ImplementationMilestone.status.in_(MILESTONE_SETTLED))
+                           .group_by(ImplementationMilestone.implementation_id).all()):
+            self.milestones.setdefault(impl_id, [0, 0])[1] = int(n)
+
+    def counts(self, impl_id):
+        return tuple(self.milestones.get(impl_id, (0, 0)))
+
+
+def _implementation_row(db: Session, impl: Implementation,
+                        pre: Optional[ImplPrefetch] = None) -> Dict[str, Any]:
+    if pre is not None:
+        if impl.id in pre._rows:
+            return pre._rows[impl.id]
+        org = pre.orgs.get(impl.organization_id)
+        opp = pre.opps.get(impl.opportunity_id)
+        bso = pre.bsos.get(impl.brand_sales_org_id) if impl.brand_sales_org_id else None
+        platform = pre.platforms.get(impl.platform_id) if impl.platform_id else None
+        pkg = pre.packages.get(impl.package_id) if impl.package_id else None
+        owner = pre.users.get(impl.owner_user_id) if impl.owner_user_id else None
+        sold_by = pre.users.get(impl.sold_by_user_id) if impl.sold_by_user_id else None
+        total, settled = pre.counts(impl.id)
+    else:
+        org = db.query(Organization).filter(Organization.id == impl.organization_id).first()
+        opp = db.query(Opportunity).filter(Opportunity.id == impl.opportunity_id).first()
+        bso = (db.query(BrandSalesOrg).filter(BrandSalesOrg.id == impl.brand_sales_org_id).first()
+               if impl.brand_sales_org_id else None)
+        platform = (db.query(Platform).filter(Platform.id == impl.platform_id).first()
+                    if impl.platform_id else None)
+        pkg = (db.query(BrandPackage).filter(BrandPackage.id == impl.package_id).first()
+               if impl.package_id else None)
+        owner = (db.query(User).filter(User.id == impl.owner_user_id).first()
+                 if impl.owner_user_id else None)
+        sold_by = (db.query(User).filter(User.id == impl.sold_by_user_id).first()
+                   if impl.sold_by_user_id else None)
+
+        total = (db.query(func.count(ImplementationMilestone.id))
+                   .filter(ImplementationMilestone.implementation_id == impl.id).scalar() or 0)
+        settled = (db.query(func.count(ImplementationMilestone.id))
+                     .filter(ImplementationMilestone.implementation_id == impl.id,
+                             ImplementationMilestone.status.in_(MILESTONE_SETTLED)).scalar() or 0)
 
     now = datetime.utcnow()
-    return {
+    row = {
         "implementation_id": impl.id,
         "organization_id": impl.organization_id,
         "organization_name": org.name if org else None,
@@ -329,6 +416,9 @@ def _implementation_row(db: Session, impl: Implementation) -> Dict[str, Any]:
         "billing_status": impl.billing_status,
         "created_at": impl.created_at,
     }
+    if pre is not None:
+        pre._rows[impl.id] = row
+    return row
 
 
 def implementations(db: Session, *, platform_id: Optional[str] = None,
@@ -355,7 +445,8 @@ def implementations(db: Session, *, platform_id: Optional[str] = None,
     elif live is False:
         q = q.filter(Implementation.status != IMPL_LIVE)
     rows = q.order_by(Implementation.created_at.desc()).limit(max(1, min(limit, 500))).all()
-    out = [_implementation_row(db, i) for i in rows]
+    pre = ImplPrefetch(db, rows)
+    out = [_implementation_row(db, i, pre) for i in rows]
     if overdue is True:
         out = [r for r in out if r["is_overdue"]]
     elif overdue is False:
@@ -377,18 +468,40 @@ def customer_organizations(db: Session, *, platform_id: Optional[str] = None,
         q = q.filter(Organization.platform_id == platform_id)
     orgs = q.order_by(Organization.created_at.desc()).limit(max(1, min(limit, 1000))).all()
 
+    # Five queries per organisation - platform, implementation, package, and two
+    # counts - became five for the whole page. `implementations` is unique on
+    # organization_id, so the single row `.first()` returned is the only one
+    # there is; setdefault below preserves that same choice regardless.
+    _org_ids = sorted({o.id for o in orgs})
+    _impls, _users, _leads, _platforms, _packages = {}, {}, {}, {}, {}
+    if _org_ids:
+        for im in (db.query(Implementation)
+                     .filter(Implementation.organization_id.in_(_org_ids)).all()):
+            _impls.setdefault(im.organization_id, im)
+        _users = {str(k): int(n) for k, n in
+                  db.query(User.organization_id, func.count(User.id))
+                    .filter(User.organization_id.in_(_org_ids))
+                    .group_by(User.organization_id).all()}
+        _leads = {str(k): int(n) for k, n in
+                  db.query(Lead.organization_id, func.count(Lead.id))
+                    .filter(Lead.organization_id.in_(_org_ids))
+                    .group_by(Lead.organization_id).all()}
+        _plat_ids = sorted({o.platform_id for o in orgs if o.platform_id})
+        if _plat_ids:
+            _platforms = {p.id: p for p in
+                          db.query(Platform).filter(Platform.id.in_(_plat_ids)).all()}
+        _pkg_ids = sorted({im.package_id for im in _impls.values() if im.package_id})
+        if _pkg_ids:
+            _packages = {p.id: p for p in
+                         db.query(BrandPackage).filter(BrandPackage.id.in_(_pkg_ids)).all()}
+
     out = []
     for o in orgs:
-        platform = (db.query(Platform).filter(Platform.id == o.platform_id).first()
-                    if o.platform_id else None)
-        impl = (db.query(Implementation)
-                  .filter(Implementation.organization_id == o.id).first())
-        pkg = (db.query(BrandPackage).filter(BrandPackage.id == impl.package_id).first()
-               if impl and impl.package_id else None)
-        users = (db.query(func.count(User.id))
-                   .filter(User.organization_id == o.id).scalar() or 0)
-        leads = (db.query(func.count(Lead.id))
-                   .filter(Lead.organization_id == o.id).scalar() or 0)
+        platform = _platforms.get(o.platform_id) if o.platform_id else None
+        impl = _impls.get(o.id)
+        pkg = _packages.get(impl.package_id) if impl and impl.package_id else None
+        users = _users.get(str(o.id), 0)
+        leads = _leads.get(str(o.id), 0)
         out.append({
             "organization_id": o.id,
             "name": o.name,
