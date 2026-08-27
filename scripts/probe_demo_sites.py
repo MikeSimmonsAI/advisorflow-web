@@ -187,6 +187,41 @@ def main():
         tok2 = r2.json()["url"].rsplit("/", 1)[-1]
         check("...and the new one opens", c.get("/public/demo/" + tok2).status_code == 200)
 
+        section("SLOTS - A DEAL CAN CARRY TWO DIFFERENT MOCKUPS AT ONCE")
+        rs1 = c.post("/sales/opportunities/opp-1/demo-site",
+                     json={"title": "Website concept", "html": "<h1>site</h1>",
+                           "slot": "website"}, headers=rep)
+        check("a website-slot demo publishes", rs1.status_code == 201, rs1.status_code)
+        toks1 = rs1.json()["url"].rsplit("/", 1)[-1]
+        check("...and the platform demo IS STILL LIVE - a different shelf",
+              c.get("/public/demo/" + tok2).status_code == 200)
+        check("...and the website demo opens too",
+              c.get("/public/demo/" + toks1).status_code == 200)
+
+        rs2 = c.post("/sales/opportunities/opp-1/demo-site",
+                     json={"title": "Website concept v2", "html": "<h1>site2</h1>",
+                           "slot": "website"}, headers=rep)
+        check("republishing the same slot retires only that slot",
+              rs2.status_code == 201 and c.get("/public/demo/" + toks1).status_code == 404,
+              [rs2.status_code, c.get("/public/demo/" + toks1).status_code])
+        check("...the platform demo is STILL untouched",
+              c.get("/public/demo/" + tok2).status_code == 200)
+
+        check("a website demo does NOT claim the deal's demo_url",
+              tok2 in (opp().demo_url or ""), opp().demo_url)
+
+        rs3 = c.post("/sales/opportunities/opp-1/demo-site",
+                     json={"title": "Junk slot", "html": "<h1>x</h1>",
+                           "slot": "../../etc/passwd"}, headers=rep)
+        check("AN UNRECOGNISABLE SLOT FALLS BACK TO THE DEFAULT, never a new shelf",
+              rs3.status_code == 201 and rs3.json()["demo"]["slot"] == "platform",
+              rs3.json().get("demo", {}).get("slot"))
+        # Hand the next section a live platform demo: the fallback publish above
+        # already retired r2's, so carrying r2 forward would test a dead link.
+        r2 = rs3
+        tok2 = rs3.json()["url"].rsplit("/", 1)[-1]
+        c.post("/sales/demo-sites/%s/revoke" % rs2.json()["demo"]["id"], headers=rep)
+
         section("REVOCATION IS IMMEDIATE")
         did2 = r2.json()["demo"]["id"]
         rv = c.post("/sales/demo-sites/%s/revoke" % did2, headers=rep)

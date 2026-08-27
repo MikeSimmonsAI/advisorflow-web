@@ -60,6 +60,12 @@ class DemoSite(Base):
     brand_sales_org_id = Column(String, ForeignKey("brand_sales_orgs.id", ondelete="CASCADE"),
                                 nullable=False)
 
+    # Which KIND of mockup this is. A deal can legitimately carry more than one
+    # at a time - the product walkthrough and an optional website concept are
+    # different artifacts, not two versions of one pitch - so replacement only
+    # retires the live demo in the SAME slot.
+    slot = Column(String(32), nullable=False, default="platform",
+                  server_default="platform", index=True)
     title = Column(String, nullable=False)
     # What the prospect is being shown. Rendered sandboxed; see the module note.
     html = Column(Text, nullable=False)

@@ -53,6 +53,11 @@ COLUMNS_TO_ADD = [
     # that has no term option - which is refused rather than defaulted.
     # brand_packages.price keeps holding the ONE-TIME implementation charge.
     # These are the NEW recurring platform rates layered on top of it.
+    # ── Demo mockups: one live link PER SLOT ───────────────────────────────
+    # Existing rows predate slots and are all website concepts, which is what
+    # the backfilled default says. New rows default to "platform" in the model,
+    # so the product walkthrough does not retire the website concept.
+    ("demo_sites", "slot", "VARCHAR(32) DEFAULT 'website' NOT NULL"),
     ("brand_packages", "monthly_price", "NUMERIC(12,2)"),
     ("brand_packages", "contract_monthly_price", "NUMERIC(12,2)"),
     ("brand_packages", "contract_term_months", "INTEGER"),

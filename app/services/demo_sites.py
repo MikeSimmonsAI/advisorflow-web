@@ -5,6 +5,7 @@ returns one demo's title and HTML or it refuses. It never accepts an id, never
 lists anything, and never reveals whether a token that failed was wrong,
 expired or revoked in a way that would let somebody probe for live ones.
 """
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -43,13 +44,30 @@ def current(db: Session, opportunity_id: str) -> Optional[DemoSite]:
     return None
 
 
+DEFAULT_SLOT = "platform"
+_SLOT_OK = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+def normalize_slot(value) -> str:
+    """Fail toward the default rather than minting an unbounded slot space.
+
+    A slot is a shelf, not a label. Anything unrecognisable goes on the default
+    shelf, where the existing "one live link" behaviour applies unchanged.
+    """
+    v = (value or "").strip().lower().replace(" ", "_")
+    return v if _SLOT_OK.match(v) else DEFAULT_SLOT
+
+
 def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
+           slot: str = DEFAULT_SLOT,
            ttl_days: int = DEFAULT_TTL_DAYS, now=None) -> Dict[str, Any]:
     """Publish a mockup for this deal and mint its link.
 
-    Replacing a demo REVOKES the previous one rather than leaving it live.
-    Two working links to two different versions of the same pitch is how a
-    prospect ends up looking at the design you already moved on from.
+    Replacing a demo REVOKES the previous one IN THE SAME SLOT rather than
+    leaving it live. Two working links to two different versions of the same
+    pitch is how a prospect ends up looking at the design you already moved on
+    from — but a product walkthrough and a website concept are not two versions
+    of one pitch, and retiring one because the other shipped would be wrong.
     """
     now = now or datetime.utcnow()
     html = html or ""
@@ -62,8 +80,9 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
     if not (title or "").strip():
         return {"ok": False, "error": "Give the demo a title the prospect will see."}
 
+    slot = normalize_slot(slot)
     for old in for_opportunity(db, opp.id):
-        if old.is_live(now):
+        if old.is_live(now) and (old.slot or DEFAULT_SLOT) == slot:
             old.revoked_at = now
             old.is_active = False
 
@@ -71,6 +90,7 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
         opportunity_id=opp.id,
         brand_sales_org_id=opp.brand_sales_org_id,
         title=title.strip(),
+        slot=slot,
         html=html,
         token=mint_token(),
         created_by=getattr(actor, "id", None),
@@ -112,6 +132,7 @@ def out(demo: DemoSite, base_url: str = None) -> Dict[str, Any]:
     return {
         "id": demo.id,
         "title": demo.title,
+        "slot": demo.slot or DEFAULT_SLOT,
         "opportunity_id": demo.opportunity_id,
         "url": public_url(base_url, demo.token) if base_url else None,
         "is_live": demo.is_live(),

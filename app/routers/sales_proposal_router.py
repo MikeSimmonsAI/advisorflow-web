@@ -758,6 +758,11 @@ def deal_room_decision(token: str, body: DecisionIn, request: Request,
 class DemoSiteIn(BaseModel):
     title: str
     html: str
+    # Which shelf this mockup sits on. "platform" is the product walkthrough and
+    # is what the deal advertises as its demo; "website" is an optional website
+    # concept and does not claim the deal's demo slot. Anything unrecognised
+    # falls back to the default rather than minting a new shelf.
+    slot: Optional[str] = None
 
 
 @router.post("/sales/opportunities/{opportunity_id}/demo-site", status_code=201)
@@ -777,7 +782,8 @@ def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
     if opp.brand_sales_org_id not in sales_org_ids(user, db):
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
-    res = _demos.create(db, opp, user, title=body.title, html=body.html)
+    slot = _demos.normalize_slot(body.slot)
+    res = _demos.create(db, opp, user, title=body.title, html=body.html, slot=slot)
     if not res["ok"]:
         raise HTTPException(status_code=400, detail=res["error"])
     demo = res["demo"]
@@ -787,11 +793,15 @@ def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
     base = ident.get("app_base_url") or PUBLIC_BASE_URL
     url = _demos.public_url(base, demo.token)
 
-    opp.demo_url = url
-    if opp.demo_status in (None, "not_requested", "requested", "in_progress"):
-        opp.demo_status = "ready"
-    if not opp.demo_ready_at:
-        opp.demo_ready_at = datetime.utcnow()
+    # Only the product walkthrough is "this deal's demo". A website concept is
+    # an optional add-on being illustrated, and marking the demo ready because
+    # one was published would tell the pipeline something that is not true.
+    if slot == _demos.DEFAULT_SLOT:
+        opp.demo_url = url
+        if opp.demo_status in (None, "not_requested", "requested", "in_progress"):
+            opp.demo_status = "ready"
+        if not opp.demo_ready_at:
+            opp.demo_ready_at = datetime.utcnow()
 
     db.commit()
     db.refresh(demo)
