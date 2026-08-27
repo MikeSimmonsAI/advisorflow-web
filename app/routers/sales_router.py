@@ -1141,15 +1141,37 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
             setattr(opp, f, data[f])
 
     # ── plain fields ────────────────────────────────────────────────────────
-    for f in ("company_name", "contact_name", "phone", "email", "website",
-              "industry", "timezone", "source", "loss_reason"):
+    # The identity of the deal — who this is and how to reach them. Corrected
+    # from the RECORD card, and recorded on the timeline like every other write
+    # on this page: a phone number that changed, or a company name that was
+    # typed wrong at intake, is a fact about the deal and belongs in its history.
+    _IDENTITY = ("company_name", "contact_name", "phone", "email",
+                 "website", "industry", "timezone")
+    _IDENTITY_LABELS = {
+        "company_name": "Company", "contact_name": "Contact",
+        "phone": "Phone", "email": "Email", "website": "Website",
+        "industry": "Industry", "timezone": "Timezone",
+    }
+    identity_changes = []
+    for f in _IDENTITY + ("source", "loss_reason"):
         if f in data:
             v = data[f]
             if isinstance(v, str):
                 v = v.strip() or None
                 if f == "email" and v:
                     v = v.lower()
+            before = getattr(opp, f)
             setattr(opp, f, v)
+            if f in _IDENTITY and before != v:
+                identity_changes.append((f, before, v))
+
+    if identity_changes:
+        _event(db, opp, user, "record_updated",
+               "Record updated: %s" % ", ".join(
+                   _IDENTITY_LABELS[f] for f, _b, _a in identity_changes),
+               " · ".join("%s: %s → %s" % (_IDENTITY_LABELS[f],
+                                           b or "(blank)", a or "(blank)")
+                          for f, b, a in identity_changes))
 
     if "next_action" in data or "next_action_due_at" in data:
         if "next_action" in data:

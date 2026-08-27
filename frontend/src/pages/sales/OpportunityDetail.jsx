@@ -8,7 +8,7 @@
  * Every write goes to the real API and the timeline reloads from the server —
  * the record on screen is always what the database actually holds.
  */
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
@@ -98,6 +98,134 @@ const DEMO_STATUSES = [
   ['ready', 'Ready'],
   ['delivered', 'Delivered'],
 ]
+
+/* The deal's identity — who this is and how to reach them. Editable in place,
+   because these get typed in a hurry at intake and corrected later: a prospect
+   created from a voicemail has no email until somebody calls back. */
+const RECORD_FIELDS = [
+  ['company_name', 'COMPANY NAME', 'text', 'Acme Facilities LLC'],
+  ['contact_name', 'CONTACT NAME', 'text', 'First Last'],
+  ['phone', 'PHONE', 'tel', '+1 555 555 0100'],
+  ['email', 'EMAIL', 'email', 'name@company.com'],
+  ['website', 'WEBSITE', 'url', 'https://example.com'],
+  ['industry', 'INDUSTRY', 'text', 'Commercial cleaning'],
+  ['timezone', 'TIMEZONE', 'text', 'America/Chicago'],
+]
+
+const COMMON_TIMEZONES = [
+  'America/New_York', 'America/Chicago', 'America/Denver',
+  'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage',
+  'Pacific/Honolulu', 'UTC',
+]
+
+/**
+ * RECORD, read-mode and edit-mode. Read-mode is deliberately unchanged from
+ * what it always was — a record being read is not a form, and an always-live
+ * form invites edits nobody meant to make. Pressing Edit swaps the same card
+ * into inputs; nothing navigates.
+ *
+ * Saves go through the page's own PATCH, so the server is the one that decides
+ * what is valid and it writes the change to this deal's timeline.
+ */
+function RecordIdentity({ opp, editing, saved, onSave, onSaved, onCancel }) {
+  const [form, setForm] = useState({})
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  // Seed once per opening, so Cancel-then-Edit starts from the record again
+  // rather than from whatever was half-typed last time — and so a background
+  // Refresh landing mid-edit does not wipe out what is being typed.
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (!editing) { seeded.current = false; return }
+    if (seeded.current) return
+    seeded.current = true
+    const f = {}
+    RECORD_FIELDS.forEach(([k]) => { f[k] = opp[k] || '' })
+    setForm(f); setErr(null)
+  }, [editing, opp])
+
+  async function save() {
+    if (!(form.company_name || '').trim()) {
+      // The company name titles this record everywhere else in the workspace.
+      setErr('A company name is required — it is how this deal is named in the pipeline.')
+      return
+    }
+    // Send only what actually changed. An empty string clears the field
+    // server-side; an untouched field is not in the body at all.
+    const body = {}
+    RECORD_FIELDS.forEach(([k]) => {
+      const next = (form[k] || '').trim()
+      if (next !== (opp[k] || '')) body[k] = next
+    })
+    if (Object.keys(body).length === 0) { onCancel(); return }
+    setErr(null); setBusy(true)
+    try {
+      await onSave(body)
+      onSaved()
+    } catch (e) {
+      setErr(e.message || 'Could not save these changes. Nothing was changed.')
+    } finally { setBusy(false) }
+  }
+
+  if (!editing) {
+    return (
+      <>
+        <div className="sw-infogrid">
+          <Info label="PHONE" value={opp.phone} />
+          <Info label="EMAIL" value={opp.email} />
+          <Info label="WEBSITE" value={opp.website} />
+          <Info label="TIMEZONE" value={opp.timezone} />
+          <Info label="SALES OWNER" value={opp.owner_name} />
+          <Info label="BRAND" value={opp.brand_sales_org?.name} />
+          <Info label="PACKAGE INTEREST" value={opp.package_interest?.name} />
+          <Info label="SELECTED PACKAGE" value={opp.selected_package?.name} />
+          <Info label="DEAL VALUE" value={opp.deal_value != null ? money(opp.deal_value) : null} />
+        </div>
+        {saved && (
+          <p className="sw-subtle" style={{ margin: '10px 0 0', fontSize: 12 }}>
+            Record updated. The change is on this deal's timeline.
+          </p>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <datalist id="af-tz-list">
+        {COMMON_TIMEZONES.map(tz => <option value={tz} key={tz} />)}
+      </datalist>
+      <div className="sw-grid-even">
+        {RECORD_FIELDS.map(([k, label, type, placeholder]) => (
+          <div className="sw-field" key={k}>
+            <label>{label}</label>
+            <input
+              className="sw-input"
+              type={type}
+              value={form[k] || ''}
+              placeholder={placeholder}
+              list={k === 'timezone' ? 'af-tz-list' : undefined}
+              disabled={busy}
+              onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+            />
+          </div>
+        ))}
+      </div>
+      {err && <div className="sw-err" style={{ marginTop: 12 }}>{err}</div>}
+      <p className="sw-subtle" style={{ margin: '10px 0 0', fontSize: 12 }}>
+        Clearing a field empties it on the record. Every change is written to
+        this deal's timeline with what it was before.
+      </p>
+      <div className="sw-flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+        <button className="sw-btn" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button className="sw-btn sw-primary" onClick={save} disabled={busy}>
+          {busy ? 'Saving…' : 'Save record'}
+        </button>
+      </div>
+    </>
+  )
+}
 
 /** The continuous lifecycle, rendered from real timestamps on the record. */
 function Lifecycle({ opp }) {
@@ -436,6 +564,10 @@ export default function OpportunityDetail() {
   // display it if it wanted to. Failing quietly is right: an opportunity that
   // was never won has nothing to show, and that is not an error worth a banner.
   const [postWon, setPostWon] = useState(null)
+  // RECORD card edit mode. Lives here so the Edit control can sit in the card
+  // header next to Reassign, where both actions on this card are together.
+  const [editingRecord, setEditingRecord] = useState(false)
+  const [recordSaved, setRecordSaved] = useState(false)
   useEffect(() => {
     api.get('/sales/packages').then(setPackages).catch(() => setPackages([]))
     api.get('/sales/team').then(setTeam).catch(() => setTeam([]))
@@ -449,6 +581,15 @@ export default function OpportunityDetail() {
     setSaving(true); setError(null)
     try { setOpp(await api.patch('/sales/opportunities/' + oppId, body)) }
     catch (e) { setError(e.message || 'Save failed.') }
+    finally { setSaving(false) }
+  }
+
+  /* The same write, but it lets the failure through instead of swallowing it
+     into the page banner — the RECORD card shows the server's refusal next to
+     the fields that caused it, where the person can act on it. */
+  async function patchOrThrow(body) {
+    setSaving(true); setError(null)
+    try { setOpp(await api.patch('/sales/opportunities/' + oppId, body)) }
     finally { setSaving(false) }
   }
 
@@ -594,26 +735,31 @@ export default function OpportunityDetail() {
                does not exist for anyone else, and the endpoint refuses them
                regardless. */
             right={
-              <ReassignControl
-                opportunityId={opp.id}
-                canReassign={opp.can_reassign}
-                currentOwnerId={opp.owner_user_id}
-                currentOwnerName={opp.owner_name}
-                onReassigned={load}
-              />
+              <>
+                {!editingRecord && (
+                  <button className="sw-btn" title="Edit company, contact and contact details"
+                          onClick={() => { setRecordSaved(false); setEditingRecord(true) }}>
+                    ✎ Edit
+                  </button>
+                )}
+                <ReassignControl
+                  opportunityId={opp.id}
+                  canReassign={opp.can_reassign}
+                  currentOwnerId={opp.owner_user_id}
+                  currentOwnerName={opp.owner_name}
+                  onReassigned={load}
+                />
+              </>
             }
           >
-            <div className="sw-infogrid">
-              <Info label="PHONE" value={opp.phone} />
-              <Info label="EMAIL" value={opp.email} />
-              <Info label="WEBSITE" value={opp.website} />
-              <Info label="TIMEZONE" value={opp.timezone} />
-              <Info label="SALES OWNER" value={opp.owner_name} />
-              <Info label="BRAND" value={opp.brand_sales_org?.name} />
-              <Info label="PACKAGE INTEREST" value={opp.package_interest?.name} />
-              <Info label="SELECTED PACKAGE" value={opp.selected_package?.name} />
-              <Info label="DEAL VALUE" value={opp.deal_value != null ? money(opp.deal_value) : null} />
-            </div>
+            <RecordIdentity
+              opp={opp}
+              editing={editingRecord}
+              saved={recordSaved}
+              onSave={patchOrThrow}
+              onSaved={() => { setEditingRecord(false); setRecordSaved(true) }}
+              onCancel={() => setEditingRecord(false)}
+            />
 
             <div className="sw-grid-even sw-mt">
               <div className="sw-field">
