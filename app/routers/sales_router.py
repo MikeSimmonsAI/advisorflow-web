@@ -43,6 +43,7 @@ from app.models.scheduling_models import (
     SalesAppointment, AppointmentParticipant, MeetingType,
     APPT_CANCELLED, CONF_PENDING, CONF_SENT,
 )
+from app.models.meeting_models import AppointmentMeeting
 from app.services.sales_access import (
     require_sales_member, require_sales_manager,
     assert_can_view_opportunity, assert_can_edit_opportunity, assert_can_reassign,
@@ -120,6 +121,21 @@ def _user_name(db: Session, user_id: Optional[str]) -> Optional[str]:
         return None
     u = db.query(User).filter(User.id == user_id).first()
     return u.full_name if u else None
+
+
+def _name_map(db: Session, user_ids) -> dict:
+    """user_id -> full_name for a whole list, in one query.
+
+    The per-id helper above is correct for a single lookup and ruinous for a
+    list: a fifteen-row activity feed resolved fifteen actors one at a time.
+    Returns the same values that helper would, so a caller can swap to it
+    without changing a single byte of its response.
+    """
+    ids = sorted({i for i in user_ids if i})
+    if not ids:
+        return {}
+    return {u.id: u.full_name
+            for u in db.query(User).filter(User.id.in_(ids)).all()}
 
 
 def _attention(opp: Opportunity) -> Optional[str]:
@@ -231,19 +247,91 @@ def _visible_sales_appointments(db: Session, user: User, org):
                     | SalesAppointment.opportunity_id.in_(own_opp_ids or [""]))
 
 
-def _appt_brief(db: Session, a: SalesAppointment) -> dict:
+class ApptPrefetch:
+    """Everything `_appt_brief` needs for a SET of appointments, in 3 queries.
+
+    WHY THIS EXISTS. My Day renders seven overlapping lists — today's, the next
+    one, the unconfirmed, discoveries, demos, upcoming, closing — off one
+    appointment set. `_appt_brief` costs three queries per call, so the same
+    meeting paid for its participants, its meeting type and its video row up to
+    four times, and `kind()` re-read the meeting type three more times on top.
+
+    This changes NOTHING about what gets returned. It changes how many times the
+    database is asked for rows the request already has. The brief for a given
+    appointment is also memoised, so a meeting that appears in four lists is
+    built once and the four lists share it.
+    """
+
+    __slots__ = ("participants", "types", "meetings", "_briefs")
+
+    def __init__(self, db: Session, appts):
+        self.participants = {}
+        self.types = {}
+        self.meetings = {}
+        self._briefs = {}
+        # NO ORDER BY on the participant read below, deliberately. The
+        # per-appointment query this replaces has none either, so adding one
+        # here - even a sensible one - reorders every participants list in the
+        # response. That is a behaviour change, and this refactor is not the
+        # place to make one. (Participant order being unspecified at all is a
+        # real latent issue in both versions; it predates this change and is
+        # noted in the report rather than smuggled in with it.)
+        ids = sorted({a.id for a in appts if a is not None})
+        type_ids = sorted({a.meeting_type_id for a in appts
+                           if a is not None and a.meeting_type_id})
+        if ids:
+            for p, u in (db.query(AppointmentParticipant, User)
+                         .join(User, User.id == AppointmentParticipant.user_id)
+                         .filter(AppointmentParticipant.appointment_id.in_(ids))
+                         .all()):
+                self.participants.setdefault(p.appointment_id, []).append((p, u))
+            for m in (db.query(AppointmentMeeting)
+                      .filter(AppointmentMeeting.appointment_id.in_(ids)).all()):
+                # One row per appointment (unique constraint), so first wins is
+                # not a choice being made here — there is only ever one.
+                self.meetings.setdefault(m.appointment_id, m)
+        if type_ids:
+            for mt in (db.query(MeetingType)
+                       .filter(MeetingType.id.in_(type_ids)).all()):
+                self.types[mt.id] = mt
+
+    def meeting_type(self, a: SalesAppointment):
+        return self.types.get(a.meeting_type_id) if a.meeting_type_id else None
+
+    def kind(self, a: SalesAppointment) -> str:
+        """The meeting type KEY, or "" — exactly what my_day's local kind() did,
+        without a query per appointment per list."""
+        mt = self.meeting_type(a)
+        return (mt.key or "") if mt else ""
+
+
+def _appt_brief(db: Session, a: SalesAppointment,
+                pre: Optional["ApptPrefetch"] = None) -> dict:
     """The compact appointment shape My Day and the opportunity record render.
 
     Deliberately lighter than the scheduling router's full serializer — a My Day
     list of twelve meetings should not fan out into dozens of participant
     queries for detail nobody reads on that screen.
+
+    `pre` is an optional ApptPrefetch covering this appointment. With it the
+    body below runs on rows already in memory and issues no queries at all;
+    without it the original three-query path is untouched, which is what keeps
+    every other caller working unchanged.
     """
-    parts = (db.query(AppointmentParticipant, User)
-             .join(User, User.id == AppointmentParticipant.user_id)
-             .filter(AppointmentParticipant.appointment_id == a.id).all())
-    mt = (db.query(MeetingType).filter(MeetingType.id == a.meeting_type_id).first()
-          if a.meeting_type_id else None)
-    return {
+    if pre is not None and a.id in pre._briefs:
+        return pre._briefs[a.id]
+    if pre is not None:
+        parts = pre.participants.get(a.id, [])
+        mt = pre.meeting_type(a)
+        video_row = pre.meetings.get(a.id)
+    else:
+        parts = (db.query(AppointmentParticipant, User)
+                 .join(User, User.id == AppointmentParticipant.user_id)
+                 .filter(AppointmentParticipant.appointment_id == a.id).all())
+        mt = (db.query(MeetingType).filter(MeetingType.id == a.meeting_type_id).first()
+              if a.meeting_type_id else None)
+        video_row = _apmeet.get_meeting_row(db, a.id)
+    out = {
         "id": a.id,
         "title": a.title,
         "starts_at": a.starts_at,
@@ -261,10 +349,13 @@ def _appt_brief(db: Session, a: SalesAppointment) -> dict:
         "meeting_url": a.meeting_url,
         # Checkpoint 4 — what powers JOIN MEETING on My Day. Attendee link only:
         # `meeting_out` has no field for the host url, so this cannot leak one.
-        "video": _apmeet.meeting_out(_apmeet.get_meeting_row(db, a.id)),
+        "video": _apmeet.meeting_out(video_row),
         "participants": [{"user_id": u.id, "full_name": u.full_name,
                           "is_required": bool(p.is_required)} for p, u in parts],
     }
+    if pre is not None:
+        pre._briefs[a.id] = out
+    return out
 
 
 def _event(db: Session, opp: Opportunity, actor: User, event_type: str,
@@ -479,9 +570,13 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
                                   Opportunity.won_at >= month_start).all())
     won_value = sum(float(o.deal_value or 0) for o in won_this_month)
 
+    # `base` was already executed above for the open deals. Re-running it here
+    # loaded every scoped Opportunity a SECOND time, in full, to read one column
+    # off each. Same rows, same filter, id column only.
+    scoped_ids = [r[0] for r in base.with_entities(Opportunity.id).all()]
     recent = (db.query(OpportunityEvent)
               .join(Opportunity, Opportunity.id == OpportunityEvent.opportunity_id)
-              .filter(Opportunity.id.in_([o.id for o in base.all()] or [""]))
+              .filter(Opportunity.id.in_(scoped_ids or [""]))
               .order_by(OpportunityEvent.occurred_at.desc())
               .limit(15).all())
 
@@ -507,15 +602,22 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     unconfirmed = [a for a in upcoming
                    if a.confirmation_status in (CONF_PENDING, CONF_SENT)]
 
-    def kind(a):
-        mt = (db.query(MeetingType).filter(MeetingType.id == a.meeting_type_id).first()
-              if a.meeting_type_id else None)
-        return (mt.key or "") if mt else ""
+    # EVERY appointment this response can mention, resolved once. todays and
+    # upcoming overlap heavily and feed seven output lists between them; before
+    # this, each list re-read the same participants, meeting types and video
+    # rows from scratch.
+    pre = ApptPrefetch(db, list(todays) + list(upcoming))
 
-    discoveries_today = [a for a in todays if "discovery" in kind(a)]
-    demos_today = [a for a in todays if "demo" in kind(a)]
+    discoveries_today = [a for a in todays if "discovery" in pre.kind(a)]
+    demos_today = [a for a in todays if "demo" in pre.kind(a)]
+    closing_today = [a for a in todays if "closing" in pre.kind(a)]
 
     appt_map = next_appt_map(db, open_opps)
+    # `_card` already accepts a names map precisely so a board does not fire one
+    # query per tile to print an owner. My Day was not passing one, so up to 36
+    # cards resolved their owner individually.
+    names = _name_map(db, [o.owner_user_id for o in open_opps])
+    actor_names = _name_map(db, [e.actor_user_id for e in recent])
 
     return {
         "brand_sales_org": {"id": org.id, "name": org.name,
@@ -532,24 +634,24 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
             "discoveries_today": len(discoveries_today),
             "demos_today": len(demos_today),
         },
-        "follow_ups_due": [_card(o, db, appt_map) for o in follow_ups[:12]],
-        "deals_needing_action": [_card(o, db, appt_map) for o in needs_action[:12]],
-        "demos_to_build": [_card(o, db, appt_map) for o in demos_to_build[:12]],
+        "follow_ups_due": [_card(o, db, appt_map, names) for o in follow_ups[:12]],
+        "deals_needing_action": [_card(o, db, appt_map, names) for o in needs_action[:12]],
+        "demos_to_build": [_card(o, db, appt_map, names) for o in demos_to_build[:12]],
         "stage_counts": stage_counts,
         "recent_activity": [{
             "id": e.id, "opportunity_id": e.opportunity_id,
             "event_type": e.event_type, "summary": e.summary,
             "detail": e.detail, "occurred_at": e.occurred_at,
-            "actor_name": _user_name(db, e.actor_user_id),
+            "actor_name": actor_names.get(e.actor_user_id),
         } for e in recent],
         # REAL appointment data. An empty list here now means "no meetings",
         # which it did not mean in Checkpoint 1.
-        "todays_appointments": [_appt_brief(db, a) for a in todays],
-        "next_appointment": _appt_brief(db, upcoming[0]) if upcoming else None,
-        "needs_confirmation": [_appt_brief(db, a) for a in unconfirmed[:12]],
-        "discoveries_today": [_appt_brief(db, a) for a in discoveries_today],
-        "demos_today": [_appt_brief(db, a) for a in demos_today],
-        "upcoming_appointments": [_appt_brief(db, a) for a in upcoming[:12]],
+        "todays_appointments": [_appt_brief(db, a, pre) for a in todays],
+        "next_appointment": _appt_brief(db, upcoming[0], pre) if upcoming else None,
+        "needs_confirmation": [_appt_brief(db, a, pre) for a in unconfirmed[:12]],
+        "discoveries_today": [_appt_brief(db, a, pre) for a in discoveries_today],
+        "demos_today": [_appt_brief(db, a, pre) for a in demos_today],
+        "upcoming_appointments": [_appt_brief(db, a, pre) for a in upcoming[:12]],
         # ── Proposal work (Checkpoint 4) ────────────────────────────────────
         # Six queues, each with an action and a reason. Not a proposal report:
         # a rep opening My Day is deciding what to touch next, and a number
@@ -557,8 +659,7 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
         "proposals": _pwq.proposal_queues(db, open_opps, now=now),
         # A closing call today is the highest-stakes thing on the calendar, so
         # it is surfaced separately rather than buried in the day's list.
-        "closing_today": [_appt_brief(db, a) for a in todays
-                          if "closing" in kind(a)],
+        "closing_today": [_appt_brief(db, a, pre) for a in closing_today],
         # Still genuinely absent — see the constant.
         "calendar_sync": CALENDAR_SYNC_NOT_BUILT,
     }

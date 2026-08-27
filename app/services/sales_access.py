@@ -30,11 +30,23 @@ def is_god(user: User) -> bool:
     return getattr(user, "role", None) == "god_admin"
 
 
+# Memoised on the request's own User instance. get_current_user builds a fresh
+# one per request, so the cache lives exactly as long as the request does - it
+# cannot leak between users or outlast a membership change made by another
+# request. Before this, sales_org_ids / is_sales_manager / require_sales_member
+# each re-read the same handful of rows, so a single My Day load asked four
+# times for an answer that cannot change while it is being assembled.
+_MEMBERSHIP_MEMO = "_sales_memberships_memo"
+
+
 def sales_memberships(user: User, db: Session) -> List[Membership]:
     """Active brand-sales memberships for this user. Empty for non-sales users."""
     if not user:
         return []
-    return (
+    cached = getattr(user, _MEMBERSHIP_MEMO, None)
+    if cached is not None:
+        return cached
+    rows = (
         db.query(Membership)
         .filter(
             Membership.user_id == user.id,
@@ -43,6 +55,25 @@ def sales_memberships(user: User, db: Session) -> List[Membership]:
         )
         .all()
     )
+    try:
+        setattr(user, _MEMBERSHIP_MEMO, rows)
+    except Exception:
+        # An instance that will not take an attribute must not break authorisation.
+        pass
+    return rows
+
+
+def invalidate_sales_memberships(user: User) -> None:
+    """Drop the memo after writing a Membership for this user in this request.
+
+    Only matters when the actor changes their OWN membership mid-request, which
+    is rare - but a cache with no way to clear it is a bug waiting for the one
+    caller that needs it.
+    """
+    try:
+        setattr(user, _MEMBERSHIP_MEMO, None)
+    except Exception:
+        pass
 
 
 def sales_org_ids(user: User, db: Session) -> List[str]:

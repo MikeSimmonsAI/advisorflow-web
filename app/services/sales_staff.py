@@ -49,6 +49,7 @@ from app.models.sales_models import (
     BRAND_SALES_ROLES, ROLE_SALES_MANAGER, ROLE_SALES_REP,
 )
 from app.services.auth_service import hash_password
+from app.services import sales_access as _sa
 from app.routers.audit_log_router import log_action
 
 # A deliberately loose shape check. The authority on whether an address works is
@@ -275,6 +276,10 @@ def grant_membership(db: Session, user: User, bso: BrandSalesOrg, role: str,
     )
     db.add(m)
     db.flush()
+    # The actor's own membership memo is request-scoped; clear it in case an
+    # actor ever grants a seat to themselves inside one request.
+    _sa.invalidate_sales_memberships(actor)
+    _sa.invalidate_sales_memberships(user)
     log_action(
         db, None, actor.id,
         action="sales_membership_granted",

@@ -24,12 +24,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import statistics
 import sys
 import tempfile
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dtime
 
 TMP = tempfile.mkdtemp(prefix="perfbench_")
 os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(TMP, "t.db").replace("\\", "/")
@@ -99,17 +100,76 @@ def digest(obj):
     change in ORDER of equal content does not read as a behaviour change, but a
     change in CONTENT does.
     """
-    def norm(o):
-        if isinstance(o, dict):
-            return {k: norm(o[k]) for k in sorted(o)}
-        if isinstance(o, list):
-            items = [norm(x) for x in o]
-            if items and all(isinstance(x, dict) and "id" in x for x in items):
-                items.sort(key=lambda x: str(x.get("id")))
-            return items
-        return o
     return hashlib.sha256(
-        json.dumps(norm(obj), sort_keys=True, default=str).encode()).hexdigest()[:16]
+        json.dumps(_norm(obj), sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+# ── the only two things the digest is allowed to be blind to ────────────────
+# Both are proven volatile under IDENTICAL code, and neither carries behaviour:
+#
+#   generated_at  a wall-clock stamp the route puts on its own response.
+#   uuid4 hex     ids the APP seeds at import time (the three real brand
+#                 Platform rows). The fixture's own ids are readable strings
+#                 like "opp-007", so this mask cannot hide a fixture row, and a
+#                 changed RELATIONSHIP still shows because the surrounding
+#                 fields are untouched.
+#
+# Nothing else is excluded. A field that differs for any other reason must fail
+# the comparison - that is the whole point of having one.
+_VOLATILE_KEYS = ("generated_at",)
+_UUID_HEX = re.compile(r"^[0-9a-f]{32}$")
+_SORT_KEYS = ("slug", "key", "name", "id")
+
+
+def _stable_sort_key(d):
+    for k in _SORT_KEYS:
+        v = d.get(k)
+        if isinstance(v, str) and not _UUID_HEX.match(v):
+            return (k, v)
+    return ("id", str(d.get("id")))
+
+
+def _norm(o):
+    if isinstance(o, dict):
+        return {k: _norm(o[k]) for k in sorted(o) if k not in _VOLATILE_KEYS}
+    if isinstance(o, list):
+        items = [_norm(x) for x in o]
+        if items and all(isinstance(x, dict) for x in items) \
+                and any("id" in x for x in items):
+            items.sort(key=_stable_sort_key)
+        return items
+    if isinstance(o, str) and _UUID_HEX.match(o):
+        return "<app-generated-uuid>"
+    return o
+
+
+# ── why row stamps get frozen ───────────────────────────────────────────────
+# Most models carry `created_at = Column(DateTime, default=datetime.utcnow)`.
+# That default fires at INSERT time, inside build(), so every fixture row got a
+# stamp from the wall clock even though the fixture itself uses a fixed anchor.
+# Those stamps are returned by several routes, so two runs of IDENTICAL code
+# produced different digests - which made "OUTPUT CHANGED" fire constantly and
+# meaningless. Pinning them after the build makes the response a function of the
+# code alone, which is the only thing a before/after is allowed to be measuring.
+_STAMP_COLUMNS = ("created_at", "updated_at")
+
+
+def _freeze_row_stamps():
+    from sqlalchemy import update as _sa_update
+    anchor = _anchor()
+    db = SessionLocal()
+    try:
+        for table in Base.metadata.sorted_tables:
+            cols = [c for c in table.columns if c.name in _STAMP_COLUMNS]
+            if not cols:
+                continue
+            try:
+                db.execute(_sa_update(table).values({c.name: anchor for c in cols}))
+            except Exception:
+                db.rollback()
+        db.commit()
+    finally:
+        db.close()
 
 
 def top_repeats(sql, k=5):
@@ -121,11 +181,29 @@ def top_repeats(sql, k=5):
 
 # ── fixture ─────────────────────────────────────────────────────────────────
 
+def _anchor():
+    """A FIXED instant - noon UTC today - used as the fixture's 'now'.
+
+    Not datetime.utcnow(). Every created_at, occurred_at and appointment time
+    derives from this, and several routes return those values, so a wall-clock
+    anchor made the response digest change between two runs that were otherwise
+    identical. That turns the equivalence check into noise: "OUTPUT CHANGED"
+    stops meaning anything the moment it fires when nothing changed.
+
+    Anchored to TODAY rather than a hard-coded date because my_day resolves its
+    own local day from the real clock - a fixed calendar date would put every
+    appointment in the past and the route would go back to measuring an empty
+    calendar. Two runs on the same day are byte-comparable, which is the window
+    a before/after actually needs.
+    """
+    return datetime.combine(datetime.utcnow().date(), dtime(12, 0))
+
+
 def build(scale):
     """scale = implementations/customers; advisors and appointments scale with it."""
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
-    now = datetime.utcnow()
+    now = _anchor()
 
     db.add(Platform(id="plt", name="EvoSys Pro", slug="evo-perf"))
     db.add(Platform(id="plt2", name="BookaBoost", slug="bab-perf"))
@@ -262,7 +340,13 @@ def _appointments(db, scale, now):
                            requires_video=video, sort_order=n))
     db.flush()
 
-    today_local = _av.utc_to_local(now, tz).date()
+    # THE LOCAL DAY MUST COME FROM THE REAL CLOCK, not from the fixed anchor.
+    # my_day resolves 'today' with datetime.utcnow(); at 03:00 UTC that is still
+    # YESTERDAY in Chicago. Anchoring this to noon UTC put every 'today'
+    # appointment on the route's tomorrow, todays_appointments came back empty,
+    # and the benchmark went straight back to measuring nothing. Only the
+    # created_at-style stamps use the anchor - those are what needed pinning.
+    today_local = _av.utc_to_local(datetime.utcnow(), tz).date()
     seq = {"n": 0}
 
     def appt(start, mins, mt_key, owner, opp_id, participants,
@@ -361,8 +445,9 @@ ROUTES = [
 ]
 
 
-def run(scale, repeats):
+def run(scale, repeats, dump=None):
     build(scale)
+    _freeze_row_stamps()
     out = {"scale": scale, "routes": {}}
     with TestClient(app) as c:
         who = {"god": token(c, "god@perf.test"), "mgr": token(c, "mgr@perf.test"),
@@ -381,6 +466,15 @@ def run(scale, repeats):
                     dg = digest(r.json())
                 except Exception:
                     dg = "non-json:%s" % r.status_code
+            if dump is not None:
+                fn = path.strip("/").replace("/", "_") + ".json"
+                try:
+                    io_body = json.dumps(_norm(r.json()), sort_keys=True,
+                                         indent=1, default=str)
+                except Exception:
+                    io_body = "non-json:%s" % r.status_code
+                with open(os.path.join(dump, fn), "w", encoding="utf-8") as fh:
+                    fh.write(io_body)
             out["routes"][path] = {
                 "status": r.status_code, "queries": qs,
                 "ms_median": round(statistics.median(times), 1),
@@ -397,9 +491,13 @@ def main():
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--save")
     ap.add_argument("--compare")
+    ap.add_argument("--dump", help="write each route's normalised body here, "
+                                   "so two runs can be diffed field by field")
     a = ap.parse_args()
 
-    res = run(a.scale, a.repeats)
+    if a.dump:
+        os.makedirs(a.dump, exist_ok=True)
+    res = run(a.scale, a.repeats, dump=a.dump)
 
     print("=" * 92)
     print("PERF BENCH  scale=%d customers  (%d advisors, %d impls, %d leads)"

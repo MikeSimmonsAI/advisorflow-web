@@ -71,3 +71,9 @@ cp6check.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# perf benchmark outputs (machine-specific, not source)
+.perfdump/
+perf_baseline_*.json
+perf_after_*.json
+app/routers/sales_router.optimized.bak

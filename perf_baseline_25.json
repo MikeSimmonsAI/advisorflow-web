@@ -3,39 +3,39 @@
  "routes": {
   "/sales/my-day": {
    "status": 200,
-   "queries": 28,
-   "ms_median": 33.7,
-   "ms_min": 33.1,
-   "digest": "b48425a415e4b1af",
+   "queries": 157,
+   "ms_median": 123.4,
+   "ms_min": 123.4,
+   "digest": "157cc97f0b851bf2",
    "top_repeated_sql": [
     {
-     "count": 13,
+     "count": 50,
+     "sql": "SELECT sales_meeting_types.id AS sales_meeting_types_id, sales_meeting_types.brand_sales_org_id AS sales_meeti"
+    },
+    {
+     "count": 32,
+     "sql": "SELECT sales_appointment_participants.id AS sales_appointment_participants_id, sales_appointment_participants."
+    },
+    {
+     "count": 32,
+     "sql": "SELECT appointment_meetings.id AS appointment_meetings_id, appointment_meetings.appointment_id AS appointment_"
+    },
+    {
+     "count": 28,
      "sql": "SELECT users.id AS users_id, users.organization_id AS users_organization_id, users.email AS users_email, users"
     },
     {
      "count": 4,
      "sql": "SELECT memberships.id AS memberships_id, memberships.user_id AS memberships_user_id, memberships.scope_type AS"
-    },
-    {
-     "count": 3,
-     "sql": "SELECT opportunities.id AS opportunities_id, opportunities.brand_sales_org_id AS opportunities_brand_sales_org"
-    },
-    {
-     "count": 3,
-     "sql": "SELECT sales_appointments.id AS sales_appointments_id, sales_appointments.brand_sales_org_id AS sales_appointm"
-    },
-    {
-     "count": 1,
-     "sql": "SELECT brand_sales_orgs.id AS brand_sales_orgs_id, brand_sales_orgs.platform_id AS brand_sales_orgs_platform_i"
     }
    ]
   },
   "/sales/opportunities": {
    "status": 200,
    "queries": 108,
-   "ms_median": 109.5,
-   "ms_min": 106.6,
-   "digest": "3290da3726119e65",
+   "ms_median": 84.7,
+   "ms_min": 84.7,
+   "digest": "a276a34a039af809",
    "top_repeated_sql": [
     {
      "count": 101,
@@ -62,8 +62,8 @@
   "/sales/implementations": {
    "status": 200,
    "queries": 133,
-   "ms_median": 121.7,
-   "ms_min": 121.6,
+   "ms_median": 93.3,
+   "ms_min": 93.3,
    "digest": "005896b7cac372e2",
    "top_repeated_sql": [
     {
@@ -91,9 +91,9 @@
   "/god/ops/implementations": {
    "status": 200,
    "queries": 227,
-   "ms_median": 202.7,
-   "ms_min": 200.1,
-   "digest": "390779952ce6f947",
+   "ms_median": 132.8,
+   "ms_min": 132.8,
+   "digest": "d1f46a76e5ca3934",
    "top_repeated_sql": [
     {
      "count": 51,
@@ -120,9 +120,9 @@
   "/god/ops/sales-operations": {
    "status": 200,
    "queries": 370,
-   "ms_median": 352.3,
-   "ms_min": 316.6,
-   "digest": "26262718d9a03def",
+   "ms_median": 212.8,
+   "ms_min": 212.8,
+   "digest": "dda907c5f29f907c",
    "top_repeated_sql": [
     {
      "count": 100,
@@ -149,9 +149,9 @@
   "/god/ops/customer-organizations": {
    "status": 200,
    "queries": 127,
-   "ms_median": 97.8,
-   "ms_min": 97.1,
-   "digest": "9e17794f9a8cf42f",
+   "ms_median": 69.9,
+   "ms_min": 69.9,
+   "digest": "73e95455023d4ba4",
    "top_repeated_sql": [
     {
      "count": 25,
@@ -178,8 +178,8 @@
   "/god/ops/won-queue": {
    "status": 200,
    "queries": 3,
-   "ms_median": 8.5,
-   "ms_min": 6.9,
+   "ms_median": 7.1,
+   "ms_min": 7.1,
    "digest": "af9bad7cce504abd",
    "top_repeated_sql": [
     {
@@ -199,8 +199,8 @@
   "/admin/dashboard": {
    "status": 200,
    "queries": 305,
-   "ms_median": 243.7,
-   "ms_min": 240.4,
+   "ms_median": 348.9,
+   "ms_min": 348.9,
    "digest": "1306bb4a24a86d7d",
    "top_repeated_sql": [
     {
@@ -228,8 +228,8 @@
   "/admin/dashboard/metrics": {
    "status": 200,
    "queries": 604,
-   "ms_median": 601.3,
-   "ms_min": 515.9,
+   "ms_median": 385.6,
+   "ms_min": 385.6,
    "digest": "450e830972399cea",
    "top_repeated_sql": [
     {
@@ -257,9 +257,9 @@
   "/god/customers": {
    "status": 200,
    "queries": 77,
-   "ms_median": 70.8,
-   "ms_min": 67.4,
-   "digest": "7fbfb3e6c95f1470",
+   "ms_median": 56.0,
+   "ms_min": 56.0,
+   "digest": "56398411e9600a9e",
    "top_repeated_sql": [
     {
      "count": 26,
@@ -282,9 +282,9 @@
   "/god/platform/overview": {
    "status": 200,
    "queries": 4,
-   "ms_median": 9.7,
-   "ms_min": 8.5,
-   "digest": "596022dd438a4291",
+   "ms_median": 7.3,
+   "ms_min": 7.3,
+   "digest": "dfb17b8c0cb85f32",
    "top_repeated_sql": [
     {
      "count": 1,
