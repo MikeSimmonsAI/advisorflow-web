@@ -443,6 +443,33 @@ def main():
         check("...and its total agrees", again["final_amount"] == 1750.0,
               again["final_amount"])
 
+        section("A PUBLISHED-BUT-UNSENT QUOTE STILL FOLLOWS THE DEAL")
+        pub = c.post("/sales/proposals/" + pid + "/publish", headers=mgr)
+        check("it can be published without sending", pub.status_code == 200,
+              (pub.status_code, pub.text[:120]))
+        check("...and is Ready, not Sent",
+              pub.json()["status"] == "ready" and pub.json()["sent_at"] is None,
+              (pub.json()["status"], pub.json()["sent_at"]))
+        c.patch("/sales/opportunities/opp-1",
+                json={"implementation_fee": None}, headers=rep)
+        back = c.patch("/sales/proposals/" + pid,
+                       json={"billing_option": pp.BILLING_TERM_AGREEMENT},
+                       headers=mgr).json()
+        check("clearing the override falls back to the CATALOGUE's $1,497",
+              back["base_amount"] == 1497.0, back["base_amount"])
+        check("...and the commercials agree",
+              back["commercials"]["implementation_fee"] == 1497.0
+              and back["commercials"]["implementation_fee_source"]
+              == "package_legacy_price",
+              [back["commercials"]["implementation_fee"],
+               back["commercials"]["implementation_fee_source"]])
+        check("total contract value is now 6500 + 1497 = 7997",
+              back["commercials"]["total_contract_value"] == 7997.0,
+              back["commercials"]["total_contract_value"])
+        check("NO $1,500 survives anywhere in the quote",
+              "1500" not in json.dumps(back),
+              [k for k, v in back.items() if "1500" in json.dumps(v)])
+
         section("BUT A MANAGER'S AGREED NUMBER IS NEVER OVERWRITTEN")
         adj = c.patch("/sales/proposals/" + pid,
                       json={"adjustment": -250,
@@ -454,8 +481,8 @@ def main():
         held = c.patch("/sales/proposals/" + pid,
                        json={"billing_option": pp.BILLING_TERM_AGREEMENT},
                        headers=mgr).json()
-        check("the adjusted quote HOLDS at 1750 - 250, not re-derived to 1500",
-              held["base_amount"] == 1750.0 and held["final_amount"] == 1500.0,
+        check("the adjusted quote HOLDS at 1497 - 250, not re-derived to 1500",
+              held["base_amount"] == 1497.0 and held["final_amount"] == 1247.0,
               (held["base_amount"], held["final_amount"]))
 
         section("A SOLD DEAL CARRIES ITS AGREEMENT INTO PROVISIONING")

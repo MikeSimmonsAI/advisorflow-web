@@ -477,10 +477,20 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
     # against a $1,497 catalogue - and a draft that kept the old figure would
     # show one number in its total and another in its pricing block.
     #
-    # Only ever for a draft with NO manual adjustment. A figure a manager
+    # Only while the customer has NOT seen it, and only with NO manual
+    # adjustment.
+    #
+    # The status test is PROPOSAL_EDITABLE_STATUSES, not PROP_DRAFT. A proposal
+    # sitting at "ready to send" is in exactly the position a draft is - written,
+    # not delivered - and the narrower test left those stuck on a stale fee with
+    # no way to correct it short of a new version. Once it is SENT or VIEWED this
+    # stops: a document a customer has read does not move underneath them.
+    #
+    # The adjustment test is the one that matters more. A figure a manager
     # deliberately agreed is never silently re-derived; that is the difference
     # between keeping a quote current and overwriting somebody's decision.
-    if prop.package_id and not _dec(prop.adjustment) and prop.sales_status == PROP_DRAFT:
+    if (prop.package_id and not _dec(prop.adjustment)
+            and prop.sales_status in PROPOSAL_EDITABLE_STATUSES):
         _pkg = db.query(BrandPackage).filter(BrandPackage.id == prop.package_id).first()
         _o = (db.query(Opportunity)
                 .filter(Opportunity.id == prop.opportunity_id).first()
