@@ -1,387 +1,587 @@
-import { useEffect, useState } from 'react'
+/**
+ * CUSTOMER WORKSPACE — OVERVIEW.
+ *
+ * Visual target: the approved customer app redesign (Aug 27 2026). This is not
+ * a prettier dashboard; it is meant to answer one question on arrival —
+ * WHAT NEEDS TO HAPPEN NEXT — and to be one click from doing it.
+ *
+ * ── Sources. Every number on this page names one. ──────────────────────────
+ *   GET /leads/?page=1&page_size=1            total lead count (envelope.total)
+ *   GET /leads/?status=dnc&page_size=1        suppression count
+ *   GET /leads/status-funnel                  new · sent · replied · hot · booked
+ *   GET /leads/daily-briefing                 callbacks, imports, bookings
+ *   GET /sms/replies?needs_attention=true     the hot reply queue itself
+ *   GET /leads/?page=1&page_size=40           the "needs action" table
+ *   GET /activity/sent?limit=8&days=7         recent outbound activity
+ *   GET /outcomes/summary                     recorded outcomes / sales
+ *   GET /pipeline/forecast                    AI alerts, folded into the queue
+ *   GET /admin/dashboard/metrics              team performance  (admins only)
+ *
+ * ── Two rules ─────────────────────────────────────────────────────────────
+ * 1. NO METRIC WITHOUT A SOURCE. The approved mockup shows "avg first touch"
+ *    and a "no contact" pipeline stage. Neither exists in this schema, so
+ *    neither is here. A number invented to fill a tile is worse than a gap.
+ * 2. EVERY TILE GOES SOMEWHERE. A KPI that cannot be drilled into is a
+ *    decorative number block. Each one below carries a route, and the Leads
+ *    page reads those filters out of the URL.
+ *
+ * DNC is fetched as its own count rather than read off the funnel: the funnel
+ * endpoint returns five stages and `dnc` is not one of them, so the previous
+ * version of this page read funnelCount('dnc') and displayed 0 forever.
+ */
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser, getBranding } from '../api/client'
 import './Overview.css'
 
 // ── Industry-aware labels ─────────────────────────────────────────────────────
 const INDUSTRY_LABELS = {
-  funeral: {
-    appointments: 'Arrangements',
-    bookingRate: 'Arrangement rate',
-    bookedSub: 'Booked arrangements',
-    projectedBookings: 'Projected arrangements',
-    confirmLabel: 'arrangements confirmed',
-    weeklyLabel: 'arrangements this week',
-    recordedVisits: 'Recorded visits',
-  },
-  fiber: {
-    appointments: 'Installs scheduled',
-    bookingRate: 'Install rate',
-    bookedSub: 'Scheduled installs',
-    projectedBookings: 'Projected installs',
-    confirmLabel: 'installs confirmed',
-    weeklyLabel: 'installs this week',
-    recordedVisits: 'Completed installs',
-  },
-  solar: {
-    appointments: 'Assessments',
-    bookingRate: 'Assessment rate',
-    bookedSub: 'Scheduled assessments',
-    projectedBookings: 'Projected assessments',
-    confirmLabel: 'assessments confirmed',
-    weeklyLabel: 'assessments this week',
-    recordedVisits: 'Completed assessments',
-  },
-  roofing: {
-    appointments: 'Inspections',
-    bookingRate: 'Inspection rate',
-    bookedSub: 'Scheduled inspections',
-    projectedBookings: 'Projected inspections',
-    confirmLabel: 'inspections confirmed',
-    weeklyLabel: 'inspections this week',
-    recordedVisits: 'Completed inspections',
-  },
-  insurance: {
-    appointments: 'Consultations',
-    bookingRate: 'Consultation rate',
-    bookedSub: 'Booked consultations',
-    projectedBookings: 'Projected consultations',
-    confirmLabel: 'consultations confirmed',
-    weeklyLabel: 'consultations this week',
-    recordedVisits: 'Completed consultations',
-  },
-  real_estate: {
-    appointments: 'Showings',
-    bookingRate: 'Showing rate',
-    bookedSub: 'Scheduled showings',
-    projectedBookings: 'Projected showings',
-    confirmLabel: 'showings confirmed',
-    weeklyLabel: 'showings this week',
-    recordedVisits: 'Completed showings',
-  },
-  home_services: {
-    appointments: 'Appointments',
-    bookingRate: 'Booking rate',
-    bookedSub: 'Booked appointments',
-    projectedBookings: 'Projected bookings',
-    confirmLabel: 'appointments confirmed',
-    weeklyLabel: 'bookings this week',
-    recordedVisits: 'Completed appointments',
-  },
-  sales: {
-    appointments: 'Demos',
-    bookingRate: 'Demo rate',
-    bookedSub: 'Scheduled demos',
-    projectedBookings: 'Projected demos',
-    confirmLabel: 'demos confirmed',
-    weeklyLabel: 'demos this week',
-    recordedVisits: 'Completed demos',
-  },
+  funeral:      { appointments: 'Arrangements', bookingRate: 'Arrangement rate', bookedSub: 'Booked arrangements', projectedBookings: 'Projected arrangements', confirmLabel: 'arrangements confirmed', weeklyLabel: 'arrangements this week', recordedVisits: 'Recorded visits' },
+  fiber:        { appointments: 'Installs',     bookingRate: 'Install rate',     bookedSub: 'Scheduled installs',  projectedBookings: 'Projected installs',     confirmLabel: 'installs confirmed',     weeklyLabel: 'installs this week',     recordedVisits: 'Completed installs' },
+  solar:        { appointments: 'Assessments',  bookingRate: 'Assessment rate',  bookedSub: 'Scheduled assessments', projectedBookings: 'Projected assessments', confirmLabel: 'assessments confirmed', weeklyLabel: 'assessments this week', recordedVisits: 'Completed assessments' },
+  roofing:      { appointments: 'Inspections',  bookingRate: 'Inspection rate',  bookedSub: 'Scheduled inspections', projectedBookings: 'Projected inspections', confirmLabel: 'inspections confirmed', weeklyLabel: 'inspections this week', recordedVisits: 'Completed inspections' },
+  insurance:    { appointments: 'Consultations', bookingRate: 'Consultation rate', bookedSub: 'Booked consultations', projectedBookings: 'Projected consultations', confirmLabel: 'consultations confirmed', weeklyLabel: 'consultations this week', recordedVisits: 'Completed consultations' },
+  real_estate:  { appointments: 'Showings',     bookingRate: 'Showing rate',     bookedSub: 'Scheduled showings',  projectedBookings: 'Projected showings',    confirmLabel: 'showings confirmed',     weeklyLabel: 'showings this week',     recordedVisits: 'Completed showings' },
+  home_services:{ appointments: 'Appointments', bookingRate: 'Booking rate',     bookedSub: 'Booked appointments', projectedBookings: 'Projected bookings',    confirmLabel: 'appointments confirmed', weeklyLabel: 'bookings this week',     recordedVisits: 'Completed appointments' },
+  sales:        { appointments: 'Demos',        bookingRate: 'Demo rate',        bookedSub: 'Scheduled demos',     projectedBookings: 'Projected demos',       confirmLabel: 'demos confirmed',        weeklyLabel: 'demos this week',        recordedVisits: 'Completed demos' },
 }
 const DEFAULT_LABELS = INDUSTRY_LABELS.funeral
+
+const STAGE_TONE = {
+  new: 'var(--signal-amber)', sent: 'var(--signal-blue)', replied: 'var(--signal-blue)',
+  hot: 'var(--signal-red)', booked: 'var(--signal-green)',
+}
+
+const STATUS_PILL = {
+  new: 'gold', sent: 'blue', replied: 'blue', hot: 'red',
+  booked: 'teal', dnc: 'off',
+}
+
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '—'
+  return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase()
+}
+
+function ago(iso) {
+  if (!iso) return null
+  const ms = Date.now() - new Date(iso).getTime()
+  if (Number.isNaN(ms)) return null
+  const m = Math.floor(ms / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return m + 'm'
+  const h = Math.floor(m / 60)
+  if (h < 24) return h + 'h'
+  const d = Math.floor(h / 24)
+  return d + 'd'
+}
+
+function num(n) {
+  return n === null || n === undefined ? '—' : Number(n).toLocaleString('en-US')
+}
 
 export default function Overview() {
   const user = getCurrentUser()
   const navigate = useNavigate()
 
-  // Branding — industry + feature flags
-  const _branding = getBranding()
-  const _enabledFeatures = _branding?.enabled_features ?? null
-  const _isEnabled = (key) => !_enabledFeatures || _enabledFeatures.includes(key)
-  const industry = _branding?.industry || 'funeral'
+  const branding = getBranding()
+  const enabledFeatures = branding?.enabled_features ?? null
+  const isEnabled = (key) => !enabledFeatures || enabledFeatures.includes(key)
+  const industry = branding?.industry || 'funeral'
   const IL = INDUSTRY_LABELS[industry] || DEFAULT_LABELS
 
+  // Team performance reads an admin endpoint. An advisor asking for it gets a
+  // 403, so it is not requested for them and the panel says why rather than
+  // rendering an empty box that looks like "your team did nothing".
+  const isManager = ['org_admin', 'super_admin', 'god_admin'].includes(user?.role)
+
+  const [totalLeads, setTotalLeads] = useState(null)
+  const [dncCount, setDncCount] = useState(null)
+  const [funnel, setFunnel] = useState([])
+  const [briefing, setBriefing] = useState(null)
   const [replies, setReplies] = useState([])
-  const [dailyBriefing, setDailyBriefing] = useState(null)
-  const [replyActivity, setReplyActivity] = useState([])
-  const [statusFunnel, setStatusFunnel] = useState([])
-  const [outcomesSummary, setOutcomesSummary] = useState(null)
+  const [recentLeads, setRecentLeads] = useState([])
+  const [activity, setActivity] = useState([])
+  const [outcomes, setOutcomes] = useState(null)
+  const [forecast, setForecast] = useState(null)
+  const [team, setTeam] = useState(null)
+  const [teamError, setTeamError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [time, setTime] = useState(new Date())
-  const [pipelineForecast, setPipelineForecast] = useState(null)
+  const [now, setNow] = useState(new Date())
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000)
+    const t = setInterval(() => setNow(new Date()), 30000)
     return () => clearInterval(t)
   }, [])
 
-  // totalLeads tracks the real count from the paginated envelope
-  const [totalLeads, setTotalLeads] = useState(0)
-
   useEffect(() => {
-    Promise.all([
-      api.get('/leads/?page=1&page_size=1').catch(() => null),  // lightweight — just need .total
-      api.get('/sms/replies?needs_attention=true').catch(() => []),
-      api.get('/leads/daily-briefing').catch(() => null),
-      api.get('/sms/replies/activity-by-day?days=14').catch(() => []),
+    let live = true
+    const calls = [
+      api.get('/leads/?page=1&page_size=1').catch(() => null),
+      api.get('/leads/?status=dnc&page=1&page_size=1').catch(() => null),
       api.get('/leads/status-funnel').catch(() => []),
+      api.get('/leads/daily-briefing').catch(() => null),
+      api.get('/sms/replies?needs_attention=true').catch(() => []),
+      api.get('/leads/?page=1&page_size=40').catch(() => null),
+      api.get('/activity/sent?limit=8&days=7').catch(() => []),
       api.get('/outcomes/summary').catch(() => null),
       api.get('/pipeline/forecast').catch(() => null),
-    ]).then(([leadsData, repliesData, briefingData, activityData, funnelData, outcomesData, forecastData]) => {
-      // leadsData is a paginated envelope {items, total, page, page_size}
-      const total = leadsData?.total ?? (Array.isArray(leadsData) ? leadsData.length : 0)
-      setTotalLeads(total)
-      setReplies(repliesData || [])
-      setDailyBriefing(briefingData)
-      setReplyActivity(activityData || [])
-      setStatusFunnel(funnelData || [])
-      setOutcomesSummary(outcomesData)
-      setPipelineForecast(forecastData)
+      isManager
+        ? api.get('/admin/dashboard/metrics').catch(e => ({ __err: e?.message || 'unavailable' }))
+        : Promise.resolve(null),
+    ]
+    Promise.all(calls).then(([t, dnc, fn, br, rp, rl, ac, oc, fc, tm]) => {
+      if (!live) return
+      setTotalLeads(t?.total ?? null)
+      setDncCount(dnc?.total ?? null)
+      setFunnel(Array.isArray(fn) ? fn : [])
+      setBriefing(br)
+      setReplies(Array.isArray(rp) ? rp : [])
+      setRecentLeads(Array.isArray(rl?.items) ? rl.items : [])
+      setActivity(Array.isArray(ac) ? ac : [])
+      setOutcomes(oc)
+      setForecast(fc)
+      if (tm && tm.__err) { setTeamError(tm.__err); setTeam(null) } else { setTeam(tm) }
       setLoading(false)
     })
-  }, [])
+    return () => { live = false }
+  }, [isManager])
 
-  // Pull status counts from funnel (accurate across all leads, not just 1 page)
-  const funnelCount = (status) => {
-    const stage = statusFunnel.find(s => s.status === status)
-    return stage?.count ?? 0
+  // ── derived ───────────────────────────────────────────────────────────────
+  const stage = (s) => funnel.find(x => x.status === s)?.count ?? 0
+  const newLeads = stage('new')
+  const sentLeads = stage('sent')
+  const bookedLeads = stage('booked')
+  const hotReplies = replies.length
+  const replyRate = sentLeads > 0 ? Math.round((hotReplies / sentLeads) * 100) : null
+  const bookingRate = sentLeads > 0 ? Math.round((bookedLeads / sentLeads) * 100) : null
+
+  const advisorNames = useMemo(() => {
+    const m = {}
+    ;(team?.advisors || []).forEach(a => { m[a.advisor_id] = a.advisor_name })
+    return m
+  }, [team])
+
+  const greeting = now.getHours() < 12 ? 'Good morning'
+    : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
+  const firstName = user?.full_name?.split(' ')[0] || 'there'
+
+  function go(path) { navigate(path) }
+
+  function runSearch(e) {
+    e.preventDefault()
+    const q = query.trim()
+    navigate(q ? `/leads?q=${encodeURIComponent(q)}` : '/leads')
   }
-  const newLeads     = funnelCount('new')
-  const sentLeads    = funnelCount('sent')
-  const bookedLeads  = funnelCount('booked')
-  const dncLeads     = funnelCount('dnc')
-  const hotReplies   = replies.length
-  const replyRate    = sentLeads > 0 ? Math.round((hotReplies / sentLeads) * 100) : 0
-  const bookingRate  = sentLeads > 0 ? Math.round((bookedLeads / sentLeads) * 100) : 0
 
-  const firstName = user?.full_name?.split(' ')[0] || 'Advisor'
-  const hour = time.getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  // ── WHAT NEEDS ATTENTION ─────────────────────────────────────────────────
+  // Real counts only. A condition at zero is not shown: an empty queue is the
+  // honest answer to "what needs to happen next", not four rows saying none.
+  const attention = []
+  if (hotReplies > 0) attention.push({
+    key: 'hot', tone: 'var(--signal-red)',
+    title: `${hotReplies} hot ${hotReplies === 1 ? 'reply needs' : 'replies need'} a human response`,
+    sub: 'High-intent contacts waiting on qualification or scheduling.',
+    cta: 'Review', to: '/replies?needs_attention=true',
+  })
+  if (briefing?.cadence_touches_due_today > 0) attention.push({
+    key: 'cadence', tone: 'var(--signal-amber)',
+    title: `${briefing.cadence_touches_due_today} cadence ${briefing.cadence_touches_due_today === 1 ? 'touch is' : 'touches are'} due today`,
+    sub: 'Scheduled follow-ups that have reached their send time.',
+    cta: 'Open', to: '/cadence',
+  })
+  if (newLeads > 0) attention.push({
+    key: 'new', tone: 'var(--signal-blue)',
+    title: `${num(newLeads)} ${newLeads === 1 ? 'lead has' : 'leads have'} never been contacted`,
+    sub: briefing?.leads_imported_last_24h
+      ? `${num(briefing.leads_imported_last_24h)} of them arrived in the last 24 hours.`
+      : 'Still sitting at status "new".',
+    cta: 'Filter', to: '/leads?status=new',
+  })
+  if (briefing?.certified_appointments_waiting > 0) attention.push({
+    key: 'appts', tone: 'var(--signal-green)',
+    title: `${briefing.certified_appointments_waiting} ${IL.confirmLabel}`,
+    sub: 'Booked or confirmed, with no outcome recorded yet.',
+    cta: 'View', to: '/workqueue',
+  })
+  // The AI forecast already produces actionable alerts with their own routes.
+  // Folding them in here keeps that feature rather than dropping it, and keeps
+  // one place to look for "what next".
+  ;(forecast?.alerts || []).forEach((a, i) => attention.push({
+    key: 'fc' + i,
+    tone: a.type === 'urgent' ? 'var(--signal-red)' : 'var(--signal-purple)',
+    title: a.message, sub: 'From the pipeline forecast.',
+    cta: a.action || 'Open', to: a.path || '/pipeline',
+  }))
 
-  const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const dateStr = time.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
-
-  // 14-day sparkline
-  const maxActivity = Math.max(1, ...replyActivity.map(d => d.count || 0))
-  const maxFunnel   = Math.max(1, ...statusFunnel.map(s => s.count || 0))
+  const kpis = [
+    { label: 'Total leads', value: num(totalLeads), color: 'var(--signal-blue)',
+      trend: briefing?.leads_imported_last_24h != null
+        ? `+${num(briefing.leads_imported_last_24h)} in 24h` : 'all lists', to: '/leads' },
+    { label: 'New / unworked', value: num(newLeads), color: 'var(--signal-amber)',
+      trend: newLeads > 0 ? 'needs attention' : 'nothing waiting', to: '/leads?status=new' },
+    { label: 'Hot replies', value: num(hotReplies), color: 'var(--signal-red)',
+      trend: hotReplies > 0 ? 'awaiting a decision' : 'inbox clear',
+      to: '/replies?needs_attention=true' },
+    { label: IL.appointments, value: num(bookedLeads), color: 'var(--signal-green)',
+      trend: outcomes?.total_appointments != null
+        ? `${num(outcomes.total_appointments)} ${IL.recordedVisits.toLowerCase()}` : IL.bookedSub,
+      to: '/leads?status=booked' },
+    { label: 'Reply rate', value: replyRate === null ? '—' : replyRate + '%',
+      color: 'var(--signal-purple)',
+      trend: sentLeads > 0 ? `of ${num(sentLeads)} contacted` : 'nothing sent yet',
+      to: '/reports', managerOnly: true },
+    { label: IL.bookingRate, value: bookingRate === null ? '—' : bookingRate + '%',
+      color: 'var(--signal-green)',
+      trend: sentLeads > 0 ? `of ${num(sentLeads)} contacted` : 'nothing sent yet',
+      to: '/reports', managerOnly: true },
+    { label: 'Callbacks & touches', value: num(briefing?.cadence_touches_due_today),
+      color: 'var(--signal-amber)', trend: 'due today', to: '/cadence' },
+    { label: 'DNC / opted out', value: num(dncCount), color: 'var(--text-secondary)',
+      trend: 'suppression active', to: '/leads?status=dnc' },
+  ]
 
   return (
     <div className="ov-page">
 
-      {/* ── HERO HEADER ── */}
-      <div className="ov-hero">
-        <div className="ov-hero-left">
-          <div className="ov-greeting">{greeting}, {firstName}.</div>
-          <div className="ov-date">{dateStr}</div>
+      {/* ── top bar ── */}
+      <div className="ov-topbar">
+        <form className="ov-search" onSubmit={runSearch}>
+          <span className="ov-search-icon" aria-hidden="true">🔍</span>
+          <input
+            value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="Search leads by name, phone or email…"
+            aria-label="Search leads"
+          />
+        </form>
+        <div className="ov-top-actions">
+          <button className="ov-btn" onClick={() => go('/leads?import=1')}>Import leads</button>
+          {isEnabled('campaigns') && isManager && (
+            <button className="ov-btn" onClick={() => go('/campaigns')}>New campaign</button>
+          )}
+          <button className="ov-btn ov-btn--primary" onClick={() => go('/workqueue')}>
+            ⚡ View urgent work
+          </button>
         </div>
-        <div className="ov-clock">{timeStr}</div>
       </div>
 
-      {/* ── KPI ROW ── */}
-      <div className="ov-kpi-row">
-        {[
-          { label: 'Total leads',        value: totalLeads,        accent: '#2fb6ff', path: '/leads',   icon: '&#128101;' },
-          { label: 'New — uncontacted',  value: newLeads,          accent: '#2fb6ff', path: '/leads',   icon: '&#128203;' },
-          { label: 'Hot replies',        value: hotReplies,        accent: '#ff4d4d', path: '/replies', icon: '&#128293;' },
-          { label: IL.appointments,      value: bookedLeads,       accent: '#1ef0a8', path: '/leads',   icon: '&#128197;' },
-          { label: 'Reply rate',         value: `${replyRate}%`,   accent: '#f0c040', path: '/reports', icon: '&#128202;' },
-          { label: IL.bookingRate,       value: `${bookingRate}%`, accent: '#a78bfa', path: '/reports', icon: '&#127919;' },
-        ].map(card => (
-          <button key={card.label} className="ov-kpi-card" onClick={() => navigate(card.path)}>
-            <span className="ov-kpi-icon" dangerouslySetInnerHTML={{ __html: card.icon }} />
-            <strong className="ov-kpi-value" style={{ color: card.accent }}>
-              {loading ? '—' : card.value}
-            </strong>
-            <span className="ov-kpi-label">{card.label}</span>
+      {/* ── hero ── */}
+      <div className="ov-hero">
+        <div>
+          <div className="ov-greeting">{greeting}, {firstName}.</div>
+          <div className="ov-sub">
+            {loading ? 'Loading your workspace…'
+              : attention.length
+                ? `${attention.length} thing${attention.length === 1 ? '' : 's'} need your attention right now.`
+                : 'Nothing is waiting on you. Here is what moved.'}
+          </div>
+        </div>
+        <div className="ov-datebox">
+          <div className="ov-clock">
+            {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+          <div className="ov-date">
+            {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── quick row ── */}
+      {!loading && (
+        <div className="ov-quick-row">
+          <button className="ov-quick" onClick={() => go('/replies?needs_attention=true')}>
+            <strong>{num(hotReplies)}</strong> replies awaiting review
+          </button>
+          <button className="ov-quick" onClick={() => go('/cadence')}>
+            <strong>{num(briefing?.cadence_touches_due_today ?? 0)}</strong> touches due today
+          </button>
+          <button className="ov-quick" onClick={() => go('/leads?status=new')}>
+            <strong>{num(newLeads)}</strong> leads never contacted
+          </button>
+          <button className="ov-quick" onClick={() => go('/leads?status=booked')}>
+            <strong>{num(briefing?.bookings_last_7_days ?? 0)}</strong> {IL.weeklyLabel}
+          </button>
+        </div>
+      )}
+
+      {/* ── KPI cards ── */}
+      <div className="ov-kpis">
+        {kpis.filter(k => !k.managerOnly || isManager).map(k => (
+          <button key={k.label} className="ov-kpi" onClick={() => go(k.to)}
+                  title={'Open ' + k.to}>
+            <span className="ov-kpi-label">{k.label}</span>
+            <span className="ov-kpi-value" style={{ color: k.color }}>
+              {loading ? '·' : k.value}
+            </span>
+            <span className="ov-kpi-trend">{k.trend}</span>
           </button>
         ))}
       </div>
 
-      {/* ── MAIN GRID ── */}
-      <div className="ov-main-grid">
-
-        {/* TODAY'S BRIEFING */}
+      {/* ── attention + hot replies ── */}
+      <div className="ov-grid">
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">&#9889; Today's action items</h2>
+            <h2 className="panel-title">What needs attention now</h2>
+            <span className="panel-count">{loading ? '' : attention.length}</span>
           </div>
           {loading ? (
-            <div className="empty-state">Loading&#8230;</div>
-          ) : dailyBriefing ? (
-            <div className="ov-action-list">
-              {[
-                { count: dailyBriefing.replies_needing_attention,      label: 'hot replies need your response',  path: '/replies',  accent: '#ff4d4d', urgent: true },
-                { count: dailyBriefing.cadence_touches_due_today,      label: 'cadence touches due today',       path: '/cadence',  accent: '#2fb6ff' },
-                { count: dailyBriefing.certified_appointments_waiting, label: IL.confirmLabel,                   path: '/leads',    accent: '#1ef0a8' },
-                { count: dailyBriefing.leads_imported_last_24h,        label: 'leads imported in the last 24h', path: '/leads',    accent: '#f0c040' },
-                { count: dailyBriefing.bookings_last_7_days,           label: IL.weeklyLabel,                    path: '/leads',    accent: '#a78bfa' },
-              ].map((item, i) => (
-                <button key={i} className={`ov-action-row ${item.urgent && item.count > 0 ? 'ov-action-row--urgent' : ''}`} onClick={() => navigate(item.path)}>
-                  <span className="ov-action-count" style={{ color: item.accent }}>{item.count}</span>
-                  <span className="ov-action-label">{item.label}</span>
-                  <span className="ov-action-arrow">&#8594;</span>
+            <div className="empty-state">Loading…</div>
+          ) : attention.length === 0 ? (
+            <div className="empty-state">
+              Nothing is waiting on a person right now — no unanswered hot replies,
+              no overdue touches, no untouched leads.
+            </div>
+          ) : (
+            <div className="ov-queue">
+              {attention.map(a => (
+                <button key={a.key} className="ov-queue-item" onClick={() => go(a.to)}>
+                  <span className="ov-queue-dot" style={{ background: a.tone }} />
+                  <span>
+                    <span className="ov-queue-title">{a.title}</span>
+                    <span className="ov-queue-sub">{a.sub}</span>
+                  </span>
+                  <span className="ov-queue-go">{a.cta} →</span>
                 </button>
               ))}
             </div>
-          ) : (
-            <div className="empty-state">No briefing data yet.</div>
           )}
         </section>
 
-        {/* HOT REPLIES */}
         <section className="panel ov-panel">
           <div className="panel-header">
-            <h2 className="panel-title">&#128293; Hot replies</h2>
+            <h2 className="panel-title">Hot replies</h2>
             <span className="panel-count">{replies.length}</span>
           </div>
-          {replies.length === 0 ? (
-            <div className="empty-state">No hot replies right now. All clear.</div>
-          ) : (
-            <div className="ov-reply-list">
-              {replies.slice(0, 6).map(r => (
-                <button key={r.id} className="ov-reply-row" onClick={() => r.lead_id && navigate(`/leads/${r.lead_id}`)}>
-                  <span className="ov-reply-dot" />
-                  <span className="ov-reply-body">{r.body}</span>
-                  <span className="ov-reply-arrow">&#8594;</span>
-                </button>
-              ))}
-              {replies.length > 6 && (
-                <button className="ov-see-all" onClick={() => navigate('/replies')}>
-                  See all {replies.length} replies &#8594;
-                </button>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* REPLY ACTIVITY SPARKLINE */}
-        <section className="panel ov-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">&#128200; Reply activity</h2>
-            <span className="panel-count">14 days</span>
-          </div>
-          {replyActivity.length === 0 ? (
-            <div className="empty-state">No reply data yet. Reply activity will appear here once you've sent outreach and received responses.</div>
-          ) : (
-            <div className="ov-sparkline">
-              {replyActivity.map((d, i) => (
-                <div key={i} className="ov-spark-col">
-                  <div
-                    className="ov-spark-bar"
-                    style={{ height: `${Math.max(4, Math.round((d.count / maxActivity) * 80))}px` }}
-                    title={`${d.date}: ${d.count} replies`}
-                  />
-                  {i % 7 === 0 && (
-                    <span className="ov-spark-label">
-                      {new Date(d.date + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' })}
+          {loading ? <div className="empty-state">Loading…</div>
+            : replies.length === 0 ? (
+              <div className="empty-state">No replies are waiting on a decision.</div>
+            ) : (
+              <>
+                {replies.slice(0, 5).map(r => (
+                  <button key={r.id} className="ov-reply"
+                          onClick={() => r.lead_id ? go(`/leads/${r.lead_id}`) : go('/replies')}
+                          title="Open the lead's conversation">
+                    <span className="ov-reply-avatar">{initials(r.lead_name)}</span>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="ov-reply-name">
+                        {r.lead_name}{ago(r.received_at) ? ` · ${ago(r.received_at)} ago` : ''}
+                      </span>
+                      <span className="ov-reply-meta">
+                        {(r.source || 'sms').toUpperCase()}
+                        {r.classification ? ` · ${String(r.classification).replace(/_/g, ' ')}` : ''}
+                        {r.is_hot ? ' · hot' : ''}
+                        {r.reviewed_at ? ' · reviewed' : ' · unreviewed'}
+                      </span>
+                      <p className="ov-reply-body">
+                        {String(r.body || '').slice(0, 160)}
+                        {String(r.body || '').length > 160 ? '…' : ''}
+                      </p>
                     </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                  </button>
+                ))}
+                {replies.length > 5 && (
+                  <button className="ov-btn" style={{ marginTop: 10 }}
+                          onClick={() => go('/replies?needs_attention=true')}>
+                    See all {replies.length} →
+                  </button>
+                )}
+              </>
+            )}
         </section>
-
-        {/* STATUS FUNNEL */}
-        <section className="panel ov-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">&#127942; Pipeline funnel</h2>
-          </div>
-          {statusFunnel.length === 0 ? (
-            <div className="empty-state">No funnel data yet. Import leads on the Leads page to start populating your pipeline.</div>
-          ) : (
-            <div className="ov-funnel">
-              {statusFunnel.map(stage => (
-                <div key={stage.status} className="ov-funnel-row">
-                  <span className="ov-funnel-label">{stage.label}</span>
-                  <div className="ov-funnel-track">
-                    <div
-                      className="ov-funnel-fill"
-                      style={{ width: `${Math.max(2, Math.round((stage.count / maxFunnel) * 100))}%` }}
-                    />
-                  </div>
-                  <strong className="ov-funnel-count">{stage.count}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* QUICK ACTIONS */}
-        <section className="panel ov-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">&#9881;&#65039; Quick actions</h2>
-          </div>
-          <div className="ov-quick-grid">
-            {[
-              { label: 'Import leads',   icon: '&#128229;', path: '/leads',       desc: 'Upload CSV or Excel' },
-              ...(_isEnabled('campaigns')    ? [{ label: 'Send campaign',  icon: '&#128227;', path: '/campaigns',   desc: 'AI-powered outreach' }] : []),
-              { label: 'Review replies', icon: '&#128172;', path: '/replies',     desc: `${hotReplies} waiting` },
-              { label: 'Email queue',    icon: '&#128231;', path: '/email-queue', desc: 'Draft & send emails' },
-              { label: 'Work queue',     icon: '&#9989;',   path: '/work-queue',  desc: "Today's action items" },
-              ...(_isEnabled('lead_cleanup') ? [{ label: 'Lead cleanup',   icon: '&#129529;', path: '/lead-cleanup', desc: 'Merge duplicates' }] : []),
-            ].map(item => (
-              <button key={item.label} className="ov-quick-btn" onClick={() => navigate(item.path)}>
-                <span className="ov-quick-icon" dangerouslySetInnerHTML={{ __html: item.icon }} />
-                <span className="ov-quick-label">{item.label}</span>
-                <span className="ov-quick-desc">{item.desc}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* REVENUE SUMMARY */}
-        <section className="panel ov-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">&#128176; Revenue activity</h2>
-          </div>
-          <div className="ov-revenue-grid">
-            {[
-              { label: 'In pipeline', value: bookedLeads,                              sub: IL.bookedSub,          color: '#2fb6ff' },
-              { label: 'Outcomes',    value: outcomesSummary?.total_appointments ?? 0, sub: IL.recordedVisits,     color: '#1ef0a8' },
-              { label: 'Sales',       value: outcomesSummary?.sales_count ?? 0,        sub: outcomesSummary?.conversion_rate != null ? `${outcomesSummary.conversion_rate}% close rate` : 'No outcomes yet', color: '#a78bfa' },
-              { label: 'DNC',         value: dncLeads,                                 sub: 'Opted out — suppressed', color: '#ff4d4d' },
-            ].map(item => (
-              <div key={item.label} className="ov-revenue-cell">
-                <strong className="ov-revenue-value" style={{ color: item.color }}>
-                  {loading ? '—' : item.value}
-                </strong>
-                <span className="ov-revenue-label">{item.label}</span>
-                <span className="ov-revenue-sub">{item.sub}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
       </div>
 
-      {/* AI Forecast + Pipeline Summary */}
-      {pipelineForecast && (
-        <div className="panel" style={{ marginTop: 0 }}>
-          <div className="panel-header">
-            <h2 className="panel-title">&#129302; AI Forecast</h2>
-            <button className="btn btn--secondary" style={{ fontSize: 12, padding: '4px 12px' }}
-              onClick={() => window.location.href = '/pipeline'}>
-              Open pipeline &#8594;
-            </button>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
-            {[
-              { label: 'Active conversations',  value: pipelineForecast.active_conversations,         color: '#2fb6ff' },
-              { label: 'Reply rate',            value: `${pipelineForecast.reply_rate}%`,             color: '#1ef0a8' },
-              { label: 'Need your review',      value: pipelineForecast.flagged_count,                color: '#ff4d4d' },
-              { label: IL.projectedBookings,    value: pipelineForecast.projected_bookings_this_week, color: '#ffd700' },
-            ].map(item => (
-              <div key={item.label} className="ov-revenue-cell">
-                <strong className="ov-revenue-value" style={{ color: item.color }}>{item.value}</strong>
-                <span className="ov-revenue-label">{item.label}</span>
-              </div>
-            ))}
-          </div>
-          {pipelineForecast.alerts?.map((alert, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-              borderRadius: 10, marginBottom: 6, cursor: 'pointer',
-              background: alert.type === 'urgent' ? 'rgba(255,77,77,0.07)' : 'rgba(47,182,255,0.05)',
-              border: `1px solid ${alert.type === 'urgent' ? 'rgba(255,77,77,0.18)' : 'rgba(47,182,255,0.12)'}`,
-            }} onClick={() => window.location.href = alert.path}>
-              <span dangerouslySetInnerHTML={{ __html: alert.type === 'urgent' ? '&#9888;&#65039;' : '&#128161;' }} />
-              <span style={{ flex: 1, fontSize: 13 }}>{alert.message}</span>
-              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{alert.action} &#8594;</span>
-            </div>
-          ))}
+      {/* ── lead flow ── */}
+      <section className="panel">
+        <div className="panel-header">
+          <h2 className="panel-title">Lead flow</h2>
+          <span className="panel-count">{loading ? '' : num(totalLeads)}</span>
         </div>
-      )}
+        {loading ? <div className="empty-state">Loading…</div>
+          : funnel.length === 0 ? (
+            <div className="empty-state">
+              No pipeline data yet. Import leads to start populating these stages.
+            </div>
+          ) : (
+            <div className="ov-pipeline">
+              {funnel.map(s => (
+                <button key={s.status} className="ov-stage"
+                        onClick={() => go('/leads?status=' + s.status)}>
+                  <span className="ov-stage-label">{s.label}</span>
+                  <span className="ov-stage-value" style={{ color: STAGE_TONE[s.status] }}>
+                    {num(s.count)}
+                  </span>
+                  <span className="ov-stage-sub">
+                    {totalLeads ? Math.round((s.count / totalLeads) * 1000) / 10 + '% of all leads' : ''}
+                  </span>
+                </button>
+              ))}
+              <button className="ov-stage" onClick={() => go('/leads?status=dnc')}>
+                <span className="ov-stage-label">DNC</span>
+                <span className="ov-stage-value" style={{ color: 'var(--text-secondary)' }}>
+                  {num(dncCount)}
+                </span>
+                <span className="ov-stage-sub">suppressed</span>
+              </button>
+            </div>
+          )}
+        <p className="ov-note">
+          These are the real lead statuses this organization uses. Stages the schema does not
+          record are not shown.
+        </p>
+      </section>
+
+      {/* ── leads needing action + activity ── */}
+      <div className="ov-grid">
+        <section className="panel ov-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Leads needing action</h2>
+            <button className="ov-btn" onClick={() => go('/leads')}>Open Leads →</button>
+          </div>
+          {loading ? <div className="empty-state">Loading…</div>
+            : recentLeads.length === 0 ? (
+              <div className="empty-state">No leads yet. Import a list to get started.</div>
+            ) : (
+              <div className="ov-tablewrap">
+                <table className="ov-table">
+                  <thead>
+                    <tr>
+                      <th>Lead</th><th>Source</th><th>Status</th>
+                      <th>Owner</th><th>Last touch</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentLeads
+                      .filter(l => ['new', 'replied', 'hot'].includes(l.status))
+                      .slice(0, 8)
+                      .map(l => (
+                        <tr key={l.id} onClick={() => go('/leads/' + l.id)}>
+                          <td>
+                            <strong>
+                              {[l.first_name, l.last_name].filter(Boolean).join(' ')
+                                || l.phone || l.email || 'Unnamed lead'}
+                            </strong>
+                          </td>
+                          <td style={{ color: 'var(--text-secondary)' }}>
+                            {l.import_list_name || l.source_file || '—'}
+                          </td>
+                          <td>
+                            <span className={'ov-pill ov-pill--' + (STATUS_PILL[l.status] || 'off')}>
+                              {String(l.status || '—').toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ color: 'var(--text-secondary)' }}>
+                            {l.assigned_to_id
+                              ? (advisorNames[l.assigned_to_id]
+                                  || (l.assigned_to_id === user?.id ? 'You' : 'Assigned'))
+                              : 'Unassigned'}
+                          </td>
+                          <td style={{ color: 'var(--text-secondary)' }}>
+                            {ago(l.last_messaged_at) ? ago(l.last_messaged_at) + ' ago' : 'never'}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+                {recentLeads.filter(l => ['new', 'replied', 'hot'].includes(l.status)).length === 0 && (
+                  <div className="empty-state">
+                    Nothing in the most recent 40 leads is waiting on a touch.
+                  </div>
+                )}
+              </div>
+            )}
+          <p className="ov-note">
+            Owner names come from the organization's advisor metrics, which only an admin can
+            read — an advisor sees only their own leads here, so the owner is always them.
+          </p>
+        </section>
+
+        <section className="panel ov-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">Recent activity</h2>
+            <button className="ov-btn" onClick={() => go('/activity')}>All activity →</button>
+          </div>
+          {loading ? <div className="empty-state">Loading…</div>
+            : activity.length === 0 ? (
+              <div className="empty-state">Nothing has been sent in the last 7 days.</div>
+            ) : activity.slice(0, 8).map(a => (
+              <button key={a.channel + a.id} className="ov-activity"
+                      onClick={() => a.lead_id ? go('/leads/' + a.lead_id) : go('/activity')}>
+                <span className="ov-activity-dot" style={{
+                  background: a.delivery_status === 'failed' || a.delivery_status === 'undelivered'
+                    ? 'var(--signal-red)'
+                    : a.delivery_status === 'delivered' ? 'var(--signal-green)'
+                    : a.channel === 'email' ? 'var(--signal-purple)' : 'var(--signal-blue)',
+                }} />
+                <span style={{ minWidth: 0 }}>
+                  <span className="ov-activity-title">
+                    {a.channel === 'email' ? 'Email' : 'SMS'} to {a.lead_name}
+                  </span>
+                  <span className="ov-activity-sub">
+                    {ago(a.sent_at) ? ago(a.sent_at) + ' ago' : '—'}
+                    {' · '}{a.delivery_status || 'pending'}
+                    {a.subject ? ` · ${a.subject}` : ''}
+                  </span>
+                </span>
+              </button>
+            ))}
+        </section>
+      </div>
+
+      {/* ── team performance ── */}
+      <section className="panel">
+        <div className="panel-header">
+          <h2 className="panel-title">Team performance</h2>
+          {team?.totals && (
+            <span className="panel-count">{num(team.advisors?.length ?? 0)}</span>
+          )}
+        </div>
+        {!isManager ? (
+          <div className="empty-state">
+            Team performance is an organization-admin view. Your own numbers are in Reports.
+          </div>
+        ) : teamError ? (
+          <div className="empty-state">Team metrics are unavailable: {teamError}</div>
+        ) : loading ? (
+          <div className="empty-state">Loading…</div>
+        ) : !team?.advisors?.length ? (
+          <div className="empty-state">
+            No advisors are set up in this organization yet, so there is no per-person
+            output to report.
+          </div>
+        ) : (
+          <>
+            <div className="ov-team">
+              {team.advisors.slice(0, 8).map(a => (
+                <button key={a.advisor_id} className="ov-person"
+                        onClick={() => go('/users/' + a.advisor_id)}
+                        title="Open this advisor">
+                  <span className="ov-person-name">{a.advisor_name || 'Unnamed advisor'}</span>
+                  <span className="ov-person-role">
+                    Advisor · {a.reply_rate}% reply · {a.booking_rate}% booked
+                  </span>
+                  <div className="ov-person-metrics">
+                    <div><strong>{num(a.leads_owned)}</strong><small>leads</small></div>
+                    <div><strong>{num(a.messages_sent)}</strong><small>sent</small></div>
+                    <div><strong>{num(a.booked_leads)}</strong><small>booked</small></div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            {team.totals && (
+              <p className="ov-note">
+                Organization total: {num(team.totals.leads_owned)} leads owned ·{' '}
+                {num(team.totals.messages_sent)} messages sent ·{' '}
+                {num(team.totals.replies)} replies ·{' '}
+                {num(team.totals.booked_leads)} booked ·{' '}
+                {team.totals.reply_rate}% reply rate. These are counts from the database, not
+                estimates.
+              </p>
+            )}
+          </>
+        )}
+      </section>
     </div>
   )
 }

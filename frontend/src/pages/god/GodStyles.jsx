@@ -132,6 +132,162 @@ const CSS = `
    rather than as another God screen. */
 .gm-nav-item.gm-jump{color:#4a6482;font-size:12px}
 .gm-nav-item.gm-jump:hover{color:#8ab4cc;background:rgba(47,182,255,.04)}
+/* Rail section headings. Replaced the wall of NEEDS BUILD tags: the primary
+   nav now carries working modules only, and everything else lives under one
+   heading that says what it is. */
+.gm-nav-head{
+  font-size:8.5px;letter-spacing:.16em;font-weight:800;color:#33506e;
+  padding:14px 14px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.gm-nav-head.gm-next{color:#6a5a2c}
+.gm-nav-rule{height:1px;background:rgba(78,157,211,.12);margin:6px 12px}
+
+/* ══ REDESIGN PRIMITIVES ═══════════════════════════════════════════════════
+   Added Aug 27 2026 for the approved God Mode Command Center redesign.
+   These EXTEND the sheet above — the tokens, card, row, tool and button rules
+   are unchanged and still the only ones. Nothing below introduces a second
+   palette; every colour is one of the six --gm-* variables at the top.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── executive summary tiles ───────────────────────────────────────────── */
+.gm-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:9px;margin-bottom:16px}
+.gm-stat{
+  background:linear-gradient(180deg,rgba(12,24,41,.94),rgba(9,20,34,.96));
+  border:1px solid rgba(77,151,204,.22);border-radius:12px;padding:12px;
+  min-height:88px;text-align:left;font-family:inherit;color:inherit;width:100%;
+  display:flex;flex-direction:column;
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.gm-stat.gm-warn{border-color:rgba(122,95,34,.62)}
+.gm-stat.gm-crit{border-color:rgba(114,49,66,.72)}
+.gm-stat.gm-click{cursor:pointer}
+.gm-stat.gm-click:hover{transform:translateY(-2px);border-color:rgba(91,190,248,.44);box-shadow:0 14px 30px rgba(0,0,0,.24)}
+.gm-stat .gm-k{font-size:8px;letter-spacing:.13em;color:#6281a2;font-weight:800;margin-bottom:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-stat .gm-v{font-size:21px;font-weight:900;letter-spacing:-.03em;line-height:1;margin-bottom:4px;color:#eef8ff}
+.gm-stat .gm-s{font-size:8.5px;color:#587593;margin-top:auto;line-height:1.4}
+
+/* ── platform health tiles ─────────────────────────────────────────────── */
+.gm-healths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.gm-health{
+  padding:12px;background:rgba(10,26,46,.72);border:1px solid rgba(27,58,90,.9);
+  border-radius:11px;text-align:left;font-family:inherit;color:inherit;width:100%;
+  transition:border-color .16s ease,background .16s ease;
+}
+.gm-health.gm-click{cursor:pointer}
+.gm-health.gm-click:hover{border-color:rgba(91,190,248,.44);background:rgba(14,34,58,.82)}
+.gm-health-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.gm-health b{font-size:10.5px;color:#eaf4ff;font-weight:600}
+.gm-health p{margin:0;color:#68829f;font-size:9px;line-height:1.5}
+.gm-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.gm-dot.ok{background:var(--gm-teal);box-shadow:0 0 10px rgba(35,239,178,.5)}
+.gm-dot.warn{background:var(--gm-amber);box-shadow:0 0 10px rgba(255,199,90,.4)}
+.gm-dot.bad{background:var(--gm-red);box-shadow:0 0 10px rgba(255,93,125,.5)}
+.gm-dot.off{background:#2b425c}
+
+/* ── owner action queue ────────────────────────────────────────────────── */
+.gm-q{display:flex;flex-direction:column}
+.gm-q-item{
+  display:grid;grid-template-columns:9px 1fr auto;gap:12px;align-items:start;
+  padding:12px 14px;border-bottom:1px solid rgba(42,92,132,.16);
+}
+.gm-q-item:last-child{border-bottom:0}
+.gm-q-item:hover{background:rgba(16,44,68,.20)}
+.gm-q-item>i{width:9px;height:9px;border-radius:50%;margin-top:4px}
+.gm-q-title{display:block;font-size:11.5px;color:#f1f7ff;font-weight:600;margin-bottom:3px;line-height:1.35}
+.gm-q-detail{display:block;font-size:9.5px;color:#5e7796;line-height:1.55}
+.gm-q-meta{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right;flex:none}
+.gm-q-sev{font-size:8px;font-weight:800;letter-spacing:.09em}
+.gm-q-age{font-size:8.5px;color:#4f6b88;white-space:nowrap}
+
+/* ── command table ─────────────────────────────────────────────────────── */
+.gm-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.gm-table{width:100%;border-collapse:collapse;font-size:10.5px;min-width:1020px}
+table.gm-table th{
+  text-align:left;padding:10px;color:#6784a3;font-size:7.5px;letter-spacing:.11em;
+  font-weight:800;border-bottom:1px solid rgba(24,53,82,.9);background:#06101d;
+  white-space:nowrap;position:sticky;top:0;z-index:2;
+}
+table.gm-table td{padding:10px;border-bottom:1px solid rgba(19,43,68,.86);vertical-align:middle;color:#c6d8ea}
+table.gm-table tbody tr:hover td{background:rgba(12,28,48,.75)}
+table.gm-table td.gm-num,table.gm-table th.gm-num{text-align:right;font-variant-numeric:tabular-nums}
+.gm-orgname{color:#eaf4ff;font-weight:600;font-size:11px}
+.gm-orgsub{color:#4f6b88;font-size:8.5px;margin-top:2px}
+.gm-group{background:linear-gradient(90deg,rgba(47,182,255,.075),rgba(7,19,32,.94))}
+.gm-group td{color:#dceafb;font-weight:600;font-size:10.5px;letter-spacing:.04em}
+.gm-groupbtn{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;display:flex;align-items:center;gap:8px}
+
+/* ── pills ─────────────────────────────────────────────────────────────── */
+.gm-pill{display:inline-block;padding:3px 7px;border-radius:999px;font-size:7.5px;font-weight:800;letter-spacing:.04em;white-space:nowrap;border:1px solid transparent}
+.gm-pill.teal{background:#0a2b22;border-color:#176f58;color:#44efbd}
+.gm-pill.gold{background:#251e08;border-color:#70591d;color:#f4c652}
+.gm-pill.blue{background:#0b1a2a;border-color:#1b3c59;color:#7cc0ff}
+.gm-pill.red{background:#2a1017;border-color:#723142;color:#ff829b}
+.gm-pill.purple{background:#1d1638;border-color:#453177;color:#b79aff}
+.gm-pill.off{background:#0c1727;border-color:#2a3f57;color:#5d7697}
+
+/* ── row action buttons ────────────────────────────────────────────────── */
+.gm-acts{display:flex;gap:5px;flex-wrap:wrap}
+.gm-act{
+  border:1px solid #244565;background:#0c1c30;color:#a9bfd5;border-radius:6px;
+  padding:4px 7px;font-size:8px;font-weight:700;letter-spacing:.05em;
+  cursor:pointer;font-family:inherit;white-space:nowrap;
+}
+.gm-act:hover{color:#fff;border-color:#2e7eb8;background:#11273f}
+.gm-act:disabled{opacity:.45;cursor:not-allowed}
+.gm-act.gm-primary{background:rgba(47,182,255,.12);border-color:rgba(57,189,248,.5);color:#7cc0ff}
+.gm-act.gm-primary:hover{background:rgba(47,182,255,.2)}
+.gm-act.gm-danger{color:#ff829b;border-color:#5b2334}
+.gm-act.gm-danger:hover{background:#2a1017;border-color:#8d3a4f;color:#ffa3b6}
+
+/* ── product status chips ──────────────────────────────────────────────── */
+.gm-modules{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gm-modbox{padding:13px;border-radius:11px;border:1px solid rgba(27,57,88,.9);background:rgba(10,25,43,.7)}
+.gm-modbox h4{margin:0 0 9px;font-size:9px;letter-spacing:.15em;font-weight:800}
+.gm-modbox h4.live{color:var(--gm-teal)}
+.gm-modbox h4.next{color:var(--gm-amber)}
+.gm-chips{display:flex;gap:6px;flex-wrap:wrap}
+.gm-chip{padding:5px 8px;border-radius:999px;font-size:8px;font-weight:700;border:1px solid #234665;color:#9cb5ce;background:none;font-family:inherit}
+.gm-chip.live{border-color:#1e5b4f;color:#35dcbc;background:#0c2e28;cursor:pointer}
+.gm-chip.live:hover{border-color:#2c8471;background:#0f3c33}
+.gm-chip.next{border-color:#55441d;color:#ffd15d;background:#241c0d;cursor:default}
+
+/* ── searching / filtering ─────────────────────────────────────────────── */
+.gm-input{
+  background:#071827;border:1px solid #1c4969;color:#dceafb;border-radius:7px;
+  padding:7px 10px;font-size:11px;font-family:inherit;outline:none;min-width:0;
+}
+.gm-input:focus{border-color:#2f7db5;box-shadow:0 0 0 2px rgba(47,125,181,.18)}
+.gm-input::placeholder{color:#41607f}
+.gm-filters{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.gm-seg{display:flex;gap:4px;flex-wrap:wrap}
+.gm-seg button{
+  background:transparent;border:1px solid #1c3a58;border-radius:7px;color:#5f7c9c;
+  cursor:pointer;font-size:8.5px;font-weight:700;letter-spacing:.06em;padding:5px 9px;font-family:inherit;
+}
+.gm-seg button.on{background:rgba(47,182,255,.12);border-color:#2f7db5;color:#7cc0ff}
+
+/* ── empty / loading ───────────────────────────────────────────────────── */
+.gm-empty{padding:26px;text-align:center;color:#496078;font-size:11px}
+
+/* ── responsive ────────────────────────────────────────────────────────── */
+@media(max-width:1350px){
+  .gm-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:1150px){
+  /* !important because the band sets its columns inline, where the two-column
+     shape is the default and this is the override. */
+  .gm-band2{grid-template-columns:1fr!important}
+}
+@media(max-width:1000px){
+  .gm-healths{grid-template-columns:1fr 1fr}
+  .gm-modules{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .gm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .gm-healths{grid-template-columns:1fr}
+  .gm-q-item{grid-template-columns:9px 1fr;row-gap:8px}
+  .gm-q-meta{grid-column:2;flex-direction:row;align-items:center;justify-content:flex-start}
+}
 `
 
 let injected = false

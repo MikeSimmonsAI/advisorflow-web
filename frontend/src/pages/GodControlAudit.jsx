@@ -6,7 +6,7 @@
  * are the same rows through different filters and cannot disagree.
  */
 import { Fragment, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Panel, Empty, whenExact, errText } from './god/GodOpsShared'
 import './god/GodOps.css'
@@ -18,6 +18,11 @@ function pretty(json) {
 
 export default function GodControlAudit() {
   const nav = useNavigate()
+  // ?organization_id= makes the command table's ACTIVITY action land on this
+  // customer's own history rather than on the whole platform's, where finding
+  // one organization's rows means reading past everyone else's.
+  const [params, setParams] = useSearchParams()
+  const orgFilter = params.get('organization_id') || ''
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [action, setAction] = useState('')
@@ -25,15 +30,19 @@ export default function GodControlAudit() {
 
   useEffect(() => {
     setD(null)
-    api.get('/god/ops/audit' + (action ? '?action=' + encodeURIComponent(action) : ''))
+    const qs = new URLSearchParams()
+    if (action) qs.set('action', action)
+    if (orgFilter) qs.set('organization_id', orgFilter)
+    const s = qs.toString()
+    api.get('/god/ops/audit' + (s ? '?' + s : ''))
       .then(setD).catch(e => setErr(errText(e)))
-  }, [action])
+  }, [action, orgFilter])
 
   return (
     <div className="go-scope">
       <div className="go-head">
         <div>
-          <button className="go-back" onClick={() => nav('/god/sales-operations')}>← Sales Operations</button>
+          <button className="go-back" onClick={() => nav('/god')}>← Command Center</button>
           <h1 style={{ marginTop: 8 }}>Control-plane audit</h1>
           <p>Who did what, to which record, from what to what, and why. No secrets
              are recorded here — activation links and integration keys never appear.</p>
@@ -49,6 +58,15 @@ export default function GodControlAudit() {
             <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
           ))}
         </select>
+        {orgFilter ? (
+          <button className="go-btn" onClick={() => {
+            const next = new URLSearchParams(params)
+            next.delete('organization_id')
+            setParams(next, { replace: true })
+          }}>
+            Scoped to one organization — show the whole platform ✕
+          </button>
+        ) : null}
       </div>
 
       <Panel title="Entries" count={d ? d.entries.length : null}>

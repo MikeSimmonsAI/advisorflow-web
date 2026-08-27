@@ -69,34 +69,42 @@ const JUMP = [
     hint: 'EvoSys Pro brand sales — pipeline, scheduling, opportunities' },
 ]
 
-/** built:false → destination has no <Route> yet. Shown, but marked, never faked. */
+/**
+ * THE PRIMARY NAVIGATION CARRIES WORKING MODULES ONLY.
+ *
+ * It used to carry seventeen entries, ten of them tagged NEEDS BUILD, all
+ * routing to the /god/* catch-all — so two thirds of the owner's navigation was
+ * a list of doors that opened onto the same room, and a product with a real
+ * control plane read as a prototype.
+ *
+ * Nothing was faked to remove those tags. Every entry below is a registered
+ * route in App.jsx backed by real endpoints. The unfinished work did not
+ * disappear either: it is stated once, honestly, in PRODUCT STATUS on the
+ * Command Center (COMING NEXT), where each item names what it is actually
+ * waiting on. `Roadmap` at the bottom of this rail jumps straight to it.
+ *
+ * If you build one of those, add its <Route> in App.jsx, flip `live` in
+ * ProductStatus.MODULES, and add it here. Three edits, no other bookkeeping.
+ */
 const NAV = [
-  { label: 'Command Center',   path: '/god',               icon: 'command',  built: true  },
-  // Platform overview: brands, their customers, and the create-customer entry
-  // point. Sits at the top because it is where the owner should LAND — with no
-  // customer selected — rather than arriving already inside somebody's tenant.
-  //
-  // This replaces the old 'Platforms' item, which pointed at /god/platforms.
-  // That route was never built and the entry was marked built:false, so the
-  // one nav item named after this concept led nowhere.
-  { label: 'Platform',         path: '/god/platform',      icon: 'layers',   built: true  },
-  // Checkpoint 6 — the operating layer. These are the screens the owner lives
-  // in day to day, so they sit directly under the Command Center.
-  { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending', built: true  },
-  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',   built: true  },
-  { label: 'Customers',        path: '/god/customers',      icon: 'globe',    built: true  },
-  { label: 'Organizations',    path: '/god/organizations', icon: 'building', built: true  },
-  { label: 'Users',            path: '/god/users-all',     icon: 'users',    built: false },
-  { label: 'Leads',            path: '/god/leads',         icon: 'trending', built: false },
-  { label: 'Communications',   path: '/god/messaging',     icon: 'message',  built: false },
-  { label: 'Pipeline & Cadence', path: '/god/pipeline',    icon: 'branch',   built: false },
-  { label: 'Activity Feed',    path: '/god/activity',      icon: 'activity', built: false },
-  { label: 'System Health',    path: '/god/system-health', icon: 'monitor',  built: false },
-  { label: 'Billing',          path: '/god/billing',       icon: 'dollar',   built: false },
-  { label: 'Feature Flags',    path: '/god/features',      icon: 'flag',     built: false },
-  { label: 'Integrations',     path: '/god/integrations',  icon: 'link',     built: false },
-  { label: 'Audit & Security', path: '/god/audit',         icon: 'shield',   built: true  },
-  { label: 'System Settings',  path: '/god/settings',      icon: 'settings', built: false },
+  { group: 'COMMAND' },
+  { label: 'Command Center',   path: '/god',                  icon: 'command'  },
+  // Platform overview is where the owner should LAND — with no customer
+  // selected — rather than arriving already inside somebody's tenant.
+  { label: 'Platform',         path: '/god/platform',         icon: 'layers'   },
+  { label: 'Organizations',    path: '/god/organizations',    icon: 'building' },
+  { label: 'Customers',        path: '/god/customers',        icon: 'globe'    },
+  { label: 'Users & Identity', path: '/god/users-all',        icon: 'users'    },
+
+  { group: 'OPERATIONS' },
+  { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending' },
+  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch'   },
+  { label: 'Lead Scraper',     path: '/scraper',              icon: 'grid'     },
+
+  { group: 'PLATFORM' },
+  { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
+  { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
+  { label: 'Roadmap',          path: '/god#product-status',   icon: 'flag'     },
 ]
 
 function LiveClock() {
@@ -170,9 +178,14 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
 
   function handleLogout() { logout(); navigate('/login') }
 
-  const isActive = (path) =>
-    path === '/god' ? location.pathname === '/god' : location.pathname.startsWith(path)
-  const current = NAV.find(n => isActive(n.path))
+  // A hash entry ("/god#platform-health") is a jump WITHIN the Command Center,
+  // so it must never claim the active state — otherwise two rail items light up
+  // at once on /god.
+  const isActive = (path) => {
+    if (!path || path.includes('#')) return false
+    return path === '/god' ? location.pathname === '/god' : location.pathname.startsWith(path)
+  }
+  const current = NAV.find(n => n.path && isActive(n.path))
   // 248, not 220. At 220 the label had ~93px left after the icon, the gap and
   // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
   // "Audit & Security" were all being ellipsised.
@@ -250,16 +263,23 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
 
         {/* Nav */}
         <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
-          {NAV.map(({ label, path, icon, built }) => {
+          {NAV.map((item, i) => {
+            if (item.group) {
+              // Collapsed, a heading has no room and no icon to stand in for
+              // it, so it becomes a hairline rule instead of clipped text.
+              return collapsed
+                ? <div key={'g' + i} className="gm-nav-rule" />
+                : <div key={'g' + i} className="gm-nav-head">{item.group}</div>
+            }
+            const { label, path, icon } = item
             const active = isActive(path)
             return (
-              <NavLink key={path} to={path} title={collapsed ? label + (built ? '' : ' — needs build') : undefined}
-                className={`gm-nav-item ${active ? 'gm-active' : ''} ${built ? '' : 'gm-unbuilt'}`}
+              <NavLink key={path} to={path} title={collapsed ? label : undefined}
+                className={`gm-nav-item ${active ? 'gm-active' : ''}`}
                 style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '10px 0' : '9px 14px' }}
               >
                 <Ico d={ICONS[icon]} size={14} />
                 {!collapsed && <span className="gm-nav-label">{label}</span>}
-                {!collapsed && !built && <span className="gm-nav-tag">NEEDS BUILD</span>}
               </NavLink>
             )
           })}
@@ -346,10 +366,6 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {(current?.label || 'GOD MODE').toUpperCase()}
             </span>
-            {current && !current.built && (
-              <span style={{ fontSize: 8, letterSpacing: '.09em', color: '#43607d',
-                border: '1px solid #23394f', borderRadius: 3, padding: '2px 5px' }}>NEEDS BUILD</span>
-            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3a6080', fontSize: '11px' }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#23efb2', boxShadow: '0 0 6px #23efb2' }} />

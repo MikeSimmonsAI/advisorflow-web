@@ -12,10 +12,13 @@
  * writes an audit row. Nothing here creates a membership.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { api, setOrgContext } from '../../api/client'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { api } from '../../api/client'
+import { enterCustomer } from './enterCustomer'
 import { errText, whenExact } from './GodOpsShared'
 import './GodOps.css'
+
+const TABS = ['overview', 'locations', 'people', 'features']
 
 const TONE = {
   CONFIGURED: 'live', PARTIAL: 'ready', NOT_CONFIGURED: 'new',
@@ -32,7 +35,21 @@ export default function CustomerDetail() {
   const nav = useNavigate()
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
-  const [tab, setTab] = useState('overview')
+  // ?tab=people lets the command table's USERS action and the identity screen's
+  // IN CUSTOMER action land on the right tab instead of on the overview, which
+  // is one click and one scan away from what they were asked for.
+  const [params, setParams] = useSearchParams()
+  const [tab, setTab] = useState(() => {
+    const t = params.get('tab')
+    return TABS.includes(t) ? t : 'overview'
+  })
+  function chooseTab(t) {
+    setTab(t)
+    // Keep the URL honest so the tab survives a refresh and can be shared.
+    const next = new URLSearchParams(params)
+    if (t === 'overview') next.delete('tab'); else next.set('tab', t)
+    setParams(next, { replace: true })
+  }
   const [busy, setBusy] = useState(false)
   const [invite, setInvite] = useState(null)
 
@@ -42,11 +59,11 @@ export default function CustomerDetail() {
   useEffect(load, [load])
 
   async function enterContext() {
+    // The shared helper — the same one the Command Center and the organization
+    // command table call. One way into a tenant is one thing to audit.
     try {
-      const r = await api.post('/god/platform/context/customer/' + orgId, {})
-      setOrgContext(orgId, d.customer.name)
+      await enterCustomer(orgId, d.customer.name)
       nav('/')
-      void r
     } catch (e) { setErr(errText(e)) }
   }
 
@@ -105,9 +122,9 @@ export default function CustomerDetail() {
       )}
 
       <div className="go-tabs">
-        {['overview', 'locations', 'people', 'features'].map(t => (
+        {TABS.map(t => (
           <button key={t} className={'go-tab' + (tab === t ? ' on' : '')}
-                  onClick={() => setTab(t)}>{t}</button>
+                  onClick={() => chooseTab(t)}>{t}</button>
         ))}
       </div>
 

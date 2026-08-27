@@ -183,7 +183,23 @@ def get_platform_org_ids(user: User, db) -> list:
     - org_admin  → their own org only
     """
     if user.role == "god_admin":
-        return [str(row[0]) for row in db.query(Organization.id).all()]
+        # A SELECTED CUSTOMER IS A NARROWING, NOT A DECORATION.
+        #
+        # This returned every organization for a god_admin unconditionally,
+        # including while the owner had deliberately entered ONE customer via
+        # X-Org-Override. The tenant screens that call this - the admin
+        # dashboard, advisor metrics, the funnel - therefore showed every
+        # advisor on the platform under the banner naming a single customer.
+        # The owner asked "how is Greenland doing" and was answered with
+        # everyone.
+        #
+        # get_current_user sets _god_all_orgs ONLY when no customer is
+        # selected, so it is the exact signal for "the owner is neutral". When
+        # they are neutral this still returns everything, which is what God
+        # Mode is for. This only ever narrows; it never widens anyone's scope.
+        if getattr(user, "_god_all_orgs", False) or getattr(user, "organization_id", None) is None:
+            return [str(row[0]) for row in db.query(Organization.id).all()]
+        return [str(user.organization_id)]
     if user.role == "super_admin" and getattr(user, "platform_id", None):
         return [
             str(row[0])

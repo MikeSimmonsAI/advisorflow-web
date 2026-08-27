@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import MessageReview from '../components/MessageReview'
@@ -58,7 +58,12 @@ export default function Leads() {
   const [bulkAiStartResult, setBulkAiStartResult] = useState(null)
   const [view, setView] = useState('all')
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
-  const [showImport, setShowImport] = useState(false)
+  // "/leads?import=1" opens the import panel directly — that is what the
+  // Overview's Import leads button means. Read from location rather than the
+  // useSearchParams hook below, which is declared further down this list.
+  const [showImport, setShowImport] = useState(
+    () => new URLSearchParams(window.location.search).get('import') === '1'
+  )
   const fileInputRef = useRef(null)
   const pendingFile = useRef(null)
   const [googleImporting, setGoogleImporting] = useState(false)
@@ -69,9 +74,25 @@ export default function Leads() {
   const [importError, setImportError] = useState('')
   const [addLeadResult, setAddLeadResult] = useState(null)
 
-  const [searchQuery, setSearchQuery] = useState('')
-  const [tierFilter, setTierFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  // ── FILTERS ARRIVE IN THE URL ────────────────────────────────────────────
+  // The Overview's KPI cards, pipeline stages and attention queue all link
+  // here with a filter attached ("/leads?status=new"). Before this, they landed
+  // on the unfiltered list and the person had to reproduce the filter by hand,
+  // which is exactly the "decorative number block" the redesign is meant to
+  // eliminate.
+  //
+  // These seed the SAME state the filter bar drives, so a link and a dropdown
+  // produce one behaviour, and changing a filter afterwards just works.
+  const [urlParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => urlParams.get('q') || '')
+  const [tierFilter, setTierFilter] = useState(() => {
+    const t = urlParams.get('tier')
+    return TIER_FILTER_OPTIONS.some(o => o.value === t) ? t : ''
+  })
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const s = urlParams.get('status')
+    return STATUS_FILTER_OPTIONS.some(o => o.value === s) ? s : ''
+  })
   const [sortBy, setSortBy] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
   const [leadsPage, setLeadsPage] = useState(1)
@@ -190,8 +211,15 @@ export default function Leads() {
     // filterBatch may be passed directly (e.g. from batch filter change); fall back to state
     const activeBatch = filterBatch !== undefined ? filterBatch : batchFilter
     const batchParam = activeBatch ? `&import_list_name=${encodeURIComponent(activeBatch)}` : ''
+    // THE STATUS FILTER GOES TO THE SERVER, not just to the rendered rows.
+    // This loads 500 leads and filtered them in the browser, so "212 new" on
+    // the Overview could open a list showing three — the other 209 were simply
+    // outside the newest 500 rows. Passing the status down means the 500 that
+    // arrive are the 500 the filter is about. The client-side pass below is
+    // kept: it still narrows by tier and free text.
+    const statusParam = statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ''
     Promise.all([
-      api.get(`/leads/?page=1&page_size=500${batchParam}`),
+      api.get(`/leads/?page=1&page_size=500${batchParam}${statusParam}`),
       api.get('/leads/needs-review?page=1&page_size=500'),
     ]).then(([leadsData, reviewData]) => {
       // Both endpoints return a paginated envelope {items, total, page, page_size}.
@@ -211,7 +239,11 @@ export default function Leads() {
     })
   }
 
-  useEffect(() => { loadLeads(); loadImportBatches(); loadFlaggedLeads() }, [])
+  useEffect(() => { loadImportBatches(); loadFlaggedLeads() }, [])
+  // Re-fetch when the status filter changes — including on mount, which is how
+  // a "/leads?status=new" link arrives already narrowed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadLeads() }, [statusFilter])
 
   async function handleGoogleContactsImport() {
     setGoogleImporting(true)

@@ -83,6 +83,32 @@
   --surface-inset:  rgba(0, 0, 0, 0.24);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   MISSING TOKEN ALIASES — a defect fix, not a new design system.
+
+   `--border`, `--bg-hover`, `--accent` and `--text-muted` are referenced 148
+   times across the frontend (Overview, Leads, Replies, WorkQueue, CRM and
+   others) and were defined NOWHERE. An unresolved var() makes the whole
+   declaration invalid at computed-value time, so `border: 1px solid
+   var(--border)` did not render a faint border — it rendered NO border, and
+   `background: var(--bg-hover)` on :hover did nothing at all. That is why the
+   dashboard cards looked flat and unfinished.
+
+   These are aliases, so they follow the winning value of the real token on the
+   same element. `[data-theme="..."]` is set on <html>, which IS :root, so a
+   brand theme that redefines --border-subtle redefines --border with it and
+   the white-label palettes keep working untouched.
+
+   --accent is additionally overwritten at runtime by applyBrandingCSS() when
+   an organization has a brand colour; this is the default it falls back to.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --border:      var(--border-subtle);
+  --bg-hover:    var(--bg-row-hover);
+  --accent:      var(--signal-blue);
+  --text-muted:  var(--text-tertiary);
+}
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    BOOKABOOST THEME — applied when hostname contains "bookaboost" (default)

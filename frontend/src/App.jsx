@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { useEffect, useState, cloneElement } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
 import ContextBanner from './components/ContextBanner'
@@ -78,7 +78,9 @@ import TeamCalendar from './pages/sales/TeamCalendar'
 import TeamProposals from './pages/sales/TeamProposals'
 import Salespeople from './pages/sales/Salespeople'
 import Prospects from './pages/sales/Prospects'
-import { getCurrentUser, startKeepAlive, startRefreshLoop, api } from './api/client'
+import GodUsers from './pages/god/GodUsers'
+import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext } from './api/client'
+import { exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
   // Check both keys: af_token is the current key, bookaboost_token is the legacy key.
@@ -145,24 +147,43 @@ function GodRoute({ children }) {
   return <>{children}</>
 }
 
+/**
+ * GodModeLayout — the God Mode frame.
+ *
+ * THE BANNER NOW REFLECTS THE REAL CONTEXT, NOT A LOCAL FLAG. It used to hold
+ * an `orgSession` in React state, set by a POST /god/orgs/{id}/impersonate call
+ * that established no context on the server or on the client — so the banner
+ * appeared for a tenancy the API was not actually applying, and it vanished the
+ * moment the page reloaded even though nothing had been exited.
+ *
+ * It now reads the same org context that puts `X-Org-Override` on every
+ * request. Its purpose is the case where the owner walks back into God Mode
+ * while still inside a customer: the whole control plane says so, and offers
+ * one click to leave.
+ */
 function GodModeLayout({ children }) {
-  const [orgSession, setOrgSession] = useState(null)
+  const [ctx, setCtx] = useState(() => getOrgContext())
+
+  // Re-read on focus: the context can be cleared from the tenant app's own
+  // banner in another tab, and a God rail still claiming a customer would be
+  // saying something untrue about what the server will do next.
+  useEffect(() => {
+    const sync = () => setCtx(getOrgContext())
+    window.addEventListener('focus', sync)
+    return () => window.removeEventListener('focus', sync)
+  }, [])
 
   async function handleExitOrgSession() {
-    if (orgSession) {
-      try { await api.post(`/god/orgs/${orgSession.org_id}/exit-session`) }
-      catch (e) { /* best effort */ }
-    }
-    setOrgSession(null)
+    await exitCustomer()
+    setCtx(null)
   }
 
-  const childrenWithProps = children && typeof children.type === 'function'
-    ? cloneElement(children, { onEnterOrg: setOrgSession })
-    : children
-
   return (
-    <GodShell orgSession={orgSession} onExitOrgSession={handleExitOrgSession}>
-      {childrenWithProps}
+    <GodShell
+      orgSession={ctx ? { org_id: ctx.orgId, org_name: ctx.orgName } : null}
+      onExitOrgSession={handleExitOrgSession}
+    >
+      {children}
     </GodShell>
   )
 }
@@ -286,6 +307,9 @@ export default function App() {
         <Route path="/god/customers/new" element={<GodRoute><GodModeLayout><CustomerCreate /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers/:orgId" element={<GodRoute><GodModeLayout><CustomerDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
+        {/* Users & Identity. One row per human, every context on that row —
+            see the header of GodUsers.jsx. */}
+        <Route path="/god/users-all" element={<GodRoute><GodModeLayout><GodUsers /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

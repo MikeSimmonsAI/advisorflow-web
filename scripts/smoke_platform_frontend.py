@@ -93,8 +93,37 @@ def main():
               "identity-lookup" in code and "look.can_add" in code)
         check("...and a refusal from the server is shown, not worked around",
               "look.reason" in code)
-        check("entering a customer calls the audited context endpoint",
-              "/god/platform/context/customer/" in code)
+        # Aug 27 2026: the call moved into pages/god/enterCustomer.js, which is
+        # now the ONE way into a tenant. Asserting it here would have kept
+        # passing while the Command Center and the organizations table used a
+        # different, broken path — which is exactly what happened. So the check
+        # moved with it and got stricter: the helper must call the audited
+        # endpoint, and NO screen may call the old impersonate route.
+        check("entering a customer goes through the shared helper",
+              "enterCustomer(" in code and "/god/platform/context/customer/" not in code)
+
+    helper = read("pages", "god", "enterCustomer.js")
+    if helper:
+        check("the shared helper calls the audited context endpoint",
+              "/god/platform/context/customer/" in helper)
+        check("...and sets the org context that scopes every later request",
+              "setOrgContext(" in helper)
+        check("...and refuses to continue if a membership was created",
+              "memberships_before" in helper and "memberships_after" in helper)
+
+    # THE OLD PATH MUST BE GONE FROM THE UI ENTIRELY.
+    # POST /god/orgs/{id}/impersonate validates an org and writes a log line but
+    # establishes no context on the client, so a screen using it dropped the
+    # owner into the tenant app holding no organization at all. The endpoint
+    # still exists for compatibility; nothing in the UI may reach for it.
+    import glob as _glob
+    offenders = []
+    for path in _glob.glob(os.path.join(SRC, "**", "*.jsx"), recursive=True):
+        with open(path, encoding="utf-8") as fh:
+            if "/impersonate" in strip_comments(fh.read()):
+                offenders.append(os.path.basename(path))
+    check("no screen uses the context-less impersonate route",
+          not offenders, ", ".join(offenders) or "none")
 
     app = read("App.jsx")
     if app:

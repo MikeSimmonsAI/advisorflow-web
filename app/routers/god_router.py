@@ -322,6 +322,248 @@ def god_stats(god: User = Depends(require_god), db: Session = Depends(get_db)):
             "as_of": datetime.utcnow().isoformat()}
 
 
+@router.get("/platform-health")
+def god_platform_health(god: User = Depends(require_god), db: Session = Depends(get_db)):
+    """PLATFORM HEALTH — real conditions, computed by the server, in grouped queries.
+
+    WHY THIS IS ONE ENDPOINT AND NOT SIX FRONTEND DERIVATIONS. The health grid
+    needs facts that live in five tables. Asking the browser to derive them from
+    the org list would either be wrong (it cannot see delivery receipts or
+    integration credentials at all) or would need a request per organization,
+    which is the N+1 the app was just hardened against. Every query below is
+    grouped or aggregate and runs once for the whole platform.
+
+    EVERY SECTION REPORTS ITS OWN SOURCE. A section whose data does not exist
+    says so with `status: "no_source"` and a `needs` string naming what would
+    have to be built. It never guesses, and it never renders green for silence.
+
+    Sections: messaging · billing · jobs · integrations · customer_activity ·
+    security. `status` is one of ok | warn | bad | no_source.
+    """
+    now = datetime.utcnow()
+    cutoff_30 = now - timedelta(days=30)
+    cutoff_7 = now - timedelta(days=7)
+    cutoff_1 = now - timedelta(days=1)
+
+    def _section(key, label, status, headline, detail, needs=None, to=None):
+        return {"key": key, "label": label, "status": status,
+                "headline": headline, "detail": detail,
+                "needs": needs, "to": to}
+
+    out = []
+
+    # ── messaging ──────────────────────────────────────────────────────────
+    # Twilio delivery receipts are written by the status-callback webhook, so
+    # this is a real delivery figure and not a send count.
+    try:
+        rows = db.execute(text("""
+            SELECT COALESCE(delivery_status, 'pending') AS s, COUNT(*)
+            FROM messages WHERE sent_at >= :c GROUP BY 1
+        """), {"c": cutoff_30}).fetchall()
+        by_status = {str(r[0]): int(r[1]) for r in rows}
+        sent_30 = sum(by_status.values())
+        failed = by_status.get("failed", 0) + by_status.get("undelivered", 0)
+        delivered = by_status.get("delivered", 0)
+        pending = by_status.get("pending", 0)
+        if sent_30 == 0:
+            out.append(_section(
+                "messaging", "Messaging", "off",
+                "No messages in 30 days",
+                "Nothing has been sent platform-wide, so there is no delivery "
+                "rate to report.", to="/god/organizations"))
+        else:
+            fail_pct = round((failed / sent_30) * 100, 1)
+            # Receipts only exist for messages Twilio has reported on. Counting
+            # pending as a failure would show a red platform every time a
+            # webhook is briefly behind.
+            settled = sent_30 - pending
+            deliv_pct = round((delivered / settled) * 100, 1) if settled else None
+            status = "bad" if fail_pct >= 10 else "warn" if fail_pct >= 2 else "ok"
+            out.append(_section(
+                "messaging", "Messaging", status,
+                (("%s%% delivered" % deliv_pct) if deliv_pct is not None
+                 else "%d sent · awaiting receipts" % sent_30),
+                "%d sent in 30 days · %d failed or undelivered (%s%%) · %d awaiting a receipt."
+                % (sent_30, failed, fail_pct, pending),
+                to="/god/organizations"))
+    except Exception as e:                                   # pragma: no cover
+        log.warning("platform-health messaging failed: %s", e)
+        out.append(_section("messaging", "Messaging", "no_source",
+                            "Query failed", str(e)[:160]))
+
+    # ── billing ────────────────────────────────────────────────────────────
+    # Real, and deliberately unflattering: a customer with no Stripe customer
+    # id cannot be charged, whatever their plan field says.
+    try:
+        real_orgs = db.query(Organization).filter(
+            Organization.id != "org-god-platform").all()
+        no_pm = [o for o in real_orgs
+                 if not getattr(o, "stripe_customer_id", None)]
+        unpriced = [o for o in real_orgs
+                    if not getattr(o, "plan", None) or o.plan == "trial"]
+        if not real_orgs:
+            out.append(_section("billing", "Billing", "off",
+                                "No customers yet", "Nothing to bill."))
+        elif len(no_pm) == len(real_orgs):
+            out.append(_section(
+                "billing", "Billing", "bad",
+                "Billing has never run",
+                "None of %d customers has a payment method, and there is no "
+                "invoice or payment table for charges to be written to."
+                % len(real_orgs),
+                needs="invoices + payments tables", to="/god/organizations"))
+        else:
+            status = "warn" if (no_pm or unpriced) else "ok"
+            out.append(_section(
+                "billing", "Billing", status,
+                "%d of %d payable" % (len(real_orgs) - len(no_pm), len(real_orgs)),
+                "%d without a payment method · %d with no package assigned."
+                % (len(no_pm), len(unpriced)),
+                to="/god/organizations"))
+    except Exception as e:                                   # pragma: no cover
+        log.warning("platform-health billing failed: %s", e)
+        out.append(_section("billing", "Billing", "no_source",
+                            "Query failed", str(e)[:160]))
+
+    # ── background jobs ────────────────────────────────────────────────────
+    # THERE IS NO JOB TABLE. Scheduled sends run in-process and leave no
+    # durable record of success or failure, so there is nothing truthful to
+    # report. A green tick here would be a lie about the one subsystem whose
+    # silent failure nobody would notice.
+    out.append(_section(
+        "jobs", "Background jobs", "no_source",
+        "No source",
+        "Scheduled work leaves no durable record, so queue depth and failure "
+        "counts cannot be reported.",
+        needs="a job/queue table with outcomes"))
+
+    # ── integrations ───────────────────────────────────────────────────────
+    try:
+        cred_rows = db.execute(text("""
+            SELECT COUNT(*),
+                   SUM(CASE WHEN is_active THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN last_used_at IS NULL THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN last_used_at IS NOT NULL AND last_used_at < :c30
+                            THEN 1 ELSE 0 END)
+            FROM integration_credentials
+        """), {"c30": cutoff_30}).fetchone()
+        total_c = int(cred_rows[0] or 0)
+        active_c = int(cred_rows[1] or 0)
+        never_used = int(cred_rows[2] or 0)
+        stale = int(cred_rows[3] or 0)
+        try:
+            fails = db.execute(text("""
+                SELECT COUNT(*) FROM integration_request_logs
+                WHERE occurred_at >= :c7 AND success = false
+            """), {"c7": cutoff_7}).scalar() or 0
+        except Exception:
+            fails = db.execute(text("""
+                SELECT COUNT(*) FROM integration_request_logs
+                WHERE occurred_at >= :c7 AND success = 0
+            """), {"c7": cutoff_7}).scalar() or 0
+        fails = int(fails)
+        if total_c == 0:
+            out.append(_section(
+                "integrations", "Integrations", "off",
+                "None issued",
+                "No integration credentials exist. Voice and calendar bridges "
+                "are not connected for any customer.",
+                to="/god/customers"))
+        else:
+            status = "bad" if fails else "warn" if (stale or never_used) else "ok"
+            bits = ["%d active of %d" % (active_c, total_c)]
+            if never_used:
+                bits.append("%d never used" % never_used)
+            if stale:
+                bits.append("%d unused for 30+ days" % stale)
+            if fails:
+                bits.append("%d failed calls in 7 days" % fails)
+            out.append(_section(
+                "integrations", "Integrations", status,
+                "%d active" % active_c, " · ".join(bits) + ".",
+                to="/god/customers"))
+    except Exception as e:
+        log.warning("platform-health integrations failed: %s", e)
+        out.append(_section(
+            "integrations", "Integrations", "no_source",
+            "No source",
+            "Integration credential state could not be read.",
+            needs="integration_credentials table"))
+
+    # ── customer activity ──────────────────────────────────────────────────
+    # Same definition of "activity" that _enrich_org uses, so this tile and the
+    # organization table cannot disagree about who is quiet.
+    try:
+        active_orgs = db.query(Organization).filter(
+            Organization.id != "org-god-platform",
+            Organization.is_active == True).all()          # noqa: E712
+        ids = [o.id for o in active_orgs]
+        used_today, used_week = set(), set()
+        if ids:
+            for cutoff, bucket in ((cutoff_1, used_today), (cutoff_7, used_week)):
+                for src in (
+                    "SELECT DISTINCT l.organization_id FROM messages m "
+                    "JOIN leads l ON m.lead_id = l.id WHERE m.sent_at >= :c",
+                    "SELECT DISTINCT organization_id FROM users "
+                    "WHERE last_login_at >= :c AND organization_id IS NOT NULL",
+                ):
+                    for r in db.execute(text(src), {"c": cutoff}).fetchall():
+                        if r[0]:
+                            bucket.add(str(r[0]))
+        t = len([i for i in ids if str(i) in used_today])
+        w = len([i for i in ids if str(i) in used_week])
+        n = len(ids)
+        if n == 0:
+            out.append(_section("customer_activity", "Customer activity", "off",
+                                "No active customers", "Nothing to measure."))
+        else:
+            quiet = n - w
+            status = "bad" if quiet >= max(1, n // 2) else "warn" if quiet else "ok"
+            out.append(_section(
+                "customer_activity", "Customer activity", status,
+                "%d of %d used it today" % (t, n),
+                "%d active in the last 7 days · %d silent for a week or more."
+                % (w, quiet),
+                to="/god/organizations"))
+    except Exception as e:                                   # pragma: no cover
+        log.warning("platform-health activity failed: %s", e)
+        out.append(_section("customer_activity", "Customer activity",
+                            "no_source", "Query failed", str(e)[:160]))
+
+    # ── security & access ──────────────────────────────────────────────────
+    try:
+        owners = _safe_count(db, User, [User.role == "god_admin",
+                                        User.is_active == True])   # noqa: E712
+        suspended_orgs = _safe_count(db, Organization, [
+            Organization.is_active == False,                        # noqa: E712
+            Organization.id != "org-god-platform"])
+        deactivated = _safe_count(db, User, [User.is_active == False])  # noqa: E712
+        try:
+            ctx = db.execute(text("""
+                SELECT COUNT(*) FROM audit_log_entries
+                WHERE created_at >= :c7 AND action LIKE 'platform_owner.%'
+            """), {"c7": cutoff_7}).scalar() or 0
+        except Exception:
+            ctx = None
+        # More than one platform-owner identity is the condition worth shouting
+        # about: the whole identity model says there is exactly one.
+        status = "bad" if owners != 1 else "ok"
+        headline = ("%d platform owner identities" % owners) if owners != 1 \
+            else "1 platform owner"
+        detail = "%d organization(s) suspended · %d user account(s) deactivated" \
+                 % (suspended_orgs, deactivated)
+        if ctx is not None:
+            detail += " · %d privileged context action(s) in 7 days" % int(ctx)
+        out.append(_section("security", "Security & access", status,
+                            headline, detail + ".", to="/god/audit"))
+    except Exception as e:                                   # pragma: no cover
+        log.warning("platform-health security failed: %s", e)
+        out.append(_section("security", "Security & access", "no_source",
+                            "Query failed", str(e)[:160]))
+
+    return {"as_of": now.isoformat(), "sections": out}
+
+
 @router.get("/platforms")
 def god_platforms(god: User = Depends(require_god), db: Session = Depends(get_db)):
     try:
@@ -463,21 +705,110 @@ def god_leads(
 @router.get("/users")
 def god_users(
     role: Optional[str] = Query(None), search: Optional[str] = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+    scope: str = Query("admins", regex="^(admins|all|internal|tenant)$"),
+    skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=500),
     god: User = Depends(require_god), db: Session = Depends(get_db),
 ):
+    """THE CANONICAL IDENTITY LIST. One row per HUMAN, never per context.
+
+    A person who is a god_admin, sells for EvoSys Pro, and administers a
+    customer is ONE row here carrying three contexts — not three rows. That is
+    the whole point of the centralized identity model, and a user screen that
+    listed them three times would quietly teach the operator otherwise.
+
+    Every context is resolved in GROUPED queries: one for organizations, one
+    for platforms, one for memberships, one for brand-sales org names. Fetching
+    them per user is what made the old admin screens 600 statements deep.
+
+    `scope`:
+      admins   — god / super / org admins (unchanged default; existing callers)
+      internal — organization_id IS NULL: the control plane and brand sales
+      tenant   — everyone who belongs to a customer organization
+      all      — every account
+    """
+    from app.models.sales_models import BrandSalesOrg, Membership
+
     q = db.query(User)
-    if role: q = q.filter(User.role == role)
-    else: q = q.filter(User.role.in_(["god_admin","super_admin","org_admin"]))
-    if search: q = q.filter(User.email.ilike(f"%{search}%") | User.full_name.ilike(f"%{search}%"))
+    if role:
+        q = q.filter(User.role == role)
+    elif scope == "admins":
+        q = q.filter(User.role.in_(["god_admin", "super_admin", "org_admin"]))
+    elif scope == "internal":
+        q = q.filter(User.organization_id.is_(None))
+    elif scope == "tenant":
+        q = q.filter(User.organization_id.isnot(None))
+    if search:
+        q = q.filter(User.email.ilike(f"%{search}%") | User.full_name.ilike(f"%{search}%"))
     total = q.count()
     users = q.order_by(User.email).offset(skip).limit(limit).all()
+
+    # ── contexts, resolved once for the whole page ─────────────────────────
+    org_ids = sorted({u.organization_id for u in users if u.organization_id})
+    orgs = {}
+    if org_ids:
+        orgs = {o.id: o for o in
+                db.query(Organization).filter(Organization.id.in_(org_ids)).all()}
+    plat_ids = sorted({o.platform_id for o in orgs.values() if o.platform_id})
+    platforms = {}
+    if plat_ids:
+        platforms = {p.id: p for p in
+                     db.query(Platform).filter(Platform.id.in_(plat_ids)).all()}
+
+    user_ids = sorted({u.id for u in users})
+    mems_by_user = {}
+    scope_names = {}
+    if user_ids:
+        try:
+            rows = (db.query(Membership)
+                      .filter(Membership.user_id.in_(user_ids)).all())
+            for m in rows:
+                mems_by_user.setdefault(m.user_id, []).append(m)
+            bs_ids = sorted({m.scope_id for m in rows
+                             if m.scope_type == "brand_sales_org"})
+            if bs_ids:
+                for b in db.query(BrandSalesOrg).filter(
+                        BrandSalesOrg.id.in_(bs_ids)).all():
+                    scope_names[b.id] = b.name
+            m_org_ids = sorted({m.scope_id for m in rows
+                                if m.scope_type == "organization"
+                                and m.scope_id not in orgs})
+            if m_org_ids:
+                for o in db.query(Organization).filter(
+                        Organization.id.in_(m_org_ids)).all():
+                    scope_names[o.id] = o.name
+        except Exception as e:                               # pragma: no cover
+            log.warning("god_users membership lookup failed: %s", e)
+
     def _ud(u):
-        return {"id": u.id, "email": u.email, "name": getattr(u,"full_name",None),
-                "role": u.role, "is_active": getattr(u,"is_active",True),
-                "organization_id": getattr(u,"organization_id",None),
-                "created_at": u.created_at.isoformat() if getattr(u,"created_at",None) else None}
-    return {"total": total, "users": [_ud(u) for u in users]}
+        org = orgs.get(u.organization_id) if u.organization_id else None
+        plat = platforms.get(org.platform_id) if org and org.platform_id else None
+        mems = mems_by_user.get(u.id, [])
+        return {
+            # ── existing contract, unchanged ──
+            "id": u.id, "email": u.email, "name": getattr(u, "full_name", None),
+            "role": u.role, "is_active": getattr(u, "is_active", True),
+            "organization_id": getattr(u, "organization_id", None),
+            "created_at": u.created_at.isoformat() if getattr(u, "created_at", None) else None,
+            # ── added: the contexts this one identity holds ──
+            "full_name": getattr(u, "full_name", None),
+            "organization_name": org.name if org else None,
+            "platform_id": plat.id if plat else None,
+            "platform_name": plat.name if plat else None,
+            # NULL organization_id is this architecture's positive assertion
+            # that somebody belongs to the control plane and to no tenant.
+            "is_internal": u.organization_id is None,
+            "must_change_password": bool(getattr(u, "must_change_password", False)),
+            "last_login_at": (u.last_login_at.isoformat()
+                              if getattr(u, "last_login_at", None) else None),
+            "memberships": [
+                {"id": m.id, "scope_type": m.scope_type, "scope_id": m.scope_id,
+                 "scope_name": scope_names.get(m.scope_id),
+                 "role": m.role, "is_active": bool(m.is_active)}
+                for m in mems
+            ],
+        }
+
+    return {"total": total, "scope": scope, "users": [_ud(u) for u in users]}
 
 
 @router.patch("/users/{user_id}/role")

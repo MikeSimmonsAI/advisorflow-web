@@ -182,10 +182,49 @@ def main():
 
     print("\n--- navigation tells the truth " + "-" * 40)
     shell = read("pages", "GodShell.jsx")
-    for route in ("/god/sales-operations", "/god/implementations", "/god/customers", "/god/audit"):
-        m = re.search(r"path: '%s'\s*,\s*icon: '\w+',\s*built: (true|false)" % re.escape(route), shell)
-        check("nav for %s is marked built" % route, bool(m) and m.group(1) == "true",
-              m.group(0) if m else "no nav entry")
+    app_src = read("App.jsx")
+
+    # ── Aug 27 2026: the rule got STRICTER, not looser ──────────────────────
+    # This used to require `built: true` beside four known paths — a label the
+    # rail printed as a NEEDS BUILD tag. Ten of seventeen entries carried that
+    # tag and every one of them routed to the /god/* catch-all, so the honesty
+    # mechanism had become the thing making a working product look unfinished.
+    #
+    # The label is gone. What replaced it is the stronger claim it was only ever
+    # a proxy for: EVERY ENTRY IN THE PRIMARY NAV RESOLVES TO A REAL ROUTE.
+    # A tag can be wrong; this cannot be wrong without the check failing.
+    nav_block = shell.split("const NAV = [", 1)[-1].split("\n]", 1)[0]
+    nav_paths = re.findall(r"path:\s*'([^']+)'", nav_block)
+    check("the primary nav has entries", len(nav_paths) >= 5, "%d entries" % len(nav_paths))
+    for p in nav_paths:
+        base = p.split("#")[0]                      # "/god#platform-health" → "/god"
+        routed = ('path="%s"' % base) in app_src
+        check("nav entry %s resolves to a registered route" % p, routed,
+              "no <Route path=\"%s\">" % base)
+
+    # The four Checkpoint 6 screens must still BE in the nav, not merely routed.
+    for route in ("/god/sales-operations", "/god/implementations",
+                  "/god/customers", "/god/audit"):
+        check("nav still carries %s" % route, route in nav_paths,
+              "missing from NAV")
+
+    # And nothing may reintroduce a wall of unbuilt markers in the RENDERED
+    # rail. Comments are stripped first: the file explains at length why the
+    # markers were removed, and a check that failed on its own rationale would
+    # be pressure to delete the explanation.
+    shell_code = re.sub(r"/\*.*?\*/", "", shell, flags=re.S)
+    shell_code = re.sub(r"^\s*//.*$", "", shell_code, flags=re.M)
+    check("the rail no longer advertises unbuilt destinations",
+          "NEEDS BUILD" not in shell_code and "built: false" not in shell_code,
+          "an unbuilt marker is back in GodShell's rendered output")
+
+    # Unfinished work is still declared — once, where it belongs.
+    status = read("pages", "god", "ProductStatus.jsx")
+    check("unfinished modules are declared in PRODUCT STATUS",
+          "COMING NEXT" in status and "live: false" in status)
+    check("...and every one of them names what it is waiting on",
+          status.count("needs:") >= status.count("live: false"),
+          "%d needs: for %d roadmap items" % (status.count("needs:"), status.count("live: false")))
     sales_shell = read("pages", "sales", "SalesShell.jsx")
     m = [l for l in sales_shell.splitlines() if "/sales/onboarding" in l]
     check("the sales nav no longer marks Sold/Onboarding as 'soon'",

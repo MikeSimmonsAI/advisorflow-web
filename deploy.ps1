@@ -169,6 +169,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "DEMO SITE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_tenant_isolation.py 2>&1 | Select-String "FAIL|checks passed|ISOLATED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "TENANT ISOLATION CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_owner_console.py 2>&1 | Select-String "FAIL|checks passed|HONEST" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "OWNER CONSOLE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_platform_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM FRONTEND CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
