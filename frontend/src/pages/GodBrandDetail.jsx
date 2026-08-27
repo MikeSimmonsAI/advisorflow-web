@@ -14,6 +14,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { Kpi, Panel, Empty, Fact, money, when, whenExact, StatusBadge, errText, Bar } from './god/GodOpsShared'
 import AddSalesUser from './god/AddSalesUser'
+import PackagePricing from './god/PackagePricing'
 import './god/GodOps.css'
 
 export default function GodBrandDetail() {
@@ -51,8 +52,13 @@ export default function GodBrandDetail() {
     } finally { setBusy('') }
   }
 
+  // Named, because the pricing editor has to be able to redraw the catalogue
+  // from the server after a save rather than patching what the browser assumed.
+  const loadBrand = () => api.get('/god/ops/brands/' + brandId)
+    .then(setD).catch(e => setErr(errText(e)))
+
   useEffect(() => {
-    api.get('/god/ops/brands/' + brandId).then(setD).catch(e => setErr(errText(e)))
+    loadBrand()
     loadTeam()
   }, [brandId])
 
@@ -141,49 +147,7 @@ export default function GodBrandDetail() {
         </div>
       </Panel>
 
-      <Panel title="Package catalogue" count={(cfg.packages || []).length}>
-        {!(cfg.packages || []).length ? (
-          <Empty>This platform has no packages configured.</Empty>
-        ) : (
-          <table className="go-table">
-            <thead>
-              <tr><th>Package</th><th>Key</th><th className="num">Price</th>
-                  <th className="num">Setup</th><th>Billing plan</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              {cfg.packages.map(p => (
-                <tr key={p.id}>
-                  <td data-label="Package">{p.name}</td>
-                  <td data-label="Key"><code>{p.key}</code></td>
-                  <td data-label="Price" className="num">
-                    {p.is_custom ? 'custom' : money(p.price, p.currency)}
-                  </td>
-                  <td data-label="Setup" className="num">
-                    {p.setup_fee ? money(p.setup_fee, p.currency) : '—'}
-                  </td>
-                  <td data-label="Billing plan">
-                    {p.billing_plan_key
-                      ? <span className="go-badge">{p.billing_plan_key}</span>
-                      : <span className="go-badge">not linked</span>}
-                  </td>
-                  <td data-label="Status">
-                    <span className={'go-badge' + (p.is_active ? ' live' : '')}>
-                      {p.is_active ? 'active' : 'inactive'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <div className="go-body" style={{ borderTop: '1px solid var(--go-line)' }}>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--go-dim)' }}>
-            Sales packages are not the legacy Stripe plans. The billing plan column
-            shows the link where one exists; it is deliberately not wired to
-            charging, and provisioning records billing <em>intent</em> only.
-          </p>
-        </div>
-      </Panel>
+      <PackagePricing packages={cfg.packages} onSaved={loadBrand} />
 
       {link ? (
         <div className="go-note warn">

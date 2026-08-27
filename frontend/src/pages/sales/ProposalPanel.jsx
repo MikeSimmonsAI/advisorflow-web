@@ -105,6 +105,31 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
     () => api.post('/sales/proposals/' + current.id + '/send', {}),
     'Sent. The customer now has a secure link.')
 
+  // The customer's own view, with no email and no trace on the deal that the
+  // customer opened anything. The server's dry run publishes and mints a real
+  // key but sends nothing, so what you read here is exactly what they would
+  // read - not a mock of it.
+  //
+  // The key is short-lived on purpose: a preview link is a live door into the
+  // pricing, and one pasted into a chat should not still open next week.
+  const previewAsCustomer = () => {
+    // Opened synchronously, before any await, or the browser treats it as a
+    // popup and blocks it.
+    const w = window.open('', '_blank')
+    act(async () => {
+      try {
+        const r = await api.post('/sales/proposals/' + current.id + '/send',
+                                 { dry_run: true, valid_hours: 4 })
+        if (!r.portal_url) throw new Error('No preview link came back.')
+        if (w) w.location = r.portal_url
+        else window.location.href = r.portal_url
+      } catch (e) {
+        if (w) w.close()
+        throw e
+      }
+    }, 'Opened the customer view in a new tab. Nothing was sent, and the preview key expires in 4 hours.')
+  }
+
   const newVersion = () => act(
     () => api.post('/sales/proposals/' + current.id + '/version', {}),
     'Version created. The previous one is kept as superseded.')
@@ -434,6 +459,9 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
       {/* ── actions ─────────────────────────────────────────────────────── */}
       <div className="sw-flex" style={{ gap: 8, marginTop: 18, paddingTop: 14,
                                         borderTop: '1px solid #eef2f5', flexWrap: 'wrap' }}>
+        <button className="sw-btn" onClick={previewAsCustomer} disabled={busy}>
+          Preview as customer
+        </button>
         <button className="sw-btn" onClick={publish} disabled={busy}>
           {p.is_published ? 'Republish' : 'Publish'}
         </button>
@@ -452,8 +480,9 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
         )}
       </div>
       <div className="sw-subtle" style={{ marginTop: 8 }}>
-        Publishing puts it in the deal room and sends nothing. Sending emails the
-        customer a private link.
+        Preview opens the finished document exactly as the customer sees it, in a
+        new tab, and sends nothing. Publishing puts it in the deal room and sends
+        nothing. Sending emails the customer a private link.
       </div>
 
 

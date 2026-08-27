@@ -95,8 +95,10 @@ def brand_detail(brand_sales_org_id: str,
             "brand_sales_org": {"id": bso.id, "name": bso.name, "slug": bso.slug,
                                 "timezone": bso.timezone, "is_active": bool(bso.is_active)},
             "packages": [{"id": p.id, "key": p.key, "name": p.name,
-                          # `price` is the MONTH-TO-MONTH rate; the contracted
-                          # rate lives in the pricing block beside it, named.
+                          # `price` is the LEGACY ONE-TIME implementation charge,
+                          # not a monthly rate. Both monthly rates, and the
+                          # implementation fee that actually applies, are in the
+                          # named `pricing` block beside it.
                           "price": float(p.price) if p.price is not None else None,
                           "setup_fee": float(p.setup_fee) if p.setup_fee is not None else None,
                           "pricing": _pp.package_pricing(p),
