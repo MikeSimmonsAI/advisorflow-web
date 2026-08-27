@@ -719,8 +719,25 @@ def resolve_portal_token(
     db.commit()
     db.refresh(view)
 
-    # Branding — future white-label support
-    branding = json.loads(p.branding_override) if p.branding_override else {}
+    # Branding. The brand's own public identity first (name, support number,
+    # marketing site) so the document can sign itself the way the brand does
+    # everywhere else, then any per-proposal override on top. Nothing internal
+    # is added here: every key below is information the brand already prints on
+    # its own website.
+    branding = {}
+    try:
+        from app.services.appointment_invites import brand_identity_for_brand
+        ident = brand_identity_for_brand(db, getattr(p, "brand_sales_org_id", None))
+        for k in ("name", "support_phone", "website", "accent"):
+            if ident.get(k):
+                branding[k] = ident[k]
+    except Exception:
+        logger.exception("portal branding lookup failed for proposal %s", p.id)
+    if p.branding_override:
+        try:
+            branding.update(json.loads(p.branding_override) or {})
+        except Exception:
+            logger.exception("bad branding_override on proposal %s", p.id)
 
     return {
         "view_id": view.id,
@@ -730,6 +747,12 @@ def resolve_portal_token(
             "subtitle": p.subtitle,
             "client_name": portal_token.recipient_name or p.client_name,
             "client_company": p.client_company,
+            # Document identity, so the cover can carry a reference and a date
+            # instead of inventing one at render time.
+            "proposal_number": getattr(p, "proposal_number", None),
+            "version": getattr(p, "version", None),
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "updated_at": p.updated_at.isoformat() if p.updated_at else None,
             "blocks": [_block_to_dict(b) for b in p.blocks],
         },
         "branding": branding,

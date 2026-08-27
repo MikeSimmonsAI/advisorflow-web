@@ -1,20 +1,29 @@
 /**
- * PortalViewer — the immersive client-facing proposal experience
+ * PortalViewer — the client-facing proposal document
  *
  * URL: /portal/view/:proposalId
  * Auth: sessionStorage portal_view_id + portal_proposal (set by PortalAccess)
  *
  * Design goals:
- *  - Full-screen, dark, premium — nothing that looks like the internal app
- *  - Client sees their name, the proposal title, and content blocks
+ *  - Reads like a printed proposal: white sheet, navy headings, blue keylines.
+ *    A prospect is being asked for money; the page should look like a document
+ *    from a firm, not like a product tour.
+ *  - Nothing that looks like the internal app.
  *  - Scroll depth + time tracked via heartbeat pings every 15s
  *  - Final stats sent on beforeunload via sendBeacon
  *  - PDF/image blocks embedded inline, video blocks embedded via iframe
  *  - Download button per file block, marks download event on backend
+ *
+ * The tracking, permission and content-protection behaviour is unchanged from
+ * the previous version of this file. Only the presentation was rebuilt.
+ *
+ * This page is deliberately single-theme. It is a document, and a document has
+ * a paper colour; every colour below is stated explicitly so it never inherits
+ * anything from the host.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 
 // ── URL resolver: ensures /proposals/files/{id} hits the backend, not the SPA ─
@@ -25,55 +34,406 @@ function resolveFileUrl(url) {
   return url
 }
 
-// ── Markdown renderer (lightweight, no external lib) ─────────────────────────
-function renderMarkdown(text) {
-  if (!text) return ''
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>')
-    .replace(/^#{2}\s+(.+)$/gm, '<h2>$1</h2>')
-    .replace(/^#{1}\s+(.+)$/gm, '<h1>$1</h1>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/\n/g, '<br/>')
+const C = {
+  navy: '#0d2440',
+  navy2: '#173b64',
+  head: '#12304f',
+  ink: '#16283c',
+  body: '#3a4756',
+  muted: '#6d7c8d',
+  faint: '#93a1b1',
+  blue: '#2f76c7',
+  blueLt: '#8ab8ea',
+  callBg: '#e9f1fb',
+  callBar: '#1f4e8c',
+  green: '#17794a',
+  paper: '#ffffff',
+  page: '#eef1f6',
+  line: '#dfe5ec',
+  zebra: '#f6f9fc',
 }
 
-// ── Block renderers ───────────────────────────────────────────────────────────
-function TextBlock({ block }) {
+const RULE = 'linear-gradient(90deg, #1b3f66 0%, #4a8ed4 55%, #9cc6ee 100%)'
+
+// ── Inline formatting ────────────────────────────────────────────────────────
+// Returns React nodes, never HTML. Proposal prose is typed by a salesperson,
+// and rendering it as HTML would make every proposal an XSS vector aimed at
+// the customer.
+
+const URL_RE = /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?])/g
+
+function linkify(text, keyBase) {
+  const out = []
+  let last = 0
+  let m
+  URL_RE.lastIndex = 0
+  while ((m = URL_RE.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    out.push(
+      <a key={keyBase + '-u' + m.index} href={m[0]} target="_blank" rel="noopener noreferrer"
+         style={{ color: C.blue, textDecoration: 'underline', wordBreak: 'break-word' }}>
+        {m[0]}
+      </a>
+    )
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+// Highlights that make the commercial sections readable at a glance: the word
+// OPTIONAL becomes a badge, a stated saving becomes green. Both are only ever
+// applied to words the author actually wrote.
+function decorate(text, keyBase) {
+  const parts = []
+  const re = /(\bOPTIONAL\b|Save \$[\d,]+(?:\.\d\d)?(?:\s*(?:\/month|every month|per month|\/mo))?)/g
+  let last = 0
+  let m
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(...linkify(text.slice(last, m.index), keyBase + '-t' + last))
+    if (m[0] === 'OPTIONAL') {
+      parts.push(
+        <span key={keyBase + '-o' + m.index} style={{
+          display: 'inline-block', verticalAlign: 'baseline',
+          background: C.callBg, color: C.callBar,
+          border: '1px solid #c3d9f2', borderRadius: 4,
+          fontSize: 10.5, fontWeight: 700, letterSpacing: '.10em',
+          padding: '2px 7px', margin: '0 2px',
+        }}>OPTIONAL</span>
+      )
+    } else {
+      parts.push(
+        <strong key={keyBase + '-s' + m.index} style={{ color: C.green, fontWeight: 600 }}>{m[0]}</strong>
+      )
+    }
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(...linkify(text.slice(last), keyBase + '-t' + last))
+  return parts
+}
+
+function inline(text, keyBase) {
+  // **bold** and *italic*, then decorate/linkify whatever is left.
+  const nodes = []
+  const re = /\*\*(.+?)\*\*|\*(.+?)\*/g
+  let last = 0
+  let m
+  let i = 0
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) nodes.push(...decorate(text.slice(last, m.index), keyBase + '-p' + (i++)))
+    if (m[1] !== undefined) {
+      nodes.push(<strong key={keyBase + '-b' + m.index} style={{ color: C.ink, fontWeight: 600 }}>
+        {decorate(m[1], keyBase + '-bi' + m.index)}
+      </strong>)
+    } else {
+      nodes.push(<em key={keyBase + '-i' + m.index}>{decorate(m[2], keyBase + '-ii' + m.index)}</em>)
+    }
+    last = m.index + m[0].length
+  }
+  if (last < text.length) nodes.push(...decorate(text.slice(last), keyBase + '-p' + (i++)))
+  return nodes
+}
+
+// ── Block-level parser ───────────────────────────────────────────────────────
+// Headings, bullets, numbered lists, pipe tables, > callouts, paragraphs.
+
+function isTableRow(line) {
+  const t = line.trim()
+  return t.startsWith('|') && t.endsWith('|') && t.length > 2
+}
+function isTableDivider(line) {
+  return /^\|[\s:|-]+\|$/.test(line.trim())
+}
+function splitRow(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim())
+}
+
+function parseBlocks(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    const t = line.trim()
+
+    if (!t) { i++; continue }
+
+    if (/^###\s+/.test(t)) { out.push({ k: 'h3', text: t.replace(/^###\s+/, '') }); i++; continue }
+    if (/^##\s+/.test(t))  { out.push({ k: 'h2', text: t.replace(/^##\s+/, '') });  i++; continue }
+    if (/^#\s+/.test(t))   { out.push({ k: 'h2', text: t.replace(/^#\s+/, '') });   i++; continue }
+    if (/^(-{3,}|_{3,}|\*{3,})$/.test(t)) { out.push({ k: 'hr' }); i++; continue }
+
+    if (isTableRow(t)) {
+      const rows = []
+      while (i < lines.length && isTableRow(lines[i])) {
+        if (!isTableDivider(lines[i])) rows.push(splitRow(lines[i]))
+        i++
+      }
+      if (rows.length) out.push({ k: 'table', head: rows[0], rows: rows.slice(1) })
+      continue
+    }
+
+    if (t.startsWith('>')) {
+      const buf = []
+      while (i < lines.length && lines[i].trim().startsWith('>')) {
+        buf.push(lines[i].trim().replace(/^>\s?/, ''))
+        i++
+      }
+      out.push({ k: 'callout', text: buf.join(' ').trim() })
+      continue
+    }
+
+    if (/^([-*•]|•)\s+/.test(t)) {
+      const items = []
+      while (i < lines.length && /^([-*•]|•)\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^([-*•]|•)\s+/, ''))
+        i++
+      }
+      out.push({ k: 'ul', items })
+      continue
+    }
+
+    if (/^\d+[.)]\s+/.test(t)) {
+      const items = []
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^\d+[.)]\s+/, ''))
+        i++
+      }
+      out.push({ k: 'ol', items })
+      continue
+    }
+
+    // Paragraph: consume until a blank line or the start of another construct.
+    const buf = []
+    while (i < lines.length) {
+      const l = lines[i]
+      const lt = l.trim()
+      if (!lt) break
+      if (/^#{1,3}\s+/.test(lt) || lt.startsWith('>') || isTableRow(lt) ||
+          /^([-*•]|•)\s+/.test(lt) || /^\d+[.)]\s+/.test(lt)) break
+      buf.push(lt)
+      i++
+    }
+    if (buf.length) out.push({ k: 'p', text: buf.join(' ') })
+  }
+  return out
+}
+
+// ── Document primitives ──────────────────────────────────────────────────────
+
+function SectionRule() {
+  return <div style={{ height: 3, background: RULE, borderRadius: 2, margin: '10px 0 22px' }} />
+}
+
+function H2({ children }) {
+  return (
+    <>
+      <h2 style={{
+        fontFamily: 'Archivo, "Helvetica Neue", Arial, sans-serif',
+        fontSize: 'clamp(20px, 2.4vw, 25px)', fontWeight: 700, color: C.head,
+        letterSpacing: '-.01em', lineHeight: 1.2, margin: '38px 0 0',
+        textWrap: 'balance',
+      }}>{children}</h2>
+      <SectionRule />
+    </>
+  )
+}
+
+function Callout({ children }) {
   return (
     <div style={{
-      color: '#c8d4e8',
-      fontSize: 16,
-      lineHeight: 1.85,
-      maxWidth: 680,
-    }}>
-      <div
-        dangerouslySetInnerHTML={{ __html: '<p>' + renderMarkdown(block.content) + '</p>' }}
-        style={{ margin: 0 }}
-      />
+      background: C.callBg, borderLeft: '4px solid ' + C.callBar,
+      padding: '16px 20px', margin: '18px 0', color: C.ink,
+      fontSize: 16, lineHeight: 1.65,
+    }}>{children}</div>
+  )
+}
+
+function Table({ head, rows }) {
+  return (
+    <div style={{ overflowX: 'auto', margin: '18px 0', border: '1px solid ' + C.line }}>
+      <table style={{
+        width: '100%', minWidth: 480, borderCollapse: 'collapse',
+        fontSize: 14.5, fontVariantNumeric: 'tabular-nums',
+      }}>
+        <thead>
+          <tr>
+            {head.map((c, n) => (
+              <th key={n} style={{
+                background: C.head, color: '#fff', textAlign: 'left',
+                fontWeight: 600, padding: '11px 14px',
+                fontSize: 13, letterSpacing: '.01em',
+                borderRight: n < head.length - 1 ? '1px solid rgba(255,255,255,.14)' : 'none',
+              }}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, n) => (
+            <tr key={n} style={{ background: n % 2 ? C.zebra : '#fff' }}>
+              {r.map((c, m) => (
+                <td key={m} style={{
+                  padding: '12px 14px', color: C.body, verticalAlign: 'top',
+                  borderTop: '1px solid ' + C.line, lineHeight: 1.55,
+                }}>{inline(c, 'tc' + n + '-' + m)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
+
+function Prose({ nodes, keyBase }) {
+  return nodes.map((b, n) => {
+    const k = keyBase + '-' + n
+    if (b.k === 'h2') return <H2 key={k}>{b.text}</H2>
+    if (b.k === 'h3') return (
+      <h3 key={k} style={{
+        fontFamily: 'Archivo, "Helvetica Neue", Arial, sans-serif',
+        fontSize: 17, fontWeight: 600, color: C.head, margin: '26px 0 8px',
+      }}>{inline(b.text, k)}</h3>
+    )
+    if (b.k === 'hr') return <hr key={k} style={{ border: 0, borderTop: '1px solid ' + C.line, margin: '28px 0' }} />
+    if (b.k === 'callout') return <Callout key={k}>{inline(b.text, k)}</Callout>
+    if (b.k === 'table') return <Table key={k} head={b.head} rows={b.rows} />
+    if (b.k === 'ul') return (
+      <ul key={k} style={{ margin: '12px 0 16px', padding: 0, listStyle: 'none' }}>
+        {b.items.map((it, m) => (
+          <li key={m} style={{
+            position: 'relative', paddingLeft: 22, margin: '0 0 9px',
+            fontSize: 16.5, lineHeight: 1.7, color: C.body,
+          }}>
+            <span style={{
+              position: 'absolute', left: 2, top: '.62em', width: 6, height: 6,
+              background: C.blue, borderRadius: 1, transform: 'rotate(45deg)',
+            }} />
+            {inline(it, k + '-' + m)}
+          </li>
+        ))}
+      </ul>
+    )
+    if (b.k === 'ol') return (
+      <ol key={k} style={{ margin: '12px 0 16px', paddingLeft: 22 }}>
+        {b.items.map((it, m) => (
+          <li key={m} style={{ fontSize: 16.5, lineHeight: 1.7, color: C.body, margin: '0 0 9px' }}>
+            {inline(it, k + '-' + m)}
+          </li>
+        ))}
+      </ol>
+    )
+    return (
+      <p key={k} style={{ fontSize: 16.5, lineHeight: 1.75, color: C.body, margin: '0 0 14px' }}>
+        {inline(b.text, k)}
+      </p>
+    )
+  })
+}
+
+// ── Block renderers ──────────────────────────────────────────────────────────
+
+function TextBlock({ block }) {
+  const nodes = parseBlocks(block.content)
+  const first = nodes[0]
+  const heading = first && first.k === 'h2' ? first.text : null
+  const rest = heading ? nodes.slice(1) : nodes
+
+  // "Investment" is generated by the backend as a heading plus one bold money
+  // line. Give the number the weight it has in the conversation.
+  if (heading && /^investment$/i.test(heading.trim())) {
+    const amount = rest.find(b => b.k === 'p')
+    return (
+      <section>
+        <H2>{heading}</H2>
+        <div style={{
+          border: '1px solid ' + C.line, borderTop: '3px solid ' + C.head,
+          background: '#fbfcfe', padding: '22px 24px', margin: '4px 0 8px',
+        }}>
+          <div style={{
+            fontSize: 11.5, fontWeight: 700, letterSpacing: '.13em',
+            textTransform: 'uppercase', color: C.muted, marginBottom: 8,
+          }}>Total</div>
+          <div style={{
+            fontFamily: 'Archivo, "Helvetica Neue", Arial, sans-serif',
+            fontSize: 'clamp(28px, 4vw, 38px)', fontWeight: 700, color: C.head,
+            letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums',
+          }}>
+            {amount ? amount.text.replace(/\*\*/g, '') : ''}
+          </div>
+        </div>
+        {rest.filter(b => b !== amount).length > 0 && (
+          <Prose nodes={rest.filter(b => b !== amount)} keyBase={'inv-' + block.id} />
+        )}
+      </section>
+    )
+  }
+
+  // A "next steps" section is the one place the document should raise its
+  // voice, so it gets the dark card.
+  if (heading && /next step/i.test(heading)) {
+    return (
+      <section>
+        <H2>{heading}</H2>
+        <div style={{
+          background: 'linear-gradient(135deg, ' + C.navy + ' 0%, #16375c 100%)',
+          color: '#fff', padding: '26px 28px', margin: '4px 0 8px',
+        }}>
+          <div className="pv-oncard">
+            <Prose nodes={rest} keyBase={'ns-' + block.id} />
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section>
+      {heading && <H2>{heading}</H2>}
+      <Prose nodes={rest} keyBase={'tb-' + block.id} />
+    </section>
+  )
+}
+
+function FileChrome({ title, meta, actions, children }) {
+  return (
+    <div style={{ border: '1px solid ' + C.line, background: '#fff', margin: '22px 0' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '14px 18px', background: '#f8fafc',
+        borderBottom: '1px solid ' + C.line, flexWrap: 'wrap',
+      }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: C.ink }}>{title}</div>
+          {meta && <div style={{ fontSize: 12.5, color: C.muted, marginTop: 2 }}>{meta}</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>{actions}</div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const BTN = {
+  background: '#fff', border: '1px solid ' + C.line, borderRadius: 6,
+  padding: '7px 14px', color: C.head, fontSize: 12.5, fontWeight: 600,
+  cursor: 'pointer', font: 'inherit', fontFamily: 'inherit',
+  textDecoration: 'none', display: 'inline-flex', alignItems: 'center',
+}
+const BTN_PRIMARY = { ...BTN, background: C.head, borderColor: C.head, color: '#fff' }
 
 function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) {
   const [loaded, setLoaded] = useState(false)
   if (!block.file_url) return null
   const src = resolveFileUrl(block.file_url)
   return (
-    <div>
+    <div style={{ margin: '22px 0' }}>
       {block.content && (
-        <p style={{ color: '#7a92b4', fontSize: 13, margin: '0 0 12px', fontStyle: 'italic' }}>
-          {block.content}
-        </p>
+        <p style={{ color: C.muted, fontSize: 13.5, margin: '0 0 10px' }}>{block.content}</p>
       )}
       <div style={{
-        borderRadius: 12, overflow: 'hidden',
-        border: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(0,0,0,0.3)',
-        opacity: loaded ? 1 : 0,
-        transition: 'opacity 0.4s ease',
-        position: 'relative',
+        border: '1px solid ' + C.line, background: '#f8fafc',
+        opacity: loaded ? 1 : 0, transition: 'opacity .4s ease', position: 'relative',
       }}>
         <img
           src={src}
@@ -82,26 +442,15 @@ function ImageBlock({ block, onDownload, canDownload, protected: isProtected }) 
           draggable={false}
           style={{ width: '100%', display: 'block', maxHeight: 600, objectFit: 'contain' }}
         />
-        {/* Transparent overlay blocks right-click → Save Image */}
         {isProtected && (
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'transparent',
-            zIndex: 1,
-          }} onContextMenu={e => e.preventDefault()} />
+          <div style={{ position: 'absolute', inset: 0, background: 'transparent', zIndex: 1 }}
+               onContextMenu={e => e.preventDefault()} />
         )}
       </div>
       {canDownload && block.file_url && (
-        <button
-          onClick={() => { window.open(src, '_blank'); onDownload() }}
-          style={{
-            marginTop: 12, background: 'none',
-            border: '1px solid rgba(255,255,255,0.12)',
-            borderRadius: 8, padding: '7px 16px',
-            color: '#7a92b4', fontSize: 12, cursor: 'pointer',
-          }}
-        >
-          ↓ {block.file_name || 'Download Image'}
+        <button onClick={() => { window.open(src, '_blank'); onDownload() }}
+                style={{ ...BTN, marginTop: 10 }}>
+          ↓ {block.file_name || 'Download image'}
           {block.file_size ? ` (${(block.file_size / 1024).toFixed(0)} KB)` : ''}
         </button>
       )}
@@ -114,80 +463,32 @@ function PdfBlock({ block, onDownload, canDownload }) {
   if (!block.file_url) return null
   const src = resolveFileUrl(block.file_url)
   return (
-    <div style={{
-      border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: 12,
-      overflow: 'hidden',
-      background: 'rgba(8,12,30,0.6)',
-    }}>
-      {/* Preview bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 14,
-        padding: '16px 20px',
-        borderBottom: expanded ? '1px solid rgba(255,255,255,0.08)' : 'none',
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 8,
-          background: 'rgba(8,124,255,0.15)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18, flexShrink: 0,
-        }}>
-          📄
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#ddeeff' }}>
-            {block.content || block.file_name || 'Document'}
-          </div>
-          {block.file_size && (
-            <div style={{ fontSize: 12, color: '#4a6080' }}>
-              {block.file_name} · {(block.file_size / 1024).toFixed(0)} KB
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            style={{
-              background: 'rgba(8,124,255,0.15)',
-              border: '1px solid rgba(8,124,255,0.3)',
-              borderRadius: 8, padding: '7px 14px',
-              color: '#087cff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
+    <FileChrome
+      title={block.content || block.file_name || 'Document'}
+      meta={block.file_size ? `${block.file_name} · ${(block.file_size / 1024).toFixed(0)} KB` : block.file_name}
+      actions={
+        <>
+          <button style={BTN} onClick={() => setExpanded(e => !e)}>
             {expanded ? 'Collapse' : 'Preview'}
           </button>
           {canDownload && (
-            <button
-              onClick={() => { window.open(src, '_blank'); onDownload() }}
-              style={{
-                background: 'rgba(25,214,124,0.1)',
-                border: '1px solid rgba(25,214,124,0.3)',
-                borderRadius: 8, padding: '7px 14px',
-                color: '#19d67c', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
+            <button style={BTN_PRIMARY} onClick={() => { window.open(src, '_blank'); onDownload() }}>
               ↓ Download
             </button>
           )}
-        </div>
-      </div>
-      {/* Inline PDF viewer */}
+        </>
+      }
+    >
       {expanded && (
-        <iframe
-          src={`${src}#toolbar=0&navpanes=0`}
-          title={block.content || 'Document'}
-          style={{ width: '100%', height: 600, border: 'none', display: 'block' }}
-        />
+        <iframe src={`${src}#toolbar=0&navpanes=0`} title={block.content || 'Document'}
+                style={{ width: '100%', height: 600, border: 'none', display: 'block' }} />
       )}
-    </div>
+    </FileChrome>
   )
 }
 
 function VideoBlock({ block }) {
-  const [ready, setReady] = useState(false)
   if (!block.file_url) return null
-
-  // Transform share URLs to embed URLs
   let embedUrl = block.file_url
   if (embedUrl.includes('youtube.com/watch')) {
     const id = new URL(embedUrl).searchParams.get('v')
@@ -202,21 +503,12 @@ function VideoBlock({ block }) {
     const id = embedUrl.split('loom.com/share/')[1]?.split('?')[0]
     if (id) embedUrl = `https://www.loom.com/embed/${id}`
   }
-
   return (
-    <div>
+    <div style={{ margin: '22px 0' }}>
       {block.content && (
-        <p style={{ color: '#7a92b4', fontSize: 13, margin: '0 0 14px', fontStyle: 'italic' }}>
-          {block.content}
-        </p>
+        <p style={{ color: C.muted, fontSize: 13.5, margin: '0 0 10px' }}>{block.content}</p>
       )}
-      <div style={{
-        borderRadius: 12, overflow: 'hidden',
-        border: '1px solid rgba(255,255,255,0.08)',
-        background: '#000',
-        aspectRatio: '16/9',
-        position: 'relative',
-      }}>
+      <div style={{ border: '1px solid ' + C.line, background: '#000', aspectRatio: '16/9' }}>
         <iframe
           src={embedUrl}
           title={block.content || 'Video'}
@@ -230,150 +522,63 @@ function VideoBlock({ block }) {
 }
 
 function DividerBlock() {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0',
-    }}>
-      <div style={{ flex: 1, height: 1, background: 'linear-gradient(to right, transparent, rgba(8,124,255,0.3), transparent)' }} />
-      <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(8,124,255,0.5)' }} />
-      <div style={{ flex: 1, height: 1, background: 'linear-gradient(to left, transparent, rgba(8,124,255,0.3), transparent)' }} />
-    </div>
-  )
+  return <div style={{ height: 2, background: RULE, opacity: .5, margin: '34px 0', borderRadius: 2 }} />
 }
 
 function WebsiteUrlBlock({ block }) {
   const [expanded, setExpanded] = useState(true)
   const [loadError, setLoadError] = useState(false)
   if (!block.file_url) return null
-
   const url = block.file_url.startsWith('http') ? block.file_url : `https://${block.file_url}`
-
   return (
-    <div style={{
-      border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: 12,
-      overflow: 'hidden',
-      background: 'rgba(8,12,30,0.6)',
-    }}>
-      {/* Header bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: '14px 20px',
-        borderBottom: expanded ? '1px solid rgba(255,255,255,0.08)' : 'none',
-        background: 'rgba(255,255,255,0.02)',
-      }}>
-        {/* Browser chrome dots */}
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-          {['#ff5f57', '#ffbd2e', '#28c840'].map(c => (
-            <div key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c, opacity: 0.7 }} />
-          ))}
-        </div>
-        {/* URL pill */}
-        <div style={{
-          flex: 1, background: 'rgba(0,0,0,0.3)',
-          borderRadius: 6, padding: '5px 12px',
-          fontSize: 12, color: '#6a8aaa', fontFamily: 'monospace',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {url}
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            style={{
-              background: 'rgba(8,124,255,0.15)',
-              border: '1px solid rgba(8,124,255,0.3)',
-              borderRadius: 8, padding: '6px 14px',
-              color: '#087cff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
+    <FileChrome
+      title={block.content || 'Website'}
+      meta={url}
+      actions={
+        <>
+          <button style={BTN} onClick={() => setExpanded(e => !e)}>
             {expanded ? 'Collapse' : 'Expand'}
           </button>
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              background: 'rgba(25,214,124,0.1)',
-              border: '1px solid rgba(25,214,124,0.3)',
-              borderRadius: 8, padding: '6px 14px',
-              color: '#19d67c', fontSize: 12, fontWeight: 600,
-              textDecoration: 'none', display: 'inline-flex', alignItems: 'center',
-            }}
-          >
-            ↗ Open
-          </a>
-        </div>
-      </div>
-      {/* iframe */}
+          <a style={BTN_PRIMARY} href={url} target="_blank" rel="noopener noreferrer">Open ↗</a>
+        </>
+      }
+    >
       {expanded && (
         loadError ? (
           <div style={{
-            height: 240,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            color: '#4a6080', fontSize: 14, gap: 12,
+            height: 220, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 12,
+            color: C.muted, fontSize: 14,
           }}>
-            <div style={{ fontSize: 32 }}>🚫</div>
-            <div>This site doesn't allow embedding.</div>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                color: '#087cff', fontSize: 13, textDecoration: 'none',
-                border: '1px solid rgba(8,124,255,0.3)',
-                borderRadius: 8, padding: '7px 16px',
-              }}
-            >
-              Open in new tab ↗
-            </a>
+            <div>This site doesn’t allow embedding.</div>
+            <a style={BTN} href={url} target="_blank" rel="noopener noreferrer">Open in a new tab ↗</a>
           </div>
         ) : (
           <iframe
             src={url}
-            title={block.content || 'Site Preview'}
+            title={block.content || 'Site preview'}
             style={{ width: '100%', height: 560, border: 'none', display: 'block' }}
             onError={() => setLoadError(true)}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         )
       )}
-      {block.content && (
-        <div style={{ padding: '10px 20px', fontSize: 13, color: '#4a6080', fontStyle: 'italic', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-          {block.content}
-        </div>
-      )}
-    </div>
+    </FileChrome>
   )
 }
 
 function CtaBlock({ block }) {
   if (!block.content) return null
   return (
-    <div style={{ textAlign: 'center', padding: '8px 0' }}>
+    <div style={{ margin: '26px 0' }}>
       <a
         href={block.file_url || '#'}
         target={block.file_url ? '_blank' : '_self'}
         rel="noopener noreferrer"
         style={{
-          display: 'inline-block',
-          background: 'linear-gradient(135deg, #087cff, #0557c4)',
-          color: '#fff',
-          textDecoration: 'none',
-          borderRadius: 12,
-          padding: '14px 36px',
-          fontSize: 15,
-          fontWeight: 700,
-          boxShadow: '0 4px 20px rgba(8,124,255,0.35)',
-          transition: 'transform 0.1s, box-shadow 0.1s',
-        }}
-        onMouseEnter={e => {
-          e.currentTarget.style.transform = 'translateY(-1px)'
-          e.currentTarget.style.boxShadow = '0 6px 28px rgba(8,124,255,0.5)'
-        }}
-        onMouseLeave={e => {
-          e.currentTarget.style.transform = 'translateY(0)'
-          e.currentTarget.style.boxShadow = '0 4px 20px rgba(8,124,255,0.35)'
+          display: 'inline-block', background: C.head, color: '#fff',
+          textDecoration: 'none', padding: '14px 30px',
+          fontSize: 15, fontWeight: 600, letterSpacing: '.01em',
         }}
       >
         {block.content}
@@ -382,13 +587,46 @@ function CtaBlock({ block }) {
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Cover ────────────────────────────────────────────────────────────────────
+
+function MetaCell({ label, children }) {
+  if (!children) return null
+  return (
+    <div style={{ borderTop: '1px solid rgba(255,255,255,.28)', paddingTop: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 14.5, color: '#c9dcf0', lineHeight: 1.55 }}>{children}</div>
+    </div>
+  )
+}
+
+function Wordmark({ light }) {
+  return (
+    <span style={{
+      fontFamily: 'Archivo, "Helvetica Neue", Arial, sans-serif',
+      fontWeight: 700, letterSpacing: '-.02em',
+      color: light ? '#fff' : C.head,
+    }}>
+      EvoSys <span style={{ color: light ? C.blueLt : C.blue }}>Pro</span>
+    </span>
+  )
+}
+
+function fmtDate(iso) {
+  if (!iso) return null
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
+  if (isNaN(d.getTime())) return null
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+
 export default function PortalViewer() {
   const { proposalId } = useParams()
-  const navigate = useNavigate()
   const [proposal, setProposal] = useState(null)
+  const [branding, setBranding] = useState({})
   const [error, setError] = useState(null)
   const [revealed, setRevealed] = useState(false)
+  const [progress, setProgress] = useState(0)
   const viewIdRef = useRef(null)
   const startRef = useRef(Date.now())
   const scrollPctRef = useRef(0)
@@ -402,6 +640,8 @@ export default function PortalViewer() {
     const raw = sessionStorage.getItem('portal_proposal')
     const viewId = sessionStorage.getItem('portal_view_id')
     const perms = JSON.parse(sessionStorage.getItem('portal_permissions') || '{}')
+    let brand = {}
+    try { brand = JSON.parse(sessionStorage.getItem('portal_branding') || '{}') || {} } catch { brand = {} }
 
     if (!raw || !viewId) {
       setError('Your session has expired. Please use the link from your email to re-enter.')
@@ -415,18 +655,17 @@ export default function PortalViewer() {
         return
       }
       setProposal(p)
+      setBranding(brand)
       viewIdRef.current = viewId
       canDownload.current = perms.can_download !== false
       protectContent.current = !!perms.protect_content
-
-      // Fade in
       setTimeout(() => setRevealed(true), 80)
     } catch {
       setError('Failed to load proposal. Please use the link from your email.')
     }
   }, [proposalId])
 
-  // Scroll tracking
+  // Scroll tracking — unchanged semantics, plus a reading-progress bar.
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return
     const el = containerRef.current
@@ -434,6 +673,8 @@ export default function PortalViewer() {
     const total = el.scrollHeight
     const pct = Math.round((scrolled / total) * 100)
     if (pct > scrollPctRef.current) scrollPctRef.current = pct
+    const range = total - el.clientHeight
+    setProgress(range > 0 ? Math.min(100, Math.max(0, (el.scrollTop / range) * 100)) : 0)
   }, [])
 
   // Heartbeat ping every 15s
@@ -452,16 +693,10 @@ export default function PortalViewer() {
   // Content protection
   useEffect(() => {
     if (!proposal || !protectContent.current) return
-
-    // Disable right-click
     const blockContext = e => e.preventDefault()
     document.addEventListener('contextmenu', blockContext)
-
-    // Disable drag on images
     const blockDrag = e => e.preventDefault()
     document.addEventListener('dragstart', blockDrag)
-
-    // Block Ctrl+S, Ctrl+P, Ctrl+U, Ctrl+A
     const blockKeys = e => {
       if (e.ctrlKey || e.metaKey) {
         if (['s', 'p', 'u', 'a'].includes(e.key.toLowerCase())) {
@@ -471,11 +706,8 @@ export default function PortalViewer() {
       }
     }
     document.addEventListener('keydown', blockKeys)
-
-    // CSS: disable text selection and image drag
     document.body.style.userSelect = 'none'
     document.body.style.webkitUserSelect = 'none'
-
     return () => {
       document.removeEventListener('contextmenu', blockContext)
       document.removeEventListener('dragstart', blockDrag)
@@ -506,18 +738,48 @@ export default function PortalViewer() {
     } catch {}
   }
 
+  const FONTS = (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@300;400;500;600&display=swap');
+      .pv-root, .pv-root * { box-sizing: border-box; }
+      .pv-root ::-webkit-scrollbar { width: 10px; }
+      .pv-root ::-webkit-scrollbar-track { background: ${C.page}; }
+      .pv-root ::-webkit-scrollbar-thumb { background: #c4cfdb; border-radius: 6px; }
+      @keyframes pvUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+      .pv-block { animation: pvUp .45s ease both; }
+      .pv-oncard p, .pv-oncard li { color: #d8e6f5 !important; }
+      .pv-oncard h2, .pv-oncard h3, .pv-oncard strong { color: #fff !important; }
+      @media (prefers-reduced-motion: reduce) {
+        .pv-block { animation: none !important; }
+        .pv-root { scroll-behavior: auto !important; }
+      }
+      @media print {
+        .pv-chrome { display: none !important; }
+        .pv-sheet { box-shadow: none !important; border: 0 !important; }
+      }
+    `}</style>
+  )
+
   // ── Error state ─────────────────────────────────────────────────────────────
   if (error) {
     return (
-      <div style={{
-        minHeight: '100vh', background: '#040812',
+      <div className="pv-root" style={{
+        minHeight: '100vh', background: C.page,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: '"Inter", system-ui, sans-serif',
+        fontFamily: '"Source Sans 3", system-ui, Arial, sans-serif', padding: 24,
       }}>
-        <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 20 }}>🔒</div>
-          <h2 style={{ color: '#fff', fontSize: 20, fontWeight: 700, margin: '0 0 12px' }}>Session Expired</h2>
-          <p style={{ color: '#556', fontSize: 14, lineHeight: 1.6 }}>{error}</p>
+        {FONTS}
+        <div style={{
+          textAlign: 'center', maxWidth: 460, padding: '40px 32px',
+          background: '#fff', border: '1px solid ' + C.line,
+          borderTop: '4px solid ' + C.head,
+        }}>
+          <div style={{ marginBottom: 14, fontSize: 15 }}><Wordmark /></div>
+          <h2 style={{
+            fontFamily: 'Archivo, Arial, sans-serif', color: C.head,
+            fontSize: 20, fontWeight: 700, margin: '0 0 10px',
+          }}>This link is no longer active</h2>
+          <p style={{ color: C.body, fontSize: 15, lineHeight: 1.6, margin: 0 }}>{error}</p>
         </div>
       </div>
     )
@@ -525,207 +787,194 @@ export default function PortalViewer() {
 
   if (!proposal) {
     return (
-      <div style={{
-        minHeight: '100vh', background: '#040812',
+      <div className="pv-root" style={{
+        minHeight: '100vh', background: C.page,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: '"Source Sans 3", system-ui, Arial, sans-serif',
       }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: 'linear-gradient(135deg, #087cff, #0a56b0)',
-          animation: 'pulse 1.8s ease-in-out infinite',
-          boxShadow: '0 0 24px rgba(8,124,255,0.3)',
-        }} />
-        <style>{`@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.6;transform:scale(0.93)} }`}</style>
+        {FONTS}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 17, marginBottom: 14 }}><Wordmark /></div>
+          <div style={{ width: 160, height: 3, background: '#dbe3ec', overflow: 'hidden' }}>
+            <div style={{
+              width: '40%', height: '100%', background: RULE,
+              animation: 'pvSlide 1.2s ease-in-out infinite',
+            }} />
+          </div>
+          <style>{`@keyframes pvSlide { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }`}</style>
+        </div>
       </div>
     )
   }
 
-  // ── The proposal ────────────────────────────────────────────────────────────
+  const brandName = branding.name || 'EvoSys Pro'
+  const brandPhone = branding.support_phone || branding.phone || null
+  const brandEmail = branding.support_email || branding.email || null
+  const brandSite = branding.website || null
+  const preparedDate = fmtDate(proposal.created_at) || fmtDate(proposal.updated_at)
+  const docRef = proposal.proposal_number
+    ? proposal.proposal_number + (proposal.version > 1 ? ' · v' + proposal.version : '')
+    : null
+
   return (
     <div
       ref={containerRef}
       onScroll={handleScroll}
+      className="pv-root"
       style={{
-        minHeight: '100vh',
-        height: '100vh',
-        overflowY: 'auto',
-        background: '#040812',
-        fontFamily: '"Inter", system-ui, sans-serif',
+        minHeight: '100vh', height: '100vh', overflowY: 'auto',
+        background: C.page, color: C.body,
+        fontFamily: '"Source Sans 3", system-ui, -apple-system, Arial, sans-serif',
         opacity: revealed ? 1 : 0,
-        transform: revealed ? 'translateY(0)' : 'translateY(16px)',
-        transition: 'opacity 0.6s ease, transform 0.6s ease',
+        transition: 'opacity .5s ease',
         scrollBehavior: 'smooth',
       }}
     >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@700&display=swap');
-        * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(8,124,255,0.25); border-radius: 4px; }
-        @keyframes fadeInUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
-        .portal-block { animation: fadeInUp 0.5s ease both; }
-        @media (max-width: 700px) { .portal-grid { grid-template-columns: 1fr !important; } }
-      `}</style>
+      {FONTS}
 
       {/* Top bar */}
-      <div style={{
-        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
-        background: 'rgba(4,8,18,0.85)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
-        padding: '0 32px',
-        height: 56,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      <div className="pv-chrome" style={{
+        position: 'sticky', top: 0, zIndex: 100,
+        background: 'rgba(255,255,255,.94)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid ' + C.line,
+        padding: '0 clamp(16px, 4vw, 40px)',
+        height: 54, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 7,
-            background: 'linear-gradient(135deg, #087cff, #0a56b0)',
-            boxShadow: '0 0 12px rgba(8,124,255,0.4)',
-          }} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>
-            EvoSys Pro
+        <span style={{ fontSize: 15 }}><Wordmark /></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {protectContent.current && (
+            <span style={{
+              fontSize: 11, color: C.callBar, background: C.callBg,
+              border: '1px solid #c3d9f2', borderRadius: 4,
+              padding: '3px 9px', letterSpacing: '.06em', fontWeight: 600,
+            }}>PROTECTED</span>
+          )}
+          <span style={{ fontSize: 12, color: C.muted, letterSpacing: '.06em' }}>
+            CONFIDENTIAL PROPOSAL
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {protectContent.current && (
-            <div style={{
-              fontSize: 11, color: '#445',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 6, padding: '3px 8px',
-              letterSpacing: '0.03em',
-            }}>
-              🔒 Protected
-            </div>
-          )}
-          <div style={{ fontSize: 12, color: '#445' }}>Secure Proposal Portal</div>
-        </div>
+        <div style={{
+          position: 'absolute', left: 0, bottom: -1, height: 2,
+          width: progress + '%', background: RULE, transition: 'width .12s linear',
+        }} />
       </div>
 
-      {/* Cover / Hero */}
+      {/* Cover */}
       <div style={{
-        minHeight: '55vh',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        textAlign: 'center', padding: '100px 32px 64px',
-        position: 'relative', overflow: 'hidden',
+        background: 'linear-gradient(135deg, ' + C.navy + ' 0%, ' + C.navy2 + ' 100%)',
+        padding: 'clamp(48px, 8vw, 88px) clamp(20px, 5vw, 56px) clamp(40px, 6vw, 64px)',
       }}>
-        {/* Background glow */}
-        <div style={{
-          position: 'absolute', inset: 0, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse 800px 400px at 50% 30%, rgba(8,124,255,0.08) 0%, transparent 70%)',
-        }} />
-        {/* Grid texture */}
-        <div style={{
-          position: 'absolute', inset: 0, pointerEvents: 'none',
-          backgroundImage: 'linear-gradient(rgba(8,124,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(8,124,255,0.04) 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-          maskImage: 'radial-gradient(ellipse 80% 60% at 50% 40%, black, transparent)',
-          WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 40%, black, transparent)',
-        }} />
+        <div style={{ maxWidth: 900, margin: '0 auto' }}>
+          <div style={{ fontSize: 22, marginBottom: 'clamp(32px, 6vw, 64px)' }}><Wordmark light /></div>
 
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          {proposal.client_name && (
-            <div style={{
-              fontSize: 13, color: '#087cff', fontWeight: 600,
-              letterSpacing: '0.12em', textTransform: 'uppercase',
-              marginBottom: 20,
-              animation: 'fadeInUp 0.5s 0.1s ease both',
-            }}>
-              Prepared for {proposal.client_name}
-              {proposal.client_company ? ` · ${proposal.client_company}` : ''}
-            </div>
-          )}
+          <div style={{
+            fontSize: 12.5, fontWeight: 700, letterSpacing: '.16em',
+            textTransform: 'uppercase', color: C.blueLt, marginBottom: 14,
+          }}>
+            Proposal{docRef ? ' · ' + docRef : ''}
+          </div>
+
           <h1 style={{
-            fontSize: 'clamp(28px, 5vw, 52px)',
-            fontWeight: 700,
-            fontFamily: '"Playfair Display", Georgia, serif',
-            color: '#fff',
-            lineHeight: 1.15,
-            margin: '0 0 20px',
-            maxWidth: 740,
-            animation: 'fadeInUp 0.5s 0.2s ease both',
+            fontFamily: 'Archivo, "Helvetica Neue", Arial, sans-serif',
+            fontSize: 'clamp(30px, 5.2vw, 50px)', fontWeight: 700, color: '#fff',
+            lineHeight: 1.12, letterSpacing: '-.025em', margin: '0 0 18px',
+            maxWidth: 18 + 'em', textWrap: 'balance',
           }}>
             {proposal.title}
           </h1>
+
           {proposal.subtitle && (
             <p style={{
-              fontSize: 18, color: '#7a92b4', lineHeight: 1.6,
-              margin: 0, maxWidth: 560,
-              animation: 'fadeInUp 0.5s 0.3s ease both',
+              fontSize: 'clamp(16px, 1.8vw, 18.5px)', color: '#c9dcf0',
+              lineHeight: 1.6, margin: 0, maxWidth: '38em',
             }}>
               {proposal.subtitle}
             </p>
           )}
 
-          {/* Scroll cue */}
           <div style={{
-            marginTop: 48, color: '#2a4060',
-            animation: 'fadeInUp 0.5s 0.6s ease both',
+            display: 'grid', gap: 'clamp(18px, 3vw, 32px)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            marginTop: 'clamp(36px, 6vw, 60px)',
           }}>
-            <div style={{ fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Scroll to review</div>
-            <div style={{ fontSize: 20, animation: 'bounce 2s ease-in-out infinite' }}>↓</div>
-            <style>{`@keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }`}</style>
+            <MetaCell label="Prepared for">
+              {proposal.client_name}
+              {proposal.client_company && <><br />{proposal.client_company}</>}
+            </MetaCell>
+            <MetaCell label="Prepared by">{brandName}</MetaCell>
+            {preparedDate && <MetaCell label="Date">{preparedDate}</MetaCell>}
+            {(brandPhone || brandEmail || brandSite) && (
+              <MetaCell label="Contact">
+                {brandPhone && <>{brandPhone}<br /></>}
+                {brandEmail && <>{brandEmail}<br /></>}
+                {brandSite}
+              </MetaCell>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Content blocks — 2-column grid, full-width for pdf/video/divider/site */}
-      <div className="portal-grid" style={{
-        maxWidth: 1120, margin: '0 auto', padding: '0 32px 120px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
-        gap: '28px',
-        alignItems: 'start',
-      }}>
-        {proposal.blocks.map((block, idx) => {
-          const fullWidth = ['pdf', 'video', 'divider', 'website_url'].includes(block.block_type)
-          return (
-          <div
-            key={block.id}
-            className="portal-block"
-            style={{
-              animationDelay: `${0.15 * idx}s`,
-              gridColumn: fullWidth ? '1 / -1' : undefined,
-              marginBottom: block.block_type === 'divider' ? 0 : 0,
-            }}
-          >
-            {block.block_type === 'text'        && <TextBlock block={block} />}
-            {block.block_type === 'image'       && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} protected={protectContent.current} />}
-            {block.block_type === 'pdf'         && <PdfBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
-            {block.block_type === 'video'       && <VideoBlock block={block} />}
-            {block.block_type === 'divider'     && <DividerBlock />}
-            {block.block_type === 'cta'         && <CtaBlock block={block} />}
-            {block.block_type === 'website_url' && <WebsiteUrlBlock block={block} />}
-          </div>
-          )
-        })}
+      {/* Document sheet */}
+      <div style={{ padding: 'clamp(24px, 4vw, 44px) clamp(12px, 4vw, 40px) 64px' }}>
+        <div className="pv-sheet" style={{
+          maxWidth: 900, margin: '0 auto', background: C.paper,
+          border: '1px solid ' + C.line,
+          boxShadow: '0 12px 40px rgba(16,36,60,.08)',
+          padding: 'clamp(28px, 5vw, 60px) clamp(20px, 5vw, 64px) clamp(36px, 5vw, 56px)',
+        }}>
+          {proposal.blocks.map((block, idx) => (
+            <div key={block.id} className="pv-block" style={{ animationDelay: `${Math.min(0.08 * idx, 0.5)}s` }}>
+              {block.block_type === 'text'        && <TextBlock block={block} />}
+              {block.block_type === 'image'       && <ImageBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} protected={protectContent.current} />}
+              {block.block_type === 'pdf'         && <PdfBlock block={block} onDownload={handleDownload} canDownload={canDownload.current} />}
+              {block.block_type === 'video'       && <VideoBlock block={block} />}
+              {block.block_type === 'divider'     && <DividerBlock />}
+              {block.block_type === 'cta'         && <CtaBlock block={block} />}
+              {block.block_type === 'website_url' && <WebsiteUrlBlock block={block} />}
+            </div>
+          ))}
 
-        {proposal.blocks.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#334', padding: '80px 0', fontSize: 14 }}>
-            Content coming soon.
-          </div>
-        )}
-      </div>
+          {proposal.blocks.length === 0 && (
+            <div style={{ textAlign: 'center', color: C.muted, padding: '80px 0', fontSize: 15 }}>
+              Content coming soon.
+            </div>
+          )}
 
-      {/* Footer */}
-      <div style={{
-        borderTop: '1px solid rgba(255,255,255,0.05)',
-        padding: '28px 32px',
-        textAlign: 'center',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-          <div style={{
-            width: 20, height: 20, borderRadius: 5,
-            background: 'linear-gradient(135deg, #087cff, #0a56b0)',
-          }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#334' }}>EvoSys Pro</span>
+          {/* Signature */}
+          <div style={{ marginTop: 'clamp(40px, 6vw, 64px)' }}>
+            <H2>Prepared by</H2>
+            <div style={{ fontSize: 16.5, color: C.ink, fontWeight: 600 }}>{brandName}</div>
+            {brandPhone && <div style={{ fontSize: 15.5, color: C.body, marginTop: 6 }}>{brandPhone}</div>}
+            {brandEmail && <div style={{ fontSize: 15.5, color: C.body, marginTop: 2 }}>{brandEmail}</div>}
+            {brandSite && <div style={{ fontSize: 15.5, color: C.body, marginTop: 2 }}>{brandSite}</div>}
+
+            <div style={{
+              display: 'grid', gap: 'clamp(20px, 4vw, 44px)',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              marginTop: 'clamp(36px, 6vw, 56px)',
+            }}>
+              <div style={{ borderTop: '1px solid #9fb0c2', paddingTop: 8 }}>
+                <div style={{ fontSize: 12.5, color: C.muted }}>
+                  {(proposal.client_company || proposal.client_name || 'Client')} representative
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #9fb0c2', paddingTop: 8 }}>
+                <div style={{ fontSize: 12.5, color: C.muted }}>Date</div>
+              </div>
+            </div>
+          </div>
         </div>
-        <p style={{ fontSize: 12, color: '#2a3a50', margin: 0 }}>
+
+        {/* Footer */}
+        <div style={{
+          maxWidth: 900, margin: '26px auto 0', textAlign: 'center',
+          color: C.muted, fontSize: 12.5, lineHeight: 1.6,
+        }}>
+          <div style={{ marginBottom: 6, fontSize: 13 }}><Wordmark /></div>
           This proposal is private and intended only for its recipient.
           For questions, contact your advisor directly.
-        </p>
+        </div>
       </div>
     </div>
   )

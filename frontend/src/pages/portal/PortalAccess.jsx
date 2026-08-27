@@ -8,11 +8,32 @@
  * then navigates to the full-screen portal viewer.
  *
  * No internal JWT is involved. The token IS the authentication.
+ *
+ * Presentation matches the proposal document it hands off to: paper, navy,
+ * one blue keyline. Nothing here is themed by the host.
  */
 
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
+
+const NAVY = '#12304f'
+const BLUE = '#2f76c7'
+const PAGE = '#eef1f6'
+const LINE = '#dfe5ec'
+const BODY = '#3a4756'
+const MUTED = '#6d7c8d'
+
+function Wordmark() {
+  return (
+    <span style={{
+      fontFamily: 'Archivo, "Helvetica Neue", Arial, sans-serif',
+      fontWeight: 700, letterSpacing: '-.02em', color: NAVY, fontSize: 18,
+    }}>
+      EvoSys <span style={{ color: BLUE }}>Pro</span>
+    </span>
+  )
+}
 
 export default function PortalAccess() {
   const { token } = useParams()
@@ -44,49 +65,48 @@ export default function PortalAccess() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#040812',
+      background: PAGE,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      fontFamily: '"Inter", system-ui, sans-serif',
+      padding: 24,
+      fontFamily: '"Source Sans 3", system-ui, -apple-system, Arial, sans-serif',
+      color: BODY,
     }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap');
+        @keyframes paSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+      `}</style>
+
       {error ? (
-        <div style={{ textAlign: 'center', maxWidth: 420, padding: 32 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: 'rgba(255,80,80,0.1)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 28, margin: '0 auto 24px',
+        <div style={{
+          textAlign: 'center', maxWidth: 460, padding: '40px 32px',
+          background: '#fff', border: '1px solid ' + LINE,
+          borderTop: '4px solid ' + NAVY,
+        }}>
+          <div style={{ marginBottom: 16 }}><Wordmark /></div>
+          <h2 style={{
+            fontFamily: 'Archivo, Arial, sans-serif', color: NAVY,
+            fontSize: 20, fontWeight: 700, margin: '0 0 10px',
           }}>
-            🔒
-          </div>
-          <h2 style={{ color: '#fff', fontSize: 20, fontWeight: 700, margin: '0 0 12px' }}>
-            Link Unavailable
+            This link is no longer active
           </h2>
-          <p style={{ color: '#667', fontSize: 15, lineHeight: 1.6, margin: 0 }}>
-            {error}
-          </p>
-          <p style={{ color: '#445', fontSize: 13, marginTop: 24 }}>
+          <p style={{ fontSize: 15, lineHeight: 1.6, margin: 0 }}>{error}</p>
+          <p style={{ color: MUTED, fontSize: 13.5, marginTop: 22, marginBottom: 0 }}>
             Contact your advisor if you believe this is an error.
           </p>
         </div>
       ) : (
         <div style={{ textAlign: 'center' }}>
-          {/* Animated logo mark */}
-          <div style={{
-            width: 48, height: 48, borderRadius: 12,
-            background: 'linear-gradient(135deg, #087cff, #0a56b0)',
-            margin: '0 auto 24px',
-            animation: 'pulse 1.8s ease-in-out infinite',
-            boxShadow: '0 0 32px rgba(8,124,255,0.3)',
-          }} />
-          <p style={{ color: '#445', fontSize: 14 }}>Accessing your proposal…</p>
-          <style>{`
-            @keyframes pulse {
-              0%, 100% { opacity: 1; transform: scale(1); }
-              50% { opacity: 0.7; transform: scale(0.95); }
-            }
-          `}</style>
+          <div style={{ marginBottom: 16 }}><Wordmark /></div>
+          <div style={{ width: 170, height: 3, background: '#dbe3ec', overflow: 'hidden', margin: '0 auto' }}>
+            <div style={{
+              width: '40%', height: '100%',
+              background: 'linear-gradient(90deg, #1b3f66 0%, #4a8ed4 55%, #9cc6ee 100%)',
+              animation: 'paSlide 1.2s ease-in-out infinite',
+            }} />
+          </div>
+          <p style={{ color: MUTED, fontSize: 14, marginTop: 18 }}>Opening your proposal…</p>
         </div>
       )}
     </div>
