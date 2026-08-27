@@ -72,7 +72,11 @@ export default function GodCommandCenter() {
       api.get('/god/platform-health'),
       api.get('/god/orgs?limit=200'),
       api.get('/god/ops/customer-organizations'),
-      api.get('/admin/dashboard/funnel'),
+      // Platform-wide on purpose. Every other tile in the executive summary is,
+      // and if the owner happens to be inside a customer this one would
+      // otherwise report that customer's bookings next to the whole estate's
+      // lead and user counts.
+      api.get('/admin/dashboard/funnel', { noOrgContext: true }),
       api.get('/billing/all'),
     ])
     if (s.status === 'fulfilled') setStats(s.value)

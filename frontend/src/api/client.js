@@ -65,7 +65,13 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   const token = getToken()
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = `Bearer ${token}`
-  const orgCtx = getOrgContext()
+  // The selected customer scopes every request BY DEFAULT — that is the whole
+  // point of it. `noOrgContext` is the deliberate exception, for God Mode's own
+  // platform-wide reads: the Command Center's executive summary shows platforms,
+  // organizations, users and leads across the whole estate, and a tile that
+  // silently narrowed to one customer while the ones beside it did not would be
+  // a wrong number sitting in a row of right ones.
+  const orgCtx = options.noOrgContext ? null : getOrgContext()
   if (orgCtx) headers['X-Org-Override'] = orgCtx.orgId
   if (!(options.body instanceof FormData) && options.body) {
     headers['Content-Type'] = 'application/json'

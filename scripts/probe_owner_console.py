@@ -387,6 +387,16 @@ def main():
     check("...and the MRR tile explicitly renders NoSource",
           "MRR" in es and "NoSource" in es)
 
+    # The executive summary must not mix scopes. Found in production: with a
+    # customer selected, APPOINTMENTS reported that customer's 7 bookings while
+    # PLATFORMS / ORGANIZATIONS / USERS / LEADS beside it stayed platform-wide.
+    client = read("api", "client.js")
+    check("the API client supports a deliberate platform-wide read",
+          "noOrgContext" in client)
+    check("...and the executive summary's funnel uses it",
+          "noOrgContext: true" in cc,
+          "the appointments tile would narrow to the selected customer")
+
     # ══ 7. THE DESIGN SYSTEM WAS EXTENDED, NOT DUPLICATED ═══════════════════
     section("ONE DESIGN SYSTEM")
     god_css = read("pages", "god", "GodStyles.jsx")
