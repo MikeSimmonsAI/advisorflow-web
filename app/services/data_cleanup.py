@@ -41,7 +41,7 @@ not belong behind a checkbox labelled "clean up test data".
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.models import (
@@ -115,9 +115,63 @@ def _why(lead: Lead, rules: List[str], import_batches: Optional[List[str]]) -> L
     return out
 
 
+def _manifest(db: Session, leads: List[Lead], rules: List[str],
+              import_batches: Optional[List[str]], org_names: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Per-record deletion manifest, built from THE SAME lead set that gets deleted.
+
+    Not a separate query. A manifest assembled by re-deriving "what looks like
+    test data" would be a second opinion, and the moment the two disagree the
+    manifest is worse than none - it would describe a deletion that did not
+    happen and omit one that did. This takes the rows `_lead_filter` already
+    selected and counts what hangs off each of them.
+    """
+    ids = [l.id for l in leads]
+    if not ids:
+        return []
+
+    def tally(model):
+        out: Dict[str, int] = {}
+        rows = (db.query(model.lead_id, func.count(model.id))
+                .filter(model.lead_id.in_(ids)).group_by(model.lead_id).all())
+        for lead_id, n in rows:
+            out[lead_id] = n
+        return out
+
+    msgs = tally(Message)
+    reps = tally(Reply)
+    outs = tally(LeadOutcome)
+    try:
+        cads = tally(CadenceState)
+    except Exception:
+        cads = {}
+
+    manifest = []
+    for l in leads:
+        m, r, o, c = (msgs.get(l.id, 0), reps.get(l.id, 0),
+                      outs.get(l.id, 0), cads.get(l.id, 0))
+        manifest.append({
+            "lead_id": l.id,
+            "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip() or "(no name)",
+            "organization_id": l.organization_id,
+            "organization": org_names.get(l.organization_id, l.organization_id),
+            "classification": _why(l, rules, import_batches),
+            "source_file": l.source_file,
+            "is_test": bool(l.is_test),
+            "test_note": l.test_note,
+            "status": l.status,
+            "assigned_to_id": l.assigned_to_id,
+            "dependents": {"messages": m, "replies": r,
+                           "cadence_state": c, "outcomes": o},
+            # The lead itself plus everything that goes with it.
+            "total_records": 1 + m + r + c + o,
+        })
+    return manifest
+
+
 def preview(db: Session, *, rules: List[str], org_ids: Optional[List[str]] = None,
             import_batches: Optional[List[str]] = None,
-            sample_limit: int = 15) -> Dict[str, Any]:
+            sample_limit: int = 15,
+            include_manifest: bool = False) -> Dict[str, Any]:
     """What WOULD be deleted, by category, with the reason for each classification.
 
     Read-only. Runs the same query the delete runs, so the numbers shown are the
@@ -198,6 +252,8 @@ def preview(db: Session, *, rules: List[str], org_ids: Optional[List[str]] = Non
         # stale preview cannot be used to confirm a bigger delete than the one
         # that was reviewed.
         "confirmation_phrase": "DELETE %d TEST RECORDS" % total,
+        "manifest": (_manifest(db, leads, rules, import_batches, org_names)
+                     if include_manifest else None),
     }
 
 

@@ -332,6 +332,9 @@ class CleanupRequest(BaseModel):
     rules: List[str] = []
     org_ids: Optional[List[str]] = None
     import_batches: Optional[List[str]] = None
+    # Per-record deletion manifest. Off by default because it is a row per
+    # candidate and most previews just want the counts.
+    include_manifest: bool = False
 
 
 class CleanupExecute(CleanupRequest):
@@ -348,7 +351,8 @@ def cleanup_preview(req: CleanupRequest, db: Session = Depends(get_db),
     """
     from app.services import data_cleanup
     return data_cleanup.preview(db, rules=req.rules, org_ids=req.org_ids,
-                                import_batches=req.import_batches)
+                                import_batches=req.import_batches,
+                                include_manifest=req.include_manifest)
 
 
 @router.get("/cleanup/rules")

@@ -175,6 +175,41 @@ def main():
               any("Customer organizations" in p for p in pv.get("protected", [])),
               pv.get("protected"))
 
+        section("THE MANIFEST DESCRIBES EXACTLY WHAT GOES")
+        r = c.post("/god/customers/cleanup/preview", headers=god,
+                   json={"rules": ["is_test", "sample_data", "demo_prefix", "orphaned"],
+                         "include_manifest": True})
+        man = r.json().get("manifest")
+        check("a manifest is returned when asked for", isinstance(man, list),
+              type(man).__name__)
+        check("...with one row per candidate lead", len(man or []) == 4, len(man or []))
+        check("...covering exactly the marked ids",
+              {m["lead_id"] for m in man} == {"test-a-1", "sample-a-1", "demo-a-1", "orphan-1"},
+              sorted(m["lead_id"] for m in man or []))
+        check("...naming the organization, not just its id",
+              all(m["organization"] for m in man), [m.get("organization") for m in man])
+        check("...carrying the classification rule for each",
+              all(m["classification"] for m in man),
+              [(m["lead_id"], m["classification"]) for m in man])
+        tst = next(m for m in man if m["lead_id"] == "test-a-1")
+        check("...and the operator's note on the is_test row",
+              tst["test_note"] == "QA fixture, Mike", tst["test_note"])
+        check("dependents are counted per lead (the message on test-a-1)",
+              tst["dependents"]["messages"] == 1, tst["dependents"])
+        check("total_records per lead = the lead plus its dependents",
+              all(m["total_records"] == 1 + sum(m["dependents"].values()) for m in man),
+              [(m["lead_id"], m["total_records"], m["dependents"]) for m in man])
+        check("the manifest total EQUALS the confirmation-phrase count",
+              sum(m["total_records"] for m in man) == r.json()["total_records"],
+              "manifest=%s preview=%s" % (sum(m["total_records"] for m in man),
+                                          r.json()["total_records"]))
+        r2 = c.post("/god/customers/cleanup/preview", headers=god,
+                    json={"rules": ["is_test"]})
+        check("the manifest is omitted unless requested",
+              r2.json().get("manifest") is None, r2.json().get("manifest"))
+        check("asking for a manifest still deletes nothing",
+              count(Lead) == before_leads, count(Lead))
+
         section("AN EMPTY RULE SET SELECTS NOTHING (not everything)")
         r = c.post("/god/customers/cleanup/preview", headers=god, json={"rules": []})
         check("no rules -> zero records", r.json()["total_records"] == 0,
