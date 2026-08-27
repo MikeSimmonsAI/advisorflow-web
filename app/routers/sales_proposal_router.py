@@ -763,6 +763,9 @@ class DemoSiteIn(BaseModel):
     # concept and does not claim the deal's demo slot. Anything unrecognised
     # falls back to the default rather than minting a new shelf.
     slot: Optional[str] = None
+    # Older links in this slot stay live unless this says otherwise. A link a
+    # prospect already has keeps working until somebody decides it should not.
+    retire_previous: bool = False
 
 
 @router.post("/sales/opportunities/{opportunity_id}/demo-site", status_code=201)
@@ -783,7 +786,8 @@ def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
     slot = _demos.normalize_slot(body.slot)
-    res = _demos.create(db, opp, user, title=body.title, html=body.html, slot=slot)
+    res = _demos.create(db, opp, user, title=body.title, html=body.html, slot=slot,
+                        retire_previous=bool(body.retire_previous))
     if not res["ok"]:
         raise HTTPException(status_code=400, detail=res["error"])
     demo = res["demo"]

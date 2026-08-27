@@ -177,13 +177,28 @@ def main():
               d.view_count == 2 and d.first_viewed_at != d.last_viewed_at,
               [d.view_count])
 
-        section("PUBLISHING AGAIN RETIRES THE OLD LINK")
+        section("A LINK SOMEBODY ALREADY HAS KEEPS WORKING")
+        rk = c.post("/sales/opportunities/opp-1/demo-site",
+                    json={"title": "Version one-and-a-half", "html": "<h1>v1.5</h1>"},
+                    headers=rep)
+        check("publishing again succeeds", rk.status_code == 201, rk.status_code)
+        check("THE OLDER LINK IS STILL LIVE BY DEFAULT - nothing is killed silently",
+              c.get("/public/demo/" + tok).status_code == 200,
+              c.get("/public/demo/" + tok).status_code)
+        tokk = rk.json()["url"].rsplit("/", 1)[-1]
+        check("...and the deal advertises the NEWEST one",
+              tokk in (opp().demo_url or ""), opp().demo_url)
+
+        section("RETIRING THE OLD LINK IS AN EXPLICIT CHOICE")
         r2 = c.post("/sales/opportunities/opp-1/demo-site",
-                    json={"title": "Version two", "html": "<h1>v2</h1>"},
+                    json={"title": "Version two", "html": "<h1>v2</h1>",
+                          "retire_previous": True},
                     headers=rep)
         check("a second demo publishes", r2.status_code == 201, r2.status_code)
-        check("THE FIRST LINK IS DEAD - no two live versions of one pitch",
+        check("THE FIRST LINK IS DEAD - but only because it was asked for",
               c.get("/public/demo/" + tok).status_code == 404)
+        check("...and so is the one in between",
+              c.get("/public/demo/" + tokk).status_code == 404)
         tok2 = r2.json()["url"].rsplit("/", 1)[-1]
         check("...and the new one opens", c.get("/public/demo/" + tok2).status_code == 200)
 
@@ -200,7 +215,7 @@ def main():
 
         rs2 = c.post("/sales/opportunities/opp-1/demo-site",
                      json={"title": "Website concept v2", "html": "<h1>site2</h1>",
-                           "slot": "website"}, headers=rep)
+                           "slot": "website", "retire_previous": True}, headers=rep)
         check("republishing the same slot retires only that slot",
               rs2.status_code == 201 and c.get("/public/demo/" + toks1).status_code == 404,
               [rs2.status_code, c.get("/public/demo/" + toks1).status_code])
@@ -212,7 +227,7 @@ def main():
 
         rs3 = c.post("/sales/opportunities/opp-1/demo-site",
                      json={"title": "Junk slot", "html": "<h1>x</h1>",
-                           "slot": "../../etc/passwd"}, headers=rep)
+                           "slot": "../../etc/passwd", "retire_previous": True}, headers=rep)
         check("AN UNRECOGNISABLE SLOT FALLS BACK TO THE DEFAULT, never a new shelf",
               rs3.status_code == 201 and rs3.json()["demo"]["slot"] == "platform",
               rs3.json().get("demo", {}).get("slot"))

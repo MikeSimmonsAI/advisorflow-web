@@ -59,15 +59,24 @@ def normalize_slot(value) -> str:
 
 
 def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
-           slot: str = DEFAULT_SLOT,
+           slot: str = DEFAULT_SLOT, retire_previous: bool = False,
            ttl_days: int = DEFAULT_TTL_DAYS, now=None) -> Dict[str, Any]:
     """Publish a mockup for this deal and mint its link.
 
-    Replacing a demo REVOKES the previous one IN THE SAME SLOT rather than
-    leaving it live. Two working links to two different versions of the same
-    pitch is how a prospect ends up looking at the design you already moved on
-    from — but a product walkthrough and a website concept are not two versions
-    of one pitch, and retiring one because the other shipped would be wrong.
+    A previous version in the same slot is LEFT LIVE by default. A link that
+    has been sent to a prospect, put in a proposal, or pasted into a message
+    keeps working until somebody decides it should not — killing it silently
+    because a newer draft was published is how a prospect opens a dead page in
+    front of you.
+
+    Pass `retire_previous=True` to close the older link at the moment the new
+    one is minted, which is the right call once a version is genuinely
+    superseded and you do not want the old one seen again. Either way, only the
+    SAME slot is affected: a product walkthrough and a website concept are not
+    two versions of one pitch.
+
+    `opp.demo_url` always follows the newest platform demo, so "this deal's
+    demo" means the current one even while older links still open.
     """
     now = now or datetime.utcnow()
     html = html or ""
@@ -81,10 +90,11 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
         return {"ok": False, "error": "Give the demo a title the prospect will see."}
 
     slot = normalize_slot(slot)
-    for old in for_opportunity(db, opp.id):
-        if old.is_live(now) and (old.slot or DEFAULT_SLOT) == slot:
-            old.revoked_at = now
-            old.is_active = False
+    if retire_previous:
+        for old in for_opportunity(db, opp.id):
+            if old.is_live(now) and (old.slot or DEFAULT_SLOT) == slot:
+                old.revoked_at = now
+                old.is_active = False
 
     row = DemoSite(
         opportunity_id=opp.id,
