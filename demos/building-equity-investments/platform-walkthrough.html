@@ -1,0 +1,690 @@
+<title>EvoSys Pro — Building Equity Investments</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg-base:#03060f; --bg-panel:rgba(7,14,32,.86); --bg-card:rgba(10,20,44,.80);
+  --bg-card-hover:rgba(16,32,68,.92); --bg-row:rgba(8,16,36,.52); --bg-row-hover:rgba(16,32,68,.72);
+  --bg-field:rgba(7,14,31,.7);
+  --border-subtle:rgba(64,170,255,.18); --border-strong:rgba(86,200,255,.42);
+  --green:#1ef0a8; --green-dim:rgba(30,240,168,.15);
+  --blue:#2fb6ff;  --blue-dim:rgba(47,182,255,.16);
+  --red:#ff4d7e;   --red-dim:rgba(255,77,126,.16);
+  --amber:#ffb238; --amber-dim:rgba(255,178,56,.16);
+  --purple:#9d6dff;--purple-dim:rgba(157,109,255,.16);
+  --t1:#eef5ff; --t2:#9fb0cf; --t3:#5e6f8f;
+  --rs:10px; --rm:16px; --rl:22px;
+  --font-display:'Space Grotesk','Inter',sans-serif;
+  --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',monospace;
+  --glow-blue:0 0 24px rgba(47,182,255,.30);
+  --glow-green:0 0 14px rgba(30,240,168,.26);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg-base); color:var(--t1);
+  font-family:var(--font-body); font-size:15px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:
+    radial-gradient(ellipse 900px 500px at 18% -5%, rgba(47,182,255,.10), transparent 65%),
+    radial-gradient(ellipse 700px 420px at 92% 8%, rgba(157,109,255,.08), transparent 60%);
+}
+
+/* ── demo bar ─────────────────────────────────────────────────────────── */
+.demo-bar{
+  position:relative; z-index:3;
+  background:linear-gradient(90deg,rgba(255,178,56,.16),rgba(255,178,56,.06));
+  border-bottom:1px solid rgba(255,178,56,.32);
+  color:#ffe0ad; font-size:12.5px; padding:9px 20px;
+  display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+}
+.demo-bar b{color:var(--amber); font-family:var(--font-display); letter-spacing:.09em; font-size:11.5px}
+
+/* ── shell ────────────────────────────────────────────────────────────── */
+.app{position:relative; z-index:1; display:grid; grid-template-columns:252px 1fr; min-height:calc(100vh - 38px)}
+.side{
+  border-right:1px solid var(--border-subtle);
+  background:var(--bg-panel); padding:18px 14px 22px;
+  display:flex; flex-direction:column; gap:16px;
+}
+.brand{display:flex; align-items:center; gap:10px; padding:2px 6px 0}
+.logo{
+  width:32px;height:32px;border-radius:9px;flex:none;
+  background:linear-gradient(135deg,var(--blue),#0a63b8); box-shadow:var(--glow-blue);
+  display:grid;place-items:center; font-family:var(--font-display); font-weight:700; color:#04121f; font-size:15px;
+}
+.brand b{font-family:var(--font-display); font-size:15.5px; letter-spacing:-.01em; display:block}
+.brand span{font-size:10.5px; color:var(--t3); letter-spacing:.09em; text-transform:uppercase}
+.who{
+  display:flex; gap:10px; align-items:center;
+  background:var(--bg-card); border:1px solid var(--border-subtle);
+  border-radius:var(--rs); padding:9px 10px;
+}
+.who .av{width:30px;height:30px;border-radius:8px;flex:none;display:grid;place-items:center;
+  background:var(--purple-dim); color:var(--purple); font-weight:700; font-size:12px}
+.who b{font-size:13px; display:block; line-height:1.25}
+.who span{font-size:11px; color:var(--t3)}
+.navlabel{font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--t3); padding:6px 8px 2px}
+nav{display:flex; flex-direction:column; gap:2px}
+.nav{
+  display:flex; align-items:center; gap:10px; width:100%;
+  background:none; border:0; border-radius:var(--rs); cursor:pointer;
+  color:var(--t2); font:inherit; font-size:13.5px; padding:8px 10px; text-align:left;
+}
+.nav:hover{background:var(--bg-row-hover); color:var(--t1)}
+.nav.on{background:var(--blue-dim); color:var(--t1); box-shadow:inset 0 0 0 1px var(--border-strong)}
+.nav .ic{width:16px;height:16px;flex:none;opacity:.85}
+.nav .badge{margin-left:auto; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:20px;
+  background:var(--red-dim); color:var(--red)}
+.sidefoot{margin-top:auto; font-size:10.5px; color:var(--t3); padding:0 8px; line-height:1.5}
+
+main{padding:22px clamp(16px,3vw,32px) 90px; min-width:0}
+
+/* ── bits ─────────────────────────────────────────────────────────────── */
+.hero{display:flex; justify-content:space-between; align-items:flex-end; gap:20px; flex-wrap:wrap; margin-bottom:20px}
+.greet{font-family:var(--font-display); font-size:clamp(21px,2.6vw,27px); font-weight:600; letter-spacing:-.02em}
+.sub{color:var(--t3); font-size:13px; margin-top:3px}
+.clock{font-family:var(--font-mono); font-size:26px; color:var(--blue); text-shadow:var(--glow-blue)}
+
+.kpis{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); margin-bottom:20px}
+.kpi{
+  background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--rm);
+  padding:15px 16px; position:relative; overflow:hidden;
+}
+.kpi .v{font-family:var(--font-display); font-size:30px; font-weight:700; line-height:1; letter-spacing:-.02em}
+.kpi .l{font-size:11.5px; color:var(--t2); margin-top:7px}
+.kpi .d{font-size:10.5px; color:var(--t3); margin-top:3px}
+
+.grid2{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.panel{background:var(--bg-panel); border:1px solid var(--border-subtle); border-radius:var(--rl); overflow:hidden}
+.ph{display:flex; align-items:center; gap:10px; padding:13px 17px; border-bottom:1px solid var(--border-subtle)}
+.ph h2{margin:0; font-family:var(--font-display); font-size:13.5px; font-weight:600; letter-spacing:.01em}
+.ph .cnt{margin-left:auto; font-size:11px; color:var(--t3); font-family:var(--font-mono)}
+.pb{padding:14px 17px}
+.pb.flush{padding:0}
+
+.rowbtn{
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+  background:none; border:0; border-bottom:1px solid rgba(64,170,255,.09);
+  color:inherit; font:inherit; padding:12px 17px; cursor:pointer;
+}
+.rowbtn:last-child{border-bottom:0}
+.rowbtn:hover{background:var(--bg-row-hover)}
+.count{font-family:var(--font-display); font-size:19px; font-weight:700; min-width:30px}
+.arrow{margin-left:auto; color:var(--t3)}
+
+.pill{display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.05em;
+  padding:2px 9px; border-radius:20px; white-space:nowrap}
+.p-green{background:var(--green-dim); color:var(--green)}
+.p-blue{background:var(--blue-dim); color:var(--blue)}
+.p-amber{background:var(--amber-dim); color:var(--amber)}
+.p-red{background:var(--red-dim); color:var(--red)}
+.p-purple{background:var(--purple-dim); color:var(--purple)}
+.p-grey{background:rgba(94,111,143,.16); color:var(--t2)}
+
+table{width:100%; border-collapse:collapse; font-size:13.5px}
+th{text-align:left; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--t3);
+   padding:10px 14px; border-bottom:1px solid var(--border-subtle); font-weight:600; white-space:nowrap}
+td{padding:12px 14px; border-bottom:1px solid rgba(64,170,255,.08); vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr{cursor:pointer}
+tbody tr:hover td{background:var(--bg-row-hover)}
+.mono{font-family:var(--font-mono); font-size:12.5px; color:var(--t2)}
+.dim{color:var(--t3); font-size:12px}
+.wrap{overflow-x:auto}
+
+.tag{font-size:11px; color:var(--t2); background:var(--bg-field); border:1px solid var(--border-subtle);
+  border-radius:6px; padding:2px 8px; display:inline-block}
+
+/* ── conversation ─────────────────────────────────────────────────────── */
+.thread{display:flex; flex-direction:column; gap:12px; padding:16px 17px}
+.msg{max-width:78%; border-radius:14px; padding:10px 13px; font-size:13.5px; line-height:1.55}
+.msg .meta{font-size:10.5px; color:var(--t3); margin-top:6px; font-family:var(--font-mono)}
+.out{align-self:flex-start; background:var(--bg-card); border:1px solid var(--border-subtle)}
+.in{align-self:flex-end; background:var(--blue-dim); border:1px solid var(--border-strong)}
+.sys{align-self:center; max-width:100%; text-align:center; font-size:11.5px; color:var(--t3);
+  background:none; border:0; padding:2px}
+.sys b{color:var(--green); font-weight:600}
+
+.stack{display:flex; flex-direction:column; gap:0}
+.evt{display:grid; grid-template-columns:78px 16px 1fr; gap:12px; padding:11px 17px; align-items:start}
+.evt + .evt{border-top:1px solid rgba(64,170,255,.08)}
+.evt .t{font-family:var(--font-mono); font-size:11.5px; color:var(--t3); padding-top:2px}
+.evt .dot{width:9px;height:9px;border-radius:50%; margin:6px 0 0 3px; background:var(--blue); box-shadow:var(--glow-blue)}
+.evt.g .dot{background:var(--green); box-shadow:var(--glow-green)}
+.evt.a .dot{background:var(--amber)}
+.evt.p .dot{background:var(--purple)}
+.evt b{font-size:13.5px; font-weight:600; display:block}
+.evt span{font-size:12.5px; color:var(--t2)}
+
+.facts{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); padding:14px 17px}
+.fact .k{font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--t3)}
+.fact .v{font-size:14px; margin-top:3px}
+
+.bars{display:flex; flex-direction:column; gap:11px; padding:16px 17px}
+.bar .top{display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px}
+.bar .track{height:7px; border-radius:20px; background:var(--bg-field); overflow:hidden}
+.bar .fill{height:100%; border-radius:20px}
+
+/* ── tour ─────────────────────────────────────────────────────────────── */
+.tour{
+  position:fixed; left:0; right:0; bottom:0; z-index:5;
+  background:rgba(4,9,22,.94); backdrop-filter:blur(10px);
+  border-top:1px solid var(--border-subtle);
+  padding:11px clamp(14px,3vw,26px);
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+}
+.tour .step{font-family:var(--font-mono); font-size:11.5px; color:var(--blue); white-space:nowrap}
+.tour .say{font-size:13px; color:var(--t2); flex:1; min-width:200px}
+.btn{font:inherit; font-size:13px; font-weight:600; border-radius:9px; padding:8px 16px; cursor:pointer;
+  border:1px solid var(--border-subtle); background:var(--bg-card); color:var(--t1)}
+.btn:hover{border-color:var(--border-strong)}
+.btn.pri{background:linear-gradient(135deg,var(--blue),#0a63b8); border-color:transparent; color:#04121f}
+.btn:disabled{opacity:.4; cursor:default}
+
+.screen{display:none}
+.screen.on{display:block; animation:up .3s ease both}
+@keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.screen.on{animation:none}}
+
+@media(max-width:900px){
+  .app{grid-template-columns:1fr}
+  .side{border-right:0; border-bottom:1px solid var(--border-subtle)}
+  nav{flex-direction:row; flex-wrap:wrap}
+  .nav{width:auto}
+  .navlabel,.sidefoot{display:none}
+}
+</style>
+
+<div class="demo-bar">
+  <b>SAMPLE DATA</b>
+  <span>A walkthrough of the EvoSys Pro workspace, prepared by EvoSys Pro for Building Equity Investments LLC. Every name, address, phone number and figure below is invented for this demonstration.</span>
+</div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="logo">E</div>
+      <div><b>EvoSys Pro</b><span>Building Equity</span></div>
+    </div>
+
+    <div class="who">
+      <div class="av">DD</div>
+      <div><b>Derrick Davis</b><span>Owner · full access</span></div>
+    </div>
+
+    <div class="navlabel">Workspace</div>
+    <nav>
+      <button class="nav on" data-go="overview"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></svg>Overview</button>
+      <button class="nav" data-go="leads"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>Leads<span class="badge">3</span></button>
+      <button class="nav" data-go="lead"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Conversation</button>
+      <button class="nav" data-go="replies"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Replies &amp; AI</button>
+      <button class="nav" data-go="team"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87"/></svg>Team</button>
+      <button class="nav" data-go="reports"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M7 15l4-5 3 3 5-7"/></svg>Reports</button>
+    </nav>
+
+    <div class="sidefoot">
+      Illustration of the EvoSys Pro workspace.<br>Not a live system and not connected to any provider.
+    </div>
+  </aside>
+
+  <main>
+
+    <!-- ══ OVERVIEW ══════════════════════════════════════════════════ -->
+    <section class="screen on" id="s-overview">
+      <div class="hero">
+        <div>
+          <div class="greet">Good morning, Derrick.</div>
+          <div class="sub">Tuesday · everything below happened while you were doing something else.</div>
+        </div>
+        <div class="clock">8:42 AM</div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="v" style="color:var(--blue)">14</div><div class="l">New seller leads</div><div class="d">last 7 days</div></div>
+        <div class="kpi"><div class="v" style="color:var(--red)">3</div><div class="l">Waiting on a human</div><div class="d">nobody has replied yet</div></div>
+        <div class="kpi"><div class="v" style="color:var(--green)">5</div><div class="l">Replied — interested</div><div class="d">ready to qualify</div></div>
+        <div class="kpi"><div class="v" style="color:var(--amber)">6</div><div class="l">Appointments set</div><div class="d">this week</div></div>
+        <div class="kpi"><div class="v" style="color:var(--purple)">41s</div><div class="l">Median first response</div><div class="d">across all sources</div></div>
+      </div>
+
+      <div class="grid2">
+        <section class="panel">
+          <div class="ph"><h2>⚡ Today's action items</h2><span class="cnt">4</span></div>
+          <div class="pb flush">
+            <button class="rowbtn" data-go="lead"><span class="count" style="color:var(--red)">3</span><span>Leads with no human touch yet</span><span class="arrow">→</span></button>
+            <button class="rowbtn" data-go="replies"><span class="count" style="color:var(--green)">5</span><span>Interested replies to qualify</span><span class="arrow">→</span></button>
+            <button class="rowbtn" data-go="leads"><span class="count" style="color:var(--amber)">2</span><span>Qualified — waiting on your offer</span><span class="arrow">→</span></button>
+            <button class="rowbtn" data-go="leads"><span class="count" style="color:var(--blue)">4</span><span>Going cold — 9+ days since contact</span><span class="arrow">→</span></button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="ph"><h2>🔥 Hot replies</h2><span class="cnt">5</span></div>
+          <div class="pb flush">
+            <button class="rowbtn" data-go="lead">
+              <span class="pill p-green">INTERESTED</span>
+              <span>“Yes I still own it. What can you pay?”<div class="dim">Marcus Whitfield · 4:12 AM</div></span>
+              <span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="replies">
+              <span class="pill p-green">INTERESTED</span>
+              <span>“Tenant moves out in March, call me after 5”<div class="dim">Yolanda Pryce · 11:38 PM</div></span>
+              <span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="replies">
+              <span class="pill p-amber">QUESTION</span>
+              <span>“Are you an agent? I don't want to list it.”<div class="dim">Ed Salazar · 9:02 PM</div></span>
+              <span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="replies">
+              <span class="pill p-purple">CALLBACK</span>
+              <span>“Not right now but check back this summer”<div class="dim">Dana Cortez · 6:55 PM</div></span>
+              <span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="replies">
+              <span class="pill p-red">DO NOT CONTACT</span>
+              <span>“STOP”<div class="dim">withheld · 6:10 PM — removed automatically</div></span>
+              <span class="arrow">→</span>
+            </button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ══ LEADS ═════════════════════════════════════════════════════ -->
+    <section class="screen" id="s-leads">
+      <div class="hero">
+        <div>
+          <div class="greet">Seller leads</div>
+          <div class="sub">Every lead, who owns it, and what has to happen next. Nothing sits here without an owner.</div>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="ph"><h2>All leads</h2><span class="cnt">14 of 214</span></div>
+        <div class="wrap">
+        <table>
+          <thead><tr>
+            <th>Seller</th><th>Property</th><th>Source</th><th>Status</th>
+            <th>Owner</th><th>Last touch</th><th>Next step</th>
+          </tr></thead>
+          <tbody>
+            <tr data-go="lead">
+              <td><b>Marcus Whitfield</b><div class="dim mono">(555) 0142</div></td>
+              <td>1418 Ridgemont Dr, Plano<div class="dim">3/2 · inherited</div></td>
+              <td><span class="tag">Website</span></td>
+              <td><span class="pill p-green">INTERESTED</span></td>
+              <td>Auto → Rosa</td><td class="mono">4h ago</td>
+              <td>Qualify call today</td>
+            </tr>
+            <tr data-go="replies">
+              <td><b>Yolanda Pryce</b><div class="dim mono">(555) 0177</div></td>
+              <td>822 Cedar Bluff Ln, Frisco<div class="dim">4/2 · tenant in place</div></td>
+              <td><span class="tag">Cold list</span></td>
+              <td><span class="pill p-green">INTERESTED</span></td>
+              <td>Rosa</td><td class="mono">9h ago</td>
+              <td>Call after 5pm</td>
+            </tr>
+            <tr data-go="replies">
+              <td><b>Ed Salazar</b><div class="dim mono">(555) 0103</div></td>
+              <td>3307 Marigold Ct, McKinney<div class="dim">3/2 · deferred repairs</div></td>
+              <td><span class="tag">Website</span></td>
+              <td><span class="pill p-amber">QUESTION</span></td>
+              <td>Rosa</td><td class="mono">11h ago</td>
+              <td>Answer, then qualify</td>
+            </tr>
+            <tr data-go="leads">
+              <td><b>Priscilla Nance</b><div class="dim mono">(555) 0158</div></td>
+              <td>509 Havenwood Rd, Allen<div class="dim">3/2 · vacant</div></td>
+              <td><span class="tag">Referral</span></td>
+              <td><span class="pill p-blue">QUALIFIED</span></td>
+              <td>Derrick</td><td class="mono">1d ago</td>
+              <td><b style="color:var(--amber)">Comps &amp; offer</b></td>
+            </tr>
+            <tr data-go="leads">
+              <td><b>Terrance Boyd</b><div class="dim mono">(555) 0191</div></td>
+              <td>77 Quail Run, Plano<div class="dim">4/3 · relocating</div></td>
+              <td><span class="tag">Cold list</span></td>
+              <td><span class="pill p-blue">QUALIFIED</span></td>
+              <td>Derrick</td><td class="mono">2d ago</td>
+              <td><b style="color:var(--amber)">Comps &amp; offer</b></td>
+            </tr>
+            <tr data-go="leads">
+              <td><b>Janelle Obi</b><div class="dim mono">(555) 0126</div></td>
+              <td>2140 Sandpiper Way, Frisco<div class="dim">3/2 · probate</div></td>
+              <td><span class="tag">Website</span></td>
+              <td><span class="pill p-grey">NO REPLY</span></td>
+              <td>Automated</td><td class="mono">3d ago</td>
+              <td>Touch 4 of 7 · Thu</td>
+            </tr>
+            <tr data-go="leads">
+              <td><b>Dana Cortez</b><div class="dim mono">(555) 0169</div></td>
+              <td>615 Ash Meadow, Wylie<div class="dim">3/2 · owner-occupied</div></td>
+              <td><span class="tag">Cold list</span></td>
+              <td><span class="pill p-purple">CALLBACK</span></td>
+              <td>Automated</td><td class="mono">14h ago</td>
+              <td>Paused until 1 Jun</td>
+            </tr>
+            <tr data-go="leads">
+              <td><b>Ruth Ann Delgado</b><div class="dim mono">(555) 0134</div></td>
+              <td>91 Foxglove Ct, Murphy<div class="dim">2/1 · fire damage</div></td>
+              <td><span class="tag">Referral</span></td>
+              <td><span class="pill p-red">NOT A FIT</span></td>
+              <td>Rosa</td><td class="mono">4d ago</td>
+              <td>Closed — told her why</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ══ LEAD DETAIL ═══════════════════════════════════════════════ -->
+    <section class="screen" id="s-lead">
+      <div class="hero">
+        <div>
+          <div class="greet">Marcus Whitfield</div>
+          <div class="sub">1418 Ridgemont Dr, Plano TX · came in from the website at 11:47pm</div>
+        </div>
+        <span class="pill p-green" style="font-size:12px;padding:5px 14px">INTERESTED</span>
+      </div>
+
+      <div class="grid2" style="grid-template-columns:minmax(320px,1.15fr) minmax(280px,.85fr)">
+
+        <section class="panel">
+          <div class="ph"><h2>Conversation</h2><span class="cnt">SMS</span></div>
+          <div class="thread">
+            <div class="msg sys">Web form submitted · <b>11:47 PM</b></div>
+            <div class="msg out">
+              Hi Marcus — this is Building Equity Investments about 1418 Ridgemont. We buy in Plano directly, as-is. Are you still the owner?
+              <div class="meta">Sent automatically · 11:47 PM · 38 seconds after the form</div>
+            </div>
+            <div class="msg in">
+              Yes I still own it. What can you pay?
+              <div class="meta">Received · 4:12 AM</div>
+            </div>
+            <div class="msg sys">Classified <b>INTERESTED</b> — follow-up sequence stopped itself</div>
+            <div class="msg out">
+              Straight answer: we can't say a number before someone looks at it. Two questions and we'll be close — roughly what condition is it in, and when would you want to close?
+              <div class="meta">Sent · 4:13 AM · queued for Rosa to review before it went</div>
+            </div>
+            <div class="msg in">
+              Needs a roof and the kitchen is dated. No rush, sometime this summer.
+              <div class="meta">Received · 6:30 AM</div>
+            </div>
+            <div class="msg sys">Rosa called · <b>8:05 AM</b> · 6m 12s · qualified</div>
+          </div>
+        </section>
+
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <section class="panel">
+            <div class="ph"><h2>What we know</h2></div>
+            <div class="facts">
+              <div class="fact"><div class="k">Source</div><div class="v">Website form</div></div>
+              <div class="fact"><div class="k">First response</div><div class="v" style="color:var(--green)">38 seconds</div></div>
+              <div class="fact"><div class="k">Condition</div><div class="v">Roof, dated kitchen</div></div>
+              <div class="fact"><div class="k">Timeline</div><div class="v">Summer, flexible</div></div>
+              <div class="fact"><div class="k">Occupancy</div><div class="v">Owner-occupied</div></div>
+              <div class="fact"><div class="k">Owner</div><div class="v">Rosa → Derrick</div></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="ph"><h2>Everything that happened</h2></div>
+            <div class="stack">
+              <div class="evt"><div class="t">11:47 PM</div><div class="dot"></div><div><b>Lead created</b><span>Website form · Plano</span></div></div>
+              <div class="evt g"><div class="t">11:47 PM</div><div class="dot"></div><div><b>First text sent</b><span>38 seconds after the form arrived</span></div></div>
+              <div class="evt"><div class="t">4:12 AM</div><div class="dot"></div><div><b>Seller replied</b><span>Sequence stopped on its own</span></div></div>
+              <div class="evt a"><div class="t">4:13 AM</div><div class="dot"></div><div><b>Reply drafted for review</b><span>Rosa approved it before it sent</span></div></div>
+              <div class="evt"><div class="t">6:30 AM</div><div class="dot"></div><div><b>Condition and timeline captured</b><span>Written to the record, not a notepad</span></div></div>
+              <div class="evt g"><div class="t">8:05 AM</div><div class="dot"></div><div><b>Rosa called · 6m 12s</b><span>Marked qualified</span></div></div>
+              <div class="evt p"><div class="t">8:11 AM</div><div class="dot"></div><div><b>Handed to Derrick</b><span>For comps, repair estimate and the offer</span></div></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ REPLIES ═══════════════════════════════════════════════════ -->
+    <section class="screen" id="s-replies">
+      <div class="hero">
+        <div>
+          <div class="greet">Replies &amp; AI</div>
+          <div class="sub">Every inbound message, sorted. Nothing sends to a seller until somebody on your team says so.</div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <section class="panel">
+          <div class="ph"><h2>Needs a decision</h2><span class="cnt">4</span></div>
+          <div class="pb flush">
+            <button class="rowbtn" data-go="lead">
+              <span class="pill p-green">INTERESTED</span>
+              <span><b>Marcus Whitfield</b> — “Yes I still own it. What can you pay?”
+              <div class="dim">Draft ready · Rosa · 4:12 AM</div></span><span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="lead">
+              <span class="pill p-green">INTERESTED</span>
+              <span><b>Yolanda Pryce</b> — “Tenant moves out in March, call me after 5”
+              <div class="dim">Draft ready · Rosa · 11:38 PM</div></span><span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="lead">
+              <span class="pill p-amber">QUESTION</span>
+              <span><b>Ed Salazar</b> — “Are you an agent? I don't want to list it.”
+              <div class="dim">Draft ready · Rosa · 9:02 PM</div></span><span class="arrow">→</span>
+            </button>
+            <button class="rowbtn" data-go="lead">
+              <span class="pill p-purple">CALLBACK</span>
+              <span><b>Dana Cortez</b> — “Not right now but check back this summer”
+              <div class="dim">Paused until 1 June · no action needed</div></span><span class="arrow">→</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="ph"><h2>Handled without you</h2><span class="cnt">last 7 days</span></div>
+          <div class="stack">
+            <div class="evt g"><div class="t">42</div><div class="dot"></div><div><b>First texts sent inside a minute</b><span>Median 41 seconds from form to first message</span></div></div>
+            <div class="evt"><div class="t">18</div><div class="dot"></div><div><b>Replies classified and routed</b><span>Interested, question, callback, not a fit</span></div></div>
+            <div class="evt a"><div class="t">31</div><div class="dot"></div><div><b>Follow-ups sent on schedule</b><span>Sequences stop themselves the moment a seller replies</span></div></div>
+            <div class="evt p"><div class="t">6</div><div class="dot"></div><div><b>Appointments written to the calendar</b><span>With the address and the notes attached</span></div></div>
+            <div class="evt"><div class="t">2</div><div class="dot"></div><div><b>Opt-outs honoured immediately</b><span>Removed from every sequence, permanently</span></div></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ══ TEAM ══════════════════════════════════════════════════════ -->
+    <section class="screen" id="s-team">
+      <div class="hero">
+        <div>
+          <div class="greet">Your team</div>
+          <div class="sub">What each person is carrying, and what they did with it. This is the view Derrick keeps open.</div>
+        </div>
+      </div>
+
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+        <div class="kpi"><div class="v" style="color:var(--blue)">214</div><div class="l">Leads in the system</div><div class="d">all sources</div></div>
+        <div class="kpi"><div class="v" style="color:var(--green)">96%</div><div class="l">Leads contacted</div><div class="d">within 5 minutes</div></div>
+        <div class="kpi"><div class="v" style="color:var(--amber)">0</div><div class="l">Leads with no owner</div><div class="d">nothing is unassigned</div></div>
+        <div class="kpi"><div class="v" style="color:var(--purple)">3</div><div class="l">People with access</div><div class="d">each sees their own queue</div></div>
+      </div>
+
+      <section class="panel" style="margin-bottom:16px">
+        <div class="ph"><h2>People</h2><span class="cnt">3</span></div>
+        <div class="wrap">
+        <table>
+          <thead><tr><th>Person</th><th>Role</th><th>What they can do</th><th class="mono">Open</th><th class="mono">Touched today</th><th>Last active</th></tr></thead>
+          <tbody>
+            <tr data-go="team">
+              <td><b>Derrick Davis</b><div class="dim">you</div></td>
+              <td><span class="pill p-purple">OWNER</span></td>
+              <td>Everything, including who has access and what the numbers say</td>
+              <td class="mono">7</td><td class="mono">12</td><td class="dim">now</td>
+            </tr>
+            <tr data-go="team">
+              <td><b>Rosa Villalba</b><div class="dim">lead desk</div></td>
+              <td><span class="pill p-blue">TEAM MEMBER</span></td>
+              <td>Work leads, send approved replies, book appointments. Cannot change pricing or access</td>
+              <td class="mono">31</td><td class="mono">44</td><td class="dim">6 min ago</td>
+            </tr>
+            <tr data-go="team">
+              <td><b>Kwame Adjei</b><div class="dim">acquisitions</div></td>
+              <td><span class="pill p-blue">TEAM MEMBER</span></td>
+              <td>Work leads, run comps, record offers. Cannot change pricing or access</td>
+              <td class="mono">9</td><td class="mono">6</td><td class="dim">1 hr ago</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+      </section>
+
+      <div class="grid2">
+        <section class="panel">
+          <div class="ph"><h2>Rosa — lead desk</h2><span class="cnt">today</span></div>
+          <div class="bars">
+            <div class="bar"><div class="top"><span>Leads worked</span><b>44</b></div><div class="track"><div class="fill" style="width:88%;background:var(--blue)"></div></div></div>
+            <div class="bar"><div class="top"><span>Replies handled</span><b>18</b></div><div class="track"><div class="fill" style="width:64%;background:var(--green)"></div></div></div>
+            <div class="bar"><div class="top"><span>Calls made</span><b>11</b></div><div class="track"><div class="fill" style="width:44%;background:var(--purple)"></div></div></div>
+            <div class="bar"><div class="top"><span>Appointments set</span><b>4</b></div><div class="track"><div class="fill" style="width:26%;background:var(--amber)"></div></div></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="ph"><h2>Kwame — acquisitions</h2><span class="cnt">today</span></div>
+          <div class="bars">
+            <div class="bar"><div class="top"><span>Leads worked</span><b>6</b></div><div class="track"><div class="fill" style="width:22%;background:var(--blue)"></div></div></div>
+            <div class="bar"><div class="top"><span>Comps run</span><b>5</b></div><div class="track"><div class="fill" style="width:38%;background:var(--green)"></div></div></div>
+            <div class="bar"><div class="top"><span>Offers recorded</span><b>2</b></div><div class="track"><div class="fill" style="width:15%;background:var(--purple)"></div></div></div>
+            <div class="bar"><div class="top"><span>Walkthroughs booked</span><b>2</b></div><div class="track"><div class="fill" style="width:15%;background:var(--amber)"></div></div></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ══ REPORTS ═══════════════════════════════════════════════════ -->
+    <section class="screen" id="s-reports">
+      <div class="hero">
+        <div>
+          <div class="greet">Reports</div>
+          <div class="sub">The questions you said you were guessing at. Every number here is counted from the records, not estimated.</div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <section class="panel">
+          <div class="ph"><h2>Where they drop off</h2><span class="cnt">last 30 days</span></div>
+          <div class="bars">
+            <div class="bar"><div class="top"><span>Leads received</span><b>214</b></div><div class="track"><div class="fill" style="width:100%;background:var(--blue)"></div></div></div>
+            <div class="bar"><div class="top"><span>Contacted</span><b>206 · 96%</b></div><div class="track"><div class="fill" style="width:96%;background:var(--blue)"></div></div></div>
+            <div class="bar"><div class="top"><span>Replied</span><b>71 · 33%</b></div><div class="track"><div class="fill" style="width:33%;background:var(--green)"></div></div></div>
+            <div class="bar"><div class="top"><span>Qualified</span><b>28 · 13%</b></div><div class="track"><div class="fill" style="width:13%;background:var(--amber)"></div></div></div>
+            <div class="bar"><div class="top"><span>Offer made</span><b>11 · 5%</b></div><div class="track"><div class="fill" style="width:5.2%;background:var(--purple)"></div></div></div>
+            <div class="bar"><div class="top"><span>Under contract</span><b>3 · 1.4%</b></div><div class="track"><div class="fill" style="width:2%;background:var(--red)"></div></div></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="ph"><h2>Which sources are worth the money</h2><span class="cnt">last 30 days</span></div>
+          <div class="wrap">
+          <table>
+            <thead><tr><th>Source</th><th class="mono">Leads</th><th class="mono">Replied</th><th class="mono">Qualified</th><th class="mono">Under contract</th></tr></thead>
+            <tbody>
+              <tr data-go="reports"><td><b>Website</b></td><td class="mono">63</td><td class="mono">41%</td><td class="mono">19%</td><td class="mono" style="color:var(--green)">2</td></tr>
+              <tr data-go="reports"><td><b>Referral</b></td><td class="mono">17</td><td class="mono">58%</td><td class="mono">29%</td><td class="mono" style="color:var(--green)">1</td></tr>
+              <tr data-go="reports"><td><b>Cold list A</b></td><td class="mono">88</td><td class="mono">27%</td><td class="mono">9%</td><td class="mono">0</td></tr>
+              <tr data-go="reports"><td><b>Cold list B</b></td><td class="mono">46</td><td class="mono">14%</td><td class="mono">4%</td><td class="mono">0</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <div class="pb" style="border-top:1px solid var(--border-subtle)">
+            <div class="dim">Cold list B produced 46 leads and nothing under contract. That is the kind of thing you said you could not see today.</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="tour">
+  <span class="step" id="tstep">1 / 5</span>
+  <span class="say" id="tsay">The first screen Derrick opens. Everything that happened overnight, and the four things that need a person today.</span>
+  <button class="btn" id="tprev">← Back</button>
+  <button class="btn pri" id="tnext">Next →</button>
+</div>
+
+<script>
+(function () {
+  var ORDER = ['overview', 'leads', 'lead', 'replies', 'team', 'reports'];
+  var SAY = {
+    overview: 'The first screen Derrick opens. Everything that happened overnight, and the four things that need a person today.',
+    leads:    'Every seller lead with an owner and a next step. Nothing sits in a spreadsheet and nothing sits unassigned.',
+    lead:     'One lead, end to end: form at 11:47pm, first text 38 seconds later, reply at 4:12am, qualified by 8:05am, handed to Derrick for the offer.',
+    replies:  'Inbound messages sorted by what they are. Nothing reaches a seller until somebody on the team approves it.',
+    team:     'What each person is carrying and what they did with it — the view that replaces asking the VA how it is going.',
+    reports:  'Where leads drop off, and which sources are actually producing. Cold list B cost money and produced nothing.'
+  };
+
+  function show(name) {
+    if (ORDER.indexOf(name) === -1) return;
+    var i;
+    var screens = document.querySelectorAll('.screen');
+    for (i = 0; i < screens.length; i++) screens[i].classList.remove('on');
+    var el = document.getElementById('s-' + name);
+    if (el) el.classList.add('on');
+
+    var navs = document.querySelectorAll('.nav');
+    for (i = 0; i < navs.length; i++) {
+      navs[i].classList.toggle('on', navs[i].getAttribute('data-go') === name);
+    }
+
+    var idx = ORDER.indexOf(name);
+    document.getElementById('tstep').textContent = (idx + 1) + ' / ' + ORDER.length;
+    document.getElementById('tsay').textContent = SAY[name] || '';
+    document.getElementById('tprev').disabled = idx === 0;
+    document.getElementById('tnext').disabled = idx === ORDER.length - 1;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // One listener for every navigating element — sidebar buttons, action rows
+  // and table rows all carry data-go, so nothing here knows about the layout.
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    var hit = t && t.closest ? t.closest('[data-go]') : null;
+    if (hit) { e.preventDefault(); show(hit.getAttribute('data-go')); return; }
+
+    // In-page links resolve against the HOST page inside a sandboxed frame, so
+    // they are handled here rather than left to the browser.
+    var a = t && t.closest ? t.closest('a[href^="#"]') : null;
+    if (!a) return;
+    e.preventDefault();
+    var id = (a.getAttribute('href') || '').slice(1);
+    var el = id && document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  function step(delta) {
+    var cur = document.querySelector('.screen.on');
+    var name = cur ? cur.id.replace('s-', '') : 'overview';
+    var i = ORDER.indexOf(name) + delta;
+    if (i >= 0 && i < ORDER.length) show(ORDER[i]);
+  }
+  document.getElementById('tnext').addEventListener('click', function () { step(1); });
+  document.getElementById('tprev').addEventListener('click', function () { step(-1); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight') step(1);
+    if (e.key === 'ArrowLeft') step(-1);
+  });
+
+  show('overview');
+})();
+</script>

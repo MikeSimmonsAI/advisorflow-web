@@ -1,0 +1,947 @@
+<title>Building Equity Investments</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap">
+
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   BUILDING EQUITY INVESTMENTS — website design concept
+
+   Palette is North Texas: limestone, weathered red brick, blackland prairie
+   soil, live-oak. Deliberately warm and grounded rather than the bright-blue
+   投resor look every "we buy houses" site wears — a homeowner in trouble is
+   wary of anything that feels like a funnel, so the page reads established
+   and local instead of slick.
+
+   Type: Zilla Slab (sturdy, civic — deeds, signage, county records) against
+   Source Sans 3 (plain, humanist, boring on purpose where trust matters).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --ink:        #1B1A17;
+  --ink-soft:   #4A463E;
+  --paper:      #FBF9F5;
+  --paper-2:    #F3EFE7;
+  --sand:       #E4DCCD;
+  --sand-deep:  #CFC3AD;
+  --brick:      #9A3B26;
+  --brick-soft: #C1614A;
+  --sage:       #5C6B54;
+  --slate:      #56606B;
+  --shadow:     0 1px 2px rgba(27,26,23,.06), 0 8px 24px -12px rgba(27,26,23,.18);
+  --ring:       0 0 0 3px rgba(154,59,38,.28);
+  --maxw:       1180px;
+}
+
+:root:not([data-theme="light"]) {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink:        #F2EEE6;
+    --ink-soft:   #B6AE9F;
+    --paper:      #161512;
+    --paper-2:    #201E1A;
+    --sand:       #33302A;
+    --sand-deep:  #464138;
+    --brick:      #D2694C;
+    --brick-soft: #E08163;
+    --sage:       #8CA07F;
+    --slate:      #9AA5B0;
+    --shadow:     0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.7);
+    --ring:       0 0 0 3px rgba(210,105,76,.34);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ink:        #F2EEE6;
+  --ink-soft:   #B6AE9F;
+  --paper:      #161512;
+  --paper-2:    #201E1A;
+  --sand:       #33302A;
+  --sand-deep:  #464138;
+  --brick:      #D2694C;
+  --brick-soft: #E08163;
+  --sage:       #8CA07F;
+  --slate:      #9AA5B0;
+  --shadow:     0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.7);
+  --ring:       0 0 0 3px rgba(210,105,76,.34);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: "Zilla Slab", Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  line-height: 1.12;
+  text-wrap: balance;
+  margin: 0;
+  letter-spacing: -.01em;
+}
+
+p { margin: 0; }
+a { color: var(--brick); }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--brick);
+}
+
+/* ── concept ribbon ─────────────────────────────────────────────────────
+   This is a proposal mockup, not a live website, and it says so at the top
+   of every screen. A design concept that could be mistaken for the real
+   thing is a liability, not a better pitch.                              */
+.concept-bar {
+  position: sticky; top: 0; z-index: 90;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12.5px;
+  letter-spacing: .04em;
+  padding: 9px 24px;
+  display: flex; gap: 14px; align-items: center; justify-content: center;
+  flex-wrap: wrap;
+  text-align: center;
+}
+.concept-bar b { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--brick-soft); }
+.concept-bar span { opacity: .82; }
+
+/* ── site header ───────────────────────────────────────────────────────── */
+.masthead {
+  border-bottom: 1px solid var(--sand);
+  background: var(--paper);
+}
+.masthead .wrap {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; padding-top: 18px; padding-bottom: 18px;
+}
+.brand { display: flex; align-items: center; gap: 13px; text-decoration: none; color: inherit; }
+.brand-mark {
+  width: 40px; height: 40px; flex: none;
+  border-radius: 3px;
+  background: var(--brick);
+  display: grid; place-items: center;
+}
+.brand-mark svg { width: 22px; height: 22px; }
+.brand-name {
+  font-family: "Zilla Slab", Georgia, serif;
+  font-weight: 700; font-size: 18px; line-height: 1.05; letter-spacing: -.015em;
+}
+.brand-sub { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--slate); }
+
+.nav { display: flex; align-items: center; gap: 28px; }
+.nav a {
+  color: var(--ink-soft); text-decoration: none; font-size: 15px; font-weight: 500;
+  padding: 4px 0; border-bottom: 2px solid transparent;
+}
+.nav a:hover { color: var(--ink); border-bottom-color: var(--brick); }
+.nav .tel {
+  font-family: "Zilla Slab", Georgia, serif;
+  font-weight: 600; font-size: 17px; color: var(--ink);
+  border: none;
+}
+.nav .tel:hover { color: var(--brick); border: none; }
+@media (max-width: 860px) { .nav .hide-sm { display: none; } }
+
+/* ── hero ──────────────────────────────────────────────────────────────── */
+.hero { padding: 72px 0 64px; border-bottom: 1px solid var(--sand); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 64px; align-items: start; }
+@media (max-width: 940px) { .hero-grid { grid-template-columns: 1fr; gap: 40px; } .hero { padding: 44px 0 40px; } }
+
+.hero h1 { font-size: clamp(38px, 5.2vw, 60px); margin: 16px 0 20px; }
+.hero h1 em { font-style: normal; color: var(--brick); }
+.hero-lede { font-size: 19.5px; color: var(--ink-soft); max-width: 34em; }
+
+.hero-points { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 12px; }
+.hero-points li { display: flex; gap: 12px; align-items: baseline; font-size: 16.5px; }
+.hero-points li::before {
+  content: ""; flex: none; width: 7px; height: 7px; margin-top: 8px;
+  background: var(--sage); border-radius: 1px; transform: rotate(45deg);
+}
+
+.trust-row {
+  margin-top: 34px; padding-top: 24px; border-top: 1px solid var(--sand);
+  display: flex; gap: 36px; flex-wrap: wrap;
+}
+.trust-item .n {
+  font-family: "Zilla Slab", Georgia, serif; font-size: 27px; font-weight: 700;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.trust-item .l { font-size: 12.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--slate); margin-top: 5px; }
+
+/* Anything that would be a factual claim about the client's business is
+   flagged for them to confirm, rather than invented to make the mockup
+   look better. */
+.tbd {
+  border-bottom: 1.5px dotted var(--brick);
+  cursor: help;
+}
+
+/* ── offer form ────────────────────────────────────────────────────────── */
+.offer-card {
+  background: var(--paper-2);
+  border: 1px solid var(--sand-deep);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  position: sticky; top: 84px;
+}
+@media (max-width: 940px) { .offer-card { position: static; } }
+
+.offer-head { padding: 22px 26px 18px; border-bottom: 1px solid var(--sand); }
+.offer-head h2 { font-size: 22px; }
+.offer-head p { font-size: 14.5px; color: var(--ink-soft); margin-top: 6px; }
+
+.steps { display: flex; gap: 6px; padding: 16px 26px 0; }
+.step-pip { flex: 1; height: 3px; background: var(--sand-deep); border-radius: 2px; transition: background .3s; }
+.step-pip.on { background: var(--brick); }
+
+.offer-body { padding: 20px 26px 26px; }
+.step { display: none; }
+.step.on { display: block; animation: rise .32s ease both; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.field { display: block; margin-bottom: 15px; }
+.field span {
+  display: block; font-size: 12.5px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--slate); margin-bottom: 6px;
+}
+.field input, .field select, .field textarea {
+  width: 100%; padding: 11px 13px;
+  font: inherit; font-size: 16px;
+  color: var(--ink); background: var(--paper);
+  border: 1px solid var(--sand-deep); border-radius: 3px;
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: none; border-color: var(--brick); box-shadow: var(--ring);
+}
+.field .err { display: none; color: var(--brick); font-size: 13.5px; text-transform: none; letter-spacing: 0; font-weight: 500; margin-top: 5px; }
+.field.bad input, .field.bad select { border-color: var(--brick); }
+.field.bad .err { display: block; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit; font-size: 15px;
+  padding: 8px 14px; border-radius: 3px; cursor: pointer;
+  background: var(--paper); color: var(--ink-soft);
+  border: 1px solid var(--sand-deep);
+}
+.chip:hover { border-color: var(--brick-soft); color: var(--ink); }
+.chip[aria-pressed="true"] { background: var(--brick); border-color: var(--brick); color: #FFF6F2; font-weight: 600; }
+.chip:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.btn {
+  font: inherit; font-weight: 600; font-size: 16.5px;
+  padding: 13px 22px; border-radius: 3px; cursor: pointer; border: 1px solid transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+}
+.btn-primary { background: var(--brick); color: #FFF6F2; width: 100%; }
+.btn-primary:hover { background: var(--brick-soft); }
+.btn-ghost { background: transparent; color: var(--ink-soft); border-color: var(--sand-deep); }
+.btn-ghost:hover { color: var(--ink); border-color: var(--ink-soft); }
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.btn-row { display: flex; gap: 10px; margin-top: 4px; }
+.btn-row .btn-primary { width: auto; flex: 1; }
+
+.fineprint { font-size: 13px; color: var(--slate); margin-top: 14px; line-height: 1.5; }
+
+.done { text-align: center; padding: 12px 0 4px; }
+.done-mark {
+  width: 46px; height: 46px; margin: 0 auto 16px; border-radius: 50%;
+  background: var(--sage); display: grid; place-items: center;
+}
+.done-mark svg { width: 24px; height: 24px; }
+.done h3 { font-size: 21px; margin-bottom: 10px; }
+.done p { font-size: 15px; color: var(--ink-soft); }
+.done .routed {
+  margin-top: 18px; padding: 13px 15px; text-align: left;
+  background: var(--paper); border: 1px dashed var(--sand-deep); border-radius: 3px;
+  font-size: 13.5px; color: var(--slate); line-height: 1.55;
+}
+.done .routed b { color: var(--brick); }
+
+/* ── generic section ───────────────────────────────────────────────────── */
+.section { padding: 76px 0; border-bottom: 1px solid var(--sand); }
+.section.tint { background: var(--paper-2); }
+@media (max-width: 780px) { .section { padding: 52px 0; } }
+.section-head { max-width: 40em; margin-bottom: 44px; }
+.section-head h2 { font-size: clamp(28px, 3.4vw, 38px); margin: 14px 0 14px; }
+.section-head p { font-size: 18px; color: var(--ink-soft); }
+
+/* ── how it works — a real 3-step sequence, so it is numbered ──────────── */
+.steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+@media (max-width: 840px) { .steps-grid { grid-template-columns: 1fr; gap: 32px; } }
+.step-card { border-top: 2px solid var(--brick); padding-top: 20px; }
+.step-card .num {
+  font-family: "Zilla Slab", Georgia, serif; font-size: 15px; font-weight: 700;
+  color: var(--brick); letter-spacing: .08em;
+}
+.step-card h3 { font-size: 21px; margin: 10px 0 10px; }
+.step-card p { color: var(--ink-soft); font-size: 16px; }
+.step-card .when { margin-top: 12px; font-size: 13px; letter-spacing: .07em; text-transform: uppercase; color: var(--slate); }
+
+/* ── net proceeds calculator ───────────────────────────────────────────── */
+.calc { display: grid; grid-template-columns: .8fr 1.2fr; gap: 48px; align-items: start; }
+@media (max-width: 940px) { .calc { grid-template-columns: 1fr; gap: 32px; } }
+
+.calc-inputs { background: var(--paper); border: 1px solid var(--sand-deep); border-radius: 4px; padding: 24px; }
+:root[data-theme="dark"] .calc-inputs,
+:root:not([data-theme="light"]) .calc-inputs { background: var(--paper); }
+.calc-inputs .field:last-of-type { margin-bottom: 6px; }
+.range-row { display: flex; align-items: center; gap: 14px; }
+.range-row input[type="range"] { flex: 1; accent-color: var(--brick); }
+.range-val {
+  font-family: "Zilla Slab", Georgia, serif; font-weight: 700; font-size: 20px;
+  font-variant-numeric: tabular-nums; min-width: 108px; text-align: right;
+}
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 620px) { .compare { grid-template-columns: 1fr; } }
+.col {
+  border: 1px solid var(--sand-deep); border-radius: 4px; padding: 22px; background: var(--paper);
+}
+.col.ours { border-color: var(--brick); border-width: 1.5px; }
+.col h4 { font-size: 17px; margin-bottom: 4px; }
+.col .sub { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--slate); margin-bottom: 18px; }
+.line { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 15.5px; border-bottom: 1px solid var(--sand); }
+.line:last-of-type { border-bottom: none; }
+.line .lab { color: var(--ink-soft); }
+.line .amt { font-variant-numeric: tabular-nums; font-weight: 500; }
+.line .amt.neg { color: var(--brick); }
+.line .amt.zero { color: var(--sage); font-weight: 600; }
+.net {
+  margin-top: 16px; padding-top: 16px; border-top: 2px solid var(--ink);
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+}
+.net .lab { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--slate); }
+.net .amt { font-family: "Zilla Slab", Georgia, serif; font-size: 27px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.timing { margin-top: 14px; font-size: 13.5px; color: var(--slate); }
+.calc-note { margin-top: 22px; font-size: 13.5px; color: var(--slate); max-width: 46em; line-height: 1.6; }
+
+/* ── situations ────────────────────────────────────────────────────────── */
+.sits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; background: var(--sand); border: 1px solid var(--sand); }
+@media (max-width: 840px) { .sits { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .sits { grid-template-columns: 1fr; } }
+.sit { background: var(--paper); padding: 24px 22px; }
+.sit h4 { font-size: 17px; margin-bottom: 7px; }
+.sit p { font-size: 15px; color: var(--ink-soft); }
+
+/* ── faq ───────────────────────────────────────────────────────────────── */
+.faq { max-width: 46em; }
+.qa { border-bottom: 1px solid var(--sand); }
+.qa button {
+  width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  font: inherit; font-family: "Zilla Slab", Georgia, serif; font-weight: 600; font-size: 19px;
+  color: var(--ink); padding: 20px 40px 20px 0; position: relative;
+}
+.qa button:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 3px; }
+.qa button::after {
+  content: ""; position: absolute; right: 8px; top: 50%; width: 11px; height: 11px;
+  border-right: 2px solid var(--brick); border-bottom: 2px solid var(--brick);
+  transform: translateY(-70%) rotate(45deg); transition: transform .24s;
+}
+.qa[open] button::after { transform: translateY(-30%) rotate(-135deg); }
+.qa .a { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+.qa[open] .a { max-height: 340px; }
+.qa .a p { padding-bottom: 22px; color: var(--ink-soft); font-size: 16.5px; max-width: 40em; }
+
+/* ── closing cta ───────────────────────────────────────────────────────── */
+.closer { background: var(--ink); color: var(--paper); padding: 76px 0; }
+.closer h2 { font-size: clamp(30px, 4vw, 44px); color: var(--paper); max-width: 16em; }
+.closer p { margin-top: 18px; font-size: 18.5px; color: var(--sand-deep); max-width: 34em; }
+.closer .acts { margin-top: 32px; display: flex; gap: 14px; flex-wrap: wrap; }
+.closer .btn-primary { width: auto; padding-left: 30px; padding-right: 30px; }
+.closer .btn-ghost { color: var(--paper); border-color: rgba(228,220,205,.34); }
+.closer .btn-ghost:hover { border-color: var(--paper); color: var(--paper); }
+
+/* ── footer ────────────────────────────────────────────────────────────── */
+.foot { padding: 46px 0 56px; font-size: 15px; }
+.foot-grid { display: flex; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
+.foot a { color: var(--ink); text-decoration: none; }
+.foot a:hover { color: var(--brick); }
+.foot .lab { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--slate); margin-bottom: 7px; }
+.foot .legal { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--sand); font-size: 13.5px; color: var(--slate); max-width: 52em; line-height: 1.6; }
+
+/* ── sticky mobile cta ─────────────────────────────────────────────────── */
+.mobile-cta {
+  display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 80;
+  background: var(--paper); border-top: 1px solid var(--sand-deep);
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  gap: 10px;
+}
+@media (max-width: 940px) { .mobile-cta { display: flex; } body { padding-bottom: 74px; } }
+.mobile-cta .btn { flex: 1; font-size: 15.5px; padding: 12px 10px; }
+
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .step.on { animation: none; }
+  .qa .a { transition: none; }
+}
+</style>
+
+<div class="concept-bar">
+  <b>Design concept</b>
+  <span>Prepared by EvoSys Pro for Building Equity Investments LLC — this is a mockup, not a live website.</span>
+</div>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#FFF6F2" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/>
+        </svg>
+      </span>
+      <span>
+        <span class="brand-name">Building Equity</span><br>
+        <span class="brand-sub">Investments&nbsp;LLC · DFW</span>
+      </span>
+    </a>
+    <nav class="nav">
+      <a href="#how" class="hide-sm">How it works</a>
+      <a href="#compare" class="hide-sm">What you keep</a>
+      <a href="#faq" class="hide-sm">Questions</a>
+      <a href="tel:+19726438565" class="tel">(972)&nbsp;643-8565</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Plano · Frisco · McKinney · Dallas–Fort Worth</p>
+        <h1>Sell your house <em>as-is</em>, on the date you pick.</h1>
+        <p class="hero-lede">
+          We are local buyers, not a listing service. Tell us about the property and
+          we will look at it, run the numbers the same way we would for our own,
+          and come back with a straight cash number. No repairs. No showings. No
+          commission taken out at closing.
+        </p>
+        <ul class="hero-points">
+          <li>You choose the closing date — as quick as two weeks, or months out if you need the time.</li>
+          <li>We buy in any condition. Deferred maintenance, tenants in place, inherited and empty.</li>
+          <li>No agent commission, and we cover standard closing costs.</li>
+          <li>If a cash sale is not your best move, we will tell you that too.</li>
+        </ul>
+        <div class="trust-row">
+          <div class="trust-item">
+            <div class="n"><span class="tbd" title="Placeholder — confirm the real figure with Derrick before launch">— homes</span></div>
+            <div class="l">Purchased in DFW</div>
+          </div>
+          <div class="trust-item">
+            <div class="n"><span class="tbd" title="Placeholder — confirm the real figure with Derrick before launch">— years</span></div>
+            <div class="l">Buying in North Texas</div>
+          </div>
+          <div class="trust-item">
+            <div class="n">14 days</div>
+            <div class="l">Typical close, if you want it</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- The whole site has one job, so the form is never more than a glance
+           away: sticky on desktop, a fixed bar on mobile. -->
+      <div class="offer-card" id="offer">
+        <div class="offer-head">
+          <h2>Get a cash offer</h2>
+          <p>Three short steps. Nothing you fill in obligates you to anything.</p>
+        </div>
+        <div class="steps" aria-hidden="true">
+          <div class="step-pip on" data-pip="1"></div>
+          <div class="step-pip" data-pip="2"></div>
+          <div class="step-pip" data-pip="3"></div>
+        </div>
+        <div class="offer-body">
+
+          <div class="step on" data-step="1">
+            <label class="field" id="f-addr">
+              <span>Property address</span>
+              <input type="text" id="addr" placeholder="Street address, city" autocomplete="street-address">
+              <em class="err">Enter the address of the property you want to sell.</em>
+            </label>
+            <label class="field">
+              <span>Property type</span>
+              <select id="ptype">
+                <option>Single-family house</option>
+                <option>Duplex or small multi-family</option>
+                <option>Townhouse or condo</option>
+                <option>Mobile or manufactured</option>
+                <option>Land</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" data-next="2">Continue</button>
+            <p class="fineprint">We look at every address ourselves. You will not be handed to a call centre.</p>
+          </div>
+
+          <div class="step" data-step="2">
+            <div class="field" id="f-cond">
+              <span>Condition, roughly</span>
+              <div class="chips" role="group" aria-label="Condition">
+                <button type="button" class="chip" data-group="cond">Move-in ready</button>
+                <button type="button" class="chip" data-group="cond">Needs light work</button>
+                <button type="button" class="chip" data-group="cond">Needs a lot of work</button>
+                <button type="button" class="chip" data-group="cond">Not sure</button>
+              </div>
+              <em class="err">Pick whichever is closest — a rough answer is fine.</em>
+            </div>
+            <div class="field" id="f-when">
+              <span>How soon do you want to close?</span>
+              <div class="chips" role="group" aria-label="Timeline">
+                <button type="button" class="chip" data-group="when">As soon as possible</button>
+                <button type="button" class="chip" data-group="when">Within 30 days</button>
+                <button type="button" class="chip" data-group="when">1–3 months</button>
+                <button type="button" class="chip" data-group="when">Just exploring</button>
+              </div>
+              <em class="err">Let us know your timing so we can work to it.</em>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-ghost" data-back="1">Back</button>
+              <button class="btn btn-primary" data-next="3">Continue</button>
+            </div>
+          </div>
+
+          <div class="step" data-step="3">
+            <label class="field" id="f-name">
+              <span>Your name</span>
+              <input type="text" id="nm" autocomplete="name">
+              <em class="err">We need a name to put on the offer.</em>
+            </label>
+            <label class="field" id="f-phone">
+              <span>Phone</span>
+              <input type="tel" id="ph" placeholder="(972) 555-0134" autocomplete="tel">
+              <em class="err">Enter a phone number we can reach you on.</em>
+            </label>
+            <label class="field">
+              <span>Email <span style="text-transform:none;letter-spacing:0;font-weight:400;">(optional)</span></span>
+              <input type="email" id="em" autocomplete="email">
+            </label>
+            <div class="btn-row">
+              <button class="btn btn-ghost" data-back="2">Back</button>
+              <button class="btn btn-primary" id="submit">Request my offer</button>
+            </div>
+            <p class="fineprint">
+              By sending this you are asking us to look at the property. You are not
+              listing it, and you are not agreeing to sell.
+            </p>
+          </div>
+
+          <div class="step" data-step="4">
+            <div class="done">
+              <div class="done-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#FBF9F5" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg>
+              </div>
+              <h3>Got it, <span id="who">thanks</span>.</h3>
+              <p>
+                We will pull comparable sales for <span id="echo-addr" style="font-weight:600;">the property</span>
+                and call you back — usually the same day.
+              </p>
+              <div class="routed">
+                <b>In the live site:</b> this enquiry lands in EvoSys Pro as a new
+                seller lead, with the address, condition and timeline already
+                attached, and starts the follow-up sequence automatically. Nothing
+                is typed in twice, and nothing waits in an inbox for someone to
+                notice it.
+              </div>
+              <button class="btn btn-ghost" id="again" style="margin-top:18px;">Try the form again</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">How it works</p>
+        <h2>Three steps, and you can stop at any one of them.</h2>
+        <p>There is no point in the process where you are locked in before you have seen a number.</p>
+      </div>
+      <div class="steps-grid">
+        <div class="step-card reveal">
+          <div class="num">STEP 01</div>
+          <h3>You tell us about the house</h3>
+          <p>Address, rough condition, and when you would like to be done. Two minutes on the form above, or a phone call if you would rather talk.</p>
+          <div class="when">Same day</div>
+        </div>
+        <div class="step-card reveal">
+          <div class="num">STEP 02</div>
+          <h3>We look at it and make an offer</h3>
+          <p>We pull comparable sales, estimate what the property needs, and give you a cash number with the reasoning behind it. Ask us how we got there — we will show you.</p>
+          <div class="when">Usually 24–48 hours</div>
+        </div>
+        <div class="step-card reveal">
+          <div class="num">STEP 03</div>
+          <h3>You pick the closing date</h3>
+          <p>If the number works, we close at a local title company on the date you choose. If it does not work, no hard feelings and no follow-up you did not ask for.</p>
+          <div class="when">Two weeks, or whenever suits</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section tint" id="compare">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">What you actually keep</p>
+        <h2>The sale price is not the number that matters.</h2>
+        <p>
+          A higher price on the listing sheet can still leave you with less in hand.
+          Move the sliders to your situation and compare what each route actually nets you.
+        </p>
+      </div>
+
+      <div class="calc reveal">
+        <div class="calc-inputs">
+          <label class="field">
+            <span>What is the house worth, fixed up?</span>
+            <div class="range-row">
+              <input type="range" id="val" min="80000" max="900000" step="5000" value="325000">
+              <span class="range-val" id="val-out">$325,000</span>
+            </div>
+          </label>
+          <label class="field">
+            <span>What does it need in repairs?</span>
+            <div class="range-row">
+              <input type="range" id="rep" min="0" max="150000" step="2500" value="35000">
+              <span class="range-val" id="rep-out">$35,000</span>
+            </div>
+          </label>
+          <label class="field">
+            <span>Months you would carry it while listed</span>
+            <div class="range-row">
+              <input type="range" id="mon" min="1" max="9" step="1" value="3">
+              <span class="range-val" id="mon-out">3 mo</span>
+            </div>
+          </label>
+          <p class="fineprint" style="margin-top:16px;">
+            Carrying cost assumes taxes, insurance and utilities at roughly 1% of
+            value a year. Adjust the sliders — the comparison updates as you go.
+          </p>
+        </div>
+
+        <div>
+          <div class="compare">
+            <div class="col">
+              <h4>List it with an agent</h4>
+              <div class="sub">Sell at full value</div>
+              <div class="line"><span class="lab">Sale price</span><span class="amt" id="a-price">$325,000</span></div>
+              <div class="line"><span class="lab">Agent commission (6%)</span><span class="amt neg" id="a-comm">−$19,500</span></div>
+              <div class="line"><span class="lab">Seller closing costs (2%)</span><span class="amt neg" id="a-close">−$6,500</span></div>
+              <div class="line"><span class="lab">Repairs you pay for</span><span class="amt neg" id="a-rep">−$35,000</span></div>
+              <div class="line"><span class="lab">Carrying costs</span><span class="amt neg" id="a-carry">−$2,438</span></div>
+              <div class="net"><span class="lab">You keep</span><span class="amt" id="a-net">$261,562</span></div>
+              <p class="timing" id="a-time">About 3 months, plus repair time before it lists.</p>
+            </div>
+
+            <div class="col ours">
+              <h4>Sell to Building Equity</h4>
+              <div class="sub">Cash, as-is</div>
+              <div class="line"><span class="lab">Our offer</span><span class="amt" id="b-price">$225,000</span></div>
+              <div class="line"><span class="lab">Agent commission</span><span class="amt zero">None</span></div>
+              <div class="line"><span class="lab">Closing costs</span><span class="amt zero">We cover them</span></div>
+              <div class="line"><span class="lab">Repairs you pay for</span><span class="amt zero">None</span></div>
+              <div class="line"><span class="lab">Carrying costs</span><span class="amt zero">None</span></div>
+              <div class="net"><span class="lab">You keep</span><span class="amt" id="b-net">$225,000</span></div>
+              <p class="timing">As little as 14 days, on your date.</p>
+            </div>
+          </div>
+
+          <p class="calc-note">
+            <span class="tbd" title="Placeholder formula — Derrick sets the real offer basis before launch">Offer shown here is illustrative</span>,
+            calculated as 78% of after-repair value less the repair estimate. Every
+            real offer is worked out property by property, and we will walk you
+            through how we got to it. Sometimes the listed route genuinely nets you
+            more — when it does, we say so.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Who we usually hear from</p>
+        <h2>Most people who call us have a reason that has nothing to do with price.</h2>
+      </div>
+      <div class="sits reveal">
+        <div class="sit"><h4>Inherited a house</h4><p>Often out of state, often full of a lifetime of belongings, and usually with siblings who need it settled.</p></div>
+        <div class="sit"><h4>Tired of being a landlord</h4><p>We buy with tenants in place. You do not have to turn anyone out to sell.</p></div>
+        <div class="sit"><h4>Repairs you cannot face</h4><p>Foundation, roof, plumbing. You do not have to fix anything for us to buy it.</p></div>
+        <div class="sit"><h4>Behind on payments</h4><p>If there is still time to work with, a straight sale can end it cleanly. Call sooner rather than later.</p></div>
+        <div class="sit"><h4>Divorce or a move</h4><p>A fixed closing date you control is worth more than a maybe from a buyer who needs financing.</p></div>
+        <div class="sit"><h4>It has been sitting listed</h4><p>Showings, price cuts, contracts falling through. We are a certain answer instead of another maybe.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section tint" id="faq">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Straight answers</p>
+        <h2>The questions people actually ask.</h2>
+      </div>
+      <div class="faq reveal">
+        <details class="qa" open>
+          <summary style="list-style:none;"><button type="button">Will you pay what the house is worth?</button></summary>
+          <div class="a"><p>Not full retail value — and anyone who tells you otherwise is not being straight with you. We buy below after-repair value because we take on the repairs, the holding costs and the risk that the market moves. What you get instead is certainty, speed, no commission and no repair bill. Run your numbers in the calculator above and see how the two compare for your situation.</p></div>
+        </details>
+        <details class="qa">
+          <summary style="list-style:none;"><button type="button">Is there any cost to me?</button></summary>
+          <div class="a"><p>No. There is no fee for the offer, no commission, and we cover standard seller closing costs. Nothing comes out of your pocket at any point.</p></div>
+        </details>
+        <details class="qa">
+          <summary style="list-style:none;"><button type="button">Do I have to clean it out or fix anything?</button></summary>
+          <div class="a"><p>No. Take what you want to keep and leave the rest. We handle clean-out and repairs after closing.</p></div>
+        </details>
+        <details class="qa">
+          <summary style="list-style:none;"><button type="button">How fast can this actually close?</button></summary>
+          <div class="a"><p>Two weeks is normal once title comes back clear. If you need longer — to find your next place, or to get through a school year — we will close on the date you name instead.</p></div>
+        </details>
+        <details class="qa">
+          <summary style="list-style:none;"><button type="button">Am I committed to anything by asking?</button></summary>
+          <div class="a"><p>No. Asking for an offer is asking for a number. You are free to take it, leave it, or use it as a benchmark against what an agent tells you.</p></div>
+        </details>
+        <details class="qa">
+          <summary style="list-style:none;"><button type="button">Where do you buy?</button></summary>
+          <div class="a"><p>Across the Dallas–Fort Worth metroplex, and we are based in Plano. If the property is outside our area, we will say so straight away rather than waste your time.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="closer">
+    <div class="wrap">
+      <h2>Find out what your house is worth to us.</h2>
+      <p>No fee, no obligation, and a real person on the other end of it.</p>
+      <div class="acts">
+        <a class="btn btn-primary" href="#offer">Get my cash offer</a>
+        <a class="btn btn-ghost" href="tel:+19726438565">Call (972) 643-8565</a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div>
+          <div class="lab">Building Equity Investments LLC</div>
+          <div>Plano, Texas — buying across DFW</div>
+        </div>
+        <div>
+          <div class="lab">Phone</div>
+          <a href="tel:+19726438565">(972) 643-8565</a>
+        </div>
+        <div>
+          <div class="lab">Email</div>
+          <a href="mailto:info@buildinginvestments.net">info@buildinginvestments.net</a>
+        </div>
+        <div>
+          <div class="lab">Hours</div>
+          <div>Mon–Sat, 8am–7pm CT</div>
+        </div>
+      </div>
+      <p class="legal">
+        We buy houses directly as investors. We are not acting as your real estate
+        agent and do not represent you in a transaction. Offers are not appraisals.
+        Nothing on this page is legal, tax or financial advice — for a decision this
+        size, talk to your own advisor as well as to us.
+      </p>
+    </div>
+  </footer>
+</main>
+
+<div class="mobile-cta">
+  <a class="btn btn-ghost" href="tel:+19726438565">Call</a>
+  <a class="btn btn-primary" href="#offer">Get my cash offer</a>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ── multi-step offer form ─────────────────────────────────────────────
+     Validation is per step so nobody is told about a problem on a screen
+     they cannot see. Every message says what to do, not that something is
+     "invalid".                                                            */
+  var card = document.getElementById("offer");
+  var picked = { cond: null, when: null };
+
+  function show(n) {
+    card.querySelectorAll(".step").forEach(function (s) {
+      s.classList.toggle("on", s.dataset.step === String(n));
+    });
+    card.querySelectorAll(".step-pip").forEach(function (p) {
+      p.classList.toggle("on", Number(p.dataset.pip) <= Math.min(n, 3));
+    });
+  }
+
+  function flag(id, bad) {
+    var el = document.getElementById(id);
+    if (el) el.classList.toggle("bad", !!bad);
+    return !bad;
+  }
+
+  function valid(step) {
+    if (step === 1) {
+      return flag("f-addr", document.getElementById("addr").value.trim().length < 5);
+    }
+    if (step === 2) {
+      var a = flag("f-cond", !picked.cond);
+      var b = flag("f-when", !picked.when);
+      return a && b;
+    }
+    if (step === 3) {
+      var n = flag("f-name", document.getElementById("nm").value.trim().length < 2);
+      var digits = document.getElementById("ph").value.replace(/\D/g, "");
+      var p = flag("f-phone", digits.length < 10);
+      return n && p;
+    }
+    return true;
+  }
+
+  card.addEventListener("click", function (e) {
+    var t = e.target;
+
+    if (t.dataset && t.dataset.next) {
+      var from = Number(t.dataset.next) - 1;
+      if (valid(from)) show(Number(t.dataset.next));
+      return;
+    }
+    if (t.dataset && t.dataset.back) { show(Number(t.dataset.back)); return; }
+
+    if (t.classList && t.classList.contains("chip")) {
+      var g = t.dataset.group;
+      card.querySelectorAll('.chip[data-group="' + g + '"]').forEach(function (c) {
+        c.setAttribute("aria-pressed", c === t ? "true" : "false");
+      });
+      picked[g] = t.textContent.trim();
+      flag(g === "cond" ? "f-cond" : "f-when", false);
+      return;
+    }
+
+    if (t.id === "submit") {
+      if (!valid(3)) return;
+      var nm = document.getElementById("nm").value.trim().split(/\s+/)[0];
+      document.getElementById("who").textContent = nm || "thanks";
+      document.getElementById("echo-addr").textContent =
+        document.getElementById("addr").value.trim() || "the property";
+      show(4);
+      return;
+    }
+
+    if (t.id === "again") {
+      ["addr", "nm", "ph", "em"].forEach(function (id) {
+        var el = document.getElementById(id); if (el) el.value = "";
+      });
+      card.querySelectorAll(".chip").forEach(function (c) { c.setAttribute("aria-pressed", "false"); });
+      picked = { cond: null, when: null };
+      card.querySelectorAll(".field, #f-cond, #f-when").forEach(function (f) { f.classList.remove("bad"); });
+      show(1);
+    }
+  });
+
+  /* ── net proceeds calculator ───────────────────────────────────────────
+     The persuasive point of the whole page: the sale price is not what you
+     keep. Numbers recompute live so a seller can put their own situation in
+     rather than take our word for it.                                     */
+  var val = document.getElementById("val");
+  var rep = document.getElementById("rep");
+  var mon = document.getElementById("mon");
+
+  var usd = function (n) {
+    return (n < 0 ? "−$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
+  };
+
+  function recalc() {
+    var v = Number(val.value), r = Number(rep.value), m = Number(mon.value);
+
+    var commission = v * 0.06;
+    var closing    = v * 0.02;
+    var carry      = v * 0.01 / 12 * m;
+    var agentNet   = v - commission - closing - r - carry;
+
+    // Illustrative only, and labelled as such on the page: 78% of ARV less repairs.
+    var offer = Math.max(0, v * 0.78 - r);
+
+    document.getElementById("val-out").textContent = usd(v);
+    document.getElementById("rep-out").textContent = usd(r);
+    document.getElementById("mon-out").textContent = m + " mo";
+
+    document.getElementById("a-price").textContent = usd(v);
+    document.getElementById("a-comm").textContent  = usd(-commission);
+    document.getElementById("a-close").textContent = usd(-closing);
+    document.getElementById("a-rep").textContent   = r === 0 ? "$0" : usd(-r);
+    document.getElementById("a-carry").textContent = usd(-carry);
+    document.getElementById("a-net").textContent   = usd(agentNet);
+    document.getElementById("a-time").textContent  =
+      "About " + m + (m === 1 ? " month" : " months") + ", plus repair time before it lists.";
+
+    document.getElementById("b-price").textContent = usd(offer);
+    document.getElementById("b-net").textContent   = usd(offer);
+  }
+
+  [val, rep, mon].forEach(function (el) { el.addEventListener("input", recalc); });
+  recalc();
+
+  /* ── faq: one open at a time, and the arrow follows ────────────────── */
+  document.querySelectorAll(".qa button").forEach(function (b) {
+    b.addEventListener("click", function (e) {
+      e.preventDefault();
+      var d = b.closest("details");
+      var wasOpen = d.hasAttribute("open");
+      document.querySelectorAll(".qa[open]").forEach(function (o) { o.removeAttribute("open"); });
+      if (!wasOpen) d.setAttribute("open", "");
+    });
+  });
+
+  /* ── in-page links: scroll, never navigate ─────────────────────────
+     This page is shown inside a sandboxed srcdoc frame, where a bare
+     "#id" href resolves against the HOST page's URL and reloads the app
+     instead of jumping. Handle every in-page link ourselves. ────────── */
+  document.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if (!a) return;
+    e.preventDefault();
+    var id = (a.getAttribute("href") || "").slice(1);
+    if (!id || id === "top") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  /* ── scroll reveal, off entirely for reduced motion ────────────────── */
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches && "IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+      });
+    }, { rootMargin: "0px 0px -8% 0px" });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
+  }
+})();
+</script>
