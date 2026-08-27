@@ -378,14 +378,34 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
             # webhook is briefly behind.
             settled = sent_30 - pending
             deliv_pct = round((delivered / settled) * 100, 1) if settled else None
-            status = "bad" if fail_pct >= 10 else "warn" if fail_pct >= 2 else "ok"
-            out.append(_section(
-                "messaging", "Messaging", status,
-                (("%s%% delivered" % deliv_pct) if deliv_pct is not None
-                 else "%d sent · awaiting receipts" % sent_30),
-                "%d sent in 30 days · %d failed or undelivered (%s%%) · %d awaiting a receipt."
-                % (sent_30, failed, fail_pct, pending),
-                to="/god/organizations"))
+            if settled == 0:
+                # NO RECEIPTS AT ALL IS NOT A CLEAN BILL OF HEALTH.
+                #
+                # Production returned 3,589 sent and 3,589 pending: every single
+                # message is still awaiting a delivery receipt, which means the
+                # Twilio status-callback webhook is not reporting. Scoring that
+                # as "ok" because the failure count is zero is the exact
+                # green-for-silence mistake this endpoint exists to avoid — the
+                # failure count is zero because NOTHING has been reported, not
+                # because nothing failed. Whether those messages arrived is
+                # currently unknown, and the tile has to say so.
+                out.append(_section(
+                    "messaging", "Messaging", "warn",
+                    "%d sent · no delivery receipts" % sent_30,
+                    "Not one of %d messages sent in 30 days has a delivery "
+                    "receipt, so whether they arrived is unknown. Receipts are "
+                    "written by the Twilio status-callback webhook."
+                    % sent_30,
+                    needs="the status-callback webhook reporting back",
+                    to="/god/organizations"))
+            else:
+                status = "bad" if fail_pct >= 10 else "warn" if fail_pct >= 2 else "ok"
+                out.append(_section(
+                    "messaging", "Messaging", status,
+                    "%s%% delivered" % deliv_pct,
+                    "%d sent in 30 days · %d failed or undelivered (%s%%) · %d awaiting a receipt."
+                    % (sent_30, failed, fail_pct, pending),
+                    to="/god/organizations"))
     except Exception as e:                                   # pragma: no cover
         log.warning("platform-health messaging failed: %s", e)
         out.append(_section("messaging", "Messaging", "no_source",

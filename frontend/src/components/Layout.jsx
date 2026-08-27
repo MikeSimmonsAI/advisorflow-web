@@ -483,12 +483,19 @@ export default function Layout({ children }) {
             <NotificationBell />
           </div>
         </header>
-        {orgContext && (
-          <div className="org-context-banner">
-            <span>👁 Viewing as <strong>{orgContext.orgName}</strong> — all data is scoped to this org</span>
-            <button type="button" className="org-context-exit" onClick={handleExitOrg}>Exit Org View</button>
-          </div>
-        )}
+        {/* THE SECOND CONTEXT BANNER WAS REMOVED, NOT THE FIRST.
+            Three strips used to stack here: GodReturnBar above ("viewing the
+            customer app", with the way back), this one, and ContextBanner
+            inside the page ("VIEWING: <customer> · <brand> customer", with Exit
+            customer). The middle one said the same thing as the third and read
+            it from LOCALSTORAGE — which is the exact source ContextBanner
+            exists in order not to trust, because a stale tab keeps naming a
+            customer the server has already stopped applying.
+
+            So the duplicate went and the two that do different jobs stayed: one
+            gets you back to the control plane, the other tells you — on the
+            server's authority — whose records you are about to change.
+            `handleExitOrg` is still wired to the org switcher in the rail. */}
         <main className="main-content">{children}</main>
       </div>
       <ProfileOnboarding />

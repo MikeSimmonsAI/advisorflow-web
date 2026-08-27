@@ -181,6 +181,34 @@ def main():
           msg.get("headline"))
     check("...and counts the failed message rather than hiding it",
           "1 failed" in (msg.get("detail") or ""), msg.get("detail"))
+
+    # SILENCE IS NOT HEALTH. Production shipped with 3,589 messages sent and
+    # 3,589 still pending — every one awaiting a receipt the status-callback
+    # webhook never delivered — and the tile rendered GREEN, because the failure
+    # count was zero. It was zero because nothing had been reported, not because
+    # nothing failed. A separate fixture proves that case is a warning now.
+    db2 = SessionLocal()
+    try:
+        for m in db2.query(Message).all():
+            m.delivery_status = "pending"
+        db2.commit()
+    finally:
+        db2.close()
+    m2 = {s["key"]: s for s in c.get("/god/platform-health",
+                                     headers=god).json()["sections"]}["messaging"]
+    check("messages with NO delivery receipt at all are not scored healthy",
+          m2.get("status") != "ok", "%s / %s" % (m2.get("status"), m2.get("headline")))
+    check("...and the tile says whether they arrived is unknown",
+          "unknown" in (m2.get("detail") or "") and bool(m2.get("needs")),
+          m2.get("detail"))
+    # Put the fixture back so later sections read the state they were written for.
+    db2 = SessionLocal()
+    try:
+        db2.query(Message).filter(Message.id == "msg-ok").first().delivery_status = "delivered"
+        db2.query(Message).filter(Message.id == "msg-bad").first().delivery_status = "failed"
+        db2.commit()
+    finally:
+        db2.close()
     bil = secs.get("billing", {})
     check("billing reports that nothing can be charged",
           bil.get("status") == "bad", bil.get("headline"))

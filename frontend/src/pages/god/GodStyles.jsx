@@ -185,7 +185,15 @@ const CSS = `
 .gm-dot.off{background:#2b425c}
 
 /* ── owner action queue ────────────────────────────────────────────────── */
-.gm-q{display:flex;flex-direction:column}
+/* Capped and scrolled, not uncapped. Production opened with 21 items against a
+   six-tile health grid beside it, so the band ran a full screen taller than its
+   left column and left a dead void next to the list. The count in the section
+   label says how many there are; this keeps the first several readable without
+   the page paying for the twenty-first. */
+.gm-q{display:flex;flex-direction:column;max-height:560px;overflow-y:auto}
+.gm-q::-webkit-scrollbar{width:8px}
+.gm-q::-webkit-scrollbar-thumb{background:rgba(88,169,225,.22);border-radius:4px}
+.gm-q::-webkit-scrollbar-track{background:transparent}
 .gm-q-item{
   display:grid;grid-template-columns:9px 1fr auto;gap:12px;align-items:start;
   padding:12px 14px;border-bottom:1px solid rgba(42,92,132,.16);

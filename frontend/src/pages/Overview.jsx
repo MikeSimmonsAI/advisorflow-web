@@ -225,8 +225,11 @@ export default function Overview() {
       trend: hotReplies > 0 ? 'awaiting a decision' : 'inbox clear',
       to: '/replies?needs_attention=true' },
     { label: IL.appointments, value: num(bookedLeads), color: 'var(--signal-green)',
+      // Label first, count second. "1 recorded visits" is what you get from
+      // gluing a count onto a plural noun, and the industry labels are plural
+      // by nature ("Arrangements", "Installs") so there is no singular to pick.
       trend: outcomes?.total_appointments != null
-        ? `${num(outcomes.total_appointments)} ${IL.recordedVisits.toLowerCase()}` : IL.bookedSub,
+        ? `${IL.recordedVisits}: ${num(outcomes.total_appointments)}` : IL.bookedSub,
       to: '/leads?status=booked' },
     { label: 'Reply rate', value: replyRate === null ? '—' : replyRate + '%',
       color: 'var(--signal-purple)',
