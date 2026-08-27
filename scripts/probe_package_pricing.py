@@ -25,6 +25,7 @@ So most checks below are about what must NOT happen:
 
 Nothing here touches production. Every id below is invented.
 """
+import json
 import os
 import shutil
 import sys
@@ -408,6 +409,27 @@ def main():
               float(pkg("pkg-start").monthly_price) == 597.0
               and float(pkg("pkg-start").price) == 1497.0,
               (float(pkg("pkg-start").monthly_price), float(pkg("pkg-start").price)))
+
+        section("A PROPOSAL QUOTES THE DEAL'S FEE, NOT THE CATALOGUE'S")
+        c.patch("/sales/opportunities/opp-1",
+                json={"selected_package_id": "pkg-start",
+                      "implementation_fee": 1500}, headers=rep)
+        pr_r = c.post("/sales/proposals",
+                      json={"opportunity_id": "opp-1", "package_id": "pkg-start"},
+                      headers=mgr)
+        check("a proposal can be created", pr_r.status_code == 201,
+              (pr_r.status_code, pr_r.text[:160]))
+        prop = pr_r.json()
+        check("base_amount is the DEAL's $1,500, not the catalogue's $1,497",
+              prop["base_amount"] == 1500.0, prop["base_amount"])
+        check("...and the total agrees with it",
+              prop["final_amount"] == 1500.0, prop["final_amount"])
+        check("the commercials block agrees too - one number, not two",
+              prop["commercials"]["implementation_fee"] == 1500.0,
+              prop["commercials"]["implementation_fee"])
+        check("NO $1,497 anywhere in the quote",
+              "1497" not in json.dumps(prop),
+              [k for k, v in prop.items() if "1497" in json.dumps(v)])
 
         section("A SOLD DEAL CARRIES ITS AGREEMENT INTO PROVISIONING")
         from app.services.provisioning import _billing_option_sold, _term_sold

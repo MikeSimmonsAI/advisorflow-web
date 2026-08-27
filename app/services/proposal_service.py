@@ -182,7 +182,11 @@ def prefill_from_opportunity(db: Session, opp: Opportunity) -> dict:
         summary = ("Prepared for %s. This proposal sets out what we heard during "
                    "discovery, what we recommend, and what it costs." % company)
 
-    base = pkg.price if (pkg and pkg.price is not None) else None
+    # THIS DEAL'S one-time implementation figure, not the catalogue's. The
+    # prefill is where a proposal's numbers actually come from - apply_pricing
+    # only re-rates when the package CHANGES, so a fix there alone would never
+    # run for a proposal created against the package already selected.
+    base = _pp.implementation_fee(pkg, opp)
     return {
         "title": "%s — Proposal" % company,
         "subtitle": "Prepared for %s" % company,
@@ -192,6 +196,12 @@ def prefill_from_opportunity(db: Session, opp: Opportunity) -> dict:
         "package_id": pkg.id if pkg else None,
         "base_amount": base,
         "final_amount": base,
+        # Inherited from the deal so a proposal never quotes month-to-month for
+        # a customer who agreed to a term - and vice versa.
+        "billing_option": _pp.normalize_option(opp.billing_option, pkg) if pkg else None,
+        "contract_term_months": (opp.contract_term_months
+                                 if (pkg and _pp.normalize_option(opp.billing_option, pkg)
+                                     == _pp.BILLING_TERM_AGREEMENT) else None),
         "currency": (pkg.currency if pkg and pkg.currency else "USD"),
         "executive_summary": summary,
         "business_need": business_need,
@@ -265,6 +275,8 @@ def create_proposal(db: Session, opp: Opportunity, user, now=None,
         package_id=data.get("package_id"),
         base_amount=_dec(data.get("base_amount")),
         final_amount=_dec(data.get("final_amount")),
+        billing_option=data.get("billing_option"),
+        contract_term_months=data.get("contract_term_months"),
         currency=data.get("currency") or "USD",
         executive_summary=data.get("executive_summary"),
         business_need=data.get("business_need"),
@@ -290,6 +302,7 @@ def create_proposal(db: Session, opp: Opportunity, user, now=None,
 _VERSIONED_FIELDS = (
     "title", "subtitle", "client_name", "client_email", "client_company",
     "package_id", "base_amount", "adjustment", "final_amount", "currency",
+    "billing_option", "contract_term_months",
     "executive_summary", "business_need", "objectives", "recommended_solution",
     "scope", "deliverables", "implementation_plan", "terms",
     "price_override_by", "price_override_at", "price_override_reason",
@@ -375,11 +388,19 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
         if org is not None and pkg.platform_id != org.platform_id:
             return {"ok": False, "error": "That package belongs to another brand."}
         prop.package_id = pkg.id
-        # `base_amount` keeps meaning what it always meant - the package's
-        # `price`, the ONE-TIME implementation figure - so every existing
-        # proposal, adjustment and total still reads correctly. The recurring
-        # rates are carried by `billing_option` and read through the package.
-        prop.base_amount = pkg.price
+        # `base_amount` keeps meaning what it always meant - the ONE-TIME
+        # implementation figure - so every existing proposal, adjustment and
+        # total still reads correctly.
+        #
+        # But it must be THIS DEAL'S implementation figure. Reading `pkg.price`
+        # directly ignored a per-deal override, so a proposal could quote the
+        # catalogue's $1,497 in its total while the pricing block beside it
+        # showed the $1,500 actually agreed - one document, two numbers, and
+        # nothing to say which one the customer owes.
+        _opp = (db.query(Opportunity)
+                  .filter(Opportunity.id == prop.opportunity_id).first()
+                if prop.opportunity_id else None)
+        prop.base_amount = _pp.implementation_fee(pkg, _opp)
         prop.billing_option = _pp.normalize_option(
             billing_option if billing_option is not None else prop.billing_option, pkg)
         prop.contract_term_months = (
