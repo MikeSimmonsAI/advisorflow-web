@@ -471,6 +471,24 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
                 prop.price_override_at = None
                 prop.price_override_reason = None
 
+    # ── keep the quote in step with the deal's implementation fee ──────────
+    # `apply_pricing` above only re-rates when the PACKAGE changes. But the
+    # one-time fee can change on the deal alone - a customer is quoted $1,500
+    # against a $1,497 catalogue - and a draft that kept the old figure would
+    # show one number in its total and another in its pricing block.
+    #
+    # Only ever for a draft with NO manual adjustment. A figure a manager
+    # deliberately agreed is never silently re-derived; that is the difference
+    # between keeping a quote current and overwriting somebody's decision.
+    if prop.package_id and not _dec(prop.adjustment) and prop.sales_status == PROP_DRAFT:
+        _pkg = db.query(BrandPackage).filter(BrandPackage.id == prop.package_id).first()
+        _o = (db.query(Opportunity)
+                .filter(Opportunity.id == prop.opportunity_id).first()
+              if prop.opportunity_id else None)
+        _fee = _pp.implementation_fee(_pkg, _o)
+        if _fee is not None and _dec(prop.base_amount) != _fee:
+            prop.base_amount = _fee
+
     base = _dec(prop.base_amount) or Decimal("0")
     adj = _dec(prop.adjustment) or Decimal("0")
     total = base + adj

@@ -431,6 +431,33 @@ def main():
               "1497" not in json.dumps(prop),
               [k for k, v in prop.items() if "1497" in json.dumps(v)])
 
+        section("A DRAFT FOLLOWS A LATER CHANGE TO THE DEAL'S FEE")
+        pid = prop["id"]
+        c.patch("/sales/opportunities/opp-1",
+                json={"implementation_fee": 1750}, headers=rep)
+        again = c.patch("/sales/proposals/" + pid,
+                        json={"billing_option": pp.BILLING_TERM_AGREEMENT},
+                        headers=mgr).json()
+        check("the draft picks up the new $1,750",
+              again["base_amount"] == 1750.0, again["base_amount"])
+        check("...and its total agrees", again["final_amount"] == 1750.0,
+              again["final_amount"])
+
+        section("BUT A MANAGER'S AGREED NUMBER IS NEVER OVERWRITTEN")
+        adj = c.patch("/sales/proposals/" + pid,
+                      json={"adjustment": -250,
+                            "price_reason": "Agreed concession"}, headers=mgr)
+        check("a manager may adjust", adj.status_code == 200,
+              (adj.status_code, adj.text[:140]))
+        c.patch("/sales/opportunities/opp-1",
+                json={"implementation_fee": 1500}, headers=rep)
+        held = c.patch("/sales/proposals/" + pid,
+                       json={"billing_option": pp.BILLING_TERM_AGREEMENT},
+                       headers=mgr).json()
+        check("the adjusted quote HOLDS at 1750 - 250, not re-derived to 1500",
+              held["base_amount"] == 1750.0 and held["final_amount"] == 1500.0,
+              (held["base_amount"], held["final_amount"]))
+
         section("A SOLD DEAL CARRIES ITS AGREEMENT INTO PROVISIONING")
         from app.services.provisioning import _billing_option_sold, _term_sold
 
