@@ -165,6 +165,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "CLEANUP RECEIPT CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_package_pricing.py 2>&1 | Select-String "FAIL|checks passed|EARNED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "PACKAGE PRICING CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_demo_sites.py 2>&1 | Select-String "FAIL|checks passed|SANDBOXED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "DEMO SITE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_tenant_isolation.py 2>&1 | Select-String "FAIL|checks passed|ISOLATED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "TENANT ISOLATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_platform_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }

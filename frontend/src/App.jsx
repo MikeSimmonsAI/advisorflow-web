@@ -11,6 +11,7 @@ import Onboarding from './pages/Onboarding'
 // that were built but never routed until now.
 import DealRoom from './pages/portal/DealRoom'
 import PortalAccess from './pages/portal/PortalAccess'
+import DemoSite from './pages/portal/DemoSite'
 import PortalViewer from './pages/portal/PortalViewer'
 import CadenceTemplates from './pages/CadenceTemplates'
 import OrgSettings from './pages/OrgSettings'
@@ -197,6 +198,7 @@ export default function App() {
             ever emailed hit the catch-all and silently redirected to "/". The
             backend was always correct; the door was missing. */}
         <Route path="/deal-room/:token" element={<DealRoom />} />
+        <Route path="/demo/:token" element={<DemoSite />} />
         <Route path="/portal/access/:token" element={<PortalAccess />} />
         <Route path="/portal/view/:proposalId" element={<PortalViewer />} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />

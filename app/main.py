@@ -67,6 +67,7 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 # import a deletion plan has nowhere durable to live, and the manifest exists
 # only in whatever browser tab asked for it.
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
+import app.models.demo_site_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,

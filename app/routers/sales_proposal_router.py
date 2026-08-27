@@ -41,6 +41,7 @@ from app.models.models import (
 )
 from app.models.sales_models import Opportunity, BrandPackage
 from app.services import package_pricing as _pp
+from app.services import demo_sites as _demos
 from app.services.sales_access import (
     require_sales_member, assert_can_view_opportunity, sales_org_ids,
     is_sales_manager, is_god,
@@ -743,6 +744,114 @@ def deal_room_decision(token: str, body: DecisionIn, request: Request,
     db.commit()
     return {"ok": True, "action": res["action"],
             "proposal": _public_payload(db, prop)["proposal"]}
+
+
+# ── demo sites ──────────────────────────────────────────────────────────────
+#
+# A mockup the prospect can open, hosted on the BRAND's own domain. The
+# proposal upload path refuses HTML for good reason - a customer-supplied page
+# served same-origin with an app that keeps its token in localStorage is stored
+# XSS - and this does not reopen that door. A demo is authored here by an
+# authenticated brand-sales user, and the public route below hands it to a
+# sandboxed frame that has no same-origin access to anything.
+
+class DemoSiteIn(BaseModel):
+    title: str
+    html: str
+
+
+@router.post("/sales/opportunities/{opportunity_id}/demo-site", status_code=201)
+def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
+                      user: User = Depends(require_sales_member),
+                      db: Session = Depends(get_db)):
+    """Publish a demo mockup for this deal and return its shareable link.
+
+    Also sets the opportunity's `demo_url` and marks the demo ready, so the
+    Demo Build panel stops saying "set when the environment exists" the moment
+    the environment exists.
+    """
+    opp = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    assert_can_view_opportunity(user, opp, db)
+    if opp.brand_sales_org_id not in sales_org_ids(user, db):
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    res = _demos.create(db, opp, user, title=body.title, html=body.html)
+    if not res["ok"]:
+        raise HTTPException(status_code=400, detail=res["error"])
+    demo = res["demo"]
+
+    from app.services.appointment_invites import brand_identity_for_brand, PUBLIC_BASE_URL
+    ident = brand_identity_for_brand(db, opp.brand_sales_org_id)
+    base = ident.get("app_base_url") or PUBLIC_BASE_URL
+    url = _demos.public_url(base, demo.token)
+
+    opp.demo_url = url
+    if opp.demo_status in (None, "not_requested", "requested", "in_progress"):
+        opp.demo_status = "ready"
+    if not opp.demo_ready_at:
+        opp.demo_ready_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(demo)
+    return {"demo": _demos.out(demo, base), "url": url}
+
+
+@router.get("/sales/opportunities/{opportunity_id}/demo-sites")
+def list_demo_sites(opportunity_id: str,
+                    user: User = Depends(require_sales_member),
+                    db: Session = Depends(get_db)):
+    opp = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    assert_can_view_opportunity(user, opp, db)
+    if opp.brand_sales_org_id not in sales_org_ids(user, db):
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    from app.services.appointment_invites import brand_identity_for_brand, PUBLIC_BASE_URL
+    ident = brand_identity_for_brand(db, opp.brand_sales_org_id)
+    base = ident.get("app_base_url") or PUBLIC_BASE_URL
+    rows = _demos.for_opportunity(db, opportunity_id)
+    return {"demos": [_demos.out(d, base) for d in rows]}
+
+
+@router.post("/sales/demo-sites/{demo_id}/revoke")
+def revoke_demo_site(demo_id: str,
+                     user: User = Depends(require_sales_member),
+                     db: Session = Depends(get_db)):
+    """Kill a live demo link immediately."""
+    from app.models.demo_site_models import DemoSite
+    demo = db.query(DemoSite).filter(DemoSite.id == demo_id).first()
+    # 404 rather than 403 for another brand's demo: confirming it exists would
+    # be a small leak for no benefit.
+    if demo is None or demo.brand_sales_org_id not in sales_org_ids(user, db):
+        raise HTTPException(status_code=404, detail="Demo not found")
+    _demos.revoke(db, demo)
+    opp = db.query(Opportunity).filter(Opportunity.id == demo.opportunity_id).first()
+    if opp is not None and opp.demo_url and demo.token in opp.demo_url:
+        # The link no longer opens, so the field must not keep advertising it.
+        opp.demo_url = None
+    db.commit()
+    return {"revoked": True, "demo_id": demo.id}
+
+
+# ── PUBLIC: the prospect's view ─────────────────────────────────────────────
+# No ProtectedRoute, no account, no JWT. The token IS the authorization, and it
+# is the only thing this route accepts.
+
+@router.get("/public/demo/{token}")
+def resolve_demo_site(token: str, db: Session = Depends(get_db)):
+    demo = _demos.resolve(db, token)
+    if demo is None:
+        # One message for every failure mode. Distinguishing expired from
+        # never-existed would let somebody probe for live tokens.
+        raise HTTPException(status_code=404,
+                            detail="This link is no longer available. "
+                                   "Ask your contact for a new one.")
+    payload = {"title": demo.title, "html": demo.html}
+    db.commit()   # persist the view counters
+    return payload
 
 
 # ── file upload ─────────────────────────────────────────────────────────────
