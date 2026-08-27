@@ -1364,6 +1364,25 @@ class Proposal(Base):
     billing_option       = Column(String, nullable=True)
     contract_term_months = Column(Integer, nullable=True)
 
+    # DELIBERATELY QUOTES NO PRICE. Not "the price is zero" and not "the price
+    # is missing" — a considered decision to put the commercial terms in a
+    # separate conversation, which is a real stage of a real deal.
+    #
+    # Suppresses the generated Investment section entirely. Without it the only
+    # way to publish a document with no numbers was to leave the fields empty,
+    # which renders "$0" — a figure nobody agreed to, on a page a customer reads.
+    withhold_pricing     = Column(Boolean, default=False, nullable=False,
+                                  server_default="0")
+
+    # The per-deal recurring rate this proposal QUOTED, snapshotted from the
+    # opportunity at creation. A later change on the deal must never rewrite a
+    # document the customer has already read — same reason `contract_term_months`
+    # above is a snapshot rather than a lookup.
+    custom_unit_price    = Column(Numeric(12, 2), nullable=True)
+    custom_unit_label    = Column(String, nullable=True)
+    custom_min_units     = Column(Integer, nullable=True)
+    custom_term_months   = Column(Integer, nullable=True)
+
     base_amount     = Column(Numeric(12, 2), nullable=True)
     # Signed: negative is a discount, positive an add-on. Kept separate from
     # final_amount so "what did we give away" is answerable without arithmetic

@@ -198,10 +198,18 @@ def prefill_from_opportunity(db: Session, opp: Opportunity) -> dict:
         "final_amount": base,
         # Inherited from the deal so a proposal never quotes month-to-month for
         # a customer who agreed to a term - and vice versa.
-        "billing_option": _pp.normalize_option(opp.billing_option, pkg) if pkg else None,
+        "billing_option": _pp.normalize_option(opp.billing_option, pkg,
+                                               _pp.custom_rate(opp)) if pkg else None,
         "contract_term_months": (opp.contract_term_months
-                                 if (pkg and _pp.normalize_option(opp.billing_option, pkg)
+                                 if (pkg and _pp.normalize_option(
+                                         opp.billing_option, pkg, _pp.custom_rate(opp))
                                      == _pp.BILLING_TERM_AGREEMENT) else None),
+        # SNAPSHOT of the deal's custom rate. Copied, not looked up, so a later
+        # renegotiation cannot rewrite a document the customer already read.
+        "custom_unit_price": opp.custom_unit_price,
+        "custom_unit_label": opp.custom_unit_label,
+        "custom_min_units": opp.custom_min_units,
+        "custom_term_months": opp.custom_term_months,
         "currency": (pkg.currency if pkg and pkg.currency else "USD"),
         "executive_summary": summary,
         "business_need": business_need,
@@ -277,6 +285,10 @@ def create_proposal(db: Session, opp: Opportunity, user, now=None,
         final_amount=_dec(data.get("final_amount")),
         billing_option=data.get("billing_option"),
         contract_term_months=data.get("contract_term_months"),
+        custom_unit_price=_dec(data.get("custom_unit_price")),
+        custom_unit_label=data.get("custom_unit_label"),
+        custom_min_units=data.get("custom_min_units"),
+        custom_term_months=data.get("custom_term_months"),
         currency=data.get("currency") or "USD",
         executive_summary=data.get("executive_summary"),
         business_need=data.get("business_need"),
@@ -303,6 +315,8 @@ _VERSIONED_FIELDS = (
     "title", "subtitle", "client_name", "client_email", "client_company",
     "package_id", "base_amount", "adjustment", "final_amount", "currency",
     "billing_option", "contract_term_months",
+    "custom_unit_price", "custom_unit_label", "custom_min_units",
+    "custom_term_months",
     "executive_summary", "business_need", "objectives", "recommended_solution",
     "scope", "deliverables", "implementation_plan", "terms",
     "price_override_by", "price_override_at", "price_override_reason",
@@ -366,6 +380,66 @@ def can_override_price(db: Session, user, brand_sales_org_id: str) -> bool:
     return bool(is_god(user) or is_sales_manager(user, db, brand_sales_org_id))
 
 
+def apply_custom_rate(db: Session, prop: Proposal, user, fields: dict,
+                      now=None) -> dict:
+    """Set the per-deal recurring rate this proposal quotes.
+
+    Manager-only on the SAME authority as `apply_pricing`'s adjustment — a
+    recurring commitment is a larger promise than a one-time discount, so it
+    cannot be the one price a rep may set alone. Never raises; the caller turns
+    a refusal into a 403.
+    """
+    now = now or datetime.utcnow()
+    if not can_override_price(db, user, prop.brand_sales_org_id):
+        return {"ok": False,
+                "error": "Only a sales manager can set a custom rate on a proposal."}
+
+    unit = fields.get("custom_unit_price", "__absent__")
+    if unit != "__absent__" and unit is not None and float(unit) < 0:
+        return {"ok": False, "error": "A custom rate cannot be negative."}
+    units = fields.get("custom_min_units", "__absent__")
+    if units != "__absent__" and units is not None and int(units) < 1:
+        return {"ok": False, "error": "The minimum must be at least 1."}
+    term = fields.get("custom_term_months", "__absent__")
+    if term != "__absent__" and term is not None and int(term) < 0:
+        return {"ok": False, "error": "A term cannot be negative."}
+
+    before = _pp.custom_rate(prop)
+    for f in ("custom_unit_price", "custom_unit_label",
+              "custom_min_units", "custom_term_months"):
+        if f in fields:
+            v = fields[f]
+            if f == "custom_unit_price":
+                v = _dec(v)
+            elif isinstance(v, str):
+                v = v.strip() or None
+            setattr(prop, f, v)
+    after = _pp.custom_rate(prop)
+
+    # Keep the quoted option honest with the rate that was just set. A custom
+    # agreement carries its own term; without this the proposal would state a
+    # 13-month commitment while its billing option still said month-to-month.
+    pkg = (db.query(BrandPackage).filter(BrandPackage.id == prop.package_id).first()
+           if prop.package_id else None)
+    if after and after.get("term_months"):
+        prop.billing_option = _pp.BILLING_TERM_AGREEMENT
+        prop.contract_term_months = after["term_months"]
+    elif before and before.get("term_months") and not (after and after.get("term_months")):
+        # The term was removed. Fall back rather than leave a commitment
+        # pointing at a term that no longer exists.
+        prop.billing_option = _pp.normalize_option(None, pkg, after)
+        prop.contract_term_months = None
+
+    if before != after:
+        _event(db, prop.opportunity_id, "proposal_custom_rate",
+               "Custom rate set on %s" % prop.proposal_number if after
+               else "Custom rate cleared on %s" % prop.proposal_number,
+               _pp.custom_basis(after) or
+               ("%s/month" % _pp._plain_money(after["monthly_rate"]) if after else None),
+               user.id, now)
+    return {"ok": True, "error": None}
+
+
 def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
                   adjustment=None, reason: str = None, now=None,
                   billing_option=None) -> dict:
@@ -401,10 +475,13 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
                   .filter(Opportunity.id == prop.opportunity_id).first()
                 if prop.opportunity_id else None)
         prop.base_amount = _pp.implementation_fee(pkg, _opp)
+        _c = _pp.custom_rate(prop)
         prop.billing_option = _pp.normalize_option(
-            billing_option if billing_option is not None else prop.billing_option, pkg)
+            billing_option if billing_option is not None else prop.billing_option,
+            pkg, _c)
         prop.contract_term_months = (
-            _pp.term_months_for(pkg)
+            (_c["term_months"] if _c and _c.get("term_months")
+             else _pp.term_months_for(pkg))
             if prop.billing_option == _pp.BILLING_TERM_AGREEMENT else None)
         prop.currency = pkg.currency or prop.currency or "USD"
         # Changing the package resets any prior adjustment: a discount agreed
@@ -424,16 +501,18 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
         if pkg is None:
             return {"ok": False,
                     "error": "Choose a package before choosing a billing option."}
+        _c = _pp.custom_rate(prop)
         if (billing_option == _pp.BILLING_TERM_AGREEMENT
-                and not _pp.has_term_option(pkg)):
+                and not _pp.has_term_option(pkg, _c)):
             return {"ok": False,
-                    "error": "%s has no term-agreement rate. Only month-to-month "
-                             "is available for this package." % pkg.name}
-        option = _pp.normalize_option(billing_option, pkg)
+                    "error": "%s has no term-agreement rate. Set a custom rate "
+                             "with a term, or use month-to-month." % pkg.name}
+        option = _pp.normalize_option(billing_option, pkg, _c)
         if option != prop.billing_option:
             prop.billing_option = option
             prop.contract_term_months = (
-                _pp.term_months_for(pkg)
+                (_c["term_months"] if _c and _c.get("term_months")
+                 else _pp.term_months_for(pkg))
                 if option == _pp.BILLING_TERM_AGREEMENT else None)
             # `base_amount` is the one-time implementation figure and does NOT
             # move with the billing option - the setup fee is identical under
@@ -499,9 +578,16 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
         if _fee is not None and _dec(prop.base_amount) != _fee:
             prop.base_amount = _fee
 
-    base = _dec(prop.base_amount) or Decimal("0")
-    adj = _dec(prop.adjustment) or Decimal("0")
-    total = base + adj
+    # NO FEE IS NOT A ZERO FEE. A proposal with neither a base nor an adjustment
+    # has not been priced, and saying "$0" would put a number the customer never
+    # agreed to on a page they read as an offer.
+    base = _dec(prop.base_amount)
+    adj = _dec(prop.adjustment)
+    if base is None and adj is None:
+        prop.final_amount = None
+        return {"ok": True, "error": None}
+
+    total = (base or Decimal("0")) + (adj or Decimal("0"))
     if total < 0:
         return {"ok": False, "error": "That adjustment would make the total negative."}
     prop.final_amount = total
@@ -536,6 +622,12 @@ def _investment_markdown(db: Session, prop: Proposal) -> Optional[str]:
     proposal is written against is named explicitly. The lower rate is never
     presented as the normal price.
     """
+    # A document that deliberately quotes nothing. Returning None here removes
+    # the whole section rather than rendering an empty or zeroed one — a "$0"
+    # or a "TBD" beside a dollar sign is a figure the customer will read as a
+    # figure, and this proposal is explicitly not making one.
+    if getattr(prop, "withhold_pricing", False):
+        return None
     if prop.final_amount is None and not prop.package_id:
         return None
 
@@ -554,12 +646,16 @@ def _investment_markdown(db: Session, prop: Proposal) -> Optional[str]:
         fee = _pp.implementation_fee(pkg, opp)
 
     name = (getattr(pkg, "name", None) or "Platform").strip()
+    # The rate agreed on this deal, snapshotted onto the proposal. It replaces
+    # the catalogue's rates entirely: there is one custom price, and quoting a
+    # catalogue figure beside it would show the customer a number nobody offered.
+    custom = _pp.custom_rate(prop)
     m2m = _pp.monthly_rate(pkg, _pp.BILLING_MONTH_TO_MONTH) if pkg else None
     term_rate = _pp.monthly_rate(pkg, _pp.BILLING_TERM_AGREEMENT) if pkg else None
-    has_term = bool(pkg) and _pp.has_term_option(pkg)
+    has_term = _pp.has_term_option(pkg, custom)
     term_months = (int(prop.contract_term_months) if prop.contract_term_months
                    else (_pp.term_months_for(pkg) if pkg else None))
-    chosen = _pp.normalize_option(prop.billing_option, pkg)
+    chosen = _pp.normalize_option(prop.billing_option, pkg, custom)
 
     rows = []
     if fee is not None:
@@ -569,6 +665,51 @@ def _investment_markdown(db: Session, prop: Proposal) -> Optional[str]:
             "Configuration and implementation of the %s system around your "
             "existing process." % name,
         ))
+
+    if custom:
+        rate = custom["monthly_rate"]
+        basis = _pp.custom_basis(custom)
+        rows.append((
+            "Platform — %s" % ("%d-month agreement" % custom["term_months"]
+                               if custom["term_months"] else "monthly"),
+            "%s/month" % _fmt_money(rate, currency),
+            (basis + "." if basis else
+             "Recurring platform access.") +
+            ("" if not custom["term_months"] else
+             " All %d months are billed monthly. No free month and no annual "
+             "prepayment." % custom["term_months"]),
+        ))
+        out = ["## Investment", "",
+               "| Item | Pricing | Details |", "| --- | --- | --- |"]
+        for item, price, detail in rows:
+            out.append("| %s | %s | %s |" % (item, price, detail))
+        out.append("")
+        if custom["term_months"]:
+            months = int(custom["term_months"])
+            rcv = rate * Decimal(months)
+            out.append("### Selected: %d-month agreement" % months)
+            out.append("")
+            out.append("**%d-month platform commitment: %s** — %d monthly payments of %s."
+                       % (months, _fmt_money(rcv, currency), months,
+                          _fmt_money(rate, currency)))
+            if fee is not None:
+                out.append("")
+                out.append("**Total contract value: %s** — %s implementation plus %s platform."
+                           % (_fmt_money(rcv + fee, currency),
+                              _fmt_money(fee, currency),
+                              _fmt_money(rcv, currency)))
+        else:
+            out.append("**Platform: %s/month**, with no term commitment%s."
+                       % (_fmt_money(rate, currency),
+                          "" if fee is None else
+                          ", plus a %s one-time implementation charge"
+                          % _fmt_money(fee, currency)))
+        if basis:
+            out.append("")
+            out.append("The monthly figure moves with the count above, at the "
+                       "same rate per %s." % custom["unit_label"])
+        return "\n".join(out).strip()
+
     if m2m is not None:
         rows.append((
             "Standard month-to-month platform",

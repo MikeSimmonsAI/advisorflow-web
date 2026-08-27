@@ -308,6 +308,21 @@ class Opportunity(Base):
     # the number for everyone. NULL means "use the package's".
     implementation_fee   = Column(Numeric(12, 2), nullable=True)
 
+    # PER-DEAL RECURRING RATE — the same idea as `implementation_fee` above,
+    # for the other half of the money. A "Custom" package has no catalogue rate
+    # by definition; without these, a custom deal could not state a monthly
+    # figure or a term anywhere in the system, which made the word meaningless.
+    #
+    # Priced per unit so the BASIS survives, not just the total: $250 per active
+    # paying customer with a 15 minimum is $3,750/month and the arithmetic that
+    # produced it. A flat rate is one unit with no label.
+    #
+    # NULL unit price means "no per-deal rate" — fall back to the catalogue.
+    custom_unit_price    = Column(Numeric(12, 2), nullable=True)
+    custom_unit_label    = Column(String, nullable=True)   # "active paying customer"
+    custom_min_units     = Column(Integer, nullable=True)  # contracted minimum
+    custom_term_months   = Column(Integer, nullable=True)  # NULL = no commitment
+
     deal_value          = Column(Numeric(12, 2), nullable=True)
     deal_value_override = Column(Boolean, default=False, nullable=False)
     deal_value_override_by     = Column(String, ForeignKey("users.id"), nullable=True)

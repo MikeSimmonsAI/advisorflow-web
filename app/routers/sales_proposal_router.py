@@ -118,9 +118,14 @@ def _proposal_commercials(db: Session, prop: Proposal, pkg) -> Optional[dict]:
     if pkg is None:
         return None
     opp = _proposal_opp(db, prop)
-    option = _pp.normalize_option(prop.billing_option, pkg)
+    # The custom rate comes off the PROPOSAL, not the opportunity: the proposal
+    # holds the snapshot of what this document quoted, and renegotiating the
+    # deal must not restate a version the customer has already read.
+    custom = _pp.custom_rate(prop)
+    option = _pp.normalize_option(prop.billing_option, pkg, custom)
     return _pp.quote(pkg, option, opp,
-                     term_months=prop.contract_term_months or None)
+                     term_months=prop.contract_term_months or None,
+                     custom=custom)
 
 
 def _proposal_out(db: Session, prop: Proposal, user: User,
@@ -152,8 +157,23 @@ def _proposal_out(db: Session, prop: Proposal, user: User,
         # still means the one-time figure it always meant; these are the
         # recurring numbers beside it, not a redefinition of it.
         "commercials": _proposal_commercials(db, prop, pkg),
-        "package_pricing": (_pp.package_pricing(pkg, _proposal_opp(db, prop))
+        "package_pricing": (_pp.package_pricing(pkg, _proposal_opp(db, prop),
+                                                _pp.custom_rate(prop))
                             if pkg is not None else None),
+        # The raw agreement, so the panel can edit the four numbers it is made
+        # of rather than having to reverse it out of the derived monthly figure.
+        "custom_rate": ({
+            "unit_price": _money(prop.custom_unit_price),
+            "unit_label": prop.custom_unit_label,
+            "min_units": prop.custom_min_units,
+            "term_months": prop.custom_term_months,
+            "monthly_rate": float(_pp.custom_rate(prop)["monthly_rate"]),
+            "basis": _pp.custom_basis(_pp.custom_rate(prop)),
+        } if _pp.custom_rate(prop) else None),
+        # Whether THIS user may set one. The server refuses either way; this
+        # only decides whether to show a control that would always fail.
+        "can_set_custom_rate": ps.can_override_price(db, user, prop.brand_sales_org_id),
+        "withhold_pricing": bool(prop.withhold_pricing),
         "package_name": pkg.name if pkg else None,
         "base_amount": _money(prop.base_amount),
         "adjustment": _money(prop.adjustment),
@@ -249,6 +269,19 @@ class UpdateProposalIn(BaseModel):
     billing_option: Optional[str] = None      # month_to_month | term_agreement
     adjustment: Optional[float] = None
     price_reason: Optional[str] = None
+    # The per-deal recurring rate. Manager-only, routed through
+    # apply_custom_rate — there is no path that writes these columns directly
+    # from a request body, for the same reason final_amount has none.
+    custom_unit_price: Optional[float] = None
+    custom_unit_label: Optional[str] = None
+    custom_min_units: Optional[int] = None
+    custom_term_months: Optional[int] = None
+    # Explicit, because "omitted" and "clear it" are different instructions and
+    # an Optional field cannot tell them apart.
+    clear_custom_rate: bool = False
+    # Quote no price in the customer's document. A commercial decision, so it
+    # sits behind the same authority as every other one.
+    withhold_pricing: Optional[bool] = None
 
 
 class BlockIn(BaseModel):
@@ -363,6 +396,37 @@ def update_proposal(proposal_id: str, body: UpdateProposalIn,
         val = getattr(body, field, None)
         if val is not None:
             setattr(prop, field, val)
+
+    if body.withhold_pricing is not None and bool(body.withhold_pricing) != bool(prop.withhold_pricing):
+        if not ps.can_override_price(db, user, prop.brand_sales_org_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Only a sales manager can decide whether this proposal quotes a price.")
+        prop.withhold_pricing = bool(body.withhold_pricing)
+        ps._event(db, prop.opportunity_id, "proposal_pricing_withheld",
+                  ("%s will quote no pricing" % prop.proposal_number)
+                  if prop.withhold_pricing
+                  else ("%s will quote its pricing" % prop.proposal_number),
+                  "Commercial terms to be agreed separately."
+                  if prop.withhold_pricing else None,
+                  user.id, datetime.utcnow())
+
+    # The custom rate is applied FIRST: it can supply the term that the billing
+    # option below is validated against, and doing it the other way round would
+    # refuse the very agreement being set.
+    _custom_sent = body.model_dump(exclude_unset=True)
+    _custom_fields = {k: v for k, v in _custom_sent.items()
+                      if k in ("custom_unit_price", "custom_unit_label",
+                               "custom_min_units", "custom_term_months")}
+    if body.clear_custom_rate:
+        _custom_fields = {"custom_unit_price": None, "custom_unit_label": None,
+                          "custom_min_units": None, "custom_term_months": None}
+    if _custom_fields:
+        res = ps.apply_custom_rate(db, prop, user, _custom_fields)
+        if not res["ok"]:
+            db.rollback()
+            raise HTTPException(status_code=403 if "manager" in (res["error"] or "")
+                                else 400, detail=res["error"])
 
     if (body.package_id is not None or body.adjustment is not None
             or body.billing_option is not None):

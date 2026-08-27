@@ -514,6 +514,75 @@ def main():
               _billing_option_sold(_Src(pp.BILLING_TERM_AGREEMENT, 13), None, None)
               is None)
 
+    # ── the per-deal custom rate ───────────────────────────────────────────
+    # A "Custom" package has no catalogue rate on purpose. These prove the DEAL
+    # can supply one, that it wins over the catalogue, that it carries its own
+    # term, and that it never manufactures a saving against a price nobody quoted.
+    section("CUSTOM IS ACTUALLY CUSTOMISABLE - the rate lives on the deal")
+
+    class _Deal(object):
+        def __init__(self, unit=None, label=None, mn=None, term=None):
+            self.custom_unit_price = unit
+            self.custom_unit_label = label
+            self.custom_min_units = mn
+            self.custom_term_months = term
+
+    custom_pkg = pkg("pkg-multi")
+    daniel = _Deal("250", "active paying customer", 15, 13)
+    c = pp.custom_rate(daniel)
+
+    check("a deal with no custom rate reports none",
+          pp.custom_rate(_Deal()) is None)
+    check("the monthly rate is unit x minimum, not a typed total",
+          float(c["monthly_rate"]) == 3750.0, float(c["monthly_rate"]))
+    check("the BASIS survives, not just the total",
+          pp.custom_basis(c) == "$250 per active paying customer per month, 15 minimum",
+          pp.custom_basis(c))
+    check("a flat custom rate has no basis to explain",
+          pp.custom_basis(pp.custom_rate(_Deal("5000"))) is None)
+    check("a missing minimum means one unit, never zero",
+          float(pp.custom_rate(_Deal("5000"))["monthly_rate"]) == 5000.0)
+
+    check("a custom package alone still offers NO term",
+          pp.has_term_option(custom_pkg) is False)
+    check("...but a custom rate WITH a term does",
+          pp.has_term_option(custom_pkg, c) is True)
+    check("a custom rate with no term does not invent one",
+          pp.has_term_option(custom_pkg,
+                             pp.custom_rate(_Deal("250", None, 15))) is False)
+    check("the term agreement is reachable once the deal states a term",
+          pp.normalize_option(pp.BILLING_TERM_AGREEMENT, custom_pkg, c)
+          == pp.BILLING_TERM_AGREEMENT)
+    check("...and still fails closed without one",
+          pp.normalize_option(pp.BILLING_TERM_AGREEMENT, custom_pkg, None)
+          == pp.BILLING_MONTH_TO_MONTH)
+
+    q = pp.quote(custom_pkg, pp.BILLING_TERM_AGREEMENT, None, custom=c)
+    check("the quote bills the custom rate", q["monthly_rate"] == 3750.0,
+          q["monthly_rate"])
+    check("the quote uses the DEAL's term, not the catalogue default",
+          q["term_months"] == 13, q["term_months"])
+    check("all 13 months are required - no free month",
+          q["payments_required"] == 13 and q["has_free_month"] is False)
+    check("recurring contract value is rate x term",
+          q["recurring_contract_value"] == 48750.0, q["recurring_contract_value"])
+    check("A CUSTOM RATE MANUFACTURES NO SAVING - there is no price to beat",
+          q["savings_per_month"] is None, q["savings_per_month"])
+    check("the quote reports the basis for the document",
+          q["custom_basis"] == pp.custom_basis(c))
+
+    # The catalogue must stay untouched. The whole reason this lives on the deal
+    # is that editing the package would move the number for every other deal.
+    check("THE CATALOGUE IS UNCHANGED BY A DEAL'S RATE",
+          getattr(custom_pkg, "monthly_price", None) is None,
+          getattr(custom_pkg, "monthly_price", None))
+
+    opts = pp.options_for(custom_pkg, None, c)
+    check("a custom agreement offers ONE option, not a false choice",
+          len(opts) == 1, len(opts))
+    check("...and that option is the agreement itself",
+          opts[0]["billing_option"] == pp.BILLING_TERM_AGREEMENT)
+
     print("\n" + "=" * 78)
     print("checks passed: %d" % len(PASSED))
     if FAIL:

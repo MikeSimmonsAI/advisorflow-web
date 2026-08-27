@@ -390,22 +390,60 @@ def _opportunity_billing(db: Session, opp) -> dict:
     if pkg is None:
         return {"selected": None, "options": [], "package_id": None,
                 "implementation_fee": None}
-    option = _pp.normalize_option(opp.billing_option, pkg)
+    # A rate agreed on THIS deal, if there is one. It outranks the catalogue,
+    # which is the entire point of a custom package.
+    custom = _pp.custom_rate(opp)
+    option = _pp.normalize_option(opp.billing_option, pkg, custom)
     # The stored term wins over the catalogue's current one: what the customer
     # agreed to cannot be rewritten by a later catalogue edit.
     selected = _pp.quote(pkg, option, opp,
-                         term_months=opp.contract_term_months or None)
+                         term_months=opp.contract_term_months or None,
+                         custom=custom)
     return {
         "package_id": pkg.id,
         "package_name": pkg.name,
         "selected": selected,
-        "options": _pp.options_for(pkg, opp),
+        "options": _pp.options_for(pkg, opp, custom),
+        "custom_rate": {
+            "unit_price": float(custom["unit_price"]),
+            "unit_label": custom["unit_label"],
+            "min_units": custom["min_units"],
+            "term_months": custom["term_months"],
+            "monthly_rate": float(custom["monthly_rate"]),
+            "basis": _pp.custom_basis(custom),
+        } if custom else None,
         # Named at the top level too, because it is the number most often read
         # off this block on its own.
         "implementation_fee": selected["implementation_fee"],
         "implementation_fee_is_one_time": True,
         "implementation_fee_source": selected["implementation_fee_source"],
     }
+
+
+def _custom_signature(c):
+    """What makes two custom rates the same agreement.
+
+    Compared rather than the raw columns, so re-sending an unchanged value does
+    not write a timeline row saying the price changed when it did not.
+    """
+    if not c:
+        return None
+    return (c["unit_price"], c["unit_label"], c["min_units"], c["term_months"])
+
+
+def _custom_note(after, before) -> str:
+    """The timeline detail for a custom-rate change — what it is now, and what
+    it was, because a price change nobody can reconstruct is not an audit."""
+    def one(c):
+        if not c:
+            return "none"
+        bits = [_pp.custom_basis(c) or "%s/month" % _pp._plain_money(c["monthly_rate"])]
+        if _pp.custom_basis(c):
+            bits.append("= %s/month" % _pp._plain_money(c["monthly_rate"]))
+        bits.append("%d-month agreement" % c["term_months"] if c["term_months"]
+                    else "no term commitment")
+        return " · ".join(bits)
+    return "Now: %s. Was: %s." % (one(after), one(before))
 
 
 def _price_note(q: dict) -> str:
@@ -484,6 +522,12 @@ class OpportunityPatch(BaseModel):
     # Per-deal one-time implementation charge. Send null to fall back to the
     # package's; omit to leave whatever is there alone.
     implementation_fee: Optional[float] = None
+    # Per-deal RECURRING rate — manager-only, audited. Send custom_unit_price
+    # null to clear the whole agreement; omit any field to leave it alone.
+    custom_unit_price: Optional[float] = None
+    custom_unit_label: Optional[str] = None
+    custom_min_units: Optional[int] = None
+    custom_term_months: Optional[int] = None
     deal_value: Optional[float] = None
     deal_value_override_reason: Optional[str] = None
     loss_reason: Optional[str] = None
@@ -1015,6 +1059,34 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
                "Stage: %s → %s" % (STAGE_LABELS.get(old, old),
                                    STAGE_LABELS.get(new_stage, new_stage)))
 
+    # ── the per-deal custom rate ────────────────────────────────────────────
+    # Applied BEFORE the package block below, because the billing option and
+    # the term are resolved against it: a custom agreement carries its own term,
+    # and resolving the option first would refuse the very commitment being set.
+    #
+    # Manager-only and audited, on the same authority as the deal-value override
+    # and the proposal adjustment. A recurring price is a larger commitment than
+    # a one-time discount, so it is not the one number a rep may set alone.
+    _CUSTOM = ("custom_unit_price", "custom_unit_label",
+               "custom_min_units", "custom_term_months")
+    if any(f in data for f in _CUSTOM):
+        if not (is_god(user) or is_sales_manager(user, db, opp.brand_sales_org_id)):
+            raise HTTPException(
+                status_code=403,
+                detail="Only a sales manager can set a custom rate on this deal.")
+        before = _pp.custom_rate(opp)
+        for f in _CUSTOM:
+            if f in data:
+                v = data[f]
+                if isinstance(v, str):
+                    v = v.strip() or None
+                setattr(opp, f, v)
+        after = _pp.custom_rate(opp)
+        if _custom_signature(before) != _custom_signature(after):
+            _event(db, opp, user, "custom_rate_set",
+                   "Custom rate set" if after else "Custom rate cleared",
+                   _custom_note(after, before))
+
     # ── packages and deal value ─────────────────────────────────────────────
     platform_id = org.platform_id if org else None
     if "package_interest_id" in data:
@@ -1037,22 +1109,27 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
 
         requested = data.get("billing_option",
                              opp.billing_option or _pp.DEFAULT_BILLING_OPTION)
+        # The deal's own rate, which supplies a term the catalogue does not have.
+        _custom = _pp.custom_rate(opp)
         # Refuse rather than guess: asking for a term agreement on a package
         # that has no contracted rate is answered, not silently downgraded.
         if (requested == _pp.BILLING_TERM_AGREEMENT and pkg is not None
-                and not _pp.has_term_option(pkg)):
+                and not _pp.has_term_option(pkg, _custom)):
             raise HTTPException(
                 status_code=400,
-                detail="%s has no term-agreement rate. Only month-to-month is "
-                       "available for this package." % pkg.name)
-        option = _pp.normalize_option(requested, pkg)
+                detail="%s has no term-agreement rate. Set a custom rate with a "
+                       "term on this deal, or use month-to-month." % pkg.name)
+        option = _pp.normalize_option(requested, pkg, _custom)
 
         prev_option = opp.billing_option
         opp.billing_option = option if pkg is not None else None
-        opp.contract_term_months = (_pp.term_months_for(pkg)
-                                    if pkg is not None
-                                    and option == _pp.BILLING_TERM_AGREEMENT
-                                    else None)
+        # A custom agreement's term is the one that was negotiated; only fall
+        # back to the catalogue's when the deal has not stated its own.
+        opp.contract_term_months = (
+            (_custom["term_months"] if _custom and _custom.get("term_months")
+             else _pp.term_months_for(pkg))
+            if pkg is not None and option == _pp.BILLING_TERM_AGREEMENT
+            else None)
 
         # Decision #9 — value DERIVES from the package unless explicitly
         # overridden. Selecting a package never silently clobbers an override.
@@ -1068,12 +1145,12 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
             opp.deal_value = pkg.price
 
         if pkg and selecting_package:
-            q = _pp.quote(pkg, option)
+            q = _pp.quote(pkg, option, opp, custom=_custom)
             _event(db, opp, user, "package_selected",
                    "Package selected: %s (%s)" % (pkg.name, q["billing_option_label"]),
                    _price_note(q))
         elif pkg and option != prev_option:
-            q = _pp.quote(pkg, option)
+            q = _pp.quote(pkg, option, opp, custom=_custom)
             _event(db, opp, user, "billing_option_changed",
                    "Billing option: %s" % q["billing_option_label"],
                    _price_note(q))

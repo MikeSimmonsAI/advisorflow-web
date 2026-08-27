@@ -58,6 +58,27 @@ COLUMNS_TO_ADD = [
     # the backfilled default says. New rows default to "platform" in the model,
     # so the product walkthrough does not retire the website concept.
     ("demo_sites", "slot", "VARCHAR(32) DEFAULT 'website' NOT NULL"),
+
+    # ── Per-deal custom recurring rate ─────────────────────────────────────
+    # The recurring counterpart to opportunities.implementation_fee. A "Custom"
+    # package carries no catalogue rate on purpose; these let the DEAL state
+    # one, priced per unit so the basis ("$250 per active paying customer,
+    # 15 minimum") survives into the customer's document rather than being
+    # flattened to a total nobody can check.
+    #
+    # Mirrored onto proposals as a SNAPSHOT: what was quoted must not move when
+    # the deal is renegotiated.
+    ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),
+    ("opportunities", "custom_unit_label", "VARCHAR"),
+    ("opportunities", "custom_min_units", "INTEGER"),
+    ("opportunities", "custom_term_months", "INTEGER"),
+    # A proposal that deliberately quotes no price yet. Defaults false, so every
+    # existing proposal keeps showing exactly what it showed yesterday.
+    ("proposals", "withhold_pricing", "BOOLEAN DEFAULT FALSE NOT NULL"),
+    ("proposals", "custom_unit_price", "NUMERIC(12,2)"),
+    ("proposals", "custom_unit_label", "VARCHAR"),
+    ("proposals", "custom_min_units", "INTEGER"),
+    ("proposals", "custom_term_months", "INTEGER"),
     ("brand_packages", "monthly_price", "NUMERIC(12,2)"),
     ("brand_packages", "contract_monthly_price", "NUMERIC(12,2)"),
     ("brand_packages", "contract_term_months", "INTEGER"),

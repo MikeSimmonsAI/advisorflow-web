@@ -43,6 +43,153 @@ function money(v, cur) {
 
 import { BillingOptions } from './BillingOptions.jsx'
 
+/**
+ * The recurring rate agreed on THIS deal.
+ *
+ * A package named "Custom" exists because its price is not in the catalogue.
+ * Until this control existed, that meant a custom deal could not state a
+ * monthly figure or a term anywhere — the panel simply reported that no rate
+ * was configured and offered no way to configure one.
+ *
+ * Priced per unit rather than as a flat number so the BASIS is recorded, not
+ * just the total: "$250 per active paying customer, 15 minimum" is $3,750 a
+ * month AND the arithmetic behind it, which is what the customer's document
+ * needs to print. Leave the unit blank for a genuinely flat rate.
+ */
+function CustomRate({ rate, currency, canEdit, disabled, onSave, onClear }) {
+  const [open, setOpen] = useState(false)
+  const [f, setF] = useState({ unit: '', label: '', min: '', term: '' })
+
+  const begin = () => {
+    setF({
+      unit: rate?.unit_price != null ? String(rate.unit_price) : '',
+      label: rate?.unit_label || '',
+      min: rate?.min_units != null ? String(rate.min_units) : '1',
+      term: rate?.term_months != null ? String(rate.term_months) : '',
+    })
+    setOpen(true)
+  }
+
+  // Shown live while typing, so nobody has to save to find out what the deal
+  // actually costs per month.
+  const unitN = Number(f.unit || 0)
+  const minN = Math.max(1, Number(f.min || 1))
+  const termN = Number(f.term || 0)
+  const monthly = unitN * minN
+
+  if (!open) {
+    return (
+      <div className="sw-billing-summary" style={{ marginTop: 10 }}>
+        {rate ? (
+          <>
+            <div className="sw-billing-row is-primary">
+              <span>MONTHLY PLATFORM</span>
+              <b>{money(rate.monthly_rate, currency)}/mo</b>
+            </div>
+            {rate.basis && (
+              <div className="sw-billing-row">
+                <span>Basis</span><b>{rate.basis}</b>
+              </div>
+            )}
+            <div className="sw-billing-row">
+              <span>Term</span>
+              <b>{rate.term_months
+                ? rate.term_months + ' months · all ' + rate.term_months + ' payments required'
+                : 'No term commitment'}</b>
+            </div>
+          </>
+        ) : (
+          <div style={{ padding: '2px 0 8px' }}>
+            <b style={{ fontSize: 12, letterSpacing: '.4px' }}>NO RECURRING RATE YET</b>
+            <p className="sw-subtle" style={{ margin: '4px 0 0', fontSize: 12 }}>
+              This package is priced per deal. Set the rate this customer agreed
+              to — it is what the proposal will quote.
+            </p>
+          </div>
+        )}
+        {canEdit && (
+          <div className="sw-flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            {rate && (
+              <button className="sw-tiny" disabled={disabled} onClick={onClear}>Clear</button>
+            )}
+            <button className="sw-tiny sw-primary" disabled={disabled} onClick={begin}>
+              {rate ? 'Edit rate' : 'Set custom rate'}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb',
+                  borderRadius: 8, padding: 12, marginTop: 10 }}>
+      <div className="sw-subtle" style={{ marginBottom: 8 }}>
+        Custom rate — manager only, and recorded on the deal timeline.
+      </div>
+      <div className="sw-grid-even">
+        <div className="sw-field">
+          <label>RATE PER UNIT / MONTH</label>
+          <input className="sw-input" type="number" min="0" step="0.01" value={f.unit}
+                 placeholder="250"
+                 onChange={e => setF({ ...f, unit: e.target.value })} />
+        </div>
+        <div className="sw-field">
+          <label>UNIT IS CALLED</label>
+          <input className="sw-input" value={f.label}
+                 placeholder="active paying customer"
+                 onChange={e => setF({ ...f, label: e.target.value })} />
+        </div>
+        <div className="sw-field">
+          <label>MINIMUM UNITS</label>
+          <input className="sw-input" type="number" min="1" step="1" value={f.min}
+                 placeholder="15"
+                 onChange={e => setF({ ...f, min: e.target.value })} />
+        </div>
+        <div className="sw-field">
+          <label>TERM (MONTHS)</label>
+          <input className="sw-input" type="number" min="0" step="1" value={f.term}
+                 placeholder="13 — leave blank for no commitment"
+                 onChange={e => setF({ ...f, term: e.target.value })} />
+        </div>
+      </div>
+
+      {unitN > 0 && (
+        <div className="sw-billing-summary" style={{ marginTop: 10 }}>
+          <div className="sw-billing-row is-primary">
+            <span>MONTHLY PLATFORM</span>
+            <b>{money(monthly, currency)}/mo</b>
+          </div>
+          {termN > 0 && (
+            <div className="sw-billing-row">
+              <span>{termN}-month platform commitment</span>
+              <b>{money(monthly * termN, currency)}</b>
+            </div>
+          )}
+        </div>
+      )}
+      <p className="sw-subtle" style={{ margin: '8px 0 0', fontSize: 12 }}>
+        Leave the unit name blank for a flat monthly rate. Leaving the term blank
+        quotes month-to-month with no commitment.
+      </p>
+
+      <div className="sw-flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+        <button className="sw-btn" disabled={disabled} onClick={() => setOpen(false)}>Cancel</button>
+        <button className="sw-btn sw-primary" disabled={disabled || !(unitN > 0)}
+                onClick={async () => {
+                  await onSave({
+                    custom_unit_price: unitN,
+                    custom_unit_label: f.label.trim() || null,
+                    custom_min_units: minN,
+                    custom_term_months: termN > 0 ? termN : null,
+                  })
+                  setOpen(false)
+                }}>Save rate</button>
+      </div>
+    </div>
+  )
+}
+
 export default function ProposalPanel({ opp, packages = [], onChanged }) {
   const [data, setData] = useState(null)
   const [current, setCurrent] = useState(null)
@@ -138,8 +285,22 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
     () => api.post('/sales/proposals/' + current.id + '/revoke-access', {}),
     'Every live link for this proposal has been revoked.')
 
-  const setPackage = pid => act(
-    () => api.patch('/sales/proposals/' + current.id, { package_id: pid }))
+  /* The placeholder option is not a package. Sending its empty value asked the
+     server to look up a package with no id, which answered — correctly, but
+     unhelpfully — "That package does not exist." A proposal always has a
+     package once one is chosen; there is no "unchoose". */
+  const setPackage = pid => {
+    if (!pid) return
+    return act(() => api.patch('/sales/proposals/' + current.id, { package_id: pid }))
+  }
+
+  const saveCustomRate = fields => act(
+    () => api.patch('/sales/proposals/' + current.id, fields),
+    'Custom rate saved. It is on the deal timeline.')
+
+  const clearCustomRate = () => act(
+    () => api.patch('/sales/proposals/' + current.id, { clear_custom_rate: true }),
+    'Custom rate cleared.')
 
   const applyDiscount = adj => act(
     () => api.patch('/sales/proposals/' + current.id,
@@ -248,14 +409,52 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
       {/* The proposal must be able to say WHICH rate it quotes. Without this the
           document shows a monthly figure and the terms show a 13-month
           commitment, with nothing tying the two together. */}
-      {p.package_pricing && (
+      {/* Some deals are agreed before their economics are. This states that
+          plainly instead of publishing a zero or a placeholder. */}
+      {p.can_set_custom_rate && p.editable && (
+        <label className="sw-flex" style={{ gap: 8, alignItems: 'flex-start',
+                                            padding: '8px 0', cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!p.withhold_pricing} disabled={busy}
+                 style={{ marginTop: 3 }}
+                 onChange={e => act(
+                   () => api.patch('/sales/proposals/' + current.id,
+                                   { withhold_pricing: e.target.checked }),
+                   e.target.checked
+                     ? 'This proposal will quote no pricing.'
+                     : 'This proposal will quote its pricing again.')} />
+          <span>
+            <b style={{ fontSize: 12 }}>Quote no pricing in this document</b>
+            <div className="sw-subtle" style={{ fontSize: 12 }}>
+              Removes the Investment section entirely. Use when the commercial
+              terms are being agreed separately — nothing is shown as $0 or TBD.
+            </div>
+          </span>
+        </label>
+      )}
+      {p.withhold_pricing && !(p.can_set_custom_rate && p.editable) && (
+        <div className="sw-subtle" style={{ padding: '8px 0', fontSize: 12 }}>
+          This proposal deliberately quotes no pricing.
+        </div>
+      )}
+
+      {/* A custom package has no catalogue rate to choose between, so the
+          choice is replaced by the agreement itself. Showing both would offer
+          a month-to-month option at a rate that was negotiated with a term. */}
+      {p.package_pricing && p.package_pricing.is_custom ? (
+        <CustomRate rate={p.custom_rate}
+                    currency={p.currency}
+                    canEdit={p.can_set_custom_rate && p.editable}
+                    disabled={busy}
+                    onSave={saveCustomRate}
+                    onClear={clearCustomRate} />
+      ) : p.package_pricing ? (
         <BillingOptions pricing={p.package_pricing}
                         selected={p.billing_option || 'month_to_month'}
                         disabled={!p.editable || busy}
                         onChoose={opt => act(
                           () => api.patch('/sales/proposals/' + current.id,
                                           { billing_option: opt }))} />
-      )}
+      ) : null}
 
       {/* `base_amount` is the ONE-TIME figure and is labelled as such. It is
           what the adjustment below applies to, and it is unchanged by the
