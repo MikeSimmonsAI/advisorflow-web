@@ -308,6 +308,12 @@ def owner_state(db: Session = Depends(get_db), user: User = Depends(require_god)
 
 class NeutralizeRequest(BaseModel):
     confirm: str
+    # A SECOND, different phrase, required only when the owner is attached to a
+    # real customer rather than the placeholder. Clearing a real tenancy is not
+    # the same act as clearing an artifact - it removes a true statement about
+    # who this person is inside that customer - so it does not share a
+    # confirmation with the easy case.
+    confirm_real_tenancy: Optional[str] = None
 
 
 @router.post("/owner-neutralize")
@@ -339,12 +345,53 @@ def owner_neutralize(req: NeutralizeRequest, db: Session = Depends(get_db),
         return {"changed": False, "organization_id": None,
                 "message": "The owner account was already neutral."}
 
+    owned_leads = 0
     if not po.is_platform_pseudo_org(before_org):
-        raise HTTPException(
-            status_code=409,
-            detail="The owner is attached to a real customer organization (%s), not "
-                   "the platform placeholder. Refusing to clear it automatically - "
-                   "review that tenancy by hand." % before_org)
+        # A REAL customer tenancy. Still refused by default, but now refusable
+        # ON PURPOSE rather than as a dead end: the operator can say, in a
+        # second and different phrase, that they know which customer this is.
+        real = db.query(Organization).filter(Organization.id == before_org).first()
+        expected = "DETACH OWNER FROM %s" % (real.name.upper() if real else before_org)
+
+        # Records that would be left pointing at a person no longer in the org.
+        # Reported either way - this is the dependency check that has to happen
+        # before the tenancy goes, not a warning invented afterwards.
+        from app.models.models import Lead
+        owned_leads = (db.query(Lead)
+                       .filter(Lead.organization_id == before_org,
+                               Lead.assigned_to_id == user.id).count())
+
+        if (req.confirm_real_tenancy or "").strip() != expected:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "The owner is attached to a REAL customer organization, "
+                               "not the platform placeholder. Clearing it removes a true "
+                               "statement about this person inside that customer, so it "
+                               "needs its own confirmation.",
+                    "organization_id": before_org,
+                    "organization_name": real.name if real else None,
+                    "leads_still_assigned_to_owner": owned_leads,
+                    "reassign_first": owned_leads > 0,
+                    "confirm_real_tenancy": expected,
+                })
+
+        if owned_leads > 0:
+            # Hard refusal, not a warning. Detaching while records still point
+            # at this person leaves those leads owned by somebody who is not in
+            # the organization - which is how a booked family ends up with no
+            # advisor anyone can find.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "%d lead(s) in this customer are still assigned to the "
+                               "owner. Reassign them to somebody who actually works "
+                               "there first - detaching now would leave them owned by "
+                               "a person outside the organization."
+                               % owned_leads,
+                    "organization_id": before_org,
+                    "leads_still_assigned_to_owner": owned_leads,
+                })
 
     fresh.organization_id = None
     log_action(

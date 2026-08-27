@@ -67,10 +67,49 @@ def register_org(
     req: OnboardingRegisterRequest,
     db: Session = Depends(get_db),
 ):
+    """RETIRED — 410 Gone. Customer creation goes through provisioning.
+
+    This route was public, unauthenticated, and created a customer organization
+    with:
+
+      · NO platform_id — an organization belonging to no brand, which sits
+        outside every scoping decision in the system. It would not appear in the
+        customer list of the operator who was supposed to own it, and
+        `get_platform_org_ids` would never return it.
+      · a caller-chosen password with `must_change_password = False`, bypassing
+        the one-time activation-link discipline every other account-creation
+        path in this codebase enforces.
+      · no entitlement, no location, no readiness check, and no audit row.
+
+    Rate limiting is not the control here. Five orgs an hour from anywhere on
+    the internet, each invisible to its own brand, is not a signup funnel — it
+    is an unattended door into the tenant table.
+
+    The supported path is POST /god/customers (customers_router), which requires
+    a brand, records who created it, starts the customer with no features
+    enabled, and hands over access by a one-time link.
+
+    The route is kept rather than deleted so that anything still pointing at it
+    gets a specific, greppable 410 explaining where to go, instead of a 404 that
+    looks like a deploy problem.
     """
-    Creates a new org + admin user in one transaction.
-    Returns a JWT so the caller is immediately authenticated.
-    """
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Self-service organization signup has been retired. It created "
+            "organizations with no brand, which are invisible to every scoped "
+            "query in the platform. Customers are now provisioned by an operator "
+            "through the customer provisioning flow."
+        ),
+    )
+
+
+def _register_org_retired_implementation(
+    request: Request,
+    req: OnboardingRegisterRequest,
+    db: Session,
+):
+    """The former body of register_org. Unreachable; kept for reference only."""
     if len(req.admin_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
     if len(req.business_name.strip()) < 2:

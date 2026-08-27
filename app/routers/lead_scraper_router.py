@@ -165,12 +165,48 @@ def _channel_for_type(phone_type: str, has_website: bool) -> str:
 
 
 def _get_twilio_creds(current_user: User, db: Session) -> tuple:
+    """The caller's OWN Twilio credentials, or a refusal. Never anyone else's.
+
+    Two bugs lived here, and the second hid the first.
+
+    THE ORG BRANCH WAS DEAD CODE. It read `org.twilio_account_sid` and
+    `org.twilio_auth_token_encrypted`. Those attributes do not exist on
+    Organization - the columns are `org_twilio_account_sid` and
+    `org_twilio_auth_token_encrypted`. `getattr(..., None)` swallowed the
+    mistake silently, so the branch never once returned an organization's
+    credentials.
+
+    THE FALLBACK THEN SENT AS SOMEBODY ELSE. Because the org branch never
+    matched, every organization fell through to the platform's own
+    TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN. One shared account, used on behalf
+    of any tenant that asked - a lookup billed to the platform, from a number
+    that belongs to no one customer, in a codebase whose entire premise is that
+    tenants do not share credentials. Nothing failed, so nothing was noticed.
+
+    Both are fixed together, because fixing only the names would have left the
+    fallback as the quiet default for every org that has not configured Twilio.
+    An unconfigured organization now gets a refusal naming what to do, which is
+    the only honest answer: there is no correct account to use.
+    """
     if current_user.twilio_account_sid and getattr(current_user, "twilio_auth_token_encrypted", None):
         return (current_user.twilio_account_sid, decrypt_value(current_user.twilio_auth_token_encrypted))
+
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if org and getattr(org, "twilio_account_sid", None) and getattr(org, "twilio_auth_token_encrypted", None):
-        return (org.twilio_account_sid, decrypt_value(org.twilio_auth_token_encrypted))
-    return (os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", ""))
+    sid = getattr(org, "org_twilio_account_sid", None) if org else None
+    tok = getattr(org, "org_twilio_auth_token_encrypted", None) if org else None
+    if sid and tok:
+        return (sid, decrypt_value(tok))
+
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "No Twilio credentials are configured for this organization, and this "
+            "will not fall back to the platform's shared account — a lookup billed "
+            "to the platform from a number belonging to no customer is not a "
+            "sensible default. Add org-level Twilio under the customer's "
+            "Communications settings, or set them on your own user."
+        ),
+    )
 
 
 # -- Endpoints ----------------------------------------------------------------
