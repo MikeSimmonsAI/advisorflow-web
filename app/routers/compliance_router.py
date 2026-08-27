@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_admin, get_current_user, require_tenant_user
+from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, SuppressionEntry, SuppressionSource
 from app.routers.audit_log_router import log_action
 
@@ -119,7 +120,7 @@ def list_suppression_entries(
 def add_suppression_entry(
     payload: SuppressionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),   # ALL users can add
+    current_user: User = Depends(require_tenant_context),   # ALL users can add
 ):
     normalized_phone = normalize_phone(payload.phone)
 

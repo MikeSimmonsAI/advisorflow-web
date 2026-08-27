@@ -868,11 +868,28 @@ def clear_sample_data(
     # For safety: skip CRM delete unless we add a sample marker. Leave CRM as-is on clear.
     deleted["crm_contacts"] = 0
 
-    # Campaigns — delete sample campaigns by checking the name ends with our known patterns
-    deleted["campaigns"] = db.query(Campaign).filter(
-        Campaign.organization_id == current_user.organization_id,
-        Campaign.created_by_id == current_user.id,
-    ).delete(synchronize_session=False) if not sample_lead_ids else 0
+    # Campaigns.
+    #
+    # This used to read:
+    #
+    #     .delete(...) if not sample_lead_ids else 0
+    #
+    # with the filter `organization_id == mine AND created_by_id == me` and NO
+    # sample marker. The condition is inverted, so the branch that ran was the
+    # one where NOTHING sample existed - and it deleted every campaign the
+    # calling admin had ever created in that organization. "Clear the sample
+    # data" was a button that removed real work precisely when there was no
+    # sample data to remove.
+    #
+    # There is no marker on Campaign that identifies a sample campaign, so the
+    # honest answer is to delete none of them and say so, the same decision
+    # already taken for CRM contacts above.
+    deleted["campaigns"] = 0
+    deleted["campaigns_note"] = (
+        "Campaigns are not removed: nothing on the Campaign row marks it as "
+        "sample data, and the previous filter (created_by_id == caller) matched "
+        "real campaigns. Use the scoped cleanup workflow instead."
+    )
 
     db.commit()
 

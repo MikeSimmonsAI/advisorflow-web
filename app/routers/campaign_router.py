@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin, require_tenant_user
+from app.services.platform_owner import require_tenant_context
 from app.models.models import Campaign, Lead, Message, Reply, User
 from app.routers.audit_log_router import log_action
 
@@ -639,7 +640,7 @@ def builder_preview(
 def builder_send(
     req: BuilderSendRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Execute Campaign Builder send — open to all advisors.

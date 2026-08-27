@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_tenant_user
+from app.services.platform_owner import require_tenant_context
 from app.models.models import Lead, gen_uuid
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ class FiberLeadCreate(BaseModel):
 def create_fiber_lead(
     payload: FiberLeadCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_tenant_user),
+    current_user=Depends(require_tenant_context),
 ):
     """Create a new fiber prospect lead. Must be called by a logged-in rep."""
     if not payload.verbal_sms_consent:

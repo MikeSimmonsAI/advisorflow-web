@@ -155,6 +155,16 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM OWNER CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_customer_provisioning.py 2>&1 | Select-String "FAIL|checks passed|END TO END" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "CUSTOMER PROVISIONING CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_data_cleanup.py 2>&1 | Select-String "FAIL|checks passed|NOTHING ELSE" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "DATA CLEANUP CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_tenant_isolation.py 2>&1 | Select-String "FAIL|checks passed|ISOLATED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "TENANT ISOLATION CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\smoke_platform_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM FRONTEND CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

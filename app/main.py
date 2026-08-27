@@ -14,7 +14,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()  # Load .env before any app imports read os.environ
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -58,6 +58,12 @@ import app.models.implementation_models  # noqa: F401  (imported for side effect
 # reason. A control-plane identity has organization_id = NULL, so it cannot
 # use the customer activation table, whose organization_id is NOT NULL.
 import app.models.staff_models  # noqa: F401  (imported for side effects)
+# Customer locations (locations / user_locations) - same Base, same reason.
+# Without this import a customer's physical sites are never created and
+# booking has nothing to route to. `create_all` only builds tables whose
+# module has been imported, and a missing table here fails silently.
+import app.models.location_models  # noqa: F401  (imported for side effects)
+from app.services.entitlements import require_feature  # noqa: E402
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
@@ -89,6 +95,12 @@ from app.routers.god_router import router as god_router
 # implementation lifecycle and the control-plane audit view. Separate module
 # from god_router so the whole Checkpoint 6 surface reads as one thing.
 from app.routers.god_ops_router import router as god_ops_router
+# Platform overview + brand/customer context selection for the platform owner.
+# Separate from god_router because it is about WHERE the owner is operating,
+# not what they are operating on.
+from app.routers.platform_context_router import router as platform_context_router
+# Customer provisioning: create, locate, staff, entitle, review, activate.
+from app.routers.customers_router import router as customers_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
@@ -375,7 +387,19 @@ app.include_router(audit_log_router.router)
 app.include_router(sample_data_router.router)
 app.include_router(health_router.router)
 app.include_router(workqueue_router.router)
-app.include_router(campaign_router.router)
+# FEATURE ENTITLEMENT, ENFORCED SERVER-SIDE.
+#
+# `Organization.enabled_features` has existed for a long time and nothing in the
+# backend consulted it — Layout.jsx decided whether to draw the nav item and that
+# was the whole of it. Applying the dependency at include time gates every route
+# in the router at once, which is the point: a per-route list is a list somebody
+# forgets to add the next route to.
+#
+# Only routers whose every route is authenticated are gated this way. Anything
+# carrying a public webhook (sms, voice, social, calendar booking) is not, because
+# a 402 on an inbound provider callback would drop real traffic.
+app.include_router(campaign_router.router,
+                   dependencies=[Depends(require_feature("campaigns"))])
 app.include_router(pipeline_router)
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
@@ -388,11 +412,13 @@ app.include_router(availability_router.router)
 app.include_router(voice_router.router)
 app.include_router(reports_router.router)
 app.include_router(crm_router.router)
-app.include_router(crm_native_router)
+app.include_router(crm_native_router,
+                   dependencies=[Depends(require_feature("crm"))])
 app.include_router(survey_router)
 app.include_router(tier_definitions_router)
 app.include_router(dlc_router)
-app.include_router(case_file_router)
+app.include_router(case_file_router,
+                   dependencies=[Depends(require_feature("case_files"))])
 app.include_router(social_webhooks_router)
 app.include_router(fiber_leads_router)
 app.include_router(setup_router)
@@ -401,6 +427,8 @@ app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
+app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
+app.include_router(customers_router)          # Customer provisioning engine
 app.include_router(email_tracking_router)
 # Stripe billing: /billing/plans is public; subscription/checkout/portal are
 # org_admin+ (each org manages its own card); /billing/all is god_admin only.
@@ -678,12 +706,27 @@ async def on_startup():
                 if _init_pw else None
             )
             with engine.connect() as conn:
-                # Ensure a god-level organization exists first (idempotent)
-                conn.execute(_text("""
-                    INSERT INTO organizations (id, name, slug, plan, is_active)
-                    SELECT 'org-god-platform', 'AdvisorFlow Platform', 'advisorflow-platform', 'god', TRUE
-                    WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = 'advisorflow-platform')
-                """))
+                # NOTE (Aug 27 2026): this block used to INSERT an organization
+                # called 'org-god-platform' and make the owner a member of it.
+                # Both halves were wrong.
+                #
+                # The platform owner is not a customer, so giving them a
+                # customer organization gave every unguarded
+                # `organization_id == current_user.organization_id` filter a
+                # real, query-visible org to match. A context-less owner then
+                # read and wrote that pseudo-org's tenant data instead of
+                # failing, which is how an imported lead could land somewhere
+                # that belonged to nobody.
+                #
+                # New deployments no longer get the row, and new owner accounts
+                # are created NEUTRAL (organization_id NULL). Existing rows are
+                # deliberately NOT touched here: silently mutating production
+                # identities on boot is exactly the "blindly modify production
+                # records" failure this project forbids. The pseudo-org is made
+                # inert instead (app/services/platform_owner.py), reported by
+                # GET /god/platform-owner/state, and cleared only by an
+                # explicit, audited POST /god/platform-owner/neutralize.
+                #
                 # Create the god_admin user only if they don't already exist.
                 # Skipped when GOD_ADMIN_INIT_PW is unset, so we never create an
                 # account with an empty password. The role UPDATE below still runs.
@@ -693,7 +736,7 @@ async def on_startup():
                                        role, is_active, must_change_password, failed_login_attempts)
                     SELECT
                         gen_random_uuid(),
-                        'org-god-platform',
+                        NULL,
                         :email,
                         'Mike Simmons',
                         :pw_hash,

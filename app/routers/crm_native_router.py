@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_tenant_user
+from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Organization, CRMContact, CRMNote, Lead
 
 router = APIRouter(prefix="/crm-native", tags=["crm-native"])
@@ -372,7 +373,7 @@ class ContactCreate(BaseModel):
 def create_contact(
     req: ContactCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     stages = _get_org_stages(org) if org else GENERIC_STAGES
@@ -507,7 +508,7 @@ def add_note(
 def create_from_lead(
     lead_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
@@ -541,7 +542,7 @@ def create_from_lead(
 @router.post("/sync-from-leads")
 def sync_leads_to_crm(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Bulk-sync all org leads into the CRM. Safe to call multiple times.

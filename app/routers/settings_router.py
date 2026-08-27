@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.deps import get_db, get_current_user, require_tenant_user
+from app.services.platform_owner import require_tenant_context
 from app.models.models import User
 from app.utils.crypto import encrypt_value
 from app.routers.audit_log_router import log_action
@@ -205,7 +206,7 @@ def update_booking_settings(
 def update_twilio_config(
     req: TwilioConfigRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Lets each advisor enter their own Twilio account details, so each
@@ -236,7 +237,7 @@ def admin_assign_twilio(
     user_id: str,
     req: AdminTwilioAssignRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Org admin endpoint — assign a Twilio phone number to any advisor
@@ -443,7 +444,7 @@ def admin_update_profile(
     user_id: str,
     req: AdminProfileRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Org admin / super admin endpoint — set up any team member's full profile

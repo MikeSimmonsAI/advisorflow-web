@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { useEffect, useState, cloneElement } from 'react'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
+import ContextBanner from './components/ContextBanner'
 import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
@@ -55,6 +56,10 @@ import GodOrganizations from './pages/GodOrganizations'
 import GodSalesOps from './pages/GodSalesOps'
 import GodBrandDetail from './pages/GodBrandDetail'
 import GodProvision from './pages/GodProvision'
+// Platform separation + customer provisioning.
+import PlatformOverview from './pages/god/PlatformOverview'
+import CustomerCreate from './pages/god/CustomerCreate'
+import CustomerDetail from './pages/god/CustomerDetail'
 import GodImplementations from './pages/GodImplementations'
 import GodImplementationDetail from './pages/GodImplementationDetail'
 import GodCustomers from './pages/GodCustomers'
@@ -92,7 +97,11 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   if (requireGodAdmin && role !== 'god_admin') return <Navigate to="/" replace />
   if (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
   if (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
-  return <Layout>{children}</Layout>
+  // The context banner wraps every tenant screen, not just a chosen few. The
+  // owner is most likely to forget which customer they entered on the ordinary
+  // pages — the leads list, a lead detail — which is exactly where a banner
+  // that only appeared on special screens would be missing.
+  return <Layout><ContextBanner />{children}</Layout>
 }
 
 /**
@@ -269,6 +278,11 @@ export default function App() {
         <Route path="/god/implementations" element={<GodRoute><GodModeLayout><GodImplementations /></GodModeLayout></GodRoute>} />
         <Route path="/god/implementations/:implId" element={<GodRoute><GodModeLayout><GodImplementationDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers" element={<GodRoute><GodModeLayout><GodCustomers /></GodModeLayout></GodRoute>} />
+        {/* Platform overview is where the owner lands with NO customer selected.
+            "new" is a static segment so React Router ranks it above :orgId. */}
+        <Route path="/god/platform" element={<GodRoute><GodModeLayout><PlatformOverview /></GodModeLayout></GodRoute>} />
+        <Route path="/god/customers/new" element={<GodRoute><GodModeLayout><CustomerCreate /></GodModeLayout></GodRoute>} />
+        <Route path="/god/customers/:orgId" element={<GodRoute><GodModeLayout><CustomerDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

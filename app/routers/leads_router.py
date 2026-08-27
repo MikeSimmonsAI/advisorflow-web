@@ -10,6 +10,7 @@ from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
 from app.deps import get_db, require_tenant_user
+from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
 from app.services.import_service import import_leads_from_excel
 from app.services.dedup_service import normalize_phone
@@ -34,7 +35,7 @@ def preview_upload(
     campaign_purpose: Optional[str] = Form(None),   # why we're reaching out
     offer_hook: Optional[str] = Form(None),          # what we're offering
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Step 1: advisor uploads an Excel file, we run the REAL import logic
@@ -106,7 +107,7 @@ def confirm_upload(
     campaign_purpose: Optional[str] = Form(None),
     offer_hook: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
     import os as _os
@@ -976,7 +977,7 @@ def confirm_send_batch(
 @router.delete("/duplicates/bulk-delete")
 def bulk_delete_duplicate_leads(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Permanently deletes all leads flagged as duplicates (is_duplicate=True)
@@ -1162,7 +1163,7 @@ class ManualLeadCreate(BaseModel):
 def create_lead_manually(
     payload: ManualLeadCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_context),
 ):
     """
     Create a single lead manually from the Leads page UI.

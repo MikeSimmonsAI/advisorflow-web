@@ -1,0 +1,49 @@
+/* Persistent context indicator. Scoped `ctx-` like every other shell in this
+   codebase (gm-, sw-, dc-, go-, act-) so it cannot leak into a page's styles. */
+
+.ctx-banner {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: #7c2d12;
+  color: #fff7ed;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.ctx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fdba74;
+  flex: 0 0 auto;
+}
+
+.ctx-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-spacer { flex: 1 1 auto; }
+
+.ctx-exit {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff7ed;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ctx-exit:hover:not(:disabled) { background: rgba(255, 255, 255, 0.24); }
+.ctx-exit:disabled { opacity: 0.6; cursor: default; }

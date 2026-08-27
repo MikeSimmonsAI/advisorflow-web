@@ -367,7 +367,12 @@ def implementations(db: Session, *, platform_id: Optional[str] = None,
 
 def customer_organizations(db: Session, *, platform_id: Optional[str] = None,
                            limit: int = 300) -> List[Dict[str, Any]]:
-    q = db.query(Organization)
+    from app.services.platform_owner import exclude_platform_org
+
+    # The platform's own pseudo-organization is not a customer. It appeared in
+    # this list, and therefore in every customer count and picker built on it,
+    # which made "how many customers do we have" wrong by one everywhere.
+    q = exclude_platform_org(db.query(Organization))
     if platform_id:
         q = q.filter(Organization.platform_id == platform_id)
     orgs = q.order_by(Organization.created_at.desc()).limit(max(1, min(limit, 1000))).all()

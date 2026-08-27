@@ -78,6 +78,15 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
         org_override = request.headers.get("X-Org-Override")
         db.expunge(user)  # always detach first
         if org_override:
+            # The platform's own pseudo-org is not a customer and is never a
+            # context you can enter. Selecting it would reintroduce exactly the
+            # mis-attribution the else-branch below exists to prevent, just by
+            # the front door instead of by default.
+            if str(org_override) == "org-god-platform":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The AdvisorFlow platform account is not a customer "
+                           "organization and cannot be entered as one.")
             target_org = db.query(Organization).filter(Organization.id == org_override).first()
             if target_org:
                 _log.info(
@@ -91,6 +100,27 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             # Routers check this flag and skip the org filter, returning data
             # across all organizations. The flag is never persisted.
             user._god_all_orgs = True
+
+            # ...and the owner is NEUTRAL while no customer is selected.
+            #
+            # Until Aug 27 2026 the owner kept whatever organization_id their
+            # row carried, which app/main.py had been setting to the real
+            # pseudo-org 'org-god-platform' on every boot. Three routers check
+            # _god_all_orgs before filtering. The other ~179 read the attribute
+            # at face value, so a context-less owner did not get an empty result
+            # or a loud failure — they quietly read and wrote the platform
+            # pseudo-org's own tenant data, and an imported lead landed
+            # somewhere that belonged to nobody.
+            #
+            # Nulling it here makes the unguarded READS return empty instead of
+            # returning the wrong tenant's rows, and makes the unguarded WRITES
+            # fail instead of silently mis-attributing. `require_tenant_context`
+            # / `tenant_write_org_id` in app/services/platform_owner.py turn
+            # that failure into a clean 409 that names the fix.
+            #
+            # Safe to assign: `db.expunge(user)` above detached this instance
+            # before any mutation, so nothing here is written back.
+            user.organization_id = None
 
     return user
 

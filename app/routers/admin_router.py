@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-from sqlalchemy import func, distinct
+from sqlalchemy import func, distinct, or_
 from pydantic import BaseModel, EmailStr, Field
 import secrets
 from collections import defaultdict
@@ -2377,8 +2377,24 @@ def wipe_demo_data(
 
     target_org = load_org_in_scope(db, current_user, org_id)
 
-    # Get all lead IDs for the org
-    lead_ids = [r[0] for r in db.query(Lead.id).filter(Lead.organization_id == org_id).all()]
+    # ONLY demo/sample rows. This route is called "demo wipe" and until
+    # Aug 27 2026 it selected `Lead.organization_id == org_id` and nothing else
+    # - every lead in the organization, real ones included - and then deleted
+    # every user whose role was 'advisor'. The name promised a narrow operation
+    # and the query performed a total one.
+    #
+    # The markers below are the ones that actually exist: the sample generator
+    # stamps source_file, the demo runner prefixes ids, and an operator can flag
+    # a row is_test. A lead matching none of them is a real lead and survives.
+    from app.services.data_cleanup import SAMPLE_TAG, DEMO_PREFIX
+    lead_ids = [
+        r[0] for r in db.query(Lead.id).filter(
+            Lead.organization_id == org_id,
+            or_(Lead.source_file == SAMPLE_TAG,
+                Lead.id.like(DEMO_PREFIX + "%"),
+                Lead.is_test.is_(True)),
+        ).all()
+    ]
 
     if lead_ids:
         db.execute(sql_delete(LeadOutcome).where(LeadOutcome.lead_id.in_(lead_ids)))
@@ -2388,12 +2404,20 @@ def wipe_demo_data(
             db.execute(sql_delete(CadenceState).where(CadenceState.lead_id.in_(lead_ids)))
         except Exception:
             pass
-        db.execute(sql_delete(Lead).where(Lead.organization_id == org_id))
+        # The selected ids, NOT every lead in the org. The line here used to be
+        # `where(Lead.organization_id == org_id)`, which ignored the id list
+        # that had just been carefully built.
+        db.execute(sql_delete(Lead).where(Lead.id.in_(lead_ids)))
 
-    # Remove demo advisors (not org_admin, not super_admin)
+    # Demo advisors: ONLY ones the demo runner created, recognised by the same
+    # 'demo-' id prefix it deletes by. This previously deleted every user in the
+    # organization whose role was 'advisor' - which is most of a real funeral
+    # home's staff, along with their logins.
     demo_advisors_deleted = (
         db.query(User)
-        .filter(User.organization_id == org_id, User.role == "advisor")
+        .filter(User.organization_id == org_id,
+                User.role == "advisor",
+                User.id.like(DEMO_PREFIX + "%"))
         .delete(synchronize_session=False)
     )
 
@@ -2404,6 +2428,8 @@ def wipe_demo_data(
         "org": target_org.name,
         "leads_deleted": len(lead_ids),
         "demo_advisors_deleted": demo_advisors_deleted,
+        "note": "Only sample/demo/test-flagged records are removed. Real leads "
+                "and real staff accounts are not touched by this route.",
     }
 
 # ---------------------------------------------------------------------------

@@ -296,3 +296,86 @@
   color: var(--go-text); padding: 7px 10px; font-size: 12px;
   appearance: none; -webkit-appearance: none;
 }
+
+/* ── Platform separation + customer provisioning ─────────────────────────────
+   Same `go-` scope as the rest of God Ops. These are additions for the platform
+   overview, the create-customer form and Customer 360; nothing above changed. */
+
+.go-narrow { max-width: 760px; }
+
+.go-head-actions { display: flex; gap: 8px; align-items: center; }
+
+.go-back {
+  background: none; border: none; padding: 0 0 6px;
+  color: var(--go-muted, #94a3b8); font-size: 13px; cursor: pointer;
+}
+.go-back:hover { color: var(--go-fg, #e2e8f0); }
+
+.go-stats { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 22px; }
+.go-stat {
+  flex: 1 1 120px; padding: 14px 16px; border-radius: 10px;
+  background: var(--go-card, #111827); border: 1px solid var(--go-line, #1f2937);
+}
+.go-stat-v { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.go-stat-l {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--go-muted, #94a3b8); margin-top: 4px;
+}
+
+.go-card-list { display: flex; flex-direction: column; gap: 12px; }
+.go-pad { padding: 16px 18px; }
+.go-row-between { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+
+.go-card-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 16px 18px; background: none; border: none;
+  color: inherit; cursor: pointer; text-align: left;
+}
+.go-card-title { font-weight: 600; font-size: 15px; }
+.go-card-body { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 6px; }
+.go-chev { color: var(--go-muted, #94a3b8); font-size: 14px; }
+
+.go-row-btn {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 10px 12px; border-radius: 8px; border: 1px solid transparent;
+  background: none; color: inherit; cursor: pointer; text-align: left;
+}
+.go-row-btn:hover { background: rgba(148, 163, 184, .08); border-color: var(--go-line, #1f2937); }
+.go-row-name { flex: 1 1 auto; font-weight: 500; }
+
+.go-two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.go-input-sm { max-width: 90px; }
+
+.go-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+.go-tabs { display: flex; gap: 4px; margin: 18px 0 16px; flex-wrap: wrap; }
+.go-tab {
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--go-line, #1f2937);
+  background: none; color: var(--go-muted, #94a3b8); font-size: 13px;
+  text-transform: capitalize; cursor: pointer;
+}
+.go-tab.on { background: var(--go-card, #111827); color: var(--go-fg, #e2e8f0); }
+
+.go-check { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 14px; }
+.go-check input { margin-top: 3px; }
+
+.go-plain-list { margin: 8px 0 0 18px; padding: 0; }
+.go-plain-list li { margin: 2px 0; }
+
+.go-warn {
+  padding: 12px 16px; border-radius: 10px; margin-bottom: 16px;
+  background: rgba(180, 83, 9, .14); border: 1px solid rgba(180, 83, 9, .4);
+  font-size: 14px;
+}
+.go-note {
+  padding: 10px 14px; border-radius: 8px; margin: 10px 0;
+  background: rgba(14, 116, 144, .14); border: 1px solid rgba(14, 116, 144, .4);
+  font-size: 13px;
+}
+.go-dismiss { cursor: pointer; }
+
+.go-code {
+  display: block; margin-top: 8px; padding: 10px 12px; border-radius: 8px;
+  background: rgba(148, 163, 184, .1); font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px; word-break: break-all;
+}
