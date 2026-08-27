@@ -54,6 +54,14 @@ from app.models.sales_models import (                               # noqa: E402
 from app.models.implementation_models import (                      # noqa: E402
     Implementation, ImplementationMilestone,
 )
+from app.models.sales_models import OpportunityEvent                # noqa: E402
+from app.models.scheduling_models import (                          # noqa: E402
+    MeetingType, SalesAppointment, AppointmentParticipant,
+    APPT_SCHEDULED, CONF_PENDING, CONF_CONFIRMED,
+    SLOT_OPPORTUNITY_OWNER, SLOT_SALES_MANAGER,
+)
+from app.models.meeting_models import AppointmentMeeting            # noqa: E402
+from app.services import availability as _av                        # noqa: E402
 from app.services.auth_service import hash_password                 # noqa: E402
 
 PW = "PerfBench!2026"
@@ -193,8 +201,142 @@ def build(scale):
                                owner_user_id="u-rep" if o % 2 else "u-mgr",
                                company_name="Prospect %03d-%d" % (i, o),
                                status="open", stage="discovery", created_at=now))
+    db.flush()
+
+    _timeline(db, scale, now)
+    _appointments(db, scale, now)
+
     db.commit()
     db.close()
+
+
+# ── the part the first baseline was missing ─────────────────────────────────
+# my_day's cost is almost entirely appointment-driven: kind() runs a MeetingType
+# query per appointment and is invoked twice over todays, _appt_brief costs three
+# queries each and is called over SEVEN overlapping lists, and recent_activity
+# resolves an actor name per row. A fixture with no SalesAppointment and no
+# OpportunityEvent rows measures none of that - it measures an empty calendar
+# and reports a number that looks healthy. These two builders exist so the
+# benchmark exercises the shapes the optimisation is supposed to remove.
+
+def _timeline(db, scale, now):
+    """Activity events with DISTINCT actors, so _user_name cannot be memoised
+    away by accident and the 15-row N+1 is real."""
+    actors = ["u-rep", "u-mgr"] + ["adv-%03d-%d" % (i, i % 3) for i in range(scale)]
+    n = 0
+    for i in range(scale):
+        for o in range(3):
+            for e in range(3):
+                n += 1
+                db.add(OpportunityEvent(
+                    id="ev-%03d-%d-%d" % (i, o, e),
+                    opportunity_id="o-%03d-%d" % (i, o),
+                    event_type=("created", "stage_changed", "note")[e],
+                    summary="Event %d" % e,
+                    actor_user_id=actors[n % len(actors)],
+                    occurred_at=now - timedelta(hours=n)))
+    db.flush()
+
+
+def _appointments(db, scale, now):
+    """A real sales calendar for the rep and for the brand.
+
+    Placed with the SAME local-day maths my_day uses, so 'today' means today to
+    the route rather than to UTC - otherwise the todays_appointments list comes
+    back empty on either side of the timezone offset and the benchmark quietly
+    measures nothing again.
+    """
+    tz = "America/Chicago"
+    types = [
+        ("discovery",       "Discovery Call",     30, False),
+        ("discovery_demo",  "Discovery + Demo",   60, True),
+        ("demo",            "Product Demo",       45, True),
+        ("closing_call",    "Closing Call",       30, True),
+        ("internal_review", "Pipeline Review",    30, False),
+    ]
+    for n, (key, label, mins, video) in enumerate(types):
+        db.add(MeetingType(id="mt-" + key, brand_sales_org_id="bso", key=key,
+                           name=label, duration_minutes=mins,
+                           required_slots="opportunity_owner,sales_manager",
+                           is_internal=(key == "internal_review"),
+                           requires_video=video, sort_order=n))
+    db.flush()
+
+    today_local = _av.utc_to_local(now, tz).date()
+    seq = {"n": 0}
+
+    def appt(start, mins, mt_key, owner, opp_id, participants,
+             confirmed=True, video=True):
+        seq["n"] += 1
+        aid = "appt-%04d" % seq["n"]
+        db.add(SalesAppointment(
+            id=aid, brand_sales_org_id="bso", opportunity_id=opp_id,
+            meeting_type_id="mt-" + mt_key,
+            title="%s - %s" % (mt_key.replace("_", " ").title(), opp_id),
+            starts_at=start, ends_at=start + timedelta(minutes=mins),
+            timezone=tz, status=APPT_SCHEDULED,
+            prospect_name="Prospect %s" % opp_id,
+            prospect_company="Company %s" % opp_id,
+            prospect_email="p%s@perf.test" % seq["n"],
+            confirmation_status=CONF_CONFIRMED if confirmed else CONF_PENDING,
+            created_by=owner, created_at=now - timedelta(days=2)))
+        db.flush()
+        for uid, slot, required in participants:
+            db.add(AppointmentParticipant(
+                id="ap-%04d-%s" % (seq["n"], uid[-6:]), appointment_id=aid,
+                user_id=uid, role_slot=slot, is_required=required,
+                busy_start_at=start - timedelta(minutes=10),
+                busy_end_at=start + timedelta(minutes=mins + 10)))
+        if video:
+            db.add(AppointmentMeeting(
+                id="am-%04d" % seq["n"], appointment_id=aid,
+                brand_sales_org_id="bso", provider="zoom",
+                provider_meeting_id="z%09d" % seq["n"],
+                join_url="https://zoom.example/j/%09d" % seq["n"],
+                status="created"))
+        db.flush()
+        return aid
+
+    def rep_opp(i):
+        # o-XXX-1 is owned by u-rep (the loop above alternates on o % 2).
+        return "o-%03d-1" % (i % max(scale, 1))
+
+    both = [("u-rep", SLOT_OPPORTUNITY_OWNER, True),
+            ("u-mgr", SLOT_SALES_MANAGER, False)]
+    mgr_only = [("u-mgr", SLOT_OPPORTUNITY_OWNER, True)]
+
+    # THE REP'S TODAY - six meetings at 9,10,11,13,14,15 local.
+    keys = ["discovery", "demo", "discovery_demo", "closing_call",
+            "discovery", "demo"]
+    for n, hour in enumerate((9, 10, 11, 13, 14, 15)):
+        appt(_av.local_to_utc(today_local, hour * 60, tz), 30, keys[n],
+             "u-rep", rep_opp(n), both, confirmed=(n % 3 != 0), video=(n % 2 == 0))
+
+    # THE REP'S NEXT TWO WEEKS - two a day, so `upcoming` reaches its 25 cap.
+    for d in range(1, 16):
+        day = today_local + timedelta(days=d)
+        for n, hour in enumerate((10, 14)):
+            k = keys[(d + n) % len(keys)]
+            appt(_av.local_to_utc(day, hour * 60, tz), 45, k, "u-rep",
+                 rep_opp(d * 2 + n), both,
+                 confirmed=((d + n) % 4 != 0), video=((d + n) % 2 == 0))
+
+    # HISTORY - a month behind, so the date filters have rows to exclude.
+    for d in range(1, 31):
+        day = today_local - timedelta(days=d)
+        appt(_av.local_to_utc(day, 11 * 60, tz), 30, keys[d % len(keys)],
+             "u-rep", rep_opp(d), both, confirmed=True, video=(d % 3 == 0))
+
+    # THE REST OF THE BRAND - the rep is on none of these, the manager sees all
+    # of them. Without these, manager scope and rep scope return the same set
+    # and _visible_sales_appointments is never actually exercised.
+    for i in range(scale):
+        for n, off in enumerate((0, 3)):
+            day = today_local + timedelta(days=off)
+            appt(_av.local_to_utc(day, (9 + (i % 8)) * 60 + n * 30, tz), 30,
+                 keys[(i + n) % len(keys)], "u-mgr", "o-%03d-0" % i, mgr_only,
+                 confirmed=(i % 2 == 0), video=(i % 4 == 0))
+    db.flush()
 
 
 def token(c, email):
