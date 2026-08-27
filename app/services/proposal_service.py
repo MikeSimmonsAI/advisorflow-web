@@ -575,7 +575,11 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
                 .filter(Opportunity.id == prop.opportunity_id).first()
               if prop.opportunity_id else None)
         _fee = _pp.implementation_fee(_pkg, _o)
-        if _fee is not None and _dec(prop.base_amount) != _fee:
+        # Follows the deal in BOTH directions, including back to nothing. The
+        # old guard skipped None, so a fee deliberately removed from a deal left
+        # a stale figure on the quote with no way to clear it — the proposal
+        # went on stating a price the deal no longer had.
+        if _dec(prop.base_amount) != _fee:
             prop.base_amount = _fee
 
     # NO FEE IS NOT A ZERO FEE. A proposal with neither a base nor an adjustment

@@ -577,6 +577,32 @@ def main():
           getattr(custom_pkg, "monthly_price", None) is None,
           getattr(custom_pkg, "monthly_price", None))
 
+    # A deal can be agreed before its economics are. The document must then say
+    # nothing about money — not "$0", not "TBD" beside a dollar sign.
+    section("A PROPOSAL MAY DELIBERATELY QUOTE NOTHING")
+
+    class _Prop(object):
+        def __init__(self, withhold=False, final=None, pkgid=None):
+            self.withhold_pricing = withhold
+            self.final_amount = final
+            self.package_id = pkgid
+            self.currency = "USD"
+            self.contract_term_months = None
+            self.billing_option = None
+            self.opportunity_id = None
+            self.custom_unit_price = None
+            self.custom_unit_label = None
+            self.custom_min_units = None
+            self.custom_term_months = None
+
+    from app.services import proposal_service as _ps
+    check("withholding removes the Investment section entirely",
+          _ps._investment_markdown(None, _Prop(True, 7500, "pkg-multi")) is None)
+    check("...and NOTHING is rendered in its place",
+          not (_ps._investment_markdown(None, _Prop(True, 7500, "pkg-multi")) or ""))
+    check("an unpriced proposal is not a zero-priced one",
+          _ps._investment_markdown(None, _Prop(False, None, None)) is None)
+
     opts = pp.options_for(custom_pkg, None, c)
     check("a custom agreement offers ONE option, not a false choice",
           len(opts) == 1, len(opts))
