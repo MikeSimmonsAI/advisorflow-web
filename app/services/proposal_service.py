@@ -43,6 +43,7 @@ from app.models.models import (
 from app.models.sales_models import (
     Opportunity, OpportunityEvent, BrandSalesOrg, BrandPackage, DiscoveryRecord,
 )
+from app.services import package_pricing as _pp
 
 log = logging.getLogger(__name__)
 
@@ -353,7 +354,8 @@ def can_override_price(db: Session, user, brand_sales_org_id: str) -> bool:
 
 
 def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
-                  adjustment=None, reason: str = None, now=None) -> dict:
+                  adjustment=None, reason: str = None, now=None,
+                  billing_option=None) -> dict:
     """Set the package and any adjustment, enforcing authority server-side.
 
     Returns {"ok": bool, "error": str|None}. The caller turns a failure into a
@@ -373,7 +375,16 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
         if org is not None and pkg.platform_id != org.platform_id:
             return {"ok": False, "error": "That package belongs to another brand."}
         prop.package_id = pkg.id
+        # `base_amount` keeps meaning what it always meant - the package's
+        # `price`, the ONE-TIME implementation figure - so every existing
+        # proposal, adjustment and total still reads correctly. The recurring
+        # rates are carried by `billing_option` and read through the package.
         prop.base_amount = pkg.price
+        prop.billing_option = _pp.normalize_option(
+            billing_option if billing_option is not None else prop.billing_option, pkg)
+        prop.contract_term_months = (
+            _pp.term_months_for(pkg)
+            if prop.billing_option == _pp.BILLING_TERM_AGREEMENT else None)
         prop.currency = pkg.currency or prop.currency or "USD"
         # Changing the package resets any prior adjustment: a discount agreed
         # against Professional is not a discount against Starter.
@@ -381,6 +392,32 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
         prop.price_override_by = None
         prop.price_override_at = None
         prop.price_override_reason = None
+
+    elif billing_option is not None:
+        # Switching option on the package already chosen. Re-rates the proposal
+        # and, like a package change, clears any adjustment: a discount agreed
+        # against the month-to-month rate is not a discount against the
+        # contracted one.
+        pkg = (db.query(BrandPackage).filter(BrandPackage.id == prop.package_id).first()
+               if prop.package_id else None)
+        if pkg is None:
+            return {"ok": False,
+                    "error": "Choose a package before choosing a billing option."}
+        if (billing_option == _pp.BILLING_TERM_AGREEMENT
+                and not _pp.has_term_option(pkg)):
+            return {"ok": False,
+                    "error": "%s has no term-agreement rate. Only month-to-month "
+                             "is available for this package." % pkg.name}
+        option = _pp.normalize_option(billing_option, pkg)
+        if option != prop.billing_option:
+            prop.billing_option = option
+            prop.contract_term_months = (
+                _pp.term_months_for(pkg)
+                if option == _pp.BILLING_TERM_AGREEMENT else None)
+            # `base_amount` is the one-time implementation figure and does NOT
+            # move with the billing option - the setup fee is identical under
+            # both. Any adjustment agreed against it therefore still stands,
+            # which is why nothing is cleared here.
 
     if adjustment is not None:
         adj = _dec(adjustment)

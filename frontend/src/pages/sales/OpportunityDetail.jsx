@@ -22,6 +22,7 @@ import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
   money, dateTime, dueLabel, wallDateTime,
 } from './parts'
+import { BillingOptions } from './BillingOptions.jsx'
 
 const CONF_TONE = {
   confirmed: 'green', declined: 'red', no_show: 'red',
@@ -258,16 +259,30 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
   const [pkgId, setPkgId] = useState(opp.selected_package_id || '')
   const [interestId, setInterestId] = useState(opp.package_interest_id || '')
   const [value, setValue] = useState(opp.deal_value != null ? String(opp.deal_value) : '')
+  const [fee, setFee] = useState(
+    opp.implementation_fee != null ? String(opp.implementation_fee) : '')
   const [reason, setReason] = useState('')
 
   useEffect(() => {
     setPkgId(opp.selected_package_id || '')
     setInterestId(opp.package_interest_id || '')
     setValue(opp.deal_value != null ? String(opp.deal_value) : '')
+    setFee(opp.implementation_fee != null ? String(opp.implementation_fee) : '')
     setReason('')
-  }, [opp.id, opp.selected_package_id, opp.package_interest_id, opp.deal_value])
+  }, [opp.id, opp.selected_package_id, opp.package_interest_id, opp.deal_value,
+      opp.implementation_fee])
 
   const selected = packages.find(p => p.id === pkgId)
+  // Prefer the deal's own pricing block: it carries the per-deal implementation
+  // fee, which the catalogue's copy cannot know about.
+  const pricing = (opp.billing && opp.billing.package_id === pkgId && selected)
+    ? { ...selected.pricing, ...{ options: opp.billing.options,
+                                  implementation_fee: opp.billing.implementation_fee } }
+    : (selected ? selected.pricing : null)
+  const billingOption = opp.billing_option || 'month_to_month'
+  // UNCHANGED ON PURPOSE. `deal_value` still derives from the package's `price`
+  // - the one-time implementation figure it has always meant. The billing
+  // option drives the recurring numbers, which are shown separately.
   const derived = selected && selected.price != null ? Number(selected.price) : null
   const isOverride = value !== '' && derived != null && Math.abs(Number(value) - derived) > 0.005
   const needsReason = (isOverride || (value !== '' && derived == null)) && !opp.deal_value_override
@@ -289,17 +304,61 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
           <select className="sw-select" value={pkgId}
                   onChange={e => { setPkgId(e.target.value); onPatch({ selected_package_id: e.target.value || null }) }}>
             <option value="">None selected</option>
-            {packages.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}{p.price != null ? ' · $' + Number(p.price).toLocaleString() : ' · custom'}
-              </option>
-            ))}
+            {/* Every number here is LABELLED. A bare "$1,497" is exactly how a
+                one-time implementation fee starts being read as a monthly rate,
+                and "$500" as the normal price. */}
+            {packages.map(p => {
+              const pr = p.pricing || {}
+              const bits = []
+              if (pr.implementation_fee != null)
+                bits.push('$' + Number(pr.implementation_fee).toLocaleString() + ' setup')
+              if (pr.monthly_price != null)
+                bits.push('$' + Number(pr.monthly_price).toLocaleString() + '/mo')
+              if (pr.contract_monthly_price != null)
+                bits.push('or $' + Number(pr.contract_monthly_price).toLocaleString()
+                          + '/mo on ' + pr.contract_term_months + 'mo')
+              return (
+                <option key={p.id} value={p.id}>
+                  {p.name}{bits.length ? ' · ' + bits.join(' + ') : ' · custom'}
+                </option>
+              )
+            })}
           </select>
         </div>
       </div>
 
+      {pricing && (
+        <BillingOptions pricing={pricing} selected={billingOption} disabled={saving}
+                        onChoose={opt => onPatch({ billing_option: opt })} />
+      )}
+
+      {/* Quoted for THIS customer. Deliberately not a catalogue edit: changing
+          the package would move the setup fee for every deal referencing it. */}
+      {selected && (
+        <div className="sw-field">
+          <label>IMPLEMENTATION FEE FOR THIS DEAL{' '}
+            <span style={{ fontWeight: 400 }}>
+              (blank = the package&rsquo;s {selected.pricing && selected.pricing.implementation_fee != null
+                ? money(selected.pricing.implementation_fee) : 'none'})
+            </span>
+          </label>
+          <div className="sw-flex">
+            <input className="sw-input" type="number" step="0.01" value={fee}
+                   placeholder="Use package default"
+                   onChange={e => setFee(e.target.value)} />
+            <button className="sw-btn" disabled={saving}
+                    onClick={() => onPatch({
+                      implementation_fee: fee === '' ? null : Number(fee) })}>
+              Save fee
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="sw-field">
-        <label>DEAL VALUE {derived != null && <span style={{ fontWeight: 400 }}>(derived {money(derived)})</span>}</label>
+        <label>DEAL VALUE {derived != null && (
+          <span style={{ fontWeight: 400 }}>(derived {money(derived)} — one-time)</span>
+        )}</label>
         <input className="sw-input" type="number" step="0.01" value={value}
                onChange={e => setValue(e.target.value)} />
       </div>

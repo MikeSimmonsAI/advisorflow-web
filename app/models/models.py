@@ -1359,6 +1359,11 @@ class Proposal(Base):
 
     # Pricing. Numeric, not float — this is money.
     package_id      = Column(String, ForeignKey("brand_packages.id"), nullable=True)
+    # Which billing option this proposal quotes, and the term it commits to.
+    # Snapshotted so a later catalogue change cannot rewrite what was quoted.
+    billing_option       = Column(String, nullable=True)
+    contract_term_months = Column(Integer, nullable=True)
+
     base_amount     = Column(Numeric(12, 2), nullable=True)
     # Signed: negative is a discount, positive an add-on. Kept separate from
     # final_amount so "what did we give away" is answerable without arithmetic

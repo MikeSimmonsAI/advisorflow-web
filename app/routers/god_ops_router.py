@@ -49,6 +49,7 @@ from app.services import customer_activation as activation
 from app.services.sales_access import require_sales_member, is_god
 from app.services import staff_activation as staff_access
 from app.services import sales_staff
+from app.services import package_pricing as _pp
 from app.models.staff_models import StaffActivation, PURPOSE_SETUP, PURPOSE_RESET
 from app.models.sales_models import (
     Membership, SCOPE_BRAND_SALES_ORG, BRAND_SALES_ROLES, ROLE_SALES_MANAGER,
@@ -94,8 +95,11 @@ def brand_detail(brand_sales_org_id: str,
             "brand_sales_org": {"id": bso.id, "name": bso.name, "slug": bso.slug,
                                 "timezone": bso.timezone, "is_active": bool(bso.is_active)},
             "packages": [{"id": p.id, "key": p.key, "name": p.name,
+                          # `price` is the MONTH-TO-MONTH rate; the contracted
+                          # rate lives in the pricing block beside it, named.
                           "price": float(p.price) if p.price is not None else None,
                           "setup_fee": float(p.setup_fee) if p.setup_fee is not None else None,
+                          "pricing": _pp.package_pricing(p),
                           "currency": p.currency, "billing_period": p.billing_period,
                           "is_custom": bool(p.is_custom), "is_active": bool(p.is_active),
                           # Deliberately surfaced as-is. billing_plan_key is the
@@ -386,6 +390,134 @@ def launch(implementation_id: str, req: LaunchRequest,
         raise HTTPException(status_code=403, detail="Marking a customer Live requires god authority.")
     impls.launch(db, impl, user, acknowledge_warnings=req.acknowledge_warnings, note=req.note)
     return {"implementation": ops._implementation_row(db, impl)}
+
+
+class PackagePricingRequest(BaseModel):
+    """The RECURRING platform rates, plus the one-time implementation fee.
+
+    Three different numbers, named so nobody setting them can be in any doubt:
+
+      monthly_price           the NORMAL monthly rate - month-to-month, no
+                              commitment.
+      contract_monthly_price  the LOWER monthly rate earned by committing to a
+                              term agreement. Send null to withdraw the term
+                              option entirely.
+      contract_term_months    the length of that commitment. Every one of those
+                              months is billed monthly at the contracted rate:
+                              no free month, no annual prepayment.
+      setup_fee               the ONE-TIME implementation charge. Layered under
+                              both options, identical in both, and never folded
+                              into a monthly figure.
+
+    The legacy `price` column is deliberately NOT settable here. It holds the
+    existing one-time catalogue figures and changing it through a route named
+    "pricing" is how those get overwritten with a monthly rate by accident.
+    """
+    monthly_price: Optional[float] = None
+    contract_monthly_price: Optional[float] = None
+    contract_term_months: Optional[int] = None
+    setup_fee: Optional[float] = None
+
+
+@router.patch("/packages/{package_id}/pricing")
+def set_package_pricing(package_id: str, req: PackagePricingRequest,
+                        db: Session = Depends(get_db),
+                        user: User = Depends(require_god)):
+    """Set what a package costs, from the control plane. No shell, no SQL.
+
+    Refuses two shapes that would put a wrong number in front of a customer:
+
+      - a contracted rate at or above the month-to-month rate, which is not a
+        term discount and would ask a customer to commit for thirteen months in
+        exchange for nothing,
+      - a term length of zero or less, which cannot be billed.
+
+    Both are refused rather than corrected. A pricing endpoint that quietly
+    "fixes" the numbers it was given is how a wrong price ships.
+    """
+    pkg = db.query(BrandPackage).filter(BrandPackage.id == package_id).first()
+    if pkg is None:
+        raise HTTPException(status_code=404, detail="Package not found.")
+
+    data = req.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="Nothing to change.")
+
+    def snap():
+        return {
+            "monthly_price": (float(pkg.monthly_price)
+                              if pkg.monthly_price is not None else None),
+            "contract_monthly_price": (float(pkg.contract_monthly_price)
+                                       if pkg.contract_monthly_price is not None else None),
+            "contract_term_months": pkg.contract_term_months,
+            "setup_fee": float(pkg.setup_fee) if pkg.setup_fee is not None else None,
+            # Recorded but never written here, so an audit reader can see that
+            # the one-time figure did not move.
+            "legacy_one_time_price": float(pkg.price) if pkg.price is not None else None,
+        }
+
+    before = snap()
+    new_m2m = data.get("monthly_price", before["monthly_price"])
+    new_contract = data.get("contract_monthly_price", before["contract_monthly_price"])
+    new_term = data.get("contract_term_months", before["contract_term_months"])
+
+    for label, amount in (("Monthly price", new_m2m),
+                          ("Contract monthly price", new_contract),
+                          ("Setup fee", data.get("setup_fee", before["setup_fee"]))):
+        if amount is not None and float(amount) < 0:
+            raise HTTPException(status_code=400,
+                                detail="%s cannot be negative." % label)
+
+    if new_contract is not None:
+        if new_m2m is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Set the month-to-month monthly price before the contract "
+                       "rate. A contracted rate has no meaning without the "
+                       "regular rate it discounts.")
+        if float(new_contract) >= float(new_m2m):
+            raise HTTPException(
+                status_code=400,
+                detail="The contract rate ($%s/month) must be LOWER than the "
+                       "month-to-month rate ($%s/month). The lower rate is what "
+                       "the commitment buys."
+                       % (format(float(new_contract), ",.2f"),
+                          format(float(new_m2m), ",.2f")))
+        if new_term is not None and int(new_term) <= 0:
+            raise HTTPException(status_code=400,
+                                detail="The agreement term must be at least one month.")
+        if new_term is None:
+            # A contracted rate with no stated term is unbillable, so the
+            # house default is applied rather than left blank.
+            new_term = _pp.DEFAULT_TERM_MONTHS
+
+    if "monthly_price" in data:
+        pkg.monthly_price = data["monthly_price"]
+    if "contract_monthly_price" in data:
+        pkg.contract_monthly_price = data["contract_monthly_price"]
+        # Withdrawing the rate withdraws the term with it - a term with no rate
+        # would offer a commitment that costs the regular price.
+        pkg.contract_term_months = (new_term
+                                    if data["contract_monthly_price"] is not None
+                                    else None)
+    elif "contract_term_months" in data:
+        pkg.contract_term_months = new_term
+    if "setup_fee" in data:
+        pkg.setup_fee = data["setup_fee"]
+    pkg.updated_at = datetime.utcnow()
+
+    after = snap()
+    log_action(db, None, user.id, action="package_pricing_changed",
+               target_type="brand_package", target_id=pkg.id,
+               platform_id=pkg.platform_id,
+               details={"package": pkg.name, "key": pkg.key},
+               before=before, after=after,
+               note="Recurring platform rates only. The one-time implementation "
+                    "price is unchanged by this route.")
+    db.commit()
+    db.refresh(pkg)
+    return {"package": {"id": pkg.id, "key": pkg.key, "name": pkg.name,
+                        "pricing": _pp.package_pricing(pkg)}}
 
 
 class BillingRequest(BaseModel):
@@ -882,6 +1014,9 @@ AUDIT_CATEGORIES = {
         "platform_owner.enter_customer", "platform_owner.exit_customer",
         "platform_owner.neutralized",
     ),
+    # Changing what a package costs is a control-plane act with money attached;
+    # it belongs in the audit feed beside provisioning and staffing.
+    "pricing": ("package_pricing_changed",),
     "data_lifecycle": (
         "data_cleanup.previewed", "data_cleanup.executed",
         "data_cleanup.failed", "data_cleanup.rolled_back",

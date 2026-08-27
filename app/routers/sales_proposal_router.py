@@ -40,6 +40,7 @@ from app.models.models import (
     PORTAL_EVENT_LABELS,
 )
 from app.models.sales_models import Opportunity, BrandPackage
+from app.services import package_pricing as _pp
 from app.services.sales_access import (
     require_sales_member, assert_can_view_opportunity, sales_org_ids,
     is_sales_manager, is_god,
@@ -98,6 +99,29 @@ def _money(v):
     return None if v is None else float(v)
 
 
+def _proposal_opp(db: Session, prop: Proposal):
+    """The opportunity behind this proposal - needed because a per-deal
+    implementation fee lives there, not on the package."""
+    return (db.query(Opportunity).filter(Opportunity.id == prop.opportunity_id).first()
+            if prop.opportunity_id else None)
+
+
+def _proposal_commercials(db: Session, prop: Proposal, pkg) -> Optional[dict]:
+    """Implementation fee, monthly rate, MRR, term, RCV and TCV for this quote.
+
+    Assembled from the package and the deal rather than stored on the proposal,
+    so there is no second copy of the arithmetic that can disagree with the
+    first. The proposal's own snapshot - which option, which term - is what
+    steers it.
+    """
+    if pkg is None:
+        return None
+    opp = _proposal_opp(db, prop)
+    option = _pp.normalize_option(prop.billing_option, pkg)
+    return _pp.quote(pkg, option, opp,
+                     term_months=prop.contract_term_months or None)
+
+
 def _proposal_out(db: Session, prop: Proposal, user: User,
                   include_blocks: bool = False) -> dict:
     pkg = (db.query(BrandPackage).filter(BrandPackage.id == prop.package_id).first()
@@ -118,6 +142,17 @@ def _proposal_out(db: Session, prop: Proposal, user: User,
         "client_email": prop.client_email,
         "client_company": prop.client_company,
         "package_id": prop.package_id,
+        "billing_option": prop.billing_option,
+        "billing_option_label": (_pp.option_label(prop.billing_option,
+                                                  prop.contract_term_months)
+                                 if prop.billing_option else None),
+        "contract_term_months": prop.contract_term_months,
+        # The full commercial picture, each component named. `base_amount` above
+        # still means the one-time figure it always meant; these are the
+        # recurring numbers beside it, not a redefinition of it.
+        "commercials": _proposal_commercials(db, prop, pkg),
+        "package_pricing": (_pp.package_pricing(pkg, _proposal_opp(db, prop))
+                            if pkg is not None else None),
         "package_name": pkg.name if pkg else None,
         "base_amount": _money(prop.base_amount),
         "adjustment": _money(prop.adjustment),
@@ -186,6 +221,9 @@ class CreateProposalIn(BaseModel):
     opportunity_id: str
     title: Optional[str] = None
     package_id: Optional[str] = None
+    # Omitted, this inherits whatever the opportunity was sold on rather than
+    # defaulting to the regular rate and quietly re-rating an agreed deal.
+    billing_option: Optional[str] = None
 
 
 class UpdateProposalIn(BaseModel):
@@ -207,6 +245,7 @@ class UpdateProposalIn(BaseModel):
     # enforces manager authority. There is no path that writes final_amount
     # directly from a request body.
     package_id: Optional[str] = None
+    billing_option: Optional[str] = None      # month_to_month | term_agreement
     adjustment: Optional[float] = None
     price_reason: Optional[str] = None
 
@@ -279,7 +318,14 @@ def create_proposal(body: CreateProposalIn,
         overrides["title"] = body.title
     prop = ps.create_proposal(db, opp, user, overrides=overrides)
     if body.package_id:
-        res = ps.apply_pricing(db, prop, user, package_id=body.package_id)
+        # The opportunity already records which option this deal is on. Falling
+        # back to it - rather than to the default - stops a proposal quoting the
+        # month-to-month rate for a deal that was agreed on a term agreement.
+        res = ps.apply_pricing(
+            db, prop, user, package_id=body.package_id,
+            billing_option=(body.billing_option
+                            if body.billing_option is not None
+                            else opp.billing_option))
         if not res["ok"]:
             db.rollback()
             raise HTTPException(status_code=400, detail=res["error"])
@@ -317,9 +363,11 @@ def update_proposal(proposal_id: str, body: UpdateProposalIn,
         if val is not None:
             setattr(prop, field, val)
 
-    if body.package_id is not None or body.adjustment is not None:
+    if (body.package_id is not None or body.adjustment is not None
+            or body.billing_option is not None):
         res = ps.apply_pricing(db, prop, user,
                                package_id=body.package_id,
+                               billing_option=body.billing_option,
                                adjustment=body.adjustment,
                                reason=body.price_reason)
         if not res["ok"]:

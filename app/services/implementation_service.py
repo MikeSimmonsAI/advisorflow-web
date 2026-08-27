@@ -468,6 +468,8 @@ def _sales_projection_row(impl, org, owner, c, opp, sold_by, pkg) -> Dict[str, A
         "deal_value": float(opp.deal_value) if opp is not None and opp.deal_value is not None else None,
         "won_at": opp.won_at if opp else None,
         "brand_sales_org_id": impl.brand_sales_org_id,
+        "billing_option": impl.billing_option,
+        "contract_term_months": impl.contract_term_months,
         "status": impl.status,
         "status_label": _SALES_VISIBLE_STATUS.get(impl.status,
                                                   IMPLEMENTATION_STATUS_LABELS.get(impl.status, impl.status)),

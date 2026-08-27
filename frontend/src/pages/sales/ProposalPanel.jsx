@@ -41,6 +41,8 @@ function money(v, cur) {
 }
 
 
+import { BillingOptions } from './BillingOptions.jsx'
+
 export default function ProposalPanel({ opp, packages = [], onChanged }) {
   const [data, setData] = useState(null)
   const [current, setCurrent] = useState(null)
@@ -210,14 +212,31 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
           <option value="">— choose a package —</option>
           {packages.map(pk => (
             <option key={pk.id} value={pk.id}>
-              {pk.name}{pk.price != null ? ' — ' + money(pk.price, pk.currency) : ' — custom'}
+              {pk.name}{pk.price != null
+                ? ' — ' + money(pk.price, pk.currency) + ' setup'
+                : ' — custom'}
             </option>
           ))}
         </select>
       </div>
 
+      {/* The proposal must be able to say WHICH rate it quotes. Without this the
+          document shows a monthly figure and the terms show a 13-month
+          commitment, with nothing tying the two together. */}
+      {p.package_pricing && (
+        <BillingOptions pricing={p.package_pricing}
+                        selected={p.billing_option || 'month_to_month'}
+                        disabled={!p.editable || busy}
+                        onChoose={opt => act(
+                          () => api.patch('/sales/proposals/' + current.id,
+                                          { billing_option: opt }))} />
+      )}
+
+      {/* `base_amount` is the ONE-TIME figure and is labelled as such. It is
+          what the adjustment below applies to, and it is unchanged by the
+          billing option - the setup fee is identical under both. */}
       <div className="sw-flex sw-between" style={{ padding: '10px 0' }}>
-        <span className="sw-subtle">List price</span>
+        <span className="sw-subtle">Implementation &amp; setup (one-time)</span>
         <b>{money(p.base_amount, p.currency)}</b>
       </div>
       {p.adjustment ? (
@@ -228,9 +247,39 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
       ) : null}
       <div className="sw-flex sw-between"
            style={{ padding: '10px 0', borderTop: '1px solid #eef2f5' }}>
-        <b style={{ fontSize: 12 }}>Customer pays</b>
+        <b style={{ fontSize: 12 }}>Implementation total (one-time)</b>
         <b style={{ fontSize: 16 }}>{money(p.final_amount, p.currency)}</b>
       </div>
+
+      {/* The recurring side, kept visually separate from the one-time total
+          above so the two can never be read as one number. */}
+      {p.commercials && p.commercials.monthly_rate != null && (
+        <div className="sw-billing-summary" style={{ marginTop: 10 }}>
+          <div className="sw-billing-row">
+            <span>Monthly rate / MRR</span>
+            <b>{money(p.commercials.monthly_rate, p.currency)}/mo</b>
+          </div>
+          <div className="sw-billing-row">
+            <span>Term</span>
+            <b>{p.commercials.term_months
+              ? p.commercials.term_months + ' months · all ' +
+                p.commercials.payments_required + ' payments required'
+              : 'Month-to-month'}</b>
+          </div>
+          {p.commercials.recurring_contract_value != null && (
+            <div className="sw-billing-row">
+              <span>Recurring contract value</span>
+              <b>{money(p.commercials.recurring_contract_value, p.currency)}</b>
+            </div>
+          )}
+          {p.commercials.term_months && p.commercials.total_contract_value != null ? (
+            <div className="sw-billing-row is-primary">
+              <span>TOTAL CONTRACT VALUE</span>
+              <b>{money(p.commercials.total_contract_value, p.currency)}</b>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Manager-only. The server refuses a rep's discount either way — this
           just avoids showing a control that would always fail. */}

@@ -414,6 +414,9 @@ def _implementation_row(db: Session, impl: Implementation,
         "launched_at": impl.launched_at,
         "is_live": impl.is_live(),
         "billing_status": impl.billing_status,
+        # What the customer signed, carried from the deal rather than re-derived.
+        "billing_option": impl.billing_option,
+        "contract_term_months": impl.contract_term_months,
         "created_at": impl.created_at,
     }
     if pre is not None:

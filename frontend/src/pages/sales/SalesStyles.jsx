@@ -374,6 +374,47 @@ const CSS = `
   .sw-meet{padding-left:0}
   .sw-rep-nums{grid-template-columns:repeat(2,1fr)}
 }
+
+/* ── Billing options ────────────────────────────────────────────────────────
+   Two cards, not a dropdown. The month-to-month rate is the package's normal
+   price and is rendered at the same size and weight as the contracted one, so
+   neither can be mistaken for "the" price. The saving badge is the only thing
+   that draws the eye to the agreement, and it is earned. */
+.sw-billing-options{display:flex;align-items:stretch;gap:12px;flex-wrap:wrap}
+.sw-billing-options > div{display:flex;align-items:stretch;gap:12px;flex:1;min-width:220px}
+.sw-billing-or{display:flex;align-items:center;font-size:9px;letter-spacing:.14em;
+  color:#8496a4;font-weight:700}
+.sw-billing-card{flex:1;min-width:200px;text-align:left;cursor:pointer;
+  border:1.5px solid #d7e0ea;background:#fff;border-radius:12px;padding:14px 16px;
+  display:flex;flex-direction:column;gap:6px;transition:border-color .12s,box-shadow .12s}
+.sw-billing-card:hover:not(:disabled){border-color:#9db4cc}
+.sw-billing-card:disabled{opacity:.6;cursor:default}
+.sw-billing-card.is-active{border-color:#2f6fb0;box-shadow:0 0 0 3px rgba(47,111,176,.12)}
+.sw-billing-name{font-size:9px;letter-spacing:.1em;color:#5f7182;font-weight:700;
+  text-transform:uppercase}
+.sw-billing-rate{font-size:22px;font-weight:700;color:#16324f;line-height:1.1}
+.sw-billing-rate em{font-style:normal;font-size:11px;font-weight:500;color:#6c7f90;
+  margin-left:3px}
+.sw-billing-save{align-self:flex-start;font-size:9px;font-weight:700;letter-spacing:.08em;
+  color:#1c6b4a;background:#e7f6ee;border:1px solid #bde3ce;border-radius:20px;
+  padding:3px 9px}
+.sw-billing-terms{font-size:9px;color:#80909d;line-height:1.5}
+.sw-billing-setup{display:flex;justify-content:space-between;align-items:center;
+  margin-top:12px;padding:10px 14px;border:1px dashed #c3cedb;border-radius:10px;
+  background:#f7f9fc;font-size:10px;color:#5f7182}
+.sw-billing-setup b{font-size:12px;color:#16324f}
+.sw-billing-setup em{font-style:normal;color:#8496a4}
+.sw-billing-summary{margin-top:12px;border:1px solid #e6ecf2;border-radius:10px;
+  padding:4px 14px;background:#fbfdff}
+.sw-billing-row{display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0;font-size:10px;color:#5f7182;border-bottom:1px solid #f0f4f8}
+.sw-billing-row:last-child{border-bottom:none}
+.sw-billing-row b{font-size:11px;color:#16324f}
+.sw-billing-row.is-primary{padding:12px 0}
+.sw-billing-row.is-primary span{font-size:9px;letter-spacing:.1em;font-weight:700;
+  color:#16324f}
+.sw-billing-row.is-primary b{font-size:18px}
+
 `
 
 let injected = false

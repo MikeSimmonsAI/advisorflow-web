@@ -166,6 +166,14 @@ class Implementation(Base):
     # unwired on purpose: the sales packages and the Stripe plans are different
     # products at different prices and must not be mapped to each other blindly.
     # See the docstring on BrandPackage.
+    # WHAT THE CUSTOMER ACTUALLY SIGNED. Copied from the opportunity at
+    # provisioning and never recomputed: once the deal is closed, the catalogue
+    # can be repriced and this must still say what was agreed. Without it, a
+    # $500/month customer is indistinguishable from a discounted one and nothing
+    # records that thirteen payments are owed.
+    billing_option       = Column(String, nullable=True)   # BILLING_OPTIONS
+    contract_term_months = Column(Integer, nullable=True)
+
     billing_status = Column(String, default="not_configured", nullable=True)
     implementation_fee = Column(Numeric(12, 2), nullable=True)
     recurring_amount = Column(Numeric(12, 2), nullable=True)

@@ -47,6 +47,22 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Two-rate package pricing ───────────────────────────────────────────
+    # brand_packages.price stays the MONTH-TO-MONTH rate. contract_price is the
+    # lower rate earned by signing a term agreement, and is NULL for any package
+    # that has no term option - which is refused rather than defaulted.
+    # brand_packages.price keeps holding the ONE-TIME implementation charge.
+    # These are the NEW recurring platform rates layered on top of it.
+    ("brand_packages", "monthly_price", "NUMERIC(12,2)"),
+    ("brand_packages", "contract_monthly_price", "NUMERIC(12,2)"),
+    ("brand_packages", "contract_term_months", "INTEGER"),
+    ("opportunities", "billing_option", "VARCHAR"),
+    ("opportunities", "contract_term_months", "INTEGER"),
+    ("opportunities", "implementation_fee", "NUMERIC(12,2)"),
+    ("proposals", "billing_option", "VARCHAR"),
+    ("proposals", "contract_term_months", "INTEGER"),
+    ("implementations", "billing_option", "VARCHAR"),
+    ("implementations", "contract_term_months", "INTEGER"),
     ("users", "microsoft_oauth_refresh_token_encrypted", "VARCHAR"),
     ("users", "microsoft_email_address", "VARCHAR"),
     ("users", "microsoft_365_connected", "BOOLEAN DEFAULT FALSE"),

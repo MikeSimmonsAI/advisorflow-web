@@ -53,6 +53,7 @@ from app.models.implementation_models import (
     IMPL_NOT_STARTED, MILESTONE_PENDING,
 )
 from app.services.sales_access import is_god, is_sales_manager
+from app.services import package_pricing as _pp
 from app.routers.audit_log_router import log_action
 
 
@@ -117,6 +118,39 @@ PACKAGE_MILESTONES["multi_tenant"] = PACKAGE_MILESTONES["professional"] + [
      "description": "Move the customer's historical records across."},
 ]
 PACKAGE_MILESTONES["custom"] = PACKAGE_MILESTONES["multi_tenant"]
+
+
+def _billing_option_sold(opp, prop, pkg) -> Optional[str]:
+    """Which billing option this customer actually bought on.
+
+    The ACCEPTED PROPOSAL WINS when it states one: that is the document the
+    customer agreed to, and the opportunity may have been edited afterwards. The
+    opportunity is the fallback. Neither is invented - a deal with no package
+    records no option rather than a default one, because "month-to-month" is a
+    claim about what was agreed, not a safe blank.
+    """
+    if pkg is None:
+        return None
+    for src in (prop, opp):
+        opt = getattr(src, "billing_option", None) if src is not None else None
+        if opt:
+            return _pp.normalize_option(opt, pkg)
+    return _pp.DEFAULT_BILLING_OPTION
+
+
+def _term_sold(opp, prop, pkg) -> Optional[int]:
+    """The commitment length agreed, or None for month-to-month.
+
+    Taken from the same record the option came from, so a term can never be
+    attached to a month-to-month sale or dropped from an agreement.
+    """
+    if _billing_option_sold(opp, prop, pkg) != _pp.BILLING_TERM_AGREEMENT:
+        return None
+    for src in (prop, opp):
+        n = getattr(src, "contract_term_months", None) if src is not None else None
+        if n:
+            return int(n)
+    return _pp.term_months_for(pkg)
 
 
 def milestone_template(package: Optional[BrandPackage]) -> List[Dict[str, Any]]:
@@ -468,8 +502,18 @@ def provision_customer(
         last_activity_at=now,
         # Billing INTENT copied from what was sold. Nothing charges anybody.
         billing_status="not_configured",
-        implementation_fee=(pkg.setup_fee if pkg else None),
-        recurring_amount=(prop.final_amount if prop else (pkg.price if pkg else None)),
+        # ONE-TIME, resolved through the same helper every screen uses - which
+        # honours a per-deal override and falls back to the legacy `price`
+        # column where `setup_fee` was never set.
+        implementation_fee=_pp.implementation_fee(pkg, opp),
+        # RECURRING, and it must follow THE OPTION THIS DEAL WAS SOLD ON. The
+        # old code put `pkg.price` here - a ONE-TIME implementation figure - as
+        # the monthly recurring amount, which would have set every provisioned
+        # customer up to be billed their setup fee every month.
+        billing_option=_billing_option_sold(opp, prop, pkg),
+        contract_term_months=_term_sold(opp, prop, pkg),
+        recurring_amount=_pp.monthly_rate(
+            pkg, _billing_option_sold(opp, prop, pkg)),
         currency=(prop.currency if prop else (pkg.currency if pkg else "USD")) or "USD",
         created_at=now,
         created_by=actor.id,

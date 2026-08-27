@@ -150,11 +150,47 @@ class BrandPackage(Base):
     name          = Column(String, nullable=False)
     description   = Column(Text, nullable=True)
 
-    # Numeric, not float — this is money. NULL price = quoted per deal (custom).
+    # THREE SEPARATE NUMBERS, and they are not interchangeable.
+    #
+    #   price / setup_fee        the ONE-TIME implementation charge
+    #   monthly_price            the recurring month-to-month platform rate
+    #   contract_monthly_price   the recurring rate a term agreement earns
+    #
+    # Numeric, not float — this is money. NULL = quoted per deal (custom).
+
+    # LEGACY AND UNCHANGED. This column holds the one-time implementation price
+    # (Starter $1,497 / Growth $2,495 / Professional $4,995) and it keeps doing
+    # exactly that. It is deliberately NOT reused as a monthly rate: everything
+    # already written against it reads a one-time figure, and quietly changing
+    # what it means would mis-state every existing deal at once.
     price         = Column(Numeric(12, 2), nullable=True)
+
+    # The explicit one-time implementation charge. Where it is set it wins over
+    # `price`; where it is NULL the legacy `price` above is the implementation
+    # fee. Resolved in one place - package_pricing.implementation_fee().
+    setup_fee     = Column(Numeric(12, 2), nullable=True)
+
+    # ── recurring platform pricing ──────────────────────────────────────────
+    # NEW money, layered ON TOP OF the one-time implementation fee. Neither of
+    # these replaces it and neither may be folded into it.
+
+    # The package's NORMAL monthly price - what a customer pays with no
+    # commitment. NULL means this package has no recurring platform rate yet.
+    monthly_price = Column(Numeric(12, 2), nullable=True)
+
+    # The lower monthly rate a customer EARNS by committing to a term
+    # agreement. NULL means no term option exists, and the term option is then
+    # refused rather than falling back to `monthly_price` - a fallback would
+    # quote a thirteen-month commitment at the no-commitment rate.
+    #
+    # THERE IS NO FREE MONTH and no annual prepayment. All
+    # `contract_term_months` payments are billed monthly at this rate; the
+    # saving is per-month, not a skipped month.
+    contract_monthly_price = Column(Numeric(12, 2), nullable=True)
+    contract_term_months   = Column(Integer, nullable=True)   # e.g. 13
+
     currency      = Column(String, default="USD")
     billing_period = Column(String, default="monthly")   # monthly | annual | one_time | custom
-    setup_fee     = Column(Numeric(12, 2), nullable=True)
 
     is_custom     = Column(Boolean, default=False, nullable=False)  # Multi-Tenant/Custom
     sort_order    = Column(Integer, default=0)
@@ -258,6 +294,20 @@ class Opportunity(Base):
     # silently replacing the derived number.
     package_interest_id = Column(String, ForeignKey("brand_packages.id"), nullable=True)
     selected_package_id = Column(String, ForeignKey("brand_packages.id"), nullable=True)
+    # WHICH BILLING OPTION THIS DEAL IS ON. Without it, a deal priced at the
+    # contracted rate is indistinguishable from one discounted off the regular
+    # rate, and nothing downstream can state the term.
+    billing_option       = Column(String, nullable=True)   # BILLING_OPTIONS
+    # Snapshot at selection. The catalogue's term can change later; what this
+    # customer agreed to cannot.
+    contract_term_months = Column(Integer, nullable=True)
+
+    # PER-DEAL one-time implementation charge, overriding the package's. Some
+    # customers are quoted a different setup figure than the catalogue's, and
+    # that belongs on the deal rather than as a catalogue edit that would move
+    # the number for everyone. NULL means "use the package's".
+    implementation_fee   = Column(Numeric(12, 2), nullable=True)
+
     deal_value          = Column(Numeric(12, 2), nullable=True)
     deal_value_override = Column(Boolean, default=False, nullable=False)
     deal_value_override_by     = Column(String, ForeignKey("users.id"), nullable=True)

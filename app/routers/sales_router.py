@@ -52,6 +52,7 @@ from app.services.sales_access import (
 from app.services import availability as _av
 from app.services import appointment_meetings as _apmeet
 from app.services import proposal_workqueue as _pwq
+from app.services import package_pricing as _pp
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -213,6 +214,15 @@ def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None,
         "selected_package_id": opp.selected_package_id,
         "deal_value": _money(opp.deal_value),
         "deal_value_override": bool(opp.deal_value_override),
+        # `deal_value` above still means exactly what it always meant. These
+        # are the commercial numbers the new pricing produces, named separately
+        # so no historical figure changes meaning.
+        "billing_option": opp.billing_option,
+        "billing_option_label": (_pp.option_label(opp.billing_option,
+                                                  opp.contract_term_months)
+                                 if opp.billing_option else None),
+        "contract_term_months": opp.contract_term_months,
+        "implementation_fee": _money(opp.implementation_fee),
         "demo_status": opp.demo_status,
         "demo_due_at": opp.demo_due_at,
         "attention": _attention(opp),
@@ -368,6 +378,65 @@ def _event(db: Session, opp: Opportunity, actor: User, event_type: str,
     return ev
 
 
+def _opportunity_billing(db: Session, opp) -> dict:
+    """What this deal has actually been sold on, and what the alternative is.
+
+    Returns the SELECTED option's terms plus every option still available, so a
+    screen can render the choice and a contract can state the commitment without
+    either of them recomputing prices and disagreeing.
+    """
+    pkg = (db.query(BrandPackage).filter(BrandPackage.id == opp.selected_package_id).first()
+           if opp.selected_package_id else None)
+    if pkg is None:
+        return {"selected": None, "options": [], "package_id": None,
+                "implementation_fee": None}
+    option = _pp.normalize_option(opp.billing_option, pkg)
+    # The stored term wins over the catalogue's current one: what the customer
+    # agreed to cannot be rewritten by a later catalogue edit.
+    selected = _pp.quote(pkg, option, opp,
+                         term_months=opp.contract_term_months or None)
+    return {
+        "package_id": pkg.id,
+        "package_name": pkg.name,
+        "selected": selected,
+        "options": _pp.options_for(pkg, opp),
+        # Named at the top level too, because it is the number most often read
+        # off this block on its own.
+        "implementation_fee": selected["implementation_fee"],
+        "implementation_fee_is_one_time": True,
+        "implementation_fee_source": selected["implementation_fee_source"],
+    }
+
+
+def _price_note(q: dict) -> str:
+    """The one-line money summary that goes on the timeline.
+
+    States the rate, the term and the separate setup fee. A note that said only
+    "$500/month" would read identically for a discount and for a 13-month
+    commitment, which is the confusion this whole change exists to remove.
+    """
+    bits = []
+    if q.get("implementation_fee") is not None:
+        bits.append("implementation $%s one-time"
+                    % format(q["implementation_fee"], ",.2f"))
+    if q.get("monthly_rate") is None:
+        bits.append("no recurring rate configured")
+        return " · ".join(bits) or "custom pricing"
+    bits.append("$%s/month" % format(q["monthly_rate"], ",.2f"))
+    if q.get("term_months"):
+        bits.append("%d-month agreement, all %d payments required"
+                    % (q["term_months"], q["term_months"]))
+        if q.get("savings_per_month"):
+            bits.append("saves $%s/month vs month-to-month"
+                        % format(q["savings_per_month"], ",.2f"))
+        if q.get("total_contract_value") is not None:
+            bits.append("total contract value $%s"
+                        % format(q["total_contract_value"], ",.2f"))
+    else:
+        bits.append("month-to-month")
+    return " · ".join(bits)
+
+
 def _package(db: Session, package_id: Optional[str], platform_id: str) -> Optional[BrandPackage]:
     if not package_id:
         return None
@@ -411,6 +480,10 @@ class OpportunityPatch(BaseModel):
     next_action_due_at: Optional[datetime] = None
     package_interest_id: Optional[str] = None
     selected_package_id: Optional[str] = None
+    billing_option: Optional[str] = None       # month_to_month | term_agreement
+    # Per-deal one-time implementation charge. Send null to fall back to the
+    # package's; omit to leave whatever is there alone.
+    implementation_fee: Optional[float] = None
     deal_value: Optional[float] = None
     deal_value_override_reason: Optional[str] = None
     loss_reason: Optional[str] = None
@@ -526,12 +599,17 @@ def sales_packages(brand_sales_org_id: Optional[str] = Query(None),
             .filter(BrandPackage.platform_id == org.platform_id,
                     BrandPackage.is_active.is_(True))
             .order_by(BrandPackage.sort_order.asc()).all())
-    return [{
+    # `price` is kept and still means what it always did - the MONTH-TO-MONTH
+    # rate - so no existing consumer of this endpoint silently starts reading a
+    # contracted rate. `month_to_month_price` names it explicitly for anything
+    # written from here on, and `pricing.options` carries both choices.
+    return [dict({
         "id": p.id, "key": p.key, "name": p.name, "description": p.description,
         "price": _money(p.price), "currency": p.currency,
         "billing_period": p.billing_period, "is_custom": bool(p.is_custom),
         "billing_plan_key": p.billing_plan_key,
-    } for p in rows]
+        "pricing": _pp.package_pricing(p),
+    }) for p in rows]
 
 
 # ── My Day ──────────────────────────────────────────────────────────────────
@@ -823,8 +901,11 @@ def get_opportunity(opp_id: str,
 
     def pkg_out(pid):
         p = db.query(BrandPackage).filter(BrandPackage.id == pid).first() if pid else None
+        # `price` remains the MONTH-TO-MONTH rate. `pricing` carries both rates
+        # plus the selectable options, so the screen never has to infer either.
         return {"id": p.id, "name": p.name, "key": p.key,
-                "price": _money(p.price), "is_custom": bool(p.is_custom)} if p else None
+                "price": _money(p.price), "is_custom": bool(p.is_custom),
+                "pricing": _pp.package_pricing(p)} if p else None
 
     upcoming_appts = (db.query(SalesAppointment)
                       .filter(SalesAppointment.opportunity_id == opp.id,
@@ -838,6 +919,10 @@ def get_opportunity(opp_id: str,
         "source": opp.source,
         "package_interest": pkg_out(opp.package_interest_id),
         "selected_package": pkg_out(opp.selected_package_id),
+        # THE AGREEMENT TERMS THIS DEAL IS ON, stated rather than implied.
+        # Everything downstream - proposal, contract, checkout - reads this
+        # rather than re-deriving it and risking a different answer.
+        "billing": _opportunity_billing(db, opp),
         "deal_value_override_reason": opp.deal_value_override_reason,
         "deal_value_override_by_name": _user_name(db, opp.deal_value_override_by),
         "deal_value_override_at": opp.deal_value_override_at,
@@ -936,18 +1021,79 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
         pkg = _package(db, data["package_interest_id"], platform_id)
         opp.package_interest_id = pkg.id if pkg else None
 
-    if "selected_package_id" in data:
-        pkg = _package(db, data["selected_package_id"], platform_id)
-        opp.selected_package_id = pkg.id if pkg else None
+    # THE BILLING OPTION IS PART OF THE PRICE, so it is resolved before the
+    # value is derived. A package selected without one lands on month-to-month:
+    # that is the package's normal rate, and defaulting to the contracted rate
+    # would put a customer on a 13-month commitment nobody chose.
+    selecting_package = "selected_package_id" in data
+    if selecting_package or "billing_option" in data:
+        pkg = (_package(db, data["selected_package_id"], platform_id)
+               if selecting_package
+               else (db.query(BrandPackage)
+                       .filter(BrandPackage.id == opp.selected_package_id).first()
+                     if opp.selected_package_id else None))
+        if selecting_package:
+            opp.selected_package_id = pkg.id if pkg else None
+
+        requested = data.get("billing_option",
+                             opp.billing_option or _pp.DEFAULT_BILLING_OPTION)
+        # Refuse rather than guess: asking for a term agreement on a package
+        # that has no contracted rate is answered, not silently downgraded.
+        if (requested == _pp.BILLING_TERM_AGREEMENT and pkg is not None
+                and not _pp.has_term_option(pkg)):
+            raise HTTPException(
+                status_code=400,
+                detail="%s has no term-agreement rate. Only month-to-month is "
+                       "available for this package." % pkg.name)
+        option = _pp.normalize_option(requested, pkg)
+
+        prev_option = opp.billing_option
+        opp.billing_option = option if pkg is not None else None
+        opp.contract_term_months = (_pp.term_months_for(pkg)
+                                    if pkg is not None
+                                    and option == _pp.BILLING_TERM_AGREEMENT
+                                    else None)
+
         # Decision #9 — value DERIVES from the package unless explicitly
         # overridden. Selecting a package never silently clobbers an override.
+        #
+        # DELIBERATELY UNCHANGED BY THE BILLING OPTION. `deal_value` has always
+        # meant "the package's `price`", every historical figure and every
+        # report was built on that, and re-pointing it at a monthly rate would
+        # silently restate the whole pipeline. The option-aware commercial
+        # numbers - MRR, recurring contract value, total contract value - are
+        # exposed beside it instead, where they can be read without rewriting
+        # what the old field meant.
         if pkg and not opp.deal_value_override:
             opp.deal_value = pkg.price
-        if pkg:
+
+        if pkg and selecting_package:
+            q = _pp.quote(pkg, option)
             _event(db, opp, user, "package_selected",
-                   "Package selected: %s" % pkg.name,
-                   ("$%s" % format(float(pkg.price), ",.2f")) if pkg.price is not None
-                   else "custom pricing")
+                   "Package selected: %s (%s)" % (pkg.name, q["billing_option_label"]),
+                   _price_note(q))
+        elif pkg and option != prev_option:
+            q = _pp.quote(pkg, option)
+            _event(db, opp, user, "billing_option_changed",
+                   "Billing option: %s" % q["billing_option_label"],
+                   _price_note(q))
+
+    # A per-deal setup figure, quoted for this customer and nobody else. Kept
+    # off the catalogue on purpose: editing the package would move the number
+    # for every deal that has ever referenced it.
+    if "implementation_fee" in data:
+        fee = data["implementation_fee"]
+        if fee is not None and float(fee) < 0:
+            raise HTTPException(status_code=400,
+                                detail="The implementation fee cannot be negative.")
+        before_fee = opp.implementation_fee
+        opp.implementation_fee = Decimal(str(fee)) if fee is not None else None
+        if before_fee != opp.implementation_fee:
+            _event(db, opp, user, "implementation_fee_set",
+                   ("Implementation fee: $%s one-time" % format(float(fee), ",.2f"))
+                   if fee is not None
+                   else "Implementation fee reset to the package's",
+                   "Quoted for this deal. The package catalogue is unchanged.")
 
     if "deal_value" in data and data["deal_value"] is not None:
         derived = None
