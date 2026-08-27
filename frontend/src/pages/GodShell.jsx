@@ -72,12 +72,19 @@ const JUMP = [
 /** built:false → destination has no <Route> yet. Shown, but marked, never faked. */
 const NAV = [
   { label: 'Command Center',   path: '/god',               icon: 'command',  built: true  },
+  // Platform overview: brands, their customers, and the create-customer entry
+  // point. Sits at the top because it is where the owner should LAND — with no
+  // customer selected — rather than arriving already inside somebody's tenant.
+  //
+  // This replaces the old 'Platforms' item, which pointed at /god/platforms.
+  // That route was never built and the entry was marked built:false, so the
+  // one nav item named after this concept led nowhere.
+  { label: 'Platform',         path: '/god/platform',      icon: 'layers',   built: true  },
   // Checkpoint 6 — the operating layer. These are the screens the owner lives
   // in day to day, so they sit directly under the Command Center.
   { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending', built: true  },
   { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',   built: true  },
   { label: 'Customers',        path: '/god/customers',      icon: 'globe',    built: true  },
-  { label: 'Platforms',        path: '/god/platforms',     icon: 'layers',   built: false },
   { label: 'Organizations',    path: '/god/organizations', icon: 'building', built: true  },
   { label: 'Users',            path: '/god/users-all',     icon: 'users',    built: false },
   { label: 'Leads',            path: '/god/leads',         icon: 'trending', built: false },
