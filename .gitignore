@@ -68,6 +68,11 @@ cp6_local.db
 cp6check.db
 
 # SQLite rollback journals / WAL from local test runs
+# Throwaway SQLite files created by the deploy gates. Each probe deletes its
+# own on exit, but Windows can still hold the handle after engine.dispose(),
+# and deploy.ps1 runs `git add -A` — so a leaked one would otherwise be
+# committed. A pattern beats listing filenames one at a time.
+.probe_*.db
 *.db-journal
 *.db-wal
 *.db-shm

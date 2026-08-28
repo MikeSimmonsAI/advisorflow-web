@@ -178,6 +178,10 @@ if ($SkipSmoke) {
     # keeps that from shipping again.
     python scripts\probe_twilio_webhook_auth.py 2>&1 | Select-String "FAIL|failure|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "TWILIO WEBHOOK AUTH CHECKS FAILED - not deploying."; exit 1 }
+    # Retell voice: signed webhook replay, cross-org refusal, DNC sharing,
+    # appointment correlation, and proof the old Twilio voice stack stays off.
+    python scripts\probe_retell_voice.py 2>&1 | Select-String "FAIL|failure|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "RETELL VOICE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_platform_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM FRONTEND CHECKS FAILED - not deploying."; exit 1 }
     # A wrong build filter fails SILENTLY: the change just never reaches

@@ -3,9 +3,14 @@ Lead Timeline Router
 GET /leads/{lead_id}/timeline
 
 Aggregates all activity for a lead into a single sorted event feed:
-SMS sent, SMS received, email sent, booking links, appointments,
+SMS sent, SMS received, email sent, voice calls (started / answered /
+ended / transfer / callback / opt-out), booking links, appointments,
 outcomes, cadence state changes. No new tables — pure query aggregation
 over existing data.
+
+One feed, every channel, whichever provider carried it: Twilio SMS and
+Retell voice both land here, because "what communications happened with
+this lead?" must have exactly one answer.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,7 +21,7 @@ from datetime import datetime
 from app.deps import get_db, get_current_user
 from app.models.models import (
     Lead, Message, Reply, BookingLink, LeadOutcome,
-    CadenceState, EmailMessage, User
+    CadenceState, EmailMessage, User, VoiceCall
 )
 
 router = APIRouter(prefix="/leads", tags=["timeline"])
@@ -216,6 +221,102 @@ def get_lead_timeline(
                 "label": "⛔ Marked Do Not Contact",
                 "body": "This lead is on the DNC list.",
                 "meta": {},
+            })
+
+    # ── Voice calls ──────────────────────────────────────────────────────
+    # Voice was invisible in this feed until 2026-08-28: it read SMS, email,
+    # bookings, outcomes and cadence, but never `voice_calls`. So "what
+    # communications happened with this lead?" had a hole in it exactly where
+    # the AI voice agent was.
+    #
+    # Still NO new activity table — this is the same query-aggregation the rest
+    # of the endpoint does, and it is provider-neutral: a Retell call and a
+    # legacy Twilio call produce identical event shapes because both read the
+    # same columns.
+    voice_calls = db.query(VoiceCall).filter(VoiceCall.lead_id == lead_id).all()
+    for vc in voice_calls:
+        provider = (vc.provider or "twilio")
+        direction = (vc.direction or "outbound")
+        verb = "Voice call" if direction == "outbound" else "Inbound call"
+
+        events.append({
+            "id": f"voice-start-{vc.id}",
+            "type": "voice_call_started",
+            "ts": _fmt(vc.started_at or vc.created_at),
+            "label": f"📞 {verb} started",
+            "body": f"{provider} · to {vc.to_phone}",
+            "meta": {
+                "call_id": vc.id,
+                "provider": provider,
+                "provider_call_id": vc.provider_call_id,
+                "agent_id": vc.agent_id,
+                "direction": direction,
+                "status": vc.status,
+            },
+        })
+
+        if vc.answered_at:
+            events.append({
+                "id": f"voice-answered-{vc.id}",
+                "type": "voice_call_answered",
+                "ts": _fmt(vc.answered_at),
+                "label": "📞 Call answered",
+                "body": "",
+                "meta": {"call_id": vc.id, "provider": provider},
+            })
+
+        if vc.transfer_requested:
+            events.append({
+                "id": f"voice-transfer-{vc.id}",
+                "type": "voice_transfer",
+                "ts": _fmt(vc.ended_at or vc.answered_at or vc.created_at),
+                "label": "↗ Transferred to a person",
+                "body": (vc.transfer_destination or ""),
+                "meta": {"call_id": vc.id,
+                         "transfer_status": vc.transfer_status,
+                         "destination": vc.transfer_destination},
+            })
+
+        if vc.ended_at or vc.status in ("completed", "failed"):
+            mins = (f"{vc.duration_seconds}s" if vc.duration_seconds is not None
+                    else "")
+            body_bits = [b for b in (vc.summary, mins) if b]
+            events.append({
+                "id": f"voice-end-{vc.id}",
+                "type": "voice_call_ended",
+                "ts": _fmt(vc.ended_at or vc.created_at),
+                "label": f"📞 Call ended · {vc.outcome or vc.status or 'unknown'}",
+                "body": " · ".join(body_bits),
+                "meta": {
+                    "call_id": vc.id,
+                    "provider": provider,
+                    "outcome": vc.outcome,
+                    "disconnect_reason": vc.disconnect_reason,
+                    "duration_seconds": vc.duration_seconds,
+                    "has_transcript": bool(vc.transcript),
+                    "recording_url": vc.recording_url,
+                    "booking_link_id": vc.booking_link_id,
+                },
+            })
+
+        if vc.callback_at:
+            events.append({
+                "id": f"voice-callback-{vc.id}",
+                "type": "callback_scheduled",
+                "ts": _fmt(vc.callback_at),
+                "label": "⏰ Callback requested",
+                "body": _fmt(vc.callback_at) or "",
+                "meta": {"call_id": vc.id},
+            })
+
+        if vc.outcome == "opted_out":
+            events.append({
+                "id": f"voice-optout-{vc.id}",
+                "type": "opt_out",
+                "ts": _fmt(vc.ended_at or vc.created_at),
+                "label": "⛔ Opted out on a call",
+                "body": "Added to the organization's suppression list.",
+                "meta": {"call_id": vc.id, "channel": "voice"},
             })
 
     # ── Sort ascending by timestamp (None sorts to top) ─────────────────

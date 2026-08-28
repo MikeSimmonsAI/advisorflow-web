@@ -702,6 +702,11 @@ class SuppressionSource(str, enum.Enum):
     MANUAL = "manual"
     REPLY_STOP = "reply_stop"
     ADVISOR_FLAGGED = "advisor_flagged"
+    # Someone told the AI voice agent not to call again. Same table, same
+    # enforcement, same uniqueness — only the provenance differs. A separate
+    # provider-owned suppression list is exactly the failure mode this avoids:
+    # Twilio saying DNC while Retell keeps dialling.
+    VOICE_OPT_OUT = "voice_opt_out"
 
 
 class SuppressionEntry(Base):
@@ -1096,6 +1101,73 @@ class VoiceCall(Base):
     started_at      = Column(DateTime, nullable=True)
     ended_at        = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
+
+    # ── PROVIDER-NEUTRAL LIFECYCLE ───────────────────────────────────────────
+    # Added 2026-08-28 for the Retell integration. Every column here is
+    # additive and nullable: this table already held ~all of Twilio's call
+    # shape, and a second RetellCall table would have split "what happened on
+    # a call" across two places that every reader would then have to union.
+    #
+    # The columns above stay exactly as they were. `call_sid` and
+    # `twilio_status` remain Twilio's; `provider_call_id` is the neutral one
+    # every provider fills in.
+    provider          = Column(String, nullable=True, default="twilio")  # twilio | retell
+    provider_call_id  = Column(String, nullable=True, index=True)        # Retell call_id — the webhook lookup key
+    direction         = Column(String, nullable=True)                    # outbound | inbound
+    agent_id          = Column(String, nullable=True)                    # which voice agent ran it (multi-agent)
+    campaign_id       = Column(String, nullable=True, index=True)        # voice_call_campaigns.id, when part of one
+
+    answered_at       = Column(DateTime, nullable=True)                  # distinct from started_at: picked up
+    disconnect_reason = Column(String, nullable=True)                    # provider's own hangup reason
+
+    summary           = Column(Text, nullable=True)                      # post-call analysis summary
+    analysis_json     = Column(Text, nullable=True)                      # raw provider analysis incl. custom fields
+
+    # Transfer. Recorded only to the depth the provider actually reports.
+    transfer_requested   = Column(Boolean, default=False)
+    transfer_destination = Column(String, nullable=True)
+    transfer_status      = Column(String, nullable=True)                 # started | bridged | cancelled | ended
+
+    callback_at       = Column(DateTime, nullable=True)                  # caller asked to be rung back then
+    booking_link_id   = Column(String, nullable=True, index=True)        # the appointment this call produced
+
+
+# ── Voice agent configuration ─────────────────────────────────────────────────
+# organization → provider → agent → outbound number.
+#
+# WHY THIS IS A TABLE AND NOT CONSTANTS. The File Check agent is the first
+# configuration running through the voice layer, not the definition of it.
+# Adding a second Retell agent later must cost one row plus business rules —
+# not a new integration, webhook, or provider module. So no agent id and no
+# outbound number may appear as a literal in application logic; both are read
+# from here.
+
+class VoiceAgentConfig(Base):
+    __tablename__ = "voice_agent_configs"
+
+    id              = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    provider        = Column(String, nullable=False, default="retell")   # matches a registered VoiceProvider key
+    agent_id        = Column(String, nullable=False)                     # provider's agent identifier
+    from_number     = Column(String, nullable=False)                     # E.164, provider-owned or imported
+    use_case        = Column(String, nullable=False, default="file_check")
+    label           = Column(String, nullable=True)                      # human name for the console
+
+    # Per-org credential OVERRIDE. NULL means "use the platform key from the
+    # environment", which is the normal case. This exists so a white-label
+    # customer can bring their own provider account later without a schema
+    # change. Encrypted with the same Fernet helper as the Twilio tokens.
+    api_key_encrypted = Column(String, nullable=True)
+
+    is_active       = Column(Boolean, default=True, nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by      = Column(String, ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        Index("ix_voice_agent_org_usecase", "organization_id", "use_case"),
+    )
 
 
 # ── Voice Call Campaign ───────────────────────────────────────────────────────

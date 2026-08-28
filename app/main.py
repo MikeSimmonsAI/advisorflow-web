@@ -115,6 +115,9 @@ from app.routers.calendar_connections_router import router as calendar_connectio
 from app.routers.sales_proposal_router import router as sales_proposal_router
 from app.routers.sales_manager_router import router as sales_manager_router
 from app.routers.integrations_router import router as integrations_router
+# Retell voice lifecycle webhooks. A separate module from voice_router (the
+# legacy Twilio voice stack), which stays fail-closed and untouched.
+from app.routers.voice_webhooks_router import router as voice_webhooks_router
 from app.routers.demo_router import router as demo_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
@@ -470,6 +473,7 @@ app.include_router(sales_manager_router)
 # per credential, every request audited. It computes no availability of its own:
 # it calls the same engine /sales/availability/find uses.
 app.include_router(integrations_router)
+app.include_router(voice_webhooks_router)
 # Mounted in every environment, and 404 in all but one. The routes check
 # APP_ENV themselves rather than being conditionally mounted, so production and
 # demo run the identical router table — a conditional mount would mean the two

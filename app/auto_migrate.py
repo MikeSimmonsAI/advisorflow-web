@@ -57,6 +57,26 @@ COLUMNS_TO_ADD = [
     # Existing rows predate slots and are all website concepts, which is what
     # the backfilled default says. New rows default to "platform" in the model,
     # so the product walkthrough does not retire the website concept.
+    # ── Provider-neutral voice lifecycle (Retell integration, 2026-08-28) ────
+    # All additive and nullable. `create_all()` never adds a column to an
+    # existing table, so voice_calls — which has been in production since the
+    # Twilio voice work — needs these here or they would only appear on a
+    # freshly created database and fail on the first real webhook.
+    ("voice_calls", "provider", "VARCHAR"),
+    ("voice_calls", "provider_call_id", "VARCHAR"),
+    ("voice_calls", "direction", "VARCHAR"),
+    ("voice_calls", "agent_id", "VARCHAR"),
+    ("voice_calls", "campaign_id", "VARCHAR"),
+    ("voice_calls", "answered_at", "TIMESTAMP"),
+    ("voice_calls", "disconnect_reason", "VARCHAR"),
+    ("voice_calls", "summary", "TEXT"),
+    ("voice_calls", "analysis_json", "TEXT"),
+    ("voice_calls", "transfer_requested", "BOOLEAN DEFAULT FALSE"),
+    ("voice_calls", "transfer_destination", "VARCHAR"),
+    ("voice_calls", "transfer_status", "VARCHAR"),
+    ("voice_calls", "callback_at", "TIMESTAMP"),
+    ("voice_calls", "booking_link_id", "VARCHAR"),
+
     ("demo_sites", "slot", "VARCHAR(32) DEFAULT 'website' NOT NULL"),
 
     # ── Per-deal custom recurring rate ─────────────────────────────────────
@@ -442,6 +462,10 @@ TABLES_TO_CREATE = [
 # wrong once already. Always use the uppercase member NAME here.
 ENUM_VALUES_TO_ADD = [
     ("suppressionsource", "ADVISOR_FLAGGED"),
+    # A voice opt-out lands in the SAME suppression table as an SMS STOP; only
+    # the provenance differs. Postgres needs the enum value to exist before a
+    # row can carry it, so this must be here rather than implied by the model.
+    ("suppressionsource", "VOICE_OPT_OUT"),
     ("notificationtype", "REPLY_RECEIVED"),
 ]
 
@@ -475,6 +499,11 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 # table scans on messages and email_messages (potentially millions of rows)
 # because neither table had any indexes on lead_id, sent_at, or sender_id.
 INDEXES_TO_CREATE = [
+    # The webhook lookup key. Every Retell event resolves through this column,
+    # several times per call, so it is indexed rather than scanned.
+    "CREATE INDEX IF NOT EXISTS ix_voice_calls_provider_call_id ON voice_calls(provider_call_id)",
+    "CREATE INDEX IF NOT EXISTS ix_voice_calls_campaign_id      ON voice_calls(campaign_id)",
+    "CREATE INDEX IF NOT EXISTS ix_voice_calls_booking_link_id  ON voice_calls(booking_link_id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_lead_id      ON messages(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sent_at      ON messages(sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sender_id    ON messages(sender_id)",

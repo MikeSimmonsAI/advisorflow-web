@@ -91,6 +91,17 @@ services:
       # replies would get in.
       - key: TWILIO_AUTH_TOKEN
         sync: false
+      # AI VOICE PROVIDER. Retell signs its webhooks with the API key itself —
+      # there is no separate webhook secret, so do not add one. Until this is
+      # set, outbound calls report "not configured" and every inbound webhook
+      # is refused: unverifiable never means allowed.
+      #
+      # Obtain from the Retell dashboard → Settings → API Keys, and paste it
+      # into Render's environment directly. The agent id and outbound number
+      # are NOT here on purpose — they are per-organization rows in
+      # voice_agent_configs, so a second agent costs a row, not a deploy.
+      - key: RETELL_API_KEY
+        sync: false
       - key: GOOGLE_REDIRECT_URI
         value: https://advisorflow-backend.onrender.com/calendar/oauth/callback
       - key: MICROSOFT_REDIRECT_URI

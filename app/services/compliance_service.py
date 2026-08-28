@@ -35,14 +35,28 @@ def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
     )
 
 
-def add_suppression_entry_from_reply(db: Session, organization_id: str, phone: str, reason: str) -> SuppressionEntry:
+def add_suppression_entry(
+    db: Session,
+    organization_id: str,
+    phone: str,
+    reason: str,
+    source: SuppressionSource = SuppressionSource.MANUAL,
+) -> SuppressionEntry:
     """
-    Adds a number to the suppression list with source=REPLY_STOP,
-    distinguishing it from numbers an admin added manually via the
-    Compliance Center. Idempotent - if the number is already
-    suppressed (e.g. an admin already added it manually, or they
-    replied STOP twice), returns the existing entry rather than
-    erroring or creating a duplicate.
+    THE one write path into the suppression authority, whatever channel the
+    opt-out arrived on.
+
+    Every provider funnels here on purpose. The failure this prevents is a
+    provider keeping its own list: someone replies STOP to a Twilio text, and
+    the Retell voice agent rings them the next morning because voice consulted
+    a different source of truth. There is one table, one uniqueness rule
+    (organization_id, phone), and `source` records only WHERE the opt-out came
+    from — never WHO gets to honour it. All of them do.
+
+    Idempotent: an existing entry is returned untouched rather than duplicated
+    or overwritten, so the earliest opt-out keeps its original reason and
+    provenance. Re-suppressing is a no-op, which is what makes it safe to call
+    from a webhook that may be delivered more than once.
     """
     normalized = normalize_phone(phone)
     existing = (
@@ -57,8 +71,19 @@ def add_suppression_entry_from_reply(db: Session, organization_id: str, phone: s
         organization_id=organization_id,
         phone=normalized,
         reason=reason,
-        source=SuppressionSource.REPLY_STOP,
+        source=source,
     )
     db.add(entry)
     db.commit()
     return entry
+
+
+def add_suppression_entry_from_reply(db: Session, organization_id: str, phone: str, reason: str) -> SuppressionEntry:
+    """
+    SMS STOP-keyword opt-out. Unchanged behaviour, unchanged signature, and
+    still the function sms_router calls — it now delegates so there is exactly
+    one implementation to keep correct.
+    """
+    return add_suppression_entry(
+        db, organization_id, phone, reason, source=SuppressionSource.REPLY_STOP
+    )
