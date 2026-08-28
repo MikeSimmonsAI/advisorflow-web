@@ -8,7 +8,7 @@ from typing import Optional
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
-from app.utils.twilio_security import validate_twilio_webhook
+from app.utils.twilio_webhook_guard import guard_inbound, guard_status_callback
 
 router = APIRouter(prefix="/sms", tags=["sms"])
 
@@ -128,9 +128,15 @@ async def sms_status_callback(
     """
     Twilio delivery status callback — called by Twilio each time an SMS
     delivery status changes (sent → delivered, failed, undelivered, etc.).
-    Validates X-Twilio-Signature before processing to prevent spoofed callbacks.
+
+    AUTHENTICATE FIRST. `guard_status_callback` resolves the sending Twilio
+    account from AccountSid, loads THAT account's auth token (per-advisor or
+    per-org, decrypted from the DB — never a global env var), verifies the
+    signature against it, and confirms the account owns this MessageSid. It
+    raises 403 on any failure. Nothing below runs unless it returns, so a
+    forged callback carrying a real MessageSid leaves the row untouched.
     """
-    await validate_twilio_webhook(request)
+    await guard_status_callback(request, db)
     from app.models.models import Message
 
     msg = db.query(Message).filter(Message.twilio_sid == MessageSid).first()
@@ -156,10 +162,19 @@ async def inbound_webhook(
 ):
     """
     Twilio webhook for inbound SMS replies.
-    Validates X-Twilio-Signature before processing to prevent spoofed inbound
-    messages that could inject fake lead replies or trigger AI flows.
+
+    P0 AUTHENTICATION BOUNDARY. Everything below this guard is a side effect a
+    forged message must never be able to cause: creating a Reply, stopping a
+    cadence, flipping lead.status, writing a DNC/suppression entry, or invoking
+    the AI conversation and pipeline services.
+
+    `guard_inbound` resolves the sending Twilio account from AccountSid, loads
+    that account's own decrypted auth token, verifies the signature against it,
+    and confirms the account owns the destination number in `To` — so a valid
+    signature from Org A cannot inject a reply into Org B's inbox. It raises
+    403 on any failure, before any of the above is reachable.
     """
-    await validate_twilio_webhook(request)
+    await guard_inbound(request, db)
     from app.services.dedup_service import normalize_phone
     from app.services.cadence_service import stop_cadence_for_lead
     from app.services.reply_classification_service import classify_reply, contains_hard_stop_language

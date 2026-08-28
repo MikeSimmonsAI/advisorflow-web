@@ -173,6 +173,11 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "OWNER CONSOLE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_delivery_receipts.py 2>&1 | Select-String "FAIL|checks passed|PERSISTED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "DELIVERY RECEIPT CHECKS FAILED - not deploying."; exit 1 }
+    # Replays REAL HMAC-signed webhooks against the app and reads the rows back.
+    # Production once returned 200 to an unsigned forgery; this is the gate that
+    # keeps that from shipping again.
+    python scripts\probe_twilio_webhook_auth.py 2>&1 | Select-String "FAIL|failure|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "TWILIO WEBHOOK AUTH CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_platform_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM FRONTEND CHECKS FAILED - not deploying."; exit 1 }
     # A wrong build filter fails SILENTLY: the change just never reaches

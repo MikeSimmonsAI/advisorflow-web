@@ -63,11 +63,17 @@ from app.models.models import (                                      # noqa: E40
 )
 from app.services.auth_service import hash_password                  # noqa: E402
 from app.services import twilio_callbacks as tc                      # noqa: E402
+from app.utils.crypto import encrypt_value                           # noqa: E402
 
 PW = "ProbeTest!2026"
 FAIL, PASSED = [], []
 CB_PATH = "/sms/webhook/status-callback"
 TEST_TOKEN = "test_auth_token_not_a_real_secret"
+# Per-account credentials. As of the 2026-08-28 webhook-auth fix there is no
+# global token and no unsigned path: every callback below is signed with the
+# SENDING ADVISOR'S own token, resolved from AccountSid, which is what Twilio
+# actually does. See app/utils/twilio_webhook_guard.py.
+TEST_ACCOUNT_SID = "ACprobe0000000000000000000000000f"
 
 
 def check(label, ok, detail=""):
@@ -114,7 +120,9 @@ def build():
     db.add(User(id="u-adv", organization_id="org-a", email="adv@probe.test",
                 full_name="Advisor", password_hash=hash_password(PW),
                 role="advisor", must_change_password=False, is_active=True,
-                twilio_phone_number="+15550000001"))
+                twilio_phone_number="+15550000001",
+                twilio_account_sid=TEST_ACCOUNT_SID,
+                twilio_auth_token_encrypted=encrypt_value(TEST_TOKEN)))
     db.add(Lead(id="lead-1", organization_id="org-a", first_name="Test",
                 last_name="Lead", phone="+15550000099", status="new",
                 assigned_to_id="u-adv", created_at=datetime.utcnow()))
@@ -126,6 +134,26 @@ def sign(token, url, params):
     s = url + "".join("%s%s" % (k, v) for k, v in sorted(params.items()))
     return base64.b64encode(
         hmac.new(token.encode(), s.encode(), hashlib.sha1).digest()).decode()
+
+
+PUBLIC_ORIGIN = "https://advisorflow-backend.onrender.com"
+
+
+def signed_cb(c, msg_sid, status, account_sid=TEST_ACCOUNT_SID,
+              token=TEST_TOKEN):
+    """POST a delivery receipt the way Twilio really would.
+
+    AccountSid names the sending account; the signature is HMAC'd with THAT
+    account's auth token over the https:// URL. Both are now required — an
+    unsigned callback is refused, which is the whole point of the fix.
+    """
+    params = {"AccountSid": account_sid, "MessageSid": msg_sid,
+              "MessageStatus": status}
+    return c.post(CB_PATH, data=params, headers={
+        "X-Twilio-Signature": sign(token, PUBLIC_ORIGIN + CB_PATH, params),
+        "X-Forwarded-Proto": "https",
+        "Host": "advisorflow-backend.onrender.com",
+    })
 
 
 def main():
@@ -183,8 +211,8 @@ def main():
 
     # ══ 3. A REPLAYED TWILIO CALLBACK PERSISTS THE RECEIPT ══════════════════
     section("THE RECEIPT PERSISTS (replayed callback, real endpoint)")
-    r = c.post(CB_PATH, data={"MessageSid": msg_sid, "MessageStatus": "delivered"})
-    check("the endpoint exists and is publicly reachable",
+    r = signed_cb(c, msg_sid, "delivered")
+    check("the endpoint exists and accepts a properly signed callback",
           r.status_code == 200, "%s %s" % (r.status_code, r.text[:120]))
     check("...and reports the message updated",
           r.json().get("status") == "updated", r.json())
@@ -199,7 +227,7 @@ def main():
     check("...and delivery_status_at is stamped", got_at is not None, got_at)
 
     # A failure must land too — a receipt that only records success is useless.
-    r = c.post(CB_PATH, data={"MessageSid": msg_sid, "MessageStatus": "failed"})
+    r = signed_cb(c, msg_sid, "failed")
     db = SessionLocal()
     fresh = db.query(Message).filter(Message.id == msg_id).first()
     failed_status = fresh.delivery_status
@@ -208,16 +236,17 @@ def main():
 
     # ══ 4. IT SURVIVES SIGNATURE VALIDATION BEHIND RENDER'S PROXY ═══════════
     section("SIGNATURE VALIDATION behind a TLS-terminating proxy")
-    # Turning the token on is what would have started rejecting every genuine
-    # callback: Twilio signs the https URL, and this app sees http behind
-    # Render's proxy because uvicorn is not started with --forwarded-allow-ips.
-    os.environ["TWILIO_AUTH_TOKEN"] = TEST_TOKEN
-    import importlib
-    import app.utils.twilio_security as tsec
-    importlib.reload(tsec)
-
-    params = {"MessageSid": msg_sid, "MessageStatus": "delivered"}
-    https_url = "https://advisorflow-backend.onrender.com" + CB_PATH
+    # Twilio signs the https URL; this app sees http behind Render's proxy
+    # because uvicorn is not started with --forwarded-allow-ips. The candidate
+    # URL reconstruction is what bridges that.
+    #
+    # NOTE: no global TWILIO_AUTH_TOKEN is set here any more, and none is
+    # needed. The token comes from the advisor row resolved via AccountSid, so
+    # these assertions now exercise the real production path rather than an
+    # env var that never existed in production.
+    params = {"AccountSid": TEST_ACCOUNT_SID, "MessageSid": msg_sid,
+              "MessageStatus": "delivered"}
+    https_url = PUBLIC_ORIGIN + CB_PATH
     good_sig = sign(TEST_TOKEN, https_url, params)
 
     r = c.post(CB_PATH, data=params, headers={
@@ -248,10 +277,23 @@ def main():
         "X-Forwarded-Proto": "https",
         "Host": "advisorflow-backend.onrender.com",
     })
-    check("an unsigned callback is refused once a token is set",
+    check("an unsigned callback is refused, unconditionally",
           r.status_code == 403, r.status_code)
-    os.environ.pop("TWILIO_AUTH_TOKEN", None)
-    importlib.reload(tsec)
+
+    # The regression that started all of this: production had NO global token,
+    # and that was treated as "allowed". Prove that is dead — an unsigned
+    # callback is refused even though TWILIO_AUTH_TOKEN is absent right now.
+    check("...and TWILIO_AUTH_TOKEN is genuinely absent for that assertion",
+          not os.environ.get("TWILIO_AUTH_TOKEN"),
+          "if this were set, the fail-closed proof would be worthless")
+
+    # An unknown account cannot forge its way in even with a valid HMAC over
+    # its own token.
+    r = signed_cb(c, msg_sid, "delivered",
+                  account_sid="ACnotarealaccount00000000000000ff",
+                  token="some-other-accounts-token")
+    check("a callback from an UNKNOWN AccountSid is refused",
+          r.status_code == 403, r.status_code)
 
     # ══ 5. THE DASHBOARD READS WHAT WAS PERSISTED ═══════════════════════════
     section("PLATFORM HEALTH reflects the receipt, not a guess")

@@ -99,6 +99,51 @@ def _candidate_urls(request: Request) -> list:
     return out
 
 
+def verify_signature_or_403(request: Request, auth_token: str,
+                            params: dict) -> None:
+    """Verify X-Twilio-Signature against a SPECIFIC account's token.
+
+    The synchronous, token-explicit core. `twilio_webhook_guard` resolves which
+    Twilio account a request claims to be from, then calls this with that
+    account's real token and the already-parsed form params — so the token is
+    never read from the environment and there is no fallback to fall back to.
+
+    Keeps the two hard-won correctness fixes:
+      * the URL is reconstructed from server-side trust (the proxy's
+        X-Forwarded-Proto and this service's configured origin), because
+        Render terminates TLS and `request.url` reports http://
+      * params come from the caller, which read them via `request.form()`
+        (cached) rather than `request.body()` (which returns b"" after
+        FastAPI's Form(...) parsing consumed the stream)
+
+    Raises HTTPException(403) on a missing or non-matching signature.
+    """
+    if not auth_token:
+        logger.warning("twilio_security: verify called with no token on %s",
+                       request.url.path)
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    twilio_sig = request.headers.get("X-Twilio-Signature", "")
+    if not twilio_sig:
+        logger.warning(
+            "twilio_security: missing X-Twilio-Signature on %s from %s",
+            request.url.path,
+            request.client.host if request.client else "unknown")
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    for candidate in _candidate_urls(request):
+        if hmac.compare_digest(
+                _compute_signature(auth_token, candidate, params), twilio_sig):
+            return
+
+    logger.warning(
+        "twilio_security: signature mismatch on %s from %s (%d candidate URLs)",
+        request.url.path,
+        request.client.host if request.client else "unknown",
+        len(_candidate_urls(request)))
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+
 async def validate_twilio_webhook(
     request: Request,
     auth_token: str | None = None,
@@ -112,19 +157,26 @@ async def validate_twilio_webhook(
                     Falls back to TWILIO_AUTH_TOKEN env var (platform-level).
 
     Raises:
-        HTTPException(403) if the signature is invalid or missing.
-        Does nothing (but logs a warning) if no auth token is configured at all.
+        HTTPException(403) if the signature is invalid, missing, or if no auth
+        token could be supplied. There is no pass-through case.
     """
     token = auth_token or _PLATFORM_TWILIO_AUTH_TOKEN
 
     if not token:
-        # No token configured — skip validation but warn so it shows in logs
+        # FAIL CLOSED. This used to `return` here — validation was skipped and
+        # the request sailed through. That is exactly how production came to
+        # accept an unsigned forged callback with HTTP 200: the token was never
+        # configured, so this branch fired on every single webhook.
+        #
+        # There is no longer any "unconfigured means allowed" path. If we
+        # cannot prove who sent a webhook, we do not act on it.
         logger.warning(
-            "twilio_security: TWILIO_AUTH_TOKEN not set — skipping signature "
-            "validation on %s (configure env var to enable)",
+            "twilio_security: no auth token available for %s — refusing. "
+            "Per-account resolution lives in app/utils/twilio_webhook_guard.py; "
+            "callers must resolve the sending account's token and pass it.",
             request.url.path,
         )
-        return
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     # Get the signature Twilio sent
     twilio_sig = request.headers.get("X-Twilio-Signature", "")
