@@ -22,6 +22,7 @@ Endpoints:
 """
 
 import logging
+import os
 import re
 import secrets
 import string
@@ -582,6 +583,95 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
                             "Query failed", str(e)[:160]))
 
     return {"as_of": now.isoformat(), "sections": out}
+
+
+@router.get("/twilio-diagnostics")
+def god_twilio_diagnostics(god: User = Depends(require_god), db: Session = Depends(get_db)):
+    """WHY DELIVERY RECEIPTS ARE OR ARE NOT ARRIVING — checkable, not argued.
+
+    Production ran with 3,583 outbound messages and zero delivery receipts, and
+    nothing in the product could say why: the callback URL was resolved from an
+    environment variable inside a service module, and when that variable was
+    empty the parameter was simply dropped. There was no surface anywhere that
+    said "Twilio was never told where to send a receipt".
+
+    This is that surface. Read-only, god-only, and it NEVER returns a secret —
+    auth tokens are reported as configured / not configured, never by value.
+    """
+    from app.services import twilio_callbacks as tc
+
+    callback = tc.status_callback_url()
+    base = tc.public_api_base()
+
+    # Which env spelling actually supplied it. The three names for one idea are
+    # how this broke, so the answer names the winner rather than implying one.
+    source = None
+    for var in tc._BASE_ENV_VARS:
+        if (os.environ.get(var) or "").strip():
+            source = var
+            break
+    if source is None and base:
+        for var in tc._DERIVE_FROM:
+            if (os.environ.get(var) or "").strip():
+                source = var + " (derived)"
+                break
+
+    try:
+        rows = db.execute(text("""
+            SELECT COALESCE(delivery_status, 'null') AS s, COUNT(*)
+            FROM messages GROUP BY 1 ORDER BY 2 DESC
+        """)).fetchall()
+        by_status = {str(r[0]): int(r[1]) for r in rows}
+    except Exception as e:                                   # pragma: no cover
+        by_status = {"error": str(e)[:160]}
+
+    total = sum(v for v in by_status.values() if isinstance(v, int))
+    settled = sum(n for s, n in by_status.items()
+                  if isinstance(n, int) and s not in ("pending", "null"))
+
+    try:
+        newest_settled = db.execute(text("""
+            SELECT MAX(delivery_status_at) FROM messages
+            WHERE delivery_status_at IS NOT NULL
+        """)).scalar()
+    except Exception:
+        newest_settled = None
+
+    return {
+        "callback_url": callback,
+        "callback_url_source": source,
+        "public_api_base": base or None,
+        # The single most useful line: if this is false, no receipt can arrive.
+        "can_receive_receipts": bool(callback),
+        "signature_validation": (
+            "enforced" if os.environ.get("TWILIO_AUTH_TOKEN")
+            else "SKIPPED — TWILIO_AUTH_TOKEN is not set on this service"
+        ),
+        "env_present": {
+            v: bool((os.environ.get(v) or "").strip())
+            for v in list(tc._BASE_ENV_VARS) + list(tc._DERIVE_FROM)
+            + ["TWILIO_AUTH_TOKEN"]
+        },
+        "messages_by_delivery_status": by_status,
+        "messages_total": total,
+        "messages_with_a_receipt": settled,
+        # SQLite hands MAX(timestamp) back as a string and Postgres as a
+        # datetime. The gates run on SQLite and production runs on Postgres, so
+        # assuming either one crashes in exactly the environment not being
+        # looked at when the assumption was written.
+        "newest_receipt_at": (
+            newest_settled.isoformat() if hasattr(newest_settled, "isoformat")
+            else (str(newest_settled) if newest_settled else None)
+        ),
+        "verdict": (
+            "No callback URL can be built, so Twilio is never told where to "
+            "report. Every message will stay 'pending' forever."
+            if not callback else
+            "A callback URL is configured. Messages sent from now on will be "
+            "reported on; messages sent BEFORE it was configured stay 'pending' "
+            "permanently, because Twilio was never asked to report them."
+        ),
+    }
 
 
 @router.get("/platforms")

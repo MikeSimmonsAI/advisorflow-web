@@ -40,6 +40,24 @@ services:
         value: https://advisorflow-booking.vercel.app
       - key: FRONTEND_URL
         value: https://advisorflow-frontend.onrender.com
+      # THIS SERVICE'S OWN PUBLIC ORIGIN. Twilio delivery receipts are POSTed to
+      # API_BASE_URL + /sms/webhook/status-callback. It was never declared here,
+      # so the send path resolved "" and dropped the status_callback parameter
+      # on every message — 3,583 sends over 30 days, not one receipt, and no
+      # error anywhere because an absent callback looks exactly like a message
+      # that has not been reported on yet. Do not remove it.
+      #
+      # NOTE: only `VITE_API_BASE_URL` existed before, on the FRONTEND service.
+      # That is a build-time variable for the static site and has never been
+      # visible to this process.
+      - key: API_BASE_URL
+        value: https://advisorflow-backend.onrender.com
+      # Required to VERIFY the X-Twilio-Signature on inbound webhooks. Without
+      # it app/utils/twilio_security.py logs a warning and accepts the request
+      # unvalidated, which is how spoofed delivery receipts and fake inbound
+      # replies would get in.
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
       - key: GOOGLE_REDIRECT_URI
         value: https://advisorflow-backend.onrender.com/calendar/oauth/callback
       - key: MICROSOFT_REDIRECT_URI
@@ -95,6 +113,11 @@ services:
         sync: false  # use the SAME value generated for advisorflow-backend
       - key: BOOKING_BASE_URL
         value: https://advisorflow-booking.vercel.app
+      # The cadence job is the highest-volume SENDER in the product, so it needs
+      # the callback origin too — its messages write Message rows that the
+      # dashboard reads, and without this every one of them is stuck 'pending'.
+      - key: API_BASE_URL
+        value: https://advisorflow-backend.onrender.com
 
   # ── Email reply poller — runs every 2 minutes ──────────────────────────────
   # Polls all M365-connected advisor inboxes for new lead replies and feeds

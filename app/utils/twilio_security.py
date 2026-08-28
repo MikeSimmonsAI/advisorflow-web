@@ -58,6 +58,47 @@ def _compute_signature(auth_token: str, url: str, params: dict) -> str:
     return base64.b64encode(mac.digest()).decode("utf-8")
 
 
+def _candidate_urls(request: Request) -> list:
+    """Every URL string Twilio could plausibly have signed for this request.
+
+    Built only from values the SERVER controls — the proxy's X-Forwarded-Proto
+    and this service's own configured public origin. The request path is taken
+    from the request itself; the scheme and host are not trusted from it.
+    """
+    path = request.url.path
+    query = request.url.query
+    suffix = path + (("?" + query) if query else "")
+
+    seen, out = set(), []
+
+    def add(u):
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+
+    # 1. The proxy's own statement about the original scheme.
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host")
+            or request.headers.get("host") or "").split(",")[0].strip()
+    if proto and host:
+        add("%s://%s%s" % (proto, host, suffix))
+    # 2. https on the Host header, for proxies that forward no proto header.
+    if host:
+        add("https://%s%s" % (host, suffix))
+    # 3. The origin this service was configured with — the same one used to
+    #    build the callback URL handed to Twilio in the first place.
+    try:
+        from app.services.twilio_callbacks import public_api_base
+        base = public_api_base()
+        if base:
+            add(base.rstrip("/") + suffix)
+    except Exception:                                        # pragma: no cover
+        pass
+    # 4. Whatever the app itself thinks, last — correct only without a proxy.
+    add(str(request.url))
+    return out
+
+
 async def validate_twilio_webhook(
     request: Request,
     auth_token: str | None = None,
@@ -95,32 +136,73 @@ async def validate_twilio_webhook(
         )
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    # Reconstruct the full callback URL Twilio used
-    # Twilio uses the URL exactly as configured in the console (https, no trailing slash)
-    url = str(request.url)
-    # Strip query string — Twilio includes query params in the URL itself for GET params
-    # but for POST the body params go into the signature, not the query string
+    # Reconstruct the full callback URL Twilio signed.
+    #
+    # ── WHY THIS IS NOT JUST str(request.url) ──────────────────────────────
+    # Twilio signs the URL IT REQUESTED, which is https. This service runs
+    # behind Render's TLS-terminating proxy and speaks plain http to it, so
+    # `request.url` reports http://... unless uvicorn is told to trust the
+    # proxy's forwarding headers — and it is not: the start command in
+    # render.yaml is a bare `uvicorn app.main:app --host 0.0.0.0 --port $PORT`,
+    # and uvicorn's `forwarded_allow_ips` defaults to 127.0.0.1, which Render's
+    # proxy is not.
+    #
+    # The HMAC covers the URL string, so http vs https is a total mismatch:
+    # every genuine Twilio callback would have been rejected with 403 the
+    # moment TWILIO_AUTH_TOKEN was configured. It has not been on this service,
+    # so validation was being skipped entirely and this never surfaced — the
+    # bug was sitting behind a switch nobody had turned on yet.
+    #
+    # Candidates are built from SERVER-SIDE trust only: the proxy's own
+    # X-Forwarded-Proto, and the public origin this service was configured
+    # with. A signature must match one of them. Offering both does not weaken
+    # anything — the HMAC still has to verify against the account's auth token.
+    candidates = _candidate_urls(request)
 
-    # Parse the POST body params
+    # The POST params Twilio signed.
+    #
+    # ── WHY request.form() AND NOT request.body() ──────────────────────────
+    # These endpoints declare their fields as `Form(...)`, so FastAPI parses
+    # the form BEFORE the endpoint body runs — which consumes the request
+    # stream. A later `await request.body()` then returns b"", because Starlette
+    # only caches `_body` when body() was what read the stream in the first
+    # place. So `raw_params` came back EMPTY on every real callback and the
+    # signature was computed over the bare URL with no parameters appended.
+    #
+    # Twilio always signs URL + sorted params, so that could never match. Every
+    # genuine delivery receipt would have been rejected 403 the moment
+    # TWILIO_AUTH_TOKEN was configured. `request.form()` IS cached
+    # (Starlette keeps `_form`), so it returns the same values FastAPI parsed.
+    raw_params = {}
     try:
-        body = await request.body()
-        # Twilio sends application/x-www-form-urlencoded
-        from urllib.parse import parse_qs, unquote_plus
-        raw_params = {}
-        if body:
-            for part in body.decode("utf-8").split("&"):
-                if "=" in part:
-                    k, v = part.split("=", 1)
-                    raw_params[unquote_plus(k)] = unquote_plus(v)
-    except Exception:
-        raw_params = {}
+        form = await request.form()
+        raw_params = {k: str(v) for k, v in form.items()}
+    except Exception:                                        # pragma: no cover
+        pass
+    if not raw_params:
+        # Endpoints that read the raw body themselves rather than via Form().
+        try:
+            body = await request.body()
+            from urllib.parse import unquote_plus
+            if body:
+                for part in body.decode("utf-8").split("&"):
+                    if "=" in part:
+                        k, v = part.split("=", 1)
+                        raw_params[unquote_plus(k)] = unquote_plus(v)
+        except Exception:
+            raw_params = {}
 
-    expected = _compute_signature(token, url, raw_params)
+    for candidate in candidates:
+        if hmac.compare_digest(_compute_signature(token, candidate, raw_params),
+                               twilio_sig):
+            return
 
-    if not hmac.compare_digest(expected, twilio_sig):
-        logger.warning(
-            "twilio_security: signature mismatch on %s from %s — possible spoofed webhook",
-            request.url.path,
-            request.client.host if request.client else "unknown",
-        )
-        raise HTTPException(status_code=403, detail="Forbidden")
+    logger.warning(
+        "twilio_security: signature mismatch on %s from %s — tried %d candidate "
+        "URL(s): %s. Possible spoofed webhook, or the public URL Twilio was "
+        "given does not match this service's configured origin.",
+        request.url.path,
+        request.client.host if request.client else "unknown",
+        len(candidates), candidates,
+    )
+    raise HTTPException(status_code=403, detail="Forbidden")

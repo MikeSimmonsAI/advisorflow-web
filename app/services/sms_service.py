@@ -28,6 +28,7 @@ from twilio.rest import Client
 from sqlalchemy.orm import Session
 from app.models.models import User, Lead, Message, BookingLink, Organization
 from app.utils.crypto import decrypt_value
+from app.services.twilio_callbacks import apply_status_callback
 
 BOOKING_BASE_URL = os.environ.get("BOOKING_BASE_URL", "https://advisorflow-booking.vercel.app")
 
@@ -238,20 +239,20 @@ def send_sms(
     body = render_template(template, lead, advisor, booking_url)
 
     client, from_phone, _ = _resolve_twilio_creds(advisor, db)
-    # StatusCallback: Twilio will POST delivery receipts to this endpoint.
-    # Only set it when the env var is configured — avoids noise in local dev.
-    status_callback_url = None
-    _api_base = os.environ.get("API_BASE_URL", "")
-    if _api_base:
-        status_callback_url = f"{_api_base.rstrip('/')}/sms/webhook/status-callback"
 
-    create_kwargs = dict(
+    # StatusCallback: Twilio POSTs delivery receipts here.
+    #
+    # This used to read API_BASE_URL directly and silently skip the parameter
+    # when it was empty. It was ALWAYS empty in production — the variable is not
+    # declared for the backend service — so no receipt was ever requested and
+    # every message stayed on 'pending' forever. Resolution now lives in
+    # app/services/twilio_callbacks.py, which accepts the other spellings this
+    # codebase already uses and logs an ERROR rather than failing quietly.
+    create_kwargs = apply_status_callback(dict(
         body=body,
         from_=from_phone,
         to=lead.phone,
-    )
-    if status_callback_url:
-        create_kwargs["status_callback"] = status_callback_url
+    ))
 
     twilio_msg = client.messages.create(**create_kwargs)
 
@@ -301,15 +302,13 @@ def send_mms(
     body = render_template(template, lead, advisor, booking_url)
 
     client, from_phone, _ = _resolve_twilio_creds(advisor, db)
-    _api_base = os.environ.get("API_BASE_URL", "")
-    mms_kwargs = dict(
+    # Same resolver as send_sms — see the note there and twilio_callbacks.py.
+    mms_kwargs = apply_status_callback(dict(
         body=body,
         from_=from_phone,
         to=lead.phone,
         media_url=[media_url],
-    )
-    if _api_base:
-        mms_kwargs["status_callback"] = f"{_api_base.rstrip('/')}/sms/webhook/status-callback"
+    ))
 
     twilio_msg = client.messages.create(**mms_kwargs)
 

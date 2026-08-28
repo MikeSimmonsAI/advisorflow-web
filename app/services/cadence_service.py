@@ -315,8 +315,17 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             db.commit()  # Phase 1 commit — state is durable before Twilio call.
 
             from app.services.sms_service import get_twilio_client
+            from app.services.twilio_callbacks import apply_status_callback
             client = get_twilio_client(advisor)
-            twilio_msg = client.messages.create(body=body, from_=advisor.twilio_phone_number, to=lead.phone)
+            # THIS PATH NEVER ASKED FOR A DELIVERY RECEIPT. It writes a Message
+            # row below (Phase 2) with the column default delivery_status
+            # 'pending', and without a status callback Twilio had no way to
+            # report on it — so every cadence touch ever sent was stuck on
+            # 'pending' permanently. Cadence is the highest-volume sender in the
+            # product, which is most of why production showed thousands of
+            # messages and not one receipt.
+            twilio_msg = client.messages.create(**apply_status_callback(dict(
+                body=body, from_=advisor.twilio_phone_number, to=lead.phone)))
             sent_count += 1
 
         except Exception as e:
