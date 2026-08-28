@@ -976,3 +976,138 @@ def god_exit_org_session(org_id: str, god: User = Depends(require_god), db: Sess
     log.info("AUDIT: GOD_EXIT_ORG | admin=%s | org_id=%s | org_name=%s | exited_at=%s",
              god.email, org_id, org_name, datetime.utcnow().isoformat())
     return {"status": "exited", "org_id": org_id}
+
+
+# ── Voice agent configuration ────────────────────────────────────────────────
+# organization -> provider -> agent -> outbound number.
+#
+# The smallest operational surface that makes the mapping creatable without a
+# Render shell, a seed script, or a direct database insert — all three of which
+# are standing prohibitions. Adding a second Retell agent later must cost one
+# row through here, not a deploy.
+#
+# God-only, and it NEVER returns a credential: the per-org API key override is
+# reported as configured / not configured, never by value. That mirrors
+# /god/twilio-diagnostics, which was written to the same rule.
+
+class VoiceAgentCreate(BaseModel):
+    organization_id: str
+    agent_id: str
+    from_number: str
+    provider: str = "retell"
+    use_case: str = "file_check"
+    label: Optional[str] = None
+
+
+def _voice_agent_row(cfg, org_name=None, ready=None, why=None):
+    return {
+        "id": cfg.id,
+        "organization_id": cfg.organization_id,
+        "organization_name": org_name,
+        "provider": cfg.provider,
+        "agent_id": cfg.agent_id,
+        "from_number": cfg.from_number,
+        "use_case": cfg.use_case,
+        "label": cfg.label,
+        "is_active": bool(cfg.is_active),
+        # Never the value. Only whether one exists.
+        "org_api_key_override": bool(cfg.api_key_encrypted),
+        "provider_ready": ready,
+        "provider_not_ready_reason": why,
+        "created_at": cfg.created_at.isoformat() if cfg.created_at else None,
+    }
+
+
+@router.get("/voice/agents")
+def god_list_voice_agents(god: User = Depends(require_god),
+                          db: Session = Depends(get_db)):
+    """Every voice agent mapping, with a live readiness check per row."""
+    from app.models.models import VoiceAgentConfig
+    from app.services.comms import get_voice_provider
+
+    rows = (db.query(VoiceAgentConfig)
+            .order_by(VoiceAgentConfig.created_at.desc()).all())
+    org_names = {}
+    if rows:
+        ids = list({r.organization_id for r in rows})
+        for oid, name in db.query(Organization.id, Organization.name).filter(
+                Organization.id.in_(ids)).all():
+            org_names[oid] = name
+
+    out = []
+    for cfg in rows:
+        ready, why = None, None
+        try:
+            ready, why = get_voice_provider(db, cfg).is_ready()
+        except Exception as exc:                                  # noqa: BLE001
+            ready, why = False, str(exc)[:200]
+        out.append(_voice_agent_row(cfg, org_names.get(cfg.organization_id),
+                                    ready, why))
+    return {"count": len(out), "agents": out}
+
+
+@router.post("/voice/agents", status_code=201)
+def god_create_voice_agent(req: VoiceAgentCreate,
+                           god: User = Depends(require_god),
+                           db: Session = Depends(get_db)):
+    """Create one mapping. Refuses to duplicate an existing active one.
+
+    The duplicate guard is on (organization_id, use_case, provider) rather than
+    on the whole row: two active agents for the same org and use case would
+    make `active_voice_config` pick one arbitrarily, and "arbitrarily" is not a
+    property you want deciding which agent phones a family.
+    """
+    from app.models.models import VoiceAgentConfig
+    from app.services.comms import get_voice_provider
+
+    org = db.query(Organization).filter(
+        Organization.id == req.organization_id).first()
+    if org is None:
+        raise HTTPException(404, "Organization not found.")
+
+    existing = (db.query(VoiceAgentConfig)
+                .filter(VoiceAgentConfig.organization_id == req.organization_id,
+                        VoiceAgentConfig.use_case == req.use_case,
+                        VoiceAgentConfig.provider == req.provider,
+                        VoiceAgentConfig.is_active.is_(True))
+                .first())
+    if existing is not None:
+        # Idempotent by design: re-running setup must not create a second row.
+        ready, why = None, None
+        try:
+            ready, why = get_voice_provider(db, existing).is_ready()
+        except Exception as exc:                                  # noqa: BLE001
+            ready, why = False, str(exc)[:200]
+        return {
+            "created": False,
+            "reason": "An active mapping already exists for this organization, "
+                      "use case and provider.",
+            "agent": _voice_agent_row(existing, org.name, ready, why),
+        }
+
+    cfg = VoiceAgentConfig(
+        organization_id=req.organization_id,
+        provider=req.provider,
+        agent_id=req.agent_id,
+        from_number=req.from_number,
+        use_case=req.use_case,
+        label=req.label,
+        is_active=True,
+        created_by=god.id,
+    )
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+
+    log.info("AUDIT: GOD_VOICE_AGENT_CREATED | admin=%s | org=%s | provider=%s "
+             "| agent=%s | use_case=%s",
+             god.email, req.organization_id, req.provider, req.agent_id,
+             req.use_case)
+
+    ready, why = None, None
+    try:
+        ready, why = get_voice_provider(db, cfg).is_ready()
+    except Exception as exc:                                      # noqa: BLE001
+        ready, why = False, str(exc)[:200]
+    return {"created": True,
+            "agent": _voice_agent_row(cfg, org.name, ready, why)}

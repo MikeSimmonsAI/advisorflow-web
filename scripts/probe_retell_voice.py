@@ -528,6 +528,22 @@ check("SMS provider delegates rather than reimplementing",
       open(os.path.join(ROOT, "app", "services", "comms", "sms", "twilio.py"),
            encoding="utf-8").read())
 
+print("\n[18] the god voice-agent surface is admin-only and leaks no credential")
+gr = open(os.path.join(ROOT, "app", "routers", "god_router.py"),
+          encoding="utf-8").read()
+check("both routes require the god dependency",
+      gr.count("Depends(require_god)") >= 2
+      and '@router.get("/voice/agents")' in gr
+      and '@router.post("/voice/agents"' in gr)
+check("the response reports the key as a boolean, never a value",
+      '"org_api_key_override": bool(cfg.api_key_encrypted)' in gr)
+check("no route returns api_key_encrypted itself",
+      '"api_key_encrypted": cfg.api_key_encrypted' not in gr)
+check("creating twice cannot produce two active mappings for one use case",
+      'VoiceAgentConfig.use_case == req.use_case' in gr
+      and 'VoiceAgentConfig.is_active.is_(True)' in gr
+      and '"created": False' in gr)
+
 print("\n%d checks, %d failure(s)" % (checks, len(failures)))
 comms.reset_providers()
 try:
