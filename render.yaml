@@ -27,6 +27,39 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # ── BUILD FILTER ────────────────────────────────────────────────────────
+    # In August, 455 commits landed on main and 113 of them touched
+    # frontend/dist and NOTHING else. Every one still triggered a full
+    # `pip install` here and on four other Python services, because no service
+    # had a build filter. Add the pushes that changed only a root-level
+    # scratch .ps1, or only a .md, and the workspace burned 1,502 pipeline
+    # minutes against a 500-minute allowance — which is what blocked every
+    # deploy from Aug 27 7:20 PM onward.
+    #
+    # DENYLIST, NOT ALLOWLIST, ON PURPOSE. An allowlist (`paths:`) fails toward
+    # NOT deploying — forget one entry and a legitimate change silently never
+    # ships, which is far worse than a wasted build. `ignoredPaths` fails toward
+    # deploying: anything not named here still triggers a build. Render skips
+    # the build only when EVERY changed file in the commit matches.
+    #
+    # Everything listed below is provably never read by this service at build
+    # or run time: scripts/ are the deploy gates (run on the developer's machine
+    # BEFORE the push), tests/ are never executed by Render, and the rest are
+    # frontend assets or documentation.
+    buildFilter: &pythonBuildFilter
+      ignoredPaths:
+        - "frontend/**"
+        - "booking-app/**"
+        - "demos/**"
+        - "docs/**"
+        - "review_artifacts/**"
+        - "scripts/**"
+        - "tests/**"
+        - "dist/**"
+        - ".perfdump/**"
+        - "**/*.md"
+        - "*.bat"
+        - "*.ps1"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -86,6 +119,42 @@ services:
     runtime: static
     buildCommand: "echo using pre-built dist"
     staticPublishPath: frontend/dist
+    # ── BUILD FILTER ────────────────────────────────────────────────────────
+    # Mirror image of the Python filter: this service publishes the committed
+    # contents of frontend/dist and its build command is a literal `echo`, so
+    # nothing under app/, alembic/, tests/ or scripts/ can change a single byte
+    # of what it serves — yet all 90 pushes in August rebuilt it.
+    #
+    # DENYLIST, NOT ALLOWLIST, for the same reason as the backend: the tempting
+    # allowlist here is `paths: ["frontend/dist/**"]`, and it is a trap. It
+    # would also skip a change to THIS FILE — the rewrite rule and
+    # VITE_API_BASE_URL both live below — so a routing or API-origin change
+    # would silently never ship. Anything not named here still builds.
+    #
+    # frontend/src/** is deliberately NOT ignored. dist is pre-built and
+    # committed, so a src-only commit needs no deploy, but ignoring src would
+    # break the day the build command starts compiling from source. The cost of
+    # being wrong in that direction is a stale production frontend; the cost of
+    # being wrong in this direction is one `echo`.
+    buildFilter:
+      ignoredPaths:
+        - "app/**"
+        - "alembic/**"
+        - "booking-app/**"
+        - "demos/**"
+        - "docs/**"
+        - "review_artifacts/**"
+        - "scripts/**"
+        - "tests/**"
+        - ".perfdump/**"
+        - "**/*.md"
+        - "**/*.py"
+        - "*.bat"
+        - "*.ps1"
+        - "requirements.txt"
+        - "requirements-dev.txt"
+        - "pytest.ini"
+        - "alembic.ini"
     # Catch-all rewrite so React Router handles deep links on hard refresh.
     # Without this, Render's static server returns 404 for /leads/123, /settings, etc.
     routes:
@@ -102,6 +171,7 @@ services:
     schedule: "0 14 * * *"  # Daily at 2pm UTC (~9am Central) — adjust for your timezone
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app/jobs/run_cadence_job.py"
+    buildFilter: *pythonBuildFilter
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -125,9 +195,16 @@ services:
   - type: cron
     name: advisorflow-email-poller
     runtime: python
+    # SCHEDULE UNCHANGED IN THIS PASS, deliberately. Every-minute polling costs
+    # 171.26 hours of runtime a month ($1.61) — 7x more than any other cron.
+    # Moving to */3 would cut it to ~57 hours (~$0.54, saving ~$1.07/month) and
+    # was accepted in principle, but it is a behaviour change (inbound email
+    # pickup latency 60s -> 180s) and Tier 1 changes no behaviour. Decide it
+    # separately.
     schedule: "* * * * *"   # Every 1 minute
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app/jobs/run_email_poller.py"
+    buildFilter: *pythonBuildFilter
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -151,6 +228,7 @@ services:
     schedule: "*/15 * * * *"
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app/jobs/run_ai_conversation_job.py"
+    buildFilter: *pythonBuildFilter
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -180,6 +258,7 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    buildFilter: *pythonBuildFilter
     envVars:
       - key: DATABASE_URL
         fromDatabase:

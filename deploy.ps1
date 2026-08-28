@@ -175,6 +175,15 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "DELIVERY RECEIPT CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_platform_frontend.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "PLATFORM FRONTEND CHECKS FAILED - not deploying."; exit 1 }
+    # A wrong build filter fails SILENTLY: the change just never reaches
+    # production and nothing errors. Simulate every service against real commit
+    # shapes instead of trusting the YAML by eye.
+    python scripts\probe_render_build_filters.py 2>&1 | Select-String "FAIL|failure|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "RENDER BUILD FILTER CHECKS FAILED - not deploying."; exit 1 }
+    # Proves requirements.txt alone still boots the app and every cron, with the
+    # dev-only packages made genuinely unimportable.
+    python scripts\probe_prod_deps_sufficient.py 2>&1 | Select-String "FAIL|failure|SUFFICIENT" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "PRODUCTION DEPENDENCY CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

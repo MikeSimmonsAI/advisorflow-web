@@ -1,0 +1,28 @@
+# Development-only dependencies.
+#
+# Render installs requirements.txt and nothing else. Everything in THIS file is
+# absent from the five production Python services on purpose — it is only
+# needed on a developer machine or in CI.
+#
+#   pip install -r requirements-dev.txt
+#
+# (the -r below pulls in the full production set as well, so this one command
+# still gives you a complete working environment)
+
+-r requirements.txt
+
+# Test runner. tests/ holds 58 files and is never executed by Render; deploy.ps1
+# does not invoke pytest, and no gate script imports it.
+pytest==8.3.3
+
+# Migration tooling for alembic/ + alembic.ini. NOT the production migration
+# path: schema changes are applied at startup by app/auto_migrate.py, and
+# neither deploy.ps1 nor any Render buildCommand/startCommand runs `alembic`.
+# Kept here so STAGING_AND_MIGRATION_GUIDE.md's workflow still works locally.
+alembic==1.19.1
+
+# Required by scripts/probe_render_build_filters.py, which parses render.yaml
+# to prove no service's build filter can silently block a real deployment.
+# Deploy-gate only - Render never reads render.yaml with Python.
+PyYAML>=6.0
+

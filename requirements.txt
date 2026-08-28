@@ -9,6 +9,11 @@ bcrypt==4.2.0
 cryptography==43.0.1
 twilio==9.3.7
 pandas==2.2.3
+# RUNTIME, NOT DEV. Nothing imports openpyxl by name — pandas loads it
+# dynamically inside read_excel, which is why a static import scan reports zero
+# hits. app/services/import_service.py:240 calls pd.read_excel on every .xlsx
+# lead upload accepted by app/routers/leads_router.py:59. Removing this breaks
+# Excel lead import in production with a runtime ImportError, not a build error.
 openpyxl==3.1.5
 python-multipart==0.0.12
 python-dotenv==1.0.1
@@ -17,7 +22,6 @@ resend==2.36.0
 google-auth==2.35.0
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.149.0
-pytest==8.3.3
 httpx==0.27.2
 email-validator==2.2.0
 
@@ -26,4 +30,9 @@ stripe==11.1.1
 python-dateutil>=2.8.0
 websockets>=12.0
 slowapi==0.1.9
-alembic==1.19.1
+
+# pytest and alembic moved to requirements-dev.txt — neither is imported by any
+# module under app/, neither is invoked by deploy.ps1 or by any Render build or
+# start command, and schema changes are applied at startup by
+# app/auto_migrate.py, not by `alembic upgrade`. Install them locally with:
+#   pip install -r requirements-dev.txt
