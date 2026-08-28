@@ -108,6 +108,22 @@ DEFAULT_NOTICE_HOURS = 2
 # which user ids are real or which belong to somebody else's funeral home.
 _NO_ADVISOR = "Advisor not found."
 
+# THE THREE ANSWERS, AS A VALUE RATHER THAN AS PROSE.
+#
+# Availability has always been able to end three ways: real openings, a calendar
+# that was read and had none, and a calendar that could not be read at all. Until
+# now the only thing separating the last two on the wire was the English in
+# `reason` — both were HTTP 200 with `slot_count: 0`. A voice agent given that
+# has no honest way to tell "she is booked solid" from "we are broken", and the
+# first live call proved how it resolves the ambiguity: it told a family there
+# were no appointments when the truth was an outage.
+#
+# So the distinction is now a field. `reason` is unchanged and still for saying
+# out loud; this is what a flow branches on.
+STATUS_OK = "ok"                                # slots present, calendar read
+STATUS_NO_OPENINGS = "no_openings"              # calendar read, genuinely none
+STATUS_CALENDAR_UNAVAILABLE = "calendar_unavailable"   # calendar NOT read
+
 # Used only when the tenant has configured nothing. Deliberately generic: the
 # funeral-home vocabulary belongs to the funeral home, not to this file. See
 # `appointment_types`.
@@ -419,7 +435,8 @@ def availability(db: Session, cred: IntegrationCredential, advisor: User,
         # grieving family.
         return _empty(advisor, org, speak_tz, duration, label, date_from, d_to,
                       "I can't reach the calendar right now, so I can't offer "
-                      "times. Please try again shortly.")
+                      "times. Please try again shortly.",
+                      status=STATUS_CALENDAR_UNAVAILABLE)
 
     busy_local = [(_to_local(b.starts_at, work_tz), _to_local(b.ends_at, work_tz))
                   for b in busy_utc]
@@ -488,9 +505,11 @@ def availability(db: Session, cred: IntegrationCredential, advisor: User,
         why = ("No openings in that range."
                if not reasons else
                "No openings — %s." % "; ".join(reasons[:3]))
-        return _empty(advisor, org, speak_tz, duration, label, date_from, d_to, why)
+        return _empty(advisor, org, speak_tz, duration, label, date_from, d_to,
+                      why, status=STATUS_NO_OPENINGS)
 
     return {
+        "availability_status": STATUS_OK,
         "success": True,
         "advisor_id": advisor.id,
         "advisor_name": advisor.full_name,
@@ -527,14 +546,20 @@ def _slot_out(start_local: datetime, end_local: datetime, duration: int,
 
 
 def _empty(advisor: User, org: Organization, tz: str, duration: int,
-           label: str, date_from: date_cls, d_to: date_cls, reason: str) -> dict:
+           label: str, date_from: date_cls, d_to: date_cls, reason: str,
+           status: str = STATUS_NO_OPENINGS) -> dict:
     """Nothing available, and WHY — in a sentence an agent can say out loud.
 
     An empty list with no explanation is the thing this avoids: it leaves the
     agent to invent a reason, and it hides an outage behind what looks like a
     busy week.
+
+    `availability_status` is the machine-readable half of the same answer. The
+    prose in `reason` is for saying out loud; an agent must never have to
+    string-match it to work out whether the calendar was actually read.
     """
     return {
+        "availability_status": status,
         "success": True,
         "advisor_id": advisor.id,
         "advisor_name": advisor.full_name,

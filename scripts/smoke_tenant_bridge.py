@@ -255,7 +255,7 @@ def build():
     # single key would exhaust its own bucket partway through the suite and
     # report 429s as if they were logic failures. Sharing the same tenant and
     # advisor keeps every section testing the same thing.
-    for n in range(4, 13):
+    for n in range(4, 18):
         key("s%d" % n, INTEGRATION_RETELL_TENANT, org="org-rest",
             advisor="u-google")
     key("restland-nocal", INTEGRATION_RETELL_TENANT, org="org-rest", advisor="u-nocal")
@@ -1070,6 +1070,8 @@ def _run(c):
         s12_audit(c)
         s13_static()
         s14_show()
+        s15_states(c)
+        s16_repoint()
 
 
 def s14_show():
@@ -1135,6 +1137,222 @@ def s14_show():
     check("A KEY SCOPED TO BOTH TREES IS REPORTED AS BROKEN",
           "BROKEN" in out2, out2[:300])
     check("and says to reissue it", "reissue" in out2.lower(), out2[:300])
+
+
+def s15_states(c):
+    """The three answers must be distinguishable WITHOUT reading English.
+
+    The first live File Check call ended with a family being told there were no
+    appointments when the truth was that the advisor could not be resolved at
+    all. The agent had no way to know the difference, because "the calendar was
+    read and is empty" and "the calendar could not be read" were the same
+    HTTP 200 with the same `slot_count: 0`, separated only by prose.
+
+    These assertions are the contract that makes fabrication protection
+    possible: a flow can branch on one field and never has to pattern-match a
+    sentence that a copy edit could change.
+    """
+    print("\n[15] Real openings, a genuine zero and an outage are three answers")
+    AV = "/integrations/retell/tenant/availability"
+    # A business day no other section touches: a day shared with a section that
+    # books into it hits the advisor's daily cap, and a capacity refusal here
+    # would look exactly like the bug this section exists to catch.
+    day = next_weekday(14)
+
+    # ── (a) real openings ──
+    FakeCal.error = None
+    FakeCal.busy = []
+    r = c.post(AV, headers=H(KEYS["s15"]),
+               json={"date_from": day.isoformat(), "duration_minutes": 60})
+    ok = r.json()
+    check("openings return 200", r.status_code == 200, r.text)
+    check("openings are reported as ok",
+          ok.get("availability_status") == ts.STATUS_OK, ok)
+    check("and carry actual slots", ok.get("slot_count", 0) > 0, ok)
+
+    # ── (b) a genuine zero: the advisor does not work weekends ──
+    sat = date_cls.today() + timedelta(days=1)
+    while sat.weekday() != 5:
+        sat += timedelta(days=1)
+    r = c.post(AV, headers=H(KEYS["s15"]), json={"date_from": sat.isoformat()})
+    zero = r.json()
+    check("a genuine zero still returns 200", r.status_code == 200, r.text)
+    check("A GENUINE ZERO IS LABELLED no_openings",
+          zero.get("availability_status") == ts.STATUS_NO_OPENINGS, zero)
+    check("and still explains itself in words", zero.get("reason"), zero)
+
+    # ── (c) the calendar cannot be read ──
+    FakeCal.error = "transport"
+    r = c.post(AV, headers=H(KEYS["s15"]), json={"date_from": day.isoformat()})
+    down = r.json()
+    FakeCal.error = None
+    check("an unreadable calendar still returns 200 (it is not a 5xx)",
+          r.status_code == 200, r.text)
+    check("AN OUTAGE IS LABELLED calendar_unavailable, NOT no_openings",
+          down.get("availability_status") == ts.STATUS_CALENDAR_UNAVAILABLE, down)
+    check("an outage offers no slots — it never guesses the advisor is free",
+          down.get("slot_count") == 0 and down.get("slots") == [], down)
+
+    # ── the point of the whole section ──
+    check("THE TWO ZERO STATES ARE INDISTINGUISHABLE BY slot_count ALONE",
+          zero.get("slot_count") == down.get("slot_count") == 0,
+          [zero.get("slot_count"), down.get("slot_count")])
+    check("and indistinguishable by `success` alone",
+          zero.get("success") is True and down.get("success") is True,
+          [zero.get("success"), down.get("success")])
+    check("SO THE STATUS FIELD IS THE ONLY HONEST DISCRIMINATOR",
+          zero.get("availability_status") != down.get("availability_status"),
+          [zero.get("availability_status"), down.get("availability_status")])
+
+    check("the three status values are exactly the three documented ones",
+          {ts.STATUS_OK, ts.STATUS_NO_OPENINGS, ts.STATUS_CALENDAR_UNAVAILABLE}
+          == {"ok", "no_openings", "calendar_unavailable"})
+
+    # Backwards compatibility: the field is additive. An older consumer that
+    # only knows slot_count/slots/reason must be unaffected.
+    for name, payload in (("ok", ok), ("zero", zero), ("outage", down)):
+        check("the %s response keeps every pre-existing field" % name,
+              all(k in payload for k in
+                  ("success", "advisor_id", "advisor_name", "organization_name",
+                   "appointment_type", "timezone", "duration_minutes",
+                   "date_from", "date_to", "slot_count", "slots", "reason")),
+              sorted(payload.keys()))
+
+
+def s16_repoint():
+    """Correcting a credential's advisor must not require touching the secret.
+
+    A key whose default advisor has drifted out of the tenant is a
+    configuration bug, not a compromised credential. Rotating it to fix that
+    takes the live agent down until somebody pastes a new secret into a vendor
+    console — a secret that then has to exist somewhere a person can paste it
+    from. `repoint-tenant` changes the two advisor columns and nothing else.
+
+    The refusals matter as much as the happy path: this command must be
+    incapable of producing the exact state that caused the outage it exists to
+    fix.
+    """
+    print("\n[16] Repointing a live credential without rotating it")
+    import io
+    import contextlib
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "integration_key.py")
+    spec = importlib.util.spec_from_file_location("integration_key_mod2", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class Args(object):
+        def __init__(self, prefix, advisor, allow=None, apply=False, note=None):
+            self.prefix = prefix
+            self.advisor = advisor
+            self.allow = allow
+            self.apply = apply
+            self.note = note
+
+    def run(args):
+        db = SessionLocal()
+        buf = io.StringIO()
+        code = None
+        try:
+            with contextlib.redirect_stdout(buf):
+                mod.cmd_repoint_tenant(db, args)
+        except SystemExit as e:
+            code = e.code
+        finally:
+            db.close()
+        return buf.getvalue(), code
+
+    def cred_named(name):
+        db = SessionLocal()
+        row = (db.query(IntegrationCredential)
+               .filter(IntegrationCredential.name == name).first())
+        snap = (row.key_prefix, row.key_hash, row.default_advisor_user_id,
+                row.allowed_advisor_ids, row.is_active)
+        db.close()
+        return snap
+
+    prefix, hash_before, adv_before, allow_before, _ = cred_named("restricted")
+    check("the fixture starts pointed at the in-tenant advisor",
+          adv_before == "u-google", adv_before)
+    check("and is locked to an allowlist of one", allow_before == "u-google",
+          allow_before)
+
+    # ── refusals ──
+    out, code = run(Args(prefix, "u-other"))
+    check("REPOINTING AT ANOTHER TENANT'S ADVISOR IS REFUSED", code == 1, out)
+    check("and says so in terms of the 404 it would have caused",
+          "Advisor not found" in out, out)
+
+    out, code = run(Args(prefix, "u-inactive"))
+    check("REPOINTING AT AN INACTIVE ADVISOR IS REFUSED", code == 1, out)
+
+    out, code = run(Args(prefix, "no-such-user"))
+    check("repointing at a non-existent user is refused", code == 1, out)
+
+    bp = cred_named("brandkey")[0]
+    out, code = run(Args(bp, "u-google"))
+    check("A BRAND KEY CANNOT BE REPOINTED BY THE TENANT COMMAND", code == 1, out)
+
+    rp = cred_named("revoked")[0]
+    out, code = run(Args(rp, "u-google"))
+    check("a revoked key is refused rather than quietly resurrected",
+          code == 1, out)
+
+    out, code = run(Args(prefix, "u-nocal", allow="u-google"))
+    check("AN ALLOWLIST THAT EXCLUDES THE NEW DEFAULT IS REFUSED", code == 1, out)
+    check("because that is the same invisible 404 in a new costume",
+          "Advisor not found" in out, out)
+
+    check("NOT ONE REFUSAL CHANGED THE ROW",
+          cred_named("restricted")[2:4] == (adv_before, allow_before),
+          cred_named("restricted"))
+
+    # ── dry run ──
+    out, code = run(Args(prefix, "u-nocal"))
+    check("a dry run reports the from/to for the advisor",
+          "u-google" in out and "u-nocal" in out, out)
+    check("a dry run warns when the new advisor has no calendar",
+          "no external calendar" in out, out)
+    check("a dry run states the secret is untouched",
+          "UNCHANGED" in out, out)
+    check("A DRY RUN WRITES NOTHING",
+          cred_named("restricted")[2:4] == (adv_before, allow_before),
+          cred_named("restricted"))
+
+    # ── apply ──
+    out, code = run(Args(prefix, "u-nocal", apply=True, note="gate"))
+    _, hash_after, adv_after, allow_after, active_after = cred_named("restricted")
+    check("apply moves the default advisor", adv_after == "u-nocal", adv_after)
+    check("THE ALLOWLIST MOVES WITH IT, OR THE KEY WOULD STILL 404",
+          allow_after == "u-nocal", allow_after)
+    check("THE STORED SECRET HASH IS UNCHANGED", hash_after == hash_before)
+    check("the prefix is unchanged, so the audit trail still joins",
+          cred_named("restricted")[0] == prefix)
+    check("and the key stays active — no outage to fix a config bug",
+          active_after is True)
+    check("no secret appears in the output",
+          KEYS["restricted"] not in out and hash_before not in out)
+
+    # ── and the repointed key actually works ──
+    from fastapi.testclient import TestClient
+    from app.main import app as _app
+    c2 = TestClient(_app)
+    FakeCal.error = None
+    FakeCal.busy = []
+    r = c2.post("/integrations/retell/tenant/availability",
+                headers=H(KEYS["restricted"]),
+                json={"date_from": next_weekday(15).isoformat()})
+    check("THE SAME UNROTATED KEY NOW RESOLVES THE NEW ADVISOR",
+          r.status_code == 200, r.text)
+    check("and reports that advisor by name",
+          r.json().get("advisor_name") == "Noel Cortez", r.text)
+
+    # Put it back, so section order cannot matter to anything added later.
+    run(Args(prefix, "u-google", allow="u-google", apply=True))
+    check("the fixture is restored for any later section",
+          cred_named("restricted")[2] == "u-google")
 
 
 if __name__ == "__main__":

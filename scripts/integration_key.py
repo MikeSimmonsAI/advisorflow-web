@@ -8,7 +8,15 @@
         --advisor <user_id> [--rate 60] [--apply]
     python scripts/integration_key.py issue-tenant --name "Taffiney" --org <org_id> \
         --advisor <user_id> [--rate 60] [--apply]
+    python scripts/integration_key.py repoint-tenant --prefix evsk_AbCdEf12 \
+        --advisor <user_id> [--apply]
     python scripts/integration_key.py revoke --prefix evsk_AbCdEf12 --apply
+
+REPOINT, DO NOT ROTATE, WHEN ONLY THE ADVISOR IS WRONG. `repoint-tenant` changes
+the two non-secret advisor columns on a live credential and leaves the hash, the
+prefix and the audit trail alone — so a running voice agent keeps working and no
+secret is handled to fix a column that never held one. Rotation is for a leaked
+key, not a misconfigured one.
 
 VERIFY WITH `show`, NOT BY CALLING THE API. `show` takes the non-secret prefix
 and reports everything /ping would — tenant, advisor, calendar, hours, recent
@@ -181,6 +189,22 @@ def cmd_show(db, args):
         print("  Brand       : %s" % cred.brand_sales_org_id)
 
     print("  Default     : %s" % (advisor.full_name if advisor else "- none -"))
+    # The id, not just the name. Two people can share a display name across two
+    # tenants, and when one of them is the wrong one every call returns the same
+    # opaque 404 — the id is the only thing that tells them apart.
+    print("  Default id  : %s" % (cred.default_advisor_user_id or "- none -"))
+    if advisor is not None:
+        print("  Advisor org : %s" % (advisor.organization_id or "- none -"))
+        print("  Belongs here: %s" % (
+            "yes" if (advisor.organization_id or None) == cred.organization_id
+            else "NO - resolves to 404"))
+        print("  Advisor act.: %s" % ("active" if advisor.is_active
+                                      else "INACTIVE - resolves to 404"))
+        _allow = cred.advisor_allowlist()
+        print("  On allowlist: %s" % (
+            "n/a - allowlist empty" if not _allow
+            else ("yes" if cred.default_advisor_user_id in _allow
+                  else "NO - resolves to 404")))
     if advisor is not None:
         cal = "none"
         if getattr(advisor, "microsoft_oauth_refresh_token_encrypted", None):
@@ -324,6 +348,129 @@ def cmd_issue_tenant(db, args):
     _print_key(full, prefix)
 
 
+def cmd_repoint_tenant(db, args):
+    """Point an EXISTING tenant credential at a different advisor.
+
+    WHY THIS EXISTS. Before this, the only way to correct a credential whose
+    default advisor had become wrong was `revoke` + `issue-tenant`, which mints
+    a new secret. That means the live agent is dead until somebody pastes the
+    new key into the vendor console, and it means a secret has to be handled at
+    all — to fix a column that holds no secret. This changes exactly two
+    non-secret columns and leaves `key_hash`, `key_prefix` and the audit trail
+    untouched, so the running agent never notices.
+
+    IT ENFORCES THE SAME REFUSALS AS `issue-tenant`, deliberately. An advisor
+    who is absent, inactive, or in another tenant is refused here rather than
+    accepted and turned into an opaque 404 at the family's first call.
+
+    THE ALLOWLIST MOVES WITH THE DEFAULT. A credential locked to one advisor
+    whose default is repointed at a second advisor still returns 404 — the
+    allowlist check runs first. Silently leaving the old list behind would swap
+    one invisible misconfiguration for another, so a non-empty allowlist is
+    narrowed to the new advisor unless `--allow` says otherwise.
+    """
+    cred = (db.query(IntegrationCredential)
+            .filter(IntegrationCredential.key_prefix == args.prefix).first())
+    if cred is None:
+        print("No credential with prefix %r." % args.prefix)
+        sys.exit(1)
+    if cred.revoked_at is not None or not cred.is_active:
+        print("%s is revoked/inactive. Repointing a dead key fixes nothing."
+              % cred.key_prefix)
+        sys.exit(1)
+    try:
+        scope = cred.scope_kind()
+    except ValueError as e:
+        print("Scope is BROKEN - %s. Revoke and reissue." % e)
+        sys.exit(1)
+    if scope != "tenant":
+        print("%s is a BRAND key. This command only repoints tenant keys."
+              % cred.key_prefix)
+        sys.exit(1)
+
+    org = (db.query(Organization)
+           .filter(Organization.id == cred.organization_id).first())
+    if org is None or not org.is_active:
+        print("The tenant this key names is missing or inactive. Refusing.")
+        sys.exit(1)
+
+    advisor = db.query(User).filter(User.id == args.advisor).first()
+    if advisor is None:
+        print("No user with id %r. Run `tenants` first." % args.advisor)
+        sys.exit(1)
+    if (advisor.organization_id or None) != cred.organization_id:
+        print("%s does not belong to %s. Refusing - every call would return "
+              "'Advisor not found'." % (advisor.email, org.name))
+        sys.exit(1)
+    if not advisor.is_active:
+        print("%s is not active. Refusing." % advisor.email)
+        sys.exit(1)
+
+    old_default = cred.default_advisor_user_id
+    old_allow = cred.advisor_allowlist()
+    if args.allow is not None:
+        new_allow = [a.strip() for a in args.allow.split(",") if a.strip()]
+    elif old_allow:
+        new_allow = [advisor.id]
+    else:
+        new_allow = []
+
+    old_advisor = None
+    if old_default:
+        old_advisor = db.query(User).filter(User.id == old_default).first()
+
+    cal = "none"
+    if getattr(advisor, "microsoft_oauth_refresh_token_encrypted", None):
+        cal = "microsoft"
+    elif getattr(advisor, "google_oauth_refresh_token_encrypted", None):
+        cal = "google"
+
+    print()
+    print("  Integration : %s (%s)" % (cred.name, cred.key_prefix))
+    print("  Tenant      : %s (%s)" % (org.brand_name or org.name, org.id))
+    print("  Secret      : UNCHANGED - not read, not rotated, not printed")
+    print()
+    print("  default_advisor_user_id")
+    print("    from : %s  %s" % (
+        old_default or "- none -",
+        ("%s <%s> org=%r active=%s" % (
+            old_advisor.full_name, old_advisor.email,
+            old_advisor.organization_id, old_advisor.is_active))
+        if old_advisor else "(row not found)"))
+    print("    to   : %s  %s <%s> org=%s active=%s" % (
+        advisor.id, advisor.full_name, advisor.email,
+        advisor.organization_id, advisor.is_active))
+    print("  allowed_advisor_ids")
+    print("    from : %s" % (", ".join(old_allow) or "- empty -"))
+    print("    to   : %s" % (", ".join(new_allow) or "- empty -"))
+    print("  Calendar    : %s" % cal)
+    if cal == "none":
+        print()
+        print("  NOTE: this advisor has no external calendar connected.")
+        print("  Availability will reflect AdvisorFlow bookings and blocks only.")
+    if new_allow and advisor.id not in new_allow:
+        print()
+        print("  REFUSING: the new default is not on the allowlist you gave.")
+        print("  Every call would still return 'Advisor not found'.")
+        sys.exit(1)
+    print()
+
+    if not args.apply:
+        print("  DRY RUN. Nothing written. Re-run with --apply.")
+        print()
+        return
+
+    cred.default_advisor_user_id = advisor.id
+    cred.allowed_advisor_ids = ",".join(new_allow) or None
+    if args.note:
+        cred.note = args.note
+    db.commit()
+    print("  Repointed. The key itself is unchanged; the agent needs no update.")
+    print("  Verify with:  python scripts/integration_key.py show --prefix %s"
+          % cred.key_prefix)
+    print()
+
+
 def _print_key(full: str, prefix: str) -> None:
     print("  " + "=" * 66)
     print("  KEY ISSUED. This is the only time it will ever be shown.")
@@ -439,6 +586,18 @@ def main():
     t.add_argument("--note")
     t.add_argument("--apply", action="store_true")
 
+    rp = sub.add_parser("repoint-tenant")
+    rp.add_argument("--prefix", required=True,
+                    help="The NON-SECRET prefix of the credential to repoint")
+    rp.add_argument("--advisor", required=True,
+                    help="users.id — the new default advisor. Must be active "
+                         "and belong to this credential's tenant.")
+    rp.add_argument("--allow",
+                    help="Comma-separated allowlist. Omit and a non-empty "
+                         "allowlist is narrowed to the new advisor.")
+    rp.add_argument("--note")
+    rp.add_argument("--apply", action="store_true")
+
     i = sub.add_parser("issue")
     i.add_argument("--name", required=True, help="Human identity, shown in audit rows")
     i.add_argument("--brand", required=True, help="brand_sales_orgs.id")
@@ -458,6 +617,7 @@ def main():
         {"list": cmd_list, "brands": cmd_brands, "tenants": cmd_tenants,
          "show": cmd_show, "issue": cmd_issue,
          "issue-tenant": cmd_issue_tenant,
+         "repoint-tenant": cmd_repoint_tenant,
          "revoke": cmd_revoke}[args.cmd](db, args)
     finally:
         db.close()
