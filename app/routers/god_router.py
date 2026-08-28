@@ -1111,3 +1111,89 @@ def god_create_voice_agent(req: VoiceAgentCreate,
         ready, why = False, str(exc)[:200]
     return {"created": True,
             "agent": _voice_agent_row(cfg, org.name, ready, why)}
+
+
+class VoiceTestCall(BaseModel):
+    lead_id: str
+    organization_id: str
+    use_case: str = "file_check"
+
+
+@router.post("/voice/test-call", status_code=201)
+def god_place_voice_call(req: VoiceTestCall,
+                         god: User = Depends(require_god),
+                         db: Session = Depends(get_db)):
+    """Place ONE outbound voice call for a lead. God-only.
+
+    The smallest surface that can exercise the outbound path at all — there is
+    no other way to start a call, and the legacy Twilio voice router is
+    deliberately fail-closed and must not be used.
+
+    It adds NO logic of its own: eligibility, suppression, the attempt cap and
+    provider readiness are all decided by `voice_orchestrator`, exactly as they
+    would be for any other caller. A refusal comes back as 409 with the reason
+    the orchestrator gave, so "why won't it call?" is answerable without
+    reading logs.
+    """
+    from app.models.models import Lead
+    from app.services.voice_orchestrator import (check_call_eligibility,
+                                                 start_file_check_call)
+
+    lead = db.query(Lead).filter(Lead.id == req.lead_id).first()
+    if lead is None:
+        raise HTTPException(404, "Lead not found.")
+
+    # Report the refusal reason rather than a bare 403 — this endpoint exists
+    # to make the outbound path debuggable.
+    elig = check_call_eligibility(db, lead, req.organization_id, req.use_case)
+    if not elig.ok:
+        raise HTTPException(409, "Call refused: %s (%s)" % (elig.reason, elig.code))
+
+    call = start_file_check_call(db, lead, req.organization_id,
+                                 use_case=req.use_case)
+    log.info("AUDIT: GOD_VOICE_TEST_CALL | admin=%s | org=%s | lead=%s | "
+             "call=%s | provider_call_id=%s | status=%s",
+             god.email, req.organization_id, req.lead_id, call.id,
+             call.provider_call_id, call.status)
+    return {
+        "call_id": call.id,
+        "provider": call.provider,
+        "provider_call_id": call.provider_call_id,
+        "agent_id": call.agent_id,
+        "from_phone": call.from_phone,
+        "to_phone": call.to_phone,
+        "status": call.status,
+        "outcome": call.outcome,
+        "error_message": call.error_message,
+    }
+
+
+@router.get("/voice/calls/{call_id}")
+def god_get_voice_call(call_id: str, god: User = Depends(require_god),
+                       db: Session = Depends(get_db)):
+    """Read one call back, for watching a lifecycle land."""
+    from app.models.models import VoiceCall
+    c = db.query(VoiceCall).filter(VoiceCall.id == call_id).first()
+    if c is None:
+        raise HTTPException(404, "Call not found.")
+    return {
+        "id": c.id, "organization_id": c.organization_id, "lead_id": c.lead_id,
+        "provider": c.provider, "provider_call_id": c.provider_call_id,
+        "agent_id": c.agent_id, "direction": c.direction,
+        "from_phone": c.from_phone, "to_phone": c.to_phone,
+        "status": c.status, "outcome": c.outcome,
+        "disconnect_reason": c.disconnect_reason,
+        "started_at": c.started_at.isoformat() if c.started_at else None,
+        "answered_at": c.answered_at.isoformat() if c.answered_at else None,
+        "ended_at": c.ended_at.isoformat() if c.ended_at else None,
+        "duration_seconds": c.duration_seconds,
+        "transcript": c.transcript,
+        "transcript_chars": len(c.transcript or ""),
+        "summary": c.summary,
+        "analysis_json": c.analysis_json,
+        "booking_link_id": c.booking_link_id,
+        "callback_at": c.callback_at.isoformat() if c.callback_at else None,
+        "transfer_requested": bool(c.transfer_requested),
+        "transfer_status": c.transfer_status,
+        "error_message": c.error_message,
+    }

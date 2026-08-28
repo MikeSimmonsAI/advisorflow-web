@@ -544,6 +544,13 @@ check("creating twice cannot produce two active mappings for one use case",
       and 'VoiceAgentConfig.is_active.is_(True)' in gr
       and '"created": False' in gr)
 
+check("the test-call route is god-gated and adds no eligibility logic of its own",
+      '@router.post("/voice/test-call"' in gr
+      and "check_call_eligibility" in gr
+      and "start_file_check_call" in gr)
+check("a refused call reports WHY rather than a bare 403",
+      'HTTPException(409, "Call refused:' in gr)
+
 print("\n%d checks, %d failure(s)" % (checks, len(failures)))
 comms.reset_providers()
 try:
