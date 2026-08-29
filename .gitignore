@@ -92,3 +92,4 @@ app/routers/sales_router.optimized.bak
 .launch_deploy.ps1
 .syntax_check.py
 .gates.log
+.verify_live.ps1
