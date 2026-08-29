@@ -10,6 +10,7 @@ from typing import Optional
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
+from app.routers.compose_router import acting_advisor
 from app.utils.twilio_webhook_guard import guard_inbound, guard_status_callback
 
 router = APIRouter(prefix="/sms", tags=["sms"])
@@ -120,11 +121,27 @@ def draft_reply_for_lead(
 
 @router.post("/send")
 def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+    """Send one SMS AS THE LEAD'S ASSIGNED ADVISOR, not as whoever pressed Send.
+
+    This used to pass `current_user` straight through. The composer, the email
+    sender and the resend button were all corrected to `acting_advisor`; this
+    endpoint - the one that actually sends the text - was missed, so it kept
+    resolving the sender from the caller.
+
+    Under impersonation the caller is the platform owner, so a send refused
+    outright (correctly - the platform-owner guard). The quieter failure is the
+    one that matters: with organization credentials present it would NOT have
+    refused. It would have resolved the ORGANIZATION's shared number instead of
+    the advisor's own assigned number, and a family would have been texted from
+    a number that is not their advisor's - which is exactly what per-advisor
+    number assignment exists to prevent.
+    """
     lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     try:
-        message = send_sms(db, current_user, lead, req.template, req.include_booking_link)
+        message = send_sms(db, acting_advisor(db, lead, current_user), lead,
+                           req.template, req.include_booking_link)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message_id": message.id, "status": message.twilio_status}
@@ -132,12 +149,36 @@ def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: U
 
 @router.post("/send-batch")
 def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+    """Send to many leads, EACH AS ITS OWN ASSIGNED ADVISOR.
+
+    A batch is the case where one sender for every lead is most obviously
+    wrong: the leads in it usually belong to different people, and each one
+    should go out from the number the family would recognise as their own
+    advisor's. Leads are grouped by acting advisor and each group sent under
+    that advisor; the counts are merged so the response shape is unchanged.
+
+    `send_batch` swallows a per-lead failure into `skipped`, so before this fix
+    a batch sent under an impersonating platform owner would have reported
+    every lead as merely "skipped" - no error, no sends, nothing to explain it.
+    """
     leads = db.query(Lead).filter(
         Lead.id.in_(req.lead_ids),
         Lead.organization_id == current_user.organization_id,
     ).all()
-    result = send_batch(db, current_user, leads, req.template, req.include_booking_link)
-    return result
+
+    groups: dict[str, tuple[User, list[Lead]]] = {}
+    for lead in leads:
+        who = acting_advisor(db, lead, current_user)
+        groups.setdefault(who.id, (who, []))[1].append(lead)
+
+    merged = {"sent_count": 0, "skipped_count": 0, "sent_ids": [], "skipped_ids": []}
+    for who, group in groups.values():
+        part = send_batch(db, who, group, req.template, req.include_booking_link)
+        merged["sent_count"] += part.get("sent_count", 0)
+        merged["skipped_count"] += part.get("skipped_count", 0)
+        merged["sent_ids"].extend(part.get("sent_ids", []))
+        merged["skipped_ids"].extend(part.get("skipped_ids", []))
+    return merged
 
 
 @router.post("/webhook/status-callback")
@@ -513,7 +554,10 @@ def send_mms_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    """Send an MMS (text + image/flyer) to a single lead."""
+    """Send an MMS (text + image/flyer) to a single lead.
+
+    Same sender rule as `/send`: the lead's assigned advisor, not the caller.
+    """
     lead = db.query(Lead).filter(
         Lead.id == req.lead_id,
         Lead.organization_id == current_user.organization_id,
@@ -522,7 +566,8 @@ def send_mms_endpoint(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     try:
-        message = send_mms(db, current_user, lead, req.template, req.media_url, req.include_booking_link)
+        message = send_mms(db, acting_advisor(db, lead, current_user), lead,
+                           req.template, req.media_url, req.include_booking_link)
         return {"message_id": message.id, "status": message.twilio_status}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

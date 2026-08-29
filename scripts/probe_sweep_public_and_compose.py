@@ -1046,6 +1046,32 @@ for path in ("app/routers/email_router.py", "app/routers/leads_router.py"):
     check("19.    and no longer for whoever is sending",
           "create_booking_link(db, lead, current_user)" not in src, path)
 
+# THE ENDPOINT THAT ACTUALLY SENDS THE TEXT.
+#
+# The composer, the email sender and the resend button were all corrected to
+# `acting_advisor`. `/sms/send` - the one that puts a message on the wire - was
+# missed, and kept resolving the sender from whoever pressed Send. Under
+# impersonation that refused outright, which is loud and safe. The quiet
+# failure is the one that matters: with organization credentials present it
+# would have resolved the ORGANIZATION's shared number instead of the advisor's
+# own assigned number, and a family would have been texted from a number that
+# is not their advisor's.
+sms_send = code_only(read("app/routers/sms_router.py"))
+check("19. /sms/send sends as the LEAD'S advisor, not the caller",
+      "send_sms(db, acting_advisor(db, lead, current_user), lead," in sms_send)
+check("19. /sms/send-mms does too",
+      "send_mms(db, acting_advisor(db, lead, current_user), lead," in sms_send)
+check("19. a BATCH resolves an advisor per lead, not one sender for all of them",
+      "who = acting_advisor(db, lead, current_user)" in sms_send
+      and "send_batch(db, who, group," in sms_send)
+check("19. no send path in sms_router still passes the raw caller",
+      "send_sms(db, current_user, lead" not in sms_send
+      and "send_mms(db, current_user, lead" not in sms_send
+      and "send_batch(db, current_user, leads" not in sms_send)
+check("19. and the batch response keeps its shape",
+      all(k in sms_send for k in ('"sent_count"', '"skipped_count"',
+                                  '"sent_ids"', '"skipped_ids"')))
+
 
 # ── 20. a reply to the shared number comes back ─────────────────────────────
 
