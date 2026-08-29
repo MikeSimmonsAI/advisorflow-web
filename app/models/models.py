@@ -246,6 +246,31 @@ class Organization(Base):
     from_email = Column(String, nullable=True)       # e.g. "support@bookaboost.live"
     resend_api_key = Column(String, nullable=True)   # org-specific Resend API key
 
+    # Where a REPLY goes, which is not the same question as where mail comes
+    # FROM. The from-address must live on a domain verified with the sending
+    # provider or nothing is delivered at all; a reply-to can be any mailbox a
+    # human actually reads. Separating them lets a customer send from a
+    # verified brand domain while replies land in their own inbox.
+    reply_to_email = Column(String, nullable=True)
+
+    # Optional second recipient on appointment/confirmation mail. Blank means
+    # blank: nothing is copied anywhere unless an owner sets this, and there is
+    # deliberately no default, because a hard-coded second recipient is how
+    # someone's mail quietly reaches a mailbox they never chose.
+    cc_email = Column(String, nullable=True)
+
+    # Which calendar this organization's scheduling actually runs on.
+    # "google" | "microsoft" | None.
+    #
+    # Before this column the answer was decided by the ORDER OF A TUPLE in
+    # app/services/calendar_providers/__init__.py. An advisor connected to both
+    # got Microsoft because Microsoft is written first, which is not a decision
+    # anyone made about their business. When this is set it is obeyed, and a
+    # provider that cannot be reached FAILS rather than quietly resolving to
+    # the other one - a booking written to the wrong calendar is worse than a
+    # booking that refuses to be written.
+    calendar_provider = Column(String, nullable=True)
+
     # Social lead-capture webhook credentials. These columns already exist in the
     # database (added via auto_migrate.py) but were missing from this model, which
     # made every /webhooks/* endpoint fail with AttributeError before it ran.
@@ -374,6 +399,11 @@ class User(Base):
     available_end_time = Column(String, default="17:00", nullable=True)         # daily close time, HH:MM 24h
     available_days = Column(String, default="0,1,2,3,4", nullable=True)         # comma-sep weekday indices 0=Mon
     booking_timezone = Column(String, default="America/Chicago", nullable=True) # IANA tz for the advisor
+
+    # This advisor's own calendar system of record, overriding their
+    # organization's. "google" | "microsoft" | None (inherit the org).
+    # Same fail-closed contract as Organization.calendar_provider.
+    calendar_provider = Column(String, nullable=True)
     booking_confirmation_message = Column(Text, nullable=True)                  # custom message shown after booking
 
     # Brute-force / credential-stuffing protection.

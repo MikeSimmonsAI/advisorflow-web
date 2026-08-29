@@ -164,6 +164,18 @@ def send_email_via_provider(
             "html": body_html,
         }
 
+        # Reply-To and CC ride on the same `org` duck-type as the from-address.
+        # Both are read off whatever object was handed in, so a resolved
+        # PublicIdentity supplies them and a raw Organization row still works.
+        # Absent means absent: no default reply-to, and nothing is ever copied
+        # to an address the caller did not supply.
+        _reply_to = getattr(org, "reply_to_email", None) if org else None
+        if _reply_to:
+            params["reply_to"] = _reply_to
+        _cc = getattr(org, "cc_email", None) if org else None
+        if _cc:
+            params["cc"] = [_cc]
+
         if attachments:
             params["attachments"] = [
                 {"filename": att["filename"], "content": att["content"], "content_type": att.get("content_type", "application/octet-stream")}
@@ -222,13 +234,23 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     import os as _os
 
     booking = create_booking_link(db, lead, advisor)
-    booking_url = f"{_os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
+    # Branded, resolver-built. The old line concatenated BOOKING_BASE_URL by
+    # hand and produced "/book/<token>" against an empty string when the env
+    # var was unset - a relative path in an email, which resolves nowhere.
+    from app.services.public_identity import booking_url as _booking_url
+    booking_url = _booking_url(db, lead.organization_id, booking.token)
 
     track = lead.message_track or "email_only_nurture"
     rendered = render_email(db, track, lead, advisor, booking_url)
 
-    # Look up the org so we can pass it to the provider (org-level sender).
-    org = db.query(Organization).filter_by(id=lead.organization_id).first()
+    # The RESOLVED identity, not the raw org row. Greenland/Restland has no
+    # from_email of its own, and passing the bare row let the send fall through
+    # to the deployment-wide default - which is a BookaBoost address on a
+    # deployment that also serves EvoSys Pro customers. The resolver walks
+    # organization -> platform -> verified registry and carries reply-to and cc
+    # with it.
+    from app.services.public_identity import sending_identity_for_org
+    org = sending_identity_for_org(db, lead.organization_id)
 
     # Provider selection: Resend using the org's own API key + from address when
     # configured; falls back to global env vars for orgs that haven't set them yet.

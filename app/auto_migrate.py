@@ -235,6 +235,14 @@ COLUMNS_TO_ADD = [
     # so each org's outbound email genuinely comes from their own domain.
     ("organizations", "from_email", "VARCHAR"),
     ("organizations", "resend_api_key", "VARCHAR"),
+    # Reply-To is not the From address: the From must sit on a domain verified
+    # with the sending provider, a Reply-To can be any mailbox a human reads.
+    ("organizations", "reply_to_email", "VARCHAR"),
+    # Optional second recipient. Deliberately no default - see the model.
+    ("organizations", "cc_email", "VARCHAR"),
+    # The calendar system of record, so it stops being decided by tuple order.
+    ("organizations", "calendar_provider", "VARCHAR"),
+    ("users", "calendar_provider", "VARCHAR"),
     # SMS consent of record — A2P 10DLC / TCPA. Verified missing from the
     # production database on Aug 25 2026: there was no queryable consent record
     # anywhere, despite the docs listing these as mandatory. Adding the columns

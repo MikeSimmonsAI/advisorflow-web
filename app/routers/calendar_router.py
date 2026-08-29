@@ -458,14 +458,22 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     if lead and getattr(lead, 'email', None) and org:
         try:
             import resend as _resend
-            _brand = get_brand_name(db, str(advisor.organization_id))
+            from app.services.public_identity import identity_for_org
+            # The family's own funeral home, not the platform. get_brand_name()
+            # returns the PLATFORM ("EvoSys Pro"), which this used to put in the
+            # From name and the signature - so a family that had never heard of
+            # EvoSys got mail from them confirming their own appointment.
+            _ident = identity_for_org(db, str(advisor.organization_id))
+            _business = _ident.customer_facing_name or get_brand_name(db, str(advisor.organization_id))
             _lead_name_full = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "there"
-            _resend_key = getattr(org, 'resend_api_key', None) or os.environ.get("RESEND_API_KEY")
-            _from_addr = getattr(org, 'from_email', None) or os.environ.get("EMAIL_FROM_ADDRESS", f"support@bookaboost.live")
-            if _resend_key:
+            _resend_key = _ident.resend_api_key or os.environ.get("RESEND_API_KEY")
+            # No BookaBoost default. An unresolved brand sends nothing rather
+            # than sending under a different customer's brand.
+            _from_addr = _ident.from_email
+            if _resend_key and _from_addr:
                 _resend.api_key = _resend_key
-                _resend.Emails.send({
-                    "from": f"{_brand} <{_from_addr}>",
+                _payload = {
+                    "from": f"{_business} <{_from_addr}>",
                     "to": [lead.email],
                     "subject": f"Your {appt_label} is Confirmed",
                     "html": (
@@ -474,9 +482,14 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                         + (f" for <strong>{slot_display}</strong>" if slot_display else "")
                         + f".</p>"
                         f"<p>If you need to reschedule, please call us or reply to this email.</p>"
-                        f"<p>We look forward to seeing you!<br>— The {_brand} Team</p>"
+                        f"<p>We look forward to seeing you!<br>— The {_business} Team</p>"
                     ),
-                })
+                }
+                if _ident.reply_to_email:
+                    _payload["reply_to"] = _ident.reply_to_email
+                if _ident.cc_email:
+                    _payload["cc"] = [_ident.cc_email]
+                _resend.Emails.send(_payload)
                 lead_email_result = {"success": True}
                 logger.info("booking-confirmed: lead confirmation email sent to %s", lead.email)
             else:

@@ -162,6 +162,9 @@ def get_org_settings(
         "from_email": getattr(org, "from_email", None),
         # Never return the raw API key to the UI — only signal whether it's set.
         "resend_api_key_set": bool(getattr(org, "resend_api_key", None)),
+        "reply_to_email": getattr(org, "reply_to_email", None),
+        "cc_email": getattr(org, "cc_email", None),
+        "calendar_provider": getattr(org, "calendar_provider", None),
         # Contact / booking page info
         "org_address": getattr(org, "org_address", None),
         "org_phone": getattr(org, "org_phone", None),
@@ -264,6 +267,15 @@ def update_social_links(
 class EmailSenderUpdate(BaseModel):
     from_email: Optional[str] = None
     resend_api_key: Optional[str] = None
+    # Where replies land. Separate from the From address because the From must
+    # sit on a domain verified with the sending provider and a Reply-To need
+    # not - so a customer can send from a verified brand domain and still have
+    # a human's answer arrive in their own inbox.
+    reply_to_email: Optional[str] = None
+    # Optional second recipient on appointment mail. Empty string clears it.
+    # There is deliberately no default: nothing is copied anywhere unless an
+    # admin puts an address here on purpose.
+    cc_email: Optional[str] = None
 
 
 @router.patch("/email-sender")
@@ -285,8 +297,52 @@ def update_email_sender(
         org.from_email = req.from_email or None  # empty string → clear
     if req.resend_api_key:  # only update when a non-empty value is explicitly provided
         org.resend_api_key = req.resend_api_key
+    if req.reply_to_email is not None:
+        org.reply_to_email = req.reply_to_email or None  # empty string → clear
+    if req.cc_email is not None:
+        org.cc_email = req.cc_email or None              # empty string → clear
     db.commit()
-    return {"updated": True, "from_email": org.from_email, "resend_api_key_set": bool(org.resend_api_key)}
+    return {"updated": True, "from_email": org.from_email,
+            "reply_to_email": org.reply_to_email, "cc_email": org.cc_email,
+            "resend_api_key_set": bool(org.resend_api_key)}
+
+
+class CalendarProviderUpdate(BaseModel):
+    # "google" | "microsoft" | "" to clear. Validated below rather than with an
+    # Enum so a bad value returns a sentence naming the allowed ones.
+    calendar_provider: Optional[str] = None
+
+
+@router.patch("/calendar-provider")
+def update_calendar_provider(
+    req: CalendarProviderUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Which calendar this organization's scheduling runs on.
+
+    Until this existed the answer came from the order of a tuple in
+    `calendar_providers/__init__.py`: an advisor connected to both Microsoft
+    and Google silently got Microsoft. That is not a decision anyone made
+    about their business, and it is invisible in every screen.
+
+    Set here, it is obeyed. A chosen provider that cannot be reached makes
+    availability report `calendar_unavailable` rather than quietly resolving
+    to the other one, because a booking written to a calendar the customer
+    does not use is worse than a booking that refuses to be written.
+    """
+    allowed = ("google", "microsoft")
+    value = (req.calendar_provider or "").strip().lower()
+    if value and value not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="calendar_provider must be one of %s, or empty to clear."
+                   % ", ".join(allowed))
+    org = _resolve_org(current_user, org_id, db)
+    org.calendar_provider = value or None
+    db.commit()
+    return {"updated": True, "calendar_provider": org.calendar_provider}
 
 
 class FeaturesUpdate(BaseModel):

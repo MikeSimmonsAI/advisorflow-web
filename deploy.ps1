@@ -131,6 +131,16 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "RETELL BRIDGE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_tenant_bridge.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "TENANT BRIDGE CHECKS FAILED - not deploying."; exit 1 }
+    # What a family sees: which brand's address mail leaves under, and which
+    # host their links point at. Guards the cross-brand leak that sent an
+    # EvoSys customer's families mail from a BookaBoost address.
+    python scripts\probe_public_identity.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "PUBLIC IDENTITY CHECKS FAILED - not deploying."; exit 1 }
+    # Which calendar a booking is actually written to. Guards the silent
+    # Microsoft-because-it-is-first-in-a-tuple failure, and the fabricated
+    # free day that a degraded provider used to produce.
+    python scripts\probe_calendar_provider.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "CALENDAR PROVIDER CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_integration_migration.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "INTEGRATION MIGRATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_demo_firewall.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }

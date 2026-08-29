@@ -59,7 +59,8 @@ def _connection_rows(db: Session, user_id: str):
 
 def _advisor_report(db: Session, u: User, org: Organization) -> dict:
     from app.services.calendar_providers import (
-        get_provider, is_external_calendar, resolve_provider_key)
+        configured_provider_key, get_provider, is_external_calendar,
+        resolve_provider_key)
 
     rep = {
         "user_id": u.id,
@@ -81,6 +82,16 @@ def _advisor_report(db: Session, u: User, org: Organization) -> dict:
         "user_google_calendar_id": getattr(u, "google_calendar_id", None),
         "connections": _connection_rows(db, u.id),
     }
+
+    try:
+        cfg_key, cfg_src = configured_provider_key(db, u)
+        rep["configured_provider"] = cfg_key
+        rep["configured_provider_source"] = cfg_src
+        rep["advisor_calendar_provider"] = getattr(u, "calendar_provider", None)
+        rep["org_calendar_provider"] = getattr(org, "calendar_provider", None)
+    except Exception as e:
+        rep["configured_provider"] = None
+        rep["configured_provider_error"] = str(e)
 
     try:
         key = resolve_provider_key(db, u)
@@ -110,7 +121,14 @@ def _advisor_report(db: Session, u: User, org: Organization) -> dict:
         rep["provider_not_ready_reason"] = str(e)
 
     # The sentence a human needs. Everything above is evidence for it.
-    if not rep.get("reads_external_calendar"):
+    cfg = rep.get("configured_provider")
+    if cfg and rep.get("provider_resolved_key") not in (None, cfg):
+        rep["verdict"] = (
+            "CONFIGURED FOR %s BUT NOT USABLE. It resolved to %s instead, which "
+            "means the chosen calendar has no live grant. Availability will "
+            "report calendar_unavailable rather than silently using the other "
+            "provider." % (cfg, rep.get("provider_resolved_key")))
+    elif not rep.get("reads_external_calendar"):
         rep["verdict"] = ("NO EXTERNAL CALENDAR. Availability cannot be read; "
                           "this advisor would appear free at every hour.")
     elif not rep.get("provider_ready"):
@@ -166,7 +184,96 @@ def god_calendar_diagnostics(
     return {
         "organization_id": org.id,
         "organization_name": org.name,
+        "organization_calendar_provider": getattr(org, "calendar_provider", None),
         "provider_preference_order": preference,
+        "preference_note": ("Only consulted when no calendar_provider is "
+                            "configured on the advisor or the organization."),
         "advisor_count": len(reports),
         "advisors": reports,
     }
+
+
+@router.get("/email-diagnostics")
+def god_email_diagnostics(
+    organization_id: str = Query(..., description="Tenant organization to inspect."),
+    db: Session = Depends(get_db),
+    god: User = Depends(require_god),
+):
+    """What address this organization's mail actually leaves under. Read-only.
+
+    SENDS NOTHING. The existing `/email/system-check` answers a similar
+    question by delivering a live test message, which makes it unusable for an
+    audit: you cannot ask "what would happen?" without it happening. This
+    reports the resolved identity, the environment's presence (never values of
+    secrets), and which domains the sending provider has actually verified —
+    the last one being the difference between a configured from-address and a
+    deliverable one.
+    """
+    import os
+
+    org = (db.query(Organization)
+           .filter(Organization.id == organization_id).first())
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+
+    from app.services.public_identity import identity_for_org
+    ident = identity_for_org(db, organization_id)
+    out = {"resolved": ident.as_dict()}
+
+    resend_key = (ident.resend_api_key or os.environ.get("RESEND_API_KEY", "")).strip()
+    out["env"] = {
+        # Presence only. The value of a key is never reported.
+        "RESEND_API_KEY_set": bool(os.environ.get("RESEND_API_KEY", "").strip()),
+        # An address is not a secret, and this one is the whole reason a
+        # customer's mail can go out under the wrong brand.
+        "EMAIL_FROM_ADDRESS": os.environ.get("EMAIL_FROM_ADDRESS", "").strip() or None,
+        "org_resend_key_set": bool(ident.resend_api_key),
+    }
+
+    # Which domains can actually send. A from-address on an unverified domain
+    # is configuration that looks correct and delivers nothing.
+    verified = None
+    domain_ok = None
+    err = None
+    if resend_key:
+        try:
+            import httpx
+            resp = httpx.get("https://api.resend.com/domains",
+                             headers={"Authorization": "Bearer %s" % resend_key},
+                             timeout=10)
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                verified = sorted({d.get("name", "") for d in data
+                                   if d.get("status") == "verified"})
+                addr = ident.from_email or ""
+                dom = addr.split("@")[-1].lower() if "@" in addr else ""
+                domain_ok = bool(dom) and any(
+                    dom == n.lower() or dom.endswith("." + n.lower())
+                    for n in verified)
+            else:
+                err = "Resend returned %s" % resp.status_code
+        except Exception as e:  # network, library, anything
+            err = str(e)
+    else:
+        err = "no Resend API key available to query verified domains"
+
+    out["sending_domains"] = {
+        "verified": verified,
+        "resolved_from_domain_is_verified": domain_ok,
+        "error": err,
+    }
+
+    advisors = (db.query(User)
+                .filter(User.organization_id == organization_id,
+                        User.is_active.is_(True)).all())
+    out["advisors"] = [{
+        "user_id": u.id,
+        "full_name": u.full_name,
+        "email": u.email,
+        "notification_email": getattr(u, "notification_email", None),
+        "microsoft_365_connected": bool(getattr(u, "microsoft_365_connected", False)),
+    } for u in advisors]
+
+    log.info("AUDIT: GOD_EMAIL_DIAGNOSTICS | admin=%s | org=%s",
+             god.email, organization_id)
+    return out

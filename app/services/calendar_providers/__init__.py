@@ -111,11 +111,59 @@ def _has_token(user, key: str) -> bool:
     return bool(getattr(user, field, None))
 
 
+def _norm_provider(value):
+    v = (value or "").strip().lower()
+    return v if v in (PROVIDER_MICROSOFT, PROVIDER_GOOGLE) else None
+
+
+def configured_provider_key(db, user):
+    """The provider somebody actually CHOSE, and where they chose it.
+
+    Returns (key, source) with source in {"advisor", "organization"}, or
+    (None, None) when nothing is configured.
+
+    This exists because the answer used to come from the order of PREFERENCE
+    below. An advisor connected to both Microsoft and Google got Microsoft
+    because Microsoft is written first — a decision nobody made about their
+    business, invisible in every screen, and wrong for any customer who runs
+    on Google.
+    """
+    if user is None:
+        return None, None
+    key = _norm_provider(getattr(user, "calendar_provider", None))
+    if key:
+        return key, "advisor"
+    org_id = getattr(user, "organization_id", None)
+    if db is not None and org_id:
+        try:
+            from app.models.models import Organization
+            org = db.query(Organization).filter(Organization.id == org_id).first()
+            key = _norm_provider(getattr(org, "calendar_provider", None))
+            if key:
+                return key, "organization"
+        except Exception:
+            log.exception("could not read calendar_provider for org %s", org_id)
+    return None, None
+
+
 def resolve_provider_key(db, user, prefer: str = None) -> str:
     """Which provider this user's events should go through. Never returns None
     — the .ics fallback is always the final answer."""
     if prefer in (PROVIDER_MICROSOFT, PROVIDER_GOOGLE, PROVIDER_ICS):
         return prefer
+
+    # A CONFIGURED provider is obeyed, usable or not.
+    #
+    # Deliberately returned without checking whether it works. If the chosen
+    # provider has no live grant, `get_provider` falls through to .ics, which
+    # `is_external_calendar` reports as False and the availability read turns
+    # into calendar_unavailable — the caller says "I could not see the
+    # calendar" instead of inventing an empty one. What must never happen is
+    # the OTHER external provider quietly answering: a booking written to a
+    # calendar the customer does not use is worse than a booking refused.
+    configured, _source = configured_provider_key(db, user)
+    if configured:
+        return configured
 
     live = _live_connections(db, user)
     for key in PREFERENCE:

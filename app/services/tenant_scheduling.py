@@ -373,6 +373,27 @@ def external_busy(db: Session, advisor: User, org: Organization,
         # still apply. Distinct from "connected but unreadable", which is.
         return [], None
     provider = reg.get_provider(db, advisor, org)
+
+    # THE CHOSEN CALENDAR MUST BE THE ONE THAT ANSWERED.
+    #
+    # `resolve_provider_key` returns what was CONFIGURED, obeyed even when it
+    # has no live grant — that is deliberate, so a Google customer never gets
+    # Microsoft by accident. But `get_provider` then degrades an unusable
+    # provider to .ics, and .ics reports "no busy intervals, no error", which
+    # is indistinguishable from a calendar that was read and found empty.
+    #
+    # Without this check, an organization configured for Google whose Google
+    # grant has expired would offer a family every hour of the working day
+    # against a calendar nobody could see. That is the exact fabrication the
+    # three-state availability contract exists to prevent, arriving through a
+    # different door.
+    built = getattr(provider, "resolved_key", None)
+    if not reg.is_external_calendar(built):
+        log.warning("advisor %s is configured for %s but it degraded to %s - "
+                    "reporting unreadable rather than free",
+                    advisor.id, key, built)
+        return [], "unreadable"
+
     try:
         busy, err = provider.get_busy(start_utc, end_utc)
     except Exception as e:

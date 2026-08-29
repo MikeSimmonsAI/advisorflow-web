@@ -196,6 +196,55 @@ check("5. the dict reports that a key exists",
 check("5. AND NEVER CONTAINS THE KEY ITSELF",
       "re_org_key_not_real" not in str(d), d)
 
+# ── 6. the business a family sees is not the platform ───────────────────────
+
+print("\n[6] THE FAMILY SEES THEIR FUNERAL HOME, NOT THE PLATFORM")
+
+check("6. the customer-facing name is the ORGANIZATION's",
+      g.customer_facing_name == "Greenland Cemetery and Funeral Home",
+      g.customer_facing_name)
+check("6. and the platform's name is kept separately, not shown to them",
+      g.brand_name == "EvoSys Pro" and g.brand_name != g.customer_facing_name)
+check("6. a rival brand's customer sees ITS OWN business name",
+      r.customer_facing_name == "A BookaBoost Customer", r.customer_facing_name)
+
+# The bug this prevents: the booking confirmation used get_brand_name(), which
+# returns the PLATFORM, in both the From name and the signature.
+check("6. THE PLATFORM NAME IS NEVER THE CUSTOMER-FACING NAME",
+      g.customer_facing_name != g.brand_name
+      and r.customer_facing_name != r.brand_name)
+
+
+# ── 7. reply-to and cc are opt-in, never inherited ──────────────────────────
+
+print("\n[7] NOTHING IS COPIED ANYWHERE UNLESS SOMEBODY SET IT")
+
+check("7. an org with no reply-to gets none",
+      g.reply_to_email is None, g.reply_to_email)
+check("7. AN ORG WITH NO CC GETS NONE - blank means blank",
+      g.cc_email is None, g.cc_email)
+check("   and the identity says they are unset rather than guessing",
+      g.source.get("reply_to_email") == "unset"
+      and g.source.get("cc_email") == "unset", g.source)
+
+org_row = db.query(Organization).filter(Organization.id == GREENLAND).first()
+org_row.reply_to_email = "michael.simmons@nsmg.com"
+db.commit()
+g2 = pi.identity_for_org(db, GREENLAND)
+check("7. a set reply-to is carried",
+      g2.reply_to_email == "michael.simmons@nsmg.com", g2.reply_to_email)
+check("   it does NOT become the from address",
+      g2.from_email == "support@evosyspro.live", g2.from_email)
+check("   and setting a reply-to does not invent a cc",
+      g2.cc_email is None, g2.cc_email)
+si2 = pi.sending_identity_for_org(db, GREENLAND)
+check("7. the mailer adapter carries reply-to and cc through",
+      si2.reply_to_email == "michael.simmons@nsmg.com" and si2.cc_email is None)
+
+# A different brand's org must not pick up the reply-to just set above.
+check("7. ONE ORG'S REPLY-TO DOES NOT LEAK TO ANOTHER",
+      pi.identity_for_org(db, RIVAL).reply_to_email is None)
+
 db.close()
 
 print("\n%d checks, %d failure(s)" % (checks, len(failures)))

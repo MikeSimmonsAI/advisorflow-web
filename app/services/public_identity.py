@@ -84,15 +84,31 @@ class PublicIdentity(object):
     """
 
     __slots__ = ("organization_id", "brand_name", "from_email", "resend_api_key",
-                 "public_base_url", "support_phone", "website", "source")
+                 "public_base_url", "support_phone", "website", "source",
+                 "reply_to_email", "cc_email", "customer_facing_name")
 
     def __init__(self, organization_id=None, brand_name=None, from_email=None,
                  resend_api_key=None, public_base_url=None, support_phone=None,
-                 website=None, source=None):
+                 website=None, source=None, reply_to_email=None, cc_email=None,
+                 customer_facing_name=None):
         self.organization_id = organization_id
+        # THE PLATFORM's name - EvoSys Pro. Infrastructure. A family has never
+        # heard of it and must never be shown it.
         self.brand_name = brand_name
+        # THE BUSINESS the family believes is contacting them - Restland
+        # Cemetery and Funeral Home. This is the display name on anything a
+        # family reads. The two were conflated before: `get_brand_name()`
+        # returns the platform, and the booking confirmation used it, so a
+        # family got mail signed "The EvoSys Pro Team".
+        self.customer_facing_name = customer_facing_name
         self.from_email = from_email
         self.resend_api_key = resend_api_key
+        # Where a human's reply lands, and an optional second recipient. Both
+        # are organization-level only: there is no brand default and no
+        # environment default, because copying a family's appointment mail to
+        # an address nobody chose is not a thing a fallback should ever do.
+        self.reply_to_email = reply_to_email
+        self.cc_email = cc_email
         self.public_base_url = public_base_url
         self.support_phone = support_phone
         self.website = website
@@ -103,7 +119,10 @@ class PublicIdentity(object):
         out = {
             "organization_id": self.organization_id,
             "brand_name": self.brand_name,
+            "customer_facing_name": self.customer_facing_name,
             "from_email": self.from_email,
+            "reply_to_email": self.reply_to_email,
+            "cc_email": self.cc_email,
             "public_base_url": self.public_base_url,
             "support_phone": self.support_phone,
             "website": self.website,
@@ -153,10 +172,16 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
             log.exception("public_identity: could not load org/platform for %s",
                           organization_id)
 
-    # ── brand name ──────────────────────────────────────────────────────────
+    # ── names: the platform's, and the customer's own ───────────────────────
     if plat is not None and getattr(plat, "name", None):
         ident.brand_name = plat.name
         ident.source["brand_name"] = "platform"
+    if org is not None:
+        ident.customer_facing_name = (getattr(org, "brand_name", None)
+                                      or getattr(org, "name", None) or None)
+        ident.source["customer_facing_name"] = (
+            "organization.brand_name" if getattr(org, "brand_name", None)
+            else "organization.name")
 
     # ── from address ────────────────────────────────────────────────────────
     # 1. organization override
@@ -188,6 +213,18 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
             # message that fails loudly is recoverable in a way that a message
             # delivered under a competitor's name is not.
             ident.source["from_email"] = "unresolved"
+
+    # ── reply-to and cc: organization only, no inheritance ──────────────────
+    #
+    # A brand cannot answer "which mailbox does this customer read?", and
+    # nothing should ever copy a family's appointment mail to an address that
+    # came from a default. Unset means unset.
+    if org is not None:
+        ident.reply_to_email = getattr(org, "reply_to_email", None) or None
+        ident.cc_email = getattr(org, "cc_email", None) or None
+    ident.source["reply_to_email"] = ("organization" if ident.reply_to_email
+                                      else "unset")
+    ident.source["cc_email"] = "organization" if ident.cc_email else "unset"
 
     # The Resend key follows the address it sends from. An org that has set its
     # own from_email but no key would otherwise send its address through the
@@ -252,17 +289,22 @@ class SendingIdentity(object):
     falling through to the global environment default.
     """
 
-    __slots__ = ("from_email", "resend_api_key")
+    __slots__ = ("from_email", "resend_api_key", "reply_to_email", "cc_email")
 
-    def __init__(self, from_email=None, resend_api_key=None):
+    def __init__(self, from_email=None, resend_api_key=None,
+                 reply_to_email=None, cc_email=None):
         self.from_email = from_email
         self.resend_api_key = resend_api_key
+        self.reply_to_email = reply_to_email
+        self.cc_email = cc_email
 
 
 def sending_identity_for_org(db: Session, organization_id: Optional[str]) -> SendingIdentity:
     ident = identity_for_org(db, organization_id)
     return SendingIdentity(from_email=ident.from_email,
-                           resend_api_key=ident.resend_api_key)
+                           resend_api_key=ident.resend_api_key,
+                           reply_to_email=ident.reply_to_email,
+                           cc_email=ident.cc_email)
 
 
 # ── public link builders ────────────────────────────────────────────────────
