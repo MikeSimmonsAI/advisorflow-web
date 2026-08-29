@@ -472,14 +472,31 @@ vr = open(os.path.join(ROOT, "app", "routers", "voice_router.py"),
           encoding="utf-8").read()
 check("voice_router still calls the bare validator (untouched)",
       "validate_twilio_webhook(request)" in vr)
-check("voice_router does not import the Retell provider",
-      "comms" not in vr and "retell" not in vr.lower())
+# Parse the imports rather than grepping, for the same reason the sibling
+# check below already does: this router's own docstring has to explain WHY it
+# does not touch the provider, and a substring test fails on that explanation.
+# What actually matters is that the router never builds or drives a provider
+# itself - every decision belongs to voice_orchestrator, which is what the
+# lead-page call endpoint now delegates to. Asserting the imports is stricter
+# than grepping for a word, not looser: prose cannot satisfy it and a real
+# import cannot hide from it.
+import ast                                                         # noqa: E402
+_vr_imports = []
+for _node in ast.walk(ast.parse(vr)):
+    if isinstance(_node, ast.Import):
+        _vr_imports += [a.name for a in _node.names]
+    elif isinstance(_node, ast.ImportFrom):
+        _vr_imports.append(_node.module or "")
+check("voice_router imports no provider package directly",
+      not any(("comms" in (m or "") or "retell" in (m or "").lower())
+              for m in _vr_imports),
+      str(_vr_imports))
+check("voice_router constructs no provider of its own",
+      "get_voice_provider(" not in vr and "RetellVoiceProvider(" not in vr)
+check("the lead-page call endpoint delegates to the orchestrator",
+      "start_file_check_call" in vr and "check_call_eligibility" in vr)
 wh = open(os.path.join(ROOT, "app", "routers", "voice_webhooks_router.py"),
           encoding="utf-8").read()
-# Parse the imports rather than grepping: the module's docstring names
-# voice_router.py precisely to explain why it is a SEPARATE file, so a
-# substring test fails on its own documentation.
-import ast                                                         # noqa: E402
 _wh_imports = []
 for _node in ast.walk(ast.parse(wh)):
     if isinstance(_node, ast.Import):
