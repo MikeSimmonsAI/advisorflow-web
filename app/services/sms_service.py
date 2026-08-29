@@ -396,11 +396,27 @@ def get_or_create_booking_link(db: Session, lead: Lead, advisor: User) -> Bookin
     saw. Reusing the newest still-pending link for this lead and advisor means
     the preview and the send agree on a single URL, and the Message row's
     `booking_link_id` still points at the link that was actually sent.
+
+    A LEGACY LONG TOKEN IS NOT REUSED. Shortening the token would otherwise
+    have changed nothing for any lead that already had a pending link - which
+    is most of them - because this function would keep handing back the
+    379-character one it minted before, and the message would stay at 4
+    segments and keep being filtered. A legacy token is recognisable by the
+    `~` separator the old format used; those links stay valid if a family
+    already has one (calendar_router still decodes them), they are simply no
+    longer handed out to anyone new.
+
+    The legacy exclusion is a QUERY filter, not a check on the row that comes
+    back. Two links minted in the same second tie on `created_at`, and with a
+    tie the database is free to return either - so filtering afterwards would
+    reuse a short link on one call and mint another on the next, which is
+    precisely the link-littering this function exists to prevent.
     """
     existing = (db.query(BookingLink)
                 .filter(BookingLink.lead_id == lead.id,
                         BookingLink.user_id == advisor.id,
-                        BookingLink.status == "pending")
+                        BookingLink.status == "pending",
+                        BookingLink.token.notlike("%~%"))
                 .order_by(BookingLink.created_at.desc())
                 .first())
     if existing:

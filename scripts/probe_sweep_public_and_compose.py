@@ -1374,6 +1374,22 @@ check("23. no payload is ever encoded into a token again",
 check("23. the token is generated from a CSPRNG, not a truncated hash",
       "secrets.token_urlsafe" in svc_tok)
 
+# A LEAD THAT ALREADY HAS A LONG LINK MUST NOT KEEP IT.
+#
+# get_or_create_booking_link reuses the newest pending link. Without this, the
+# shortening would have changed nothing for any lead that already had one -
+# which is most of them - and their messages would have stayed at 4 segments.
+_legacy = _sms.create_booking_link(db, email_only, advisor)
+_legacy.token = "eyJsZWFkIjogeyJGaXJzdCBOYW1lIjogIk1pa2UifX0~0c1d500c88ebb4c8"
+db.commit()
+_fresh = _sms.get_or_create_booking_link(db, email_only, advisor)
+check("23. a lead holding a LEGACY long link is issued a short one instead",
+      "~" not in _fresh.token and _fresh.token != _legacy.token, _fresh.token)
+check("23.    and the legacy row is left intact, so a family's live link still works",
+      db.query(_BL).filter(_BL.id == _legacy.id).first().token == _legacy.token)
+check("23.    while the new short link is then reused, not re-minted per call",
+      _sms.get_or_create_booking_link(db, email_only, advisor).id == _fresh.id)
+
 
 db.close()
 if os.path.exists(DB_FILE):
