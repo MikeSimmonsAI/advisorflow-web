@@ -551,6 +551,183 @@ check("the test-call route is god-gated and adds no eligibility logic of its own
 check("a refused call reports WHY rather than a bare 403",
       'HTTPException(409, "Call refused:' in gr)
 
+print("\n[19] a booking made during a call correlates back to THAT call")
+# WHY THIS SECTION EXISTS. `_correlate_booking` joins on a value the agent
+# supplies. The first live File Check agent was configured to build
+# `external_ref` from a phone number and a date, so the join key never matched
+# and correlation silently found nothing — no error, no log, just a call that
+# booked an appointment and a VoiceCall row that never knew. A join key that is
+# only ASSUMED to match is the failure this section makes impossible to ship.
+#
+# The agent now sends Retell's built-in `{{call_id}}`, which is the same value
+# `start_call` returns as `provider_call_id` and the same value every webhook
+# arrives under.
+from app.models.integration_models import IntegrationCredential      # noqa: E402
+from app.services.integration_auth import generate_key               # noqa: E402
+from app.services import tenant_scheduling as tsvc                   # noqa: E402
+
+# Fresh families. Earlier sections deliberately mark `lead-a` do-not-contact and
+# burn its attempt budget, so reusing it here would fail on eligibility and look
+# like a correlation bug.
+db = SessionLocal()
+db.add_all([
+    Lead(id="lead-corr-a", organization_id="org-a", first_name="Correlation",
+         last_name="Family A", phone="15551110011", status="new",
+         assigned_to_id="adv-a"),
+    Lead(id="lead-corr-a2", organization_id="org-a", first_name="Correlation",
+         last_name="Family A2", phone="15551110012", status="new",
+         assigned_to_id="adv-a"),
+    Lead(id="lead-corr-b", organization_id="org-b", first_name="Correlation",
+         last_name="Family B", phone="15551110013", status="new",
+         assigned_to_id="adv-b"),
+])
+db.commit()
+db.close()
+
+db = SessionLocal()
+_creds = {}
+for _oid in ("org-a", "org-b"):
+    _full, _pfx, _hash = generate_key()
+    _c = IntegrationCredential(
+        name="probe-%s" % _oid, kind="retell_tenant",
+        key_prefix=_pfx, key_hash=_hash, organization_id=_oid,
+        rate_limit_per_minute=60, is_active=True, created_at=datetime.utcnow())
+    db.add(_c)
+    db.flush()
+    _creds[_oid] = _c.id
+db.commit()
+db.close()
+
+
+def book_audit(org_id, external_ref, booking_link_id, success=True):
+    """Write the audit row THE REAL BRIDGE WRITES, via the real function.
+
+    Hand-rolling an ORM row here would test a shape I invented. `tenant.audit`
+    is what `/integrations/retell/tenant/book` actually calls, so if its column
+    choices ever drift from what the correlator reads, this fails.
+    """
+    d = SessionLocal()
+    try:
+        cred = d.query(IntegrationCredential).filter(
+            IntegrationCredential.id == _creds[org_id]).first()
+        tsvc.audit(d, cred, "book", success, 200 if success else 409,
+                   "booked %s" % booking_link_id,
+                   booking_link_id=booking_link_id if success else None,
+                   external_ref=external_ref)
+        d.commit()
+    finally:
+        d.close()
+
+
+# ── 1. a Retell call creates VoiceCall(provider_call_id=X) ──
+# NOTE: `FakeRetell.placed` is NOT reset here. Its length is what mints the fake
+# call id, so clearing it would re-issue "call_1" — an id earlier sections have
+# already used — and the webhook would resolve to the wrong VoiceCall. A test
+# that manufactures a duplicate id cannot say anything about correlation.
+_before_placed = len(FakeRetell.placed)
+call_c = orch.start_file_check_call(SessionLocal(), lead("lead-corr-a"), "org-a")
+X = call_c.provider_call_id
+check("1. the call row carries the provider call id as X",
+      bool(X) and X.startswith("call_"), X)
+check("   and X is exactly what the provider returned",
+      len(FakeRetell.placed) == _before_placed + 1
+      and X == "call_%d" % len(FakeRetell.placed), X)
+d = SessionLocal()
+check("   X is unique across every call in this run",
+      d.query(VoiceCall).filter(VoiceCall.provider_call_id == X).count() == 1)
+d.close()
+check("   VoiceCall.provider_call_id is the join key the correlator reads",
+      "IntegrationRequestLog.external_ref == call.provider_call_id" in
+      open(os.path.join(ROOT, "app", "routers", "voice_webhooks_router.py"),
+           encoding="utf-8").read())
+
+# ── 2. the booking arrives labelled with the same X ──
+book_audit("org-a", X, "bl-correlated")
+d = SessionLocal()
+_row = (d.query(IntegrationRequestLog)
+        .filter(IntegrationRequestLog.external_ref == X).first())
+check("2. the bridge's own audit row carries external_ref = X",
+      _row is not None and _row.external_ref == X)
+check("   and records which tenant it happened in",
+      _row is not None and _row.organization_id == "org-a")
+d.close()
+
+# ── 3 & 4. the webhook correlates it, and attaches booking_link_id ──
+# The metadata must name the family this call is actually for. The router
+# checks the claimed org against OUR row, so a mismatched payload is refused —
+# correctly — and a 403 here would make every downstream assertion pass for the
+# wrong reason.
+r = post_event(client, call_payload("call_analyzed", X, lead="lead-corr-a"))
+check("3. the lifecycle webhook is accepted", r.status_code == 200, r.text)
+_, outcome, _, _, _, blid, _ = row(call_c.id)
+check("3. the booking correlates to THAT call", blid == "bl-correlated", blid)
+check("4. booking_link_id is attached to the right VoiceCall",
+      blid == "bl-correlated")
+check("   and the outcome is promoted to booked", outcome == "booked", outcome)
+
+# ── 5. duplicate delivery stays idempotent ──
+r2 = post_event(client, call_payload("call_analyzed", X, lead="lead-corr-a"))
+r3 = post_event(client, call_payload("call_ended", X, lead="lead-corr-a"))
+_, outcome2, _, _, _, blid2, _ = row(call_c.id)
+check("5. a replayed webhook is still accepted",
+      r2.status_code == 200 and r3.status_code == 200)
+check("5. duplicate delivery does not change booking_link_id",
+      blid2 == "bl-correlated", blid2)
+d = SessionLocal()
+check("   and creates no second VoiceCall for the same provider call id",
+      d.query(VoiceCall).filter(VoiceCall.provider_call_id == X).count() == 1)
+d.close()
+# A second booking row under the same ref cannot even be written: the ledger
+# carries UNIQUE(credential_id, external_ref). Since `external_ref` is now the
+# call id, that constraint means ONE booking per call per tenant, enforced by
+# the database rather than by anyone remembering to check. Proving it here
+# rather than assuming it is the point — the correlator picks `.first()` off an
+# ordered query, which would be ambiguous if duplicates were possible.
+from sqlalchemy.exc import IntegrityError                            # noqa: E402
+_dup_refused = False
+try:
+    book_audit("org-a", X, "bl-should-not-win")
+except IntegrityError:
+    _dup_refused = True
+check("   a second booking under the same call id is refused by the ledger",
+      _dup_refused, "a duplicate external_ref was accepted")
+post_event(client, call_payload("call_analyzed", X, lead="lead-corr-a"))
+_, _, _, _, _, blid3, _ = row(call_c.id)
+check("   and the originally attached booking is untouched",
+      blid3 == "bl-correlated", blid3)
+
+# ── 6. THE TENANT BOUNDARY ──
+# `external_ref` is unique per credential, NOT globally. Two funeral homes can
+# hold the same value legitimately, so the id alone must never be enough.
+call_b = orch.start_file_check_call(SessionLocal(), lead("lead-corr-b"), "org-b")
+XB = call_b.provider_call_id
+book_audit("org-b", XB, "bl-other-tenant")
+# Now give org-b a row bearing org-a's id, and org-a a call needing one.
+book_audit("org-b", "call_cross_tenant_probe", "bl-foreign")
+call_d = orch.start_file_check_call(SessionLocal(), lead("lead-corr-a2"), "org-a")
+d = SessionLocal()
+_c = d.query(VoiceCall).filter(VoiceCall.id == call_d.id).first()
+_c.provider_call_id = "call_cross_tenant_probe"
+d.commit()
+d.close()
+rx = post_event(client, call_payload("call_analyzed",
+                                     "call_cross_tenant_probe",
+                                     lead="lead-corr-a2"))
+_, _, _, _, _, blid_x, _ = row(call_d.id)
+check("6. the cross-tenant event is ACCEPTED, so the correlator really ran",
+      rx.status_code == 200, rx.text)
+check("6. A BOOKING IN ANOTHER ORG CANNOT CORRELATE ACROSS THE BOUNDARY",
+      blid_x is None, blid_x)
+post_event(client, call_payload("call_analyzed", XB, org="org-b",
+                                lead="lead-corr-b"))
+_, _, _, _, _, blid_b, _ = row(call_b.id)
+check("   while the same-tenant booking still correlates (positive control)",
+      blid_b == "bl-other-tenant", blid_b)
+check("   the correlator filters on organization_id, not the ref alone",
+      "IntegrationRequestLog.organization_id == call.organization_id" in
+      open(os.path.join(ROOT, "app", "routers", "voice_webhooks_router.py"),
+           encoding="utf-8").read())
+
 print("\n%d checks, %d failure(s)" % (checks, len(failures)))
 comms.reset_providers()
 try:

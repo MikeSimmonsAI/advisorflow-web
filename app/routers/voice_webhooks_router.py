@@ -253,11 +253,24 @@ def _map_outcome(db: Session, call: VoiceCall, event) -> None:
 def _correlate_booking(db: Session, call: VoiceCall) -> None:
     """Tie this call to any appointment booked during it.
 
-    This needs no agent change and no new API. The tenant Retell bridge already
-    uses `external_ref` as its idempotency key, and the shipped agent
-    configuration already tells it to send the Retell call id there. So the
-    booking the agent made mid-conversation is already labelled with the same
-    id this webhook arrives under — we only have to look it up.
+    The tenant Retell bridge uses `external_ref` as its idempotency key, so a
+    booking made mid-conversation can carry the same id this webhook arrives
+    under and we only have to look it up.
+
+    CORRECTION, 2026-08-29. An earlier version of this docstring claimed the
+    shipped agent configuration "already tells it to send the Retell call id
+    there". It did not. The deployed `book_appointment` schema asked for a
+    phone-number-and-date string, so no booking ever correlated and this
+    function silently found nothing — the failure mode of a join key that is
+    merely *assumed* to match. The agent now sets `external_ref` from Retell's
+    built-in `{{call_id}}`, which is the same value `provider_call_id` is
+    populated from in `RetellVoiceProvider.start_call` and in every webhook
+    payload (`call.call_id`).
+
+    THE ORGANIZATION FILTER IS NOT DECORATION. `external_ref` is unique per
+    credential, not globally, so two tenants can legitimately hold rows with
+    the same value. Matching on the id alone would let one funeral home's call
+    adopt another's booking.
     """
     if not call.provider_call_id or call.booking_link_id:
         return
