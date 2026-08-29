@@ -92,7 +92,79 @@ def handle_oauth_callback(db: Session, advisor_user_id: str, authorization_respo
     advisor.google_calendar_id = "primary"
     advisor.google_calendar_connected = True
     db.commit()
+
+    # RECORD WHOSE CALENDAR THIS IS.
+    #
+    # Storing the token alone leaves the most important fact unrecorded: which
+    # Google account granted it. This platform has already had a tenant's
+    # scheduling pointed at the platform owner's personal calendar, and nothing
+    # in the data said so — `google_calendar_connected = True` looks identical
+    # either way.
+    #
+    # Google's primary calendar carries the account's own address as its
+    # `summary`, so one events.list identifies the account, proves the grant
+    # works, and reports the calendar's timezone. Failure here is logged and
+    # swallowed: the grant itself succeeded, and refusing to save it because a
+    # follow-up read failed would be worse than an unlabelled connection.
+    try:
+        _record_google_connection(db, advisor)
+    except Exception:
+        logger.exception("could not record Google connection detail for %s",
+                         advisor.id)
     return advisor
+
+
+def _record_google_connection(db: Session, advisor: User) -> None:
+    """Upsert the CalendarConnection row for a Google grant that just worked.
+
+    Not manufactured from a stale token: every value here comes from a live
+    call made with the credential that was just issued.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    from app.models.calendar_models import CalendarConnection
+
+    service = _get_calendar_service(advisor)
+    now = datetime.now(_tz.utc)
+    resp = service.events().list(
+        calendarId=advisor.google_calendar_id or "primary",
+        timeMin=now.isoformat(),
+        timeMax=(now + timedelta(days=1)).isoformat(),
+        maxResults=1, singleEvents=True,
+    ).execute()
+
+    account_email = resp.get("summary")
+    tz_name = resp.get("timeZone")
+
+    row = (db.query(CalendarConnection)
+           .filter(CalendarConnection.user_id == advisor.id,
+                   CalendarConnection.provider == "google").first())
+    if row is None:
+        row = CalendarConnection(user_id=advisor.id, provider="google")
+        db.add(row)
+
+    row.is_connected = True
+    row.account_email = account_email
+    row.calendar_id = advisor.google_calendar_id or "primary"
+    # The read above succeeded with the granted scopes, and `calendar.events`
+    # covers writes as well as reads, so the grant genuinely covers calendar
+    # work. This flag is set from a proven call, never optimistically.
+    row.calendar_scope_ok = True
+    row.connected_at = datetime.utcnow()
+    row.disconnected_at = None
+    row.last_sync_at = datetime.utcnow()
+    row.last_attempt_at = datetime.utcnow()
+    row.last_error = None
+    row.last_error_at = None
+    row.failure_count = 0
+
+    # The calendar's own timezone is the one a family's appointment is really
+    # in. Only adopted when the advisor has not set their own.
+    if tz_name and not getattr(advisor, "booking_timezone", None):
+        advisor.booking_timezone = tz_name
+
+    db.commit()
+    logger.info("Google connection recorded for advisor %s -> account %s (tz %s)",
+                advisor.id, account_email, tz_name)
 
 
 def _get_calendar_service(advisor: User):

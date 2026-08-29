@@ -193,6 +193,77 @@ def god_calendar_diagnostics(
     }
 
 
+@router.post("/calendar-probe")
+def god_calendar_probe(
+    user_id: str = Query(..., description="Advisor whose stored grant to test."),
+    db: Session = Depends(get_db),
+    god: User = Depends(require_god),
+):
+    """Ask the calendar itself WHOSE it is. Reads only; writes nothing.
+
+    `is_ready()` for Google checks one thing: that a refresh token exists. It
+    does not validate the token and it cannot say which account the token
+    belongs to — and this platform has already had a tenant's scheduling
+    pointed at the platform owner's personal account once. "A token is
+    present" is therefore not evidence that the right calendar is connected.
+
+    Google's primary calendar carries the account's own address as its
+    `summary`, so a single events.list against `primary` answers three
+    questions at once: does the grant still work, whose mailbox is it, and
+    what timezone is the calendar in. It is the cheapest honest answer
+    available, and it is strictly a read.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    out = {
+        "user_id": user.id,
+        "full_name": user.full_name,
+        "advisor_email": user.email,
+        "organization_id": user.organization_id,
+        "token_present": bool(getattr(user, "google_oauth_refresh_token_encrypted", None)),
+        "stored_calendar_id": getattr(user, "google_calendar_id", None) or "primary",
+        "booking_timezone": getattr(user, "booking_timezone", None),
+    }
+    if not out["token_present"]:
+        out["read_ok"] = False
+        out["error"] = "No Google refresh token stored for this user."
+        return out
+
+    try:
+        from datetime import datetime, timedelta, timezone as _tz
+        from app.services.calendar_service import _get_calendar_service
+        service = _get_calendar_service(user)
+        now = datetime.now(_tz.utc)
+        resp = service.events().list(
+            calendarId=out["stored_calendar_id"],
+            timeMin=now.isoformat(),
+            timeMax=(now + timedelta(days=1)).isoformat(),
+            maxResults=1, singleEvents=True,
+        ).execute()
+        # `summary` on the primary calendar is the account's own address.
+        out["google_account_email"] = resp.get("summary")
+        out["calendar_timezone"] = resp.get("timeZone")
+        out["read_ok"] = True
+        out["events_visible_next_24h"] = len(resp.get("items", []))
+        adv = (user.email or "").strip().lower()
+        acct = (out.get("google_account_email") or "").strip().lower()
+        out["matches_advisor_email"] = bool(acct) and acct == adv
+        if not out["matches_advisor_email"]:
+            out["warning"] = (
+                "The connected Google account (%s) is not this advisor's "
+                "address (%s). Confirm this is intended before booking into "
+                "it." % (out.get("google_account_email"), user.email))
+    except Exception as e:
+        out["read_ok"] = False
+        out["error"] = str(e)[:400]
+
+    log.info("AUDIT: GOD_CALENDAR_PROBE | admin=%s | user=%s | read_ok=%s",
+             god.email, user_id, out.get("read_ok"))
+    return out
+
+
 @router.get("/email-diagnostics")
 def god_email_diagnostics(
     organization_id: str = Query(..., description="Tenant organization to inspect."),
