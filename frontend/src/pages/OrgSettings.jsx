@@ -628,9 +628,13 @@ export default function OrgSettings() {
           <section className="panel os-section" style={{ marginTop: 16 }}>
             <div className="panel-header"><h2 className="panel-title">📧 Email Sender</h2></div>
             <p className="os-hint">
-              Set the address outbound emails are sent <em>from</em>. Use your org's own verified domain
-              (e.g. <code>support@bookaboost.live</code>) so replies land in your real inbox and emails
-              don't land in spam. Requires the domain to be verified in Resend first.
+              {/* The example was the PLATFORM's own address, on a screen a
+                  customer admin reads as advice about their own domain. */}
+              Set the address outbound emails are sent <em>from</em>. Use your organization's own
+              verified domain (e.g. <code>support@yourdomain.com</code>) so replies land in your real
+              inbox and emails don't land in spam. The domain must be verified with the email provider
+              first — until it is, mail goes out from the platform's verified address with your
+              organization's name on it.
             </p>
 
             <label className="os-label">
@@ -696,11 +700,19 @@ export default function OrgSettings() {
               </div>
               <div style={{ flex: 1 }}>
                 <label className="os-label">Phone number (E.164)</label>
-                <input className="os-input" placeholder="+18449172171" value={orgTwilioPhone} onChange={e => setOrgTwilioPhone(e.target.value)} />
+                {/* A PLACEHOLDER MUST NOT BE A REAL NUMBER. This example used
+                    to be the PLATFORM's own live Twilio number, so a customer
+                    admin opening this page on an unconfigured org saw
+                    +18449172171 in grey and read it as theirs — the field is
+                    empty, but nothing on screen says so. 555-01xx is the
+                    reserved fictional range and can never dial anybody. */}
+                <input className="os-input" placeholder="+18005550100" value={orgTwilioPhone} onChange={e => setOrgTwilioPhone(e.target.value)} />
               </div>
               <div style={{ flex: 1 }}>
                 <label className="os-label">Caller ID name (optional)</label>
-                <input className="os-input" placeholder="EvoSys Pro" value={orgTwilioCallerId} onChange={e => setOrgTwilioCallerId(e.target.value)} />
+                {/* Same reason: the platform's own brand name must never be
+                    the example on a customer's settings screen. */}
+                <input className="os-input" placeholder="Your business name" value={orgTwilioCallerId} onChange={e => setOrgTwilioCallerId(e.target.value)} />
               </div>
             </div>
 

@@ -1062,6 +1062,51 @@ check("20. the shared-sender path leaves the advisor to the LEAD, not the number
       "advisor.organization_id if advisor else None" in inbound_src)
 
 
+# ── 21. a placeholder is not a value ────────────────────────────────────────
+
+print("\n[21] A TENANT SCREEN NEVER SHOWS THE PLATFORM'S OWN DETAILS AS AN EXAMPLE")
+
+# A Restland org admin opened Org Settings and read the platform's live Twilio
+# number and brand as their own configuration. Nothing was misconfigured: the
+# fields were empty and these were HTML placeholders. That is worse, not
+# better - the screen was lying quietly, and the Save button being disabled was
+# the only clue the value was not real.
+def jsx_code_only(src):
+    """The JSX with `{/* ... */}` and `//` comments removed.
+
+    Without this, an absence check reads the comment explaining why the old
+    value was wrong and fails on it — which leaves deleting the explanation as
+    the only way to go green. The rule is about what the SCREEN renders.
+    """
+    src = re.sub(r"\{/\*.*?\*/\}", "", src, flags=re.S)
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return "\n".join(l for l in src.splitlines()
+                     if not l.lstrip().startswith("//"))
+
+
+org_settings = jsx_code_only(read("frontend/src/pages/OrgSettings.jsx"))
+
+PLATFORM_REAL_VALUES = (
+    "+18449172171",          # the platform's live Twilio number
+    'placeholder="EvoSys Pro"',
+    'placeholder="BookaBoost"',
+    "support@bookaboost.live",
+    "support@evosyspro.live",
+)
+for value in PLATFORM_REAL_VALUES:
+    check("21. %s does not appear on the org settings screen" % value,
+          value not in org_settings, value)
+
+check("21. the phone example uses the reserved fictional 555-01xx range",
+      "+18005550100" in org_settings)
+check("21. the caller-id example names the CUSTOMER, not the platform",
+      'placeholder="Your business name"' in org_settings)
+check("21. the from-address example is a generic domain",
+      "support@yourdomain.com" in org_settings)
+check("21. and the helper says what happens before a domain is verified",
+      "until it is, mail goes out from the platform's verified address" in org_settings)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:
