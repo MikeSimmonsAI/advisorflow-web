@@ -150,6 +150,31 @@ def send_email_via_provider(
     api_key = (getattr(org, "resend_api_key", None) or RESEND_API_KEY) if org else RESEND_API_KEY
     from_addr = (getattr(org, "from_email", None) or FROM_EMAIL) if org else FROM_EMAIL
 
+    # A RESOLVED IDENTITY THAT SAYS "I DON'T KNOW" IS NOT OVERRULED BY A DEFAULT.
+    #
+    # public_identity walks organization -> platform -> verified registry and
+    # deliberately returns from_email=None when none of them answer, precisely
+    # so a brand is never guessed. The line above then substituted
+    # EMAIL_FROM_ADDRESS anyway - one value for a deployment serving three
+    # brands - which is how a Restland family received mail from
+    # noreply@bookaboost.live: a company they have never heard of, on a domain
+    # their employer's mail gateway does not trust, which is also why it landed
+    # in Junk behind an "arrived from outside" warning.
+    #
+    # The env fallback still applies to a raw Organization row or to no org at
+    # all, so callers that were never brand-resolved keep working. Only a
+    # resolved identity is taken at its word - including when its word is None.
+    if org is not None and getattr(org, "resolved", False) and not getattr(org, "from_email", None):
+        return {
+            "success": False,
+            "provider_message_id": None,
+            "error": ("No verified sending address is configured for this "
+                      "organization or its brand. Set the organization's From "
+                      "address in Org Settings -> Email Sender, or the "
+                      "platform's support email. Refusing to send under another "
+                      "brand's address."),
+        }
+
     if not api_key:
         return {"success": False, "provider_message_id": None, "error": "RESEND_API_KEY not configured"}
 

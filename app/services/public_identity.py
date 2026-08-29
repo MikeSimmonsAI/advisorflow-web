@@ -329,7 +329,8 @@ class SendingIdentity(object):
     falling through to the global environment default.
     """
 
-    __slots__ = ("from_email", "resend_api_key", "reply_to_email", "cc_email")
+    __slots__ = ("from_email", "resend_api_key", "reply_to_email", "cc_email",
+                 "resolved")
 
     def __init__(self, from_email=None, resend_api_key=None,
                  reply_to_email=None, cc_email=None):
@@ -337,6 +338,17 @@ class SendingIdentity(object):
         self.resend_api_key = resend_api_key
         self.reply_to_email = reply_to_email
         self.cc_email = cc_email
+        # THIS OBJECT HAS ALREADY ASKED EVERY LEVEL. A `from_email` of None on
+        # a raw Organization row means "not configured here, look further up";
+        # on THIS object it means the whole walk came back empty, and there is
+        # nothing further up to look at.
+        #
+        # `send_email_via_provider` needs to tell those two cases apart. It used
+        # to substitute the deployment-wide EMAIL_FROM_ADDRESS for either, which
+        # is how a Restland family received mail from noreply@bookaboost.live -
+        # this resolver refused to guess a brand, and the sender guessed one a
+        # line later. With this flag set the sender refuses instead.
+        self.resolved = True
 
 
 def sending_identity_for_org(db: Session, organization_id: Optional[str]) -> SendingIdentity:

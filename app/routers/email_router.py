@@ -73,19 +73,31 @@ def send_single_email(
 
         subject = req.subject or f"Following up, {lead.first_name or 'there'}"
 
-        # Route through org-level Resend sender (preferred) — uses org's own verified
-        # domain and API key. Falls back to env-var global sender for orgs without one.
-        from app.models.models import Organization
+        # THE RESOLVED IDENTITY, NOT THE RAW ORGANIZATION ROW.
+        #
+        # This passed the bare Organization. Restland has no `from_email` of its
+        # own, so `send_email_via_provider` fell through to the deployment-wide
+        # EMAIL_FROM_ADDRESS - and a Restland family received mail From
+        # noreply@bookaboost.live, a company they have never heard of, which
+        # their employer's gateway then dropped in Junk behind an "arrived from
+        # outside" warning.
+        #
+        # `sending_identity_for_org` walks organization -> platform -> verified
+        # registry and carries reply-to and cc with it. It is the same resolver
+        # the template path already used; only this branch was missed.
         from app.services.email_service import send_email_via_provider
-        org = db.query(Organization).filter_by(id=current_user.organization_id).first()
-        result = send_email_via_provider(lead.email, subject, body_html, org=org)
+        from app.services.public_identity import sending_identity_for_org
+        result = send_email_via_provider(
+            lead.email, subject, body_html,
+            org=sending_identity_for_org(db, lead.organization_id))
 
         if not result["success"]:
             raise HTTPException(status_code=500, detail=result.get("error", "Email send failed. Check your Microsoft 365 connection in Settings."))
 
         msg = EmailMessage(
             lead_id=lead.id,
-            sender_id=current_user.id,
+            # The message is FROM the lead's advisor, so the record says so.
+            sender_id=acting_advisor(db, lead, current_user).id,
             subject=subject,
             body_html=body_html,
             status="sent",
@@ -98,9 +110,15 @@ def send_single_email(
         db.commit()
         return {"email_id": msg.id, "status": "sent"}
 
-    # Fallback to template-based send
+    # Fallback to template-based send.
+    #
+    # AS THE LEAD'S ADVISOR, not the caller. This passed `current_user`, so a
+    # template email sent while the platform owner had a tenant's lead open was
+    # signed "Best, Mike Simmons" - the platform owner - instead of the family's
+    # own advisor, and the template's merge fields named him throughout.
+    from app.routers.compose_router import acting_advisor as _acting
     try:
-        msg = send_email_to_lead(db, current_user, lead)
+        msg = send_email_to_lead(db, _acting(db, lead, current_user), lead)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"email_id": msg.id, "status": msg.status}
@@ -201,16 +219,18 @@ async def send_email_with_attachment(
             "content_type": file.content_type or "application/octet-stream",
         })
 
-    from app.models.models import Organization as OrgModel
-    org = db.query(OrgModel).filter_by(id=current_user.organization_id).first()
-    result = send_email_via_provider(lead.email, subject, body_html, attachments=attachments or None, org=org)
+    # Third send path, same rule: the RESOLVED identity, never the raw row.
+    from app.services.public_identity import sending_identity_for_org as _ident
+    result = send_email_via_provider(lead.email, subject, body_html,
+                                     attachments=attachments or None,
+                                     org=_ident(db, lead.organization_id))
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
 
     # Log it
     msg = EmailMessage(
         lead_id=lead.id,
-        sender_id=current_user.id,
+        sender_id=acting_advisor(db, lead, current_user).id,
         subject=subject,
         body_html=body_html,
         status="sent",

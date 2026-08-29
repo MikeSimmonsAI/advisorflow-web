@@ -1391,6 +1391,61 @@ check("23.    while the new short link is then reused, not re-minted per call",
       _sms.get_or_create_booking_link(db, email_only, advisor).id == _fresh.id)
 
 
+# ── 24. no email ever goes out under another brand's name ───────────────────
+
+print("\n[24] AN UNRESOLVED BRAND REFUSES TO SEND, IT DOES NOT BORROW ONE")
+
+# A Restland family received mail From noreply@bookaboost.live - a company they
+# have never heard of - and their employer's gateway put it in Junk behind an
+# "arrived from outside" warning. public_identity had done its job and returned
+# from_email=None rather than guess a brand; send_email_via_provider then
+# substituted the deployment-wide EMAIL_FROM_ADDRESS one line later, which on a
+# deployment serving three brands is exactly the guess the resolver refused.
+from app.services.public_identity import SendingIdentity                # noqa: E402
+from app.services import email_service as _es                            # noqa: E402
+
+_unresolved = SendingIdentity(from_email=None)
+check("24. a resolved identity marks itself as having asked every level",
+      _unresolved.resolved is True)
+_r = _es.send_email_via_provider("family@example.test", "s", "<p>b</p>",
+                                 org=_unresolved)
+check("24. AN UNRESOLVED BRAND REFUSES TO SEND", _r["success"] is False, _r)
+check("24. and says so in terms an admin can act on",
+      "another brand" in (_r.get("error") or "")
+      and "Org Settings" in (_r.get("error") or ""), _r.get("error"))
+check("24. nothing was handed to the provider",
+      _r.get("provider_message_id") is None)
+
+es_src = code_only(read("app/services/email_service.py"))
+check("24. the refusal is keyed on the RESOLVED flag, not on a missing value",
+      'getattr(org, "resolved", False) and not getattr(org, "from_email", None)'
+      in es_src)
+check("24. a raw Organization row still falls back, so old callers keep working",
+      'from_addr = (getattr(org, "from_email", None) or FROM_EMAIL) if org else FROM_EMAIL'
+      in es_src)
+check("24. the lead send path hands over the RESOLVED identity",
+      "sending_identity_for_org(db, lead.organization_id)" in es_src)
+
+# THE CUSTOM-BODY BRANCH WAS THE ONE STILL LEAKING.
+#
+# email_router has two send paths. The template path was corrected to the
+# resolver; the custom-body path - the one the composer and every manual send
+# use - still passed the bare Organization row, so Restland's null from_email
+# fell through to EMAIL_FROM_ADDRESS and the family got BookaBoost.
+er_src = code_only(read("app/routers/email_router.py"))
+check("24. the CUSTOM-BODY email path resolves the identity too",
+      "org=sending_identity_for_org(db, lead.organization_id)" in er_src)
+check("24. and no email path still hands over the raw Organization row",
+      "org=org)" not in er_src
+      and "filter_by(id=current_user.organization_id).first()" not in er_src)
+check("24. a template email is sent AS THE LEAD'S ADVISOR, not the caller",
+      "send_email_to_lead(db, _acting(db, lead, current_user), lead)" in er_src)
+check("24.    and no longer signs the platform owner's name",
+      "send_email_to_lead(db, current_user, lead)" not in er_src)
+check("24. the stored record attributes the email to that advisor",
+      "sender_id=acting_advisor(db, lead, current_user).id" in er_src)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:
