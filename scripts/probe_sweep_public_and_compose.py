@@ -343,6 +343,34 @@ org.org_twilio_auth_token_encrypted = _org_tok
 org.org_twilio_phone_number = _org_num
 db.commit()
 
+# WHOSE LEAD IS IT - not who happens to be looking at it.
+#
+# The composer read the sender AND minted the booking link off the CALLER. A
+# link minted while the platform owner had the lead open named the OWNER's
+# calendar, so a family clicking it would have booked time with the platform
+# rather than with the funeral home.
+from app.routers.compose_router import acting_advisor                  # noqa: E402
+from app.services import sms_service as _sms                           # noqa: E402
+
+phone_only.assigned_to_id = advisor.id
+db.commit()
+check("5. the composer acts as the lead's ASSIGNED advisor, not the caller",
+      acting_advisor(db, phone_only, god).id == advisor.id)
+check("5. an unassigned lead still falls back to the caller",
+      acting_advisor(db, email_only, advisor).id == advisor.id)
+
+_link = _sms.get_or_create_booking_link(db, phone_only,
+                                        acting_advisor(db, phone_only, god))
+check("5. a booking link minted under impersonation names the ADVISOR's calendar",
+      _link.user_id == advisor.id, _link.user_id)
+check("5. and never the platform owner's", _link.user_id != god.id)
+
+compose_src = read("app/routers/compose_router.py")
+check("5. no call site in the composer still passes the raw caller",
+      "describe_sms_sender(user, db)" not in compose_src
+      and "get_or_create_booking_link(db, lead, user)" not in compose_src
+      and "compose_body(req.template or \"\", lead, user, url)" not in compose_src)
+
 svc = read("app/services/sms_service.py")
 check("5. the screen and the send share ONE platform-owner predicate",
       svc.count("_is_platform_owner(advisor)") >= 2)

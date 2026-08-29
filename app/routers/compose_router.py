@@ -62,6 +62,36 @@ def _lead_or_404(db: Session, lead_id: str, user: User) -> Lead:
     return lead
 
 
+def acting_advisor(db: Session, lead: Lead, caller: User) -> User:
+    """WHOSE lead is this - not who happens to be looking at it.
+
+    Everything this endpoint reports is a property of the person the family
+    deals with: the number a text would come from, and the calendar a booking
+    link sends them to. Reading those off the CALLER was wrong in two ways at
+    once, and both were live:
+
+      * a god_admin inside the tenant got their own PLATFORM Twilio reported
+        as the customer's sender, and
+      * a booking link minted while they looked at the lead pointed the family
+        at the PLATFORM OWNER's calendar rather than the advisor's.
+
+    Neither needed impersonation to bite - an org_admin opening a colleague's
+    lead hit the same thing, just less visibly. The lead's assigned advisor is
+    the answer whenever there is one and they are inside this organization;
+    the caller remains the fallback for an unassigned lead, which is the only
+    case where "whoever is looking" is genuinely the right person.
+    """
+    assigned_id = getattr(lead, "assigned_to_id", None)
+    if assigned_id and assigned_id != caller.id:
+        assigned = (db.query(User)
+                    .filter(User.id == assigned_id,
+                            User.organization_id == lead.organization_id)
+                    .first())
+        if assigned is not None:
+            return assigned
+    return caller
+
+
 @router.get("/{lead_id}/context")
 def compose_context(lead_id: str,
                     db: Session = Depends(get_db),
@@ -73,9 +103,10 @@ def compose_context(lead_id: str,
     is_dnc = (lead.status or "").lower() == "dnc"
 
     # ── the sender ───────────────────────────────────────────────────────────
+    advisor = acting_advisor(db, lead, user)
     from app.services.sms_service import describe_sms_sender
     try:
-        sender = describe_sms_sender(user, db)
+        sender = describe_sms_sender(advisor, db)
     except Exception:
         log.exception("compose: could not describe SMS sender for user %s", user.id)
         sender = {"ready": False, "source": None, "from_number": None,
@@ -129,7 +160,9 @@ def compose_context(lead_id: str,
     try:
         from app.services.sms_service import get_or_create_booking_link
         from app.services.public_identity import booking_url as public_booking_url
-        link = get_or_create_booking_link(db, lead, user)
+        # The link names a calendar. It must be the ADVISOR's, never the
+        # calendar of whoever opened the lead - see `acting_advisor`.
+        link = get_or_create_booking_link(db, lead, advisor)
         url = public_booking_url(db, lead.organization_id, link.token)
         booking = {
             "url": url or None,
@@ -176,6 +209,7 @@ def compose_preview(lead_id: str, req: PreviewRequest,
     place where the body is assembled.
     """
     lead = _lead_or_404(db, lead_id, user)
+    advisor = acting_advisor(db, lead, user)
 
     from app.services.sms_service import compose_body, get_or_create_booking_link
     from app.services.public_identity import booking_url as public_booking_url
@@ -183,11 +217,13 @@ def compose_preview(lead_id: str, req: PreviewRequest,
     url = ""
     link_id = None
     if req.include_booking_link:
-        link = get_or_create_booking_link(db, lead, user)
+        link = get_or_create_booking_link(db, lead, advisor)
         link_id = link.id
         url = public_booking_url(db, lead.organization_id, link.token) or ""
 
-    body = compose_body(req.template or "", lead, user, url)
+    # `{advisor_name}` and `{advisor_cell}` name the person the family will
+    # meet, so they resolve from the same advisor the link and the sender do.
+    body = compose_body(req.template or "", lead, advisor, url)
     # GSM-7 vs UCS-2 changes the segment size; the emoji case is the one that
     # surprises people, so it is worth being honest about here.
     unicode_body = any(ord(c) > 127 for c in body)
