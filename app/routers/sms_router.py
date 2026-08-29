@@ -205,22 +205,45 @@ async def inbound_webhook(
     lead_phone = normalize_phone(From)
     twilio_to = normalize_phone(To)  # the advisor Twilio number that received this message
 
-    # Multi-tenant safety: find the advisor who owns this Twilio number first,
-    # then scope the lead lookup to their org. Without this, a lead in Org A with
+    # Multi-tenant safety: find WHO OWNS the number this arrived on, then scope
+    # the lead lookup to their organization. Without this, a lead in Org A with
     # the same phone as a lead in Org B would match the wrong record when Org B's
     # Twilio number receives the message.
+    #
+    # BOTH LEVELS, mirroring the send ladder. This used to check only
+    # `users.twilio_phone_number`, so an organization sending from its SHARED
+    # number — the toll-free/10DLC case, and the only kind Restland has — had
+    # every inbound reply dropped on the "unrecognized number" branch below.
+    # Silently: no lead, no conversation, and no STOP processing, which makes
+    # it a compliance failure and not merely a missing feature. A shared sender
+    # is the normal configuration for a funeral home whose advisors do not each
+    # carry their own number.
     advisor = db.query(User).filter(User.twilio_phone_number == twilio_to).first()
-    if advisor:
+    org_id = advisor.organization_id if advisor else None
+    if org_id is None:
+        from app.models.models import Organization
+        _org = (db.query(Organization)
+                .filter(Organization.org_twilio_phone_number == twilio_to)
+                .first())
+        org_id = _org.id if _org else None
+
+    if org_id is not None:
+        # `advisor` stays None on the shared-sender path ON PURPOSE. The reply
+        # belongs to whoever owns the LEAD, and the handler below already
+        # resolves that from `lead.assigned_to_id`; inventing an advisor here
+        # would attach a family's reply to whichever colleague owns the number.
         lead = db.query(Lead).filter(
             Lead.phone == lead_phone,
-            Lead.organization_id == advisor.organization_id,
+            Lead.organization_id == org_id,
         ).order_by(Lead.updated_at.desc()).first()
     else:
-        # No advisor owns this Twilio number — misconfigured or shared number.
-        # Return early rather than doing a cross-org lead lookup which could
-        # apply DNC flags or AI pipeline triggers to the wrong org's data.
-        logger.warning("[sms_webhook] Unrecognized Twilio number %s — no matching "
-                       "advisor, dropping inbound", twilio_to)
+        # Nobody owns this Twilio number — misconfigured, or a number that
+        # belongs to something else entirely. Return early rather than doing a
+        # cross-org lead lookup which could apply DNC flags or AI pipeline
+        # triggers to the wrong org's data.
+        logger.warning("[sms_webhook] Unrecognized Twilio number %s — matches no "
+                       "advisor and no organization sender, dropping inbound",
+                       twilio_to)
         return _twiml_ack()
 
     if not lead:

@@ -1044,6 +1044,24 @@ for path in ("app/routers/email_router.py", "app/routers/leads_router.py"):
           "create_booking_link(db, lead, current_user)" not in src, path)
 
 
+# ── 20. a reply to the shared number comes back ─────────────────────────────
+
+print("\n[20] AN INBOUND REPLY TO AN ORG SENDER FINDS ITS LEAD")
+
+inbound_src = code_only(read("app/routers/sms_router.py"))
+check("20. the inbound webhook resolves the ORGANIZATION's shared number too",
+      "Organization.org_twilio_phone_number == twilio_to" in inbound_src)
+check("20. and still resolves an advisor's own number first",
+      inbound_src.index("User.twilio_phone_number == twilio_to")
+      < inbound_src.index("Organization.org_twilio_phone_number == twilio_to"))
+check("20. the lead lookup stays scoped to the owning organization",
+      "Lead.organization_id == org_id" in inbound_src)
+check("20. an unowned number is still dropped rather than searched cross-tenant",
+      "dropping inbound" in inbound_src and "return _twiml_ack()" in inbound_src)
+check("20. the shared-sender path leaves the advisor to the LEAD, not the number",
+      "advisor.organization_id if advisor else None" in inbound_src)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

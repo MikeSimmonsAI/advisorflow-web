@@ -1,4 +1,4 @@
 Set-Location -LiteralPath $PSScriptRoot
-$msg = 'booking links: the email sender and the resend button minted their link for whoever was sending, not for the lead''s advisor - the same defect already fixed in the composer. A link created while the platform owner had a tenant''s lead open pointed the family at the OWNER''s calendar. All three paths now share one acting_advisor helper, and a gate holds them together.'
+$msg = 'inbound SMS: resolve the receiving number against the ORGANIZATION''s shared sender as well as an advisor''s own. It checked users.twilio_phone_number only, so a tenant on a shared toll-free or 10DLC number - the normal configuration - had every inbound reply silently dropped on the unrecognized-number branch, STOP replies included, which is a compliance failure and not a missing feature. Advisor number first, then the org''s, then drop; the lead lookup stays scoped to the owning organization and the reply is attributed to the lead''s advisor rather than whoever owns the number.'
 & "$PSScriptRoot\deploy.ps1" -Message $msg
 Write-Output ("DEPLOY_EXIT=" + $LASTEXITCODE)
