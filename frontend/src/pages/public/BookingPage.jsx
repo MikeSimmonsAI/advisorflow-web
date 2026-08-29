@@ -125,6 +125,22 @@ export default function BookingPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  // THE BROWSER TAB IS PART OF THE BRANDING.
+  //
+  // index.html ships a single static <title> for the whole SPA, which is the
+  // platform's name. On a page a funeral home's family opens, that read
+  // "EvoSys Pro" - a company they have never heard of, sitting in their tab
+  // and in their history next to the appointment they just made. The resolved
+  // business name replaces it; an organization with no name resolved leaves
+  // the static title alone rather than inventing one.
+  const resolvedTitle = context?.branding?.document_title || context?.org_name || '';
+  useEffect(() => {
+    if (!resolvedTitle) return undefined;
+    const previous = document.title;
+    document.title = resolvedTitle;
+    return () => { document.title = previous; };
+  }, [resolvedTitle]);
+
   const advisorId = context?.advisor_id || '';
 
   const loadSlots = useCallback(async (dayIso) => {
@@ -198,10 +214,15 @@ export default function BookingPage() {
     }
   }
 
-  const accent = context?.brand_color || '#1f4e79';
-  const businessName = context?.org_name || '';
-  const businessAddress = context?.org_address || '';
-  const rawPhone = context?.org_phone || '';
+  // `branding` is the block the public-identity resolver returns; the flat
+  // fields are the older shape and stay as the fallback so a link issued
+  // before this deploy still renders.
+  const brand = context?.branding || {};
+  const accent = brand.brand_color || context?.brand_color || '#1f4e79';
+  const businessName = brand.name || context?.org_name || '';
+  const businessAddress = brand.address || context?.org_address || '';
+  const businessLogo = brand.logo_url || '';
+  const rawPhone = brand.phone || context?.org_phone || '';
   const businessPhone = formatPhone(rawPhone);
   const firstName = context?.lead_first_name || '';
   const apptLabel = context?.appt_label || 'appointment';
@@ -233,6 +254,9 @@ export default function BookingPage() {
     <div style={S.page}>
       <div style={S.card}>
         <header style={S.header}>
+          {businessLogo ? (
+            <img src={businessLogo} alt={businessName} style={S.logo} />
+          ) : null}
           {businessName ? <div style={S.brand}>{businessName}</div> : null}
           {businessAddress ? <div style={S.brandSub}>{businessAddress}</div> : null}
           {businessPhone ? (
@@ -364,6 +388,7 @@ function styles(accent) {
       boxSizing: 'border-box',
     },
     header: { borderBottom: '1px solid #e8eaed', paddingBottom: 16, marginBottom: 22 },
+    logo: { maxHeight: 56, maxWidth: 240, display: 'block', marginBottom: 10 },
     brand: { fontSize: 19, fontWeight: 700, color: accent, letterSpacing: '-0.01em' },
     brandSub: { fontSize: 13.5, color: '#5f6368', marginTop: 3 },
     h1: { fontSize: 23, lineHeight: 1.25, margin: '0 0 10px', fontWeight: 650 },

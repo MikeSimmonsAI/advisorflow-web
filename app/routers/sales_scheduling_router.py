@@ -985,6 +985,12 @@ def prospect_confirm_context(token: str, db: Session = Depends(get_db)):
         "brand_name": ident.get("name"),
         "support_phone": ident.get("support_phone"),
         "accent": ident.get("accent"),
+        # THE BRAND IS CORRECT HERE, unlike on /book and /survey. This page is
+        # opened by a PROSPECT of the platform - somebody being sold EvoSys Pro
+        # or BookaBoost - so the platform's name is who they are dealing with.
+        # What was wrong is that the tab said whatever the static index.html
+        # said, so a BookaBoost prospect saw "EvoSys Pro". Resolved per brand.
+        "document_title": ident.get("name") or "",
     }
 
 

@@ -206,6 +206,22 @@ class Organization(Base):
     org_address = Column(String, nullable=True)
     org_phone = Column(String, nullable=True)
 
+    # ── how hard this customer is willing to chase one family ───────────────
+    #
+    # These were a module-level `MAX_CALL_ATTEMPTS = 3` in the orchestrator,
+    # which meant a pilot could be blocked with no supported way to unblock it:
+    # the constant counts call ROWS, so once a lead hit three there was no
+    # remedy short of deleting call history or editing code and deploying.
+    # That contradicts the standing rule that a customer must be operable
+    # without a shell, a seed script or a developer.
+    #
+    # NULL means "not set here" and defers to the next level down; it never
+    # means unlimited. The resolver clamps every level, so no value written
+    # anywhere can produce an unbounded dial path.
+    max_call_attempts = Column(Integer, nullable=True)        # LIVE conversations
+    max_dial_attempts = Column(Integer, nullable=True)        # dials, incl. voicemail/no-answer
+    redial_cooldown_minutes = Column(Integer, nullable=True)  # minimum gap between dials
+
     # Social media links — shown in post-appointment survey
     facebook_url = Column(String, nullable=True)
     google_review_url = Column(String, nullable=True)
@@ -473,6 +489,28 @@ class Lead(Base):
     phone = Column(String, nullable=True)  # E.164 normalized
     phone_raw = Column(String, nullable=True)  # original as imported
     email = Column(String, nullable=True)
+
+    # ── the number they asked us to use, which is not the number we dialled ──
+    #
+    # A family on the phone often gives a different callback number than the
+    # one in the file - a mobile instead of a landline, a spouse's phone. That
+    # is new information about THIS family, not evidence of a different one.
+    #
+    # Before this existed, the booking bridge matched the spoken number against
+    # every lead in the tenant and attached the appointment to whichever record
+    # happened to carry it. A real appointment landed on a second Mike Simmons
+    # row that had no email address, so no confirmation could be sent, and that
+    # family's history was split across two records that neither of them owned
+    # entirely. Storing it here keeps one family, one record.
+    #
+    # `phone` is NOT touched. It is the number the campaign dialled and the key
+    # every prior message, suppression check and call attempt is reconciled
+    # against; changing it silently from something a caller said out loud - and
+    # a transcript heard - is how a lead's identity drifts. Promoting a callback
+    # to primary is an explicit edit through PATCH /leads/{id}.
+    callback_phone = Column(String, nullable=True)          # normalized, same format as `phone`
+    callback_phone_source = Column(String, nullable=True)   # e.g. "voice:booking"
+    callback_phone_at = Column(DateTime, nullable=True)
 
     tier = Column(String, nullable=True)  # pre_need, at_need, imminent, contract_sold, email_only, etc
     engagement_temperature = Column(SAEnum(EngagementTemperature), default=EngagementTemperature.UNKNOWN)
@@ -1161,6 +1199,22 @@ class VoiceCall(Base):
     callback_at       = Column(DateTime, nullable=True)                  # caller asked to be rung back then
     booking_link_id   = Column(String, nullable=True, index=True)        # the appointment this call produced
 
+    # ── WHO, IF ANYONE, ACTUALLY PICKED UP ─────────────────────────────────
+    #
+    # `outcome` above answers "what came of the call". These answer the prior
+    # question the attempt cap depends on: was there a person on the line?
+    #
+    # It mattered immediately. A test call reached a full voicemail box,
+    # lasted thirteen seconds, held no conversation - and consumed the third
+    # and final permitted attempt, because the cap counted rows. A family who
+    # is simply out is not a family who has heard the pitch and declined.
+    #
+    # `answered_by` is the observed fact; `is_live_conversation` is the
+    # single derived flag the cap reads, so the counting rule lives in one
+    # place instead of being re-derived at each call site.
+    answered_by         = Column(String, nullable=True)   # human | voicemail | no_answer | busy | failed | unknown
+    is_live_conversation = Column(Boolean, nullable=True) # True only for `human`
+
 
 # ── Voice agent configuration ─────────────────────────────────────────────────
 # organization → provider → agent → outbound number.
@@ -1190,6 +1244,13 @@ class VoiceAgentConfig(Base):
     from_number     = Column(String, nullable=False)                     # E.164, provider-owned or imported
     use_case        = Column(String, nullable=False, default="file_check")
     label           = Column(String, nullable=True)                      # human name for the console
+
+    # THE USE-CASE OVERRIDE for attempt policy. A file check and a reminder
+    # call do not deserve the same persistence, and this row is already where
+    # "which agent, which number, for which use case" is decided. NULL defers
+    # to the organization, then to the system default. Never unlimited.
+    max_call_attempts = Column(Integer, nullable=True)
+    max_dial_attempts = Column(Integer, nullable=True)
 
     # Per-org credential OVERRIDE. NULL means "use the platform key from the
     # environment", which is the normal case. This exists so a white-label
@@ -1226,6 +1287,12 @@ class VoiceCallCampaign(Base):
     lead_ids        = Column(Text, nullable=True)        # JSON array of lead IDs
     tier_filter     = Column(String, nullable=True)      # e.g. "pre_need,at_need"
     total_leads     = Column(Integer, default=0)
+
+    # THE MOST SPECIFIC attempt override there is: this campaign, these leads.
+    # NULL defers to the use case, then the organization, then the system
+    # default. Never unlimited - see `voice_attempt_policy`.
+    max_call_attempts = Column(Integer, nullable=True)
+    max_dial_attempts = Column(Integer, nullable=True)
 
     # Progress
     calls_initiated = Column(Integer, default=0)

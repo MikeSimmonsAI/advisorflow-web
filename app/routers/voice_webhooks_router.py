@@ -170,10 +170,47 @@ def _apply(db: Session, call: VoiceCall, event) -> None:
             except Exception:                                     # noqa: BLE001
                 pass
 
+        _classify_answer(call, event)
         _map_outcome(db, call, event)
         _correlate_booking(db, call)
         db.commit()
         return
+
+
+def _classify_answer(call: VoiceCall, event) -> None:
+    """Was there a person on the line, and does this dial spend a conversation.
+
+    Written on the same event that closes the call, before `_map_outcome`, so
+    the attempt counter and the disposition can never disagree about the same
+    row. `outcome` says what came of the call; this says whether anybody
+    answered it, and the two are not the same question - "no_answer" was
+    already being used for a voicemail that we DID reach.
+
+    The provider's verdict is preferred and the transcript is the fallback. The
+    call that made this necessary reached a full mailbox and Retell reported
+    nothing, because voicemail detection was off on the agent; the greeting is
+    right there in the transcript, so it is read.
+    """
+    from app.services.voice_attempt_policy import (classify_answer,
+                                                   is_live_conversation)
+    provider_said = None
+    for attr in ("answered_by", "answered_by_machine", "voicemail"):
+        v = getattr(event, attr, None)
+        if v is True and attr in ("answered_by_machine", "voicemail"):
+            provider_said = "voicemail"
+            break
+        if isinstance(v, str) and v.strip():
+            provider_said = v
+            break
+
+    call.answered_by = classify_answer(
+        disconnect_reason=call.disconnect_reason,
+        duration_seconds=call.duration_seconds,
+        transcript=call.transcript,
+        provider_answered_by=provider_said,
+        failed=(call.status == "failed"),
+    )
+    call.is_live_conversation = is_live_conversation(call.answered_by)
 
 
 def _map_outcome(db: Session, call: VoiceCall, event) -> None:
@@ -234,7 +271,11 @@ def _map_outcome(db: Session, call: VoiceCall, event) -> None:
         return
 
     if event.voicemail is True:
-        call.outcome = "no_answer"
+        # Its own disposition now. Reaching a machine and nobody picking up
+        # were both "no_answer", which made the two indistinguishable in the
+        # console and in every report built on it - and they call for different
+        # follow-up: a voicemail was heard, a no-answer was not.
+        call.outcome = "voicemail"
         call.voicemail_left = True
         return
 
@@ -244,6 +285,18 @@ def _map_outcome(db: Session, call: VoiceCall, event) -> None:
 
     if event.reached_person is False:
         call.outcome = "no_answer"
+        return
+
+    # The agent's analysis said nothing decisive. Fall back to what the line
+    # itself did, which `_classify_answer` has already worked out - otherwise a
+    # voicemail Retell did not flag is filed as a completed conversation, which
+    # is exactly how a thirteen-second call to a full mailbox came to look like
+    # a successful contact.
+    answered = (getattr(call, "answered_by", None) or "").strip().lower()
+    if answered in ("voicemail", "no_answer", "busy", "failed"):
+        call.outcome = answered
+        if answered == "voicemail":
+            call.voicemail_left = True
         return
 
     if not call.outcome:

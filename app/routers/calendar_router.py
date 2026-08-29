@@ -126,8 +126,20 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
     # Resolve the identity the FAMILY should see. `org.name` is the account
     # name; a customer trading under a different name has `brand_name`, and
     # the platform's own name must never appear here.
-    from app.services.public_identity import identity_for_org
-    _ident = identity_for_org(db, booking.organization_id if hasattr(booking, "organization_id") else (org.id if org else None))
+    #
+    # WHERE THE ORG ID COMES FROM. `booking_links` has no `organization_id`
+    # column, so the previous `hasattr(booking, "organization_id")` was always
+    # False and this resolved an identity for None - which is why a Restland
+    # family opened a booking page with a blank header and "EvoSys Pro" in the
+    # browser tab. Tenancy lives on the LEAD, which is the authoritative owner
+    # of the record; the advisor is the fallback for a lead that somehow has
+    # none. The `org` lookup above stays for the legacy fields below it.
+    from app.services.public_identity import identity_for_org, public_branding
+    _org_id = (getattr(lead, "organization_id", None)
+               or getattr(advisor, "organization_id", None)
+               or (org.id if org else None))
+    _ident = identity_for_org(db, _org_id)
+    _branding = public_branding(db, _org_id)
 
     return {
         "token": token,
@@ -140,7 +152,10 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
         "org_name": _ident.customer_facing_name or (org.name if org else ""),
         "org_address": _ident.business_address or (org.org_address if org and hasattr(org, 'org_address') else ""),
         "org_phone": _ident.business_phone or (org.org_phone if org and hasattr(org, 'org_phone') else ""),
-        "brand_color": (getattr(org, "brand_color_primary", None) if org else None),
+        "brand_color": _branding["brand_color"] or (getattr(org, "brand_color_primary", None) if org else None),
+        # The whole family-facing identity in one object, resolved once. The
+        # flat fields above are kept because live links already read them.
+        "branding": _branding,
         "timezone": (getattr(advisor, "booking_timezone", None) if advisor else None) or "America/Chicago",
         "appt_label": appt_label,
         "appt_duration": appt_duration,

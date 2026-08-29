@@ -57,6 +57,20 @@ export default function AppointmentConfirmPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  // THE BRAND, NOT THE PLATFORM'S ONE STATIC TITLE.
+  //
+  // Unlike /book and /survey, the name a prospect should see here IS the
+  // platform's - they are being sold EvoSys Pro or BookaBoost. The bug was
+  // that the tab showed whatever index.html hard-codes, so a BookaBoost
+  // prospect read "EvoSys Pro". Resolved per brand, server-side.
+  const resolvedTitle = ctx?.document_title || ctx?.brand_name || '';
+  useEffect(() => {
+    if (!resolvedTitle) return undefined;
+    const previous = document.title;
+    document.title = resolvedTitle;
+    return () => { document.title = previous; };
+  }, [resolvedTitle]);
+
   async function respond(action) {
     if (pending) return;                 // guards double submit
     setPending(action);

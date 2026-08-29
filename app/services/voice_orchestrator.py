@@ -37,7 +37,16 @@ from app.services.comms.base import VoiceCallRequest
 log = logging.getLogger(__name__)
 
 USE_CASE_FILE_CHECK = "file_check"
-MAX_CALL_ATTEMPTS = 3
+
+# Kept as a name because other modules and gates import it, but it is no longer
+# the authority: it is the SYSTEM DEFAULT that
+# `voice_attempt_policy.resolve_attempt_policy` lands on when no campaign, use
+# case or organization has said otherwise. Read the policy, never this.
+from app.services.voice_attempt_policy import (                    # noqa: E402
+    DEFAULT_MAX_CALL_ATTEMPTS as MAX_CALL_ATTEMPTS,
+    is_live_conversation,
+    resolve_attempt_policy,
+)
 
 
 @dataclass
@@ -78,20 +87,64 @@ def check_call_eligibility(db: Session, lead: Lead, organization_id: str,
         return Eligibility(False, "Number is on the organization's suppression list.",
                            "suppressed")
 
-    # Attempt cap, mirroring the existing voice convention.
-    prior = (db.query(VoiceCall)
-             .filter(VoiceCall.lead_id == lead.id)
-             .count())
-    if prior >= MAX_CALL_ATTEMPTS:
-        return Eligibility(False,
-                           "Maximum of %d call attempts already made." % MAX_CALL_ATTEMPTS,
-                           "max_attempts")
-
     config = active_voice_config(db, organization_id, use_case)
     if config is None:
         return Eligibility(False,
                            "No active voice agent is configured for this organization.",
                            "no_config")
+
+    # ── ATTEMPT POLICY ──────────────────────────────────────────────────────
+    #
+    # Two caps and a cooldown, resolved through campaign → use case →
+    # organization → system default. The config lookup moved ABOVE this so the
+    # use-case level can be consulted; a missing config is still refused first,
+    # because a call that cannot be placed should not report a cap as the
+    # reason.
+    #
+    # The caps count different things. A voicemail is a DIAL: the family was
+    # never spoken to, and burning their last conversation on a full mailbox is
+    # what this separation exists to stop. Rows written before `answered_by`
+    # existed count as conversations, so no lead gains attempts retroactively.
+    policy = resolve_attempt_policy(db, organization_id, config=config)
+
+    rows = (db.query(VoiceCall)
+            .filter(VoiceCall.lead_id == lead.id)
+            .all())
+    dials = len(rows)
+    conversations = sum(1 for r in rows
+                        if is_live_conversation(getattr(r, "answered_by", None)))
+
+    if conversations >= policy.max_call_attempts:
+        return Eligibility(
+            False,
+            "Maximum of %d live conversations already held with this lead."
+            % policy.max_call_attempts,
+            "max_attempts")
+
+    if dials >= policy.max_dial_attempts:
+        return Eligibility(
+            False,
+            "Maximum of %d dial attempts already made to this lead."
+            % policy.max_dial_attempts,
+            "max_dials")
+
+    # A permitted retry must not become a redial loop. The most recent dial,
+    # whatever its outcome, sets the earliest the phone may ring again.
+    last_at = None
+    for r in rows:
+        for field in ("created_at", "started_at", "ended_at"):
+            v = getattr(r, field, None)
+            if v is not None and (last_at is None or v > last_at):
+                last_at = v
+    if last_at is not None and policy.redial_cooldown_minutes:
+        from datetime import timedelta
+        earliest = last_at + timedelta(minutes=policy.redial_cooldown_minutes)
+        if datetime.utcnow() < earliest:
+            return Eligibility(
+                False,
+                "This lead was called recently; the next attempt is allowed "
+                "after %s UTC." % earliest.replace(microsecond=0).isoformat(),
+                "cooldown")
 
     provider = get_voice_provider(db, config)
     ready, why = provider.is_ready()

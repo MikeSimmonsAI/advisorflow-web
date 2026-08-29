@@ -86,14 +86,27 @@ class PublicIdentity(object):
     __slots__ = ("organization_id", "brand_name", "from_email", "resend_api_key",
                  "public_base_url", "support_phone", "website", "source",
                  "reply_to_email", "cc_email", "customer_facing_name",
-                 "business_address", "business_phone")
+                 "business_address", "business_phone",
+                 "logo_url", "brand_color", "accent_color", "tagline")
 
     def __init__(self, organization_id=None, brand_name=None, from_email=None,
                  resend_api_key=None, public_base_url=None, support_phone=None,
                  website=None, source=None, reply_to_email=None, cc_email=None,
                  customer_facing_name=None, business_address=None,
-                 business_phone=None):
+                 business_phone=None, logo_url=None, brand_color=None,
+                 accent_color=None, tagline=None):
         self.organization_id = organization_id
+        # THE LOOK OF THE BUSINESS, for pages a family opens.
+        #
+        # Organization-level ONLY, with no platform fallback anywhere below.
+        # A missing customer logo must render as no logo; falling back to the
+        # platform's would put the EvoSys Pro mark at the top of a funeral
+        # home's booking page, which is the same mistake as the Vercel
+        # hostname, only louder.
+        self.logo_url = logo_url
+        self.brand_color = brand_color
+        self.accent_color = accent_color
+        self.tagline = tagline
         # The business's OWN address and phone, as a family would be told them.
         # Distinct from `support_phone`, which belongs to the platform: a
         # family calling back must reach the funeral home, not EvoSys.
@@ -129,6 +142,10 @@ class PublicIdentity(object):
             "customer_facing_name": self.customer_facing_name,
             "business_address": self.business_address,
             "business_phone": self.business_phone,
+            "logo_url": self.logo_url,
+            "brand_color": self.brand_color,
+            "accent_color": self.accent_color,
+            "tagline": self.tagline,
             "from_email": self.from_email,
             "reply_to_email": self.reply_to_email,
             "cc_email": self.cc_email,
@@ -197,6 +214,14 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
         ident.source["customer_facing_name"] = (
             "organization.brand_name" if getattr(org, "brand_name", None)
             else "organization.name")
+        # Visual identity. Read from the organization and nowhere else - see
+        # the note on these attributes in PublicIdentity.
+        ident.logo_url = getattr(org, "brand_logo_url", None) or None
+        ident.brand_color = getattr(org, "brand_color_primary", None) or None
+        ident.accent_color = getattr(org, "brand_color_accent", None) or None
+        ident.tagline = getattr(org, "tagline", None) or None
+        for _f in ("logo_url", "brand_color", "accent_color", "tagline"):
+            ident.source[_f] = ("organization" if getattr(ident, _f) else "unset")
 
     # ── from address ────────────────────────────────────────────────────────
     # 1. organization override
@@ -411,3 +436,43 @@ def survey_url(db: Session, organization_id: Optional[str], token: str) -> str:
                   "link cannot be built", organization_id)
         return ""
     return "%s/survey/%s" % (base, token)
+
+
+# ── what a family is allowed to see on a public page ────────────────────────
+
+def public_branding(db: Session, organization_id: Optional[str]) -> dict:
+    """The branding block for a page a FAMILY opens: /book, /survey, /confirm.
+
+    One shape, one resolver, three pages. Written as a function rather than
+    left to each router because the failure it prevents is not a crash - it is
+    a booking page that renders with a blank header and "EvoSys Pro" in the
+    browser tab, which is what a Restland family saw. Nobody notices that in a
+    diff; they notice it on their phone.
+
+    WHAT IS DELIBERATELY ABSENT: `brand_name`. That is the PLATFORM's name, and
+    this payload is consumed by pages with no login behind them. Leaving it out
+    means a frontend cannot render it by accident, which is a stronger
+    guarantee than asking every page to remember not to.
+
+    `name` may be empty when an organization has not been given one. The page
+    must then render no header at all rather than a placeholder - an unbranded
+    page is a gap; a page branded with the platform is a leak.
+    """
+    ident = identity_for_org(db, organization_id)
+    return {
+        "name": ident.customer_facing_name or "",
+        "logo_url": ident.logo_url or "",
+        "address": ident.business_address or "",
+        "phone": ident.business_phone or "",
+        "brand_color": ident.brand_color or "",
+        "accent_color": ident.accent_color or "",
+        "tagline": ident.tagline or "",
+        # The <title> the page should set. Named explicitly so the frontend
+        # never has to compose one, and so an unbranded org yields "" and the
+        # page leaves the static title alone rather than inventing something.
+        "document_title": (ident.customer_facing_name or ""),
+        "source": {k: v for k, v in (ident.source or {}).items()
+                   if k in ("customer_facing_name", "logo_url", "brand_color",
+                            "accent_color", "tagline", "business_address",
+                            "business_phone")},
+    }

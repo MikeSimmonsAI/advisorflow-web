@@ -245,6 +245,13 @@ class TenantBookIn(BaseModel):
     family_phone: Optional[str] = None
     family_email: Optional[str] = None
     notes: Optional[str] = None
+    # WHICH CALL THIS BOOKING BELONGS TO. The provider's own call id, which the
+    # agent can send as {{call_id}}. It identifies the lead EvoSys dialled, so
+    # a callback number the family speaks is stored against that lead rather
+    # than re-keying the appointment onto whichever record happens to carry the
+    # spoken number. Optional: when absent the bridge falls back to the most
+    # recent call this organization placed, which is the conversation in hand.
+    call_id: Optional[str] = None
 
 
 # ── tenant routes ───────────────────────────────────────────────────────────
@@ -347,7 +354,8 @@ def retell_tenant_book(request: Request, body: TenantBookIn,
             family_name=body.family_name,
             family_phone=body.family_phone,
             family_email=body.family_email,
-            notes=body.notes)
+            notes=body.notes,
+            call_id=body.call_id)
     except HTTPException as e:
         # `book` may already have rolled back; the audit row is written on a
         # clean session so a refusal is still recorded.

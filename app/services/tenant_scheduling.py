@@ -643,21 +643,126 @@ def find_prior_attempt(db: Session, cred: IntegrationCredential,
 
 # ── the family ──────────────────────────────────────────────────────────────
 
+CALLED_LEAD_LOOKBACK_MINUTES = 30
+
+
+def _same_number(a: Optional[str], b: Optional[str]) -> bool:
+    """Two spellings of one phone number. Compared on the last ten digits,
+    because `+18435328405`, `18435328405` and `843-532-8405` are one number and
+    all three spellings are live in this database right now."""
+    da = "".join(ch for ch in (a or "") if ch.isdigit())[-10:]
+    dbb = "".join(ch for ch in (b or "") if ch.isdigit())[-10:]
+    return bool(da) and da == dbb
+
+
+def _lead_from_call(db: Session, org: Organization,
+                    call_id: Optional[str]) -> Optional[Lead]:
+    """The lead EvoSys actually dialled for this conversation.
+
+    Preferred over any phone number spoken on the call. `call_id` is the
+    provider's own id for the call in progress; when the agent passes it the
+    answer is exact. Without one we take the most recent call this organization
+    placed inside a short window - the conversation the agent is standing in.
+    A booking arrives seconds after the family agrees to a time, so the window
+    is deliberately short rather than generous.
+
+    Tenant-scoped on the way in and on the way out: a call id belonging to
+    another customer resolves to nothing rather than to their lead.
+    """
+    from app.models.models import VoiceCall
+
+    try:
+        q = db.query(VoiceCall).filter(VoiceCall.organization_id == org.id)
+        call = None
+        if call_id:
+            call = q.filter(
+                VoiceCall.provider_call_id == str(call_id).strip()).first()
+        if call is None:
+            cutoff = datetime.utcnow() - timedelta(
+                minutes=CALLED_LEAD_LOOKBACK_MINUTES)
+            call = (q.filter(VoiceCall.created_at >= cutoff)
+                     .order_by(VoiceCall.created_at.desc())
+                     .first())
+    except Exception:
+        log.exception("tenant booking: could not read the in-flight call for "
+                      "org %s", getattr(org, "id", "?"))
+        return None
+
+    if call is None or not call.lead_id:
+        return None
+    return (db.query(Lead)
+            .filter(Lead.id == call.lead_id,
+                    Lead.organization_id == org.id).first())
+
+
+def record_callback_phone(lead: Lead, spoken: Optional[str],
+                          source: str = "voice:booking") -> Optional[str]:
+    """Keep a number the family gave out loud, WITHOUT rekeying the lead.
+
+    Returns the stored value, or None when there was nothing new to store.
+
+    `lead.phone` is left alone on purpose. It is the number the campaign
+    dialled and the key that every prior message, every suppression check and
+    every attempt count is reconciled against; rewriting it from a transcript
+    is how a lead's identity drifts away from its own history. Promoting a
+    callback to primary is an explicit edit through `PATCH /leads/{id}`, made
+    by a person who can see both numbers.
+
+    Nothing is stored when the spoken number is the one we already dialled - a
+    family confirming a number we read back to them is not new information.
+    """
+    spoken = (spoken or "").strip()
+    if not spoken:
+        return None
+    try:
+        from app.services.dedup_service import normalize_phone
+        normalized = normalize_phone(spoken) or spoken
+    except Exception:                                              # noqa: BLE001
+        normalized = spoken
+    if _same_number(normalized, getattr(lead, "phone", None)):
+        return None
+    if _same_number(normalized, getattr(lead, "callback_phone", None)):
+        return getattr(lead, "callback_phone", None)
+    try:
+        lead.callback_phone = normalized
+        lead.callback_phone_source = source
+        lead.callback_phone_at = datetime.utcnow()
+    except Exception:                                              # noqa: BLE001
+        # A booking must not fail because a secondary field could not be
+        # written. The appointment is the thing the family is waiting on.
+        log.exception("tenant booking: could not store callback phone for "
+                      "lead %s", getattr(lead, "id", "?"))
+        return None
+    return normalized
+
+
 def resolve_lead(db: Session, cred: IntegrationCredential, org: Organization,
                  advisor: User, lead_id: Optional[str], name: Optional[str],
-                 phone: Optional[str], email: Optional[str]) -> Lead:
+                 phone: Optional[str], email: Optional[str],
+                 call_id: Optional[str] = None) -> Lead:
     """The family this appointment is for.
 
-    Three cases, in order:
+    In order, with 2 being the product decision that overrides any phone
+    number spoken on the call:
 
     1. `lead_id` given — it must belong to THIS tenant. A lead id from another
        funeral home returns the same "not found" as one that never existed.
-    2. No id, but a phone or email we already hold for this tenant — reuse that
-       lead rather than creating a duplicate record for a family the funeral
-       home is already talking to. Matching is on phone or email, never on a
+    2. THE LEAD EVOSYS CALLED, identified from the voice call this booking is
+       being made during.
+    3. No id and no call — a phone or email we already hold for this tenant,
+       reused rather than duplicated. Matching is on phone or email, never on a
        similar name.
-    3. Otherwise a new lead, created with `source_file` marking where it came
+    4. Otherwise a new lead, created with `source_file` marking where it came
        from so nobody later wonders how it appeared.
+
+    WHY 2 EXISTS. It did not, and a live call proved the cost. Taffiney asked
+    for the best callback number, the family gave a different one, and this
+    function matched that number against every lead in the tenant and attached
+    the appointment to whichever record happened to carry it. The booking went
+    onto the right calendar and onto the WRONG family record — one with no
+    email address, so no confirmation could be sent — and that family's history
+    was split across two rows. A different callback number is a fact about the
+    family we called, not evidence of a different family.
 
     A booking REQUIRES a lead: `booking_links.lead_id` is NOT NULL, and the
     confirmation messaging has nobody to write to without one.
@@ -669,10 +774,16 @@ def resolve_lead(db: Session, cred: IntegrationCredential, org: Organization,
         if lead is None:
             # Absent and belonging-to-another-tenant give the same answer.
             raise HTTPException(status_code=404, detail="Lead not found.")
+        record_callback_phone(lead, phone)
         return lead
 
     phone = (phone or "").strip() or None
     email = (email or "").strip() or None
+
+    called = _lead_from_call(db, org, call_id)
+    if called is not None:
+        record_callback_phone(called, phone)
+        return called
 
     if phone or email:
         q = db.query(Lead).filter(Lead.organization_id == org.id)
@@ -744,6 +855,7 @@ def book(db: Session, cred: IntegrationCredential, advisor: User,
          family_phone: Optional[str] = None,
          family_email: Optional[str] = None,
          notes: Optional[str] = None,
+         call_id: Optional[str] = None,
          now_utc: Optional[datetime] = None) -> dict:
     """Take a time, having proved it is still free at this instant.
 
@@ -863,7 +975,7 @@ def book(db: Session, cred: IntegrationCredential, advisor: User,
 
     # ── the family ──
     lead = resolve_lead(db, cred, org, advisor, lead_id, family_name,
-                        family_phone, family_email)
+                        family_phone, family_email, call_id=call_id)
 
     # ── the booking ──
     # Same token format the SMS flow mints, so a link to this booking is a link

@@ -158,8 +158,10 @@ def get_survey_context_json(token: str, db: Session = Depends(get_db)):
     """
     followup, lead, advisor, org = _get_survey_context(db, token)
 
-    from app.services.public_identity import identity_for_org
-    ident = identity_for_org(db, org.id if org else None)
+    from app.services.public_identity import identity_for_org, public_branding
+    _org_id = (org.id if org else None) or getattr(lead, "organization_id", None)
+    ident = identity_for_org(db, _org_id)
+    branding = public_branding(db, _org_id)
 
     return {
         "token": token,
@@ -168,7 +170,11 @@ def get_survey_context_json(token: str, db: Session = Depends(get_db)):
         # The BUSINESS, never the platform.
         "business_name": ident.customer_facing_name or (org.name if org else "our team"),
         "business_phone": ident.business_phone,
-        "brand_color": _safe_color(getattr(org, "brand_color_primary", None) if org else None),
+        # Same resolved block the booking page uses, so the two pages a family
+        # sees in one week cannot end up branded differently.
+        "branding": branding,
+        "brand_color": _safe_color(branding["brand_color"]
+                                   or (getattr(org, "brand_color_primary", None) if org else None)),
         "review_url": getattr(org, "google_review_url", None) if org else None,
         "facebook_url": getattr(org, "facebook_url", None) if org else None,
         "instagram_url": getattr(org, "instagram_url", None) if org else None,

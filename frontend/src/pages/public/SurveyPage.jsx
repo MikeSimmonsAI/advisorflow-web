@@ -67,6 +67,16 @@ export default function SurveyPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  // The tab, for the same reason as on the booking page: the SPA's static
+  // title is the platform's name, and this page is opened by a family.
+  const resolvedTitle = ctx?.branding?.document_title || ctx?.business_name || '';
+  useEffect(() => {
+    if (!resolvedTitle) return undefined;
+    const previous = document.title;
+    document.title = resolvedTitle;
+    return () => { document.title = previous; };
+  }, [resolvedTitle]);
+
   async function submit() {
     if (!rating || submitting) return;     // guards double submit
     setSubmitting(true);
@@ -91,9 +101,12 @@ export default function SurveyPage() {
     }
   }
 
-  const accent = ctx?.brand_color || '#1f4e79';
-  const business = ctx?.business_name || '';
-  const rawPhone = ctx?.business_phone || '';
+  // Same resolved branding block the booking page renders, same fallbacks.
+  const brand = ctx?.branding || {};
+  const accent = brand.brand_color || ctx?.brand_color || '#1f4e79';
+  const business = brand.name || ctx?.business_name || '';
+  const businessLogo = brand.logo_url || '';
+  const rawPhone = brand.phone || ctx?.business_phone || '';
   const phone = formatPhone(rawPhone);
   const firstName = ctx?.first_name && ctx.first_name !== 'there' ? ctx.first_name : '';
   const S = styles(accent);
@@ -127,6 +140,9 @@ export default function SurveyPage() {
     <div style={S.page}>
       <div style={S.card}>
         <header style={S.header}>
+          {businessLogo ? (
+            <img src={businessLogo} alt={business} style={S.logo} />
+          ) : null}
           {business ? <div style={S.brand}>{business}</div> : null}
           {phone ? (
             <div style={S.brandSub}>
@@ -247,6 +263,7 @@ function styles(accent) {
       boxSizing: 'border-box',
     },
     header: { borderBottom: '1px solid #e8eaed', paddingBottom: 16, marginBottom: 22 },
+    logo: { maxHeight: 56, maxWidth: 240, display: 'block', marginBottom: 10 },
     brand: { fontSize: 19, fontWeight: 700, color: accent, letterSpacing: '-0.01em' },
     brandSub: { fontSize: 13.5, color: '#5f6368', marginTop: 3 },
     h1: { fontSize: 23, lineHeight: 1.25, margin: '0 0 10px', fontWeight: 650 },

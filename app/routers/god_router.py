@@ -1133,6 +1133,114 @@ def god_create_voice_agent(req: VoiceAgentCreate,
             "agent": _voice_agent_row(cfg, org.name, ready, why)}
 
 
+class AttemptPolicyUpdate(BaseModel):
+    """Every field optional, and null CLEARS the override at this level.
+
+    Clearing is as important as setting. Without it a number typed once could
+    only ever be replaced by another number, and there would be no way back to
+    "defer to the level below" short of editing the database.
+    """
+    max_call_attempts: Optional[int] = None
+    max_dial_attempts: Optional[int] = None
+    redial_cooldown_minutes: Optional[int] = None
+    clear: list[str] = []
+
+
+def _apply_attempt_policy(target, req: "AttemptPolicyUpdate", allowed: tuple):
+    """Write the fields this level supports, and refuse the ones it does not.
+
+    The ceilings are enforced in `voice_attempt_policy` on the way OUT, not
+    here, so a value stored before a ceiling changed still resolves correctly.
+    What this rejects is nonsense a human would want told back to them now:
+    zero and negatives, which mean nothing at any level.
+    """
+    from fastapi import HTTPException as _HTTPException
+    written = {}
+    for field in allowed:
+        if field in (req.clear or []):
+            setattr(target, field, None)
+            written[field] = None
+            continue
+        value = getattr(req, field, None)
+        if value is None:
+            continue
+        if int(value) <= 0:
+            raise _HTTPException(
+                400,
+                "%s must be a positive number. To remove this override and "
+                "defer to the level below, send it in `clear`." % field)
+        setattr(target, field, int(value))
+        written[field] = int(value)
+    for field in (req.clear or []):
+        if field not in allowed:
+            raise _HTTPException(
+                400, "%s cannot be set at this level." % field)
+    return written
+
+
+@router.patch("/orgs/{org_id}/attempt-policy")
+def god_set_org_attempt_policy(org_id: str, req: AttemptPolicyUpdate,
+                               god: User = Depends(require_god),
+                               db: Session = Depends(get_db)):
+    """The organization's own default call-attempt policy.
+
+    EXISTS SO A PILOT IS NOT A DEAD END. The cap used to be a constant in the
+    orchestrator that counted call rows, so a customer whose leads reached it
+    had no supported remedy at all - not a setting, not a console action.
+    Raising it meant editing code and deploying, which is the exact thing the
+    no-shell, no-seed-script rule forbids.
+
+    Ceilings still apply. This sets a customer's preference; it cannot buy an
+    unlimited dial path, and the resolver clamps whatever is stored here.
+    """
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org is None:
+        raise HTTPException(404, "Organization not found.")
+
+    written = _apply_attempt_policy(
+        org, req,
+        ("max_call_attempts", "max_dial_attempts", "redial_cooldown_minutes"))
+    db.commit()
+
+    from app.services.voice_attempt_policy import resolve_attempt_policy
+    log.info("AUDIT: GOD_SET_ATTEMPT_POLICY | admin=%s | org=%s | written=%s",
+             god.email, org_id, written)
+    return {"updated": True, "level": "organization", "written": written,
+            "resolved_without_campaign_or_use_case":
+                resolve_attempt_policy(db, org_id).as_dict()}
+
+
+@router.patch("/voice/agents/{config_id}/attempt-policy")
+def god_set_use_case_attempt_policy(config_id: str, req: AttemptPolicyUpdate,
+                                    god: User = Depends(require_god),
+                                    db: Session = Depends(get_db)):
+    """The USE-CASE override, which is this mapping.
+
+    A file check and an appointment reminder do not deserve the same
+    persistence, and this row is already where "which agent, which number, for
+    which use case" is decided - so it is where the use case says how hard to
+    try. `redial_cooldown_minutes` is deliberately NOT settable here: a
+    cooldown protects the family, not the campaign, so it belongs to the
+    organization and cannot be shortened per use case.
+    """
+    from app.models.models import VoiceAgentConfig
+    cfg = (db.query(VoiceAgentConfig)
+           .filter(VoiceAgentConfig.id == config_id).first())
+    if cfg is None:
+        raise HTTPException(404, "Voice agent mapping not found.")
+
+    written = _apply_attempt_policy(
+        cfg, req, ("max_call_attempts", "max_dial_attempts"))
+    db.commit()
+
+    from app.services.voice_attempt_policy import resolve_attempt_policy
+    log.info("AUDIT: GOD_SET_ATTEMPT_POLICY | admin=%s | config=%s | org=%s | "
+             "written=%s", god.email, config_id, cfg.organization_id, written)
+    return {"updated": True, "level": "use_case", "written": written,
+            "resolved": resolve_attempt_policy(db, cfg.organization_id,
+                                               config=cfg).as_dict()}
+
+
 @router.patch("/voice/agents/{config_id}/version")
 def god_set_voice_agent_version(config_id: str,
                                 req: VoiceAgentVersionUpdate,

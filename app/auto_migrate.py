@@ -84,6 +84,34 @@ COLUMNS_TO_ADD = [
     # letting the vendor pick whatever is newest.
     ("voice_agent_configs", "agent_version", "INTEGER"),
 
+    # ── Customer-ready closeout, 2026-08-29 ────────────────────────────────
+    #
+    # The spoken callback number. A family who gives a different number on the
+    # phone is still the same family; this holds what they said without
+    # rewriting `leads.phone`, which every prior message, suppression check and
+    # attempt count is reconciled against.
+    ("leads", "callback_phone", "VARCHAR"),
+    ("leads", "callback_phone_source", "VARCHAR"),
+    ("leads", "callback_phone_at", "TIMESTAMP"),
+
+    # Attempt policy, configurable instead of a constant in the orchestrator.
+    # All NULL by default, which defers to the next level down and finally to
+    # the system default of 3 - so this migration changes no live behaviour.
+    ("organizations", "max_call_attempts", "INTEGER"),
+    ("organizations", "max_dial_attempts", "INTEGER"),
+    ("organizations", "redial_cooldown_minutes", "INTEGER"),
+    ("voice_agent_configs", "max_call_attempts", "INTEGER"),
+    ("voice_agent_configs", "max_dial_attempts", "INTEGER"),
+    ("voice_call_campaigns", "max_call_attempts", "INTEGER"),
+    ("voice_call_campaigns", "max_dial_attempts", "INTEGER"),
+
+    # Was there a person on the line. NULL on every historical row, which the
+    # attempt counter treats as a live conversation - the conservative reading,
+    # because those rows predate the distinction and counting them keeps the
+    # existing cap exactly as strict as it was.
+    ("voice_calls", "answered_by", "VARCHAR"),
+    ("voice_calls", "is_live_conversation", "BOOLEAN"),
+
     ("demo_sites", "slot", "VARCHAR(32) DEFAULT 'website' NOT NULL"),
 
     # ── Per-deal custom recurring rate ─────────────────────────────────────
