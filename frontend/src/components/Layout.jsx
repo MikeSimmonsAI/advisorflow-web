@@ -13,40 +13,78 @@ import './Layout.css'
 const PLATFORM_THEME = detectTheme()
 const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 
-// Advisor-level nav — every logged-in user sees these
-const NAV_ITEMS = [
-  { to: '/', label: 'Overview', icon: 'grid' },
-  { to: '/leads', label: 'Leads', icon: 'users' },
-  { to: '/replies', label: 'Replies', icon: 'message' },
-  { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
-  { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
-  { to: '/activity', label: 'Activity', icon: 'send' },
-  { to: '/availability', label: 'Availability', icon: 'calendar' },
-  { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
-  { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
-  { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
-]
+// ── NAVIGATION ───────────────────────────────────────────────────────────────
+//
+// Grouped by WHAT SOMEBODY IS DOING, because the flat list had grown to twenty
+// items in two undifferentiated blocks and could not be used without scrolling
+// and reading every label. The groups are:
+//
+//   WORKSPACE      the day's work on leads and the diary
+//   ENGAGEMENT     the machinery that reaches out
+//   OPERATIONS     the data behind it
+//   ADMINISTRATION who may do what, and what it costs
+//
+// Nothing was removed and no route changed. Two labels did:
+//
+//   "Branding & Settings" -> "Organization"   — it wrapped onto two lines and
+//     overlapped the item beneath it, and it sat next to a separate "Settings"
+//     so the pair read as duplicates. They are not: /settings is the person's
+//     own profile, sender and calendars; /org-settings is the business.
+//
+//   "Master Dashboard" -> "Team Performance"  — it sounds like platform
+//     administration and is not. Every endpoint it calls (/admin/dashboard,
+//     /admin/leads, /admin/leads/unassigned, /admin/dashboard/metrics) is
+//     scoped to the caller's own organization: it is this org's advisors,
+//     lead pool and funnel. The old name invited an org admin to expect
+//     platform-wide reach and a platform owner to look for it in the wrong
+//     place. God/platform functions live under Platform Admin, below.
 
-// Admin-only nav items — always visible to org_admin and above (no feature flag)
-const ADMIN_ONLY_NAV_ITEMS = [
-  { to: '/billing',      label: 'Billing',       icon: 'credit-card' },
-  { to: '/cadence',      label: 'Cadence',        icon: 'repeat' },
-  { to: '/system-health',label: 'System Health',  icon: 'activity' },
-]
-
-const ADMIN_NAV_ITEMS = [
-  { to: '/admin',            label: 'Master Dashboard',   icon: 'shield',       featureKey: 'master_dashboard' },
-  { to: '/reports',          label: 'Reports',            icon: 'activity',     featureKey: 'reports' },
-  { to: '/users',            label: 'Users',              icon: 'user-plus',    featureKey: 'users' },
-  { to: '/campaigns',        label: 'Campaigns',          icon: 'target',       featureKey: 'campaigns' },
-  { to: '/crm',              label: 'CRM',                icon: 'database',     featureKey: null },
-  { to: '/crm-connectors',   label: 'CRM Connectors',     icon: 'link',         featureKey: null },
-  { to: '/lead-cleanup',     label: 'Lead Cleanup',       icon: 'users',        featureKey: 'lead_cleanup' },
-  { to: '/tier-definitions', label: 'Tier Config',        icon: 'layers',       featureKey: 'tier_config' },
-  { to: '/10dlc',            label: 'A2P 10DLC',          icon: 'shield-check', featureKey: 'a2p_10dlc' },
-  { to: '/org-settings',     label: 'Branding & Settings',icon: 'settings',    featureKey: 'branding_settings' },
-  { to: '/audit-log',        label: 'Audit Log',          icon: 'activity',     featureKey: 'audit_log' },
+const NAV_GROUPS = [
+  {
+    label: 'Workspace',
+    items: [
+      { to: '/', label: 'Overview', icon: 'grid' },
+      { to: '/leads', label: 'Leads', icon: 'users' },
+      { to: '/replies', label: 'Replies', icon: 'message' },
+      { to: '/activity', label: 'Activity', icon: 'send' },
+      { to: '/availability', label: 'Availability', icon: 'calendar' },
+      { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
+    ],
+  },
+  {
+    label: 'Engagement',
+    items: [
+      { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
+      { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
+      { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
+      { to: '/cadence', label: 'Cadence', icon: 'repeat', adminOnly: true },
+      { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
+      { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
+    ],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { to: '/crm', label: 'CRM', icon: 'database', adminOnly: true, featureKey: null },
+      { to: '/crm-connectors', label: 'CRM Connectors', icon: 'link', adminOnly: true, featureKey: null },
+      { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users', adminOnly: true, featureKey: 'lead_cleanup' },
+      { to: '/admin', label: 'Team Performance', icon: 'shield', adminOnly: true, featureKey: 'master_dashboard' },
+      { to: '/reports', label: 'Reports', icon: 'activity', adminOnly: true, featureKey: 'reports' },
+    ],
+  },
+  {
+    label: 'Administration',
+    items: [
+      { to: '/users', label: 'Users', icon: 'user-plus', adminOnly: true, featureKey: 'users' },
+      { to: '/settings', label: 'My Settings', icon: 'settings' },
+      { to: '/org-settings', label: 'Organization', icon: 'building', adminOnly: true, featureKey: 'branding_settings' },
+      { to: '/tier-definitions', label: 'Tier Config', icon: 'layers', adminOnly: true, featureKey: 'tier_config' },
+      { to: '/10dlc', label: 'A2P 10DLC', icon: 'shield-check', adminOnly: true, featureKey: 'a2p_10dlc' },
+      { to: '/audit-log', label: 'Audit Log', icon: 'activity', adminOnly: true, featureKey: 'audit_log' },
+      { to: '/system-health', label: 'System Health', icon: 'activity', adminOnly: true },
+      { to: '/billing', label: 'Billing', icon: 'credit-card', adminOnly: true },
+    ],
+  },
 ]
 
 // Platform Admin — super admin only, always visible
@@ -392,39 +430,39 @@ export default function Layout({ children }) {
             </>
           )}
 
-          {NAV_ITEMS.filter(item => !item.fiberOnly || (branding && branding.industry === 'fiber')).map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.to === '/'}
-              className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-              onClick={closeSidebar}
-              title={sidebarCollapsed ? item.label : undefined}
-            >
-              <Icon name={item.icon} />{!sidebarCollapsed && item.label}
-            </NavLink>
-          ))}
-
-          {(user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin) && (
-            <>
-              <div className="nav-divider" />
-              {ADMIN_ONLY_NAV_ITEMS.map((item) => (
-                <NavLink key={item.to} to={item.to}
-                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-                  onClick={closeSidebar}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <Icon name={item.icon} />{!sidebarCollapsed && item.label}
-                </NavLink>
-              ))}
-              {ADMIN_NAV_ITEMS.filter(item => isFeatureEnabled(item.featureKey)).map((item) => (
-                <NavLink key={item.to} to={item.to}
-                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-                  onClick={closeSidebar}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <Icon name={item.icon} />{!sidebarCollapsed && item.label}
-                </NavLink>
-              ))}
-            </>
-          )}
+          {/* Grouped navigation. Visibility rules are UNCHANGED — an item that
+              needed org_admin still needs it, and an item behind a feature flag
+              is still behind it. Grouping decides only where a visible item
+              sits. A group whose items are all hidden renders nothing at all,
+              so a plain advisor does not see four empty headings. */}
+          {(() => {
+            const isOrgAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin
+            const visible = (item) => {
+              if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
+              if (item.adminOnly && !isOrgAdmin) return false
+              if (item.featureKey !== undefined && !isFeatureEnabled(item.featureKey)) return false
+              return true
+            }
+            return NAV_GROUPS.map((group) => {
+              const items = group.items.filter(visible)
+              if (items.length === 0) return null
+              return (
+                <div key={group.label} className="nav-section">
+                  {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
+                  {sidebarCollapsed && <div className="nav-divider" />}
+                  {items.map((item) => (
+                    <NavLink key={item.to} to={item.to} end={item.to === '/'}
+                      className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                      onClick={closeSidebar}
+                      title={item.label}
+                    >
+                      <Icon name={item.icon} />{!sidebarCollapsed && item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              )
+            })
+          })()}
 
           {(user?.role === 'super_admin' || isGodAdmin) && (
             <>

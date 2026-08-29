@@ -214,8 +214,23 @@ def main():
     r = signed_cb(c, msg_sid, "delivered")
     check("the endpoint exists and accepts a properly signed callback",
           r.status_code == 200, "%s %s" % (r.status_code, r.text[:120]))
-    check("...and reports the message updated",
-          r.json().get("status") == "updated", r.json())
+    # WHAT TWILIO IS GIVEN BACK.
+    #
+    # This used to assert a JSON body, `{"status": "updated"}`. That body is
+    # precisely what earned error 12300, "Invalid Content-Type", against the
+    # account on every delivery receipt: Twilio fetches a webhook and expects
+    # TwiML. The processing was always right and the reply was always the wrong
+    # shape, so the console filled with errors while receipts persisted fine.
+    #
+    # The contract is now asserted instead of the old body, and the assertion
+    # that actually matters - that the receipt reached the database - is the
+    # check immediately below, unchanged.
+    check("...and answers Twilio with XML, not JSON (this is error 12300)",
+          "xml" in (r.headers.get("content-type") or "").lower(),
+          r.headers.get("content-type"))
+    check("...with a valid, empty TwiML document",
+          r.text.strip().endswith("</Response>") and "<Message" not in r.text,
+          r.text[:120])
 
     db = SessionLocal()
     fresh = db.query(Message).filter(Message.id == msg_id).first()

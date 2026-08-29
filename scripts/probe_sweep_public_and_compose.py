@@ -513,6 +513,189 @@ check("12. an unrecognised number still refuses a cross-org lookup",
       "no matching" in inbound.lower() and "cross-org" in inbound.lower())
 
 
+# ── 13. cleanup is narrow, dry-run first, and silent ────────────────────────
+
+print("\n[13] CLEANUP TOUCHES ONE RECORD AND TELLS NOBODY")
+
+maint = read("app/routers/god_maintenance_router.py")
+
+check("13. it is god-only",
+      "Depends(require_god)" in maint and maint.count("require_god") >= 3)
+check("13. the caller must name ONE booking by id",
+      "booking_id: str" in maint and "apply: bool = False" in maint)
+check("13. it DEFAULTS to a dry run",
+      "apply: bool = False" in maint and 'if not req.apply:' in maint)
+check("13. the caller must also state the organization",
+      "organization_id: str" in maint)
+check("13. and a booking from another organization is refused",
+      "owning_org != req.organization_id" in maint and "Refusing" in maint)
+
+# The whole point: none of the messaging helpers may be reachable from here.
+#
+# Tested against the module's actual IDENTIFIERS, not its text. The docstring
+# has to name `on_booking_cancelled` in order to explain why this endpoint does
+# NOT call it, and a probe that cannot tell an explanation from a call would
+# force that explanation to be deleted - which is exactly the comment a future
+# reader most needs.
+import ast as _ast                                                   # noqa: E402
+_maint_ast = _ast.parse(maint)
+_maint_names = set()
+for _n in _ast.walk(_maint_ast):
+    if isinstance(_n, _ast.Name):
+        _maint_names.add(_n.id)
+    elif isinstance(_n, _ast.Attribute):
+        _maint_names.add(_n.attr)
+    elif isinstance(_n, _ast.alias):
+        _maint_names.add((_n.asname or _n.name).split(".")[-1])
+    elif isinstance(_n, _ast.ImportFrom):
+        _maint_names.add(_n.module or "")
+
+for forbidden in ("on_booking_cancelled", "send_sms", "send_mms",
+                  "send_email_via_provider", "Emails", "TwilioClient", "Client",
+                  "start_cadence", "restart_cadence", "notify_hot_reply"):
+    check("13. it cannot call %s" % forbidden, forbidden not in _maint_names)
+check("13. the one helper it does use is the communication-free one",
+      "cancel_calendar_event" in _maint_names)
+
+check("13. nothing is deleted - rows are marked",
+      "DELETE FROM" not in maint.upper() and "db.delete(" not in maint)
+check("13. the cadence is explicitly left alone",
+      "no cadence restart" in maint)
+check("13. an apply is audited under the god admin's own identity",
+      "GOD_BOOKING_CLEANUP_APPLIED" in maint and "god.email" in maint)
+check("13. a dry run is audited too",
+      "GOD_BOOKING_CLEANUP_DRYRUN" in maint)
+
+from app.routers import god_maintenance_router as gm                 # noqa: E402
+check("13. +14695537417 and 4695537417 are recognised as one number",
+      gm._same_number("+14695537417", "4695537417"))
+check("13. and so is (469) 553-7417",
+      gm._same_number("+14695537417", "(469) 553-7417"))
+check("13. a different number is not matched",
+      not gm._same_number("+14695537417", "+18435328405"))
+check("13. an empty value never matches anything",
+      not gm._same_number("", "+14695537417")
+      and not gm._same_number("+14695537417", None))
+
+check("13. the phone audit is read-only and says so",
+      '"read_only": True' in maint)
+check("13. it reports ownership rather than merging records",
+      "never merged" in maint or "never inferred and never merged" in maint)
+
+
+# ── 14. calendar management, and disconnect that fails closed ───────────────
+
+print("\n[14] AN ADVISOR CAN SEE AND UNDO THEIR OWN CALENDAR")
+
+conn_router = read("app/routers/calendar_connections_router.py")
+main_py = read("app/main.py")
+
+# Comments stripped for the same reason as elsewhere: the note above `_caller`
+# has to name `require_sales_member` to record what the dependency used to be.
+_conn_live = "\n".join(l for l in conn_router.splitlines()
+                       if not l.strip().startswith("#"))
+_conn_live = re.sub(r'"""(?:.|\n)*?"""', '', _conn_live)
+check("14. the endpoints are reachable by an org advisor, not only sales",
+      "_caller = get_current_user" in conn_router
+      and "require_sales_member" not in _conn_live)
+check("14. mounted for the Sales Workspace as before",
+      'prefix="/sales/calendar"' in main_py)
+check("14. and mounted once more for everyone else",
+      'prefix="/me/calendar"' in main_py)
+check("14. it is ONE router, not a second implementation",
+      main_py.count("calendar_connections_router)") == 0
+      and main_py.count("app.include_router(calendar_connections_router,") == 2)
+
+check("14. every provider is listed, connected or not",
+      "for p in PROVIDERS" in conn_router)
+check("14. the account email is reported",
+      '"account_email"' in conn_router)
+check("14. 'has a token' is reported separately from 'can read the calendar'",
+      '"has_token"' in conn_router and '"calendar_scope_ok"' in conn_router)
+check("14. the CONFIGURED provider is reported next to the ACTIVE one",
+      '"configured_provider"' in conn_router and '"active_provider"' in conn_router)
+
+disc = conn_router[conn_router.index('@router.post("/connections/{provider}/disconnect")'):]
+check("14. disconnect affects only the named provider",
+      "_token_field(provider)" in disc
+      and "CalendarConnection.provider == provider" in disc)
+check("14. it clears that provider's credentials",
+      "setattr(user, _token_field(provider), None)" in disc)
+check("14. it marks the connection inactive",
+      "conn.is_connected = False" in disc)
+check("14. it only ever touches the CALLER's own rows",
+      disc.count("user.id") >= 2 and "organization_id" not in disc)
+check("14. FAILS CLOSED: disconnecting the configured provider warns rather "
+      "than switching to the other one",
+      "configured == provider" in disc and '"warning"' in disc)
+check("14. and does not silently reassign the configured provider",
+      "calendar_provider =" not in disc)
+check("14. historical appointments keep their event ids",
+      "external_event_id" in disc and "deliberately" in disc)
+
+settings_jsx = read("frontend/src/pages/Settings.jsx")
+check("14. the UI confirms before disconnecting",
+      "window.confirm(" in settings_jsx and "Disconnect ${c.label}" in settings_jsx)
+check("14. and warns when it is the calendar scheduling uses",
+      "availability will be reported as unavailable" in settings_jsx)
+check("14. the panel offers connect, reconnect, test and disconnect",
+      "connectCalendarProvider" in settings_jsx and "testCalendar" in settings_jsx
+      and "disconnectCalendar" in settings_jsx)
+check("14. it reads state from the backend rather than guessing from a token",
+      "/me/calendar/connections" in settings_jsx)
+
+
+# ── 15. navigation says what things are ─────────────────────────────────────
+
+print("\n[15] NAVIGATION")
+
+layout = read("frontend/src/components/Layout.jsx")
+# Comments stripped: the block above NAV_GROUPS has to quote both old labels in
+# order to record WHY they were renamed, and a probe that reads prose as code
+# would make that note impossible to write.
+layout_live = re.sub(r'/\*.*?\*/', '', layout, flags=re.S)
+layout_live = "\n".join(l for l in layout_live.splitlines()
+                        if not l.strip().startswith("//"))
+
+check("15. the sidebar is grouped",
+      "NAV_GROUPS" in layout)
+for group in ("Workspace", "Engagement", "Operations", "Administration"):
+    check("15. group %s exists" % group, "label: '%s'" % group in layout)
+
+check("15. 'Master Dashboard' is gone - it was never platform-wide",
+      "Master Dashboard" not in layout_live)
+check("15. renamed to what it actually shows, this org's team",
+      "'Team Performance'" in layout)
+check("15. it still points at the same org-scoped route",
+      "to: '/admin', label: 'Team Performance'" in layout)
+
+check("15. 'Branding & Settings' no longer wraps into its neighbour",
+      "Branding & Settings" not in layout_live)
+check("15. the two settings entries are distinguishable",
+      "'My Settings'" in layout and "'Organization'" in layout)
+
+layout_css = read("frontend/src/components/Layout.css")
+check("15. and a long label can no longer wrap at all",
+      "white-space: nowrap" in layout_css and "text-overflow: ellipsis" in layout_css)
+
+check("15. visibility rules are unchanged - admin items still need admin",
+      "item.adminOnly && !isOrgAdmin" in layout)
+check("15. and feature flags are still honoured",
+      "isFeatureEnabled(item.featureKey)" in layout)
+check("15. an empty group renders nothing rather than a bare heading",
+      "if (items.length === 0) return null" in layout)
+check("15. platform functions stay in Platform Admin",
+      "SUPER_ADMIN_NAV_ITEMS" in layout and "Platform Admin" in layout)
+
+# Every route the sidebar points at must exist in the router, or the tidy-up
+# has quietly created a dead menu item.
+app_routes = set(re.findall(r'path="([^"]+)"', app_jsx))
+nav_targets = set(re.findall(r"to: '([^']+)'", layout))
+missing = sorted(t for t in nav_targets
+                 if t not in app_routes and t != "/" )
+check("15. every sidebar destination is a real route", not missing, missing)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

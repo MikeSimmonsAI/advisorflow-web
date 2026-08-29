@@ -4,6 +4,40 @@ import { getMemberLabel } from '../utils/labels'
 import '../styles/shared.css'
 import './Settings.css'
 
+// Styles for the scheduling-calendar panel. Inline because Settings.css has no
+// row/pill vocabulary and one more global class name is worse than a local
+// object that cannot collide with anything.
+const CAL = {
+  row: {
+    display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap',
+    border: '1px solid var(--border-subtle)', borderRadius: 10,
+    padding: '12px 14px', background: 'var(--surface-card, rgba(255,255,255,0.03))',
+  },
+  title: {
+    fontSize: 14, fontWeight: 650, color: 'var(--text-primary)',
+    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+  },
+  activePill: {
+    fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
+    textTransform: 'uppercase', borderRadius: 20, padding: '2px 8px',
+    background: 'rgba(30,240,168,0.14)', color: 'var(--signal-green, #1ef0a8)',
+    border: '1px solid rgba(30,240,168,0.32)',
+  },
+  warnPill: {
+    fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
+    textTransform: 'uppercase', borderRadius: 20, padding: '2px 8px',
+    background: 'rgba(255,180,30,0.14)', color: 'var(--signal-amber, #ffb41e)',
+    border: '1px solid rgba(255,180,30,0.32)',
+  },
+  meta: { fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 },
+  detail: { fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 },
+  ok: { color: 'var(--signal-green, #1ef0a8)', fontWeight: 600 },
+  warn: { color: 'var(--signal-amber, #ffb41e)', fontWeight: 600 },
+  off: { color: 'var(--text-tertiary)', fontWeight: 600 },
+  actions: { display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' },
+  btn: { fontSize: 12, padding: '7px 12px' },
+}
+
 export default function Settings() {
   const currentUser = getCurrentUser()
   const isAdmin = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'god_admin'
@@ -48,6 +82,13 @@ export default function Settings() {
   const [calendarMessage, setCalendarMessage] = useState(null)
   const [connectingMicrosoft, setConnectingMicrosoft] = useState(false)
   const [microsoftMessage, setMicrosoftMessage] = useState(null)
+  // Scheduling calendars: the backend's own view of both providers.
+  const [calendarState, setCalendarState] = useState(null)
+  const [calendarLoading, setCalendarLoading] = useState(false)
+  const [calendarBusy, setCalendarBusy] = useState('')   // provider key in flight
+  const [calendarError, setCalendarError] = useState('')
+  const [calendarNotice, setCalendarNotice] = useState('')
+  const [calendarWarning, setCalendarWarning] = useState('')
 
   // Profile photo
   const [photoPreview, setPhotoPreview] = useState(null)
@@ -114,6 +155,10 @@ export default function Settings() {
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
+
+  // Calendar state is read once on mount, and again after any change, so the
+  // panel never shows a state the backend has since moved on from.
+  useEffect(() => { loadCalendars() }, [])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -214,6 +259,91 @@ export default function Settings() {
     } catch (err) {
       setCalendarMessage({ type: 'error', text: err.message })
       setConnectingCalendar(false)
+    }
+  }
+
+  // ── scheduling calendars ────────────────────────────────────────────────
+  //
+  // One source of truth for both providers: /me/calendar/connections, which is
+  // the same router the Sales Workspace uses. Nothing here infers a state from
+  // a token being present - the backend distinguishes "has a token" from "can
+  // read the calendar", which is the distinction that let an advisor show
+  // CONNECTED while every read failed.
+
+  async function loadCalendars() {
+    setCalendarLoading(true)
+    setCalendarError('')
+    try {
+      setCalendarState(await api.get('/me/calendar/connections'))
+    } catch (err) {
+      setCalendarError(err.message || 'We could not read your calendar connections.')
+    } finally {
+      setCalendarLoading(false)
+    }
+  }
+
+  async function connectCalendarProvider(c) {
+    if (calendarBusy) return
+    setCalendarBusy(c.provider)
+    setCalendarError('')
+    try {
+      // The EXISTING consent flows - this panel reports state and sends people
+      // to them; it does not start a second OAuth flow of its own.
+      const path = c.provider === 'google' ? '/calendar/connect' : '/microsoft/connect'
+      const result = await api.get(path)
+      window.location.href = result.authorization_url
+    } catch (err) {
+      setCalendarError(err.message || 'We could not start that connection.')
+      setCalendarBusy('')
+    }
+  }
+
+  async function testCalendar(provider) {
+    if (calendarBusy) return
+    setCalendarBusy(provider)
+    setCalendarError('')
+    setCalendarNotice('')
+    try {
+      const r = await api.post(`/me/calendar/connections/${provider}/test`, {})
+      if (r.ok) setCalendarNotice(r.message)
+      else setCalendarError(r.message)
+      await loadCalendars()
+    } catch (err) {
+      setCalendarError(err.message || 'The test could not be run.')
+    } finally {
+      setCalendarBusy('')
+    }
+  }
+
+  async function disconnectCalendar(c) {
+    if (calendarBusy) return
+    // Confirmation, because this is not undoable without going back through
+    // the provider's consent screen.
+    const isActive = calendarState?.active_provider === c.provider
+    const extra = isActive
+      ? '\n\nThis is the calendar scheduling currently uses. Until you reconnect it or ' +
+        'choose another, availability will be reported as unavailable rather than ' +
+        'falling back to a different calendar.'
+      : ''
+    if (!window.confirm(
+      `Disconnect ${c.label}?\n\nAppointments already on that calendar are left in place.` + extra
+    )) return
+
+    setCalendarBusy(c.provider)
+    setCalendarError('')
+    setCalendarNotice('')
+    setCalendarWarning('')
+    try {
+      const r = await api.post(`/me/calendar/connections/${c.provider}/disconnect`, {})
+      setCalendarNotice(r.note || 'Disconnected.')
+      if (r.warning) setCalendarWarning(r.warning)
+      await loadCalendars()
+      // The profile badge elsewhere on this page reads from /settings/profile.
+      api.get('/settings/profile').then(setProfile).catch(() => {})
+    } catch (err) {
+      setCalendarError(err.message || 'We could not disconnect that calendar.')
+    } finally {
+      setCalendarBusy('')
     }
   }
 
@@ -685,21 +815,93 @@ export default function Settings() {
         </section>
       )}
 
-      {/* ── Google Calendar ── */}
+      {/* ── Scheduling calendars ──
+          One panel for both providers, driven by the backend's own view of
+          each connection. The two panels this replaced each showed a green
+          "Connected" badge derived from a token being present, which is not
+          the same question as "can we read this calendar" — that is how an
+          advisor came to be connected to Outlook without meaning to be, with
+          no account shown and no way to undo it. */}
       <section id="google" className="panel" style={{ marginBottom: 16 }}>
         <div className="panel-header">
-          <h2 className="panel-title">Google Calendar</h2>
-          {profile.google_calendar_connected && <span className="badge badge--green">Connected</span>}
+          <h2 className="panel-title">📅 Scheduling calendars</h2>
+          {calendarState?.active_label && (
+            <span className="badge badge--green">Using {calendarState.active_label}</span>
+          )}
         </div>
         <p className="settings-help">
-          Connect your Google Calendar so appointments booked through your booking link land
-          directly on your real calendar.
+          Appointments booked through your link are written to the calendar marked
+          <strong> scheduling calendar</strong>, and that calendar is also read to work out
+          which times to offer. Connecting a second provider does not change which one is used.
         </p>
-        <div className="settings-actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="btn btn--primary" onClick={handleConnectCalendar} disabled={connectingCalendar}>
-            {connectingCalendar ? 'Redirecting…' : profile.google_calendar_connected ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}
-          </button>
-        </div>
+
+        {calendarError && <div className="settings-banner settings-banner--error">{calendarError}</div>}
+        {calendarNotice && <div className="settings-banner settings-banner--success">{calendarNotice}</div>}
+        {calendarWarning && <div className="settings-banner settings-banner--error">{calendarWarning}</div>}
+
+        {calendarLoading && !calendarState ? (
+          <p className="settings-help">Checking your calendars…</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {(calendarState?.connections || []).map((c) => {
+              const isActive = calendarState.active_provider === c.provider
+              const isConfigured = calendarState.configured_provider === c.provider
+              return (
+                <div key={c.provider} style={CAL.row}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={CAL.title}>
+                      {c.label}
+                      {isActive && <span style={CAL.activePill}>scheduling calendar</span>}
+                      {isConfigured && !isActive && <span style={CAL.warnPill}>configured, not readable</span>}
+                    </div>
+                    <div style={CAL.meta}>
+                      <span style={c.state === 'connected' ? CAL.ok : c.state === 'not_connected' ? CAL.off : CAL.warn}>
+                        {c.state === 'connected' ? 'Connected'
+                          : c.state === 'not_connected' ? 'Not connected'
+                          : 'Reconnect required'}
+                      </span>
+                      {c.account_email ? <> · <span className="mono">{c.account_email}</span></> : null}
+                      {c.last_sync_at ? <> · last read {new Date(c.last_sync_at).toLocaleString()}</> : null}
+                    </div>
+                    {c.detail && <div style={CAL.detail}>{c.detail}</div>}
+                    {c.last_error && <div style={CAL.detail}>Last error: {c.last_error}</div>}
+                  </div>
+                  <div style={CAL.actions}>
+                    <button
+                      className="btn btn--secondary"
+                      style={CAL.btn}
+                      disabled={calendarBusy === c.provider || !c.has_token}
+                      onClick={() => testCalendar(c.provider)}
+                    >
+                      {calendarBusy === c.provider ? '…' : 'Test'}
+                    </button>
+                    <button
+                      className="btn btn--primary"
+                      style={CAL.btn}
+                      disabled={calendarBusy === c.provider}
+                      onClick={() => connectCalendarProvider(c)}
+                    >
+                      {c.has_token ? 'Reconnect' : 'Connect'}
+                    </button>
+                    {c.has_token && (
+                      <button
+                        className="btn btn--ghost"
+                        style={CAL.btn}
+                        disabled={calendarBusy === c.provider}
+                        onClick={() => disconnectCalendar(c)}
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            {calendarState?.uses_email_fallback && (
+              <p className="settings-help">{calendarState.fallback_explainer}</p>
+            )}
+          </div>
+        )}
       </section>
 
       {microsoftMessage && (

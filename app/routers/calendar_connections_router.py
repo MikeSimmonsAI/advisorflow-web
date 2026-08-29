@@ -22,19 +22,38 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
+from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.models.calendar_models import (
     CalendarConnection, ExternalBusyBlock,
     PROVIDER_MICROSOFT, PROVIDER_GOOGLE, PROVIDER_LABELS, PROVIDERS,
 )
-from app.services.sales_access import require_sales_member
 from app.services import calendar_providers as reg
 from app.services import external_busy as eb
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sales/calendar", tags=["sales-calendar"])
+# WHO MAY CALL THIS, AND WHY IT WIDENED.
+#
+# It was `require_sales_member`, because the Sales Workspace was the first UI
+# that needed it. But a funeral home's advisor has exactly the same question -
+# "which calendar am I on, is it working, how do I disconnect it?" - and had no
+# way to ask it: they could START an OAuth flow and never see the result or
+# undo it. That is how an advisor ends up connected to Outlook without meaning
+# to and with no button to change it.
+#
+# Widening the audience is safe here because it changes nothing about SCOPE:
+# every endpoint below reads and writes `user.id` only, there is no org_id in
+# any query, and no endpoint accepts someone else's user id. A person managing
+# their own calendar connection is not a privileged action - it is the same
+# person who granted the consent withdrawing it.
+_caller = get_current_user
+
+# One set of endpoints, mounted twice by main.py - under /sales/calendar, which
+# the Sales Workspace already calls, and under /me/calendar for everyone else.
+# The prefix therefore lives at the mount, not here. A second implementation is
+# how two answers to the same question drift apart.
+router = APIRouter(tags=["calendar-connections"])
 
 # Where the UI sends someone to grant access. These are the EXISTING flows.
 CONNECT_PATHS = {
@@ -91,7 +110,7 @@ def _conn_out(user: User, provider: str, conn: Optional[CalendarConnection]) -> 
 
 
 @router.get("/connections")
-def list_my_connections(user: User = Depends(require_sales_member),
+def list_my_connections(user: User = Depends(_caller),
                         db: Session = Depends(get_db)):
     """Every provider, whether connected or not.
 
@@ -103,8 +122,21 @@ def list_my_connections(user: User = Depends(require_sales_member),
             .filter(CalendarConnection.user_id == user.id).all()}
     connections = [_conn_out(user, p, rows.get(p)) for p in PROVIDERS]
     active = reg.resolve_provider_key(db, user)
+
+    # The DELIBERATE choice, reported separately from what is actually in use.
+    # When an organization is configured for Google and Google cannot be read,
+    # those two answers differ - and the UI needs to be able to say so rather
+    # than showing whichever one happens to be convenient.
+    configured, configured_source = (None, None)
+    try:
+        configured, configured_source = reg.configured_provider_key(db, user)
+    except Exception:
+        log.warning("connections: could not read the configured provider", exc_info=True)
+
     return {
         "connections": connections,
+        "configured_provider": configured,
+        "configured_provider_source": configured_source,
         # What WOULD be used for this user's next meeting. The .ics fallback is
         # named plainly rather than shown as an absence.
         "active_provider": active,
@@ -119,7 +151,7 @@ def list_my_connections(user: User = Depends(require_sales_member),
 
 @router.post("/connections/{provider}/test")
 def test_my_connection(provider: str,
-                       user: User = Depends(require_sales_member),
+                       user: User = Depends(_caller),
                        db: Session = Depends(get_db)):
     """Actually read the calendar and report what happened.
 
@@ -158,7 +190,7 @@ def test_my_connection(provider: str,
 
 @router.post("/connections/{provider}/disconnect")
 def disconnect_my_calendar(provider: str,
-                           user: User = Depends(require_sales_member),
+                           user: User = Depends(_caller),
                            db: Session = Depends(get_db)):
     """Stop using this calendar. Only ever the CALLER'S own.
 
@@ -198,7 +230,36 @@ def disconnect_my_calendar(provider: str,
         ExternalBusyBlock.provider == provider).delete(synchronize_session=False)
 
     db.commit()
+
+    # FAILS CLOSED, AND SAYS SO.
+    #
+    # Disconnecting the provider the organization is configured for does NOT
+    # hand scheduling to the other one. `configured_provider_key` still answers
+    # with the deliberate choice, and availability then reports "unreadable"
+    # rather than offering a family every working hour against a calendar
+    # nobody can see. That is the correct outcome and it is also a surprising
+    # one, so it is stated here rather than discovered later.
+    configured, source = (None, None)
+    try:
+        configured, source = reg.configured_provider_key(db, user)
+    except Exception:
+        log.warning("disconnect: could not read the configured provider", exc_info=True)
+
+    warning = None
+    if configured and configured == provider:
+        warning = (
+            "%s is still the calendar this %s is configured to use, so "
+            "scheduling will now report availability as unavailable rather "
+            "than falling back to another calendar. Reconnect it, or change "
+            "the scheduling calendar in Settings."
+            % (PROVIDER_LABELS.get(provider, provider),
+               "advisor" if source == "advisor" else "organization")
+        )
+
     return {"ok": True, "connection": _conn_out(user, provider, conn),
+            "configured_provider": configured,
+            "configured_provider_source": source,
+            "warning": warning,
             "note": "Disconnected. Meetings already on your calendar were left "
                     "in place. To fully revoke access, remove AdvisorFlow in "
                     "your %s account settings."

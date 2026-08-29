@@ -87,3 +87,8 @@ app/routers/sales_router.optimized.bak
 .deploy*.txt
 .deploy*.out
 .deploy*.err
+.run_gates.ps1
+.gates.txt
+.launch_deploy.ps1
+.syntax_check.py
+.gates.log

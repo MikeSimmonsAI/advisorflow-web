@@ -120,6 +120,12 @@
   font-weight: 600;
   border: 1px solid transparent;
   overflow: hidden;
+  /* A label longer than the rail used to WRAP inside this flex row, growing
+     the item and pushing it over the one beneath — which is what made
+     "Branding & Settings" overlap its neighbour. One line, clipped with an
+     ellipsis, and the full text is on the element's title attribute. */
+  white-space: nowrap;
+  text-overflow: ellipsis;
   transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 
@@ -176,6 +182,18 @@
   letter-spacing: 0.10em;
   color: var(--text-tertiary);
   padding: 4px 13px 6px;
+}
+
+/* ── Nav section (a labelled group of links) ──
+   Distinct from .nav-group below, which is the collapsible dropdown widget.
+   A section is just a heading and its links; it has no trigger and no open
+   state, and reusing the dropdown's class for it would tie the two together
+   for anyone who later restyles either. */
+.nav-section {
+  margin-bottom: 10px;
+}
+.nav-section:last-of-type {
+  margin-bottom: 2px;
 }
 
 /* ── Nav group (collapsible dropdown) ── */

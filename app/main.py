@@ -98,6 +98,9 @@ from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
 from app.routers.god_diagnostics_calendar import router as god_calendar_diag_router
+# One record at a time, dry-run first, communicating with nobody. See the
+# module docstring for why the ordinary cancel flow is the wrong tool here.
+from app.routers.god_maintenance_router import router as god_maintenance_router
 # Checkpoint 6 control plane: sales operations, Won -> Customer provisioning,
 # implementation lifecycle and the control-plane audit view. Separate module
 # from god_router so the whole Checkpoint 6 surface reads as one thing.
@@ -439,6 +442,7 @@ app.include_router(contacts_router)
 app.include_router(activity_router)
 app.include_router(branding_router)
 app.include_router(god_calendar_diag_router)  # read-only calendar wiring report
+app.include_router(god_maintenance_router)   # one record, dry-run first, no messages sent
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
@@ -461,7 +465,14 @@ app.include_router(sales_router)
 app.include_router(sales_scheduling_router)
 # Per-USER calendar connection state (Checkpoint 3). A connection belongs to a
 # person, not a tenant — every route in here reads only the caller's own rows.
-app.include_router(calendar_connections_router)
+app.include_router(calendar_connections_router, prefix="/sales/calendar")
+# THE SAME ROUTER, mounted a second time for advisors outside the Sales
+# Workspace. A funeral home's advisor has the same question about their own
+# calendar and had no endpoint to ask it, so they could start an OAuth flow and
+# never see the result or undo it. Mounting the existing router again is
+# deliberate: a second implementation is how the two answers drift apart, and
+# every endpoint is already scoped to the caller's own user id.
+app.include_router(calendar_connections_router, prefix="/me/calendar")
 # Sales proposals + the secure deal room (Checkpoint 4). Writes the SAME
 # proposal tables as proposal_router below — this is the opportunity-scoped
 # sales path, not a second portal. Its /deal-room/* half is public by design:
