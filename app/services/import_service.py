@@ -44,7 +44,8 @@ import pandas as pd
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Lead, LeadTier
-from app.services.dedup_service import check_and_register, normalize_phone, normalize_last_name
+from app.services.dedup_service import (check_and_register, normalize_phone,
+                                         normalize_last_name, PLACEHOLDER_LAST_NAME)
 
 HEADER_MAP = {
     "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name", "given name"],
@@ -410,12 +411,26 @@ def import_leads_from_excel(
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
         # ── Dedup: phone-based leads use ContactRegistry ──────────────────
+        #
+        # A DUPLICATE IS NOT A DNC. Every branch below used to set
+        # `status = "dnc"` alongside the flag, which put a lead into the
+        # do-not-contact population for a bookkeeping reason. DNC means a human
+        # asked not to be contacted; duplicate means we may already hold this
+        # person under another row. The flag alone already excludes the lead
+        # from every send path (see sms_service.send_batch, cadence_service,
+        # ai_conversation_service), so the DNC added nothing except an
+        # irreversible-looking state and a wrong number on the DNC screen.
+        #
+        # call_restricted is a REAL suppression and still sets DNC.
         if phone_norm:
             phone_key = (phone_norm, normalize_last_name(row["last_name"]))
             if phone_key in seen_phone_keys:
-                # Duplicate within this same file — mark and skip
+                # Duplicate within this same file — flagged, not suppressed.
                 lead.is_duplicate = True
-                lead.status = "dnc"
+                lead.duplicate_reason = "same_file_phone"
+                lead.duplicate_match_field = "phone+last_name"
+                lead.duplicate_match_value = phone_norm
+                lead.status = "needs_tier_review" if tier == "partial" else "new"
                 duplicate_count += 1
             else:
                 seen_phone_keys.add(phone_key)
@@ -433,7 +448,16 @@ def import_leads_from_excel(
                 elif is_dup:
                     lead.is_duplicate = True
                     lead.duplicate_of_lead_id = registry_entry.first_seen_lead_id
-                    lead.status = "dnc"  # someone already owns this relationship
+                    # A placeholder registry entry carries no real last name -
+                    # it was seeded phone-only from the old desktop sent log -
+                    # so say which of the two rules actually fired.
+                    _placeholder = (getattr(registry_entry, "normalized_last_name", None)
+                                    == PLACEHOLDER_LAST_NAME)
+                    lead.duplicate_reason = ("registry_placeholder" if _placeholder
+                                             else "registry_exact")
+                    lead.duplicate_match_field = "phone" if _placeholder else "phone+last_name"
+                    lead.duplicate_match_value = phone_norm
+                    lead.status = "needs_tier_review" if tier == "partial" else "new"
                     duplicate_count += 1
                 else:
                     lead.status = (
@@ -447,9 +471,12 @@ def import_leads_from_excel(
             email_key  = (norm_email, norm_last)
 
             if norm_email and email_key in seen_email_keys:
-                # Duplicate within this same file
+                # Duplicate within this same file — flagged, not suppressed.
                 lead.is_duplicate = True
-                lead.status = "dnc"
+                lead.duplicate_reason = "same_file_email"
+                lead.duplicate_match_field = "email+last_name"
+                lead.duplicate_match_value = norm_email
+                lead.status = "new"
                 duplicate_count += 1
             elif norm_email:
                 seen_email_keys.add(email_key)
@@ -469,7 +496,10 @@ def import_leads_from_excel(
                 if existing_email_lead:
                     lead.is_duplicate = True
                     lead.duplicate_of_lead_id = existing_email_lead.id
-                    lead.status = "dnc"
+                    lead.duplicate_reason = "existing_email"
+                    lead.duplicate_match_field = "email+last_name"
+                    lead.duplicate_match_value = norm_email
+                    lead.status = "new"
                     duplicate_count += 1
                 else:
                     lead.status = "new"  # queued for email outreach

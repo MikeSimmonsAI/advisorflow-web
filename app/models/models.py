@@ -558,7 +558,34 @@ class Lead(Base):
     status_reason_raw = Column(String, nullable=True)  # e.g. "Contract Sold", "Attempting Contact"
     ai_lead_quality_note = Column(Text, nullable=True)  # populated by AI analysis pass, Phase 2
 
+    # ── duplicate handling ──────────────────────────────────────────────
+    #
+    # A DUPLICATE IS A DATA-QUALITY CONDITION. IT IS NOT A DNC.
+    #
+    # The importer used to set `status = "dnc"` alongside this flag. Those are
+    # two different facts: DNC means a human asked not to be contacted, or a
+    # STOP arrived, or an admin suppressed the number - a legal and ethical
+    # state. Duplicate means "we may already hold this person under another
+    # row". Conflating them put leads into the do-not-contact population for a
+    # bookkeeping reason, where they were invisible to every send path and
+    # impossible to get back out: the only endpoint that touched the flag
+    # deleted the row.
+    #
+    # The three columns below exist so a flag can be explained and undone.
+    # Without them a flagged lead said only "duplicate" - not of what, not on
+    # which field - and `duplicate_of_lead_id` was left NULL by the in-file
+    # dedup path, so even the parent was unknowable.
     is_duplicate = Column(Boolean, default=False)  # true if matched existing registry entry
+    # WHY it matched: "registry_exact" (phone+last name), "registry_placeholder"
+    # (phone-only, against a historical sent-log entry), "same_file_phone",
+    # "same_file_email", "existing_email".
+    duplicate_reason      = Column(String, nullable=True)
+    duplicate_match_field = Column(String, nullable=True)  # "phone+last_name" | "email+last_name" | "phone"
+    duplicate_match_value = Column(String, nullable=True)  # the value that actually matched
+    # Set when a human says "keep these separate". The flag stays resolved and
+    # the pair is not re-flagged unless the identifying data materially changes.
+    duplicate_resolved_at = Column(DateTime, nullable=True)
+    duplicate_resolved_by = Column(String, nullable=True)  # user id
     duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
 
     # Physical address — collected at import or via lead edit

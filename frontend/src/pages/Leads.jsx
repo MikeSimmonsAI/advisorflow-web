@@ -161,6 +161,42 @@ export default function Leads() {
     }
   }
 
+  // Duplicate resolution — "keep separate", the alternative to deleting a
+  // real record just to get it off the Duplicates tab.
+  const [resolvingDupe, setResolvingDupe] = useState(null)   // lead id in flight
+  const [dupeExplain, setDupeExplain] = useState(null)       // { lead, ...explanation }
+
+  async function handleKeepSeparate(e, lead) {
+    e.stopPropagation()
+    const who = `${lead.first_name || ''} ${lead.last_name || ''}`.trim()
+    if (!window.confirm(
+      `Keep "${who}" as a separate record?\n\n` +
+      `Nothing is deleted and nothing is merged. The duplicate flag is ` +
+      `resolved, the lead returns to normal outreach, and it won't be ` +
+      `re-flagged unless its phone, email or name materially changes.`
+    )) return
+    setResolvingDupe(lead.id)
+    try {
+      await api.post(`/leads/${lead.id}/not-duplicate`, {})
+      loadLeads()
+    } catch (err) {
+      alert(`Could not resolve: ${err.message}`)
+    } finally {
+      setResolvingDupe(null)
+    }
+  }
+
+  async function handleExplainDupe(e, lead) {
+    e.stopPropagation()
+    setDupeExplain({ loading: true, lead })
+    try {
+      const data = await api.get(`/leads/${lead.id}/duplicate-explain`)
+      setDupeExplain({ ...data, lead })
+    } catch (err) {
+      setDupeExplain({ error: err.message, lead })
+    }
+  }
+
   // Import history
   const [importBatches, setImportBatches] = useState([])
   const [batchesLoading, setBatchesLoading] = useState(false)
@@ -1136,6 +1172,27 @@ export default function Leads() {
                       )}
                     </td>
                     <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                      {/* KEEP SEPARATE. Until this existed, the only way to get
+                          a wrongly-flagged lead off the Duplicates tab was to
+                          delete it — a real family's record destroyed over a
+                          bookkeeping flag. "Why?" explains what it matched. */}
+                      {lead.is_duplicate && (
+                        <div style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}>
+                          <button
+                            className="btn btn--ghost"
+                            style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-green, #22c55e)' }}
+                            onClick={(e) => handleKeepSeparate(e, lead)}
+                            disabled={resolvingDupe === lead.id}
+                            title="Not a duplicate — keep both records. Nothing is deleted."
+                          >{resolvingDupe === lead.id ? '…' : '✓ Keep separate'}</button>
+                          <button
+                            className="btn btn--ghost"
+                            style={{ fontSize: 11, padding: '2px 6px', color: 'var(--text-secondary)' }}
+                            onClick={(e) => handleExplainDupe(e, lead)}
+                            title="What did this match, and why?"
+                          >Why?</button>
+                        </div>
+                      )}
                       {/* Flag dropdown */}
                       <div style={{ display: 'inline-flex', gap: 4 }}>
                         {lead.manual_flag ? (
@@ -1213,6 +1270,68 @@ export default function Leads() {
             onClick={() => setLeadsPage(p => Math.min(leadsPageCount, p + 1))}
           >Next →</button>
         </div>
+      )}
+
+      {/* ── Why is this flagged? ──
+          A flag that cannot be explained cannot be trusted. Rows flagged before
+          traceability existed carry no reason and often no parent, so this
+          reconstructs the match live from the contact registry and the leads
+          table rather than leaving an unaccountable mark on someone's record. */}
+      {dupeExplain && (
+        <section style={{ marginTop: 16, borderRadius: 10, padding: '14px 16px',
+                          border: '1px solid var(--border, rgba(255,255,255,0.14))',
+                          background: 'var(--surface-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong style={{ fontSize: 13 }}>
+              Why “{`${dupeExplain.lead?.first_name || ''} ${dupeExplain.lead?.last_name || ''}`.trim()}” is flagged
+            </strong>
+            <button className="btn btn--ghost" style={{ fontSize: 12 }}
+                    onClick={() => setDupeExplain(null)}>Close</button>
+          </div>
+          {dupeExplain.loading && <p style={{ fontSize: 12, marginTop: 8 }}>Checking…</p>}
+          {dupeExplain.error && (
+            <p style={{ color: 'var(--signal-red)', fontSize: 12, marginTop: 8 }}>{dupeExplain.error}</p>
+          )}
+          {!dupeExplain.loading && !dupeExplain.error && dupeExplain.stored_flag && (
+            <div style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
+              <div>
+                Stored reason:{' '}
+                <strong>{dupeExplain.stored_flag.reason || 'none recorded — flagged before reasons were stored'}</strong>
+                {dupeExplain.stored_flag.match_field && <> · matched on <strong>{dupeExplain.stored_flag.match_field}</strong></>}
+                {dupeExplain.stored_flag.match_value && <> = <span className="mono">{dupeExplain.stored_flag.match_value}</span></>}
+              </div>
+              {dupeExplain.parent_lead ? (
+                <div>Duplicate of: <strong>{dupeExplain.parent_lead.name}</strong> <span className="mono">{dupeExplain.parent_lead.phone}</span></div>
+              ) : (
+                <div style={{ color: 'var(--text-secondary)' }}>No parent record was recorded.</div>
+              )}
+              {(dupeExplain.registry_entries_for_this_phone || []).length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: 'var(--text-secondary)' }}>Contact-registry entries for this phone:</div>
+                  {dupeExplain.registry_entries_for_this_phone.map((r, i) => (
+                    <div key={i} style={{ marginLeft: 10 }}>
+                      • last name <span className="mono">{r.registry_last_name || '—'}</span>
+                      {r.is_placeholder_from_historical_sent_log &&
+                        <em style={{ color: '#f59e0b' }}> — placeholder from the historical sent log (phone-only match)</em>}
+                      {r.matches_this_lead && <strong> — this is the match</strong>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(dupeExplain.other_leads_sharing_this_phone || []).length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: 'var(--text-secondary)' }}>Other leads on this phone:</div>
+                  {dupeExplain.other_leads_sharing_this_phone.map((s) => (
+                    <div key={s.id} style={{ marginLeft: 10 }}>
+                      • {s.name} · {s.email || 'no email'} · {s.status}
+                      {s.same_last_name ? ' · same last name' : ' · different last name'}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
       )}
 
       {/* ── Manually Flagged Leads Section ── */}

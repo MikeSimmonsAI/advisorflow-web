@@ -348,6 +348,10 @@ def list_leads(
         Lead.contact_channel, Lead.import_list_name, Lead.imported_by_name,
         Lead.created_at, Lead.organization_id, Lead.case_status,
         Lead.manual_flag, Lead.manual_flag_reason,
+        # Why a duplicate flag is set, so the Duplicates tab can say more than
+        # the word "duplicate" and offer a resolution instead of deletion.
+        Lead.duplicate_reason, Lead.duplicate_match_field,
+        Lead.duplicate_match_value, Lead.duplicate_of_lead_id,
         Lead.last_messaged_at,
     ]
     COL_NAMES = [
@@ -358,6 +362,8 @@ def list_leads(
         "contact_channel", "import_list_name", "imported_by_name",
         "created_at", "organization_id", "case_status",
         "manual_flag", "manual_flag_reason",
+        "duplicate_reason", "duplicate_match_field",
+        "duplicate_match_value", "duplicate_of_lead_id",
         "last_messaged_at",
     ]
 
@@ -974,6 +980,329 @@ def confirm_send_batch(
             skipped.append({"lead_id": item.lead_id, "reason": str(e)})
 
     return {"sent_count": len(sent_ids), "skipped_count": len(skipped), "sent_ids": sent_ids, "skipped": skipped}
+
+
+@router.post("/{lead_id}/not-duplicate")
+def keep_lead_separate(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_context),
+):
+    """KEEP SEPARATE. This lead is its own person - resolve the flag, keep both.
+
+    Until this existed the only endpoint that touched `is_duplicate` DELETED
+    the row. A lead wrongly flagged - and the flag is applied inconsistently
+    enough that "wrongly" is common - could be removed from the Duplicates tab
+    only by destroying it. That is not a choice anyone should have to make
+    about a real family's record.
+
+    Nothing is deleted and nothing is merged. The flag is resolved, the
+    resolution is stamped with who and when, and the row returns to normal
+    outreach. `duplicate_of_lead_id` is deliberately KEPT: it is the evidence
+    of what was matched, and a resolved pair should stay explainable.
+
+    A resolved lead is not re-flagged. `duplicate_resolved_at` is what the
+    importer and the maintenance passes check, so re-running an import over
+    the same identifying data will not undo a human's decision. Materially
+    changing the identifying data is a different lead and gets re-evaluated.
+    """
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    was = {
+        "is_duplicate": bool(lead.is_duplicate),
+        "status": lead.status,
+        "duplicate_of_lead_id": getattr(lead, "duplicate_of_lead_id", None),
+        "duplicate_reason": getattr(lead, "duplicate_reason", None),
+    }
+
+    lead.is_duplicate = False
+    lead.duplicate_resolved_at = datetime.utcnow()
+    lead.duplicate_resolved_by = current_user.id
+
+    # A lead pushed to DNC by the duplicate-import bug comes back. A lead that
+    # is DNC for a REAL reason - a STOP, a suppression, an admin decision -
+    # stays exactly where it is: resolving a data-quality flag must never
+    # silently re-open contact with someone who asked not to be contacted.
+    restored_status = None
+    if lead.status == "dnc" and was["is_duplicate"] and not _has_real_dnc_reason(db, lead):
+        lead.status = "needs_tier_review" if not lead.tier else "new"
+        restored_status = lead.status
+
+    db.commit()
+
+    log_action(
+        db,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        action="lead.duplicate_resolved_keep_separate",
+        target_type="lead",
+        target_id=lead.id,
+        details={"before": was, "restored_status": restored_status,
+                 "name": ((lead.first_name or "") + " " + (lead.last_name or "")).strip(),
+                 "phone": lead.phone, "email": lead.email},
+    )
+
+    return {
+        "lead_id": lead.id,
+        "is_duplicate": False,
+        "status": lead.status,
+        "restored_status": restored_status,
+        "resolved_at": lead.duplicate_resolved_at.isoformat(),
+        "message": "Kept as a separate record. Nothing was deleted.",
+    }
+
+
+def _has_real_dnc_reason(db: Session, lead: Lead) -> bool:
+    """Is this lead DNC for a reason OTHER than the duplicate-import bug?
+
+    Checked before any repair restores a status. A STOP reply, a suppression
+    entry an admin added, or a manual flag are all real and must survive.
+    Fails CLOSED: anything unexpected counts as a real reason, because leaving
+    a lead suppressed is recoverable and texting someone who opted out is not.
+    """
+    try:
+        if getattr(lead, "manual_flag", None):
+            return True
+        # A DNC classification on any inbound reply is a legal opt-out.
+        from app.models.models import Reply, ReplyClassification
+        stopped = (db.query(Reply)
+                   .filter(Reply.lead_id == lead.id,
+                           Reply.classification == ReplyClassification.DNC)
+                   .first())
+        if stopped is not None:
+            return True
+        # The org-wide suppression list is the other source of truth.
+        if _is_suppressed(db, lead):
+            return True
+    except Exception:
+        return True
+    return False
+
+
+@router.get("/{lead_id}/duplicate-explain")
+def explain_duplicate(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_context),
+):
+    """WHY is this lead flagged, and what did it match?
+
+    Rows flagged before traceability existed carry no reason and, on the
+    in-file path, no parent either - they say "duplicate" and nothing more.
+    This reconstructs the answer live from the same two sources the dedup
+    engine consults, so an old flag can still be explained rather than being
+    an unaccountable mark on somebody's record.
+    """
+    from app.services.dedup_service import (normalize_phone, normalize_last_name,
+                                            PLACEHOLDER_LAST_NAME)
+    from app.models.models import ContactRegistry
+
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    norm_phone = normalize_phone(lead.phone) if lead.phone else None
+    norm_last = normalize_last_name(lead.last_name) if lead.last_name else None
+
+    stored = {
+        "is_duplicate": bool(lead.is_duplicate),
+        "reason": getattr(lead, "duplicate_reason", None),
+        "match_field": getattr(lead, "duplicate_match_field", None),
+        "match_value": getattr(lead, "duplicate_match_value", None),
+        "duplicate_of_lead_id": getattr(lead, "duplicate_of_lead_id", None),
+        "resolved_at": (lead.duplicate_resolved_at.isoformat()
+                        if getattr(lead, "duplicate_resolved_at", None) else None),
+    }
+
+    # What the registry holds for this phone, and which rule it would fire.
+    registry = []
+    if norm_phone:
+        for e in (db.query(ContactRegistry)
+                  .filter(ContactRegistry.organization_id == lead.organization_id,
+                          ContactRegistry.normalized_phone == norm_phone).all()):
+            is_placeholder = e.normalized_last_name == PLACEHOLDER_LAST_NAME
+            registry.append({
+                "registry_last_name": e.normalized_last_name,
+                "is_placeholder_from_historical_sent_log": is_placeholder,
+                "matches_this_lead": (e.normalized_last_name == norm_last) or is_placeholder,
+                "first_seen_lead_id": e.first_seen_lead_id,
+                "owning_user_id": e.owning_user_id,
+            })
+
+    # Other LEADS sharing the identifying data, so the UI can name the sibling.
+    siblings = []
+    if norm_phone:
+        for other in (db.query(Lead)
+                      .filter(Lead.organization_id == lead.organization_id,
+                              Lead.id != lead.id).all()):
+            if other.phone and normalize_phone(other.phone) == norm_phone:
+                siblings.append({
+                    "id": other.id,
+                    "name": ((other.first_name or "") + " " + (other.last_name or "")).strip(),
+                    "email": other.email, "status": other.status,
+                    "is_duplicate": bool(other.is_duplicate),
+                    "same_last_name": normalize_last_name(other.last_name or "") == norm_last,
+                    "created_at": str(other.created_at or ""),
+                })
+
+    parent = None
+    if stored["duplicate_of_lead_id"]:
+        p = db.query(Lead).filter(Lead.id == stored["duplicate_of_lead_id"]).first()
+        if p:
+            parent = {"id": p.id,
+                      "name": ((p.first_name or "") + " " + (p.last_name or "")).strip(),
+                      "phone": p.phone, "email": p.email}
+
+    return {
+        "lead": {"id": lead.id,
+                 "name": ((lead.first_name or "") + " " + (lead.last_name or "")).strip(),
+                 "phone": lead.phone, "email": lead.email, "status": lead.status,
+                 "normalized_phone": norm_phone, "normalized_last_name": norm_last},
+        "stored_flag": stored,
+        "registry_entries_for_this_phone": registry,
+        "other_leads_sharing_this_phone": siblings,
+        "parent_lead": parent,
+    }
+
+
+@router.post("/maintenance/duplicate-dnc-repair")
+def repair_duplicate_dnc(
+    apply: bool = Query(False, description="False (default) reports only."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_context),
+):
+    """Undo the duplicate->DNC coupling on rows the importer already wrote.
+
+    DRY RUN BY DEFAULT. `apply=false` counts and returns a sample, changes
+    nothing. Nothing here deletes, merges, or clears a duplicate flag - it only
+    lifts a `status = "dnc"` that the import bug applied for a bookkeeping
+    reason, and only where no REAL suppression exists.
+
+    A row is repaired only when ALL of these hold:
+      - status == "dnc"
+      - is_duplicate is true            (the bug's signature)
+      - `_has_real_dnc_reason` is false (no STOP, no suppression, no manual flag)
+
+    Everything else is left alone. The lead stays flagged as a duplicate - that
+    is a separate, honest fact, and resolving it is a human decision made
+    through /not-duplicate.
+    """
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+        raise HTTPException(status_code=403, detail="Admin role required.")
+
+    candidates = db.query(Lead).filter(
+        Lead.organization_id == current_user.organization_id,
+        Lead.status == "dnc",
+        Lead.is_duplicate == True,
+    ).all()
+
+    repairable, protected = [], []
+    for lead in candidates:
+        (protected if _has_real_dnc_reason(db, lead) else repairable).append(lead)
+
+    if apply:
+        for lead in repairable:
+            lead.status = "needs_tier_review" if not lead.tier else "new"
+        db.commit()
+        log_action(
+            db,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.id,
+            action="lead.duplicate_dnc_repaired",
+            target_type="organization",
+            target_id=current_user.organization_id,
+            details={"repaired": len(repairable), "protected": len(protected)},
+        )
+
+    def _brief(l):
+        return {"id": l.id,
+                "name": ((l.first_name or "") + " " + (l.last_name or "")).strip(),
+                "phone": l.phone, "reason": getattr(l, "duplicate_reason", None)}
+
+    return {
+        "dry_run": not apply,
+        "dnc_and_duplicate": len(candidates),
+        "repairable": len(repairable),
+        "protected_real_dnc": len(protected),
+        "sample_repairable": [_brief(l) for l in repairable[:10]],
+        "sample_protected": [_brief(l) for l in protected[:10]],
+    }
+
+
+@router.post("/maintenance/tier-status-repair")
+def repair_stale_tier_review(
+    apply: bool = Query(False, description="False (default) reports only."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_context),
+):
+    """Release leads stuck in `needs_tier_review` that already HAVE a tier.
+
+    DRY RUN BY DEFAULT.
+
+    `needs_tier_review` means "somebody must classify this lead before we
+    contact them". Once a tier is set that is answered, but nothing moved the
+    status on, so the leads stayed parked - which is why SMS READY reads 0
+    against ten thousand leads with phone numbers.
+
+    Only rows whose question has actually been answered are released:
+      - status == "needs_tier_review"
+      - a tier is present and is not the "partial" placeholder
+      - not flagged duplicate, not suppressed, has a phone
+
+    A lead with no tier still needs a human. It is reported, not touched.
+    """
+    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+        raise HTTPException(status_code=403, detail="Admin role required.")
+
+    parked = db.query(Lead).filter(
+        Lead.organization_id == current_user.organization_id,
+        Lead.status == "needs_tier_review",
+    ).all()
+
+    releasable, no_tier, blocked = [], [], []
+    for lead in parked:
+        tier = (str(lead.tier).strip().lower() if lead.tier else "")
+        if not tier or tier in ("partial", "none", "unknown"):
+            no_tier.append(lead)
+        elif lead.is_duplicate or not lead.phone or _has_real_dnc_reason(db, lead):
+            blocked.append(lead)
+        else:
+            releasable.append(lead)
+
+    if apply:
+        for lead in releasable:
+            lead.status = "new"
+        db.commit()
+        log_action(
+            db,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.id,
+            action="lead.tier_status_repaired",
+            target_type="organization",
+            target_id=current_user.organization_id,
+            details={"released": len(releasable), "still_need_a_tier": len(no_tier),
+                     "blocked_for_another_reason": len(blocked)},
+        )
+
+    return {
+        "dry_run": not apply,
+        "total_needs_tier_review": len(parked),
+        "releasable_have_a_valid_tier": len(releasable),
+        "still_need_a_tier": len(no_tier),
+        "blocked_for_another_reason": len(blocked),
+        "blocked_breakdown": {
+            "duplicate": sum(1 for l in blocked if l.is_duplicate),
+            "no_phone": sum(1 for l in blocked if not l.phone),
+        },
+    }
 
 
 @router.delete("/duplicates/bulk-delete")

@@ -207,6 +207,13 @@ COLUMNS_TO_ADD = [
     ("organizations", "twilio_a2p_registered_at", "TIMESTAMP"),
     # Post-appointment case file — lead-level case status
     ("leads", "case_status", "VARCHAR DEFAULT 'open'"),
+    # Duplicate traceability + resolution. A flag used to say only "duplicate"
+    # with no parent and no reason, and the only way off the list was deletion.
+    ("leads", "duplicate_reason", "VARCHAR"),
+    ("leads", "duplicate_match_field", "VARCHAR"),
+    ("leads", "duplicate_match_value", "VARCHAR"),
+    ("leads", "duplicate_resolved_at", "TIMESTAMP"),
+    ("leads", "duplicate_resolved_by", "VARCHAR"),
     # Post-appointment review request — track that we've sent the Google review SMS
     ("booking_links", "review_request_sent_at", "TIMESTAMP"),
     # Appointment details moved OUT of the booking token and onto the row it

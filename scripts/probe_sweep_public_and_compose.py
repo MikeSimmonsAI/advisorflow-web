@@ -1446,6 +1446,75 @@ check("24. the stored record attributes the email to that advisor",
       "sender_id=acting_advisor(db, lead, current_user).id" in er_src)
 
 
+# ── 25. a duplicate is not a DNC, and a flag can be undone ──────────────────
+
+print("\n[25] DUPLICATE IS A DATA-QUALITY FLAG, NOT A SUPPRESSION")
+
+# The importer set `status = "dnc"` alongside `is_duplicate`. Those are two
+# different facts: DNC means a human asked not to be contacted; duplicate means
+# we may already hold this person under another row. Conflating them put leads
+# into the do-not-contact population for a bookkeeping reason, where the only
+# endpoint that touched the flag DELETED the row.
+imp_src = code_only(read("app/services/import_service.py"))
+_dupe_blocks = imp_src.count('lead.is_duplicate = True')
+check("25. every duplicate branch in the importer is still there",
+      _dupe_blocks >= 4, _dupe_blocks)
+check("25. NO duplicate branch sets DNC any more",
+      'lead.is_duplicate = True\n                lead.status = "dnc"' not in imp_src
+      and 'lead.duplicate_of_lead_id = existing_email_lead.id\n                    lead.status = "dnc"' not in imp_src)
+check("25. a REAL suppression still sets DNC",
+      'if call_restricted:\n                    lead.status = "dnc"' in imp_src)
+check("25. and every flag now records WHY it fired",
+      imp_src.count("lead.duplicate_reason =") >= 4
+      and imp_src.count("lead.duplicate_match_field =") >= 4
+      and imp_src.count("lead.duplicate_match_value =") >= 4)
+check("25. including which of the two registry rules matched",
+      '"registry_placeholder" if _placeholder' in imp_src)
+
+for _c in ("duplicate_reason", "duplicate_match_field", "duplicate_match_value",
+           "duplicate_resolved_at", "duplicate_resolved_by"):
+    check("25. Lead.%s is declared" % _c, hasattr(Lead, _c), _c)
+
+lr_src = code_only(read("app/routers/leads_router.py"))
+check("25. KEEP SEPARATE exists, so a flag no longer means delete-or-live-with-it",
+      '@router.post("/{lead_id}/not-duplicate")' in lr_src)
+check("25. it deletes nothing",
+      "db.delete" not in lr_src.split("def keep_lead_separate")[1].split("def _has_real_dnc_reason")[0])
+check("25. it records the resolution and who made it",
+      "lead.duplicate_resolved_at = datetime.utcnow()" in lr_src
+      and "lead.duplicate_resolved_by = current_user.id" in lr_src)
+check("25. and writes it to the audit log",
+      '"lead.duplicate_resolved_keep_separate"' in lr_src)
+check("25. A REAL DNC IS NEVER SILENTLY RE-OPENED",
+      "not _has_real_dnc_reason(db, lead)" in lr_src)
+check("25. and the real-reason check fails CLOSED",
+      "except Exception:\n        return True" in lr_src)
+check("25. a STOP reply counts as a real reason",
+      "ReplyClassification.DNC" in lr_src)
+check("25. so does the org suppression list",
+      "_is_suppressed(db, lead)" in lr_src)
+
+check("25. both repair passes are DRY RUN by default",
+      lr_src.count('apply: bool = Query(False') == 2)
+check("25. the duplicate/DNC repair only touches rows carrying the bug's signature",
+      "Lead.status == \"dnc\"," in lr_src and "Lead.is_duplicate == True," in lr_src)
+check("25. the tier repair releases only leads that HAVE a valid tier",
+      'tier in ("partial", "none", "unknown")' in lr_src)
+check("25. and never releases a duplicate, a phoneless lead, or a real DNC",
+      "lead.is_duplicate or not lead.phone or _has_real_dnc_reason(db, lead)" in lr_src)
+check("25. an old flag can still be explained",
+      '@router.get("/{lead_id}/duplicate-explain")' in lr_src
+      and "registry_entries_for_this_phone" in lr_src)
+
+leads_jsx = jsx_code_only(read("frontend/src/pages/Leads.jsx"))
+check("25. the row offers KEEP SEPARATE, not only deletion",
+      "handleKeepSeparate" in leads_jsx and "Keep separate" in leads_jsx)
+check("25. and says what it matched",
+      "handleExplainDupe" in leads_jsx and "duplicate-explain" in leads_jsx)
+check("25. the confirm promises nothing is deleted",
+      "Nothing is deleted and nothing is merged" in leads_jsx)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:
