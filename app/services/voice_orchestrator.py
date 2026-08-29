@@ -102,6 +102,19 @@ def check_call_eligibility(db: Session, lead: Lead, organization_id: str,
     return Eligibility(True)
 
 
+def _customer_facing_name(org: Organization) -> str:
+    """The business a family believes is calling them.
+
+    NOT the platform. EvoSys Pro is infrastructure the family has never heard
+    of; the funeral home is who they think is on the phone. `brand_name` wins
+    when a customer trades under a different name from the one on their
+    account, which is also how an account whose `name` is wrong can be
+    corrected for customers without rewriting ten thousand lead records.
+    """
+    return ((getattr(org, "brand_name", None) or getattr(org, "name", "") or "")
+            .strip())
+
+
 def _dynamic_variables(lead: Lead, org: Organization,
                        advisor: Optional[User]) -> dict:
     """Only what the agent speaks with.
@@ -113,11 +126,17 @@ def _dynamic_variables(lead: Lead, org: Organization,
     """
     out = {
         "first_name": (lead.first_name or "").strip() or "there",
-        "organization_name": (getattr(org, "name", "") or "").strip(),
+        # The business the FAMILY believes is calling — resolved through the
+        # same path the confirmation email uses, so the name Taffiney speaks
+        # and the name on the email that follows it are one value, not two
+        # that can drift. `org.name` is the account name and remains the
+        # fallback; `brand_name` wins when a customer trades under a different
+        # name from the one on their contract.
+        "organization_name": _customer_facing_name(org),
     }
-    business = (getattr(org, "brand_name", None) or getattr(org, "name", "") or "")
+    business = _customer_facing_name(org)
     if business:
-        out["business_name"] = business.strip()
+        out["business_name"] = business
     if advisor is not None and getattr(advisor, "full_name", None):
         out["advisor_name"] = advisor.full_name
     out["appointment_type"] = "File Check"
