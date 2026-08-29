@@ -552,19 +552,30 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 + (f" for {slot_display}" if slot_display else "")
                 + f". We look forward to seeing you. — {_brand}"
             )
-            # Use org Twilio if available, fall back to advisor Twilio
-            _sid = (getattr(org, 'org_twilio_account_sid', None) or advisor.twilio_account_sid) if org else advisor.twilio_account_sid
-            _tok_enc = (getattr(org, 'org_twilio_auth_token_encrypted', None) or advisor.twilio_auth_token_encrypted) if org else advisor.twilio_auth_token_encrypted
-            _from = (getattr(org, 'org_twilio_phone_number', None) or advisor.twilio_phone_number) if org else advisor.twilio_phone_number
-            if _sid and _tok_enc and _from:
-                _auth = decrypt_value(_tok_enc)
-                TwilioClient(_sid, _auth).messages.create(body=_sms_text, from_=_from, to=lead.phone)
+            # ONE SENDER LADDER, NOT TWO.
+            #
+            # This resolved org-then-advisor while `sms_service` resolves
+            # advisor-then-org, so an advisor with their own number was shown
+            # that number in the composer and their family's confirmation went
+            # out from the organization's. Worse, this copy had no platform-
+            # owner guard, so a booking confirmed under god impersonation could
+            # still text a family from the PLATFORM's Twilio.
+            #
+            # It now calls the same resolver every other send uses: advisor
+            # override -> the organization's shared sender -> refuse. That is
+            # also why an organization with no sender lands in the `except`
+            # below with a plain reason rather than silently borrowing one.
+            from app.services.sms_service import _resolve_twilio_creds
+            _client, _from, _caller_id = _resolve_twilio_creds(advisor, db)
+            if _from:
+                _client.messages.create(body=_sms_text, from_=_from, to=lead.phone)
                 if booking:
                     booking.confirmation_sent = True
                 lead_sms_result = {"success": True}
                 logger.info("booking-confirmed: lead confirmation SMS sent to %s", lead.phone)
             else:
-                lead_sms_result = {"success": False, "note": "no Twilio creds"}
+                lead_sms_result = {"success": False,
+                                   "note": "a sender is configured but has no number"}
         except Exception as e:
             logger.exception("booking-confirmed: lead SMS error: %s", e)
             lead_sms_result = {"success": False, "error": str(e)}

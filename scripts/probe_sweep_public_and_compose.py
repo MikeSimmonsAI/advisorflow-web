@@ -993,6 +993,46 @@ check("18. readiness reports the numbers behind its own refusal",
       '"attempts": attempts' in read("app/routers/voice_router.py"))
 
 
+# ── 19. one sender ladder, everywhere ───────────────────────────────────────
+
+print("\n[19] ADVISOR OVERRIDE -> ORG SENDER -> UNAVAILABLE, IN EVERY PATH")
+
+cal_code = code_only(read("app/routers/calendar_router.py"))
+check("19. the booking confirmation uses the shared resolver",
+      "_resolve_twilio_creds(advisor, db)" in cal_code)
+check("19. and no longer keeps its own org-then-advisor order",
+      "getattr(org, 'org_twilio_account_sid', None) or advisor.twilio_account_sid"
+      not in cal_code)
+check("19. so it cannot build a Twilio client from hand-picked credentials",
+      "TwilioClient(_sid, _auth)" not in cal_code)
+
+# The ladder itself, proven end to end at the level Restland is about to use.
+advisor.twilio_account_sid = None
+advisor.twilio_auth_token_encrypted = None
+advisor.twilio_phone_number = None
+org.org_twilio_account_sid = "ACorgsid0000000000000000000000000"
+org.org_twilio_auth_token_encrypted = "enc"
+org.org_twilio_phone_number = "+14692241155"
+db.commit()
+s = sms.describe_sms_sender(advisor, db)
+check("19. THE MOMENT AN ORG SENDER EXISTS, it is used - no redeploy",
+      s["ready"] and s["source"] == "organization"
+      and s["from_number"] == "+14692241155", s)
+
+advisor.twilio_account_sid = "ACadvsid00000000000000000000000000"
+advisor.twilio_auth_token_encrypted = "enc"
+advisor.twilio_phone_number = "+14695551234"
+db.commit()
+s = sms.describe_sms_sender(advisor, db)
+check("19. an advisor override still wins over the shared number",
+      s["source"] == "advisor" and s["from_number"] == "+14695551234", s)
+
+check("19. no secret is ever in the payload",
+      not any(k for k in s if "token" in k or "secret" in k), list(s))
+check("19. and only the last four of the sid is reported",
+      len(s["account_sid_last4"] or "") <= 4, s["account_sid_last4"])
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:
