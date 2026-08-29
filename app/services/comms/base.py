@@ -74,10 +74,17 @@ class VoiceCallRequest:
     `dynamic_variables` are the conversational values the agent speaks with.
     Keep to what the agent actually uses: these land in a vendor's prompt and
     logs, so nothing sensitive goes here that the conversation doesn't need.
+
+    `agent_version` pins WHICH published version of that agent runs. It is
+    provider-neutral on purpose: every vendor that versions its agents needs
+    this, and a caller that names an agent without a version is asking the
+    vendor to choose — which is how a call ends up executing an unpublished
+    draft nobody reviewed.
     """
     to_number: str
     from_number: str
     agent_id: str
+    agent_version: Optional[int] = None
     metadata: Dict[str, str] = field(default_factory=dict)
     dynamic_variables: Dict[str, str] = field(default_factory=dict)
 

@@ -728,6 +728,246 @@ check("   the correlator filters on organization_id, not the ref alone",
       open(os.path.join(ROOT, "app", "routers", "voice_webhooks_router.py"),
            encoding="utf-8").read())
 
+print("\n[20] the outbound request pins WHICH agent version runs")
+# WHY. `override_agent_id` alone lets Retell choose the version, and it chooses
+# the newest — including an unpublished draft. The first live File Check call
+# ran V3 while the number's outbound binding said V1, because the request named
+# an agent and not a version. Nobody chose that; it was simply not decided.
+#
+# These checks use a provider that CAPTURES THE REAL REQUEST BODY built by
+# `RetellVoiceProvider.start_call`, rather than a stub that returns success —
+# a stub would prove the orchestrator called something, not what was sent.
+from app.services.comms.base import VoiceCallRequest as _VCR         # noqa: E402
+from app.services.comms.voice.retell import _coerce_version          # noqa: E402
+
+
+class CapturingRetell(RetellVoiceProvider):
+    """Real body construction; the HTTP hop replaced at the last moment."""
+    sent = []
+
+    def start_call(self, req):
+        # Build the body exactly as production does, then intercept transport.
+        import httpx
+
+        class _Resp:
+            status_code = 201
+
+            @staticmethod
+            def json():
+                return {"call_id": "call_pin_%d" % (len(CapturingRetell.sent) + 1),
+                        "call_status": "registered"}
+            text = ""
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, url, json=None, headers=None):
+                CapturingRetell.sent.append(json)
+                return _Resp()
+
+        real = httpx.Client
+        httpx.Client = _Client
+        try:
+            return RetellVoiceProvider.start_call(self, req)
+        finally:
+            httpx.Client = real
+
+
+comms.register_voice_provider("retell",
+                              lambda db, cfg: CapturingRetell(api_key=API_KEY))
+
+db = SessionLocal()
+db.add_all([
+    Lead(id="lead-pin-a", organization_id="org-a", first_name="Pinned",
+         last_name="Family", phone="15551110021", status="new",
+         assigned_to_id="adv-a"),
+    Lead(id="lead-pin-b", organization_id="org-a", first_name="Pinned",
+         last_name="Family Two", phone="15551110022", status="new",
+         assigned_to_id="adv-a"),
+    Lead(id="lead-pin-c", organization_id="org-a", first_name="Pinned",
+         last_name="Family Three", phone="15551110023", status="new",
+         assigned_to_id="adv-a"),
+    Lead(id="lead-pin-x", organization_id="org-b", first_name="Other",
+         last_name="Tenant", phone="15551110024", status="new",
+         assigned_to_id="adv-b"),
+])
+db.commit()
+db.close()
+
+
+def set_version(org_id, value):
+    d = SessionLocal()
+    try:
+        cfg = (d.query(VoiceAgentConfig)
+               .filter(VoiceAgentConfig.organization_id == org_id,
+                       VoiceAgentConfig.use_case == "file_check").first())
+        cfg.agent_version = value
+        d.commit()
+    finally:
+        d.close()
+
+
+# ── 1 & 2. the request carries the configured id AND version ──
+set_version("org-a", 3)
+CapturingRetell.sent = []
+call_p = orch.start_file_check_call(SessionLocal(), lead("lead-pin-a"), "org-a")
+body = CapturingRetell.sent[-1] if CapturingRetell.sent else {}
+check("1. the request carries the CONFIGURED override_agent_id",
+      body.get("override_agent_id") == "agent_file_check_existing", body)
+check("2. THE REQUEST CARRIES override_agent_version = 3",
+      body.get("override_agent_version") == 3, body)
+check("   the version is an integer, not a string Retell would reject",
+      isinstance(body.get("override_agent_version"), int)
+      and not isinstance(body.get("override_agent_version"), bool), body)
+check("   the call was accepted and the row advanced",
+      call_p.status == "ringing" and bool(call_p.provider_call_id))
+
+# ── 3. configuration changes the version; provider code does not ──
+set_version("org-a", 7)
+CapturingRetell.sent = []
+orch.start_file_check_call(SessionLocal(), lead("lead-pin-b"), "org-a")
+body7 = CapturingRetell.sent[-1] if CapturingRetell.sent else {}
+check("3. CHANGING ONLY THE CONFIG ROW CHANGES THE VERSION SENT",
+      body7.get("override_agent_version") == 7, body7)
+check("   and the agent id is unchanged by that edit",
+      body7.get("override_agent_id") == "agent_file_check_existing", body7)
+
+prov_src_v = open(os.path.join(ROOT, "app", "services", "comms", "voice",
+                               "retell.py"), encoding="utf-8").read()
+orch_src_v = open(os.path.join(ROOT, "app", "services", "voice_orchestrator.py"),
+                  encoding="utf-8").read()
+import ast as _ast                                                   # noqa: E402
+
+
+def _literal_version_assignments(src):
+    """Every place a LITERAL number is fed into an agent version.
+
+    Deliberately narrow. An earlier draft of this check banned the integer 3
+    anywhere in the module and failed on the unrelated three-attempt cap — a
+    blunt assertion that punishes honest constants teaches people to delete
+    assertions. What actually matters is that no version NUMBER is written
+    here: the value must come from configuration.
+    """
+    hits = []
+    for node in _ast.walk(_ast.parse(src)):
+        # agent_version=3  (keyword argument)
+        if isinstance(node, _ast.Call):
+            for kw in node.keywords or []:
+                if kw.arg == "agent_version" and isinstance(kw.value, _ast.Constant) \
+                        and isinstance(kw.value.value, int):
+                    hits.append(kw.value.value)
+        # agent_version = 3  /  self.agent_version = 3
+        if isinstance(node, _ast.Assign):
+            for tgt in node.targets:
+                name = (tgt.id if isinstance(tgt, _ast.Name)
+                        else tgt.attr if isinstance(tgt, _ast.Attribute) else None)
+                if name in ("agent_version", "override_agent_version") \
+                        and isinstance(node.value, _ast.Constant) \
+                        and isinstance(node.value.value, int):
+                    hits.append(node.value.value)
+        # body["override_agent_version"] = 3
+        if isinstance(node, _ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if isinstance(k, _ast.Constant) and k.value == "override_agent_version" \
+                        and isinstance(v, _ast.Constant) and isinstance(v.value, int):
+                    hits.append(v.value)
+    return hits
+
+
+check("3. NO VERSION NUMBER IS HARD-CODED IN THE PROVIDER",
+      _literal_version_assignments(prov_src_v) == [],
+      _literal_version_assignments(prov_src_v))
+check("   nor in the orchestrator",
+      _literal_version_assignments(orch_src_v) == [],
+      _literal_version_assignments(orch_src_v))
+check("   the provider reads the version off the request, not a constant",
+      "req.agent_version" in prov_src_v)
+check("   the orchestrator reads it off the config row",
+      "config, \"agent_version\"" in orch_src_v
+      or "config.agent_version" in orch_src_v)
+
+# ── 4. missing or invalid fails SAFELY, and sends nothing ──
+for label, value in (("missing (None)", None),
+                     ("empty string", ""),
+                     ("non-numeric text", "latest"),
+                     ("negative", -1),
+                     ("a float", 3.5),
+                     ("a bool", True)):
+    set_version("org-a", value)
+    CapturingRetell.sent = []
+    d = SessionLocal()
+    cfg = (d.query(VoiceAgentConfig)
+           .filter(VoiceAgentConfig.organization_id == "org-a",
+                   VoiceAgentConfig.use_case == "file_check").first())
+    prov = CapturingRetell(api_key=API_KEY)
+    res = prov.start_call(_VCR(to_number="15551110021",
+                               from_number=cfg.from_number,
+                               agent_id=cfg.agent_id,
+                               agent_version=value))
+    d.close()
+    check("4. %s is REFUSED, not silently unpinned" % label,
+          (not res.ok) and res.error_code == "no_agent_version",
+          "%r -> ok=%s code=%s" % (value, res.ok, res.error_code))
+    check("   and NO request reached the provider for %s" % label,
+          CapturingRetell.sent == [], CapturingRetell.sent)
+
+check("4. a bool never pins version 1 by accident",
+      _coerce_version(True) is None and _coerce_version(False) is None)
+check("   a clean numeric string is still accepted",
+      _coerce_version("3") == 3 and _coerce_version(" 4 ") == 4)
+check("   zero is a legitimate version, not a falsy reject",
+      _coerce_version(0) == 0)
+
+# A refused call must leave a row marked failed, not a dangling one.
+set_version("org-a", None)
+CapturingRetell.sent = []
+call_unpinned = orch.start_file_check_call(SessionLocal(),
+                                           lead("lead-pin-c"), "org-a")
+check("4. AN UNPINNED CONFIG PLACES NO CALL AT ALL",
+      CapturingRetell.sent == [], CapturingRetell.sent)
+check("   and the attempt is recorded as failed, not left ringing",
+      call_unpinned.status == "failed" and call_unpinned.outcome == "failed",
+      (call_unpinned.status, call_unpinned.outcome))
+check("   with a reason that names the missing version",
+      "version" in (call_unpinned.error_message or "").lower(),
+      call_unpinned.error_message)
+
+# ── 5. tenant boundaries are untouched by any of this ──
+set_version("org-a", 3)
+set_version("org-b", 9)
+CapturingRetell.sent = []
+before_pin = len(CapturingRetell.sent)
+try:
+    orch.start_file_check_call(SessionLocal(), lead("lead-pin-x"), "org-a")
+    check("5. a lead from another org is still refused", False, "it was allowed")
+except PermissionError:
+    check("5. A LEAD FROM ANOTHER ORG IS STILL REFUSED", True)
+check("   and no request was sent for the refused call",
+      len(CapturingRetell.sent) == before_pin, CapturingRetell.sent)
+
+CapturingRetell.sent = []
+orch.start_file_check_call(SessionLocal(), lead("lead-pin-x"), "org-b")
+body_b = CapturingRetell.sent[-1] if CapturingRetell.sent else {}
+check("5. each organization gets ITS OWN pinned version",
+      body_b.get("override_agent_version") == 9, body_b)
+check("   and its own configured outbound number",
+      body_b.get("from_number") == "+15550000002", body_b)
+d = SessionLocal()
+own = (d.query(VoiceCall)
+       .filter(VoiceCall.lead_id == "lead-pin-x").all())
+check("   the call belongs to that tenant only",
+      all(c.organization_id == "org-b" for c in own), [c.organization_id for c in own])
+d.close()
+
+comms.register_voice_provider("retell", lambda db, cfg: FakeRetell(api_key=API_KEY))
+
 print("\n%d checks, %d failure(s)" % (checks, len(failures)))
 comms.reset_providers()
 try:

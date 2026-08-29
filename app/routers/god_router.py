@@ -997,6 +997,20 @@ class VoiceAgentCreate(BaseModel):
     provider: str = "retell"
     use_case: str = "file_check"
     label: Optional[str] = None
+    # Which published version of that agent this organization runs. Optional
+    # here only so a mapping can be created and pinned in two steps; a mapping
+    # with no version cannot place a call.
+    agent_version: Optional[int] = None
+
+
+class VoiceAgentVersionUpdate(BaseModel):
+    """Repoint one mapping at a different published agent version.
+
+    Exists so changing which version a customer runs costs one API call rather
+    than a deploy. The version is configuration; no version number is written
+    in the provider or the orchestrator.
+    """
+    agent_version: int
 
 
 def _voice_agent_row(cfg, org_name=None, ready=None, why=None):
@@ -1006,6 +1020,11 @@ def _voice_agent_row(cfg, org_name=None, ready=None, why=None):
         "organization_name": org_name,
         "provider": cfg.provider,
         "agent_id": cfg.agent_id,
+        # Reported plainly, including when it is missing, because an unpinned
+        # mapping looks identical to a pinned one everywhere else and yet
+        # cannot place a call.
+        "agent_version": getattr(cfg, "agent_version", None),
+        "version_pinned": getattr(cfg, "agent_version", None) is not None,
         "from_number": cfg.from_number,
         "use_case": cfg.use_case,
         "label": cfg.label,
@@ -1089,6 +1108,7 @@ def god_create_voice_agent(req: VoiceAgentCreate,
         organization_id=req.organization_id,
         provider=req.provider,
         agent_id=req.agent_id,
+        agent_version=req.agent_version,
         from_number=req.from_number,
         use_case=req.use_case,
         label=req.label,
@@ -1111,6 +1131,56 @@ def god_create_voice_agent(req: VoiceAgentCreate,
         ready, why = False, str(exc)[:200]
     return {"created": True,
             "agent": _voice_agent_row(cfg, org.name, ready, why)}
+
+
+@router.patch("/voice/agents/{config_id}/version")
+def god_set_voice_agent_version(config_id: str,
+                                req: VoiceAgentVersionUpdate,
+                                god: User = Depends(require_god),
+                                db: Session = Depends(get_db)):
+    """Pin which published agent version this mapping runs.
+
+    THE POINT OF THE ROUTE. Version selection has to be configuration, because
+    the alternative is a deploy every time a vendor agent is republished — and
+    a deploy is exactly the pressure that produces a hard-coded number. Nothing
+    in the provider or the orchestrator names a version; both read this column.
+
+    A negative version is rejected rather than stored: the provider would
+    refuse it later anyway, and a value that can never work should not be
+    accepted while a human is looking at the result.
+    """
+    from app.models.models import VoiceAgentConfig
+    from app.services.comms import get_voice_provider
+
+    cfg = (db.query(VoiceAgentConfig)
+           .filter(VoiceAgentConfig.id == config_id).first())
+    if cfg is None:
+        raise HTTPException(404, "Voice agent mapping not found.")
+    if req.agent_version < 0:
+        raise HTTPException(400, "agent_version must be zero or greater.")
+
+    previous = getattr(cfg, "agent_version", None)
+    cfg.agent_version = req.agent_version
+    db.commit()
+    db.refresh(cfg)
+
+    org = db.query(Organization).filter(
+        Organization.id == cfg.organization_id).first()
+
+    log.info("AUDIT: GOD_VOICE_AGENT_VERSION_PINNED | admin=%s | org=%s "
+             "| agent=%s | use_case=%s | from=%s | to=%s",
+             god.email, cfg.organization_id, cfg.agent_id, cfg.use_case,
+             previous, cfg.agent_version)
+
+    ready, why = None, None
+    try:
+        ready, why = get_voice_provider(db, cfg).is_ready()
+    except Exception as exc:                                      # noqa: BLE001
+        ready, why = False, str(exc)[:200]
+    return {"updated": True,
+            "previous_version": previous,
+            "agent": _voice_agent_row(cfg, org.name if org else None,
+                                      ready, why)}
 
 
 class VoiceTestCall(BaseModel):

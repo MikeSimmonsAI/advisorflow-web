@@ -170,6 +170,10 @@ def start_file_check_call(db: Session, lead: Lead, organization_id: str,
         to_number=lead.phone,
         from_number=config.from_number,
         agent_id=config.agent_id,
+        # Read from the row alongside the agent id and the number. The version
+        # is configuration, not a constant: changing which version an
+        # organization runs must cost one column update, never a code change.
+        agent_version=getattr(config, "agent_version", None),
         # Correlation only — re-derived, never trusted, when events return.
         metadata={
             "evosys_call_id": call.id,

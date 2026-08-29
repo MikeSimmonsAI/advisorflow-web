@@ -1150,6 +1150,13 @@ class VoiceAgentConfig(Base):
 
     provider        = Column(String, nullable=False, default="retell")   # matches a registered VoiceProvider key
     agent_id        = Column(String, nullable=False)                     # provider's agent identifier
+    # WHICH VERSION OF THAT AGENT. Nullable only so the column can be added to
+    # an existing table; a call with no version pinned is REFUSED rather than
+    # sent, because "whatever the vendor considers newest" is not a decision
+    # this system is entitled to make on a family's behalf. The first live File
+    # Check call proved the cost: it ran an UNPUBLISHED DRAFT, because the
+    # outbound request named an agent and not a version.
+    agent_version   = Column(Integer, nullable=True)                     # provider agent version to pin
     from_number     = Column(String, nullable=False)                     # E.164, provider-owned or imported
     use_case        = Column(String, nullable=False, default="file_check")
     label           = Column(String, nullable=True)                      # human name for the console

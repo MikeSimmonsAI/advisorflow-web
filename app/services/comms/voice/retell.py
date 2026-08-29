@@ -101,6 +101,33 @@ def _truthy(value) -> Optional[bool]:
     return None
 
 
+def _coerce_version(raw: Any) -> Optional[int]:
+    """A pinned agent version, or None if it cannot be trusted.
+
+    STRICT ON PURPOSE. Everything ambiguous returns None so the caller refuses
+    the call: None itself, an empty string, a bool (True is an int in Python and
+    would otherwise pin version 1), a float, a negative number, anything
+    unparseable. A version we are unsure about is worse than no call, because a
+    wrong version is a different conversation with a real person.
+
+    A clean numeric string IS accepted — configuration arrives from a form and a
+    JSON body as well as from the column, and "3" is not ambiguous.
+    """
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, str):
+        txt = raw.strip()
+        if not txt or not txt.isdigit():
+            return None
+        try:
+            return int(txt)
+        except ValueError:
+            return None
+    return None
+
+
 class RetellVoiceProvider(VoiceProvider):
     key = "retell"
 
@@ -125,9 +152,35 @@ class RetellVoiceProvider(VoiceProvider):
         if not ready:
             return VoiceCallResult.failure("not_configured", why or "")
 
+        # NAME THE VERSION, NOT JUST THE AGENT.
+        #
+        # `override_agent_id` alone tells Retell "use this agent" and leaves the
+        # version to the vendor, which resolves to whatever is newest —
+        # INCLUDING AN UNPUBLISHED DRAFT. The first live File Check call proved
+        # that: the number's outbound binding was V1, and the call ran V3, a
+        # draft that had never been reviewed or published.
+        #
+        # So a pinned version is required, and a missing or unusable one is
+        # REFUSED here rather than dropped from the body. Omitting it would fall
+        # straight back into the vendor-chooses behaviour this exists to end,
+        # and it would do so silently, on a real call to a real family.
+        #
+        # The value comes from `VoiceAgentConfig.agent_version`. No version
+        # number is written in this module — the agent id and the outbound
+        # number are already configuration, and the version belongs with them.
+        version = _coerce_version(req.agent_version)
+        if version is None:
+            return VoiceCallResult.failure(
+                "no_agent_version",
+                "No usable agent version is pinned for this configuration "
+                "(got %r). Set VoiceAgentConfig.agent_version to the published "
+                "version this organization is approved to run; refusing rather "
+                "than letting the provider pick." % (req.agent_version,))
+
         body: Dict[str, Any] = {
             "from_number": req.from_number,
             "to_number": req.to_number,
+            "override_agent_version": version,
         }
         if req.agent_id:
             body["override_agent_id"] = req.agent_id

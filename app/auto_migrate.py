@@ -77,6 +77,13 @@ COLUMNS_TO_ADD = [
     ("voice_calls", "callback_at", "TIMESTAMP"),
     ("voice_calls", "booking_link_id", "VARCHAR"),
 
+    # Which published agent version an organization is approved to run.
+    # Deliberately NOT defaulted: a backfilled version would be this file
+    # guessing which conversation a customer's families should hear. NULL means
+    # "not pinned yet", and the provider refuses to place the call rather than
+    # letting the vendor pick whatever is newest.
+    ("voice_agent_configs", "agent_version", "INTEGER"),
+
     ("demo_sites", "slot", "VARCHAR(32) DEFAULT 'website' NOT NULL"),
 
     # ── Per-deal custom recurring rate ─────────────────────────────────────
