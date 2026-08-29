@@ -123,16 +123,25 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
     except Exception:
         pass
 
+    # Resolve the identity the FAMILY should see. `org.name` is the account
+    # name; a customer trading under a different name has `brand_name`, and
+    # the platform's own name must never appear here.
+    from app.services.public_identity import identity_for_org
+    _ident = identity_for_org(db, booking.organization_id if hasattr(booking, "organization_id") else (org.id if org else None))
+
     return {
         "token": token,
         "booking_id": booking.id,
         "advisor_id": booking.user_id,
         "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Guest",
+        "lead_first_name": (lead.first_name if lead else "") or "",
         "lead_phone": lead_phone,
         "advisor_name": advisor.full_name if advisor else "Your Advisor",
-        "org_name": org.name if org else "",
-        "org_address": org.org_address if org and hasattr(org, 'org_address') else "",
-        "org_phone": org.org_phone if org and hasattr(org, 'org_phone') else "",
+        "org_name": _ident.customer_facing_name or (org.name if org else ""),
+        "org_address": _ident.business_address or (org.org_address if org and hasattr(org, 'org_address') else ""),
+        "org_phone": _ident.business_phone or (org.org_phone if org and hasattr(org, 'org_phone') else ""),
+        "brand_color": (getattr(org, "brand_color_primary", None) if org else None),
+        "timezone": (getattr(advisor, "booking_timezone", None) if advisor else None) or "America/Chicago",
         "appt_label": appt_label,
         "appt_duration": appt_duration,
         "status": booking.status,
@@ -170,6 +179,41 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     if booking:
         advisor = db.query(User).filter(User.id == booking.user_id).first()
         lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+
+        # ── IDEMPOTENCY ─────────────────────────────────────────────────────
+        #
+        # This endpoint creates a calendar event, a case file, an advisor SMS,
+        # an advisor email, a family SMS and a family email. Nothing here was
+        # replay-safe: a double-tap on the family's Confirm button, a browser
+        # retry, or the booking app resending after a timeout put the same
+        # appointment on the calendar twice and texted the family twice.
+        #
+        # A replay is a request naming a booking that is ALREADY booked at the
+        # SAME time. That returns the earlier outcome and touches nothing. A
+        # request naming a DIFFERENT time is a reschedule and still runs, which
+        # is the behaviour that existed before.
+        _already = (booking.status or "") in ("booked", "confirmed")
+        _same_slot = False
+        if _already and booking.booked_time and slot_display:
+            try:
+                _bt = booking.booked_time
+                if getattr(_bt, "tzinfo", None):
+                    _bt = _bt.replace(tzinfo=None)
+                _same_slot = _bt.strftime("%Y-%m-%dT%H:%M") == str(slot_display).strip()[:16]
+            except Exception:
+                _same_slot = False
+        if _already and _same_slot:
+            logger.info("booking-confirmed: replay for booking=%s at %s - "
+                        "no calendar write, no message sent",
+                        booking.id, slot_display)
+            return {
+                "received": True,
+                "idempotent_replay": True,
+                "booking_id": booking.id,
+                "slot": slot_display,
+                "note": "This appointment was already confirmed for this time.",
+            }
+
         booking.status = "booked"
         if lead:
             lead.status = "booked"
@@ -180,11 +224,45 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     else:
         logger.warning("booking-confirmed: no booking found for token=%s", token)
 
+    # ── Which calendar actually gets the appointment ─────────────────────────
+    #
+    # This used to write to Microsoft whenever Microsoft was connected, and then
+    # ALSO to Google whenever Google was connected — so an advisor who had once
+    # authorised Outlook got the family's appointment on a calendar nobody was
+    # looking at, or on two calendars at once. The organization's configured
+    # provider decides, and only that provider is written to.
+    #
+    # `configured_provider_key` returns the deliberate choice (advisor override,
+    # then organization). When nothing is configured we keep the historical
+    # behaviour rather than silently dropping the write.
+    _configured_provider = None
+    if advisor:
+        try:
+            from app.services.calendar_providers import configured_provider_key
+            _configured_provider, _cfg_src = configured_provider_key(db, advisor)
+            if _configured_provider:
+                logger.info("booking-confirmed: configured calendar provider=%s (%s) "
+                            "for advisor=%s", _configured_provider, _cfg_src, advisor.id)
+        except Exception:
+            logger.exception("booking-confirmed: could not read configured provider")
+
+    def _provider_allowed(key: str) -> bool:
+        if not _configured_provider:
+            return True                       # unconfigured: unchanged behaviour
+        return _configured_provider == key
+
     # ── Create Microsoft 365 Outlook calendar event ──────────────────────────
     calendar_result = {"success": False, "note": "No advisor found"}
     event_start = None  # shared between MS365 and Google Calendar blocks
 
-    if advisor and advisor.microsoft_365_connected and advisor.microsoft_oauth_refresh_token_encrypted:
+    if advisor and not _provider_allowed("microsoft"):
+        calendar_result = {
+            "success": False,
+            "note": "skipped - organization is configured for %s" % _configured_provider,
+        }
+
+    if (advisor and _provider_allowed("microsoft")
+            and advisor.microsoft_365_connected and advisor.microsoft_oauth_refresh_token_encrypted):
         try:
             from app.services.microsoft_email_service import _get_fresh_access_token
             import httpx
@@ -254,12 +332,14 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                         "dateTime": event_end.strftime("%Y-%m-%dT%H:%M:%S"),
                         "timeZone": "America/Chicago",
                     },
+                    # The ORGANIZATION's own address. The literal that used to
+                    # sit in this fallback was one customer's street address,
+                    # in code every tenant runs - so a booking anywhere else on
+                    # the platform put that customer's address on the event.
                     "location": {
-                        "displayName": (
-                            org.org_address
-                            if (org and getattr(org, "org_address", None))
-                            else "13005 Greenville Ave, Dallas, TX 75243"
-                        ),
+                        "displayName": (org.org_address
+                                        if (org and getattr(org, "org_address", None))
+                                        else ""),
                     },
                 }
                 cal_response = httpx.post(
@@ -296,7 +376,14 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Create Google Calendar event (if advisor has Google Calendar connected) ─
     google_calendar_result = {"success": False, "note": "Not connected"}
-    if advisor and getattr(advisor, 'google_calendar_connected', False) and getattr(advisor, 'google_oauth_refresh_token_encrypted', None):
+    if advisor and not _provider_allowed("google"):
+        google_calendar_result = {
+            "success": False,
+            "note": "skipped - organization is configured for %s" % _configured_provider,
+        }
+    if (advisor and _provider_allowed("google")
+            and getattr(advisor, 'google_calendar_connected', False)
+            and getattr(advisor, 'google_oauth_refresh_token_encrypted', None)):
         try:
             # Reuse the datetime we already parsed for the MS365 block above.
             # If that block didn't run (MS365 not connected), parse now.
@@ -345,8 +432,16 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 from app.utils.crypto import decrypt_value
                 auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
                 client = Client(advisor.twilio_account_sid, auth_token)
+                # Advisor-facing, so the platform name is correct here. The
+                # calendar named is the one actually written to - telling an
+                # advisor on Google to "check your Outlook calendar" sent them
+                # looking in the wrong place.
                 _sms_brand = get_brand_name(db, str(advisor.organization_id))
-                msg_body = f"📅 {_sms_brand}: {lead_name or 'A lead'} just confirmed a {appt_label} for {slot_display}. Check your Outlook calendar."
+                _cal_name = {"google": "Google Calendar",
+                             "microsoft": "Outlook calendar"}.get(
+                    _configured_provider or "", "calendar")
+                msg_body = (f"📅 {_sms_brand}: {lead_name or 'A lead'} just confirmed a "
+                            f"{appt_label} for {slot_display}. Check your {_cal_name}.")
                 client.messages.create(
                     body=msg_body,
                     from_=advisor.twilio_phone_number,
@@ -429,7 +524,13 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         try:
             from twilio.rest import Client as TwilioClient
             from app.utils.crypto import decrypt_value
-            _brand = get_brand_name(db, str(advisor.organization_id))
+            # THE FAMILY reads this. `get_brand_name` returns the PLATFORM, so
+            # this text used to sign a funeral home's appointment confirmation
+            # "— EvoSys Pro", a company the family has never heard of.
+            from app.services.public_identity import identity_for_org as _ident_for
+            _fam_ident = _ident_for(db, str(advisor.organization_id))
+            _brand = (_fam_ident.customer_facing_name
+                      or get_brand_name(db, str(advisor.organization_id)))
             _lead_name = f"{lead.first_name or ''}".strip() or "there"
             _sms_text = (
                 f"Hi {_lead_name}, your {appt_label} is confirmed"
@@ -517,7 +618,8 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
 
 URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
-NOTIFICATION_EMAIL = "michael.simmons@nsmg.com"  # advisor notification address
+# NOTIFICATION_EMAIL is deliberately gone - see `_send_booking_notification_email`.
+# It named one real operator in code shared by every tenant.
 
 
 def _send_booking_notification_email(advisor, lead, appt_label: str, slot_display: str, db=None):
@@ -653,7 +755,16 @@ def _send_booking_notification_email(advisor, lead, appt_label: str, slot_displa
 </body>
 </html>"""
 
-    notification_to = getattr(advisor, 'notification_email', None) or NOTIFICATION_EMAIL
+    # The ADVISOR whose booking this is, never a hard-coded person. The old
+    # fallback named one real operator, so a booking in any other organization
+    # notified him instead of the advisor who owns the appointment.
+    notification_to = (getattr(advisor, 'notification_email', None)
+                       or getattr(advisor, 'email', None))
+    if not notification_to:
+        logger.warning("booking notification: advisor %s has no notification "
+                       "address - skipping rather than guessing one",
+                       getattr(advisor, 'id', None))
+        return
     logger.info("Sending booking notification email to %s", notification_to)
     resp = httpx.post(
         "https://graph.microsoft.com/v1.0/me/sendMail",

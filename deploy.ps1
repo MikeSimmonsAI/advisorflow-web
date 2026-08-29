@@ -207,6 +207,13 @@ if ($SkipSmoke) {
     # dev-only packages made genuinely unimportable.
     python scripts\probe_prod_deps_sufficient.py 2>&1 | Select-String "FAIL|failure|SUFFICIENT" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "PRODUCTION DEPENDENCY CHECKS FAILED - not deploying."; exit 1 }
+    # The completion sweep: the branded /book and /survey routes actually being
+    # served, preview equalling the sent body, one missing field disabling only
+    # its own channel, Twilio resolution visible before Send, the lead page
+    # using the one proven voice path, and no infrastructure hostname or named
+    # operator reaching a customer.
+    python scripts\probe_sweep_public_and_compose.py 2>&1 | Select-String "FAIL|checks passed|SERVED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "PUBLIC ROUTE / COMPOSE SWEEP CHECKS FAILED - not deploying."; exit 1 }
     Write-Host "  Smoke tests OK"
 }
 

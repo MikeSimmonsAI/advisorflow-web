@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
+import { formatPhone } from '../utils/phone'
 import './CaseFile.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -254,7 +255,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
             <div className="cf-header-title">📋 Client Record</div>
             <div className="cf-header-sub">
               {lead?.first_name} {lead?.last_name}
-              {lead?.phone && <span className="cf-header-phone"> · {lead.phone}</span>}
+              {lead?.phone && <span className="cf-header-phone"> · {formatPhone(lead.phone)}</span>}
             </div>
           </div>
           <div className="cf-header-right">

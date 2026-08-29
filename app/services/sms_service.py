@@ -76,6 +76,55 @@ def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str 
     )
 
 
+def describe_sms_sender(advisor: User, db: Session) -> dict:
+    """Which number this advisor would send from, WITHOUT raising or sending.
+
+    The composer used to discover that no Twilio credentials were configured by
+    pressing Send and reading the exception text. The same resolution order is
+    used here as in `_resolve_twilio_creds` - advisor's own credentials, then
+    the organization's shared sender, then nothing - so what the page reports
+    and what the send does can never disagree.
+
+    NO CROSS-TENANT FALLBACK, and no secret in the return value.
+    """
+    if advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+        return {
+            "ready": bool(advisor.twilio_phone_number),
+            "source": "advisor",
+            "from_number": advisor.twilio_phone_number,
+            "account_sid_last4": (advisor.twilio_account_sid or "")[-4:],
+            "reason": (None if advisor.twilio_phone_number else
+                       "Your Twilio account is connected but no sending number "
+                       "is set. Add one in Settings -> Twilio."),
+        }
+
+    org: Organization | None = db.query(Organization).filter(
+        Organization.id == advisor.organization_id
+    ).first()
+    if (org and org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted
+            and org.org_twilio_phone_number):
+        return {
+            "ready": True,
+            "source": "organization",
+            "from_number": org.org_twilio_phone_number,
+            "account_sid_last4": (org.org_twilio_account_sid or "")[-4:],
+            "reason": None,
+        }
+
+    return {
+        "ready": False,
+        "source": None,
+        "from_number": None,
+        "account_sid_last4": None,
+        "reason": (
+            "No Twilio credentials are configured for %s or for this "
+            "organization. Add a personal number in Settings -> Twilio, or ask "
+            "an admin to configure a shared organization number in Org Settings."
+            % (advisor.full_name or "this advisor")
+        ),
+    }
+
+
 # Legacy helper kept for any callers that only need the client object
 def get_twilio_client(advisor: User, db: Session | None = None) -> Client:
     if db is not None:
@@ -197,6 +246,26 @@ def create_booking_link(db: Session, lead: Lead, advisor: User) -> BookingLink:
     return booking
 
 
+def get_or_create_booking_link(db: Session, lead: Lead, advisor: User) -> BookingLink:
+    """The link the composer previewed, so the send uses that exact URL.
+
+    Previewing a message used to be impossible without minting a token, and
+    minting one per keystroke would litter the table with links a family never
+    saw. Reusing the newest still-pending link for this lead and advisor means
+    the preview and the send agree on a single URL, and the Message row's
+    `booking_link_id` still points at the link that was actually sent.
+    """
+    existing = (db.query(BookingLink)
+                .filter(BookingLink.lead_id == lead.id,
+                        BookingLink.user_id == advisor.id,
+                        BookingLink.status == "pending")
+                .order_by(BookingLink.created_at.desc())
+                .first())
+    if existing:
+        return existing
+    return create_booking_link(db, lead, advisor)
+
+
 def render_template(template: str, lead: Lead, advisor: User, booking_url: str) -> str:
     """Simple variable substitution for message templates."""
     return (
@@ -206,6 +275,32 @@ def render_template(template: str, lead: Lead, advisor: User, booking_url: str) 
         .replace("{booking_link}", booking_url)
         .replace("{advisor_cell}", advisor.twilio_phone_number or "")
     )
+
+
+BOOKING_LINK_PLACEHOLDER = "{booking_link}"
+
+
+def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> str:
+    """The EXACT text that will be sent. One function, used by preview and send.
+
+    `render_template` only substitutes a `{booking_link}` placeholder. A message
+    typed by hand, or drafted by the AI (which strips URLs deliberately), has no
+    placeholder - so ticking "Include booking link" minted a token, recorded it
+    against the message, and sent a text with no link in it. The advisor saw a
+    checked box and the family got nothing to click.
+
+    When the placeholder is absent and there is a URL, it is appended. Preview
+    and send call this with the same arguments and therefore produce the same
+    string, which is the whole point: no hidden send-time URL.
+    """
+    body = render_template(template, lead, advisor, booking_url)
+    if not booking_url:
+        return body
+    if BOOKING_LINK_PLACEHOLDER in (template or ""):
+        return body
+    if booking_url in body:
+        return body                     # already typed in by hand
+    return (body.rstrip() + "\n\n" + booking_url).strip()
 
 
 def send_sms(
@@ -239,12 +334,13 @@ def send_sms(
     booking_url = ""
     booking_link = None
     if include_booking_link:
-        booking_link = create_booking_link(db, lead, advisor)
+        # The same link the composer previewed, not a fresh one.
+        booking_link = get_or_create_booking_link(db, lead, advisor)
         from app.services.public_identity import booking_url as public_booking_url
         booking_url = public_booking_url(db, lead.organization_id,
                                          booking_link.token)
 
-    body = render_template(template, lead, advisor, booking_url)
+    body = compose_body(template, lead, advisor, booking_url)
 
     client, from_phone, _ = _resolve_twilio_creds(advisor, db)
 
@@ -304,12 +400,12 @@ def send_mms(
     booking_url = ""
     booking_link = None
     if include_booking_link:
-        booking_link = create_booking_link(db, lead, advisor)
+        booking_link = get_or_create_booking_link(db, lead, advisor)
         from app.services.public_identity import booking_url as public_booking_url
         booking_url = public_booking_url(db, lead.organization_id,
                                          booking_link.token)
 
-    body = render_template(template, lead, advisor, booking_url)
+    body = compose_body(template, lead, advisor, booking_url)
 
     client, from_phone, _ = _resolve_twilio_creds(advisor, db)
     # Same resolver as send_sms — see the note there and twilio_callbacks.py.

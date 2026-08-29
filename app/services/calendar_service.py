@@ -132,7 +132,15 @@ def _record_google_connection(db: Session, advisor: User) -> None:
         maxResults=1, singleEvents=True,
     ).execute()
 
-    account_email = resp.get("summary")
+    # `summary` is the calendar's TITLE, which is the account address only
+    # while nobody has renamed it. This advisor's reads back "Personal
+    # Calendar". Storing a title in a column called account_email is how a
+    # record starts lying, so it is only accepted when it actually looks like
+    # an address; otherwise the field stays empty and
+    # POST /god/calendar-write-test fills it in from a value Google stamps on
+    # a created event, which is always the real account.
+    summary = (resp.get("summary") or "").strip()
+    account_email = summary if "@" in summary else None
     tz_name = resp.get("timeZone")
 
     row = (db.query(CalendarConnection)

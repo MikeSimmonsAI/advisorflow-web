@@ -5,10 +5,45 @@ import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
 import OutcomeTracker from '../components/OutcomeTracker'
 import CaseFile from './CaseFile'
+import { useToast } from '../components/Toast'
+import { formatPhone } from '../utils/phone'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
 const QUALITY_COLOR = { hot: 'red', warm: 'amber', cold: 'blue', dead: 'neutral-dim', unknown: 'neutral' }
+
+// Inline styles for the composer's new truth-telling panels: what will be
+// sent, and whether it can be sent at all.
+const SX = {
+  previewOk: {
+    background: 'rgba(30,168,255,0.07)', border: '1px solid rgba(30,168,255,0.28)',
+    borderRadius: 8, padding: '9px 11px', marginBottom: 8,
+  },
+  previewWarn: {
+    background: 'rgba(255,180,30,0.08)', border: '1px solid rgba(255,180,30,0.32)',
+    borderRadius: 8, padding: '9px 11px', marginBottom: 8,
+  },
+  previewLabel: {
+    fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em',
+    textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 4,
+  },
+  previewBody: {
+    fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-primary)',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+  },
+  previewMeta: { fontSize: 11, color: 'var(--text-tertiary)', marginTop: 5 },
+  senderWarn: {
+    background: 'rgba(255,80,80,0.08)', border: '1px solid rgba(255,80,80,0.3)',
+    borderRadius: 8, padding: '9px 11px', marginBottom: 8,
+    fontSize: 12.5, lineHeight: 1.5, color: 'var(--signal-red, #ff8a8a)',
+  },
+  senderOk: {
+    fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 8,
+  },
+  channelNote: {
+    fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 6, lineHeight: 1.5,
+  },
+}
 
 const TONES = [
   { key: 'cold',   label: '❄️ Cold',   color: 'var(--signal-blue)',   desc: 'Soft intro, no pressure' },
@@ -211,6 +246,12 @@ function ConversationBubble({ event: e }) {
 export default function LeadDetail() {
   const { leadId } = useParams()
   const navigate = useNavigate()
+  const toast = useToast()
+  // What the backend says this composer may actually do with this lead:
+  // per-channel capability, the resolved SMS sender, and the exact booking URL
+  // that Send would use. See app/routers/compose_router.py.
+  const [composeCtx, setComposeCtx] = useState(null)
+  const [voiceReadiness, setVoiceReadiness] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [messageText, setMessageText] = useState('')
@@ -235,6 +276,7 @@ export default function LeadDetail() {
   const [aiConvChannel, setAiConvChannel] = useState('email')
   const [calling, setCalling] = useState(false)
   const [callResult, setCallResult] = useState(null)
+  const [callError, setCallError] = useState('')
   const [tone, setTone] = useState(1) // 0=cold 1=warm 2=hot 3=urgent
   const [aiDirection, setAiDirection] = useState('')
   // Appointment type: auto-detected from tier, manually overridable
@@ -271,7 +313,7 @@ export default function LeadDetail() {
       await api.patch(`/leads/${leadId}/flag`, { flag_type: flagType || null })
       load()
     } catch (err) {
-      alert(`Flag failed: ${err.message}`)
+      toast.error(err.message || 'The flag could not be saved.', { title: 'Flag failed' })
     } finally {
       setFlagging(false)
     }
@@ -297,6 +339,15 @@ export default function LeadDetail() {
 
   function load() {
     setLoading(true)
+    // Capability, sender readiness and the resolved booking URL, in one read.
+    // Failures here must never block the page: the composer falls back to what
+    // it can infer from the lead record alone.
+    api.get(`/compose/${leadId}/context`)
+      .then(c => setComposeCtx(c))
+      .catch(() => setComposeCtx(null))
+    api.get(`/voice/readiness/${leadId}`)
+      .then(v => setVoiceReadiness(v))
+      .catch(() => setVoiceReadiness(null))
     // Also load AI conversation status
     api.get(`/ai-conversation/status/${leadId}`)
       .then(s => setAiConvStatus(s))
@@ -372,35 +423,50 @@ export default function LeadDetail() {
   }
 
   async function handleCall() {
-    if (!lead.phone) { alert('This lead has no phone number.'); return }
-    if (!confirm(`Call ${lead.first_name || 'this lead'} at ${lead.phone}?`)) return
+    if (calling) return                        // guards double submit
+    const phone = data?.lead?.phone
+    if (!phone) { toast.error('This lead has no phone number.'); return }
+    if (!window.confirm(`Call ${data?.lead?.first_name || 'this lead'} at ${formatPhone(phone)}?`)) return
     setCalling(true)
     setCallResult(null)
+    setCallError('')
     try {
       const result = await api.post(`/voice/call/${leadId}`, {})
       setCallResult(result)
+      toast.success('Call placed.')
       setTimeout(() => load(), 3000)
     } catch (err) {
-      alert(err.message)
+      // The backend now distinguishes a refusal (409, with the orchestrator's
+      // reason) from a provider failure (502, with the provider's message).
+      // Both are worth showing verbatim; neither is a network outage.
+      const msg = err.message || 'The call could not be placed.'
+      setCallError(msg)
+      toast.error(msg, { title: err.status === 409 ? 'Call not permitted' : 'Call failed' })
     } finally {
-      setCalling(false)
+      setCalling(false)                        // resets on EVERY path
     }
   }
 
   async function handleStartAiConversation() {
+    if (aiConvLoading) return
     setAiConvLoading(true)
     try {
-      const result = await api.post('/ai-conversation/start', { lead_id: leadId, channel: aiConvChannel })
+      // The channel actually in force, never the stale preference - starting
+      // an email sequence for a lead with no email is the exact failure the
+      // capability matrix exists to prevent.
+      const channel = effectiveAiChannel || aiConvChannel
+      const result = await api.post('/ai-conversation/start', { lead_id: leadId, channel })
       if (result.success) {
         setAiConvStatus({ active: true, stage: 'outreach_sent', touch_number: 1, messages_sent: 1 })
+        toast.success('AI conversation started.')
         load()
       } else if (result.already_active) {
-        alert('AI conversation is already active for this lead.')
+        toast.info('An AI conversation is already running for this lead.')
       } else {
-        alert(result.error || 'Failed to start AI conversation')
+        toast.error(result.error || 'Could not start the AI conversation.')
       }
     } catch (err) {
-      alert(err.message)
+      toast.error(err.message || 'Could not start the AI conversation.')
     } finally {
       setAiConvLoading(false)
     }
@@ -410,8 +476,9 @@ export default function LeadDetail() {
     try {
       await api.post('/ai-conversation/pause', { lead_id: leadId })
       setAiConvStatus(s => ({ ...s, active: false, paused: true }))
+      toast.success('AI conversation paused.')
     } catch (err) {
-      alert(err.message)
+      toast.error(err.message || 'Could not pause the AI conversation.')
     }
   }
 
@@ -419,12 +486,14 @@ export default function LeadDetail() {
     try {
       await api.post('/ai-conversation/resume', { lead_id: leadId })
       setAiConvStatus(s => ({ ...s, active: true, paused: false }))
+      toast.success('AI conversation resumed.')
     } catch (err) {
-      alert(err.message)
+      toast.error(err.message || 'Could not resume the AI conversation.')
     }
   }
 
   async function handleSuggestReply() {
+    if (suggestingReply) return                  // guards double submit
     setSuggestingReply(true)
     setSendError('')
     try {
@@ -445,6 +514,7 @@ export default function LeadDetail() {
   }
 
   async function handleSuggestEmail() {
+    if (suggestingReply) return                  // guards double submit
     setSuggestingReply(true)
     setSendError('')
     try {
@@ -499,7 +569,7 @@ export default function LeadDetail() {
   }
 
   async function handleSend() {
-    if (!messageText.trim()) return
+    if (!messageText.trim() || sending) return   // guards double submit
     setSending(true)
     setSendError('')
     try {
@@ -530,7 +600,7 @@ export default function LeadDetail() {
   }
 
   async function handleSendEmail() {
-    if (!emailBody.trim()) return
+    if (!emailBody.trim() || sendingEmail) return   // guards double submit
     setSendingEmail(true)
     setSendError('')
     try {
@@ -584,7 +654,7 @@ export default function LeadDetail() {
       await api.post(`/calendar/cancel-booking/${bookingId}`, {})
       load()
     } catch (err) {
-      alert(`Failed to cancel: ${err.message}`)
+      toast.error(err.message || 'The booking could not be cancelled.', { title: 'Cancel failed' })
     } finally {
       setCancelling(false)
     }
@@ -635,12 +705,58 @@ export default function LeadDetail() {
   )
 
   const { lead, events, ai_quality, booking } = data
-  const canSendSMS   = lead.phone  && lead.status !== 'dnc' && !lead.is_duplicate
-  const canSendEmail = lead.email  && lead.status !== 'dnc' && !lead.is_duplicate
+
+  // ── CHANNEL CAPABILITY ────────────────────────────────────────────────────
+  //
+  // Each channel depends only on what THAT channel needs. A lead with a phone
+  // and no email can be texted and called; the missing email is a reason to
+  // withhold Email and nothing else. The backend decides (compose_router), and
+  // these locals fall back to the lead record when that read failed, so the
+  // page still works if the endpoint is unreachable.
+  const ch = composeCtx?.channels
+  const notBlocked = lead.status !== 'dnc' && !lead.is_duplicate
+  const canSendSMS   = ch ? ch.sms.available   : Boolean(lead.phone && notBlocked)
+  const canSendEmail = ch ? ch.email.available : Boolean(lead.email && notBlocked)
+  const canSendBoth  = ch ? ch.both.available  : (canSendSMS && canSendEmail)
+  const canVoice     = ch ? ch.voice.available
+                          : Boolean(lead.phone && notBlocked)
+  const smsBlockedReason   = ch ? ch.sms.reason : null
+  const emailBlockedReason = ch ? ch.email.reason : 'This lead has no email address.'
+  const voiceBlockedReason = (voiceReadiness && !voiceReadiness.ready)
+    ? voiceReadiness.reason
+    : (ch ? ch.voice.reason : null)
+  const smsSender = composeCtx?.sms_sender || null
+  const bookingUrl = composeCtx?.booking?.url || ''
+  const bookingUrlReason = composeCtx?.booking?.reason || null
+
   const canSend      = canSendSMS || canSendEmail
   const initials     = `${(lead.first_name || '?')[0]}${(lead.last_name || '?')[0]}`.toUpperCase()
   const currentTone  = TONES[tone]
   const effectiveSendMode = canSendSMS && sendMode === 'sms' ? 'sms' : canSendEmail ? 'email' : 'sms'
+
+  // ── WHAT WILL ACTUALLY BE SENT ────────────────────────────────────────────
+  //
+  // Mirrors app/services/sms_service.py::compose_body exactly: substitute the
+  // {booking_link} placeholder if the advisor used one, otherwise append the
+  // URL. "Include booking link" checked used to show nothing in the box and
+  // then either append at send time or - for a hand-typed message with no
+  // placeholder - send no link at all while still recording one.
+  function composePreview(text) {
+    const body = String(text || '')
+    if (!includeBookingLink || !bookingUrl) return body.replace('{booking_link}', '')
+    if (body.includes('{booking_link}')) return body.replaceAll('{booking_link}', bookingUrl)
+    if (body.includes(bookingUrl)) return body
+    return (body.trimEnd() + '\n\n' + bookingUrl).trim()
+  }
+  const smsPreview = composePreview(messageText)
+
+  // The AI-conversation channel actually in force. The stored preference is
+  // honoured only if the lead can be reached that way; otherwise it falls back
+  // to a channel that works, and to null when none does.
+  const aiChannelAvailable = { email: canSendEmail, sms: canSendSMS, both: canSendBoth }
+  const effectiveAiChannel = aiChannelAvailable[aiConvChannel]
+    ? aiConvChannel
+    : (canSendBoth ? 'both' : canSendEmail ? 'email' : canSendSMS ? 'sms' : null)
 
   return (
     <div className="lead-detail-page">
@@ -692,7 +808,7 @@ export default function LeadDetail() {
               {editSuccess && <span style={{ fontSize: 12, color: 'var(--signal-green)' }}>✓ Saved</span>}
             </div>
             <div className="lead-detail-contact">
-              {lead.phone && <span className="mono">📱 {lead.phone}</span>}
+              {lead.phone && <span className="mono">📱 {formatPhone(lead.phone)}</span>}
               {lead.email && <span className="mono">✉️ {lead.email}</span>}
               {(lead.city || lead.street_address) && (
                 <span className="mono" style={{ color: 'var(--text-secondary)' }}>
@@ -1202,6 +1318,42 @@ export default function LeadDetail() {
                   </div>
                 )}
                 {mediaError && <div style={{ color: 'var(--signal-red)', fontSize: 12, marginBottom: 4 }}>{mediaError}</div>}
+                {/* WHAT WILL BE SENT. Shown whenever a link is being added, so
+                    the advisor sees the branded URL before pressing Send rather
+                    than discovering it in the delivered message. */}
+                {includeBookingLink && (bookingUrl || bookingUrlReason) && (
+                  <div style={bookingUrl ? SX.previewOk : SX.previewWarn}>
+                    <div style={SX.previewLabel}>
+                      {bookingUrl ? 'Will be sent as' : 'Booking link unavailable'}
+                    </div>
+                    {bookingUrl ? (
+                      <>
+                        <div style={SX.previewBody}>{smsPreview || bookingUrl}</div>
+                        <div style={SX.previewMeta}>
+                          {smsPreview.length} characters ·{' '}
+                          {smsPreview.length <= 160 ? '1 segment' : `${Math.ceil(smsPreview.length / 153)} segments`}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={SX.previewBody}>{bookingUrlReason}</div>
+                    )}
+                  </div>
+                )}
+
+                {/* SENDER READINESS. The composer knows before Send whether a
+                    Twilio sender resolves, and from where. This warning is
+                    never hidden - an advisor who cannot send should know why
+                    while writing, not after pressing the button. */}
+                {smsSender && !smsSender.ready && (
+                  <div style={SX.senderWarn}>{smsSender.reason}</div>
+                )}
+                {smsSender && smsSender.ready && smsSender.from_number && (
+                  <div style={SX.senderOk}>
+                    Sending from {formatPhone(smsSender.from_number)}
+                    {smsSender.source === 'organization' ? ' (organization sender)' : ''}
+                  </div>
+                )}
+
                 <div className="compose-footer">
                   <label className="compose-checkbox">
                     <input
@@ -1379,33 +1531,54 @@ export default function LeadDetail() {
 
             {!aiConvStatus?.active || aiConvStatus?.status === 'not_started' ? (
               <div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                  {['email', 'sms', 'both'].map(ch => (
+                {/* Channels this lead can actually be reached on. Email used to
+                    be offered - and preselected - for a lead with no email
+                    address, so the only way to discover it was to press Start
+                    and read "Lead has no email address". Now an unavailable
+                    channel is disabled and says why. */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                  {[
+                    ['email', '✉️ Email', canSendEmail, emailBlockedReason],
+                    ['sms',   '💬 SMS',   canSendSMS,   smsBlockedReason],
+                    ['both',  '⚡ Both',  canSendBoth,  ch?.both?.reason],
+                  ].map(([key, label, available, why]) => (
                     <button
-                      key={ch}
-                      onClick={() => setAiConvChannel(ch)}
+                      key={key}
+                      onClick={() => available && setAiConvChannel(key)}
+                      disabled={!available}
+                      title={available ? undefined : (why || 'Not available for this lead')}
                       style={{
                         padding: '6px 14px', borderRadius: 20, border: '1px solid',
-                        fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                        borderColor: aiConvChannel === ch ? 'var(--accent)' : 'var(--border-subtle)',
-                        background: aiConvChannel === ch ? 'var(--accent)' : 'transparent',
-                        color: aiConvChannel === ch ? '#fff' : 'var(--text-secondary)',
+                        fontSize: 12, fontWeight: 600,
+                        cursor: available ? 'pointer' : 'not-allowed',
+                        opacity: available ? 1 : 0.42,
+                        borderColor: effectiveAiChannel === key ? 'var(--accent)' : 'var(--border-subtle)',
+                        background: effectiveAiChannel === key ? 'var(--accent)' : 'transparent',
+                        color: effectiveAiChannel === key ? '#fff' : 'var(--text-secondary)',
                       }}
                     >
-                      {ch === 'email' ? '✉️ Email' : ch === 'sms' ? '💬 SMS' : '⚡ Both'}
+                      {label}
                     </button>
                   ))}
                 </div>
+                {!canSendEmail && emailBlockedReason && (
+                  <div style={SX.channelNote}>Email: {emailBlockedReason}</div>
+                )}
+                {!canSendSMS && smsBlockedReason && (
+                  <div style={SX.channelNote}>SMS: {smsBlockedReason}</div>
+                )}
                 <button
                   className="btn btn--primary"
-                  style={{ width: '100%', fontSize: 14, padding: '12px' }}
+                  style={{ width: '100%', fontSize: 14, padding: '12px', marginTop: 12 }}
                   onClick={handleStartAiConversation}
-                  disabled={aiConvLoading || lead.status === 'dnc' || lead.is_duplicate}
+                  disabled={aiConvLoading || !effectiveAiChannel}
                 >
                   {aiConvLoading ? '⏳ Starting…' : '🤖 Start AI Conversation'}
                 </button>
                 <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, textAlign: 'center' }}>
-                  AI sends 8 emails over 14 days. Responds to replies 24/7. Pauses on escalation.
+                  {effectiveAiChannel
+                    ? 'AI runs a multi-touch sequence over 14 days, responds to replies, and pauses on escalation.'
+                    : 'This lead cannot be reached on any channel right now.'}
                 </p>
               </div>
             ) : (
@@ -1431,19 +1604,31 @@ export default function LeadDetail() {
               </div>
               {callResult && (
                 <div style={{ background: 'rgba(30,240,168,0.1)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: 'var(--signal-green, #1ef0a8)' }}>
-                  ✅ Call initiated — Call #{callResult.call_number} to {callResult.lead_name}
+                  ✅ Call placed — call #{callResult.call_number} to {callResult.lead_name}
+                  {callResult.from_phone ? ` from ${formatPhone(callResult.from_phone)}` : ''}
                 </div>
+              )}
+              {/* The real reason, kept on the page. It used to be an alert()
+                  that said "Unable to reach the server" for every failure,
+                  including ones the server had answered clearly. */}
+              {callError && (
+                <div style={SX.senderWarn}>{callError}</div>
+              )}
+              {!canVoice && voiceBlockedReason && !callError && (
+                <div style={SX.senderWarn}>{voiceBlockedReason}</div>
               )}
               <button
                 className="btn btn--primary"
                 style={{ width: '100%', fontSize: 14, padding: '12px' }}
                 onClick={handleCall}
-                disabled={calling || lead.status === 'dnc' || lead.is_duplicate}
+                disabled={calling || !canVoice}
+                title={canVoice ? undefined : (voiceBlockedReason || undefined)}
               >
                 {calling ? '⏳ Calling…' : '📞 Call with AI'}
               </button>
               <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, textAlign: 'center' }}>
-                AI calls lead, discloses it's AI, books if they say yes. Records call. Max 3 attempts.
+                The AI agent calls, discloses that it is an AI, and books if they say yes.
+                Recorded. Maximum 3 attempts.
               </p>
             </section>
           )}

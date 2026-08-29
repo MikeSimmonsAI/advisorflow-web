@@ -411,7 +411,14 @@ def _escalate_conversation(db: Session, conv: PipelineConversation, lead: Lead, 
     db.commit()
 
     try:
-        notification_email = getattr(advisor, 'notification_email', None) or "michael.simmons@nsmg.com"
+        # The ADVISOR who owns this conversation. The old fallback named one
+        # real operator, so an escalation in any other organization emailed him.
+        notification_email = (getattr(advisor, 'notification_email', None)
+                              or getattr(advisor, 'email', None))
+        if not notification_email:
+            logger.warning("escalation alert: advisor %s has no address - skipping",
+                           getattr(advisor, 'id', None))
+            return
         lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
         frontend_url = os.environ.get("FRONTEND_URL", "https://advisorflow-frontend.onrender.com")
         subject = f"⚠️ Human Response Needed — {lead_name}"

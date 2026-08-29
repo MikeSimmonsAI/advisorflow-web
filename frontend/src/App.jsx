@@ -13,6 +13,15 @@ import DealRoom from './pages/portal/DealRoom'
 import PortalAccess from './pages/portal/PortalAccess'
 import DemoSite from './pages/portal/DemoSite'
 import PortalViewer from './pages/portal/PortalViewer'
+// Family-facing pages on the organization's own branded domain. The
+// public-identity resolver emits https://<branded-host>/book/:token and
+// /survey/:token; without these two routes those links 404.
+import BookingPage from './pages/public/BookingPage'
+import SurveyPage from './pages/public/SurveyPage'
+import AppointmentConfirmPage from './pages/public/AppointmentConfirmPage'
+// The app's own notice surface. Wraps the router so any page can raise a
+// notice without blocking the tab the way window.alert() does.
+import { ToastProvider } from './components/Toast'
 import CadenceTemplates from './pages/CadenceTemplates'
 import OrgSettings from './pages/OrgSettings'
 import ChangePassword from './pages/ChangePassword'
@@ -197,6 +206,7 @@ export default function App() {
   }, [])
 
   return (
+    <ToastProvider>
     <BrowserRouter>
       {/* DEMO MODE BANNER — above every shell, inside the router because it
           links to the console. Renders nothing at all unless the BACKEND says
@@ -222,6 +232,16 @@ export default function App() {
         <Route path="/demo/:token" element={<DemoSite />} />
         <Route path="/portal/access/:token" element={<PortalAccess />} />
         <Route path="/portal/view/:proposalId" element={<PortalViewer />} />
+        {/* The family's booking and feedback pages, on the customer's own
+            branded host. These are the routes the public-identity resolver
+            has been emitting; they reuse the existing booking/survey
+            endpoints rather than introducing a second system. */}
+        <Route path="/book/:token" element={<BookingPage />} />
+        <Route path="/survey/:token" element={<SurveyPage />} />
+        {/* Brand-sales meeting confirmation. Same token, same redeem logic as
+            the backend HTML page — this one just lives on the brand's host so
+            the prospect is not emailed an infrastructure URL. */}
+        <Route path="/appointments/confirm/:token" element={<AppointmentConfirmPage />} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
@@ -314,5 +334,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
+    </ToastProvider>
   )
 }

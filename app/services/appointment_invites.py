@@ -40,12 +40,26 @@ from app.services.ics_builder import build_ics, ics_uid, METHOD_REQUEST, METHOD_
 
 log = logging.getLogger(__name__)
 
-# Where the confirmation link points. The BACKEND, not the app: the prospect
-# has no account and must never be sent somewhere that asks them to log in.
+# Last-resort host for a confirmation link. The brand's own `app_base_url` is
+# what actually gets used (see `confirm_url`); the prospect has no account and
+# is never sent anywhere that asks them to log in - /appointments/confirm/:token
+# is a public route.
 PUBLIC_BASE_URL = os.environ.get(
     "PUBLIC_BASE_URL",
     os.environ.get("TRACKING_BASE_URL", "https://advisorflow-backend.onrender.com"),
 ).rstrip("/")
+
+# Shared with the public-identity resolver, which owns the same judgement for
+# family-facing booking and survey links. Imported lazily inside the helper so
+# this module keeps no import-time dependency on it.
+def _is_infrastructure_host(value) -> bool:
+    try:
+        from app.services.public_identity import _is_infrastructure_host as _chk
+        return _chk(value)
+    except Exception:
+        low = str(value or "").lower()
+        return (".onrender.com" in low or ".vercel.app" in low
+                or "localhost" in low or "127.0.0.1" in low)
 
 # A confirmation link outlives the meeting slightly so a late click still lands
 # somewhere sensible instead of on an opaque error.
@@ -177,8 +191,38 @@ def get_or_create_token(db: Session, appt: SalesAppointment,
     return tok
 
 
-def confirm_url(token: str) -> str:
-    return "%s/sales/appointments/confirm/%s" % (PUBLIC_BASE_URL, token)
+def confirm_url(token: str, base: Optional[str] = None) -> str:
+    """The link a PROSPECT clicks. Branded host, never the API hostname.
+
+    `base` is the brand's own `app_base_url`. The branded frontend serves
+    /appointments/confirm/:token, which reads its context and posts the answer
+    through the JSON endpoints beside the original HTML page - so the GET stays
+    side-effect free and a link scanner still cannot confirm a meeting.
+
+    PUBLIC_BASE_URL remains as a fallback for a brand with no app host, but an
+    infrastructure hostname is refused rather than emailed to a prospect: a
+    stranger who has never heard of AdvisorFlow reads
+    `advisorflow-backend.onrender.com` as a phishing link, and it outlives the
+    deployment in their inbox.
+    """
+    # The guard applies to the brand's own host too, not only to the fallback.
+    # A registry entry or a platform row can be wrong, and when it is, the
+    # thing that reaches a stranger's inbox is still an infrastructure URL.
+    chosen = None
+    for candidate in ((base or "").rstrip("/"), (PUBLIC_BASE_URL or "").rstrip("/")):
+        if not candidate:
+            continue
+        if _is_infrastructure_host(candidate):
+            log.error("appointment_invites: refusing infrastructure host %r for a "
+                      "prospect confirmation link", candidate)
+            continue
+        chosen = candidate
+        break
+    if not chosen:
+        log.error("appointment_invites: no branded host for a confirmation link "
+                  "- refusing to send an infrastructure URL to a prospect")
+        return ""
+    return "%s/appointments/confirm/%s" % (chosen, token)
 
 
 def resolve_token(db: Session, token: str,
@@ -361,7 +405,9 @@ def send_prospect_invitation(db: Session, appt: SalesAppointment,
 
     ident = brand_identity(db, appt)
     tok = get_or_create_token(db, appt, now=now)
-    url = confirm_url(tok.token)
+    # The BRAND's own host. This is the line that used to email a prospect an
+    # `advisorflow-backend.onrender.com` link.
+    url = confirm_url(tok.token, ident.get("app_base_url"))
 
     cancelling = kind == "cancel"
     uid = ics_uid(appt.id, appt.prospect_email)

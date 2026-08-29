@@ -92,6 +92,7 @@ from app.routers.social_webhooks_router import router as social_webhooks_router
 from app.routers.fiber_leads_router import router as fiber_leads_router
 from app.routers.setup_router import router as setup_router
 from app.routers.contacts_router import router as contacts_router
+from app.routers.compose_router import router as compose_router
 from app.routers.timeline_router import router as timeline_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
@@ -380,6 +381,9 @@ app.include_router(auth_router.router)
 app.include_router(timeline_router)   # before leads_router — prevents /{lead_id} catch-all from shadowing /activity
 app.include_router(leads_router.router)
 app.include_router(sms_router.router)
+# Read-only: what the composer may do with a lead, and the exact body it would
+# send. Registered next to sms_router because it answers for the same send path.
+app.include_router(compose_router)
 app.include_router(admin_router.router)
 app.include_router(cadence_router.router)
 app.include_router(email_router.router)

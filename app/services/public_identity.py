@@ -331,22 +331,83 @@ def public_base_url(db: Session, organization_id: Optional[str]) -> Optional[str
     return identity_for_org(db, organization_id).public_base_url
 
 
+# Hosts that belong to the plumbing, not to any customer. A family must never
+# be sent to one: the name tells them nothing, it tells them the wrong thing
+# about who is contacting them, and it survives in their message history long
+# after the deployment behind it has moved.
+#
+# These markers are matched against the FALLBACK base only. A platform row or
+# registry entry is a deliberate configuration and is trusted as written; the
+# environment is a single value shared by three brands and four services, which
+# is exactly the shape of mistake this guard exists to catch.
+_INFRASTRUCTURE_HOST_MARKERS = (
+    ".onrender.com",
+    ".vercel.app",
+    ".railway.app",
+    ".herokuapp.com",
+    ".netlify.app",
+    "localhost",
+    "127.0.0.1",
+)
+
+
+def _is_infrastructure_host(base) -> bool:
+    if not base:
+        return False
+    low = str(base).lower()
+    return any(marker in low for marker in _INFRASTRUCTURE_HOST_MARKERS)
+
+
+def _public_base_or_none(db: Session, organization_id: Optional[str],
+                         *env_fallbacks) -> Optional[str]:
+    """The branded host for this organization, or None - never plumbing.
+
+    Resolution order is the resolver first, then the configured environment,
+    so a deployment that set BOOKING_BASE_URL for an organization with no
+    platform domain keeps working. The one thing this will not do is hand back
+    an infrastructure hostname: `advisorflow-booking.vercel.app` in a text
+    message is a leak whether it arrived from a hard-coded constant or from an
+    environment variable, and the env is where the last copies of it live.
+    """
+    resolved = public_base_url(db, organization_id)
+    if resolved:
+        return resolved.rstrip("/")
+    for candidate in env_fallbacks:
+        if not candidate:
+            continue
+        if _is_infrastructure_host(candidate):
+            log.error(
+                "public_identity: refusing infrastructure host %r as a public "
+                "link for org %s - set the platform domain or BOOKING_BASE_URL "
+                "to the branded host",
+                candidate, organization_id,
+            )
+            continue
+        return str(candidate).rstrip("/")
+    return None
+
+
 def booking_url(db: Session, organization_id: Optional[str], token: str) -> str:
     """Where a family goes to pick a time.
 
-    Falls back to the configured BOOKING_BASE_URL only when the brand has no
-    domain at all, so an organization on a platform row without a domain keeps
-    working exactly as it did before this module existed.
+    Served by the branded frontend at /book/:token, which reuses the existing
+    booking endpoints. Falls back to a configured BOOKING_BASE_URL only when
+    the brand has no domain at all - and never to an infrastructure host.
     """
-    base = public_base_url(db, organization_id) or ENV_BOOKING_BASE_URL
+    base = _public_base_or_none(db, organization_id, ENV_BOOKING_BASE_URL)
     if not base:
-        log.error("public_identity: no public host for org %s - booking link "
-                  "cannot be branded", organization_id)
-        base = ENV_BOOKING_BASE_URL or ""
-    return "%s/book/%s" % (base.rstrip("/"), token)
+        log.error("public_identity: no branded public host for org %s - booking "
+                  "link cannot be built", organization_id)
+        return ""
+    return "%s/book/%s" % (base, token)
 
 
 def survey_url(db: Session, organization_id: Optional[str], token: str) -> str:
     """Where a family leaves feedback after an appointment."""
-    base = public_base_url(db, organization_id) or ENV_PUBLIC_BASE_URL or ENV_BOOKING_BASE_URL
-    return "%s/survey/%s" % ((base or "").rstrip("/"), token)
+    base = _public_base_or_none(db, organization_id,
+                                ENV_PUBLIC_BASE_URL, ENV_BOOKING_BASE_URL)
+    if not base:
+        log.error("public_identity: no branded public host for org %s - survey "
+                  "link cannot be built", organization_id)
+        return ""
+    return "%s/survey/%s" % (base, token)

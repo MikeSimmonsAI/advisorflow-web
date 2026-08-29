@@ -141,8 +141,49 @@ def get_survey_results(
     }
 
 
+@router.get("/{token}/context")
+def get_survey_context_json(token: str, db: Session = Depends(get_db)):
+    """The same survey, as JSON, for the branded public page.
+
+    Public - the token is the whole authorization, exactly as for the HTML
+    page below. That page stays: links already sent to families point at it,
+    and breaking a live link to tidy an architecture is not a trade worth
+    making. New links go to the branded route on the organization's own
+    domain, which renders from this.
+
+    Deliberately narrow. A family needs their first name, the business's name
+    and its colour. Nothing about the advisor, the lead record, the
+    appointment history or the organization's internals is in this payload,
+    so a mistake in the page cannot expose what was never sent.
+    """
+    followup, lead, advisor, org = _get_survey_context(db, token)
+
+    from app.services.public_identity import identity_for_org
+    ident = identity_for_org(db, org.id if org else None)
+
+    return {
+        "token": token,
+        "already_submitted": _already_submitted(db, followup.id),
+        "first_name": (lead.first_name if lead else "") or "there",
+        # The BUSINESS, never the platform.
+        "business_name": ident.customer_facing_name or (org.name if org else "our team"),
+        "business_phone": ident.business_phone,
+        "brand_color": _safe_color(getattr(org, "brand_color_primary", None) if org else None),
+        "review_url": getattr(org, "google_review_url", None) if org else None,
+        "facebook_url": getattr(org, "facebook_url", None) if org else None,
+        "instagram_url": getattr(org, "instagram_url", None) if org else None,
+    }
+
+
 @router.get("/{token}", response_class=HTMLResponse)
 def get_survey_page(token: str, db: Session = Depends(get_db)):
+    """The original backend-rendered survey. Kept deliberately.
+
+    Links already sent to families point here. Retiring it to tidy the
+    architecture would break live links in messages already delivered, which
+    is a worse outcome than serving two pages for a while. New links go to
+    the branded route on the organization's own domain.
+    """
     followup, lead, advisor, org = _get_survey_context(db, token)
     already_done = _already_submitted(db, followup.id)
 

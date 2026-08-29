@@ -330,6 +330,26 @@ def god_calendar_write_test(
         out["event_timezone"] = (created.get("start") or {}).get("timeZone")
         acct = (out.get("google_account_email") or "").strip().lower()
         out["matches_advisor_email"] = bool(acct) and acct == (user.email or "").strip().lower()
+
+        # Write the proven address onto the connection record. The OAuth
+        # callback can only see the calendar's title, which is the account
+        # address until somebody renames their calendar; this is the value
+        # Google itself stamped on an event it accepted, so it is the one
+        # worth keeping.
+        if acct:
+            try:
+                from app.models.calendar_models import CalendarConnection
+                row = (db.query(CalendarConnection)
+                       .filter(CalendarConnection.user_id == user.id,
+                               CalendarConnection.provider == "google").first())
+                if row is not None and row.account_email != out["google_account_email"]:
+                    out["connection_account_email_was"] = row.account_email
+                    row.account_email = out["google_account_email"]
+                    db.commit()
+                    out["connection_record_updated"] = True
+            except Exception:
+                log.exception("could not update calendar connection account "
+                              "email for %s", user.id)
     except Exception as e:
         out["error"] = str(e)[:400]
     finally:

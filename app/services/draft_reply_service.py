@@ -31,10 +31,72 @@ TONE_INSTRUCTIONS = {
     "urgent": "Be brief and urgent. Time is a factor. Get straight to the point, make a specific ask, and create a sense of gentle urgency without being aggressive.",
 }
 
+# WHAT THE MESSAGE MUST ACCOMPLISH — not how it should sound.
+#
+# Temperature used to change only adjectives. "Cold" produced the same message
+# as "warm" in a softer voice, which for a stranger is the wrong message however
+# gently it is phrased: someone who has never heard of the business does not
+# need a friendlier follow-up, they need an introduction. Each entry below is a
+# brief for a different message, and the length budget differs with it, because
+# an introduction that has to name a person, name a business, say why the text
+# arrived and offer a way to respond does not fit in one 160-character segment.
+TONE_STRATEGY = {
+    "cold": {
+        "goal": (
+            "STRATEGY — INTRODUCTION TO A STRANGER.\n"
+            "This person does not know the advisor and does not know the business. "
+            "The message must:\n"
+            "  1. Introduce the advisor BY NAME and say which business they are with.\n"
+            "  2. Offer themselves as a resource for the family - not sell anything.\n"
+            "  3. Say plainly why the message might be useful to them.\n"
+            "  4. State explicitly that there is no pressure and no obligation.\n"
+            "  5. End with an easy, optional way to talk (the booking link).\n"
+            "It must NOT: imply any prior conversation, contract, enquiry, visit or "
+            "relationship; use 'following up', 'checking back', 'as we discussed', "
+            "'reaching out again', or anything else that assumes shared history; "
+            "reference a file, an account or a record unless the lead data shows one."
+        ),
+        "max_chars": 330,      # ~2 SMS segments; an introduction needs the room
+    },
+    "warm": {
+        "goal": (
+            "STRATEGY — RE-OPEN A CONVERSATION THAT ALREADY EXISTS.\n"
+            "There is real prior contact. Reference only what the conversation "
+            "history or lead data actually shows, never an invented interaction. "
+            "Move it forward with one light, specific suggestion."
+        ),
+        "max_chars": 250,
+    },
+    "hot": {
+        "goal": (
+            "STRATEGY — CONVERT STATED INTEREST INTO A TIME.\n"
+            "They have shown interest. Do not re-introduce anyone. Acknowledge what "
+            "they said, then ask directly for the appointment and make saying yes "
+            "the easiest thing in the message."
+        ),
+        "max_chars": 200,
+    },
+    "urgent": {
+        "goal": (
+            "STRATEGY — ONE SPECIFIC ASK, NOW.\n"
+            "Time matters. One sentence of context at most, then the ask. Gentle "
+            "urgency, never pressure, and never manufactured scarcity. This is a "
+            "funeral and cemetery context: urgency is about the family's need, not "
+            "about a deadline we invented."
+        ),
+        "max_chars": 200,
+    },
+}
+
 RELATIONSHIP_TYPE_CONTEXT = {
     "cold_lead": (
-        "COLD LEAD — No prior relationship. Do NOT act familiar. "
-        "Introduce yourself naturally. First message should just open a door."
+        "COLD LEAD — NO PRIOR RELATIONSHIP OF ANY KIND. This person has never "
+        "spoken to the advisor, has never contacted the business, and may never "
+        "have heard of it. Introduce the advisor by name and the business by "
+        "name. Offer to be a resource; do not sell. Do not imply a previous "
+        "conversation, enquiry, appointment, file or account. Do not say "
+        "'following up', 'checking back', 'circling back', 'as we discussed' or "
+        "'reaching out again' — there is nothing to follow up on."
     ),
     "warm_lead": (
         "WARM LEAD — Showed prior interest or is a referral. "
@@ -61,9 +123,14 @@ RELATIONSHIP_TYPE_CONTEXT = {
 DRAFT_REPLY_PROMPT = """You are drafting a short SMS message from a service business advisor to a lead.
 
 ━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
+{tone_strategy}
+
 Relationship context: {relationship_context}
 
-User's AI direction (FOLLOW THIS EXACTLY):
+The advisor's own direction for this message. It OVERRIDES the defaults above
+wherever they disagree, and it describes THIS lead specifically — if it says the
+lead is cold with no connection to the business, that is the truth about them
+regardless of anything else in this prompt:
 {ai_direction}
 {sample_message_section}
 ━━━ CONTEXT ━━━
@@ -86,10 +153,15 @@ Conversation history, oldest to newest:
 
 ━━━ RULES ━━━
 - Respond with ONLY JSON: {{"suggested_reply": "..."}}
-- HARD LIMIT: Keep it under 160 characters (one SMS segment = one charge). Count carefully.
-- Sound human and respectful.
+- LENGTH: at most {max_chars} characters. Use the room the strategy needs and no
+  more. An introduction to a stranger is allowed to be two segments; a reply to
+  someone who already said yes should be one.
+- Sound human and respectful. This is a funeral and cemetery context: never
+  cheerful, never salesy, never a marketing voice.
 - Use ONLY "{advisor_name}" and "{org_name}" when signing or introducing.
 - Do not claim anything not shown in conversation or lead data.
+- The strategy above defines WHAT the message must accomplish; the tone defines
+  only how it sounds. Satisfy the strategy first.
 - The relationship context defines what familiarity is appropriate — respect it.
 - If a sample message is provided above, use it as the FOUNDATION and fill in variables (name, booking link, etc.). Do NOT rewrite it from scratch.
 """
@@ -155,18 +227,35 @@ def _ensure_booking_link_in_text(text: str, lead: Lead, advisor: User, booking_u
     return text
 
 
-def _fallback_reply(lead: Lead, advisor: User, booking_url: str, tone: str = "warm") -> str:
+def _fallback_reply(lead: Lead, advisor: User, booking_url: str,
+                    tone: str = "warm", org_name: str = "") -> str:
+    """Used when the model is unavailable. Follows the same strategy.
+
+    The cold variant used to introduce the advisor and stop, naming no business
+    at all - so the one message that most needed to say who was texting said the
+    least. It now carries the same five things the cold strategy asks for, minus
+    the link, which the composer appends.
+    """
     name = lead.first_name or "there"
     advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
+    where = (" with %s" % org_name) if org_name else ""
     # Do NOT include the booking URL here — the frontend's "Include booking link"
     # checkbox appends it at send time. Including it here causes a double-link.
     if tone == "urgent":
-        return f"Hi {name}, I wanted to reach out one more time. Please let me know if you'd like to connect — I have time this week."
+        return (f"Hi {name}, this is {advisor_name}{where}. If your family needs "
+                f"arrangements handled soon, I can help today — just let me know a "
+                f"time that works.")
     if tone == "hot":
-        return f"Hi {name}, great hearing from you! I'd love to set up a time to talk — check my booking link below."
+        return (f"Hi {name}, thanks for getting back to me. I'd be glad to set up a "
+                f"time to talk — you can pick whatever suits you.")
     if tone == "cold":
-        return f"Hi {name}, this is {advisor_name}. Just wanted to introduce myself and let you know I'm here whenever you're ready."
-    return f"Hi {name}, this is {advisor_name}. I'd love to connect and walk you through your options."
+        return (f"Hi {name}, this is {advisor_name}{where}. I wanted to introduce "
+                f"myself as a resource if you or your family ever have questions "
+                f"about cemetery, funeral, cremation or advance planning. There's no "
+                f"pressure or obligation — if you'd ever like to talk, you can choose "
+                f"a time that works for you.")
+    return (f"Hi {name}, this is {advisor_name}{where}. I'd be glad to connect and "
+            f"walk you through the options whenever it suits you.")
 
 
 def draft_reply(
@@ -188,11 +277,18 @@ def draft_reply(
     latest_reply_text = latest_reply.body if latest_reply else "No inbound reply yet."
     advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
 
-    # Look up org name so GPT never falls back to anything in the conversation history
+    # The name the FAMILY knows the business by, resolved through the same
+    # identity the confirmation email and Taffiney's greeting use. `org.name` is
+    # the account name and stays as the fallback; a customer trading under a
+    # different name would otherwise be introduced by a name nobody uses.
     try:
         from app.models.models import Organization
+        from app.services.public_identity import identity_for_org
         org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
-        org_name = org.name if org else "our organization"
+        _ident = identity_for_org(db, str(advisor.organization_id))
+        org_name = (_ident.customer_facing_name
+                    or (org.name if org else None)
+                    or "our organization")
     except Exception:
         org_name = "our organization"
 
@@ -211,8 +307,13 @@ def draft_reply(
             f"{sample_message.strip()}\n"
         )
 
+    strategy = TONE_STRATEGY.get(tone, TONE_STRATEGY["warm"])
+    max_chars = strategy["max_chars"]
+
     prompt = DRAFT_REPLY_PROMPT.format(
         relationship_context=relationship_context,
+        tone_strategy=strategy["goal"],
+        max_chars=max_chars,
         advisor_name=advisor_name,
         org_name=org_name,
         tone_instruction=TONE_INSTRUCTIONS[tone],
@@ -232,7 +333,9 @@ def draft_reply(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=120,
+            # Was 120, which truncated a cold introduction mid-sentence before
+            # the cap below ever saw it. The budget now follows the strategy.
+            max_tokens=320,
         )
         raw = response.choices[0].message.content
         parsed = _safe_parse_json(raw)
@@ -241,16 +344,31 @@ def draft_reply(
         import re as _re
         suggested = _re.sub(r'https?://\S+', '', parsed.get("suggested_reply", "")).strip()
         if not suggested:
-            suggested = _fallback_reply(lead, advisor, booking_url, tone)
-        # Hard cap at 155 chars to leave room for the booking link the frontend may append
-        suggested = suggested[:155].rsplit(' ', 1)[0] if len(suggested) > 155 else suggested
+            suggested = _fallback_reply(lead, advisor, booking_url, tone, org_name)
         source = "ai"
     except Exception:
-        suggested = _fallback_reply(lead, advisor, booking_url, tone)
+        suggested = _fallback_reply(lead, advisor, booking_url, tone, org_name)
         source = "fallback"
-    # Final safety net — never exceed 155 chars (leaves room for booking link)
-    if len(suggested) > 155:
-        suggested = suggested[:155].rsplit(' ', 1)[0]
+
+    # THE CAP FOLLOWS THE STRATEGY.
+    #
+    # This was a flat 155 characters for every message. An introduction to a
+    # stranger has to name the advisor, name the business, say why the text
+    # arrived, say there is no obligation and offer a way to reply - which does
+    # not fit, so the draft was cut at the last space before 155 and the advisor
+    # was shown a sentence that stopped halfway. That truncation, not the model,
+    # is what made cold outreach read as generic and strategically weak.
+    if len(suggested) > max_chars:
+        cut = suggested[:max_chars]
+        # Prefer a sentence boundary; fall back to a word boundary.
+        for stop in (". ", "! ", "? "):
+            idx = cut.rfind(stop)
+            if idx > max_chars * 0.6:
+                cut = cut[:idx + 1]
+                break
+        else:
+            cut = cut.rsplit(" ", 1)[0]
+        suggested = cut.strip()
 
     return {
         "suggested_reply": suggested,

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import MessageReview from '../components/MessageReview'
+import { formatPhone } from '../utils/phone'
 import '../styles/shared.css'
 import './Leads.css'
 import VoiceCampaign from '../components/VoiceCampaign'
@@ -1117,7 +1118,7 @@ export default function Leads() {
                         )}
                       </div>
                     </td>
-                    <td className="mono leads-secondary">{lead.phone || '—'}</td>
+                    <td className="mono leads-secondary">{formatPhone(lead.phone) || '—'}</td>
                     <td className="mono leads-secondary">{lead.email || '—'}</td>
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>

@@ -327,14 +327,18 @@ def poll_all_orgs(db: Session) -> dict:
     return total
 
 
-NOTIFICATION_EMAIL = "michael.simmons@nsmg.com"
+# NOTIFICATION_EMAIL is deliberately gone. It named one real operator, and this
+# module runs for every organization on the platform - so a hot reply belonging
+# to any other customer alerted him rather than the advisor who owns the lead.
+# Alerts now go to the advisor's own notification address, then their login
+# address, and nowhere at all if neither exists.
 URGENT_TIERS = {"at_need", "atneed", "at-need", "imminent", "urgent"}
 
 
 def _send_hot_reply_alert(advisor, lead, reply_body: str, db=None):
     """
     Send a 🔥 fire alert email to the advisor when a hot reply comes in.
-    Sends to advisor.notification_email if set, otherwise falls back to NOTIFICATION_EMAIL.
+    Sends to advisor.notification_email if set, otherwise their login address.
     Fired on every hot reply — not just the first one.
     """
     if not advisor.microsoft_365_connected or not advisor.microsoft_oauth_refresh_token_encrypted:
@@ -452,7 +456,11 @@ def _send_hot_reply_alert(advisor, lead, reply_body: str, db=None):
 </body>
 </html>"""
 
-    alert_to = getattr(advisor, "notification_email", None) or NOTIFICATION_EMAIL
+    # The ADVISOR, never a hard-coded person - see the note on NOTIFICATION_EMAIL.
+    alert_to = (getattr(advisor, "notification_email", None)
+                or getattr(advisor, "email", None))
+    if not alert_to:
+        return
     _httpx.post(
         "https://graph.microsoft.com/v1.0/me/sendMail",
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},

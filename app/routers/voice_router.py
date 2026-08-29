@@ -74,83 +74,108 @@ class InitiateCallRequest(BaseModel):
     lead_id: str
 
 
-@router.post("/call/{lead_id}")
-def initiate_call(
+@router.get("/readiness/{lead_id}")
+def call_readiness(
     lead_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Can this lead be called right now, and if not, why? Read-only.
+
+    The lead page asks this before it offers the button, so an advisor learns
+    "no active voice agent is configured" from a disabled control with a
+    reason on it, rather than from a spinner that ends in a network error.
+
+    Exactly the same authority as the call itself - it is the orchestrator's
+    `check_call_eligibility`, not a second opinion that could disagree with it.
     """
-    Initiate an outbound AI voice call to a lead.
-    Creates VoiceCall record, then calls Twilio to start the call.
-    Twilio fetches /voice/twiml/{lead_id} to get the call instructions.
-    """
+    from app.services.voice_orchestrator import check_call_eligibility
+
     lead = db.query(Lead).filter(
         Lead.id == lead_id,
         Lead.organization_id == current_user.organization_id,
     ).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if lead.status == "dnc":
-        raise HTTPException(status_code=400, detail="Lead is DNC")
-    if not lead.phone:
-        raise HTTPException(status_code=400, detail="Lead has no phone number")
-    if not current_user.twilio_account_sid:
-        raise HTTPException(status_code=400, detail="Twilio not connected. Go to Settings to connect.")
 
-    # Check max 3 call attempts
-    call_number = _get_call_number(db, lead_id, current_user.id)
-    if call_number > 3:
-        raise HTTPException(status_code=400, detail="Maximum 3 call attempts reached for this lead.")
+    try:
+        elig = check_call_eligibility(db, lead, current_user.organization_id)
+    except Exception as e:
+        logger.exception("voice readiness failed for lead %s", lead_id)
+        return {"ready": False, "reason": "Voice configuration could not be read: %s" % e,
+                "code": "readiness_error"}
+    return {"ready": bool(elig.ok), "reason": elig.reason, "code": elig.code}
 
-    # Create VoiceCall record
-    call = VoiceCall(
-        id=str(uuid.uuid4()),
-        lead_id=lead_id,
-        advisor_id=current_user.id,
-        organization_id=current_user.organization_id,
-        to_phone=lead.phone,
-        from_phone=current_user.twilio_phone_number,
-        call_number=call_number,
-        status="initiating",
-        created_at=datetime.utcnow(),
-    )
-    db.add(call)
-    db.commit()
 
-    from app.utils.crypto import decrypt_value
-    auth_token = decrypt_value(current_user.twilio_auth_token_encrypted)
+@router.post("/call/{lead_id}")
+def initiate_call(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Place ONE outbound AI voice call for this lead.
 
-    twiml_url = f"{BACKEND_URL}/voice/twiml/{lead_id}?call_id={call.id}&advisor_id={current_user.id}"
-    status_url = f"{BACKEND_URL}/voice/status?call_id={call.id}"
+    THIS IS THE SAME PATH AS EVERY OTHER CALL. It used to be a second,
+    separate implementation: the advisor's button dialled Twilio directly and
+    streamed audio over a WebSocket, while the proven path - the Retell agent
+    at its pinned version, with the organization's own from-number and the
+    org-wide suppression list - was reachable only from a god-only endpoint. So
+    the button on the lead page exercised code that nothing else used and that
+    no eligibility rule protected.
 
-    result = initiate_outbound_call(
-        advisor_twilio_sid=current_user.twilio_account_sid,
-        advisor_twilio_token=auth_token,
-        advisor_phone=current_user.twilio_phone_number,
-        lead_phone=lead.phone,
-        twiml_url=twiml_url,
-        status_callback_url=status_url,
-    )
+    All decisions now belong to `voice_orchestrator`: tenant boundary,
+    do-not-contact, the shared suppression list, the attempt cap, whether an
+    agent is configured, and whether the provider is ready. A refusal is a 409
+    carrying the orchestrator's own words, and a vendor failure is a 502 with
+    the vendor's message - never a generic error that reads to the advisor as
+    "the internet is down".
+    """
+    from app.services.voice_orchestrator import (check_call_eligibility,
+                                                 start_file_check_call)
 
-    if not result["success"]:
-        call.status = "failed"
-        call.error_message = result.get("error")
-        db.commit()
-        raise HTTPException(status_code=500, detail="Call initiation failed. Check your phone settings.")
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id,
+        Lead.organization_id == current_user.organization_id,
+    ).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
 
-    call.call_sid = result["call_sid"]
-    call.status = "ringing"
-    db.commit()
+    elig = check_call_eligibility(db, lead, current_user.organization_id)
+    if not elig.ok:
+        # 409, not 400: this is a considered refusal with a reason worth
+        # putting in front of the advisor verbatim.
+        raise HTTPException(status_code=409, detail=elig.reason or "Call not permitted.")
+
+    try:
+        call = start_file_check_call(db, lead, current_user.organization_id,
+                                     advisor=current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.exception("voice call failed for lead %s", lead_id)
+        raise HTTPException(status_code=502,
+                            detail="The voice provider could not be reached: %s" % e)
 
     log_action(db, current_user.organization_id, current_user.id,
                action="voice.call_initiated", target_type="lead", target_id=lead_id)
 
+    if call.status == "failed":
+        # A row exists and is marked failed - the attempt was real. Give the
+        # advisor the provider's actual message.
+        raise HTTPException(
+            status_code=502,
+            detail=call.error_message or "The voice provider refused the call.",
+        )
+
     return {
         "success": True,
         "call_id": call.id,
-        "call_sid": call.call_sid,
-        "call_number": call_number,
+        "provider": call.provider,
+        "provider_call_id": call.provider_call_id,
+        "agent_id": call.agent_id,
+        "from_phone": call.from_phone,
+        "call_number": call.call_number,
+        "status": call.status,
         "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
     }
 

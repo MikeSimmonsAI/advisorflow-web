@@ -952,6 +952,89 @@ async def prospect_confirm_submit(token: str, request: Request,
                          "<p class='muted'>We've told the team you can't make it.</p>%s" % tail)
 
 
+# ── PUBLIC prospect confirmation, as JSON ───────────────────────────────────
+#
+# The two endpoints below back the branded page at
+# https://<brand-host>/appointments/confirm/:token. They exist so the link a
+# prospect receives carries the BRAND's hostname instead of the API's - the
+# HTML page and form POST above are unchanged and still serve every link
+# already sitting in somebody's inbox.
+#
+# The same discipline applies here: the GET changes nothing, so a corporate
+# link scanner that fetches the page cannot confirm a meeting. Only the
+# explicit POST below records an answer.
+#
+# NO AUTHENTICATION, for the same reason as above: the token is the
+# authorisation. These return exactly what the HTML page shows a stranger and
+# nothing more - no prospect email, no opportunity, no internal ids.
+
+@router.get("/appointments/confirm/{token}/context", include_in_schema=False)
+def prospect_confirm_context(token: str, db: Session = Depends(get_db)):
+    """Everything the branded confirmation page renders. CHANGES NOTHING."""
+    row, appt, err = apinvite.resolve_token(db, token)
+    if err:
+        return {"ok": False, "error": err}
+
+    ident = apinvite.brand_identity(db, appt)
+    return {
+        "ok": True,
+        "title": appt.title or "Your meeting",
+        "when": apinvite._local_when(appt),
+        "cancelled": appt.status == APPT_CANCELLED,
+        "confirmation_status": appt.confirmation_status,
+        "brand_name": ident.get("name"),
+        "support_phone": ident.get("support_phone"),
+        "accent": ident.get("accent"),
+    }
+
+
+@router.post("/appointments/confirm/{token}/respond", include_in_schema=False)
+async def prospect_confirm_respond(token: str, request: Request,
+                                   db: Session = Depends(get_db)):
+    """Record the prospect's answer from the branded page.
+
+    Same state change, same audit trail and same idempotency as the form POST
+    above - it calls the identical `redeem_token`. Only the transport differs.
+    """
+    row, appt, err = apinvite.resolve_token(db, token)
+    if err:
+        return {"ok": False, "error": err}
+
+    if appt.status == APPT_CANCELLED:
+        return {"ok": False, "error": "This meeting has been cancelled."}
+
+    action = ""
+    try:
+        body = await request.json()
+        action = str((body or {}).get("action") or "")
+    except Exception:
+        action = ""
+    if action not in ("confirm", "decline"):
+        return {"ok": False, "error": "Please choose whether you can attend."}
+
+    client_ip = request.client.host if request.client else None
+    result = apinvite.redeem_token(db, row, appt, action, ip=client_ip)
+    if not result.get("ok"):
+        return {"ok": False, "error": "Something went wrong. Please try the link again."}
+
+    if appt.opportunity_id:
+        # The prospect is not a user, so `actor_user_id` stays NULL - recording
+        # a staff member here would misattribute the action.
+        db.add(OpportunityEvent(
+            opportunity_id=appt.opportunity_id, event_type="confirmation",
+            summary="Prospect %sed the meeting" % result["action"],
+            detail="via confirmation link", actor_user_id=None))
+    db.commit()
+
+    ident = apinvite.brand_identity(db, appt)
+    return {
+        "ok": True,
+        "action": result["action"],
+        "when": apinvite._local_when(appt),
+        "support_phone": ident.get("support_phone"),
+    }
+
+
 @router.get("/appointments/{appt_id}")
 def get_appointment(appt_id: str,
                     user: User = Depends(require_sales_member),
