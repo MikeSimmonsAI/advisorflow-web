@@ -109,19 +109,33 @@ def get_booking_by_token(token: str, db: Session = Depends(get_db)):
     advisor = db.query(User).filter(User.id == booking.user_id).first()
     org = db.query(Organization).filter(Organization.id == booking.organization_id).first() if hasattr(booking, 'organization_id') else None
 
-    # Decode the token payload to get appointment type/label
-    import base64, json as _json
+    # Appointment type/label — FROM THE ROW, not from the token.
+    #
+    # Tokens are now short and opaque (22 chars). The details that used to be
+    # base64'd into the URL live on the BookingLink row that the token keys.
+    # See sms_service._encode_booking_token: the old 379-character token made a
+    # normal SMS 4 segments and carriers filtered it (Twilio 30007).
+    #
+    # The legacy decode stays as a FALLBACK so links already in families' hands
+    # keep working. It only runs when the row has no stored label, which is
+    # exactly the set of links minted before this change.
     appt_label = "Appointment"
     appt_duration = 30
     lead_phone = lead.phone if lead else ""
-    try:
-        payload_part = token.split("~")[0]
-        padded = payload_part + "=" * (-len(payload_part) % 4)
-        decoded = _json.loads(base64.urlsafe_b64decode(padded).decode())
-        appt_label = decoded.get("appt_label", decoded.get("appt_type", "Appointment"))
-        appt_duration = decoded.get("duration", 30)
-    except Exception:
-        pass
+
+    if getattr(booking, "appt_label", None):
+        appt_label = booking.appt_label
+        appt_duration = getattr(booking, "appt_duration", None) or 30
+    else:
+        import base64, json as _json
+        try:
+            payload_part = token.split("~")[0]
+            padded = payload_part + "=" * (-len(payload_part) % 4)
+            decoded = _json.loads(base64.urlsafe_b64decode(padded).decode())
+            appt_label = decoded.get("appt_label", decoded.get("appt_type", "Appointment"))
+            appt_duration = decoded.get("duration", 30)
+        except Exception:
+            pass
 
     # Resolve the identity the FAMILY should see. `org.name` is the account
     # name; a customer trading under a different name has `brand_name`, and

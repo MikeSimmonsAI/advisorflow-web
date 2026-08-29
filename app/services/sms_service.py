@@ -327,39 +327,62 @@ def _detect_appt_type(lead: Lead) -> dict:
     return {"label": "Family Services Appointment", "duration": "20"}
 
 
-def _encode_booking_token(lead: Lead, advisor: User) -> str:
-    """
-    Generate a base64 self-contained token compatible with the Vercel booking app.
-    Format: base64(json({lead, appt_type, expires_at}))~sha256sig
-    """
-    import base64
-    import hashlib
-    import json as _json
-    from datetime import timedelta
+BOOKING_TOKEN_TTL_DAYS = 14
 
-    appt = _detect_appt_type(lead)
-    expires = (datetime.utcnow() + timedelta(days=14)).isoformat()
-    data = {
-        "lead": {
-            "First Name": lead.first_name or "",
-            "Last Name": lead.last_name or "",
-            "Phone": lead.phone or "",
-            "Tier": lead.tier or "",
-            "Lead Type": lead.message_track or "",
-        },
-        "appt_type": appt["label"],
-        "appt_label": appt["label"],
-        "duration": appt["duration"],
-        "expires": expires,
-    }
-    payload = base64.urlsafe_b64encode(_json.dumps(data).encode()).decode().rstrip("=")
-    sig = hashlib.sha256(f"{BOOKING_SECRET}:{payload}".encode()).hexdigest()[:16]
-    return f"{payload}~{sig}"
+
+def _encode_booking_token(lead: Lead, advisor: User) -> str:
+    """A SHORT, OPAQUE token. 22 characters, no payload, nothing to decode.
+
+    This used to return `base64(json({lead, appt_type, duration, expires}))~sig`
+    - 379 characters carrying the family's name, phone and tier in the URL. Two
+    things were wrong with that, and the second one broke sending outright:
+
+      1. It put personal data in a link that lands in message logs, carrier
+         infrastructure and anyone's screenshot.
+      2. It made a normal Restland SMS 602 characters / 4 segments, and
+         carriers filtered it - Twilio error 30007, "Your message content was
+         flagged as going against carrier guidelines", on EVERY multi-segment
+         send from +14692241155 since July. A 1-segment message from the same
+         number, on the same path, to the same handset, delivered.
+
+    The token was never doing work as a payload: every lookup in this codebase
+    is `BookingLink.token == token`, and lead and advisor are read from that
+    row. So the token only ever needed to be an unguessable name for the row.
+
+    `secrets.token_urlsafe(16)` gives 128 bits of entropy in 22 URL-safe
+    characters. That is STRONGER than what it replaces - the old signature was
+    a 16-hex-character (64-bit) truncated SHA-256 over a payload an attacker
+    could read, and it depended on BOOKING_SECRET being set, which in a
+    deployment without the env var fell back to a publicly known default.
+    Randomness here needs no secret and cannot be forged by construction.
+
+    Expiry moves to `BookingLink.expires_at`, which is enforced against the
+    database rather than trusted from the URL - a self-describing token can
+    always be re-read, but only the row can be revoked.
+    """
+    import secrets
+    return secrets.token_urlsafe(16)
 
 
 def create_booking_link(db: Session, lead: Lead, advisor: User) -> BookingLink:
-    token = _encode_booking_token(lead, advisor)
-    booking = BookingLink(lead_id=lead.id, user_id=advisor.id, status="pending", token=token)
+    """Mint a booking link, with the appointment details ON THE ROW."""
+    from datetime import timedelta
+
+    appt = _detect_appt_type(lead)
+    try:
+        duration = int(appt["duration"])
+    except (TypeError, ValueError):
+        duration = 30
+
+    booking = BookingLink(
+        lead_id=lead.id,
+        user_id=advisor.id,
+        status="pending",
+        token=_encode_booking_token(lead, advisor),
+        appt_label=appt["label"],
+        appt_duration=duration,
+        expires_at=datetime.utcnow() + timedelta(days=BOOKING_TOKEN_TTL_DAYS),
+    )
     db.add(booking)
     db.commit()
     return booking

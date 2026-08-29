@@ -1304,6 +1304,77 @@ check("22. the status payload reports credentials separately from approval",
       '"credentials_ready"' in dlc_src)
 
 
+# ── 23. the booking link fits in an SMS ─────────────────────────────────────
+
+print("\n[23] A BOOKING LINK IS SHORT, OPAQUE, AND CARRIES NO FAMILY DATA")
+
+# The token was base64(json({lead, appt_type, duration, expires}))~sig - 379
+# characters, carrying the family's NAME, PHONE and TIER in the URL. That made
+# a normal Restland message 602 characters / 4 segments, and carriers filtered
+# it: Twilio 30007, "Your message content was flagged as going against carrier
+# guidelines", on every multi-segment send from +14692241155 since July. A
+# 1-segment message on the same path to the same handset delivered.
+
+_bl = _sms.create_booking_link(db, phone_only, advisor)
+check("23. the token is short enough to sit in a one-segment message",
+      len(_bl.token) <= 32, len(_bl.token))
+check("23. it is opaque - no '~' payload separator, nothing to decode",
+      "~" not in _bl.token, _bl.token)
+
+_leak = (phone_only.first_name or "", phone_only.last_name or "",
+         phone_only.phone or "", phone_only.tier or "")
+import base64 as _b64
+try:
+    _pad = _bl.token + "=" * (-len(_bl.token) % 4)
+    _decoded = _b64.urlsafe_b64decode(_pad).decode("utf-8", "replace")
+except Exception:
+    _decoded = ""
+for _v in _leak:
+    if _v:
+        check("23. the URL does not carry the family's %s"
+              % ("phone" if _v == phone_only.phone else "details"),
+              _v not in _bl.token and _v not in _decoded, _v)
+
+check("23. the appointment details are on the ROW the token keys",
+      bool(_bl.appt_label) and bool(_bl.appt_duration),
+      (_bl.appt_label, _bl.appt_duration))
+from datetime import datetime as _dt                                   # noqa: E402
+check("23. expiry is stored server-side, where it can be revoked",
+      _bl.expires_at is not None and _bl.expires_at > _dt.utcnow())
+check("23. two links are never the same token",
+      _sms.create_booking_link(db, phone_only, advisor).token != _bl.token)
+check("23. and the preview still reuses one link rather than minting per keystroke",
+      _sms.get_or_create_booking_link(db, phone_only, advisor).id
+      == _sms.get_or_create_booking_link(db, phone_only, advisor).id)
+
+# THE WHOLE POINT: the message has to fit.
+_url = "https://app.evosyspro.live/book/" + _bl.token
+_body = _sms.compose_body(
+    "Hi {first_name}, this is {advisor_name} with Restland Cemetery and Funeral "
+    "Home. Following up on your pre-need planning inquiry - you can pick a time "
+    "that works for you here: {booking_link}  Reply STOP to opt out.",
+    phone_only, advisor, _url)
+_segments = 1 if len(_body) <= 160 else -(-len(_body) // 153)
+check("23. A REAL MESSAGE WITH A BOOKING LINK IS 1-2 SEGMENTS, NOT 4",
+      _segments <= 2, "%d chars / %d segments" % (len(_body), _segments))
+
+# Old links already in families' hands must keep working.
+cal_src = code_only(read("app/routers/calendar_router.py"))
+check("23. the reader prefers the stored label",
+      'if getattr(booking, "appt_label", None):' in cal_src)
+check("23. and keeps the legacy decode as a FALLBACK, so live links still open",
+      "urlsafe_b64decode" in cal_src and cal_src.index('getattr(booking, "appt_label", None)')
+      < cal_src.index("urlsafe_b64decode"))
+from app.models.models import BookingLink as _BL                       # noqa: E402
+check("23. the columns are declared on the model",
+      hasattr(_BL, "appt_label") and hasattr(_BL, "appt_duration"))
+svc_tok = code_only(read("app/services/sms_service.py"))
+check("23. no payload is ever encoded into a token again",
+      "urlsafe_b64encode" not in svc_tok)
+check("23. the token is generated from a CSPRNG, not a truncated hash",
+      "secrets.token_urlsafe" in svc_tok)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

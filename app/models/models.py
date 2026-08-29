@@ -722,6 +722,20 @@ class BookingLink(Base):
     expires_at = Column(DateTime, nullable=True)
     review_request_sent_at = Column(DateTime, nullable=True)  # set by review_request_cron
 
+    # What the appointment IS. These used to live inside the token itself: the
+    # token was base64(json({lead, appt_type, duration, expires})) plus a
+    # signature, which made it 379 characters. In an SMS that pushed a normal
+    # message to 602 characters / 4 segments, and carriers filtered it -
+    # Twilio error 30007, "message content flagged as going against carrier
+    # guidelines", on every multi-segment send from the 10DLC number.
+    #
+    # The payload belongs in the row the token already keys. Every lookup in
+    # the codebase is `BookingLink.token == token`, and lead and advisor were
+    # always read from this row, never from the token - so the token never
+    # needed to carry anything but identity.
+    appt_label    = Column(String, nullable=True)   # e.g. "Pre-Need Planning Consultation"
+    appt_duration = Column(Integer, nullable=True)  # minutes
+
     # Appointment reminder tracking — set by appointment_reminder_cron.py
     confirmation_sent   = Column(Boolean, default=False)  # immediate lead confirmation on booking
     reminder_24hr_sent  = Column(Boolean, default=False)  # 24-hour reminder to lead

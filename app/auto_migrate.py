@@ -209,6 +209,11 @@ COLUMNS_TO_ADD = [
     ("leads", "case_status", "VARCHAR DEFAULT 'open'"),
     # Post-appointment review request — track that we've sent the Google review SMS
     ("booking_links", "review_request_sent_at", "TIMESTAMP"),
+    # Appointment details moved OUT of the booking token and onto the row it
+    # keys. The old self-contained token was 379 characters, which made a normal
+    # SMS 4 segments and got it filtered by carriers (Twilio 30007).
+    ("booking_links", "appt_label", "VARCHAR"),
+    ("booking_links", "appt_duration", "INTEGER"),
     # Social media lead capture — org-level webhook credentials + token
     ("organizations", "social_webhook_token", "VARCHAR"),
     ("organizations", "meta_page_access_token", "VARCHAR"),
