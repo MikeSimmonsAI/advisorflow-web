@@ -1498,8 +1498,22 @@ check("25. both repair passes are DRY RUN by default",
       lr_src.count('apply: bool = Query(False') == 2)
 check("25. the duplicate/DNC repair only touches rows carrying the bug's signature",
       "Lead.status == \"dnc\"," in lr_src and "Lead.is_duplicate == True," in lr_src)
-check("25. the tier repair releases only leads that HAVE a valid tier",
-      'tier in ("partial", "none", "unknown")' in lr_src)
+# "partial" IS THE IMPORTER'S PLACEHOLDER, NOT A TIER — and it is truthy.
+# A `if not lead.tier` check reads it as "tier present", which would have
+# released every unclassified lead in the org straight into outreach. All
+# 7,372 needs_tier_review leads in Restland carry exactly this value.
+check("25. 'partial' is treated as UNCLASSIFIED, not as a tier",
+      "def _has_real_tier" in lr_src
+      and 'tier not in ("partial", "none", "unknown")' in lr_src)
+check("25. no status restore uses a bare truthiness check on tier",
+      'if not lead.tier else "new"' not in lr_src)
+check("25. every restore routes an unclassified lead back to review",
+      lr_src.count('"new" if _has_real_tier(lead) else "needs_tier_review"') >= 2)
+check("25. the tier repair releases only leads a human has classified",
+      "if not _has_real_tier(lead):" in lr_src)
+check("25. and the dry run says how many would actually become sendable",
+      '"would_become_sendable"' in lr_src
+      and "_has_real_tier(l) and l.phone" in lr_src)
 check("25. and never releases a duplicate, a phoneless lead, or a real DNC",
       "lead.is_duplicate or not lead.phone or _has_real_dnc_reason(db, lead)" in lr_src)
 check("25. an old flag can still be explained",
@@ -1513,6 +1527,25 @@ check("25. and says what it matched",
       "handleExplainDupe" in leads_jsx and "duplicate-explain" in leads_jsx)
 check("25. the confirm promises nothing is deleted",
       "Nothing is deleted and nothing is merged" in leads_jsx)
+
+# MANUAL "+ Add lead" MATCHED ON PHONE ALONE.
+#
+# dedup_service is explicit that phone-only matching is wrong - a phone can be
+# a household, a father and a son - and its registry keys on phone + last name.
+# The manual add endpoint quietly did the opposite, so every lead added on a
+# number the org had ever used was flagged against an unrelated person. Ashton
+# Jamon was flagged against Jennifer Breeder on nothing but a shared number.
+check("25. manual add matches on phone AND last name, never phone alone",
+      "normalize_last_name(existing.last_name or \"\") == last_name_normalized" in lr_src)
+check("25.    so a shared household number is not a duplicate by itself",
+      "if phone_normalized and last_name_normalized:" in lr_src)
+check("25.    and it records the parent and the reason",
+      'duplicate_reason="manual_add_phone_last_name" if is_dup else None' in lr_src
+      and "duplicate_of_lead_id=dup_of," in lr_src)
+check("25.    and never re-flags a lead a human already resolved",
+      "Lead.duplicate_resolved_at.is_(None)," in lr_src)
+check("25. the email cleanup sweep no longer suppresses either",
+      'lead.duplicate_of_lead_id = seen[key]\n                lead.duplicate_reason' in lr_src)
 
 
 db.close()

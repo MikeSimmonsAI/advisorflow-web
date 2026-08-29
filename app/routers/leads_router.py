@@ -1030,7 +1030,10 @@ def keep_lead_separate(
     # silently re-open contact with someone who asked not to be contacted.
     restored_status = None
     if lead.status == "dnc" and was["is_duplicate"] and not _has_real_dnc_reason(db, lead):
-        lead.status = "needs_tier_review" if not lead.tier else "new"
+        # An unclassified lead goes back to the review queue, NOT to "new".
+        # `tier == "partial"` is truthy, so a naive check would have released
+        # it straight into outreach unreviewed.
+        lead.status = "new" if _has_real_tier(lead) else "needs_tier_review"
         restored_status = lead.status
 
     db.commit()
@@ -1055,6 +1058,19 @@ def keep_lead_separate(
         "resolved_at": lead.duplicate_resolved_at.isoformat(),
         "message": "Kept as a separate record. Nothing was deleted.",
     }
+
+
+def _has_real_tier(lead: Lead) -> bool:
+    """Has a human actually classified this lead?
+
+    `partial` is the IMPORTER'S PLACEHOLDER, not a tier. It means the upload
+    could not work out what kind of lead this is, so a person must. It is a
+    non-empty string, which is the trap: a truthiness check reads it as "tier
+    present" and would release thousands of unclassified leads straight into
+    outreach - the exact opposite of what `needs_tier_review` is for.
+    """
+    tier = (str(lead.tier).strip().lower() if lead.tier else "")
+    return bool(tier) and tier not in ("partial", "none", "unknown")
 
 
 def _has_real_dnc_reason(db: Session, lead: Lead) -> bool:
@@ -1210,7 +1226,8 @@ def repair_duplicate_dnc(
 
     if apply:
         for lead in repairable:
-            lead.status = "needs_tier_review" if not lead.tier else "new"
+            # Unclassified leads land in the review queue, not in outreach.
+            lead.status = "new" if _has_real_tier(lead) else "needs_tier_review"
         db.commit()
         log_action(
             db,
@@ -1227,11 +1244,19 @@ def repair_duplicate_dnc(
                 "name": ((l.first_name or "") + " " + (l.last_name or "")).strip(),
                 "phone": l.phone, "reason": getattr(l, "duplicate_reason", None)}
 
+    # What this repair would actually add to SMS READY. A repaired lead only
+    # becomes sendable if it has a REAL tier and a phone; the rest return to
+    # the review queue, which is where they belong.
+    to_outreach = [l for l in repairable if _has_real_tier(l) and l.phone]
+    to_review = [l for l in repairable if l not in to_outreach]
+
     return {
         "dry_run": not apply,
         "dnc_and_duplicate": len(candidates),
         "repairable": len(repairable),
         "protected_real_dnc": len(protected),
+        "would_become_sendable": len(to_outreach),
+        "would_return_to_tier_review": len(to_review),
         "sample_repairable": [_brief(l) for l in repairable[:10]],
         "sample_protected": [_brief(l) for l in protected[:10]],
     }
@@ -1269,8 +1294,7 @@ def repair_stale_tier_review(
 
     releasable, no_tier, blocked = [], [], []
     for lead in parked:
-        tier = (str(lead.tier).strip().lower() if lead.tier else "")
-        if not tier or tier in ("partial", "none", "unknown"):
+        if not _has_real_tier(lead):
             no_tier.append(lead)
         elif lead.is_duplicate or not lead.phone or _has_real_dnc_reason(db, lead):
             blocked.append(lead)
@@ -1397,7 +1421,12 @@ def deduplicate_email_leads(
             if not lead.is_duplicate:
                 lead.is_duplicate = True
                 lead.duplicate_of_lead_id = seen[key]
-                lead.status = "dnc"
+                lead.duplicate_reason = "existing_email"
+                lead.duplicate_match_field = "email+last_name"
+                lead.duplicate_match_value = norm_email
+                # NOT dnc. Same rule as the importer: a duplicate is a
+                # data-quality flag. A cleanup sweep has no business moving
+                # anybody into the do-not-contact population.
                 flagged_ids.append(lead.id)
         else:
             seen[key] = lead.id
@@ -1506,16 +1535,33 @@ def create_lead_manually(
     phone_normalized = normalize_phone(payload.phone or "")
     last_name_normalized = normalize_last_name(payload.last_name or "")  # was: return value discarded
 
-    # Check for duplicate by phone
+    # DEDUP ON PHONE **AND LAST NAME**, not on phone alone.
+    #
+    # This matched on phone only. dedup_service is explicit that phone-only
+    # matching is wrong - "a phone number can represent two different real
+    # people in the same household (e.g. father and son sharing a landline)" -
+    # and the registry it owns keys on phone + last name for exactly that
+    # reason. This endpoint quietly did the opposite.
+    #
+    # The result: every manually added lead on a number the org had ever used
+    # was flagged a duplicate of an unrelated person. Ashton Jamon was flagged
+    # against Jennifer Breeder purely because they share a phone number, and
+    # any new test lead on a previously-texted number was unusable on creation.
+    #
+    # A lead a human has already resolved with "keep separate" is not re-matched.
     is_dup = False
-    if phone_normalized:
-        existing = db.query(Lead).filter(
+    dup_of = None
+    if phone_normalized and last_name_normalized:
+        for existing in db.query(Lead).filter(
             Lead.organization_id == current_user.organization_id,
             Lead.phone == phone_normalized,
             Lead.is_duplicate == False,
-        ).first()
-        if existing:
-            is_dup = True
+            Lead.duplicate_resolved_at.is_(None),
+        ).all():
+            if normalize_last_name(existing.last_name or "") == last_name_normalized:
+                is_dup = True
+                dup_of = existing.id
+                break
 
     lead = Lead(
         id=str(uuid.uuid4()),
@@ -1532,6 +1578,10 @@ def create_lead_manually(
         source_year=payload.source_year,
         source_file="manual",
         is_duplicate=is_dup,
+        duplicate_of_lead_id=dup_of,
+        duplicate_reason="manual_add_phone_last_name" if is_dup else None,
+        duplicate_match_field="phone+last_name" if is_dup else None,
+        duplicate_match_value=phone_normalized if is_dup else None,
         notes=payload.notes,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
