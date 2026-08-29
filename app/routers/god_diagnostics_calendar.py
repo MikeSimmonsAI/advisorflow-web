@@ -264,6 +264,91 @@ def god_calendar_probe(
     return out
 
 
+@router.post("/calendar-write-test")
+def god_calendar_write_test(
+    user_id: str = Query(..., description="Advisor whose calendar to test."),
+    keep: bool = Query(False, description="Leave the test event in place."),
+    db: Session = Depends(get_db),
+    god: User = Depends(require_god),
+):
+    """Prove the write, and find out whose account it really is.
+
+    `events.list` returns the calendar's TITLE as `summary`, which on this
+    advisor's calendar is the string "Personal Calendar" — somebody renamed
+    their primary calendar, so the read tells us nothing about the account.
+    The granted scope is `calendar.events`, which cannot call `calendars.get`
+    or `calendarList`, so no read can answer the question.
+
+    A created event can. Google stamps `creator.email` and `organizer.email`
+    on every event with the authenticated account's real address. So one
+    short event, written and then deleted, proves the write scope works AND
+    identifies the account — two of the things that have to be true before a
+    family is booked into this calendar.
+
+    The event is deleted in a `finally`, so a failure part-way through does
+    not leave litter on a real calendar. `keep=true` skips the delete for a
+    human who wants to see it land.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if not getattr(user, "google_oauth_refresh_token_encrypted", None):
+        raise HTTPException(status_code=400,
+                            detail="No Google grant stored for this user.")
+
+    from datetime import datetime, timedelta, timezone as _tz
+    from app.services.calendar_service import _get_calendar_service
+
+    cal_id = getattr(user, "google_calendar_id", None) or "primary"
+    out = {"user_id": user.id, "advisor_email": user.email,
+           "calendar_id": cal_id, "write_ok": False, "deleted": None}
+
+    event_id = None
+    service = None
+    try:
+        service = _get_calendar_service(user)
+        # Far enough out that it cannot collide with anything real, short
+        # enough that it is obviously a probe if a human sees it.
+        start = datetime.now(_tz.utc) + timedelta(days=180)
+        start = start.replace(minute=0, second=0, microsecond=0)
+        body = {
+            "summary": "AdvisorFlow connection test - safe to ignore",
+            "description": ("Automated verification that this calendar can be "
+                            "written to. Deleted immediately."),
+            "start": {"dateTime": start.isoformat()},
+            "end": {"dateTime": (start + timedelta(minutes=15)).isoformat()},
+        }
+        created = service.events().insert(calendarId=cal_id, body=body).execute()
+        event_id = created.get("id")
+        out["write_ok"] = True
+        out["event_id"] = event_id
+        # The whole point: Google stamps the authenticated account here.
+        out["google_account_email"] = ((created.get("creator") or {}).get("email")
+                                       or (created.get("organizer") or {}).get("email"))
+        out["organizer_email"] = (created.get("organizer") or {}).get("email")
+        out["creator_email"] = (created.get("creator") or {}).get("email")
+        out["event_timezone"] = (created.get("start") or {}).get("timeZone")
+        acct = (out.get("google_account_email") or "").strip().lower()
+        out["matches_advisor_email"] = bool(acct) and acct == (user.email or "").strip().lower()
+    except Exception as e:
+        out["error"] = str(e)[:400]
+    finally:
+        if event_id and service is not None and not keep:
+            try:
+                service.events().delete(calendarId=cal_id,
+                                        eventId=event_id).execute()
+                out["deleted"] = True
+            except Exception as e:
+                out["deleted"] = False
+                out["delete_error"] = str(e)[:300]
+
+    log.info("AUDIT: GOD_CALENDAR_WRITE_TEST | admin=%s | user=%s | write_ok=%s "
+             "| account=%s | deleted=%s", god.email, user_id,
+             out.get("write_ok"), out.get("google_account_email"),
+             out.get("deleted"))
+    return out
+
+
 @router.get("/email-diagnostics")
 def god_email_diagnostics(
     organization_id: str = Query(..., description="Tenant organization to inspect."),

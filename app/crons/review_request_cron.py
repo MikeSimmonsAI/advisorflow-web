@@ -32,8 +32,13 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-BACKEND_BASE_URL = os.getenv(
-    "BOOKING_BASE_URL", "https://advisorflow-backend.onrender.com"
+_REMOVED_BACKEND_BASE_URL = (
+    # Was: os.getenv("BOOKING_BASE_URL", "https://advisorflow-backend.onrender.com")
+    # One hostname for every brand, sent to every family in a survey SMS.
+    # Survey links now come from app.services.public_identity, resolved per
+    # organization. Left as a named tombstone rather than deleted so the next
+    # person to look for BACKEND_BASE_URL finds the reason instead of silence.
+    None
 )
 
 SURVEY_SMS = (
@@ -93,7 +98,14 @@ def run_review_request_cron(engine) -> int:
             try:
                 # Generate a unique survey token for this booking
                 survey_token = str(uuid.uuid4())
-                survey_url = f"{BACKEND_BASE_URL}/survey/{survey_token}"
+                # Branded per organization. The query already selects
+                # l.organization_id, so the row carries everything the
+                # resolver needs - the old constant sent every brand's
+                # families to the same Render hostname.
+                from app.services.public_identity import (
+                    survey_url as public_survey_url)
+                survey_url = public_survey_url(db, row.organization_id,
+                                               survey_token)
 
                 body = SURVEY_SMS.format(
                     first_name=row.first_name or "there",

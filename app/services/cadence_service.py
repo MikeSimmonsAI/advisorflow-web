@@ -284,8 +284,9 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
         try:
             from app.services.sms_service import create_booking_link
             booking = create_booking_link(db, lead, advisor)
-            import os
-            booking_url = f"{os.environ.get('BOOKING_BASE_URL', '')}/book/{booking.token}"
+            from app.services.public_identity import booking_url as public_booking_url
+            booking_url = public_booking_url(db, lead.organization_id,
+                                             booking.token)
             body = render_cadence_message(db, lead, advisor, touch_number, booking_url, touch_def.get("message_template"))
 
             # Phase 1: advance state and commit BEFORE calling Twilio.

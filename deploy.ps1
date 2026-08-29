@@ -141,6 +141,10 @@ if ($SkipSmoke) {
     # free day that a degraded provider used to produce.
     python scripts\probe_calendar_provider.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "CALENDAR PROVIDER CHECKS FAILED - not deploying."; exit 1 }
+    # One organization record, six channels, one identity - plus a source scan
+    # that stops a new hand-built customer link being written tomorrow.
+    python scripts\probe_restland_identity.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "CROSS-CHANNEL IDENTITY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_integration_migration.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "INTEGRATION MIGRATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\smoke_demo_firewall.py 2>&1 | Select-String "FAIL|PASSED" | ForEach-Object { "    $_" }

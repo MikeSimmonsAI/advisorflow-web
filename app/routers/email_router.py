@@ -51,7 +51,9 @@ def send_single_email(
         if req.include_booking_link:
             from app.services.sms_service import create_booking_link
             booking_link = create_booking_link(db, lead, current_user)
-            booking_url = f"{os.environ.get('BOOKING_BASE_URL', 'https://advisorflow-booking.vercel.app')}/book/{booking_link.token}"
+            from app.services.public_identity import booking_url as public_booking_url
+            booking_url = public_booking_url(db, lead.organization_id,
+                                             booking_link.token)
             btn_label = req.appt_label or "Schedule Your Appointment"
             body_html += f"""<br><br>
 <table width="100%" cellpadding="0" cellspacing="0" border="0">

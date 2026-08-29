@@ -95,8 +95,15 @@ Conversation history, oldest to newest:
 """
 
 
-def _booking_url(token: str) -> str:
-    return f"{BOOKING_BASE_URL}/book/{token}"
+def _booking_url(db: Session, organization_id: str, token: str) -> str:
+    """Branded, resolved per organization.
+
+    Takes the organization rather than reading a module constant: one host for
+    every tenant is what put a Vercel domain in front of a funeral home's
+    families.
+    """
+    from app.services.public_identity import booking_url as public_booking_url
+    return public_booking_url(db, organization_id, token)
 
 
 def get_or_create_booking_link(db: Session, lead: Lead, advisor: User) -> BookingLink:
@@ -172,7 +179,7 @@ def draft_reply(
 ) -> dict[str, Any]:
     tone = tone if tone in TONE_INSTRUCTIONS else "warm"
     booking = get_or_create_booking_link(db, lead, advisor)
-    booking_url = _booking_url(booking.token)
+    booking_url = _booking_url(db, lead.organization_id, booking.token)
     history, latest_reply = _conversation_history(db, lead)
 
     history_text = "\n".join(

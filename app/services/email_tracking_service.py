@@ -35,30 +35,48 @@ import os
 import re
 from html import escape
 
-TRACKING_BASE_URL = os.environ.get("TRACKING_BASE_URL", "https://advisorflow-backend.onrender.com")
+# NOT a default hostname any more.
+#
+# `inject_tracking` rewrites EVERY href in a customer's email to point at this
+# host. A branded booking link is undone the moment that happens: the family
+# hovers the button and sees an AdvisorFlow Render address. The function is
+# not currently wired into any send path, which is the only reason this was
+# never visible - so the default is removed before it becomes visible, and
+# callers pass their organization's own public host instead.
+TRACKING_BASE_URL = os.environ.get("TRACKING_BASE_URL", "").rstrip("/")
 
 _LINK_PATTERN = re.compile(r'href=(["\'])(https?://[^"\']+)\1', re.IGNORECASE)
 
 
-def inject_tracking(body_html: str, email_message_id: str) -> str:
+def inject_tracking(body_html: str, email_message_id: str,
+                    public_base_url: str = None) -> str:
     """
     Returns body_html with every link rewritten through the click
-    tracker and a tracking pixel appended. Called once, right before
+    tracker and a tracking pixel appended.
+
+    `public_base_url` is the ORGANIZATION's own public host, from
+    app.services.public_identity. Pass it. Without a host this returns the
+    body untouched rather than rewriting a family's links to a relative or
+    infrastructure URL - tracking is worth less than a working link. Called once, right before
     send, in send_email_to_lead - never stored back onto
     EmailMessage.body_html itself, so the record of what was actually
     drafted/sent stays clean and re-readable without tracking noise
     baked into it permanently (the ORIGINAL body_html, pre-injection,
     is what gets saved to the database).
     """
+    base = (public_base_url or TRACKING_BASE_URL or "").rstrip("/")
+    if not base:
+        return body_html
+
     def _rewrite_link(match: re.Match) -> str:
         quote = match.group(1)
         original_url = match.group(2)
-        tracked_url = f"{TRACKING_BASE_URL}/email-tracking/click/{email_message_id}?url={original_url}"
+        tracked_url = f"{base}/email-tracking/click/{email_message_id}?url={original_url}"
         return f'href={quote}{escape(tracked_url, quote=False)}{quote}'
 
     tracked_html = _LINK_PATTERN.sub(_rewrite_link, body_html)
 
-    pixel_url = f"{TRACKING_BASE_URL}/email-tracking/open/{email_message_id}"
+    pixel_url = f"{base}/email-tracking/open/{email_message_id}"
     tracking_pixel = f'<img src="{pixel_url}" width="1" height="1" alt="" style="display:none;" />'
 
     return tracked_html + tracking_pixel

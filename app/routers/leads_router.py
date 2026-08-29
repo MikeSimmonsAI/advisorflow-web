@@ -913,7 +913,9 @@ def preview_messages_for_leads(
             # (that only happens on real send, to avoid generating dead
             # links for messages that get edited or skipped) - use a
             # placeholder so the draft still reads naturally.
-            placeholder_booking_url = f"{BOOKING_BASE_URL}/book/preview"
+            from app.services.public_identity import booking_url as public_booking_url
+            placeholder_booking_url = public_booking_url(
+                db, current_user.organization_id, "preview")
             draft = render_cadence_message(db, lead, current_user, touch_number=1, booking_url=placeholder_booking_url)
 
         results.append(MessagePreviewItem(
@@ -1701,7 +1703,8 @@ def resend_booking_link(
 
     # Create fresh link
     link = create_booking_link(db, lead, current_user)
-    booking_url = f"{BOOKING_BASE_URL}/book/{link.token}"
+    from app.services.public_identity import booking_url as public_booking_url
+    booking_url = public_booking_url(db, lead.organization_id, link.token)
 
     # Build the email
     org = db.query(Organization).filter_by(id=current_user.organization_id).first()

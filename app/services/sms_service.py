@@ -30,7 +30,13 @@ from app.models.models import User, Lead, Message, BookingLink, Organization
 from app.utils.crypto import decrypt_value
 from app.services.twilio_callbacks import apply_status_callback
 
-BOOKING_BASE_URL = os.environ.get("BOOKING_BASE_URL", "https://advisorflow-booking.vercel.app")
+# Kept as a name because several modules still import it, but the Vercel
+# default is gone: one hostname for every brand is what put an infrastructure
+# domain in front of a funeral home's families. Customer-facing links are
+# built by app.services.public_identity, resolved per organization. An empty
+# value here is deliberate - it makes a stray f-string produce a visibly
+# broken link rather than a plausible wrong one.
+BOOKING_BASE_URL = os.environ.get("BOOKING_BASE_URL", "")
 
 
 def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str | None]:
@@ -234,7 +240,9 @@ def send_sms(
     booking_link = None
     if include_booking_link:
         booking_link = create_booking_link(db, lead, advisor)
-        booking_url = f"{BOOKING_BASE_URL}/book/{booking_link.token}"
+        from app.services.public_identity import booking_url as public_booking_url
+        booking_url = public_booking_url(db, lead.organization_id,
+                                         booking_link.token)
 
     body = render_template(template, lead, advisor, booking_url)
 
@@ -297,7 +305,9 @@ def send_mms(
     booking_link = None
     if include_booking_link:
         booking_link = create_booking_link(db, lead, advisor)
-        booking_url = f"{BOOKING_BASE_URL}/book/{booking_link.token}"
+        from app.services.public_identity import booking_url as public_booking_url
+        booking_url = public_booking_url(db, lead.organization_id,
+                                         booking_link.token)
 
     body = render_template(template, lead, advisor, booking_url)
 

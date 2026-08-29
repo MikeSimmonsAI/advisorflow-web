@@ -260,7 +260,9 @@ def analyze_and_respond(
         BookingLink.lead_id == lead.id, BookingLink.status == "pending"
     ).order_by(BookingLink.created_at.desc()).first()
     booking = existing_booking or create_booking_link(db, lead, advisor)
-    booking_url = f"{BOOKING_BASE_URL}/book/{booking.token}"
+    from app.services.public_identity import booking_url as public_booking_url
+    booking_url = public_booking_url(db, lead.organization_id,
+                                     booking.token)
 
     history, latest_inbound = _get_conversation(db, lead.id)
 

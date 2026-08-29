@@ -85,13 +85,20 @@ class PublicIdentity(object):
 
     __slots__ = ("organization_id", "brand_name", "from_email", "resend_api_key",
                  "public_base_url", "support_phone", "website", "source",
-                 "reply_to_email", "cc_email", "customer_facing_name")
+                 "reply_to_email", "cc_email", "customer_facing_name",
+                 "business_address", "business_phone")
 
     def __init__(self, organization_id=None, brand_name=None, from_email=None,
                  resend_api_key=None, public_base_url=None, support_phone=None,
                  website=None, source=None, reply_to_email=None, cc_email=None,
-                 customer_facing_name=None):
+                 customer_facing_name=None, business_address=None,
+                 business_phone=None):
         self.organization_id = organization_id
+        # The business's OWN address and phone, as a family would be told them.
+        # Distinct from `support_phone`, which belongs to the platform: a
+        # family calling back must reach the funeral home, not EvoSys.
+        self.business_address = business_address
+        self.business_phone = business_phone
         # THE PLATFORM's name - EvoSys Pro. Infrastructure. A family has never
         # heard of it and must never be shown it.
         self.brand_name = brand_name
@@ -120,6 +127,8 @@ class PublicIdentity(object):
             "organization_id": self.organization_id,
             "brand_name": self.brand_name,
             "customer_facing_name": self.customer_facing_name,
+            "business_address": self.business_address,
+            "business_phone": self.business_phone,
             "from_email": self.from_email,
             "reply_to_email": self.reply_to_email,
             "cc_email": self.cc_email,
@@ -177,6 +186,12 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
         ident.brand_name = plat.name
         ident.source["brand_name"] = "platform"
     if org is not None:
+        ident.business_address = getattr(org, "org_address", None) or None
+        ident.business_phone = getattr(org, "org_phone", None) or None
+        ident.source["business_address"] = ("organization"
+                                            if ident.business_address else "unset")
+        ident.source["business_phone"] = ("organization"
+                                          if ident.business_phone else "unset")
         ident.customer_facing_name = (getattr(org, "brand_name", None)
                                       or getattr(org, "name", None) or None)
         ident.source["customer_facing_name"] = (

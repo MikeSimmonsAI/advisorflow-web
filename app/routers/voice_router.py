@@ -227,7 +227,9 @@ async def voice_stream(
 
     # Build lead and advisor info for prompt
     booking_link = create_booking_link(db, lead, advisor)
-    booking_url = f"{BOOKING_BASE_URL}/book/{booking_link.token}"
+    from app.services.public_identity import booking_url as public_booking_url
+    booking_url = public_booking_url(db, lead.organization_id,
+                                     booking_link.token)
 
     lead_info = {
         "id": lead.id,

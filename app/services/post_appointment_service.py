@@ -20,7 +20,10 @@ from app.models.models import BookingFollowup, BookingLink, Lead, User, Organiza
 
 logger = logging.getLogger(__name__)
 
-BACKEND_URL = os.environ.get("BACKEND_URL", "https://advisorflow-backend.onrender.com")
+# Survey links are now resolved per organization by
+# app.services.public_identity. This constant sent every brand's families to
+# the same Render hostname; it has no remaining use in this module.
+BACKEND_URL = os.environ.get("BACKEND_URL", "")
 _openai_client = None
 
 
@@ -120,7 +123,8 @@ def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User)
     db.flush()  # get the id
 
     org_name = _get_org_name(db, advisor)
-    survey_url = f"{BACKEND_URL}/survey/{survey_token}"
+    from app.services.public_identity import survey_url as public_survey_url
+    survey_url = public_survey_url(db, advisor.organization_id, survey_token)
     message = _build_thank_you(lead, advisor, org_name, survey_url)
 
     sent = False

@@ -17,7 +17,10 @@ from app.services.platform_utils import get_brand_name
 
 logger = logging.getLogger(__name__)
 
-BOOKING_BASE_URL = os.environ.get("BOOKING_BASE_URL", "https://advisorflow-booking.vercel.app")
+# Removed: an unused module constant naming a Vercel host. Nothing in this
+# file read it, but it was one import away from putting an infrastructure
+# domain in front of a family. Customer-facing links come from
+# app.services.public_identity, which resolves per organization.
 
 
 def _send_sms_safe(advisor: User, to_phone: str, body: str) -> None:

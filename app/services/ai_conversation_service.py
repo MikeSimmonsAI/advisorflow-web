@@ -245,7 +245,8 @@ def _get_booking_url(db: Session, lead: Lead, advisor: User) -> str:
     # an earlier email with a booking button, that link must still work when they click it.
     # Each AI touch gets its own link; all remain valid until the lead books.
     link = create_booking_link(db, lead, advisor)
-    return f"{BOOKING_BASE_URL}/book/{link.token}"
+    from app.services.public_identity import booking_url as public_booking_url
+    return public_booking_url(db, lead.organization_id, link.token)
 
 
 def _get_conversation_history(db: Session, lead: Lead) -> str:

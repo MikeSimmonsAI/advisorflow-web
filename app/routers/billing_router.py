@@ -174,7 +174,13 @@ def create_checkout(
         raise HTTPException(status_code=404, detail="Organization not found")
 
     customer_id = _get_or_create_customer(org, db)
-    base_url = os.environ.get("APP_BASE_URL", "https://advisorflow-frontend.onrender.com")
+    # The customer paying is a funeral home on a white-label brand. Bouncing
+    # them to an AdvisorFlow Render hostname after checkout tells them who
+    # their software really belongs to. Their own brand's domain first.
+    from app.services.public_identity import public_base_url as _public_base
+    base_url = (_public_base(db, org.id)
+                or os.environ.get("APP_BASE_URL", "").strip()
+                or "https://advisorflow-frontend.onrender.com")
 
     # Annual: 11 months billed (month 13 free = ~8% discount)
     monthly_cents = plan_info["monthly_cents"]
@@ -218,7 +224,12 @@ def create_portal(
     if not getattr(org, "stripe_customer_id", None):
         raise HTTPException(status_code=400, detail="No billing account. Please select a plan first.")
 
-    base_url = os.environ.get("APP_BASE_URL", "https://advisorflow-frontend.onrender.com")
+    # Same reasoning as the checkout session above: return the customer to
+    # their own brand's domain, not to an AdvisorFlow deployment hostname.
+    from app.services.public_identity import public_base_url as _public_base
+    base_url = (_public_base(db, org.id)
+                or os.environ.get("APP_BASE_URL", "").strip()
+                or "https://advisorflow-frontend.onrender.com")
     session = stripe.billing_portal.Session.create(
         customer=org.stripe_customer_id,
         return_url=f"{base_url}/billing",
