@@ -1701,15 +1701,20 @@ def resend_booking_link(
         s.status = "expired"
     db.flush()
 
-    # Create fresh link
-    link = create_booking_link(db, lead, current_user)
+    # Create fresh link — owned by the lead's ADVISOR, not by whoever pressed
+    # the button. A resend issued while the platform owner had the lead open
+    # would otherwise send the family to the OWNER's calendar. Same helper as
+    # the composer and the email sender, so the three cannot drift apart.
+    from app.routers.compose_router import acting_advisor
+    _advisor = acting_advisor(db, lead, current_user)
+    link = create_booking_link(db, lead, _advisor)
     from app.services.public_identity import booking_url as public_booking_url
     booking_url = public_booking_url(db, lead.organization_id, link.token)
 
     # Build the email
     org = db.query(Organization).filter_by(id=current_user.organization_id).first()
     org_name = org.name if org else "our organization"
-    advisor_name = current_user.full_name or "Your Advisor"
+    advisor_name = _advisor.full_name or "Your Advisor"
     first_name = lead.first_name or "there"
 
     body_text = (

@@ -49,8 +49,15 @@ def send_single_email(
 
         # Append a single HTML booking button when requested
         if req.include_booking_link:
+            # THE LINK NAMES A CALENDAR, so it must name the lead's ADVISOR -
+            # not whoever happens to be sending. This is the same defect that
+            # was fixed in the composer: a link minted while the platform owner
+            # had a tenant's lead open pointed the family at the OWNER's
+            # calendar. One helper, so the two paths cannot drift apart again.
+            from app.routers.compose_router import acting_advisor
             from app.services.sms_service import create_booking_link
-            booking_link = create_booking_link(db, lead, current_user)
+            booking_link = create_booking_link(db, lead,
+                                               acting_advisor(db, lead, current_user))
             from app.services.public_identity import booking_url as public_booking_url
             booking_url = public_booking_url(db, lead.organization_id,
                                              booking_link.token)

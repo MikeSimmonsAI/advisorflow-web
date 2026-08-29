@@ -1032,6 +1032,17 @@ check("19. no secret is ever in the payload",
 check("19. and only the last four of the sid is reported",
       len(s["account_sid_last4"] or "") <= 4, s["account_sid_last4"])
 
+# EVERY path that mints a link must name the same advisor. The composer was
+# fixed first; the email sender and the resend button had the identical bug and
+# would have re-introduced it the moment either was used under impersonation.
+for path in ("app/routers/email_router.py", "app/routers/leads_router.py"):
+    src = code_only(read(path))
+    check("19. %s mints its booking link for the lead's advisor"
+          % path.rsplit("/", 1)[-1],
+          "acting_advisor(db, lead, current_user)" in src, path)
+    check("19.    and no longer for whoever is sending",
+          "create_booking_link(db, lead, current_user)" not in src, path)
+
 
 db.close()
 if os.path.exists(DB_FILE):
