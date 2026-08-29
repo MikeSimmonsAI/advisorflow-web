@@ -468,6 +468,51 @@ check("11. Microsoft cannot win silently when Google is configured",
       '_provider_allowed("microsoft")' in cal and '_provider_allowed("google")' in cal)
 
 
+# ── 12. Twilio gets TwiML, not JSON ─────────────────────────────────────────
+
+print("\n[12] TWILIO 12300: THE REPLY IS THE RIGHT SHAPE")
+
+sms_router = read("app/routers/sms_router.py")
+inbound = sms_router[sms_router.index('@router.post("/webhook/inbound")'):]
+inbound = inbound[:inbound.index('@router.patch("/replies/')]
+status_cb = sms_router[sms_router.index('@router.post("/webhook/status-callback")'):]
+status_cb = status_cb[:status_cb.index('@router.post("/webhook/inbound")')]
+
+check("12. the inbound webhook answers with TwiML on every path",
+      "return {" not in inbound and inbound.count("_twiml_ack()") >= 3,
+      inbound.count("_twiml_ack()"))
+check("12. the status callback answers with TwiML on every path",
+      "return {" not in status_cb and status_cb.count("_twiml_ack()") >= 2,
+      status_cb.count("_twiml_ack()"))
+check("12. the content type is XML, which is what 12300 was about",
+      'media_type="application/xml"' in sms_router)
+check("12. the body is a valid, EMPTY TwiML document",
+      "<Response></Response>" in sms_router)
+
+import xml.etree.ElementTree as _ET                                  # noqa: E402
+from app.routers import sms_router as smsr                           # noqa: E402
+_ack = smsr._twiml_ack()
+check("12. it really parses as XML",
+      _ET.fromstring(_ack.body.decode()).tag == "Response")
+check("12. and sends no message back to the family",
+      _ET.fromstring(_ack.body.decode()).find("Message") is None)
+check("12. served as an XML content type",
+      "xml" in (_ack.media_type or ""), _ack.media_type)
+
+# The security and business behaviour this must NOT have disturbed.
+check("12. per-account signature verification still runs first",
+      "await guard_inbound(" in inbound or "guard_inbound(request" in inbound,
+      "guard missing")
+check("12. the status callback is still authenticated",
+      "guard_status_callback(request, db)" in status_cb)
+check("12. STOP still reaches the suppression list",
+      "add_suppression_entry_from_reply" in inbound)
+check("12. a reply still stops the cadence",
+      "stop_cadence_for_lead" in inbound)
+check("12. an unrecognised number still refuses a cross-org lookup",
+      "no matching" in inbound.lower() and "cross-org" in inbound.lower())
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

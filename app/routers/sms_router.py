@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Form, Query, Request, UploadFile, File
@@ -12,6 +13,7 @@ from app.services.sms_service import send_sms, send_batch, send_mms
 from app.utils.twilio_webhook_guard import guard_inbound, guard_status_callback
 
 router = APIRouter(prefix="/sms", tags=["sms"])
+logger = logging.getLogger(__name__)
 
 # ── what Twilio is allowed to receive back ───────────────────────────────────
 #

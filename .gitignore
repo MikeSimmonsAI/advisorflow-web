@@ -82,3 +82,8 @@ cp6check.db
 perf_baseline_*.json
 perf_after_*.json
 app/routers/sales_router.optimized.bak
+
+# Local deploy transcripts - never part of a release
+.deploy*.txt
+.deploy*.out
+.deploy*.err
