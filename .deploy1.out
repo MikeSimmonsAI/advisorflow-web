@@ -1,0 +1,13 @@
+
+  RENDER_API_KEY is not set. Steps 1-5 can still run, but step 6
+  cannot trigger the static frontend deploy.
+  Set it with:
+    [Environment]::SetEnvironmentVariable("RENDER_API_KEY","<key>","User")
+
+
+==============================================
+  AdvisorFlow Deploy
+  Sweep
+==============================================
+
+[1/6] Saving current work...

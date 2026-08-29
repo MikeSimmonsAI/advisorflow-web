@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Form, Query, Request, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -11,6 +12,25 @@ from app.services.sms_service import send_sms, send_batch, send_mms
 from app.utils.twilio_webhook_guard import guard_inbound, guard_status_callback
 
 router = APIRouter(prefix="/sms", tags=["sms"])
+
+# ── what Twilio is allowed to receive back ───────────────────────────────────
+#
+# Twilio fetches a webhook and expects TwiML — `text/xml`. A JSON body earns
+# error 12300, "Invalid Content-Type", logged against the account on every
+# single inbound message and every delivery receipt. The processing underneath
+# was always correct; only the reply was the wrong shape, which is why replies,
+# STOP handling and cadence stops all worked while the Twilio console filled
+# with errors.
+#
+# An empty <Response/> is the documented way to say "received, and I am not
+# replying to the sender" — which is exactly right here: the advisor answers a
+# reply from the app, and an auto-reply would be an unexpected text to a family.
+_EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+
+
+def _twiml_ack() -> Response:
+    """200 with an empty TwiML document. No message is sent to the sender."""
+    return Response(content=_EMPTY_TWIML, media_type="application/xml")
 
 # Keyword-based hot lead detection - simple first pass.
 # Phase 2 can upgrade this to an LLM sentiment call.
@@ -142,13 +162,14 @@ async def sms_status_callback(
     msg = db.query(Message).filter(Message.twilio_sid == MessageSid).first()
     if not msg:
         # Twilio may re-POST for messages sent before this feature existed — that's OK
-        return {"status": "no_matching_message"}
+        return _twiml_ack()
 
     msg.twilio_status = MessageStatus
     msg.delivery_status = MessageStatus  # keep both columns in sync
     msg.delivery_status_at = datetime.utcnow()
     db.commit()
-    return {"status": "updated", "message_id": msg.id, "delivery_status": MessageStatus}
+    logger.info("twilio status callback: message=%s status=%s", msg.id, MessageStatus)
+    return _twiml_ack()
 
 
 @router.post("/webhook/inbound")
@@ -196,12 +217,14 @@ async def inbound_webhook(
         # No advisor owns this Twilio number — misconfigured or shared number.
         # Return early rather than doing a cross-org lead lookup which could
         # apply DNC flags or AI pipeline triggers to the wrong org's data.
-        print(f"[sms_webhook] Unrecognized Twilio number {twilio_to} — no matching advisor, dropping inbound from {lead_phone}")
-        return {"status": "no_matching_advisor"}
+        logger.warning("[sms_webhook] Unrecognized Twilio number %s — no matching "
+                       "advisor, dropping inbound", twilio_to)
+        return _twiml_ack()
 
     if not lead:
         # Unknown sender - log nothing actionable, just acknowledge Twilio
-        return {"status": "no_matching_lead"}
+        logger.info("[sms_webhook] inbound from a number with no matching lead")
+        return _twiml_ack()
 
     # Hard legal opt-out check ALWAYS runs first and overrides anything
     # the AI classifier returns - see reply_classification_service.py's
@@ -290,7 +313,9 @@ async def inbound_webhook(
         except Exception:
             pass  # never let a notification failure break the Twilio webhook response
 
-    return {"status": "received", "is_hot": is_hot, "classification": classification.value}
+    logger.info("twilio inbound: lead=%s hot=%s classification=%s",
+                lead.id, is_hot, classification.value)
+    return _twiml_ack()
 
 
 @router.patch("/replies/{reply_id}/mark-reviewed")
