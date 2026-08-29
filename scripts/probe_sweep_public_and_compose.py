@@ -1106,6 +1106,16 @@ check("21. the from-address example is a generic domain",
 check("21. and the helper says what happens before a domain is verified",
       "until it is, mail goes out from the platform's verified address" in org_settings)
 
+# Same class, second screen. An EvoSys customer opening Billing was told to
+# email BookaBoost about their own invoice.
+billing = jsx_code_only(read("frontend/src/pages/Billing.jsx"))
+check("21. Billing does not hard-code one brand's support address",
+      "support@bookaboost.live" not in billing)
+check("21. it resolves the support address from the brand config",
+      "BRAND_CONFIG[detectTheme()]" in billing and "SUPPORT_EMAIL" in billing)
+check("21. and every mailto uses the resolved value",
+      billing.count("mailto:${SUPPORT_EMAIL}") >= 3, billing.count("mailto:"))
+
 
 db.close()
 if os.path.exists(DB_FILE):

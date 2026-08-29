@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { detectTheme, BRAND_CONFIG } from '../theme.js';
+
+// THE SUPPORT ADDRESS BELONGS TO WHICHEVER BRAND THE CUSTOMER IS ON.
+//
+// This page hard-coded `support@bookaboost.live` in three places, so an
+// EvoSys Pro customer opening Billing was told to email BookaBoost — a company
+// they have no relationship with, about their own invoice. `theme.js` already
+// resolves the brand from the hostname and every other screen uses it; this one
+// simply never did.
+const BRAND = BRAND_CONFIG[detectTheme()] || {};
+const SUPPORT_EMAIL = BRAND.supportEmail || 'support@evosyspro.live';
 
 const PLANS = [
   {
@@ -112,7 +123,7 @@ export default function Billing() {
             <div style={{ fontSize: 14 }}>{err}</div>
             <div style={{ fontSize: 13, marginTop: 8, color: '#aaa' }}>
               To activate or change your plan, contact your platform administrator at{' '}
-              <a href="mailto:support@bookaboost.live" style={{ color: '#ef4444' }}>support@bookaboost.live</a>.
+              <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#ef4444' }}>{SUPPORT_EMAIL}</a>.
             </div>
           </div>
         </div>
@@ -144,7 +155,7 @@ export default function Billing() {
       {/* Admin contact notice */}
       <div style={{ background: 'rgba(47,182,255,0.06)', border: '1px solid rgba(47,182,255,0.2)', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', fontSize: '13px', color: '#6aa8cc', display: 'flex', gap: 10, alignItems: 'center' }}>
         <span>ℹ️</span>
-        <span>Plan changes are processed by your platform administrator. Click <strong style={{ color: '#2fb6ff' }}>Select Plan</strong> below to request a plan, or email <a href="mailto:support@bookaboost.live" style={{ color: '#2fb6ff' }}>support@bookaboost.live</a>.</span>
+        <span>Plan changes are processed by your platform administrator. Click <strong style={{ color: '#2fb6ff' }}>Select Plan</strong> below to request a plan, or email <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#2fb6ff' }}>{SUPPORT_EMAIL}</a>.</span>
       </div>
 
       {/* Billing interval toggle */}
@@ -191,7 +202,7 @@ export default function Billing() {
           <div style={{ fontWeight: '700', fontSize: '16px', marginBottom: '4px' }}>Enterprise</div>
           <div style={{ color: '#888', fontSize: '14px' }}>Unlimited leads, users, and locations. White-label available. Custom pricing.</div>
         </div>
-        <a href="mailto:support@bookaboost.live?subject=Enterprise Plan Inquiry" style={{ background: '#2a2a4a', color: '#fff', padding: '12px 24px', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>Contact Us →</a>
+        <a href={`mailto:${SUPPORT_EMAIL}?subject=Enterprise Plan Inquiry`} style={{ background: '#2a2a4a', color: '#fff', padding: '12px 24px', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>Contact Us →</a>
       </div>
     </div>
   );
