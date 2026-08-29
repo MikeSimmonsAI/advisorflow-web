@@ -1073,8 +1073,20 @@ def test_prospect_invitation():
         check("sent from the brand's verified address",
               getattr(SENT[0]["org"], "from_email", None) == "support@evosyspro.live")
         html = SENT[0]["html"]
+        # The link now points at the BRAND's own host, which serves
+        # /appointments/confirm/:token and calls the same token endpoints the
+        # backend HTML page uses. It used to carry the API hostname, so a
+        # stranger who had never heard of AdvisorFlow was emailed a link to
+        # `advisorflow-backend.onrender.com` - which reads as phishing and
+        # outlives the deployment in their inbox.
         check("the email carries a confirmation link",
-              "/sales/appointments/confirm/" in html, html[:300])
+              "/appointments/confirm/" in html, html[:300])
+        check("the confirmation link is on the brand's own host",
+              "https://app.evosyspro.live/appointments/confirm/" in html,
+              html[:300])
+        check("and NEVER on an infrastructure hostname",
+              "onrender.com" not in html and "vercel.app" not in html,
+              html[:300])
         # The single most important assertion in this section.
         check("INTERNAL NOTES NEVER REACH THE PROSPECT",
               "budget is soft" not in html and "discount" not in html.lower(), html)
