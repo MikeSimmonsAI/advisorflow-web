@@ -39,6 +39,23 @@ from app.services.twilio_callbacks import apply_status_callback
 BOOKING_BASE_URL = os.environ.get("BOOKING_BASE_URL", "")
 
 
+def _is_platform_owner(user: User) -> bool:
+    """True for the AdvisorFlow platform account itself.
+
+    A god_admin operating a customer tenant does so through X-Org-Override,
+    which rewrites `organization_id` on the in-memory User to the tenant's id.
+    Everything downstream then treats the platform owner as if they were a
+    member of that customer's staff - including, until this guard existed, the
+    Twilio resolution below, which read the OWNER's personal credentials and
+    would have sent a customer's message from the platform's own number.
+
+    That is not a cosmetic attribution problem. The family sees a number the
+    funeral home does not own, replies land in the platform's inbox instead of
+    the tenant's, and the customer's own 10DLC registration is bypassed.
+    """
+    return (getattr(user, "role", None) or "").lower() == "god_admin"
+
+
 def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str | None]:
     """
     Returns (twilio_client, from_phone, caller_id_name).
@@ -48,9 +65,17 @@ def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str 
       2. Org-level shared credentials (toll-free / 10DLC fallback)
 
     Raises ValueError if neither is configured.
+
+    Step 1 is SKIPPED for the platform owner. See `_is_platform_owner`: the
+    owner's personal Twilio is the platform's, never a tenant's, so an
+    impersonated send falls through to the organization's own sender and is
+    refused outright when the organization has none. Refusing is the right
+    outcome - a customer with no sender configured must find that out here,
+    not by having the platform quietly send for them.
     """
     # --- 1. Advisor-level ---
-    if advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+    if (not _is_platform_owner(advisor)) \
+            and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
         token = decrypt_value(advisor.twilio_auth_token_encrypted)
         client = Client(advisor.twilio_account_sid, token)
         return client, advisor.twilio_phone_number, advisor.twilio_caller_id_name
@@ -86,8 +111,16 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
     and what the send does can never disagree.
 
     NO CROSS-TENANT FALLBACK, and no secret in the return value.
+
+    The platform-owner skip mirrors `_resolve_twilio_creds` exactly, because
+    the whole point of this function is that the page and the send agree. A
+    god_admin inside a tenant used to be shown the PLATFORM's number here and
+    a green "ready" beside it, which is the single most misleading thing this
+    screen could say: it reports a customer as able to text when the customer
+    has no sender at all.
     """
-    if advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+    if (not _is_platform_owner(advisor)) \
+            and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
         return {
             "ready": bool(advisor.twilio_phone_number),
             "source": "advisor",
@@ -117,6 +150,15 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
         "from_number": None,
         "account_sid_last4": None,
         "reason": (
+            # Named for whoever is actually missing a sender. Under
+            # impersonation the caller is the platform owner, and telling a
+            # platform admin to "add a personal number in Settings" would have
+            # them configure the PLATFORM's Twilio to fix a CUSTOMER's gap.
+            "This organization has no Twilio sender configured. An admin of "
+            "this organization must add a shared number in Org Settings, or "
+            "the assigned advisor must connect a personal number in "
+            "Settings -> Twilio."
+            if _is_platform_owner(advisor) else
             "No Twilio credentials are configured for %s or for this "
             "organization. Add a personal number in Settings -> Twilio, or ask "
             "an admin to configure a shared organization number in Org Settings."

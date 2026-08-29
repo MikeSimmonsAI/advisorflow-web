@@ -296,7 +296,56 @@ s = sms.describe_sms_sender(advisor, db)
 check("5. an advisor's OWN number wins over the shared one",
       s["source"] == "advisor" and s["from_number"] == "+14695551234", s)
 
+# THE PLATFORM OWNER IS NOT A MEMBER OF THE TENANT'S STAFF.
+#
+# A god_admin inside a customer org via X-Org-Override carries that org's id on
+# the in-memory User, so every downstream reader treats them as staff. Twilio
+# resolution read their PERSONAL credentials and reported the platform's own
+# number as the customer's sender - green, ready, and wrong. Pressing Send
+# would have texted a family from a number the funeral home does not own.
+god = User(id="god-probe-1", email="owner@platform.test", full_name="Platform Owner",
+           password_hash="x", role="god_admin", organization_id=REST, is_active=True,
+           twilio_account_sid="ACgodsid00000000000000000000000000",
+           twilio_auth_token_encrypted="enc",
+           twilio_phone_number="+18449172171")
+db.add(god)
+db.commit()
+
+s = sms.describe_sms_sender(god, db)
+check("5. the PLATFORM OWNER's personal Twilio is never a tenant's sender",
+      s["from_number"] != "+18449172171" and s["source"] != "advisor", s)
+check("5. an impersonated read falls through to the ORGANIZATION's own sender",
+      s["source"] == "organization" and s["from_number"] == "+14692241155", s)
+
+_org_sid, _org_tok, _org_num = (org.org_twilio_account_sid,
+                                org.org_twilio_auth_token_encrypted,
+                                org.org_twilio_phone_number)
+org.org_twilio_account_sid = None
+org.org_twilio_auth_token_encrypted = None
+org.org_twilio_phone_number = None
+db.commit()
+s = sms.describe_sms_sender(god, db)
+check("5. an org with no sender is reported NOT ready, not papered over",
+      s["ready"] is False and s["from_number"] is None, s)
+check("5. and the fix is addressed to the organization, not to the platform admin",
+      "This organization has no Twilio sender" in (s["reason"] or ""), s["reason"])
+try:
+    sms._resolve_twilio_creds(god, db)
+    check("5. the SEND refuses too - it does not disagree with the screen", False,
+          "no exception raised")
+except ValueError:
+    check("5. the SEND refuses too - it does not disagree with the screen", True)
+except Exception as _exc:                                          # noqa: BLE001
+    check("5. the SEND refuses too - it does not disagree with the screen", False,
+          repr(_exc))
+org.org_twilio_account_sid = _org_sid
+org.org_twilio_auth_token_encrypted = _org_tok
+org.org_twilio_phone_number = _org_num
+db.commit()
+
 svc = read("app/services/sms_service.py")
+check("5. the screen and the send share ONE platform-owner predicate",
+      svc.count("_is_platform_owner(advisor)") >= 2)
 check("5. resolution order is advisor -> organization -> unavailable",
       svc.index("Advisor's personal Twilio credentials") <
       svc.index("Org-level shared credentials"))
