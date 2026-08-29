@@ -374,9 +374,12 @@ check("5. no call site in the composer still passes the raw caller",
 svc = read("app/services/sms_service.py")
 check("5. the screen and the send share ONE platform-owner predicate",
       svc.count("_is_platform_owner(advisor)") >= 2)
-check("5. resolution order is advisor -> organization -> unavailable",
-      svc.index("Advisor's personal Twilio credentials") <
-      svc.index("Org-level shared credentials"))
+check("5. resolution order is advisor account -> advisor number on org "
+      "credentials -> org shared number -> unavailable",
+      svc.index("--- 1. Advisor's own Twilio account")
+      < svc.index("--- 2. Advisor's assigned number")
+      < svc.index("--- 3. Organization's optional shared number")
+      < svc.index("--- 4. Unavailable"))
 check("5. NO cross-tenant fallback: only this advisor's own organization is read",
       "Organization.id == advisor.organization_id" in svc)
 check("5. the warning is shown, not hidden",
@@ -1115,6 +1118,164 @@ check("21. it resolves the support address from the brand config",
       "BRAND_CONFIG[detectTheme()]" in billing and "SUPPORT_EMAIL" in billing)
 check("21. and every mailto uses the resolved value",
       billing.count("mailto:${SUPPORT_EMAIL}") >= 3, billing.count("mailto:"))
+
+
+# ── 22. credentials on the org, numbers on the people ───────────────────────
+
+print("\n[22] ONE TWILIO ACCOUNT PER ORGANIZATION, ONE NUMBER PER ADVISOR")
+
+# The shape Restland actually needs: ONE Restland Twilio account carrying ONE
+# A2P brand and campaign, with FSA 1 / FSA 2 / FSA 3 each holding only their
+# own local number. The old ladder used an advisor's number ONLY when that
+# advisor row also carried a SID and an auth token, so this shape required
+# copying the organization's auth token onto every advisor row - one secret
+# duplicated per member of staff, and every copy a place it can leak from or
+# fall out of date.
+
+fsa = User(id="fsa-probe-1", email="fsa1@restland.test", full_name="FSA One",
+           password_hash="x", role="advisor", organization_id=REST, is_active=True,
+           twilio_phone_number="+12145550137")   # number ONLY - no sid, no token
+db.add(fsa)
+# A REAL ciphertext, not the "enc" sentinel the earlier sections use. This
+# section exercises _resolve_twilio_creds, which actually decrypts - and the
+# whole point of the new branch is that it reaches the ORGANISATION's token, so
+# a probe that never decrypts one would not have proven anything.
+from app.utils.crypto import encrypt_value as _encrypt                 # noqa: E402
+_ORG_TOKEN_CIPHERTEXT = _encrypt("probe-not-a-real-twilio-token")
+org.org_twilio_account_sid = "ACorgsid0000000000000000000000000"
+org.org_twilio_auth_token_encrypted = _ORG_TOKEN_CIPHERTEXT
+org.org_twilio_phone_number = None               # NO shared number, deliberately
+org.org_twilio_caller_id_name = "Restland"
+db.commit()
+
+s = sms.describe_sms_sender(fsa, db)
+check("22. an advisor with a NUMBER and no credentials can send",
+      s["ready"] is True, s)
+check("22. from THEIR OWN number, not a shared one",
+      s["source"] == "advisor" and s["from_number"] == "+12145550137", s)
+check("22. on the ORGANIZATION's Twilio account",
+      s["credentials_source"] == "organization"
+      and s["account_sid_last4"] == "0000", s)
+check("22. and no auth token is stored on the advisor row",
+      fsa.twilio_account_sid is None and fsa.twilio_auth_token_encrypted is None)
+check("22. still no secret in the payload",
+      not any(k for k in s if "token" in k or "secret" in k), list(s))
+
+_client, _from, _cid = sms._resolve_twilio_creds(fsa, db)
+check("22. the SEND agrees with the screen - same number",
+      _from == "+12145550137", _from)
+check("22. and inherits the organization's caller ID when it has none of its own",
+      _cid == "Restland", _cid)
+
+# A second FSA under the same account is exactly the same shape.
+fsa2 = User(id="fsa-probe-2", email="fsa2@restland.test", full_name="FSA Two",
+            password_hash="x", role="advisor", organization_id=REST, is_active=True,
+            twilio_phone_number="+12145550188")
+db.add(fsa2)
+db.commit()
+s2 = sms.describe_sms_sender(fsa2, db)
+check("22. a second advisor gets a DIFFERENT number on the SAME account",
+      s2["from_number"] == "+12145550188"
+      and s2["account_sid_last4"] == s["account_sid_last4"], s2)
+
+# NO SILENT PLATFORM FALLBACK. Credentials gone means refused, not borrowed.
+org.org_twilio_account_sid = None
+org.org_twilio_auth_token_encrypted = None
+db.commit()
+s3 = sms.describe_sms_sender(fsa, db)
+check("22. a number with no org credentials is NOT ready", s3["ready"] is False, s3)
+check("22. and the reason names the organization's missing credentials",
+      "no Twilio credentials" in (s3["reason"] or ""), s3["reason"])
+try:
+    sms._resolve_twilio_creds(fsa, db)
+    check("22. the send refuses rather than borrowing another account", False,
+          "no exception raised")
+except ValueError:
+    check("22. the send refuses rather than borrowing another account", True)
+org.org_twilio_account_sid = "ACorgsid0000000000000000000000000"
+org.org_twilio_auth_token_encrypted = _ORG_TOKEN_CIPHERTEXT
+db.commit()
+
+# The platform owner still gets nothing, even holding a number of their own.
+god.twilio_phone_number = "+18449172171"
+db.commit()
+sg = sms.describe_sms_sender(god, db)
+check("22. the platform owner's own number is still never a tenant's sender",
+      sg["from_number"] != "+18449172171", sg)
+
+# INBOUND. An advisor holding only a number must still be found by the webhook,
+# or a STOP arriving on that number is discarded.
+inbound_src = code_only(read("app/routers/sms_router.py"))
+check("22. inbound still matches an advisor by NUMBER, which needs no credentials",
+      "User.twilio_phone_number == twilio_to" in inbound_src)
+_hit = db.query(User).filter(User.twilio_phone_number == "+12145550137").first()
+check("22. and that lookup finds the credential-less advisor",
+      _hit is not None and _hit.id == fsa.id)
+check("22.    scoped to their organization, so STOP lands in the right tenant",
+      _hit.organization_id == REST)
+
+# PER-ACCOUNT WEBHOOK AUTH. The signature is verified against the account that
+# signed - the organization's - which the advisor row never carries.
+from app.utils.twilio_webhook_guard import (                          # noqa: E402
+    resolve_account_by_sid, account_sids_for_advisor)
+_resolved = resolve_account_by_sid(db, "ACorgsid0000000000000000000000000")
+check("22. the webhook guard resolves the ORGANIZATION's account sid",
+      _resolved is not None and _resolved.organization_id == REST, _resolved)
+check("22. an advisor holding only a number still authorizes that account",
+      "ACorgsid0000000000000000000000000" in account_sids_for_advisor(db, fsa))
+check("22. and an unknown sid resolves to nothing, so the request is denied",
+      resolve_account_by_sid(db, "ACunknown00000000000000000000000") is None)
+
+# THE ORG SHARED NUMBER IS OPTIONAL, NOT A PREREQUISITE.
+org_api = code_only(read("app/routers/org_settings_router.py"))
+check("22. saving org credentials no longer demands a shared number",
+      "org_twilio_phone_number:   Optional[str] = None" in org_api)
+check("22. a number can be assigned to one advisor without any credentials",
+      "def assign_org_sending_number" in org_api)
+check("22. that endpoint writes a number and never a secret",
+      "target.twilio_phone_number = number" in org_api
+      and "target.twilio_account_sid" not in org_api
+      and "twilio_auth_token_encrypted" not in org_api.split(
+          "def assign_org_sending_number")[1])
+check("22. the assignment is confined to the resolved organization",
+      "User.organization_id == org.id" in org_api)
+check("22. and a duplicate number is refused, so inbound stays unambiguous",
+      "def _assert_number_unused" in org_api
+      and "Organization.org_twilio_phone_number == number" in org_api)
+check("22. the roster excludes the platform owner from tenant staff",
+      'User.role != "god_admin"' in org_api)
+
+# A2P STATE ACTUALLY PERSISTS. Every one of these columns was written behind a
+# hasattr() guard against a model that did not declare them, so every SID the
+# registration flow obtained was dropped and /10dlc/status answered null.
+from app.models.models import Organization as _Org                     # noqa: E402
+for _col in ("twilio_messaging_service_sid", "twilio_a2p_brand_sid",
+             "twilio_a2p_brand_status", "twilio_a2p_campaign_sid",
+             "twilio_a2p_campaign_status", "twilio_a2p_campaign_use_case",
+             "twilio_a2p_registered_at"):
+    check("22. Organization.%s is declared, so registration state survives" % _col,
+          hasattr(_Org, _col), _col)
+
+org.twilio_a2p_brand_sid = "BNprobe0000000000000000000000000"
+org.twilio_a2p_brand_status = "PENDING"
+db.commit()
+db.expire(org)
+_reloaded = db.query(_Org).filter(_Org.id == REST).first()
+check("22. an A2P brand sid written to the org is still there after a reload",
+      _reloaded.twilio_a2p_brand_sid == "BNprobe0000000000000000000000000",
+      _reloaded.twilio_a2p_brand_sid)
+check("22. and a PENDING status is never reported as approved",
+      _reloaded.twilio_a2p_brand_status == "PENDING")
+
+dlc_src = code_only(read("app/routers/dlc_router.py"))
+check("22. A2P registration uses the ORGANIZATION's credentials first",
+      dlc_src.index("org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted")
+      < dlc_src.index("current_user.twilio_account_sid and current_user.twilio_auth_token_encrypted"))
+check("22. and never registers a customer's brand on the platform's account",
+      'is_owner = (getattr(current_user, "role", None) or "").lower() == "god_admin"'
+      in dlc_src and "(not is_owner) and current_user.twilio_account_sid" in dlc_src)
+check("22. the status payload reports credentials separately from approval",
+      '"credentials_ready"' in dlc_src)
 
 
 db.close()

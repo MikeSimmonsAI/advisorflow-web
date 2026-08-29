@@ -119,6 +119,13 @@ def resolve_account_by_sid(db: Session, account_sid: str
     sms_service._resolve_twilio_creds exactly — the account that SENT is the
     account that SIGNS, so resolution here must follow the same order the send
     path used or the tokens will not correspond.
+
+    This ordering also covers the org-credential model, where an advisor holds
+    only an assigned NUMBER and the organization holds the account. Such an
+    advisor has no twilio_account_sid, so the first query cannot match them and
+    resolution falls through to the organization — which is the account that
+    actually signed. Nothing here needs to know which number was used; the
+    AccountSid alone decides, and there is one account per organization.
     """
     if not account_sid:
         return None

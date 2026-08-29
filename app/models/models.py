@@ -296,17 +296,46 @@ class Organization(Base):
     meta_app_secret          = Column(String, nullable=True)  # HMAC signature check
     tiktok_webhook_secret    = Column(String, nullable=True)
 
-    # Org-level shared Twilio credentials — used as fallback when an advisor
-    # has no personal Twilio number configured.  Supports both toll-free and
-    # 10DLC numbers; twilio_number_type distinguishes them for reporting.
-    # All advisors in the org send FROM this shared number when no personal
-    # number is set, with their name in the message body.
+    # The organization's OWN Twilio account. These credentials — not an
+    # advisor's — are what the whole tenant sends on, and what its A2P brand and
+    # campaign below are registered against. An advisor row carries only the
+    # number assigned to that person; it never needs a copy of this token.
+    # See app/services/sms_service._resolve_twilio_creds for the resolution.
+    #
+    # org_twilio_phone_number is an OPTIONAL shared sender for teams who want
+    # one number for the whole organization. Blank is a normal, supported state
+    # and is not a gap: it simply means every send resolves through the
+    # advisor's own assigned number. twilio_number_type ("toll_free" | "10dlc" |
+    # "short_code") is informational, used in dashboards.
     org_twilio_account_sid        = Column(String, nullable=True)
     org_twilio_auth_token_encrypted = Column(String, nullable=True)  # encrypted at rest
-    org_twilio_phone_number       = Column(String, nullable=True)   # e.g. "+18449172171"
-    org_twilio_caller_id_name     = Column(String, nullable=True)   # e.g. "EvoSys Pro"
+    org_twilio_phone_number       = Column(String, nullable=True)   # e.g. "+18005550100"
+    org_twilio_caller_id_name     = Column(String, nullable=True)   # the CUSTOMER's business name
     # "toll_free" | "10dlc" | "short_code" — informational, used in dashboards
     org_twilio_number_type        = Column(String, nullable=True, default="toll_free")
+
+    # A2P 10DLC registration state — one brand and one campaign per customer
+    # organization, under that organization's own Twilio account above.
+    #
+    # These columns are the reason app/routers/dlc_router.py guards every write
+    # with `hasattr(org, ...)`. auto_migrate.COLUMNS_TO_ADD has created them in
+    # the DATABASE since the 10DLC router was written — but they were never
+    # declared on this model, so `hasattr` was False on every one of them:
+    # every SID the registration flow obtained from Twilio was dropped on the
+    # floor and GET /10dlc/status answered null forever. Declaring them here is
+    # the whole fix; the columns are already there.
+    #
+    # Statuses are Twilio/TCR's own strings ("PENDING", "APPROVED",
+    # "IN_PROGRESS", "FAILED"). Never display one as APPROVED that Twilio has
+    # not returned as approved — an unregistered campaign that reads as
+    # registered is how a customer's traffic gets carrier-filtered silently.
+    twilio_messaging_service_sid  = Column(String, nullable=True)   # MG...
+    twilio_a2p_brand_sid          = Column(String, nullable=True)   # BN...
+    twilio_a2p_brand_status       = Column(String, nullable=True)
+    twilio_a2p_campaign_sid       = Column(String, nullable=True)   # QE.../CM...
+    twilio_a2p_campaign_status    = Column(String, nullable=True)
+    twilio_a2p_campaign_use_case  = Column(String, nullable=True)   # e.g. "MIXED"
+    twilio_a2p_registered_at      = Column(DateTime, nullable=True)
 
     # Stripe billing — populated by billing_router.py on checkout/webhook
     stripe_customer_id      = Column(String, nullable=True)

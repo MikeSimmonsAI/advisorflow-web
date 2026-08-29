@@ -120,6 +120,7 @@ export default function OrgSettings() {
   const [orgTwilioCallerId, setOrgTwilioCallerId] = useState('')
   const [orgTwilioNumberType, setOrgTwilioNumberType] = useState('toll_free')
   const [orgTwilioConfigured, setOrgTwilioConfigured] = useState(false)
+  const [orgTwilioSidLast4, setOrgTwilioSidLast4] = useState('')
   const [savingOrgTwilio, setSavingOrgTwilio] = useState(false)
   const [orgTwilioSaved, setOrgTwilioSaved] = useState(false)
   const [orgTwilioError, setOrgTwilioError] = useState('')
@@ -184,6 +185,7 @@ export default function OrgSettings() {
         setOrgTwilioCallerId(t.org_twilio_caller_id_name || '')
         setOrgTwilioNumberType(t.org_twilio_number_type || 'toll_free')
         setOrgTwilioConfigured(t.org_twilio_configured || false)
+        setOrgTwilioSidLast4(t.org_twilio_account_sid_last4 || '')
         setOrgTwilioSid('')
         setOrgTwilioToken('')
       })
@@ -679,14 +681,48 @@ export default function OrgSettings() {
             </button>
           </section>
 
-        {/* ── Org-level shared Twilio (toll-free / 10DLC) ── */}
+        {/* ── The organization's Twilio account ──
+            Credentials belong to the ORGANIZATION: one Twilio account, one A2P
+            brand and campaign, and every sending number underneath it. The
+            numbers themselves are handed out to individual staff in the panel
+            below — nobody's user record ever holds a copy of this auth token. */}
           <section className="panel os-section" style={{ marginTop: 16 }}>
             <div className="panel-header">
-              <h2 className="panel-title">📱 Shared SMS number</h2>
+              <h2 className="panel-title">📱 Twilio account</h2>
             </div>
             <p className="os-hint">
-              Advisors without a personal Twilio number automatically send from this shared number.
-              {orgTwilioConfigured && <span style={{ color: 'var(--signal-green, #22c55e)', marginLeft: 6 }}>✓ Configured</span>}
+              Your organization's own Twilio account. Every text this team sends goes out
+              on it, under your own A2P registration.
+              {orgTwilioConfigured && (
+                <span style={{ color: 'var(--signal-green, #22c55e)', marginLeft: 6 }}>
+                  ✓ Credentials saved{orgTwilioSidLast4 ? ` (SID ending ${orgTwilioSidLast4})` : ''}
+                </span>
+              )}
+            </p>
+
+            <div className="os-field-row" style={{ gap: 12, marginTop: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">
+                  Twilio Account SID
+                  {orgTwilioConfigured && !orgTwilioSid && <span className="os-hint" style={{ marginLeft: 6 }}>(leave blank to keep existing)</span>}
+                </label>
+                <input className="os-input" placeholder="ACxxxxxxxxxxxxxxxx" value={orgTwilioSid} onChange={e => setOrgTwilioSid(e.target.value)} autoComplete="off" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="os-label">
+                  Auth Token
+                  {orgTwilioConfigured && !orgTwilioToken && <span className="os-hint" style={{ marginLeft: 6 }}>(leave blank to keep existing)</span>}
+                </label>
+                <input className="os-input" type="password" placeholder="••••••••••••••••" value={orgTwilioToken} onChange={e => setOrgTwilioToken(e.target.value)} autoComplete="new-password" />
+              </div>
+            </div>
+
+            <h3 className="os-label" style={{ marginTop: 18 }}>Shared number (optional)</h3>
+            <p className="os-hint">
+              Leave this blank when every person sends from their own assigned number.
+              A shared number is only for teams who want one number for the whole
+              organization — it is not required, and it is not a fallback for someone
+              whose own number is missing.
             </p>
 
             <div className="os-field-row" style={{ gap: 12, marginTop: 12 }}>
@@ -716,28 +752,22 @@ export default function OrgSettings() {
               </div>
             </div>
 
-            <div className="os-field-row" style={{ gap: 12, marginTop: 8 }}>
-              <div style={{ flex: 1 }}>
-                <label className="os-label">
-                  Twilio Account SID
-                  {orgTwilioConfigured && !orgTwilioSid && <span className="os-hint" style={{ marginLeft: 6 }}>(leave blank to keep existing)</span>}
-                </label>
-                <input className="os-input" placeholder="ACxxxxxxxxxxxxxxxx" value={orgTwilioSid} onChange={e => setOrgTwilioSid(e.target.value)} autoComplete="off" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="os-label">
-                  Auth Token
-                  {orgTwilioConfigured && !orgTwilioToken && <span className="os-hint" style={{ marginLeft: 6 }}>(leave blank to keep existing)</span>}
-                </label>
-                <input className="os-input" type="password" placeholder="••••••••••••••••" value={orgTwilioToken} onChange={e => setOrgTwilioToken(e.target.value)} autoComplete="new-password" />
-              </div>
-            </div>
-
             {orgTwilioError && <p style={{ color: 'var(--signal-red, #ff4d4f)', fontSize: 12, marginTop: 6 }}>{orgTwilioError}</p>}
-            <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={saveOrgTwilio} disabled={savingOrgTwilio || !orgTwilioPhone.trim()}>
-              {savingOrgTwilio ? 'Saving…' : orgTwilioSaved ? '✓ Saved' : 'Save shared number'}
+            {/* Enabled as soon as there is something to save. It used to require
+                a shared number, which made "credentials only, numbers assigned
+                per person" — the normal setup — impossible to save at all. */}
+            <button
+              className="btn btn-primary"
+              style={{ marginTop: 12 }}
+              onClick={saveOrgTwilio}
+              disabled={savingOrgTwilio || (!orgTwilioConfigured && (!orgTwilioSid.trim() || !orgTwilioToken.trim()))}
+            >
+              {savingOrgTwilio ? 'Saving…' : orgTwilioSaved ? '✓ Saved' : 'Save Twilio settings'}
             </button>
           </section>
+
+        {/* ── A2P registration + who holds which number ── */}
+          <TwilioNumbersSection orgQuery={orgQuery} orgTwilioConfigured={orgTwilioConfigured} />
 
         {/* ── Booking Page Info ── */}
         <section className="panel os-section" style={{ marginTop: 16 }}>
@@ -818,6 +848,155 @@ function SeedDemoButton({ orgId }) {
       )}
       {status === 'error' && <div style={{ color: '#f87171', fontSize: 13 }}>{err}</div>}
     </div>
+  )
+}
+
+// ── A2P registration + per-person sending numbers ─────────────────────────
+//
+// One organization, one Twilio account, one A2P brand and campaign — and each
+// person on the team holding only the local number assigned to them. Nothing
+// on this screen writes a credential to a person's record.
+//
+// Every status shown here is Twilio's own word, reported verbatim. Nothing is
+// promoted to "approved", "connected" or "active" by this UI: a campaign that
+// reads as registered when it is not is how a customer's messages get quietly
+// filtered by carriers with no error anywhere.
+function TwilioNumbersSection({ orgQuery, orgTwilioConfigured }) {
+  const [status, setStatus] = useState(null)
+  const [members, setMembers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [drafts, setDrafts] = useState({})       // userId -> edited number
+  const [savingId, setSavingId] = useState(null)
+  const [err, setErr] = useState('')
+  const [savedId, setSavedId] = useState(null)
+
+  const load = () => {
+    setLoading(true)
+    Promise.all([
+      api.get(`/10dlc/status`).catch(() => null),
+      api.get(`/org-settings/twilio/numbers${orgQuery}`).catch(() => []),
+    ]).then(([s, m]) => {
+      setStatus(s)
+      setMembers(Array.isArray(m) ? m : [])
+      setDrafts({})
+      setLoading(false)
+    })
+  }
+
+  useEffect(load, [orgQuery])
+
+  async function saveNumber(m) {
+    const next = (drafts[m.id] ?? m.twilio_phone_number ?? '').trim()
+    setSavingId(m.id); setErr(''); setSavedId(null)
+    try {
+      const r = await api.put(`/org-settings/twilio/numbers/${m.id}${orgQuery}`, {
+        twilio_phone_number: next || null,
+      })
+      setMembers(prev => prev.map(x => x.id === m.id
+        ? { ...x, twilio_phone_number: r.twilio_phone_number } : x))
+      setDrafts(prev => { const n = { ...prev }; delete n[m.id]; return n })
+      setSavedId(m.id)
+      setTimeout(() => setSavedId(null), 2500)
+    } catch (e) {
+      setErr(e.message || 'Could not save that number')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const pill = (label, value) => (
+    <span style={{
+      display: 'inline-block', fontSize: 12, padding: '2px 9px', borderRadius: 999,
+      border: '1px solid var(--border, rgba(255,255,255,0.14))',
+      color: value ? 'inherit' : 'var(--text-dim, #94a3b8)',
+    }}>
+      {label}: <strong>{value || 'not registered'}</strong>
+    </span>
+  )
+
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }}>
+      <div className="panel-header">
+        <h2 className="panel-title">🔢 Sending numbers &amp; A2P registration</h2>
+      </div>
+
+      {!orgTwilioConfigured && (
+        <p className="os-hint" style={{ color: 'var(--signal-amber, #f59e0b)' }}>
+          Add your Twilio Account SID and Auth Token above first. Numbers assigned
+          here cannot send until the organization's credentials are saved.
+        </p>
+      )}
+
+      <p className="os-hint" style={{ marginTop: 8 }}>
+        US carriers require an A2P 10DLC brand and campaign before local numbers can
+        text reliably. Register once for the organization — every number below sends
+        under it.
+      </p>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+        {pill('Brand', status?.brand_status)}
+        {pill('Campaign', status?.campaign_status)}
+        {pill('Messaging service', status?.messaging_service_sid ? 'created' : null)}
+      </div>
+
+      <h3 className="os-label" style={{ marginTop: 20 }}>Who sends from which number</h3>
+      <p className="os-hint">
+        Each person needs their own number from your Twilio account. Buy numbers in
+        the Twilio Console, then enter them here — this page never purchases a number
+        for you.
+      </p>
+
+      {loading ? (
+        <p className="os-hint" style={{ marginTop: 10 }}>Loading…</p>
+      ) : members.length === 0 ? (
+        <p className="os-hint" style={{ marginTop: 10 }}>No team members yet.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+          {members.map(m => {
+            const draft = drafts[m.id] ?? m.twilio_phone_number ?? ''
+            const dirty = draft.trim() !== (m.twilio_phone_number || '')
+            return (
+              <div key={m.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                padding: '8px 0',
+                borderBottom: '1px solid var(--border, rgba(255,255,255,0.08))',
+              }}>
+                <div style={{ minWidth: 180, flex: '1 1 180px' }}>
+                  <div>{m.full_name}{!m.is_active && <span className="os-hint"> (inactive)</span>}</div>
+                  <div className="os-hint" style={{ fontSize: 12 }}>{m.email}</div>
+                </div>
+                <input
+                  className="os-input"
+                  style={{ flex: '1 1 200px', maxWidth: 240 }}
+                  placeholder="+18005550100"
+                  value={draft}
+                  onChange={e => setDrafts(p => ({ ...p, [m.id]: e.target.value }))}
+                />
+                <button
+                  className="btn btn--secondary"
+                  disabled={!dirty || savingId === m.id}
+                  onClick={() => saveNumber(m)}
+                >
+                  {savingId === m.id ? 'Saving…'
+                    : savedId === m.id ? '✓ Saved'
+                    : draft.trim() ? 'Assign' : 'Unassign'}
+                </button>
+                {/* A person carrying their own Twilio account predates the
+                    organization-credential model. Say so plainly rather than
+                    letting it look like every other row. */}
+                {m.has_own_twilio_account && (
+                  <span className="os-hint" style={{ fontSize: 12 }}>
+                    uses their own Twilio account
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {err && <p style={{ color: 'var(--signal-red, #ff4d4f)', fontSize: 12, marginTop: 8 }}>{err}</p>}
+    </section>
   )
 }
 

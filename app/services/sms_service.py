@@ -56,48 +56,84 @@ def _is_platform_owner(user: User) -> bool:
     return (getattr(user, "role", None) or "").lower() == "god_admin"
 
 
+def _org_twilio_credentials(org: "Organization | None") -> tuple[str | None, str | None]:
+    """(account_sid, plaintext_auth_token) for an organization, or (None, None).
+
+    Credentials live on the ORGANIZATION. One Twilio account, one A2P brand,
+    one campaign per customer - and every number underneath it belongs to that
+    same account. This is the only place the org token is decrypted.
+    """
+    if org and org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted:
+        return org.org_twilio_account_sid, decrypt_value(org.org_twilio_auth_token_encrypted)
+    return None, None
+
+
 def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str | None]:
     """
     Returns (twilio_client, from_phone, caller_id_name).
 
     Resolution order:
-      1. Advisor's personal Twilio credentials (their own number)
-      2. Org-level shared credentials (toll-free / 10DLC fallback)
+      1. Advisor's OWN Twilio account (sid + token on their user row) - legacy,
+         for advisors who brought their own Twilio before org credentials
+         existed. Unchanged, so no existing configuration breaks.
+      2. Advisor's ASSIGNED NUMBER + the ORGANIZATION's credentials.
+         This is the model everything new uses: the organization holds one
+         Twilio account and one A2P brand/campaign; each FSA row holds only
+         the local number assigned to them. An advisor row never needs to
+         carry a copy of the organization's auth token, and copying it onto
+         every row - which the old ladder forced - is precisely the thing this
+         branch exists to stop.
+      3. The organization's optional SHARED number + the organization's
+         credentials.
+      4. Nothing. Raise.
 
-    Raises ValueError if neither is configured.
-
-    Step 1 is SKIPPED for the platform owner. See `_is_platform_owner`: the
-    owner's personal Twilio is the platform's, never a tenant's, so an
-    impersonated send falls through to the organization's own sender and is
-    refused outright when the organization has none. Refusing is the right
-    outcome - a customer with no sender configured must find that out here,
-    not by having the platform quietly send for them.
+    There is no platform fallback at any step. Steps 1 and 2 are SKIPPED for
+    the platform owner. See `_is_platform_owner`: the owner's personal Twilio
+    is the platform's, never a tenant's, so an impersonated send falls through
+    to the organization's own sender and is refused outright when the
+    organization has none. Refusing is the right outcome - a customer with no
+    sender configured must find that out here, not by having the platform
+    quietly send for them.
     """
-    # --- 1. Advisor-level ---
-    if (not _is_platform_owner(advisor)) \
-            and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+    owner = _is_platform_owner(advisor)
+
+    # --- 1. Advisor's own Twilio account (legacy / bring-your-own) ---
+    if (not owner) and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
         token = decrypt_value(advisor.twilio_auth_token_encrypted)
         client = Client(advisor.twilio_account_sid, token)
         return client, advisor.twilio_phone_number, advisor.twilio_caller_id_name
 
-    # --- 2. Org-level fallback ---
     org: Organization | None = db.query(Organization).filter(
         Organization.id == advisor.organization_id
     ).first()
-    if (
-        org
-        and org.org_twilio_account_sid
-        and org.org_twilio_auth_token_encrypted
-        and org.org_twilio_phone_number
-    ):
-        token = decrypt_value(org.org_twilio_auth_token_encrypted)
-        client = Client(org.org_twilio_account_sid, token)
+    org_sid, org_token = _org_twilio_credentials(org)
+
+    # --- 2. Advisor's assigned number, organization's credentials ---
+    if (not owner) and advisor.twilio_phone_number and org_sid and org_token:
+        client = Client(org_sid, org_token)
+        return (
+            client,
+            advisor.twilio_phone_number,
+            advisor.twilio_caller_id_name or (org.org_twilio_caller_id_name if org else None),
+        )
+
+    # --- 3. Organization's optional shared number ---
+    if org_sid and org_token and org and org.org_twilio_phone_number:
+        client = Client(org_sid, org_token)
         return client, org.org_twilio_phone_number, org.org_twilio_caller_id_name
 
+    # --- 4. Unavailable ---
+    if advisor.twilio_phone_number and not owner:
+        raise ValueError(
+            f"'{advisor.full_name}' has a sending number assigned "
+            f"({advisor.twilio_phone_number}) but this organization has no "
+            f"Twilio credentials configured. An admin must add the "
+            f"organization's Account SID and Auth Token in Org Settings -> Twilio."
+        )
     raise ValueError(
-        f"No Twilio credentials configured for advisor '{advisor.full_name}' "
-        f"or their organization. Set a personal number in Settings → Twilio, "
-        f"or ask an admin to configure a shared org number in Org Settings."
+        f"No Twilio sender is available for advisor '{advisor.full_name}'. "
+        f"An admin must configure this organization's Twilio credentials in "
+        f"Org Settings -> Twilio and assign this advisor a sending number."
     )
 
 
@@ -105,10 +141,16 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
     """Which number this advisor would send from, WITHOUT raising or sending.
 
     The composer used to discover that no Twilio credentials were configured by
-    pressing Send and reading the exception text. The same resolution order is
-    used here as in `_resolve_twilio_creds` - advisor's own credentials, then
-    the organization's shared sender, then nothing - so what the page reports
+    pressing Send and reading the exception text. The same four-step resolution
+    order is used here as in `_resolve_twilio_creds` - the advisor's own Twilio
+    account, then their assigned number on the organization's credentials, then
+    the organization's shared number, then nothing - so what the page reports
     and what the send does can never disagree.
+
+    `source` names WHOSE NUMBER is used ("advisor" | "organization").
+    `credentials_source` names WHOSE TWILIO ACCOUNT pays for and owns it. They
+    differ in the normal case now: an FSA's own local number sent under the
+    organization's account and A2P registration.
 
     NO CROSS-TENANT FALLBACK, and no secret in the return value.
 
@@ -119,11 +161,14 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
     screen could say: it reports a customer as able to text when the customer
     has no sender at all.
     """
-    if (not _is_platform_owner(advisor)) \
-            and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+    owner = _is_platform_owner(advisor)
+
+    # --- 1. Advisor's own Twilio account (legacy / bring-your-own) ---
+    if (not owner) and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
         return {
             "ready": bool(advisor.twilio_phone_number),
             "source": "advisor",
+            "credentials_source": "advisor",
             "from_number": advisor.twilio_phone_number,
             "account_sid_last4": (advisor.twilio_account_sid or "")[-4:],
             "reason": (None if advisor.twilio_phone_number else
@@ -134,19 +179,52 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
     org: Organization | None = db.query(Organization).filter(
         Organization.id == advisor.organization_id
     ).first()
-    if (org and org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted
-            and org.org_twilio_phone_number):
+    org_has_creds = bool(
+        org and org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted
+    )
+
+    # --- 2. Advisor's assigned number on the organization's credentials ---
+    if (not owner) and advisor.twilio_phone_number and org_has_creds:
+        return {
+            "ready": True,
+            "source": "advisor",
+            "credentials_source": "organization",
+            "from_number": advisor.twilio_phone_number,
+            "account_sid_last4": (org.org_twilio_account_sid or "")[-4:],
+            "reason": None,
+        }
+
+    # --- 3. Organization's optional shared number ---
+    if org_has_creds and org.org_twilio_phone_number:
         return {
             "ready": True,
             "source": "organization",
+            "credentials_source": "organization",
             "from_number": org.org_twilio_phone_number,
             "account_sid_last4": (org.org_twilio_account_sid or "")[-4:],
             "reason": None,
         }
 
+    # --- 4. Unavailable ---
+    if (not owner) and advisor.twilio_phone_number and not org_has_creds:
+        return {
+            "ready": False,
+            "source": "advisor",
+            "credentials_source": None,
+            "from_number": advisor.twilio_phone_number,
+            "account_sid_last4": None,
+            "reason": (
+                "A sending number is assigned to you, but this organization "
+                "has no Twilio credentials configured. An admin must add the "
+                "organization's Account SID and Auth Token in Org Settings -> "
+                "Twilio before this number can send."
+            ),
+        }
+
     return {
         "ready": False,
         "source": None,
+        "credentials_source": None,
         "from_number": None,
         "account_sid_last4": None,
         "reason": (
@@ -155,13 +233,12 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
             # platform admin to "add a personal number in Settings" would have
             # them configure the PLATFORM's Twilio to fix a CUSTOMER's gap.
             "This organization has no Twilio sender configured. An admin of "
-            "this organization must add a shared number in Org Settings, or "
-            "the assigned advisor must connect a personal number in "
-            "Settings -> Twilio."
-            if _is_platform_owner(advisor) else
-            "No Twilio credentials are configured for %s or for this "
-            "organization. Add a personal number in Settings -> Twilio, or ask "
-            "an admin to configure a shared organization number in Org Settings."
+            "this organization must add the organization's Twilio credentials "
+            "in Org Settings -> Twilio and assign the advisor a sending number."
+            if owner else
+            "No sending number is assigned to %s, and this organization has "
+            "no shared number. Ask an admin to assign you a number in "
+            "Org Settings -> Twilio."
             % (advisor.full_name or "this advisor")
         ),
     }

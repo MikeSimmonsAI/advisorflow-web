@@ -385,21 +385,104 @@ class OrgTwilioRead(BaseModel):
     org_twilio_caller_id_name: Optional[str] = None
     org_twilio_number_type:    Optional[str] = None   # "toll_free" | "10dlc" | "short_code"
     org_twilio_configured:     bool = False
+    org_twilio_account_sid_last4: Optional[str] = None
 
 
 class OrgTwilioUpdate(BaseModel):
     org_twilio_account_sid:    str
     org_twilio_auth_token:     str                    # plaintext — encrypted before storage
-    org_twilio_phone_number:   str                    # E.164 e.g. "+18449172171"
+    # OPTIONAL as of the org-credential model. The organization holds the Twilio
+    # account and the A2P brand; the numbers underneath it are assigned to
+    # individual advisors. A shared org-wide number is a deliberate extra, not a
+    # prerequisite — requiring one here is what previously forced every customer
+    # to nominate some number as "the org number" before anything would send.
+    # Sending an empty string CLEARS it.
+    org_twilio_phone_number:   Optional[str] = None   # E.164, e.g. "+18005550100"
     org_twilio_caller_id_name: Optional[str] = None
     org_twilio_number_type:    Optional[str] = "toll_free"
 
 
 class OrgTwilioPhoneUpdate(BaseModel):
     """Lightweight update — change phone/caller-id without re-entering the auth token."""
-    org_twilio_phone_number:   str
+    org_twilio_phone_number:   Optional[str] = None   # "" or null clears the shared number
     org_twilio_caller_id_name: Optional[str] = None
     org_twilio_number_type:    Optional[str] = None
+
+
+# ── Sending-number assignment ────────────────────────────────────────────────
+#
+# A sending number identifies exactly one mailbox in the inbound webhook
+# (app/routers/sms_router.py looks the inbound `To` up against
+# users.twilio_phone_number, then organizations.org_twilio_phone_number). Two
+# rows holding the same number would make that lookup pick whichever the
+# database returned first, and a family's reply — a STOP included — would land
+# in the wrong advisor's thread or the wrong tenant entirely. So assignment is
+# checked for collisions across ALL users and ALL organizations, not just this
+# one. That check is a correctness requirement of inbound routing, not a
+# convenience.
+
+_E164_HINT = "Use E.164 format, e.g. +12145550123."
+
+
+def _normalize_e164(value: Optional[str], field: str) -> Optional[str]:
+    """Return a validated E.164 string, or None for an empty/absent value."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    digits = value[1:] if value.startswith("+") else value
+    if not value.startswith("+") or not digits.isdigit() or not (8 <= len(digits) <= 15):
+        raise HTTPException(status_code=400, detail=f"{field} is not a valid phone number. {_E164_HINT}")
+    return value
+
+
+def _assert_number_unused(db: Session, number: str, *, allow_user_id: Optional[str] = None,
+                          allow_org_id: Optional[str] = None) -> None:
+    """Refuse a number already used as a sender anywhere on the platform."""
+    clash = db.query(User).filter(User.twilio_phone_number == number)
+    if allow_user_id:
+        clash = clash.filter(User.id != allow_user_id)
+    other = clash.first()
+    if other is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{number} is already assigned as a sending number to another "
+                f"user. A number can belong to only one sender, otherwise "
+                f"inbound replies cannot be routed to the right person."
+            ),
+        )
+    org_clash = db.query(Organization).filter(Organization.org_twilio_phone_number == number)
+    if allow_org_id:
+        org_clash = org_clash.filter(Organization.id != allow_org_id)
+    if org_clash.first() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{number} is already in use as an organization's shared "
+                f"sending number. A number can belong to only one sender."
+            ),
+        )
+
+
+class AdvisorNumberRead(BaseModel):
+    id:                Optional[str] = None
+    full_name:         Optional[str] = None
+    email:             Optional[str] = None
+    role:              Optional[str] = None
+    is_active:         Optional[bool] = None
+    twilio_phone_number: Optional[str] = None
+    twilio_caller_id_name: Optional[str] = None
+    # True when this row carries its OWN Twilio account (the legacy
+    # bring-your-own path). Under the org-credential model this is False for
+    # everyone and the organization's credentials are used instead.
+    has_own_twilio_account: bool = False
+
+
+class AdvisorNumberUpdate(BaseModel):
+    twilio_phone_number:   Optional[str] = None   # "" or null unassigns
+    twilio_caller_id_name: Optional[str] = None
 
 
 @router.get("/twilio", response_model=OrgTwilioRead)
@@ -417,6 +500,10 @@ def get_org_twilio(
         org_twilio_configured=bool(
             org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted
         ),
+        # Last 4 of THIS organization's own SID, or None. Never the platform's:
+        # _resolve_org returns the impersonated tenant, so a god_admin viewing
+        # a customer sees that customer's account or nothing at all.
+        org_twilio_account_sid_last4=(org.org_twilio_account_sid or "")[-4:] or None,
     )
 
 
@@ -427,12 +514,27 @@ def update_org_twilio(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Save org-level Twilio credentials (auth token is encrypted at rest)."""
+    """Save org-level Twilio credentials (auth token is encrypted at rest).
+
+    The shared number is optional: an organization may hold credentials and an
+    A2P brand while every sending number belongs to an individual advisor.
+    """
     from app.utils.crypto import encrypt_value
     org = _resolve_org(current_user, org_id, db)
-    org.org_twilio_account_sid          = req.org_twilio_account_sid.strip()
-    org.org_twilio_auth_token_encrypted = encrypt_value(req.org_twilio_auth_token)
-    org.org_twilio_phone_number         = req.org_twilio_phone_number.strip()
+    sid = (req.org_twilio_account_sid or "").strip()
+    token = (req.org_twilio_auth_token or "").strip()
+    if not sid or not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Both the Twilio Account SID and Auth Token are required.",
+        )
+    shared = _normalize_e164(req.org_twilio_phone_number, "Shared SMS number")
+    if shared:
+        _assert_number_unused(db, shared, allow_org_id=org.id)
+
+    org.org_twilio_account_sid          = sid
+    org.org_twilio_auth_token_encrypted = encrypt_value(token)
+    org.org_twilio_phone_number         = shared
     org.org_twilio_caller_id_name       = req.org_twilio_caller_id_name
     org.org_twilio_number_type          = req.org_twilio_number_type or "toll_free"
     db.commit()
@@ -446,12 +548,116 @@ def update_org_twilio_phone(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Update phone number / caller ID only — does not require re-entering the auth token."""
+    """Update the shared phone number / caller ID only — no auth token re-entry.
+
+    An empty phone number CLEARS the shared sender, which is a supported state:
+    the organization keeps its credentials and A2P registration, and every send
+    resolves through an advisor's own assigned number.
+    """
     org = _resolve_org(current_user, org_id, db)
-    org.org_twilio_phone_number   = req.org_twilio_phone_number.strip()
+    shared = _normalize_e164(req.org_twilio_phone_number, "Shared SMS number")
+    if shared:
+        _assert_number_unused(db, shared, allow_org_id=org.id)
+    org.org_twilio_phone_number = shared
     if req.org_twilio_caller_id_name is not None:
         org.org_twilio_caller_id_name = req.org_twilio_caller_id_name
     if req.org_twilio_number_type is not None:
         org.org_twilio_number_type = req.org_twilio_number_type
     db.commit()
-    return {"updated": True}
+    return {"updated": True, "org_twilio_phone_number": org.org_twilio_phone_number}
+
+
+# ---------------------------------------------------------------------------
+# Per-advisor sending numbers — the org holds the credentials, each advisor
+# holds only the local number assigned to them.
+# ---------------------------------------------------------------------------
+
+@router.get("/twilio/numbers", response_model=list[AdvisorNumberRead])
+def list_org_sending_numbers(
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Who in this organization holds which sending number.
+
+    god_admin rows are excluded even when they carry an organization_id through
+    impersonation: the platform owner is not a member of the customer's staff
+    and their number is the platform's, not the customer's.
+    """
+    org = _resolve_org(current_user, org_id, db)
+    members = (
+        db.query(User)
+        .filter(User.organization_id == org.id, User.role != "god_admin")
+        .order_by(User.full_name)
+        .all()
+    )
+    return [
+        AdvisorNumberRead(
+            id=m.id,
+            full_name=m.full_name,
+            email=m.email,
+            role=m.role,
+            is_active=bool(m.is_active),
+            twilio_phone_number=m.twilio_phone_number,
+            twilio_caller_id_name=m.twilio_caller_id_name,
+            has_own_twilio_account=bool(
+                m.twilio_account_sid and m.twilio_auth_token_encrypted
+            ),
+        )
+        for m in members
+    ]
+
+
+@router.put("/twilio/numbers/{user_id}")
+def assign_org_sending_number(
+    user_id: str,
+    req: AdvisorNumberUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Assign (or clear) one advisor's sending number.
+
+    This writes a NUMBER ONLY. It never writes an Account SID or Auth Token to
+    a user row — the credentials stay on the organization, which is the whole
+    point of the model: one Twilio account and one A2P registration per
+    customer, with the numbers underneath it handed out to staff.
+
+    The target user must belong to the organization being edited. That check is
+    what keeps an org admin from assigning a number to somebody in another
+    tenant, and it is enforced here rather than trusted from the request body.
+    """
+    org = _resolve_org(current_user, org_id, db)
+    target = (
+        db.query(User)
+        .filter(User.id == user_id, User.organization_id == org.id)
+        .first()
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found in this organization")
+    if (target.role or "").lower() == "god_admin":
+        raise HTTPException(
+            status_code=400,
+            detail="The platform owner's number is not a tenant sending number.",
+        )
+
+    number = _normalize_e164(req.twilio_phone_number, "Sending number")
+    if number:
+        _assert_number_unused(db, number, allow_user_id=target.id)
+
+    target.twilio_phone_number = number
+    if req.twilio_caller_id_name is not None:
+        target.twilio_caller_id_name = req.twilio_caller_id_name.strip() or None
+    db.commit()
+
+    from app.services.sms_service import describe_sms_sender
+    return {
+        "updated": True,
+        "user_id": target.id,
+        "full_name": target.full_name,
+        "twilio_phone_number": target.twilio_phone_number,
+        # Echo the resolved sender so the UI reports exactly what a send would
+        # do, rather than assuming the assignment is sufficient on its own —
+        # it is not, if the organization has no credentials yet.
+        "sender": describe_sms_sender(target, db),
+    }

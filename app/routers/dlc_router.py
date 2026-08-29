@@ -48,20 +48,44 @@ def _get_org(db: Session, current_user: User) -> Organization:
 
 def _get_twilio_client(db: Session, current_user: User):
     """
-    Returns an authenticated Twilio client using the first advisor in the
-    org that has a Twilio account configured. Org admin is checked first.
+    Returns (twilio_client, account_sid) for THIS ORGANIZATION's Twilio account.
+
+    A2P registration is an ORGANIZATION-level act: one brand, one campaign, one
+    Twilio account per customer. So the organization's own credentials are the
+    only correct source, and they are tried first.
+
+    This function used to start with the CALLING USER's personal Twilio
+    credentials. Under impersonation the calling user is the platform owner,
+    which meant an org admin clicking "Register brand" for their funeral home
+    could have registered it against the PLATFORM's Twilio account — the one
+    A2P mistake that is genuinely painful to unwind, because a brand is bound
+    to the account that created it. The platform owner is excluded outright,
+    and org credentials win regardless.
+
+    The two advisor-level fallbacks below remain only for advisors who brought
+    their own Twilio before org credentials existed, so no working setup breaks.
     """
     from twilio.rest import Client
     from app.utils.crypto import decrypt_value
 
-    # Try the calling user first
-    if current_user.twilio_account_sid and current_user.twilio_auth_token_encrypted:
+    org = _get_org(db, current_user)
+
+    # --- 1. The organization's own credentials (the model everything new uses)
+    if org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted:
+        auth = decrypt_value(org.org_twilio_auth_token_encrypted)
+        return Client(org.org_twilio_account_sid, auth), org.org_twilio_account_sid
+
+    is_owner = (getattr(current_user, "role", None) or "").lower() == "god_admin"
+
+    # --- 2. Legacy: the calling user's own Twilio account (never the platform's)
+    if (not is_owner) and current_user.twilio_account_sid and current_user.twilio_auth_token_encrypted:
         auth = decrypt_value(current_user.twilio_auth_token_encrypted)
         return Client(current_user.twilio_account_sid, auth), current_user.twilio_account_sid
 
-    # Fall back to any active advisor in the org with Twilio configured
+    # --- 3. Legacy: any active advisor in the org who brought their own Twilio
     advisor = db.query(User).filter(
         User.organization_id == current_user.organization_id,
+        User.role != "god_admin",
         User.twilio_account_sid.isnot(None),
         User.twilio_auth_token_encrypted.isnot(None),
         User.is_active == True,
@@ -70,8 +94,11 @@ def _get_twilio_client(db: Session, current_user: User):
     if not advisor:
         raise HTTPException(
             status_code=400,
-            detail="No Twilio account configured for this organization. "
-                   "Go to Settings → Twilio and add your Account SID and Auth Token first.",
+            detail=(
+                f"{org.name} has no Twilio credentials configured. An admin of "
+                f"this organization must add the Account SID and Auth Token in "
+                f"Org Settings → Twilio before registering an A2P brand."
+            ),
         )
 
     auth = decrypt_value(advisor.twilio_auth_token_encrypted)
@@ -79,8 +106,18 @@ def _get_twilio_client(db: Session, current_user: User):
 
 
 def _status_response(org: Organization) -> dict:
-    """Serialize registration status from org columns — all use getattr for safety."""
+    """Serialize registration status from org columns — all use getattr for safety.
+
+    `credentials_ready` reports only whether the organization HOLDS Twilio
+    credentials. It is deliberately not called "connected" and never implies
+    the brand or campaign is approved: those are Twilio's own status strings,
+    reported verbatim below and nowhere upgraded by this code.
+    """
     return {
+        "credentials_ready": bool(
+            org.org_twilio_account_sid and org.org_twilio_auth_token_encrypted
+        ),
+        "account_sid_last4": (org.org_twilio_account_sid or "")[-4:] or None,
         "messaging_service_sid": getattr(org, "twilio_messaging_service_sid", None),
         "brand_sid": getattr(org, "twilio_a2p_brand_sid", None),
         "brand_status": getattr(org, "twilio_a2p_brand_status", None),
@@ -338,27 +375,49 @@ def add_phone_number(
 
     client, account_sid = _get_twilio_client(db, current_user)
 
-    # Collect all phone numbers configured for advisors in this org
+    # Every sending number that belongs to this organization: each advisor's
+    # assigned number, plus the optional org shared number. god_admin rows are
+    # excluded — the platform owner's number is the PLATFORM's, and adding it
+    # to a customer's Messaging Service would put platform traffic under the
+    # customer's campaign.
     advisors_with_numbers = db.query(User).filter(
         User.organization_id == current_user.organization_id,
+        User.role != "god_admin",
         User.twilio_phone_number.isnot(None),
         User.is_active == True,
     ).all()
 
-    if not advisors_with_numbers:
+    # (phone, label) pairs, de-duplicated by phone
+    targets: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for a in advisors_with_numbers:
+        if a.twilio_phone_number not in seen:
+            seen.add(a.twilio_phone_number)
+            targets.append((a.twilio_phone_number, a.full_name))
+    if org.org_twilio_phone_number and org.org_twilio_phone_number not in seen:
+        seen.add(org.org_twilio_phone_number)
+        targets.append((org.org_twilio_phone_number, f"{org.name} (shared)"))
+
+    if not targets:
         raise HTTPException(
             status_code=400,
-            detail="No Twilio phone numbers configured for this org's advisors.",
+            detail=(
+                "No sending numbers are configured for this organization. "
+                "Assign a number to at least one advisor in Org Settings → "
+                "Twilio first."
+            ),
         )
 
     results = []
-    for advisor in advisors_with_numbers:
-        phone = advisor.twilio_phone_number
+    for phone, owner_label in targets:
         try:
             # Look up the phone number's SID in Twilio
             numbers = client.incoming_phone_numbers.list(phone_number=phone)
             if not numbers:
-                results.append({"phone": phone, "success": False, "error": "Number not found in Twilio account"})
+                results.append({
+                    "phone": phone, "assigned_to": owner_label, "success": False,
+                    "error": "Number is not in this organization's Twilio account",
+                })
                 continue
 
             number_sid = numbers[0].sid
@@ -366,10 +425,16 @@ def add_phone_number(
             client.messaging.v1.services(messaging_service_sid).phone_numbers.create(
                 phone_number_sid=number_sid
             )
-            results.append({"phone": phone, "success": True, "number_sid": number_sid})
+            results.append({
+                "phone": phone, "assigned_to": owner_label,
+                "success": True, "number_sid": number_sid,
+            })
             logger.info("10DLC: added %s (%s) to Messaging Service %s", phone, number_sid, messaging_service_sid)
         except Exception as e:
-            results.append({"phone": phone, "success": False, "error": str(e)})
+            results.append({
+                "phone": phone, "assigned_to": owner_label,
+                "success": False, "error": str(e),
+            })
 
     return {"results": results}
 
