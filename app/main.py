@@ -96,6 +96,7 @@ from app.routers.timeline_router import router as timeline_router
 from app.routers.activity_router import router as activity_router
 from app.routers.branding_router import router as branding_router
 from app.routers.god_router import router as god_router
+from app.routers.god_diagnostics_calendar import router as god_calendar_diag_router
 # Checkpoint 6 control plane: sales operations, Won -> Customer provisioning,
 # implementation lifecycle and the control-plane audit view. Separate module
 # from god_router so the whole Checkpoint 6 surface reads as one thing.
@@ -433,6 +434,7 @@ app.include_router(setup_router)
 app.include_router(contacts_router)
 app.include_router(activity_router)
 app.include_router(branding_router)
+app.include_router(god_calendar_diag_router)  # read-only calendar wiring report
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
