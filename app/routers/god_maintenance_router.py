@@ -63,6 +63,29 @@ def _same_number(a: Optional[str], b: Optional[str]) -> bool:
     return da[-10:] == dbb[-10:]
 
 
+def _event_id_provider(event_id: Optional[str]) -> Optional[str]:
+    """Which calendar an event id belongs to, read off the id itself.
+
+    This matters because the booking being cleaned up was written BEFORE the
+    provider fix, when Microsoft won by being first in a preference tuple. Its
+    `calendar_event_id` is a Graph id, and deleting it through the Google
+    client would 404 — which the Google path reports as "already deleted", so
+    the tool would claim success while the appointment sat on the advisor's
+    real Outlook calendar on the day in question.
+
+    Graph ids are long, base64-ish and begin AAMk/AQMk. Google ids are short
+    and lowercase-alphanumeric. Nothing is deleted on the strength of this
+    guess alone: it only chooses which client to ask, and the cancel is
+    id-exact in both.
+    """
+    if not event_id:
+        return None
+    e = str(event_id)
+    if e[:4] in ("AAMk", "AQMk") or ("=" in e and len(e) > 60):
+        return "microsoft"
+    return "google"
+
+
 # ── booking cleanup ─────────────────────────────────────────────────────────
 
 class BookingCleanup(BaseModel):
@@ -145,13 +168,16 @@ def booking_cleanup(req: BookingCleanup,
 
     # What an apply WOULD do - written once and reported identically in both
     # modes, so the dry run cannot describe something different from the run.
+    event_provider = _event_id_provider(booking.calendar_event_id)
+    found["calendar_event_provider"] = event_provider
+
     plan = []
     if booking.status != "cancelled":
         plan.append("mark booking %s cancelled (currently %r)"
                     % (booking.id, booking.status))
     if booking.calendar_event_id:
-        plan.append("delete calendar event %s from the advisor's calendar"
-                    % booking.calendar_event_id)
+        plan.append("delete calendar event %s from the advisor's %s calendar"
+                    % (booking.calendar_event_id[:24] + "…", event_provider))
     for cf in case_files:
         if cf["case_status"] != "void":
             plan.append("mark case file %s void" % cf["id"])
@@ -182,6 +208,47 @@ def booking_cleanup(req: BookingCleanup,
     # lives in `on_booking_cancelled` in the calendar router, which this
     # endpoint deliberately does not call.
     done = []
+
+    # THE CALENDAR ARTIFACT, THROUGH THE CALENDAR THAT ACTUALLY HOLDS IT.
+    #
+    # `cancel_calendar_event` only speaks Google. This booking's event was
+    # written to Outlook, back when Microsoft won by being first in a
+    # preference tuple, so the Google client would have 404'd — and reported
+    # that as "already deleted". The booking row would say cancelled while the
+    # appointment stayed on the advisor's real calendar.
+    #
+    # The provider registry already knows how to cancel by id on either side,
+    # so the event is removed through the one its id belongs to.
+    event_id = booking.calendar_event_id
+    if event_id:
+        try:
+            from app.services import calendar_providers as reg
+            provider = reg.get_provider(db, advisor, prefer=event_provider)
+            resolved = getattr(provider, "resolved_key", None)
+            if resolved != event_provider:
+                done.append(
+                    "calendar event NOT deleted: the event is in %s but that "
+                    "calendar is not currently connected (resolved to %r). "
+                    "The event is still on the advisor's calendar."
+                    % (event_provider, resolved))
+            else:
+                res = provider.cancel_event(event_id)
+                if getattr(res, "ok", False):
+                    booking.calendar_event_id = None
+                    done.append("calendar event deleted from %s" % event_provider)
+                else:
+                    done.append("calendar event NOT deleted from %s: %s"
+                                % (event_provider,
+                                   getattr(res, "error_message", None)
+                                   or getattr(res, "error_code", "unknown")))
+        except Exception as e:
+            log.exception("booking-cleanup: calendar delete failed")
+            done.append("calendar event NOT deleted (%s)" % e)
+
+    # The booking row itself. `cancel_calendar_event` is still used for the
+    # status change because it is the existing, communication-free helper - but
+    # the event id above has already been cleared when the delete succeeded, so
+    # it will not try Google a second time.
     from app.services.calendar_service import cancel_calendar_event
     result = cancel_calendar_event(db, booking)
     done.append("booking marked cancelled (%s)" % result.get("note"))
