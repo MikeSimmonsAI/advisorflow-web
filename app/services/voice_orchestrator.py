@@ -155,6 +155,35 @@ def check_call_eligibility(db: Session, lead: Lead, organization_id: str,
     return Eligibility(True)
 
 
+def attempt_summary(db: Session, lead: Lead, organization_id: str,
+                    use_case: str = USE_CASE_FILE_CHECK) -> Optional[dict]:
+    """The resolved caps, where each came from, and what this lead has used.
+
+    Lives HERE, beside the eligibility check that enforces it, so the numbers a
+    screen shows and the numbers a refusal is based on are produced by one
+    piece of code. It is also why the readiness route does not assemble this
+    itself: that route must not import the provider layer, and the config
+    lookup it would need to resolve the use-case level comes from it.
+
+    Returns None rather than raising - this is explanatory detail beside an
+    answer that has already been given, and it must never be the reason a
+    readiness check fails.
+    """
+    try:
+        config = active_voice_config(db, organization_id, use_case)
+        policy = resolve_attempt_policy(db, organization_id, config=config)
+        rows = db.query(VoiceCall).filter(VoiceCall.lead_id == lead.id).all()
+        out = policy.as_dict()
+        out["dials_used"] = len(rows)
+        out["live_conversations_used"] = sum(
+            1 for r in rows if is_live_conversation(getattr(r, "answered_by", None)))
+        return out
+    except Exception:                                              # noqa: BLE001
+        log.exception("attempt summary failed for lead %s",
+                      getattr(lead, "id", "?"))
+        return None
+
+
 def _customer_facing_name(org: Organization) -> str:
     """The business a family believes is calling them.
 

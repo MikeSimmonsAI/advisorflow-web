@@ -338,7 +338,19 @@ def _correlate_booking(db: Session, call: VoiceCall) -> None:
                .first())
         if row is not None:
             call.booking_link_id = row.booking_link_id
-            if call.outcome in (None, "completed"):
+            # A BOOKING IS PROOF A PERSON WAS ON THE LINE.
+            #
+            # An appointment cannot be agreed with a machine, so a correlated
+            # booking overrides whatever the answer classifier concluded -
+            # including a `voicemail` guessed from a transcript that happened
+            # to contain a phrase like "not available". Without this, a real
+            # conversation that produced a real appointment could be filed as
+            # a voicemail and handed the family's attempt back, which is the
+            # opposite of the mistake this all started from.
+            call.answered_by = "human"
+            call.is_live_conversation = True
+            if call.outcome in (None, "completed", "voicemail", "no_answer",
+                                "busy", "unknown"):
                 call.outcome = "booked"
     except Exception as exc:                                      # noqa: BLE001
         log.warning("booking correlation failed for call %s: %s", call.id, exc)

@@ -182,6 +182,29 @@ def lead(lid):
         db.close()
 
 
+def age_prior_calls(lid, hours=6):
+    """Move this lead's existing calls into the past.
+
+    A redial cooldown now stands between attempts, which is correct in
+    production and wrong for a probe that places several calls for one lead
+    inside the same second. Back-dating is what "called again an hour later"
+    actually looks like, so the probe exercises the real code path instead of
+    the cooldown being turned off to accommodate it.
+
+    The cooldown itself is asserted directly in [2b] rather than assumed.
+    """
+    db = SessionLocal()
+    try:
+        past = datetime.utcnow() - timedelta(hours=hours)
+        for c in db.query(VoiceCall).filter(VoiceCall.lead_id == lid).all():
+            c.created_at = past
+            c.started_at = past
+            c.ended_at = past
+        db.commit()
+    finally:
+        db.close()
+
+
 print("\n[1] credentials stay server-side")
 src_files = []
 for dirpath, _dirs, files in os.walk(os.path.join(ROOT, "frontend", "src")):
@@ -351,8 +374,19 @@ check("booking correlated by Retell call id -> external_ref",
       st[5] == "bl-123", st[5])
 check("outcome recorded as booked", st[1] == "booked", st[1])
 
+print("\n[10b] a permitted retry is not a redial loop")
+# The cooldown, asserted rather than assumed. Every later section back-dates
+# its prior calls, so without this check the guard could quietly disappear and
+# the probe would still be green.
+_e = orch.check_call_eligibility(SessionLocal(), lead("lead-a"), "org-a")
+check("an immediate redial is refused", not _e.ok and _e.code == "cooldown",
+      (_e.code, _e.reason))
+age_prior_calls("lead-a")
+_e = orch.check_call_eligibility(SessionLocal(), lead("lead-a"), "org-a")
+check("and allowed once the cooldown has elapsed", _e.ok, (_e.code, _e.reason))
+
 print("\n[11] callback result maps")
-call_cb = orch.start_file_check_call(SessionLocal(), lead("lead-a"), "org-a")
+call_cb = age_prior_calls("lead-a") or orch.start_file_check_call(SessionLocal(), lead("lead-a"), "org-a")
 r = post_event(client, call_payload(
     "call_analyzed", call_cb.provider_call_id,
     call_analysis={"custom_analysis_data": {
@@ -370,7 +404,7 @@ db = SessionLocal()
 supp_before = db.query(SuppressionEntry).filter(
     SuppressionEntry.organization_id == "org-a").count()
 db.close()
-call_out = orch.start_file_check_call(SessionLocal(), lead("lead-a"), "org-a")
+call_out = age_prior_calls("lead-a") or orch.start_file_check_call(SessionLocal(), lead("lead-a"), "org-a")
 r = post_event(client, call_payload(
     "call_analyzed", call_out.provider_call_id,
     call_analysis={"custom_analysis_data": {"opted_out": True}}))
@@ -393,7 +427,7 @@ check("cadence stopped", cad.status != "active", cad.status)
 db.close()
 # The point of a SHARED authority: voice opt-out now blocks the next voice call.
 try:
-    orch.start_file_check_call(SessionLocal(), lead("lead-a"), "org-a")
+    age_prior_calls("lead-a") or orch.start_file_check_call(SessionLocal(), lead("lead-a"), "org-a")
     check("a voice opt-out blocks the NEXT call", False, "call was allowed")
 except PermissionError:
     check("a voice opt-out blocks the NEXT call", True)
@@ -435,7 +469,7 @@ db = SessionLocal()
 l2 = db.query(Lead).filter(Lead.id == "lead-b").first()
 db.close()
 FakeRetell.fail_next = True
-failed = orch.start_file_check_call(SessionLocal(), lead("lead-b"), "org-b")
+failed = age_prior_calls("lead-b") or orch.start_file_check_call(SessionLocal(), lead("lead-b"), "org-b")
 check("a row still exists for the failed attempt", failed is not None)
 check("marked failed rather than left dangling", failed.status == "failed",
       failed.status)
@@ -970,7 +1004,7 @@ check("   and no request was sent for the refused call",
       len(CapturingRetell.sent) == before_pin, CapturingRetell.sent)
 
 CapturingRetell.sent = []
-orch.start_file_check_call(SessionLocal(), lead("lead-pin-x"), "org-b")
+age_prior_calls("lead-pin-x") or orch.start_file_check_call(SessionLocal(), lead("lead-pin-x"), "org-b")
 body_b = CapturingRetell.sent[-1] if CapturingRetell.sent else {}
 check("5. each organization gets ITS OWN pinned version",
       body_b.get("override_agent_version") == 9, body_b)

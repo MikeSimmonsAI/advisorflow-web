@@ -109,25 +109,13 @@ def call_readiness(
     # "Maximum of 3 attempts already made" is a dead end when 3 is a constant
     # nobody can see or change. Reporting the resolved policy, WHICH LEVEL set
     # each value, and what this lead has actually used turns the same refusal
-    # into something an admin can act on - and makes the campaign → use case →
-    # organization → system hierarchy visible without reading four tables.
-    attempts = None
-    try:
-        from app.services.comms import active_voice_config
-        from app.services.voice_attempt_policy import (is_live_conversation,
-                                                       resolve_attempt_policy)
-        from app.models.models import VoiceCall
-        cfg = active_voice_config(db, current_user.organization_id, "file_check")
-        policy = resolve_attempt_policy(db, current_user.organization_id,
-                                        config=cfg)
-        rows = db.query(VoiceCall).filter(VoiceCall.lead_id == lead.id).all()
-        attempts = policy.as_dict()
-        attempts["dials_used"] = len(rows)
-        attempts["live_conversations_used"] = sum(
-            1 for r in rows if is_live_conversation(getattr(r, "answered_by", None)))
-    except Exception:                                              # noqa: BLE001
-        logger.exception("voice readiness: could not resolve attempt policy "
-                         "for lead %s", lead_id)
+    # into something an admin can act on.
+    #
+    # Assembled by the ORCHESTRATOR, not here. This router is deliberately free
+    # of provider imports - a gate enforces it - and resolving the use-case
+    # level needs the voice config, which comes from the provider layer.
+    from app.services.voice_orchestrator import attempt_summary
+    attempts = attempt_summary(db, lead, current_user.organization_id)
 
     return {"ready": bool(elig.ok), "reason": elig.reason, "code": elig.code,
             "attempts": attempts}
