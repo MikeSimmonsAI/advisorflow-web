@@ -699,6 +699,18 @@ class Message(Base):
     delivery_status = Column(String, default="pending", nullable=True)
     delivery_status_at = Column(DateTime, nullable=True)  # when Twilio last updated this
 
+    # The five-state outcome vocabulary — see app/services/message_state.py.
+    # blocked | queued | sent | delivered | failed. `delivery_status` above
+    # stays raw Twilio for the existing activity feed; this column is the one
+    # any human-facing surface reads, so a message that never reached the
+    # carrier can never render as sent.
+    send_state = Column(String, nullable=True)
+    # Twilio's ErrorCode / ErrorMessage from the delivery receipt. Without
+    # these, an undelivered message gave no reason at all — the operator had
+    # to open the Twilio console to learn why a family never got their text.
+    error_code = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
+
     sent_at = Column(DateTime, server_default=func.now())
 
     lead = relationship("Lead", back_populates="messages")

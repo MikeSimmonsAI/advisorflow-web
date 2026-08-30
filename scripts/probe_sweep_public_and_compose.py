@@ -1548,6 +1548,129 @@ check("25. the email cleanup sweep no longer suppresses either",
       'lead.duplicate_of_lead_id = seen[key]\n                lead.duplicate_reason' in lr_src)
 
 
+
+# ---------------------------------------------------------------------------
+# 26. A BLOCKED OR UNDELIVERED MESSAGE MUST NEVER LOOK LIKE A DELIVERED ONE
+#
+# The failure this locks down: an SMS to a live test lead was accepted by
+# Twilio and then came back `undelivered`. The conversation transcript showed
+# it as an ordinary outbound bubble - body, timestamp, nothing else - because
+# ConversationBubble rendered no status field at all. The backend was already
+# sending `status` in each event and the frontend simply dropped it. An
+# operator therefore had no way, inside the product, to tell a message that
+# reached a family from one that never left the carrier.
+#
+# Twilio's ErrorCode was not stored anywhere either, so even after noticing
+# the failure the reason was only obtainable by logging into the Twilio
+# console by hand.
+# ---------------------------------------------------------------------------
+import app.services.message_state as _ms
+
+ms_src = read("app/services/message_state.py")
+
+check("26. the five states are named exactly once, in one module",
+      _ms.ALL_STATES == ("blocked", "queued", "sent", "delivered", "failed"))
+check("26. undelivered is a failure, not a fourth kind of sent",
+      _ms.normalize_provider_status("undelivered") == "failed"
+      and _ms.normalize_provider_status("failed") == "failed"
+      and _ms.normalize_provider_status("canceled") == "failed")
+check("26. queued and sent are distinct - handed to a carrier is not arrival",
+      _ms.normalize_provider_status("queued") == "queued"
+      and _ms.normalize_provider_status("sent") == "sent"
+      and _ms.normalize_provider_status("delivered") == "delivered")
+check("26. an unknown provider status degrades to queued, never to sent",
+      _ms.normalize_provider_status("something-new") == "queued"
+      and _ms.normalize_provider_status(None) == "queued"
+      and _ms.normalize_provider_status("") == "queued")
+
+
+class _Row:
+    def __init__(self, **kw):
+        self.twilio_sid = kw.get("sid")
+        self.send_state = kw.get("send_state")
+        self.delivery_status = kw.get("delivery_status")
+        self.twilio_status = kw.get("twilio_status")
+        self.error_code = kw.get("error_code")
+        self.error_message = kw.get("error_message")
+
+
+# THE LOAD-BEARING GUARANTEE. No provider SID means no provider request.
+check("26. a row with no provider SID reads BLOCKED",
+      _ms.send_state_for(_Row(sid=None)) == "blocked")
+check("26.    even when its own columns claim it was delivered",
+      _ms.send_state_for(_Row(sid=None, send_state="delivered",
+                              delivery_status="delivered")) == "blocked")
+check("26.    and a blank SID counts as no SID",
+      _ms.send_state_for(_Row(sid="   ")) == "blocked")
+check("26. an undelivered message with a SID reads FAILED, not sent",
+      _ms.send_state_for(_Row(sid="SM1", delivery_status="undelivered")) == "failed")
+check("26. this codebase's own 'pending' placeholder reads QUEUED",
+      _ms.send_state_for(_Row(sid="SM1", delivery_status="pending")) == "queued")
+check("26. a legacy row with no state at all still resolves from twilio_status",
+      _ms.send_state_for(_Row(sid="SM1", twilio_status="delivered")) == "delivered")
+check("26. describe() carries the code and reason, not just a word",
+      _ms.describe(_Row(sid="SM1", delivery_status="undelivered",
+                        error_code="30007",
+                        error_message="Carrier violation"))["error_code"] == "30007")
+
+# The receipt must capture WHY, not only THAT.
+sms_router_src = read("app/routers/sms_router.py")
+check("26. the status callback accepts Twilio's ErrorCode",
+      "ErrorCode: str | None = Form(None)" in sms_router_src
+      and "ErrorMessage: str | None = Form(None)" in sms_router_src)
+check("26. and persists it",
+      "msg.error_code = str(ErrorCode)[:32]" in sms_router_src)
+check("26. and never clears a code it already holds",
+      "if ErrorCode:" in sms_router_src)
+check("26. and writes the explicit state from the provider's own receipt",
+      "msg.send_state = normalize_provider_status(MessageStatus)" in sms_router_src)
+
+sms_service_src = read("app/services/sms_service.py")
+check("26. a freshly created message records what Twilio actually said",
+      sms_service_src.count("send_state=normalize_provider_status(twilio_msg.status)") >= 2)
+check("26. the pre-send gates still raise before any provider call",
+      "raise ValueError" in sms_service_src
+      and sms_service_src.index("is marked DNC")
+          < sms_service_src.index("client.messages.create"))
+
+# The transcript is the surface the operator actually reads.
+lr_src26 = read("app/routers/leads_router.py")
+check("26. the conversation endpoint embeds the explicit delivery block",
+      '"delivery": _describe_delivery(m),' in lr_src26)
+
+ld_jsx = jsx_code_only(read("frontend/src/pages/LeadDetail.jsx"))
+check("26. the transcript renders a delivery chip on every outbound bubble",
+      "DeliveryChip" in ld_jsx
+      and "{e.type === 'outbound' && <DeliveryChip delivery={e.delivery} />}" in ld_jsx)
+check("26. and names all five states",
+      all(("  " + s + ":") in ld_jsx or (s + ":") in ld_jsx
+          for s in ("blocked", "queued", "sent", "delivered", "failed")))
+check("26. and shows the provider error code when there is one",
+      "Twilio ${delivery.error_code}" in ld_jsx)
+
+# Forensics without a console login.
+trace_src = read("app/routers/god_sms_trace_router.py")
+check("26. the trace endpoint is god-only",
+      "_god: User = Depends(require_god)" in trace_src)
+# Precise: the prose above the code SAYS "messages.create" to explain what it
+# will never do, so match an actual call site, not the word.
+check("26. and is read-only - it can never create a message",
+      ".create(" not in trace_src and ".update(" not in trace_src)
+check("26. and never returns an auth token",
+      "auth_token" not in trace_src)
+check("26. and says plainly when a row was never submitted",
+      "the message was never" in trace_src)
+main_src26 = read("app/main.py")
+check("26. and is actually mounted",
+      "app.include_router(god_sms_trace_router)" in main_src26)
+
+migr_src = read("app/auto_migrate.py")
+check("26. the new columns are added without a shell",
+      '("messages", "send_state", "VARCHAR")' in migr_src
+      and '("messages", "error_code", "VARCHAR")' in migr_src
+      and '("messages", "error_message", "VARCHAR")' in migr_src)
+
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

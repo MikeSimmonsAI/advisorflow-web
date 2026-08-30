@@ -186,6 +186,8 @@ async def sms_status_callback(
     request: Request,
     MessageSid: str = Form(...),
     MessageStatus: str = Form(...),
+    ErrorCode: str | None = Form(None),
+    ErrorMessage: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -210,8 +212,23 @@ async def sms_status_callback(
     msg.twilio_status = MessageStatus
     msg.delivery_status = MessageStatus  # keep both columns in sync
     msg.delivery_status_at = datetime.utcnow()
+
+    # Explicit outcome, written from the provider's own receipt. The transcript
+    # reads THIS, not the presence of a row — see app/services/message_state.py.
+    from app.services.message_state import normalize_provider_status
+    msg.send_state = normalize_provider_status(MessageStatus)
+
+    # Twilio only sends ErrorCode on a failure receipt. Never clear a code we
+    # already have: 'sent' then 'undelivered' then a retry's 'sent' must not
+    # erase the reason the first attempt failed.
+    if ErrorCode:
+        msg.error_code = str(ErrorCode)[:32]
+    if ErrorMessage:
+        msg.error_message = str(ErrorMessage)[:500]
+
     db.commit()
-    logger.info("twilio status callback: message=%s status=%s", msg.id, MessageStatus)
+    logger.info("twilio status callback: message=%s status=%s state=%s error=%s",
+                msg.id, MessageStatus, msg.send_state, ErrorCode or "-")
     return _twiml_ack()
 
 

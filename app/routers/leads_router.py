@@ -743,13 +743,21 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
                       .limit(200).all())
 
     events = []
+    from app.services.message_state import describe as _describe_delivery
     for m in messages:
+        # `delivery` carries the explicit outcome. The transcript used to show
+        # only the body and a timestamp, so an undelivered message was visually
+        # identical to a delivered one — the operator had no way to know the
+        # family never got it. See app/services/message_state.py.
         events.append({
             "type": "outbound",
             "channel": "sms",
             "body": m.body,
             "timestamp": m.sent_at,
             "status": m.twilio_status,
+            "delivery": _describe_delivery(m),
+            "delivery_status_at": (m.delivery_status_at.isoformat()
+                                   if getattr(m, "delivery_status_at", None) else None),
         })
     for r in replies:
         events.append({

@@ -267,6 +267,11 @@ COLUMNS_TO_ADD = [
     # Values: pending, sent, delivered, failed, undelivered
     ("messages", "delivery_status", "VARCHAR DEFAULT 'pending'"),
     ("messages", "delivery_status_at", "TIMESTAMP"),
+    # Explicit send-state vocabulary + provider error detail.
+    # blocked | queued | sent | delivered | failed — app/services/message_state.py
+    ("messages", "send_state", "VARCHAR"),
+    ("messages", "error_code", "VARCHAR"),
+    ("messages", "error_message", "VARCHAR"),
     # last_messaged_at on leads — denormalized for fast "sent today" badge in Leads list
     ("leads", "last_messaged_at", "TIMESTAMP"),
     # Org-level email sender — each brand sends from its own domain/address.

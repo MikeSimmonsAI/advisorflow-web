@@ -177,6 +177,47 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+// The five delivery states an outbound message can be in. Presentation lives
+// here and nowhere else, so the transcript cannot describe a row differently
+// from the activity feed. Backend vocabulary: app/services/message_state.py.
+const DELIVERY_STATES = {
+  blocked:   { label: 'Blocked',   color: 'var(--signal-red)',    dot: '\u2298' },
+  queued:    { label: 'Queued',    color: 'var(--text-tertiary)', dot: '\u25CB' },
+  sent:      { label: 'Sent',      color: 'var(--text-secondary)', dot: '\u2713' },
+  delivered: { label: 'Delivered', color: 'var(--signal-green)',  dot: '\u2713\u2713' },
+  failed:    { label: 'Failed',    color: 'var(--signal-red)',    dot: '\u2717' },
+}
+
+// A receipt-free outbound message reads as Queued, never as delivered. The bug
+// this closes: an SMS Twilio returned `undelivered` for still appeared in the
+// case file as an ordinary sent message, so an operator believed a family had
+// been contacted when no text ever reached the handset.
+function DeliveryChip({ delivery }) {
+  if (!delivery || !delivery.state) return null
+  const meta = DELIVERY_STATES[delivery.state] || DELIVERY_STATES.queued
+  const detail = [delivery.error_code ? `Twilio ${delivery.error_code}` : null,
+                  delivery.error_message || null].filter(Boolean).join(' \u00B7 ')
+  return (
+    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span
+        title={delivery.description || ''}
+        style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+          textTransform: 'uppercase', color: meta.color,
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}
+      >
+        <span aria-hidden="true">{meta.dot}</span>{meta.label}
+      </span>
+      {detail && (
+        <span style={{ fontSize: 10, color: 'var(--signal-red)', lineHeight: 1.35 }}>
+          {detail}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ConversationBubble is a proper sub-component (not inline in .map)
 // so useState hooks are always called at the top level — no rules-of-hooks violations.
 function ConversationBubble({ event: e }) {
@@ -227,6 +268,8 @@ function ConversationBubble({ event: e }) {
           {e.subject ? '(email — no body preview)' : '(no message body)'}
         </p>
       )}
+
+      {e.type === 'outbound' && <DeliveryChip delivery={e.delivery} />}
 
       {isLong && (
         <button

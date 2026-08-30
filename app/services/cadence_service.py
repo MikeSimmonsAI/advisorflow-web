@@ -340,9 +340,11 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             # touch-number state is already correct, so there is no re-send on
             # the next run — only the audit record is lost, which is acceptable.
             from app.models.models import Message
+            from app.services.message_state import normalize_provider_status
             message = Message(
                 lead_id=lead.id, sender_id=advisor.id, body=body,
                 twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
+                send_state=normalize_provider_status(twilio_msg.status),
                 booking_link_id=booking.id,
             )
             db.add(message)

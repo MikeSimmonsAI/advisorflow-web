@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.models.models import User, Lead, Message, BookingLink, Organization
 from app.utils.crypto import decrypt_value
 from app.services.twilio_callbacks import apply_status_callback
+from app.services.message_state import normalize_provider_status
 
 # Kept as a name because several modules still import it, but the Vercel
 # default is gone: one hostname for every brand is what put an infrastructure
@@ -526,6 +527,14 @@ def send_sms(
         twilio_sid=twilio_msg.sid,
         twilio_status=twilio_msg.status,
         delivery_status="pending",
+        # The provider's own word for what it did with this message, mapped to
+        # the five-state vocabulary. Twilio answers `queued` here, never
+        # `delivered`, so a fresh row now reads "Queued" instead of borrowing
+        # the appearance of a successful send until a receipt arrives.
+        send_state=normalize_provider_status(twilio_msg.status),
+        error_code=str(getattr(twilio_msg, "error_code", None))
+                   if getattr(twilio_msg, "error_code", None) else None,
+        error_message=(getattr(twilio_msg, "error_message", None) or None),
         booking_link_id=booking_link.id if booking_link else None,
     )
     db.add(message)
@@ -583,6 +592,10 @@ def send_mms(
         twilio_sid=twilio_msg.sid,
         twilio_status=twilio_msg.status,
         delivery_status="pending",
+        send_state=normalize_provider_status(twilio_msg.status),
+        error_code=str(getattr(twilio_msg, "error_code", None))
+                   if getattr(twilio_msg, "error_code", None) else None,
+        error_message=(getattr(twilio_msg, "error_message", None) or None),
         booking_link_id=booking_link.id if booking_link else None,
     )
     db.add(message)
