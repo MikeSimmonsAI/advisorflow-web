@@ -324,3 +324,147 @@ def read_registered_campaign(
         },
         "messaging_services": out,
     }
+
+
+# ---------------------------------------------------------------------------
+# WHY A REPLY NEVER ARRIVED. READ-ONLY.
+#
+# Outbound delivery is proven. The inbound leg has three segments and our
+# database can only see the last one:
+#
+#     phone -> Twilio        (did the carrier hand Twilio the message?)
+#     Twilio -> our webhook  (is a webhook URL even configured on the number?)
+#     webhook -> EvoSys      (did guard_inbound accept it?)
+#
+# When no Reply row exists, all three look identical from inside the product,
+# and the honest answer is "I cannot tell" - which is why this exists. It reads
+# Twilio's own inbound message log and the IncomingPhoneNumber resource, so the
+# broken segment is identified rather than guessed at.
+#
+# Two details that decide the answer and are easy to miss:
+#   * `sms_application_sid`, when set, OVERRIDES `sms_url` entirely. A number
+#     can show a perfectly correct sms_url and still route somewhere else.
+#   * A messaging service with `use_inbound_webhook_on_number: true` - which is
+#     how MG37d057... is configured - means the NUMBER's webhook governs, not
+#     the service's. So the number-level fields below are the ones that matter.
+#
+# STRICTLY READ-ONLY. It lists and fetches. It cannot send a message, and it
+# cannot modify a number, a webhook, a messaging service or a campaign.
+# ---------------------------------------------------------------------------
+@router.get("/inbound/{organization_id}")
+def trace_inbound(
+    organization_id: str,
+    to_number: str = Query(..., description="The Twilio number that should have received it."),
+    from_number: Optional[str] = Query(None, description="The handset that replied."),
+    hours: int = Query(default=12, ge=1, le=168),
+    db: Session = Depends(get_db),
+    _god: User = Depends(require_god),
+):
+    import datetime as _dt
+
+    from app.models.models import Organization
+    from app.services.sms_service import _resolve_twilio_creds
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise HTTPException(404, "No such organization.")
+
+    client = None
+    attempts = []
+    for who in db.query(User).filter(User.organization_id == organization_id).all():
+        try:
+            client, _from, _cid = _resolve_twilio_creds(who, db)
+            break
+        except Exception as exc:                            # noqa: BLE001
+            attempts.append(f"{who.id}: {str(exc)[:120]}")
+            continue
+    if client is None:
+        return {"resolved": False,
+                "reason": "No user in this organization resolves Twilio credentials.",
+                "attempts": attempts[:10]}
+
+    since = _dt.datetime.utcnow() - _dt.timedelta(hours=hours)
+
+    # ── 1. Did Twilio receive anything inbound on this number? ──────────────
+    inbound = {"queried": True, "messages": []}
+    try:
+        kwargs = {"to": to_number, "date_sent_after": since, "limit": 50}
+        if from_number:
+            kwargs["from_"] = from_number
+        for m in client.messages.list(**kwargs):
+            inbound["messages"].append({
+                "sid": m.sid,
+                "direction": m.direction,
+                "from": m.from_,
+                "to": m.to,
+                "body": m.body,
+                "status": m.status,
+                "error_code": str(m.error_code) if m.error_code else None,
+                "date_sent": m.date_sent.isoformat() if m.date_sent else None,
+            })
+    except Exception as exc:                                # noqa: BLE001
+        inbound = {"queried": True, "error": str(exc)[:300], "messages": []}
+
+    inbound["inbound_count"] = sum(
+        1 for m in inbound["messages"] if (m.get("direction") or "").startswith("inbound")
+    )
+
+    # ── 2. What is actually configured on the number? ───────────────────────
+    number = {"found": False}
+    try:
+        matches = client.incoming_phone_numbers.list(phone_number=to_number, limit=5)
+        if matches:
+            n = matches[0]
+            number = {
+                "found": True,
+                "sid": n.sid,
+                "phone_number": n.phone_number,
+                "friendly_name": n.friendly_name,
+                "sms_url": n.sms_url,
+                "sms_method": n.sms_method,
+                "sms_fallback_url": n.sms_fallback_url,
+                "sms_fallback_method": n.sms_fallback_method,
+                # If this is set, it WINS over sms_url. A correct-looking
+                # sms_url beside a populated application sid is a trap.
+                "sms_application_sid": n.sms_application_sid,
+                "status_callback": n.status_callback,
+            }
+    except Exception as exc:                                # noqa: BLE001
+        number = {"found": False, "error": str(exc)[:300]}
+
+    expected = "https://advisorflow-backend.onrender.com/sms/webhook/inbound"
+    configured = (number.get("sms_url") or "").strip()
+    number["expected_sms_url"] = expected
+    number["matches_expected"] = (configured == expected)
+    number["overridden_by_application_sid"] = bool(number.get("sms_application_sid"))
+
+    # ── Which messaging services hold this number, and how they route ───────
+    services = []
+    try:
+        for svc in client.messaging.v1.services.list(limit=20):
+            try:
+                nums = client.messaging.v1.services(svc.sid).phone_numbers.list(limit=50)
+            except Exception:                               # noqa: BLE001
+                continue
+            if any(getattr(pn, "phone_number", None) == to_number for pn in nums):
+                services.append({
+                    "sid": svc.sid,
+                    "friendly_name": svc.friendly_name,
+                    "inbound_request_url": getattr(svc, "inbound_request_url", None),
+                    "inbound_method": getattr(svc, "inbound_method", None),
+                    "fallback_url": getattr(svc, "fallback_url", None),
+                    # True means the NUMBER's webhook governs inbound, not the
+                    # service's - so `number.sms_url` above is the live setting.
+                    "use_inbound_webhook_on_number": getattr(
+                        svc, "use_inbound_webhook_on_number", None),
+                })
+    except Exception as exc:                                # noqa: BLE001
+        services = [{"error": str(exc)[:200]}]
+
+    return {
+        "organization": org.name,
+        "window_hours": hours,
+        "twilio_inbound": inbound,
+        "number": number,
+        "messaging_services_holding_this_number": services,
+    }

@@ -1680,6 +1680,19 @@ check("26.    and can only list and fetch, never mutate",
                                        ".remove(", ".deregister(")))
 check("26.    and reports our own empty A2P record as a records gap",
       '"our_stored_a2p"' in trace_src)
+
+# The inbound trace exists because a missing Reply row looks identical whether
+# the carrier, the webhook config, or guard_inbound is at fault.
+check("26. the inbound trace reads the number's own webhook config",
+      '"sms_url": n.sms_url,' in trace_src
+      and '"sms_method": n.sms_method,' in trace_src
+      and '"sms_fallback_url": n.sms_fallback_url,' in trace_src)
+check("26.    and reports the application sid that silently overrides it",
+      '"overridden_by_application_sid"' in trace_src)
+check("26.    and compares against the real EvoSys inbound URL",
+      "/sms/webhook/inbound" in trace_src and '"matches_expected"' in trace_src)
+check("26.    and says whether Twilio itself received anything inbound",
+      '"inbound_count"' in trace_src)
 check("26. and never returns an auth token",
       "auth_token" not in trace_src)
 check("26. and says plainly when a row was never submitted",
