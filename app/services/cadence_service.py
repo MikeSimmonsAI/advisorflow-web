@@ -40,29 +40,42 @@ SEND_IMMEDIATELY_ON_DAY_1 = True
 # via TOUCH_TONE_VARIANTS below rather than 9 separate hardcoded strings -
 # keeps this maintainable and matches "rotating message variations to avoid
 # carrier flagging" from Mike's original AHK-era requirement.
+# CTIA-required opt-out. Every A2P sample message a campaign is approved on
+# carries one; NOT ONE of these templates did, and a message that omits it
+# reads to a carrier's content filter as unsolicited traffic - especially the
+# ones carrying a link on a domain with no sending reputation. This is the
+# minimum change the 30007 isolation pointed at: it does not touch the sender,
+# the send path, the branding, the booking link or any Twilio/A2P setting.
+OPT_OUT_SUFFIX = " Reply STOP to opt out."
+
 TRACK_BASE_TEMPLATES = {
     "pre_need_lock_price": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "Lock in today's pricing before it changes - here's my booking link: {booking_link}"
+        + OPT_OUT_SUFFIX
     ),
     "at_need_support": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "I'm here to help with any arrangements you need. Reach out anytime: {advisor_cell} "
         "or book a time here: {booking_link}"
+        + OPT_OUT_SUFFIX
     ),
     "imminent_support": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "Please call me directly at {advisor_cell} - I want to make sure you have support right now."
+        + OPT_OUT_SUFFIX
     ),
     "upsell_existing": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "We have options available for your family. "
         "Let's chat: {booking_link}"
+        + OPT_OUT_SUFFIX
     ),
     "new_inquiry_intro": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
         "I'd love to help answer any questions, no pressure at all. "
         "You can reach me at {advisor_cell} or grab a time here: {booking_link}"
+        + OPT_OUT_SUFFIX
     ),
 }
 
