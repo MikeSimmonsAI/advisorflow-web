@@ -432,10 +432,21 @@ def trace_inbound(
     except Exception as exc:                                # noqa: BLE001
         number = {"found": False, "error": str(exc)[:300]}
 
-    expected = "https://advisorflow-backend.onrender.com/sms/webhook/inbound"
+    # Derived, never typed. `public_api_base` is the same resolver the send
+    # path uses to build its status_callback, so "expected" is genuinely the
+    # URL this deployment would register - not a hostname pasted into a
+    # diagnostic that then rots, and not an infrastructure hostname hardcoded
+    # into the source tree.
+    from app.services.twilio_callbacks import public_api_base
+    base = (public_api_base() or "").rstrip("/")
+    expected = (base + "/sms/webhook/inbound") if base else None
     configured = (number.get("sms_url") or "").strip()
     number["expected_sms_url"] = expected
-    number["matches_expected"] = (configured == expected)
+    number["matches_expected"] = bool(expected) and (configured == expected)
+    if not expected:
+        number["expected_sms_url_note"] = (
+            "This deployment resolves no public API base URL, so the correct "
+            "inbound URL cannot be derived. Set API_BASE_URL on the backend.")
     number["overridden_by_application_sid"] = bool(number.get("sms_application_sid"))
 
     # ── Which messaging services hold this number, and how they route ───────

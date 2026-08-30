@@ -1691,6 +1691,9 @@ check("26.    and reports the application sid that silently overrides it",
       '"overridden_by_application_sid"' in trace_src)
 check("26.    and compares against the real EvoSys inbound URL",
       "/sms/webhook/inbound" in trace_src and '"matches_expected"' in trace_src)
+check("26.    deriving that URL rather than hardcoding a hostname",
+      "public_api_base()" in trace_src
+      and "onrender.com" not in trace_src)
 check("26.    and says whether Twilio itself received anything inbound",
       '"inbound_count"' in trace_src)
 check("26. and never returns an auth token",
