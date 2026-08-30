@@ -1656,6 +1656,23 @@ check("26. the trace endpoint is god-only",
 # will never do, so match an actual call site, not the word.
 check("26. and is read-only - it can never create a message",
       ".create(" not in trace_src and ".update(" not in trace_src)
+# The campaign read must stay a read. Registering, updating or deleting a
+# brand, campaign, messaging service or number from a diagnostics endpoint is
+# exactly the accident this assertion exists to prevent.
+check("26. the A2P campaign read fetches the approved wording",
+      '"message_samples": c.message_samples,' in trace_src
+      and '"use_case": c.us_app_to_person_usecase,' in trace_src)
+check("26.    including the declared link and phone flags",
+      '"has_embedded_links": c.has_embedded_links,' in trace_src
+      and '"has_embedded_phone": c.has_embedded_phone,' in trace_src)
+# The only Twilio verbs this whole router may use are list and fetch.
+# Registering, updating or deleting a brand, campaign, messaging service or
+# number from a diagnostics endpoint is the accident this prevents.
+check("26.    and can only list and fetch, never mutate",
+      not any(v in trace_src for v in (".delete(", ".create(", ".update(",
+                                       ".remove(", ".deregister(")))
+check("26.    and reports our own empty A2P record as a records gap",
+      '"our_stored_a2p"' in trace_src)
 check("26. and never returns an auth token",
       "auth_token" not in trace_src)
 check("26. and says plainly when a row was never submitted",

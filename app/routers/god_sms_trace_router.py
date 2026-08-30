@@ -192,3 +192,135 @@ def trace_lead_sms(
         "message_count": len(out),
         "messages": out,
     }
+
+
+# ---------------------------------------------------------------------------
+# WHAT THE CAMPAIGN WAS ACTUALLY APPROVED TO SEND
+#
+# `GET /10dlc/status` reports what OUR database holds, and for a campaign
+# registered by hand in the Twilio console it holds nothing - every A2P column
+# is null. That is a gap in our records, not evidence about the campaign.
+#
+# The registration itself is readable over the API: a Messaging Service carries
+# its US A2P campaign, and that campaign carries the fields the carrier
+# actually evaluates a message against - the use case, the sample messages
+# submitted for approval, and the declared behaviour flags `has_embedded_links`
+# and `has_embedded_phone`.
+#
+# `has_embedded_links` is the one that matters when messages containing a URL
+# are filtered and an otherwise identical message without one is delivered. A
+# campaign registered as not sending links, that then sends links, is a
+# declaration mismatch - and it is invisible from our side until someone reads
+# the registration.
+#
+# STRICTLY READ-ONLY. This performs GETs. It does not register, update or
+# delete a brand, a campaign, a messaging service or a phone number, and it
+# never returns an auth token.
+# ---------------------------------------------------------------------------
+@router.get("/campaign/{organization_id}")
+def read_registered_campaign(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    _god: User = Depends(require_god),
+):
+    from app.models.models import Organization
+    from app.services.sms_service import _resolve_twilio_creds
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise HTTPException(404, "No such organization.")
+
+    # Credentials come from whoever in this org can actually send. That may be
+    # the organization's own Twilio account or, for a bring-your-own advisor,
+    # theirs - the ladder in sms_service decides, exactly as it does on a real
+    # send, so this reads the same account the messages went out on.
+    client = None
+    used = None
+    candidates = (db.query(User)
+                  .filter(User.organization_id == organization_id)
+                  .all())
+    errors = []
+    for who in candidates:
+        try:
+            client, _from, _cid = _resolve_twilio_creds(who, db)
+            used = {"user_id": who.id, "from_number": _from}
+            break
+        except Exception as exc:                          # noqa: BLE001
+            errors.append(f"{who.id}: {str(exc)[:160]}")
+            continue
+
+    if client is None:
+        return {"organization": org.name, "resolved": False,
+                "reason": "No user in this organization resolves Twilio credentials.",
+                "attempts": errors[:10]}
+
+    out = []
+    try:
+        services = client.messaging.v1.services.list(limit=20)
+    except Exception as exc:                              # noqa: BLE001
+        return {"organization": org.name, "resolved": True, "credentials": used,
+                "error": f"Could not list messaging services: {str(exc)[:300]}"}
+
+    for svc in services:
+        entry = {
+            "messaging_service_sid": svc.sid,
+            "friendly_name": svc.friendly_name,
+            "use_inbound_webhook_on_number": getattr(
+                svc, "use_inbound_webhook_on_number", None),
+            "sender_pool": [],
+            "campaigns": [],
+        }
+
+        try:
+            for pn in client.messaging.v1.services(svc.sid).phone_numbers.list(limit=50):
+                entry["sender_pool"].append(getattr(pn, "phone_number", None))
+        except Exception as exc:                          # noqa: BLE001
+            entry["sender_pool_error"] = str(exc)[:200]
+
+        try:
+            for c in client.messaging.v1.services(svc.sid).us_app_to_person.list(limit=10):
+                entry["campaigns"].append({
+                    "sid": c.sid,
+                    "campaign_id": c.campaign_id,
+                    "campaign_status": c.campaign_status,
+                    "use_case": c.us_app_to_person_usecase,
+                    "description": c.description,
+                    # The approved wording, verbatim. This is what the failed
+                    # message has to be compared against.
+                    "message_samples": c.message_samples,
+                    "message_flow": c.message_flow,
+                    # The declared behaviour flags the carrier evaluates.
+                    "has_embedded_links": c.has_embedded_links,
+                    "has_embedded_phone": c.has_embedded_phone,
+                    "subscriber_opt_in": c.subscriber_opt_in,
+                    "age_gated": c.age_gated,
+                    "direct_lending": c.direct_lending,
+                    "opt_in_message": c.opt_in_message,
+                    "opt_out_message": c.opt_out_message,
+                    "help_message": c.help_message,
+                    "opt_out_keywords": c.opt_out_keywords,
+                    "rate_limits": c.rate_limits,
+                    "is_externally_registered": c.is_externally_registered,
+                    "errors": c.errors,
+                })
+        except Exception as exc:                          # noqa: BLE001
+            entry["campaign_error"] = str(exc)[:300]
+
+        out.append(entry)
+
+    return {
+        "organization": org.name,
+        "resolved": True,
+        "credentials": used,
+        # What our own database claims, side by side with what Twilio holds.
+        # A divergence here is a records gap on our side, never a statement
+        # about the campaign's real status.
+        "our_stored_a2p": {
+            "brand_sid": getattr(org, "twilio_a2p_brand_sid", None),
+            "campaign_sid": getattr(org, "twilio_a2p_campaign_sid", None),
+            "campaign_status": getattr(org, "twilio_a2p_campaign_status", None),
+            "campaign_use_case": getattr(org, "twilio_a2p_campaign_use_case", None),
+            "messaging_service_sid": getattr(org, "twilio_messaging_service_sid", None),
+        },
+        "messaging_services": out,
+    }
