@@ -43,6 +43,8 @@ def _send_sms(to_number: str, body: str, org, advisor) -> bool:
 
         auth_tok = decrypt_value(auth_tok_enc)
         client = TwilioClient(acct_sid, auth_tok)
+        from app.services.sms_content_policy import enforce_sms_content_policy
+        body = enforce_sms_content_policy(body)
         client.messages.create(body=body, from_=from_num, to=to_number)
         return True
     except Exception as exc:

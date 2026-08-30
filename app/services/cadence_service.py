@@ -34,6 +34,10 @@ TOTAL_TOUCHES = len(CADENCE_SCHEDULE_DAYS)
 
 # Day 1 touch fires immediately rather than waiting 24 hours, since "Day 1"
 # means "the day contact starts," not "wait a full day first."
+from app.services.sms_content_policy import (
+    enforce_sms_content_policy, LINKS_ALLOWED as SMS_LINKS_ALLOWED,
+)
+
 SEND_IMMEDIATELY_ON_DAY_1 = True
 
 # One template per track, with {touch_number} driven tone variation handled
@@ -48,33 +52,49 @@ SEND_IMMEDIATELY_ON_DAY_1 = True
 # the send path, the branding, the booking link or any Twilio/A2P setting.
 OPT_OUT_SUFFIX = " Reply STOP to opt out."
 
+# OPERATING RULE FOR THE CURRENT SAMPLE:
+#   SMS   = conversation and follow-up. No URL, no phone number.
+#   EMAIL = the scheduling link.
+#
+# These templates no longer reference {booking_link} or {advisor_cell} at all.
+# Campaign CO3YNIF is registered has_embedded_links=false and
+# has_embedded_phone=false, so a message containing either contradicts the
+# registration and the carrier filters it as 30007. Instead of carrying the
+# link, the SMS points the family at the email that does.
+#
+# Removing the placeholders here is only half of it - an org's custom template,
+# a cadence touch's own message_template, an AI draft or a pasted composer
+# message could each still introduce one. sms_content_policy.enforce_sms_content_policy
+# is the guarantee; this is the copy that reads well without needing it.
 TRACK_BASE_TEMPLATES = {
     "pre_need_lock_price": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
-        "Lock in today's pricing before it changes - here's my booking link: {booking_link}"
+        "I just emailed you about locking in today's pricing, along with times "
+        "we could talk. Please take a look when you have a moment."
         + OPT_OUT_SUFFIX
     ),
     "at_need_support": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
-        "I'm here to help with any arrangements you need. Reach out anytime: {advisor_cell} "
-        "or book a time here: {booking_link}"
+        "I'm here to help with any arrangements you need. I've sent you an email "
+        "with scheduling options whenever you're ready."
         + OPT_OUT_SUFFIX
     ),
     "imminent_support": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
-        "Please call me directly at {advisor_cell} - I want to make sure you have support right now."
+        "I want to make sure you have support right now. Please reply here and "
+        "I'll call you straight back, or check your email for a time to talk."
         + OPT_OUT_SUFFIX
     ),
     "upsell_existing": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
-        "We have options available for your family. "
-        "Let's chat: {booking_link}"
+        "We have options available for your family. I've emailed you the details "
+        "and some times we could chat."
         + OPT_OUT_SUFFIX
     ),
     "new_inquiry_intro": (
         "Hi {first_name}, this is {advisor_name} with {org_name}. {tone_phrase} "
-        "I'd love to help answer any questions, no pressure at all. "
-        "You can reach me at {advisor_cell} or grab a time here: {booking_link}"
+        "I'd love to help answer any questions, no pressure at all. Check your "
+        "email for scheduling options, or just reply here."
         + OPT_OUT_SUFFIX
     ),
 }
@@ -202,7 +222,9 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     if message_template:
         org = db.query(__import__('app.models.models', fromlist=['Organization']).Organization).filter_by(id=lead.organization_id).first()
         org_name = org.name if org else "our organization"
-        return (
+        # A cadence touch supplies its own text, so it can carry a link the
+        # base templates no longer do. The policy is the backstop.
+        return enforce_sms_content_policy(
             message_template
             .replace("{first_name}", lead.first_name or "there")
             .replace("{advisor_name}", advisor.full_name or "your advisor")
@@ -219,7 +241,10 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     custom_template = get_sms_template(db, lead.organization_id, lead.message_track)
     template = custom_template or TRACK_BASE_TEMPLATES.get(lead.message_track, TRACK_BASE_TEMPLATES["pre_need_lock_price"])
     tone_phrase = TOUCH_TONE_VARIANTS.get(touch_number, TOUCH_TONE_VARIANTS[9])
-    return (
+    # `custom_template` comes from the org's template editor and may still
+    # contain {booking_link} or {advisor_cell}, so the substitutions stay and
+    # the policy removes whatever the campaign is not registered to send.
+    return enforce_sms_content_policy(
         template
         .replace("{first_name}", lead.first_name or "there")
         .replace("{advisor_name}", advisor.full_name)
@@ -295,11 +320,17 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             continue
 
         try:
-            from app.services.sms_service import create_booking_link
-            booking = create_booking_link(db, lead, advisor)
-            from app.services.public_identity import booking_url as public_booking_url
-            booking_url = public_booking_url(db, lead.organization_id,
-                                             booking.token)
+            # No link is minted while none may be sent: an issued-but-never-
+            # delivered token is a dead row and an audit trail that claims a
+            # family was given a booking link they never received.
+            booking = None
+            booking_url = ""
+            if SMS_LINKS_ALLOWED:
+                from app.services.sms_service import create_booking_link
+                booking = create_booking_link(db, lead, advisor)
+                from app.services.public_identity import booking_url as public_booking_url
+                booking_url = public_booking_url(db, lead.organization_id,
+                                                 booking.token)
             body = render_cadence_message(db, lead, advisor, touch_number, booking_url, touch_def.get("message_template"))
 
             # Phase 1: advance state and commit BEFORE calling Twilio.
@@ -358,7 +389,7 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
                 lead_id=lead.id, sender_id=advisor.id, body=body,
                 twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
                 send_state=normalize_provider_status(twilio_msg.status),
-                booking_link_id=booking.id,
+                booking_link_id=booking.id if booking else None,
             )
             db.add(message)
             db.commit()  # Phase 2 commit — audit record only.

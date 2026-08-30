@@ -98,6 +98,11 @@ def _notify_fsa_sms(advisor: User, message: str) -> None:
             return
         auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
         client = Client(advisor.twilio_account_sid, auth_token)
+        from app.services.sms_content_policy import enforce_sms_content_policy
+        # No URL in SMS under campaign CO3YNIF. The AI draft and the
+        # hand-written fallback below both reference {booking_url};
+        # the policy removes it and the clause that introduced it.
+        message = enforce_sms_content_policy(message)
         client.messages.create(body=message, from_=advisor.twilio_phone_number, to=phone)
     except Exception as e:
         logger.error("FSA notification SMS failed: %s", e)

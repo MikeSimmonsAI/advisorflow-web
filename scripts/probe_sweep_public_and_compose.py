@@ -191,19 +191,26 @@ url = pi.booking_url(db, REST, "tok")
 placeholder = "Hi {first_name}, book here: {booking_link}"
 typed = "Hi Mike, this is Mike Simmons with Restland."
 
+# These three checks used to assert that compose_body APPENDED the booking
+# link. That rule is reversed: SMS carries no URL under campaign CO3YNIF (see
+# section 27), and email carries the link instead. What must not change is the
+# invariant these checks were written to protect - the composer preview and the
+# real send come from this one function, so an advisor is never shown one thing
+# and a family sent another.
+
 body = sms.compose_body(placeholder, phone_only, advisor, url)
-check("3. a {booking_link} placeholder is substituted",
-      url in body and "{booking_link}" not in body, body)
+check("3. a {booking_link} placeholder leaves no URL and no raw placeholder",
+      url not in body and "{booking_link}" not in body, body)
 
 body = sms.compose_body(typed, phone_only, advisor, url)
-check("3. a message with NO placeholder still gets the link appended",
-      body.endswith(url), body)
+check("3. a message with no placeholder is NOT given a link",
+      url not in body, body)
 check("   and the advisor's own words are untouched",
       body.startswith(typed))
 
 body = sms.compose_body(typed + " " + url, phone_only, advisor, url)
-check("3. a link the advisor typed themselves is not duplicated",
-      body.count(url) == 1, body)
+check("3. a link the advisor typed themselves is removed, visibly, in preview",
+      url not in body and body.startswith("Hi Mike"), body)
 
 body = sms.compose_body(typed, phone_only, advisor, "")
 check("3. no link means no link",
@@ -1686,6 +1693,111 @@ check("26. the new columns are added without a shell",
       '("messages", "send_state", "VARCHAR")' in migr_src
       and '("messages", "error_code", "VARCHAR")' in migr_src
       and '("messages", "error_message", "VARCHAR")' in migr_src)
+
+
+
+# ---------------------------------------------------------------------------
+# 27. SMS CARRIES NO URL. EMAIL CARRIES THE BOOKING LINK.
+#
+# Campaign CO3YNIF - VERIFIED, LOW_VOLUME, the campaign these messages actually
+# send under - is registered `has_embedded_links: false` and
+# `has_embedded_phone: false`. Read live from Twilio, not inferred. Five
+# controlled sends on one number in a 33-minute window agree with it exactly:
+# the four carrying a booking URL were filtered 30007, the one without was
+# delivered.
+#
+# The operating rule is therefore SMS = conversation, EMAIL = scheduling link.
+# Editing the five default templates is NOT the guarantee, because a URL can
+# still arrive from an org's custom template, a cadence touch's own text, an AI
+# draft, or an advisor pasting one into the composer. The guarantee is the
+# policy function sitting where every one of those paths converges.
+# ---------------------------------------------------------------------------
+import app.services.sms_content_policy as _pol
+
+check("27. links are OFF, tied to the campaign registration",
+      _pol.LINKS_ALLOWED is False and _pol.PHONE_NUMBERS_ALLOWED is False)
+check("27. and the reason is recorded, not folklore",
+      "CO3YNIF" in _pol.policy_report()["campaign"]
+      and "has_embedded_links" in _pol.policy_report()["reason"])
+
+_ENF = _pol.enforce_sms_content_policy
+
+# Every shape a link actually arrives in.
+for _label, _text in [
+    ("https", "Book a time here: https://app.evosyspro.live/book/4jtpgr8GEcX1DE"),
+    ("bare domain", "Please use evosyspro.live/book/xyz to pick a time. I can help."),
+    ("www", "See www.example.com for details. Call me when you can."),
+    ("shortener", "Grab a slot: bit.ly/abc123 whenever you like."),
+]:
+    _out = _ENF(_text)
+    check("27. a %s link never survives into an SMS" % _label,
+          not _pol.contains_url(_out))
+
+check("27. an embedded phone number never survives either",
+      not _pol.contains_phone_number(
+          _ENF("Reach out anytime: 469-224-1155 or reply here.")))
+
+# The redaction must not reach a family as wreckage.
+_wreck = _ENF(
+    "Hi Mike, this is Jerome with Restland Cemetery and Funeral Home. "
+    "I'm here to help with any arrangements you need. Reach out anytime: "
+    "469-224-1155 or book a time here: https://app.evosyspro.live/book/abc "
+    "Reply STOP to opt out."
+)
+check("27. the clause that introduced the link goes with it",
+      "book a time here" not in _wreck and "Reach out anytime" not in _wreck)
+check("27.    leaving readable prose, not a fragment",
+      "Restland Cemetery and Funeral Home" in _wreck
+      and "arrangements you need." in _wreck
+      and "  " not in _wreck and ":" not in _wreck)
+
+# Opt-out: exactly once, always.
+check("27. opt-out language is always present",
+      "reply stop" in _ENF("Quick note about your file.").lower())
+check("27.    and never duplicated",
+      _ENF("Checking in. Reply STOP to opt out.").lower().count("reply stop") == 1)
+
+# The default templates must read well WITHOUT relying on the policy.
+import app.services.cadence_service as _cad
+for _track, _tpl in _cad.TRACK_BASE_TEMPLATES.items():
+    check("27. track %s has no link or cell placeholder" % _track,
+          "{booking_link}" not in _tpl and "{booking_url}" not in _tpl
+          and "{advisor_cell}" not in _tpl)
+    check("27. track %s carries opt-out" % _track, "Reply STOP" in _tpl)
+
+# The composer preview and the send are the same function, so a pasted link is
+# seen to disappear rather than silently dropped.
+svc_src = read("app/services/sms_service.py")
+check("27. compose_body - shared by preview and send - applies the policy",
+      "if not SMS_LINKS_ALLOWED:" in svc_src
+      and "return enforce_sms_content_policy(body)" in svc_src)
+check("27. no booking link is minted for an SMS that cannot carry one",
+      svc_src.count("if include_booking_link and SMS_LINKS_ALLOWED:") == 2)
+
+cad_src = read("app/services/cadence_service.py")
+check("27. both cadence render paths end in the policy",
+      cad_src.count("return enforce_sms_content_policy(") == 2)
+check("27. cadence mints no undeliverable token",
+      "if SMS_LINKS_ALLOWED:" in cad_src
+      and "booking_link_id=booking.id if booking else None," in cad_src)
+
+# Every other direct Twilio SMS sender, so none becomes a back door.
+for _f in ("app/services/pipeline_service.py",
+           "app/crons/review_request_cron.py",
+           "app/services/appointment_flow_service.py",
+           "app/crons/appointment_reminder_cron.py"):
+    check("27. %s enforces the policy before sending" % _f.split("/")[-1],
+          "enforce_sms_content_policy" in read(_f))
+
+# EMAIL IS UNAFFECTED. The whole point of the rule is that the link still
+# reaches the family - by email.
+email_src27 = read("app/services/email_service.py")
+check("27. EMAIL still mints a booking link",
+      "booking = create_booking_link(db, lead, advisor)" in email_src27)
+check("27. EMAIL still renders it into the body",
+      '"{booking_link}": booking_url,' in email_src27)
+check("27.    and the policy is nowhere near the email path",
+      "enforce_sms_content_policy" not in email_src27)
 
 
 db.close()

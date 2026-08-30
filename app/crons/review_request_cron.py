@@ -122,6 +122,9 @@ def run_review_request_cron(engine) -> int:
                 else:
                     msg_kwargs["from_"] = row.twilio_phone_number
 
+                from app.services.sms_content_policy import enforce_sms_content_policy
+                # The survey URL is still a URL to a carrier filter.
+                msg_kwargs["body"] = enforce_sms_content_policy(msg_kwargs["body"])
                 client.messages.create(**msg_kwargs)
 
                 # Create BookingFollowup record so survey_router can look it up

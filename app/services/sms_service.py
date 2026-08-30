@@ -30,6 +30,9 @@ from app.models.models import User, Lead, Message, BookingLink, Organization
 from app.utils.crypto import decrypt_value
 from app.services.twilio_callbacks import apply_status_callback
 from app.services.message_state import normalize_provider_status
+from app.services.sms_content_policy import (
+    enforce_sms_content_policy, LINKS_ALLOWED as SMS_LINKS_ALLOWED,
+)
 
 # Kept as a name because several modules still import it, but the Vercel
 # default is gone: one hostname for every brand is what put an infrastructure
@@ -453,13 +456,23 @@ def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> 
     string, which is the whole point: no hidden send-time URL.
     """
     body = render_template(template, lead, advisor, booking_url)
+
+    # SMS carries no URL under the current campaign. This is enforced here, at
+    # the one point preview and send share, so an advisor who types or pastes a
+    # link WATCHES IT DISAPPEAR from the preview before pressing Send - they
+    # are never told a link went out when it did not. See
+    # app/services/sms_content_policy.py for why (campaign CO3YNIF is
+    # registered has_embedded_links=false; a URL is filtered as 30007).
+    if not SMS_LINKS_ALLOWED:
+        return enforce_sms_content_policy(body)
+
     if not booking_url:
-        return body
+        return enforce_sms_content_policy(body)
     if BOOKING_LINK_PLACEHOLDER in (template or ""):
-        return body
+        return enforce_sms_content_policy(body)
     if booking_url in body:
-        return body                     # already typed in by hand
-    return (body.rstrip() + "\n\n" + booking_url).strip()
+        return enforce_sms_content_policy(body)   # already typed in by hand
+    return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url)
 
 
 def send_sms(
@@ -492,7 +505,10 @@ def send_sms(
 
     booking_url = ""
     booking_link = None
-    if include_booking_link:
+    # A booking link that cannot be sent must not be minted either: a token
+    # created and never delivered is a dead row and a misleading audit trail
+    # ("a link was issued to this family") for a message that carried none.
+    if include_booking_link and SMS_LINKS_ALLOWED:
         # The same link the composer previewed, not a fresh one.
         booking_link = get_or_create_booking_link(db, lead, advisor)
         from app.services.public_identity import booking_url as public_booking_url
@@ -566,7 +582,8 @@ def send_mms(
 
     booking_url = ""
     booking_link = None
-    if include_booking_link:
+    # Same policy as send_sms: no link is minted while none may be sent.
+    if include_booking_link and SMS_LINKS_ALLOWED:
         booking_link = get_or_create_booking_link(db, lead, advisor)
         from app.services.public_identity import booking_url as public_booking_url
         booking_url = public_booking_url(db, lead.organization_id,

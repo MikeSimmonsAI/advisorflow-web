@@ -33,6 +33,8 @@ def _send_sms_safe(advisor: User, to_phone: str, body: str) -> None:
             return
         auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
         client = Client(advisor.twilio_account_sid, auth_token)
+        from app.services.sms_content_policy import enforce_sms_content_policy
+        body = enforce_sms_content_policy(body)
         client.messages.create(body=body, from_=advisor.twilio_phone_number, to=to_phone)
     except Exception as e:
         logger.error("appointment_flow SMS failed: %s", e)
