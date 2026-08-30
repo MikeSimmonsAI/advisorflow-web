@@ -1799,6 +1799,24 @@ check("27. EMAIL still renders it into the body",
 check("27.    and the policy is nowhere near the email path",
       "enforce_sms_content_policy" not in email_src27)
 
+# THE COMPOSER MUST NOT ADVERTISE WHAT THE SEND PATH STRIPS.
+# Returning a booking_url for an SMS preview put "Will be sent as <url>" on
+# screen above a body containing no link - the interface contradicting the
+# code. The affordance is removed and the reason stated instead.
+compose_src27 = read("app/routers/compose_router.py")
+check("27. the composer mints no preview link while links are off",
+      "if req.include_booking_link and SMS_LINKS_ALLOWED:" in compose_src27)
+check("27. and both compose endpoints publish the policy",
+      compose_src27.count("policy_report()") == 2)
+
+ld27 = jsx_code_only(read("frontend/src/pages/LeadDetail.jsx"))
+check("27. the composer hides the booking-link checkbox when links are off",
+      "smsLinksAllowed && (" in ld27)
+check("27. and says the link goes by email instead",
+      "Text messages carry no links" in ld27)
+check("27. the client-side preview never appends a link the send strips",
+      "if (!smsLinksAllowed) return body.replaceAll('{booking_link}', '').trim()" in ld27)
+
 
 db.close()
 if os.path.exists(DB_FILE):

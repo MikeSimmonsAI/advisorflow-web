@@ -769,8 +769,16 @@ export default function LeadDetail() {
     ? voiceReadiness.reason
     : (ch ? ch.voice.reason : null)
   const smsSender = composeCtx?.sms_sender || null
-  const bookingUrl = composeCtx?.booking?.url || ''
-  const bookingUrlReason = composeCtx?.booking?.reason || null
+  // SMS carries no URL under the current campaign - see the backend's
+  // sms_content_policy. The composer must reflect that BEFORE the advisor
+  // writes, not strip their text afterwards: no link is offered, and the
+  // reason is stated where the link preview used to be.
+  const smsLinksAllowed = composeCtx?.sms_content_policy?.links_allowed !== false
+  const smsPolicyReason = composeCtx?.sms_content_policy?.reason || null
+  const bookingUrl = smsLinksAllowed ? (composeCtx?.booking?.url || '') : ''
+  const bookingUrlReason = smsLinksAllowed
+    ? (composeCtx?.booking?.reason || null)
+    : null
 
   const canSend      = canSendSMS || canSendEmail
   const initials     = `${(lead.first_name || '?')[0]}${(lead.last_name || '?')[0]}`.toUpperCase()
@@ -786,6 +794,7 @@ export default function LeadDetail() {
   // placeholder - send no link at all while still recording one.
   function composePreview(text) {
     const body = String(text || '')
+    if (!smsLinksAllowed) return body.replaceAll('{booking_link}', '').trim()
     if (!includeBookingLink || !bookingUrl) return body.replace('{booking_link}', '')
     if (body.includes('{booking_link}')) return body.replaceAll('{booking_link}', bookingUrl)
     if (body.includes(bookingUrl)) return body
@@ -1364,7 +1373,20 @@ export default function LeadDetail() {
                 {/* WHAT WILL BE SENT. Shown whenever a link is being added, so
                     the advisor sees the branded URL before pressing Send rather
                     than discovering it in the delivered message. */}
-                {includeBookingLink && (bookingUrl || bookingUrlReason) && (
+                {!smsLinksAllowed && (
+                  <div style={SX.previewWarn}>
+                    <div style={SX.previewLabel}>Text messages carry no links</div>
+                    <div style={SX.previewBody}>
+                      The scheduling link goes out by email. Anything that looks
+                      like a link or a phone number is removed from a text before
+                      it is sent.
+                    </div>
+                    {smsPolicyReason && (
+                      <div style={SX.previewMeta}>{smsPolicyReason}</div>
+                    )}
+                  </div>
+                )}
+                {smsLinksAllowed && includeBookingLink && (bookingUrl || bookingUrlReason) && (
                   <div style={bookingUrl ? SX.previewOk : SX.previewWarn}>
                     <div style={SX.previewLabel}>
                       {bookingUrl ? 'Will be sent as' : 'Booking link unavailable'}
@@ -1398,14 +1420,16 @@ export default function LeadDetail() {
                 )}
 
                 <div className="compose-footer">
-                  <label className="compose-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={includeBookingLink}
-                      onChange={(e) => setIncludeBookingLink(e.target.checked)}
-                    />
-                    Include booking link
-                  </label>
+                  {smsLinksAllowed && (
+                    <label className="compose-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={includeBookingLink}
+                        onChange={(e) => setIncludeBookingLink(e.target.checked)}
+                      />
+                      Include booking link
+                    </label>
+                  )}
                   <button
                     className="btn btn--ghost"
                     onClick={() => mediaInputRef.current?.click()}

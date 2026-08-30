@@ -189,6 +189,13 @@ def compose_context(lead_id: str,
         "channels": channels,
         "sms_sender": sender,
         "booking": booking,
+        # The composer must not offer a booking link for a channel that will
+        # not carry one. The frontend reads this to hide the "Include booking
+        # link" affordance for SMS and say why, instead of showing a URL the
+        # send path already strips.
+        "sms_content_policy": __import__(
+            "app.services.sms_content_policy", fromlist=["policy_report"]
+        ).policy_report(),
     }
 
 
@@ -214,9 +221,16 @@ def compose_preview(lead_id: str, req: PreviewRequest,
     from app.services.sms_service import compose_body, get_or_create_booking_link
     from app.services.public_identity import booking_url as public_booking_url
 
+    from app.services.sms_content_policy import LINKS_ALLOWED as SMS_LINKS_ALLOWED
+
     url = ""
     link_id = None
-    if req.include_booking_link:
+    # Do not mint - and do not ADVERTISE - a link this SMS will not carry.
+    # Returning a booking_url here made the composer display "WILL BE SENT AS
+    # <url>" above a message whose body contains no link at all: the screen
+    # would be telling the advisor something the send path had already
+    # decided against. See app/services/sms_content_policy.py.
+    if req.include_booking_link and SMS_LINKS_ALLOWED:
         link = get_or_create_booking_link(db, lead, advisor)
         link_id = link.id
         url = public_booking_url(db, lead.organization_id, link.token) or ""
@@ -230,6 +244,8 @@ def compose_preview(lead_id: str, req: PreviewRequest,
     per_segment = 70 if unicode_body else 160
     segments = 1 if len(body) <= per_segment else -(-len(body) // (67 if unicode_body else 153))
 
+    from app.services.sms_content_policy import policy_report
+
     return {
         "body": body,
         "booking_url": url or None,
@@ -237,4 +253,7 @@ def compose_preview(lead_id: str, req: PreviewRequest,
         "characters": len(body),
         "segments": segments,
         "unicode": unicode_body,
+        # So the composer can say WHY a pasted link vanished from the preview,
+        # rather than appearing to have swallowed the advisor's text.
+        "content_policy": policy_report(),
     }
