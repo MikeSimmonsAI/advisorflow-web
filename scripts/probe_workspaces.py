@@ -228,6 +228,43 @@ def main():
        prop_src.count("_tenant_write_org_id(current_user)") >= 2
        and "organization_id=current_user.organization_id" not in prop_src)
 
+    # ── 4b. the LEGITIMATE org-NULL identity must survive ───────────────────
+    #
+    # Eliminating context-less user creation must not eliminate the brand-sales
+    # identity, which is org-NULL BY DESIGN - that NULL is the system's positive
+    # assertion of "this person sells a brand, they are not inside a customer".
+    # The distinction is ownership ambiguity, not the NULL itself:
+    #
+    #   God Mode -> Brand -> Customer      -> user belongs to that customer
+    #   God Mode -> Brand -> Sales         -> user is org-NULL, scoped by membership
+    #   God Mode -> nothing                -> refused
+    section("legitimate brand-sales identities still work")
+    with TestClient(app) as c:
+        god = token(c, "god@probe.test")
+        r = c.post("/god/ops/brands/bso-evo/sales-team", headers=god, json={
+            "email": "seller@probe-corp.com", "full_name": "Brand Seller",
+            "role": "sales_rep"})
+        made = r.status_code in (200, 201)
+        ok("creating a brand-sales user through the BRAND path works",
+           made, "%s %s" % (r.status_code, r.text[:200]))
+        if made:
+            from app.models.sales_models import Membership
+            db2 = SessionLocal()
+            try:
+                u = (db2.query(User)
+                     .filter(User.email == "seller@probe-corp.com").first())
+                ok("   the identity exists", u is not None)
+                if u is not None:
+                    ok("   and is org-NULL, which is CORRECT here",
+                       u.organization_id is None, u.organization_id)
+                    ms = (db2.query(Membership)
+                          .filter(Membership.user_id == u.id).all())
+                    ok("   scoped by a membership on the brand that created it",
+                       any(m.scope_id == "bso-evo" for m in ms),
+                       [m.scope_id for m in ms])
+            finally:
+                db2.close()
+
     # ── 5. nothing else moved ───────────────────────────────────────────────
     section("nothing was taken away")
     with TestClient(app) as c:

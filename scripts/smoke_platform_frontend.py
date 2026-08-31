@@ -47,16 +47,27 @@ def main():
     check("ContextBanner.jsx exists", banner is not None)
     if banner:
         code = strip_comments(banner)
+        # `ctx.banner` became `ctx.trail`: the banner now renders the server's
+        # BREADCRUMB (AdvisorFlow -> EvoSys Pro -> Restland) rather than a
+        # single sentence, because a brand entered with no customer inside it
+        # is now a real place to stand and a one-line string could not say so.
+        # The rule this check exists to protect is unchanged and still asserted:
+        # the text comes from the server, never from localStorage.
         check("the banner text comes from the SERVER's context endpoint",
-              "/god/platform/context" in code and "ctx.banner" in code,
-              "asks the server and renders its string")
+              "/god/platform/context" in code and "ctx.trail" in code,
+              "asks the server and renders its trail")
         check("...not from localStorage",
               "orgName" not in code,
               "no orgName from local storage is rendered")
         check("exiting calls the audited server endpoint",
               "/god/platform/context/exit" in code)
+        # clearAllContext() clears the customer AND the brand. Clearing only
+        # the customer would leave a stale brand under it, and the trail would
+        # then claim a context the server no longer agrees with.
         check("...and clears the local context too",
-              "clearOrgContext" in code)
+              "clearAllContext" in code)
+        check("...including the brand, not just the customer",
+              "clearAllContext" in code and "getBrandContext" in code)
 
     ov = read("pages", "god", "PlatformOverview.jsx")
     check("PlatformOverview.jsx exists", ov is not None)
