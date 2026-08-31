@@ -352,9 +352,19 @@ def api_tests():
     print("\n[A5] Minimum notice and booking horizon")
     db = SessionLocal()
     b = db.query(User).filter(User.id == "u-blake").first()
-    p = prof_of(db, "u-blake"); p.min_notice_minutes = 60 * 24 * 7; db.commit()
+    # The notice window is derived from how far away MON actually is, not
+    # hardcoded to seven days. `next_weekday` starts counting at TOMORROW, so
+    # when this runs ON a Monday it returns the Monday a full 7 days out - and
+    # a 7-day notice does not hide a day exactly 7 days away, leaving that
+    # day's later slots visible and failing the check. The assertion was
+    # correct Tuesday through Sunday and wrong every Monday.
+    notice_days = (MON - today).days + 1
+    p = prof_of(db, "u-blake")
+    p.min_notice_minutes = 60 * 24 * notice_days
+    db.commit()
     near = av.free_intervals_for_user(db, b, day_start, day_end)
-    check("a week of minimum notice hides the next weekday", near == [], near)
+    check("minimum notice beyond the target day hides it entirely",
+          near == [], (notice_days, near))
     p.min_notice_minutes = 0
     p.booking_horizon_days = 1
     db.commit()
