@@ -1852,6 +1852,77 @@ check("27. the client-side preview never appends a link the send strips",
       "if (!smsLinksAllowed) return body.replaceAll('{booking_link}', '').trim()" in ld27)
 
 
+
+# ---------------------------------------------------------------------------
+# 28. A NAV ITEM THAT IS SHOWN MUST BE REACHABLE, AND A REFUSAL MUST BE SAID
+#
+# Availability and DNC List appear in the sidebar for every user - neither
+# carries `adminOnly` - but both routes were wrapped in `requireAdmin`, whose
+# denial branch was `<Navigate to="/" replace />`. An advisor clicked either
+# one and landed back on Overview, which is indistinguishable from a dead
+# button. The route guards were also STRICTER THAN THE API they call, so the
+# refusal was not even protecting anything.
+# ---------------------------------------------------------------------------
+app_jsx = jsx_code_only(read("frontend/src/App.jsx"))
+layout_jsx = jsx_code_only(read("frontend/src/components/Layout.jsx"))
+
+check("28. the sidebar still offers Availability and DNC List",
+      "{ to: '/availability', label: 'Availability'" in layout_jsx
+      and "{ to: '/compliance', label: 'DNC List'" in layout_jsx)
+check("28.    to everyone, not only admins - the fix is not to hide them",
+      "label: 'Availability', icon: 'calendar' }" in layout_jsx
+      and "label: 'DNC List', icon: 'shield-check' }" in layout_jsx)
+
+check("28. /availability no longer demands an admin the API does not",
+      '<Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />'
+      in app_jsx)
+check("28. /compliance no longer demands an admin the API does not",
+      '<Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />'
+      in app_jsx)
+
+# The server is the authority, and it says both are open to any tenant user.
+compliance_src = read("app/routers/compliance_router.py")
+check("28.    the suppression list really is readable by any tenant user",
+      "current_user: User = Depends(require_tenant_user),   # ALL users can view"
+      in compliance_src)
+check("28.    while the destructive operations stay admin-only, untouched",
+      compliance_src.count("current_user: User = Depends(require_admin),") >= 2)
+avail_src = read("app/routers/availability_router.py")
+check("28.    and availability never required an admin at all",
+      "require_admin" not in avail_src)
+
+# The page's own gating was dead code behind the route guard. It must survive.
+comp_jsx = jsx_code_only(read("frontend/src/pages/Compliance.jsx"))
+check("28. the DNC page still hides Permanent DNC from non-admins",
+      "const isAdmin = ['org_admin', 'super_admin', 'god_admin'].includes(currentUser?.role)"
+      in comp_jsx)
+check("28.    and explains why, rather than showing a broken control",
+      "Only organization admins can mark a lead as Permanent DNC" in comp_jsx)
+
+# NO MORE SILENT BOUNCES.
+check("28. a refused route renders an explicit refusal, never a redirect home",
+      "<Unauthorized" in app_jsx and "const denied = (" in app_jsx)
+check("28.    keeping the nav so the screen is not a dead end",
+      "<Layout>\n        <ContextBanner />\n        <Unauthorized" in app_jsx)
+check("28. an unknown URL says so instead of pretending it was Overview",
+      "<NotFound" in app_jsx)
+check("28.    and an unknown URL while signed out still goes to login",
+      'path="*"' in app_jsx and '<Navigate to="/login" replace />' in app_jsx)
+check("28. NO role check silently navigates to the home route any more",
+      'return <Navigate to="/" replace />' not in app_jsx)
+# The platform area answers not-found rather than naming itself: a tenant user
+# reaches it only by guessing a URL, and a 'you need god_admin' refusal would
+# confirm the guess. Still not a silent bounce.
+check("28.    and the platform area refuses without announcing itself",
+      "if (user?.role !== 'god_admin') {" in app_jsx
+      and "<NotFound path=" in app_jsx)
+
+access_jsx = jsx_code_only(read("frontend/src/pages/AccessState.jsx"))
+check("28. the refusal names the level required and the level held",
+      "ROLE_LABEL" in access_jsx and "{role || 'an advisor'}" in access_jsx)
+check("28.    and never tells the user to sign in again for a role problem",
+      "you don't need to sign in again" in access_jsx)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

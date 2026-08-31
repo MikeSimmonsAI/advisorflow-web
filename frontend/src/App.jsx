@@ -49,6 +49,7 @@ import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
+import { Unauthorized, NotFound } from './pages/AccessState'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -106,9 +107,39 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
   const role = user?.role
-  if (requireGodAdmin && role !== 'god_admin') return <Navigate to="/" replace />
-  if (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
-  if (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin') return <Navigate to="/" replace />
+
+  // A REFUSAL IS SHOWN, NOT SWALLOWED.
+  //
+  // These three checks used to `<Navigate to="/" replace />`, so a user who
+  // clicked a nav item they could not open simply landed back on Overview.
+  // From their side that is indistinguishable from a dead button or a broken
+  // app, and it is the reason "the Availability link does nothing" got
+  // reported as a routing bug rather than as a permission one.
+  //
+  // Refusing still refuses — nothing below grants access. The user keeps the
+  // Layout and the nav, so the screen is never a dead end, and the URL stays
+  // put so a refresh shows the same honest answer instead of silently
+  // rewriting where they asked to go.
+  const denied = (
+    (requireGodAdmin && role !== 'god_admin') ||
+    (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') ||
+    (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin')
+  )
+  if (denied) {
+    const required = requireGodAdmin ? 'god_admin'
+      : requireSuperAdmin ? 'super_admin'
+      : 'org_admin'
+    return (
+      <Layout>
+        <ContextBanner />
+        <Unauthorized
+          required={required}
+          role={role}
+          path={typeof window !== 'undefined' ? window.location.pathname : ''}
+        />
+      </Layout>
+    )
+  }
   // The context banner wraps every tenant screen, not just a chosen few. The
   // owner is most likely to forget which customer they entered on the ordinary
   // pages — the leads list, a lead detail — which is exactly where a banner
@@ -152,7 +183,20 @@ function GodRoute({ children }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
-  if (user?.role !== 'god_admin') return <Navigate to="/" replace />
+  // NOT-FOUND, deliberately, rather than the "you need god_admin" refusal used
+  // for ordinary admin screens. Those screens are advertised in the customer's
+  // own nav, so naming the level required is helpful. The platform area is
+  // advertised to nobody: a tenant user only reaches this by typing a URL, and
+  // answering "that is a platform admin page" would confirm the guess. This
+  // still fixes the real bug — the click is no longer silently swallowed —
+  // without telling an outsider what they found.
+  if (user?.role !== 'god_admin') {
+    return (
+      <Layout>
+        <NotFound path={typeof window !== 'undefined' ? window.location.pathname : ''} />
+      </Layout>
+    )
+  }
   return <>{children}</>
 }
 
@@ -293,7 +337,14 @@ export default function App() {
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Admin /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
         <Route path="/users/:userId" element={<ProtectedRoute requireAdmin><UserDetail /></ProtectedRoute>} />
-        <Route path="/compliance" element={<ProtectedRoute requireAdmin><Compliance /></ProtectedRoute>} />
+        {/* NOT requireAdmin. compliance_router.py says so in its own comments:
+            GET /suppression-list is require_tenant_user ("ALL users can
+            view") and POST /suppression-list is "ALL users can add". Only
+            permanent-dnc and delete require_admin, and Compliance.jsx
+            already hides both behind isAdmin — it even renders an
+            explanation for non-admins that this route guard made dead
+            code. An advisor must be able to see who not to contact. */}
+        <Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
         <Route path="/audit-log" element={<ProtectedRoute requireAdmin><AuditLog /></ProtectedRoute>} />
         <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
         <Route path="/lead-cleanup" element={<ProtectedRoute requireAdmin><LeadCleanup /></ProtectedRoute>} />
@@ -302,7 +353,13 @@ export default function App() {
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
-        <Route path="/availability" element={<ProtectedRoute requireAdmin><Availability /></ProtectedRoute>} />
+        {/* NOT requireAdmin. app/routers/availability_router.py scopes every
+            endpoint to the calling advisor (_assert_can_read_advisor,
+            _resolve_advisor) and requires no admin role — this is where an
+            FSA sets their OWN hours. Availability.jsx already gates its
+            team-wide section behind its own isAdmin check, which the route
+            guard made unreachable. */}
+        <Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />
         <Route path="/crm" element={<ProtectedRoute requireAdmin><CRM /></ProtectedRoute>} />
         <Route path="/crm-connectors" element={<ProtectedRoute requireAdmin><CRMIntegration /></ProtectedRoute>} />
         <Route path="/tier-definitions" element={<ProtectedRoute requireAdmin><TierDefinitions /></ProtectedRoute>} />
@@ -331,7 +388,13 @@ export default function App() {
             see the header of GodUsers.jsx. */}
         <Route path="/god/users-all" element={<GodRoute><GodModeLayout><GodUsers /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* A mistyped or dead URL silently became Overview, which hid genuinely
+            broken links from everyone including us. Say what happened. */}
+        <Route path="*" element={
+          isAuthenticated()
+            ? <ProtectedRoute><NotFound path={typeof window !== "undefined" ? window.location.pathname : ""} /></ProtectedRoute>
+            : <Navigate to="/login" replace />
+        } />
       </Routes>
     </BrowserRouter>
     </ToastProvider>
