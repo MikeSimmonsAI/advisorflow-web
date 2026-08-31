@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from app.deps import get_db, get_current_user, require_tenant_user
+from app.deps import get_db, get_current_user, require_tenant_user, load_org_in_scope
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User
 from app.utils.crypto import encrypt_value
@@ -659,13 +659,16 @@ DEFAULT_APPT_TYPES = INDUSTRY_APPT_TYPES["funeral"]
 
 
 def _resolve_appt_org(current_user: User, org_id: Optional[str], db) -> "Organization":
-    """Return the org to operate on. Super/god admin can pass org_id to manage any org."""
+    """Return the org to operate on, scoped to the caller's own platform.
+
+    Second copy of the org_settings_router pattern, and it had the same hole:
+    `?org_id=` was loaded by id alone for any super_admin, letting one brand's
+    operator read and WRITE another brand's appointment types. Routed through
+    the same existing guard. See `_resolve_org` in org_settings_router.py.
+    """
     from app.models.models import Organization
     if org_id and current_user.role in ("super_admin", "god_admin"):
-        org = db.query(Organization).filter_by(id=org_id).first()
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found.")
-        return org
+        return load_org_in_scope(db, current_user, org_id)
     return db.query(Organization).filter_by(id=current_user.organization_id).first()
 
 

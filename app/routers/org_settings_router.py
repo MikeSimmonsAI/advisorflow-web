@@ -22,7 +22,7 @@ def _validate_url(url: Optional[str], field: str) -> Optional[str]:
         raise HTTPException(status_code=400, detail=f"{field} must be an http or https URL.")
     return url
 
-from app.deps import get_db, get_current_user, require_admin
+from app.deps import get_db, get_current_user, require_admin, load_org_in_scope
 from app.models.models import Organization, User
 
 router = APIRouter(prefix="/org-settings", tags=["org-settings"])
@@ -85,14 +85,33 @@ DEFAULT_TIERS = {
 def _resolve_org(current_user: User, org_id: Optional[str], db: Session) -> Organization:
     """
     Resolve which org to operate on.
-    Super admin can pass ?org_id= to manage any org's settings.
-    Everyone else always gets their own org.
+
+    `?org_id=` IS SCOPED TO THE CALLER'S OWN PLATFORM.
+
+    This used to load the org by id alone for anyone holding super_admin, with
+    no platform comparison. `require_super_admin` proves the caller is *a*
+    platform operator; it says nothing about *which* platform. So a super_admin
+    on one brand could pass another brand's org id and reach all thirteen
+    endpoints below - including PUT /org-settings/twilio, which writes
+    `org_twilio_account_sid` and the encrypted auth token. One brand's operator
+    could read or overwrite another brand's customer's Twilio credentials.
+
+    `load_org_in_scope` is the guard that already exists for exactly this, and
+    its own comment says every route taking an org_id must go through it. These
+    routes took it as a QUERY parameter rather than a path parameter, which is
+    how they were missed. Using the existing helper rather than a second
+    authorization system is deliberate: one boundary, one place to audit.
+
+    It refuses with 404 rather than 403 - a 403 on a record you may not touch
+    confirms the record exists, which is how another brand's customer list gets
+    enumerated one id at a time.
+
+    god_admin still reaches every org on every platform; that is the owner
+    control plane and it is unchanged. A customer org_admin never enters this
+    branch at all and continues to get their own org.
     """
     if org_id and current_user.role in ("super_admin", "god_admin"):
-        org = db.query(Organization).filter(Organization.id == org_id).first()
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found")
-        return org
+        return load_org_in_scope(db, current_user, org_id)
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")

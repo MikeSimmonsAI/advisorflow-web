@@ -2115,6 +2115,52 @@ check("31. a bad-email batch is warned about BEFORE the confirm button",
 check("31.    and the warning is honest that they still import and can be texted",
       "can still be texted" in leads31)
 
+
+# ---------------------------------------------------------------------------
+# 32. `?org_id=` NEVER LOADS AN ORG WITHOUT A PLATFORM CHECK
+#
+# Three routers resolved an organization from a QUERY parameter for anyone
+# holding super_admin, by id alone. `require_super_admin` proves the caller is
+# *a* platform operator; it says nothing about *which*. A Brand A operator
+# could pass a Brand B org id and reach PUT /org-settings/twilio, which writes
+# the account SID and encrypted auth token.
+#
+# `load_org_in_scope` already existed for this, and its own comment says every
+# route accepting an org_id must use it - these took it as a query parameter
+# rather than a path parameter, which is how they were missed. Behavioural
+# proof lives in scripts/probe_org_settings_scoping.py; this is the static half
+# that stops the shape reappearing in a fourth router.
+# ---------------------------------------------------------------------------
+_SCOPED_ORG_ROUTERS = (
+    "app/routers/org_settings_router.py",
+    "app/routers/settings_router.py",
+    "app/routers/crm_native_router.py",
+)
+for _f in _SCOPED_ORG_ROUTERS:
+    _src = read(_f)
+    check("32. %s resolves org_id through the scoping guard" % _f.split("/")[-1],
+          "load_org_in_scope(db, current_user, org_id)" in _src)
+    # The exact vulnerable shape: elevated role check, then a bare id lookup.
+    _bad = ('if org_id and current_user.role in ("super_admin", "god_admin"):\n'
+            '        org = db.query(Organization).filter(Organization.id == org_id).first()')
+    check("32.    and no longer loads it by id alone", _bad not in _src)
+
+deps32 = read("app/deps.py")
+check("32. the guard still lets the platform owner cross brands",
+      'if actor.role == "god_admin":\n        return org' in deps32)
+check("32.    and confines everyone else to their own platform's orgs",
+      "if str(org.id) not in set(get_platform_org_ids(actor, db)):" in deps32)
+check("32.    refusing with 404 so ids cannot be enumerated",
+      deps32.count('status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found"') >= 2)
+
+deploy32 = read("deploy.ps1")
+check("32. the behavioural gate blocks a deploy on its own",
+      "probe_org_settings_scoping.py" in deploy32
+      and "CROSS-BRAND org_id SCOPING FAILED - not deploying." in deploy32)
+check("32.    without swallowing the platform-boundary gate beside it",
+      "PLATFORM BOUNDARY CHECKS FAILED - not deploying." in deploy32
+      and "$script:gateFailed" not in deploy32)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

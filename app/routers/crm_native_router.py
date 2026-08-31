@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user, require_tenant_user
+from app.deps import get_db, get_current_user, require_tenant_user, load_org_in_scope
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Organization, CRMContact, CRMNote, Lead
 
@@ -206,10 +206,11 @@ def get_stages(
     """Return this org's CRM stages. Custom if configured, else industry default.
     Super admin / god admin can pass ?org_id= to inspect any org's stages.
     """
+    # Third copy of the same pattern. Read-only, but it still leaked another
+    # brand's CRM stage configuration and industry to a super_admin who guessed
+    # an org id. Same guard as the other two.
     if org_id and current_user.role in ("super_admin", "god_admin"):
-        org = db.query(Organization).filter(Organization.id == org_id).first()
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found")
+        org = load_org_in_scope(db, current_user, org_id)
     else:
         org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     if not org:
