@@ -65,8 +65,14 @@ const ICONS = {
 const JUMP = [
   { label: 'Customer App',    path: '/',       icon: 'grid',
     hint: 'The tenant application, as an organization sees it' },
-  { label: 'Sales Workspace', path: '/sales',  icon: 'briefcase',
-    hint: 'EvoSys Pro brand sales — pipeline, scheduling, opportunities' },
+  // WAS: a single 'Sales Workspace' jump straight to /sales, with the brand
+  // named in this literal — 'EvoSys Pro brand sales'. There was no way to pick
+  // another brand, and /sales returned EVERY brand's pipeline for the owner, so
+  // a second brand would have silently merged two companies' deals onto one
+  // screen. Workspaces is the doorway now, and it is driven by the platform
+  // records rather than by this file.
+  { label: 'Workspaces',      path: '/god/workspaces', icon: 'briefcase',
+    hint: 'Choose a brand, then its sales workspace or one of its customers' },
 ]
 
 /**
@@ -94,6 +100,7 @@ const NAV = [
   { label: 'Platform',         path: '/god/platform',         icon: 'layers'   },
   { label: 'Organizations',    path: '/god/organizations',    icon: 'building' },
   { label: 'Customers',        path: '/god/customers',        icon: 'globe'    },
+  { label: 'Workspaces',       path: '/god/workspaces',       icon: 'layers'   },
   { label: 'Users & Identity', path: '/god/users-all',        icon: 'users'    },
 
   { group: 'OPERATIONS' },

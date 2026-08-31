@@ -171,6 +171,8 @@ if ($SkipSmoke) {
     if ($LASTEXITCODE -ne 0) { Write-Host "CROSS-BRAND org_id SCOPING FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_config.py 2>&1 | Select-String "FAIL|checks passed|HOLDS" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND CONFIG CHECKS FAILED - not deploying."; exit 1 }
+    python scripts\probe_workspaces.py 2>&1 | Select-String "FAIL|checks passed|HOLDS" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "WORKSPACES CONTEXT CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

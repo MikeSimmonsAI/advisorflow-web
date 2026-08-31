@@ -45,6 +45,7 @@ from app.models.models import (
     User, Organization, Proposal, ProposalBlock, ProposalToken, ProposalView, ProposalFile,
 )
 from app.services.email_service import send_email
+from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/proposals", tags=["proposals"])
@@ -176,7 +177,11 @@ def create_proposal(
 ):
     p = Proposal(
         id=_gen_id(),
-        organization_id=current_user.organization_id,
+        # Proposal.organization_id is NULLABLE, so a neutral owner does not
+        # get a loud failure here - they get a proposal that belongs to
+        # nobody and appears in no customer's list. tenant_write_org_id
+        # turns that into a 409 naming the context to select.
+        organization_id=_tenant_write_org_id(current_user),
         created_by_id=current_user.id,
         title=req.title,
         subtitle=req.subtitle,
@@ -603,7 +608,7 @@ async def upload_proposal_file(
     The file_url is a path to the public serve endpoint.
     """
     p = db.query(Proposal).filter_by(id=proposal_id,
-                                     organization_id=current_user.organization_id,
+                                     organization_id=_tenant_write_org_id(current_user),
                                      deleted_at=None).first()
     if not p:
         raise HTTPException(404, "Proposal not found")
@@ -616,7 +621,9 @@ async def upload_proposal_file(
         raise HTTPException(400, f"File too large ({len(data) // 1024 // 1024} MB). Maximum is 20 MB.")
 
     pf = ProposalFile(
-        organization_id=current_user.organization_id,
+        # ProposalFile.organization_id is nullable, so a context-less owner
+        # would create a file row owned by nobody rather than being refused.
+        organization_id=_tenant_write_org_id(current_user),
         proposal_id=proposal_id,
         filename=file.filename or "upload",
         content_type=file.content_type,

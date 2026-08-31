@@ -2223,6 +2223,86 @@ check("33. the behavioural gate blocks a deploy on its own",
       "probe_brand_config.py" in deploy33
       and "BRAND CONFIG CHECKS FAILED - not deploying." in deploy33)
 
+
+# ---------------------------------------------------------------------------
+# 34. WORKSPACES IS THE DOORWAY, AND A BRAND IS A PLACE YOU CAN STAND
+#
+# God Mode's rail carried ONE workspace jump, straight to /sales, with the
+# brand named in a literal - "EvoSys Pro brand sales". /sales takes no brand
+# parameter and returned EVERY brand's sales org for the owner, so with a
+# single brand seeded it looked like a default and a second brand would have
+# blended two companies' pipelines onto one screen.
+#
+# Behavioural proof - including that a neutral owner still sees everything -
+# lives in scripts/probe_workspaces.py. This is the static half.
+# ---------------------------------------------------------------------------
+deps34 = read("app/deps.py")
+check("34. the brand context header is god-only and validated",
+      "X-Brand-Override" in deps34
+      and "_selected_brand_id" in deps34
+      and "filter(_Platform.id == brand_override)" in deps34)
+main34 = read("app/main.py")
+check("34.    and CORS admits it", '"X-Brand-Override"' in main34)
+
+po34 = read("app/services/platform_owner.py")
+check("34. a brand context has accessors and a write guard",
+      "def selected_brand_id(" in po34 and "def brand_write_platform_id(" in po34)
+check("34.    and the refusal names the missing context",
+      "_NO_BRAND_DETAIL" in po34 and "Choose a brand in" in po34)
+
+sa34 = read("app/services/sales_access.py")
+check("34. a selected brand NARROWS /sales to that brand's sales orgs",
+      "BrandSalesOrg.platform_id == brand_platform_id" in sa34)
+check("34.    and a neutral owner still gets every brand",
+      "return [row[0] for row in db.query(BrandSalesOrg.id).all()]" in sa34)
+
+ctx34 = read("app/routers/platform_context_router.py")
+check("34. there is a brand context endpoint, shaped like the customer one",
+      '@router.post("/context/brand/{platform_id}"' in ctx34
+      and "memberships_before=before" in ctx34)
+check("34.    it emits three levels, not two",
+      'level = "brand"' in ctx34 and 'level = "customer"' in ctx34)
+check("34.    with a server-decided breadcrumb trail",
+      '"trail": trail,' in ctx34 and 'trail = ["AdvisorFlow"]' in ctx34)
+check("34.    and neutral means NOTHING selected, not merely no customer",
+      '"is_neutral": org is None and platform is None,' in ctx34)
+check("34.    leaving clears both levels",
+      'header_name="X-Org-Override,X-Brand-Override"' in ctx34)
+
+# No phantom identities, no ownerless rows.
+adm34 = read("app/routers/admin_router.py")
+check("34. POST /admin/users cannot invent an org-NULL identity",
+      "organization_id=_tenant_write_org_id(current_user)," in adm34)
+prop34 = read("app/routers/proposal_router.py")
+check("34. the nullable proposal writes are guarded",
+      "organization_id=current_user.organization_id" not in prop34)
+
+# The doorway itself.
+ws34 = jsx_code_only(read("frontend/src/pages/god/Workspaces.jsx"))
+check("34. the selector is driven by the platform records",
+      "/god/platform/overview" in ws34
+      and "/god/platform/brands/${b.id}/customers" in ws34)
+check("34.    rendering each brand in its own accent and mark",
+      "b.accent_color" in ws34 and "b.logo_initial" in ws34)
+check("34.    and naming no brand in code",
+      "EvoSys" not in ws34 and "BookaBoost" not in ws34)
+shell34 = jsx_code_only(read("frontend/src/pages/GodShell.jsx"))
+check("34. the hardcoded brand jump is gone",
+      "EvoSys" not in shell34 and "/god/workspaces" in shell34)
+ban34 = jsx_code_only(read("frontend/src/components/ContextBanner.jsx"))
+check("34. the banner renders the server's trail, not localStorage",
+      "ctx.trail" in ban34)
+check("34.    with Switch workspace and Return to God Mode",
+      "Switch workspace" in ban34 and "Return to God Mode" in ban34)
+cl34 = jsx_code_only(read("frontend/src/api/client.js"))
+check("34. the brand travels on every request",
+      "X-Brand-Override" in cl34 and "getBrandContext()" in cl34)
+
+deploy34 = read("deploy.ps1")
+check("34. the behavioural gate blocks a deploy on its own",
+      "probe_workspaces.py" in deploy34
+      and "WORKSPACES CONTEXT CHECKS FAILED - not deploying." in deploy34)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

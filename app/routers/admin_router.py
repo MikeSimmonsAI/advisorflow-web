@@ -22,6 +22,9 @@ from app.services import staff_activation as _activation
 from app.models.staff_models import PURPOSE_SETUP as _PURPOSE_SETUP, PURPOSE_RESET as _PURPOSE_RESET
 from app.services.dedup_service import normalize_phone, normalize_last_name
 from app.routers.audit_log_router import log_action
+# Refuses a write the owner has not given a destination for. See the
+# create_user comment below.
+from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
 
 # ── Industry-specific tier presets ────────────────────────────────────────────
 # Each entry: (tier_key, tier_label, track_key, track_label, ai_tone_context, sort_order)
@@ -795,7 +798,17 @@ def create_user(
     # No plaintext password is created or returned. See _unknowable_password.
     secret = _unknowable_password()
     new_user = User(
-        organization_id=current_user.organization_id,
+        # A NEUTRAL OWNER MUST NOT MANUFACTURE AN IDENTITY.
+        #
+        # This read current_user.organization_id directly. For a
+        # god_admin with no customer selected that is None, and an
+        # org-NULL user is the system's POSITIVE ASSERTION that someone
+        # is a brand-sales identity (deps.py). So creating a user from
+        # God Mode with nothing selected produced a phantom seller:
+        # refused by every tenant route, holding no membership, useless
+        # in the sales workspace, and indistinguishable from a real one.
+        # tenant_write_org_id returns a 409 naming what to select.
+        organization_id=_tenant_write_org_id(current_user),
         email=req.email,
         password_hash=hash_password(secret),
         full_name=req.full_name,

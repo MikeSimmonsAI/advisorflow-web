@@ -86,6 +86,62 @@ def selected_org_id(user: Optional[User]) -> Optional[str]:
     return str(org_id)
 
 
+def selected_brand_id(user: Optional[User]) -> Optional[str]:
+    """The brand/platform currently in context, or None.
+
+    For the owner this is whatever `get_current_user` resolved from
+    X-Brand-Override. For a tenant user it is their own organization's platform,
+    because they cannot stand anywhere else.
+    """
+    if user is None:
+        return None
+    explicit = getattr(user, "_selected_brand_id", None)
+    if explicit:
+        return str(explicit)
+    return None
+
+
+def selected_brand_name(user: Optional[User]) -> Optional[str]:
+    return getattr(user, "_selected_brand_name", None) if user is not None else None
+
+
+def has_brand_context(user: Optional[User]) -> bool:
+    return selected_brand_id(user) is not None
+
+
+_NO_BRAND_DETAIL = (
+    "No brand is selected. This action creates or changes records that belong to "
+    "one brand, and AdvisorFlow itself is not a brand. Choose a brand in "
+    "Workspaces first, then run this again."
+)
+
+
+def brand_write_platform_id(user: User) -> str:
+    """The platform id a write should be attributed to, or a 409 explaining why not.
+
+    The counterpart to `tenant_write_org_id`. A neutral owner creating a sales
+    user, a package or a brand-scoped setting has not said WHICH brand it
+    belongs to, and guessing produces a record that quietly belongs to the wrong
+    company - or, worse, to none.
+    """
+    from fastapi import HTTPException
+    if getattr(user, "role", None) == "god_admin":
+        brand = selected_brand_id(user)
+        if not brand:
+            raise HTTPException(status_code=409, detail=_NO_BRAND_DETAIL)
+        return brand
+    plat = getattr(user, "platform_id", None)
+    if plat:
+        return str(plat)
+    raise HTTPException(status_code=409, detail=_NO_BRAND_DETAIL)
+
+
+def require_brand_context(user: User = None):
+    """FastAPI dependency form of the guard above."""
+    brand_write_platform_id(user)
+    return user
+
+
 def has_tenant_context(user: Optional[User]) -> bool:
     return selected_org_id(user) is not None
 

@@ -83,6 +83,20 @@ def sales_org_ids(user: User, db: Session) -> List[str]:
     is a legitimate meeting participant (decision #27).
     """
     if is_god(user):
+        # A SELECTED BRAND NARROWS. IT NEVER WIDENS.
+        #
+        # The owner legitimately sells across every brand, so with nothing
+        # selected this still returns all of them. But once a brand IS selected
+        # in Workspaces, returning all of them is how two companies' pipelines
+        # end up merged on one screen under one brand's name - invisible today
+        # only because a single brand sales org exists.
+        from app.services import platform_owner as _po
+        from app.models.models import Platform as _Platform
+        brand_platform_id = _po.selected_brand_id(user)
+        if brand_platform_id:
+            rows = (db.query(BrandSalesOrg.id)
+                    .filter(BrandSalesOrg.platform_id == brand_platform_id).all())
+            return [r[0] for r in rows]
         return [row[0] for row in db.query(BrandSalesOrg.id).all()]
     return [m.scope_id for m in sales_memberships(user, db)]
 

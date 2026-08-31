@@ -73,6 +73,15 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // a wrong number sitting in a row of right ones.
   const orgCtx = options.noOrgContext ? null : getOrgContext()
   if (orgCtx) headers['X-Org-Override'] = orgCtx.orgId
+  // THE BRAND TRAVELS WITH THE REQUEST TOO.
+  //
+  // A brand used to be inferred from whichever customer was selected, so
+  // standing in a brand with no customer inside it was not expressible -
+  // which is why /sales returned every brand's pipeline at once. Sent
+  // even on noOrgContext reads: those are the platform-wide God Mode
+  // views, and the brand is exactly what should narrow them.
+  const brandCtx = getBrandContext()
+  if (brandCtx) headers['X-Brand-Override'] = brandCtx.platformId
   if (!(options.body instanceof FormData) && options.body) {
     headers['Content-Type'] = 'application/json'
   }
@@ -397,6 +406,27 @@ function hexToRgba(hex, alpha) {
 // â”€â”€ Org Context (super admin only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ORG_CONTEXT_KEY = 'af_org_context'
+const BRAND_CONTEXT_KEY = 'af_brand_context'
+
+export function setBrandContext(platformId, brandName) {
+  try {
+    localStorage.setItem(BRAND_CONTEXT_KEY,
+                         JSON.stringify({ platformId, brandName }))
+  } catch { /* storage blocked - the header simply will not be sent */ }
+}
+
+export function getBrandContext() {
+  try {
+    const raw = localStorage.getItem(BRAND_CONTEXT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function clearBrandContext() {
+  try { localStorage.removeItem(BRAND_CONTEXT_KEY) } catch { /* nothing to clear */ }
+}
 
 export function setOrgContext(orgId, orgName) {
   localStorage.setItem(ORG_CONTEXT_KEY, JSON.stringify({ orgId, orgName }))
@@ -413,6 +443,13 @@ export function getOrgContext() {
 export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
   localStorage.removeItem('bb_org_context') // clean up legacy key
+}
+
+// Leaving everything means leaving the brand as well - a stale brand under a
+// cleared customer would render a trail the server does not agree with.
+export function clearAllContext() {
+  clearOrgContext()
+  clearBrandContext()
 }
 
 

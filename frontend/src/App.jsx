@@ -89,6 +89,7 @@ import TeamProposals from './pages/sales/TeamProposals'
 import Salespeople from './pages/sales/Salespeople'
 import Prospects from './pages/sales/Prospects'
 import GodUsers from './pages/god/GodUsers'
+import Workspaces from './pages/god/Workspaces'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext } from './api/client'
 import { exitCustomer } from './pages/god/enterCustomer'
 
@@ -386,6 +387,7 @@ export default function App() {
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
         {/* Users & Identity. One row per human, every context on that row —
             see the header of GodUsers.jsx. */}
+        <Route path="/god/workspaces" element={<GodRoute><GodModeLayout><Workspaces /></GodModeLayout></GodRoute>} />
         <Route path="/god/users-all" element={<GodRoute><GodModeLayout><GodUsers /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely

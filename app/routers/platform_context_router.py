@@ -57,15 +57,47 @@ def _org_brief(db: Session, org: Organization) -> dict:
 
 
 def _resolved_context(db: Session, user: User) -> dict:
-    """What the SERVER thinks the owner is currently looking at."""
+    """What the SERVER thinks the owner is currently looking at.
+
+    THREE LEVELS, not two. This used to emit only "customer" or "platform",
+    where "platform" meant NEUTRAL - so a brand was a label derived from
+    whichever customer was selected and never somewhere the owner could stand.
+    "brand" is that missing middle: a brand chosen with no customer inside it,
+    which is what the brand's own sales workspace runs in.
+
+    `trail` is the breadcrumb every client renders, decided here so they cannot
+    disagree: AdvisorFlow -> EvoSys Pro -> Restland.
+    """
     org_id = po.selected_org_id(user)
     org = db.query(Organization).filter(Organization.id == org_id).first() if org_id else None
+
+    # A customer implies its brand. Without one, an explicitly selected brand
+    # stands on its own.
     platform = (
         db.query(Platform).filter(Platform.id == org.platform_id).first()
         if org is not None and org.platform_id else None
     )
+    if platform is None:
+        brand_id = po.selected_brand_id(user)
+        if brand_id:
+            platform = db.query(Platform).filter(Platform.id == brand_id).first()
+
+    if org is not None:
+        level = "customer"
+    elif platform is not None:
+        level = "brand"
+    else:
+        level = "platform"
+
+    trail = ["AdvisorFlow"]
+    if platform is not None:
+        trail.append(platform.name)
+    if org is not None:
+        trail.append(org.name)
+
     return {
-        "level": "customer" if org is not None else "platform",
+        "level": level,
+        "trail": trail,
         "platform": None if platform is None else {
             "id": platform.id, "name": platform.name, "slug": platform.slug,
         },
@@ -73,13 +105,17 @@ def _resolved_context(db: Session, user: User) -> dict:
         # The banner copy, decided by the server so every client says the same
         # thing. "VIEWING: <customer> — <brand> customer".
         "banner": (
-            None if org is None
-            else "VIEWING: %s%s" % (
+            "VIEWING: %s%s" % (
                 org.name,
                 ("  ·  %s customer" % platform.name) if platform is not None else "",
-            )
+            ) if org is not None
+            else ("VIEWING: %s  ·  brand workspace" % platform.name)
+            if platform is not None else None
         ),
-        "is_neutral": org is None,
+        # Neutral means NOTHING is selected - not merely "no customer". An
+        # owner standing in a brand has a context, and the write guards must
+        # see that.
+        "is_neutral": org is None and platform is None,
     }
 
 
@@ -232,6 +268,62 @@ def enter_customer(org_id: str, request: Request, db: Session = Depends(get_db),
     )
 
 
+@router.post("/context/brand/{platform_id}", response_model=EnterResponse)
+def enter_brand(platform_id: str, request: Request, db: Session = Depends(get_db),
+                user: User = Depends(require_god)):
+    """Enter a brand's context administratively.
+
+    The exact shape of `enter_customer`, and for the same reasons: audited,
+    request-scoped, and CREATING NO MEMBERSHIP - the response carries the count
+    before and after so the claim is checkable from outside rather than being a
+    promise in a docstring.
+
+    Entering a brand does not enter any of its customers. It is the level the
+    brand's own sales workspace runs in, and it is what stops /sales returning
+    every brand's pipeline at once.
+    """
+    plat = db.query(Platform).filter(Platform.id == platform_id).first()
+    if not plat:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    if plat.is_active is False:
+        raise HTTPException(status_code=409,
+                            detail="%s is not an active brand." % plat.name)
+
+    before = _membership_count(db, user.id)
+
+    log_action(
+        db, None, user.id,
+        action="platform_owner.enter_brand",
+        target_type="platform", target_id=plat.id,
+        platform_id=plat.id,
+        details={
+            "brand_name": plat.name,
+            "brand_slug": plat.slug,
+            "from_ip": request.client.host if request.client else "unknown",
+            "membership_created": False,
+        },
+        note="Administrative brand context entry by the platform owner. "
+             "No membership granted.",
+    )
+
+    after = _membership_count(db, user.id)
+
+    return EnterResponse(
+        context={
+            "level": "brand",
+            "trail": ["AdvisorFlow", plat.name],
+            "platform": {"id": plat.id, "name": plat.name, "slug": plat.slug},
+            "customer": None,
+            "banner": "VIEWING: %s  ·  brand workspace" % plat.name,
+            "is_neutral": False,
+        },
+        header_name="X-Brand-Override",
+        header_value=plat.id,
+        memberships_before=before,
+        memberships_after=after,
+    )
+
+
 @router.post("/context/exit", response_model=EnterResponse)
 def exit_context(request: Request, db: Session = Depends(get_db),
                  user: User = Depends(require_god)):
@@ -260,9 +352,12 @@ def exit_context(request: Request, db: Session = Depends(get_db),
     after = _membership_count(db, user.id)
 
     return EnterResponse(
-        context={"level": "platform", "platform": None, "customer": None,
+        context={"level": "platform", "trail": ["AdvisorFlow"],
+                 "platform": None, "customer": None,
                  "banner": None, "is_neutral": True},
-        header_name="X-Org-Override",
+        # Both context headers are cleared. Leaving the brand set while the
+        # customer cleared would put the owner somewhere they did not choose.
+        header_name="X-Org-Override,X-Brand-Override",
         header_value=None,
         memberships_before=before,
         memberships_after=after,

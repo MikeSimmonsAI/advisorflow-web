@@ -76,7 +76,34 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     # so changes are never written back to the DB.
     if user.role == "god_admin":
         org_override = request.headers.get("X-Org-Override")
+        # BRAND CONTEXT — the level between the platform and a customer.
+        #
+        # A brand used to be a LABEL derived from whichever customer was
+        # selected, never a place the owner could stand. So "the sales
+        # workspace" meant every brand's pipeline at once: with one brand
+        # seeded that looked like a sensible default, and the moment a second
+        # brand existed it would have silently blended two companies' deals
+        # onto one screen under a single brand's name.
+        #
+        # Same shape as X-Org-Override exactly: god only, request-scoped,
+        # never persisted, and validated against a real platform row so a
+        # typo narrows nothing rather than narrowing to nothing.
+        brand_override = request.headers.get("X-Brand-Override")
         db.expunge(user)  # always detach first
+        if brand_override:
+            from app.models.models import Platform as _Platform
+            _plat = (db.query(_Platform)
+                     .filter(_Platform.id == brand_override).first())
+            if _plat is not None:
+                user._selected_brand_id = _plat.id
+                user._selected_brand_name = _plat.name
+                user._selected_brand_slug = _plat.slug
+                _log.info(
+                    "AUDIT: god_admin %s (id=%s) activated X-Brand-Override -> "
+                    "platform=%s (%s) from IP=%s",
+                    user.email, user.id, _plat.id, _plat.slug,
+                    request.client.host if request.client else "unknown",
+                )
         if org_override:
             # The platform's own pseudo-org is not a customer and is never a
             # context you can enter. Selecting it would reintroduce exactly the

@@ -222,7 +222,8 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Org-Override"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin",
+                   "X-Org-Override", "X-Brand-Override"],
 )
 
 # ── Public compliance pages - registered FIRST so nothing else intercepts them.
