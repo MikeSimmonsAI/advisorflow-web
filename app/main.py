@@ -11,6 +11,8 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 import asyncio
 import os
 
+import logging
+
 from dotenv import load_dotenv
 load_dotenv()  # Load .env before any app imports read os.environ
 
@@ -142,6 +144,31 @@ app = FastAPI(
 from app.limiter import limiter
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ── Unhandled errors must still LOOK like errors ─────────────────────────────
+# Without this, an uncaught exception is re-raised by Starlette's outermost
+# error middleware, which sits ABOVE CORSMiddleware - so the 500 reaches the
+# browser carrying no Access-Control-Allow-Origin header, the browser refuses
+# to hand it to the page, and `fetch` rejects. The frontend's only honest
+# reading of a rejected fetch is "Unable to reach the server", so every
+# server-side crash was reported to users as a connection problem. A wrong
+# column name in a CSV and a dead backend produced the identical message, and
+# people went looking at their wifi.
+#
+# Returning a real JSONResponse keeps the exception INSIDE the middleware
+# stack, so the CORS headers are applied and the browser lets the page read
+# the status. The traceback is still logged in full; only the client-facing
+# body is generic, because an exception message can carry internals.
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    logging.getLogger(__name__).exception(
+        "unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong on our end. "
+                           "The error has been logged."},
+    )
 
 
 # ── Security headers middleware ───────────────────────────────────────────────

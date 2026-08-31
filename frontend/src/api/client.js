@@ -77,15 +77,33 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
     headers['Content-Type'] = 'application/json'
   }
 
+  // A FILE UPLOAD IS NOT SAFE TO REPLAY.
+  //
+  // A transport failure does not tell you whether the server processed the
+  // request - only that the answer never came back. Replaying a GET is free;
+  // replaying `POST /leads/upload/confirm` after the import already committed
+  // imports the whole batch a second time. The retry loop did exactly that,
+  // three times, for every FormData upload.
+  //
+  // A FormData body is also single-use once its File stream has been read, so
+  // the retry was frequently replaying a body the browser had already
+  // consumed - failing again for a different reason than the original.
+  const isUpload = options.body instanceof FormData
+  const retriesAllowed = isUpload ? 0 : MAX_RETRIES
+
   let res
   try {
     res = await fetch(`${API_BASE}${path}`, { ...options, headers })
   } catch (networkErr) {
-    if (attempt < MAX_RETRIES) {
+    if (attempt < retriesAllowed) {
       await sleep(RETRY_DELAY_MS)
       return request(path, options, attempt + 1)
     }
-    throw new Error('Unable to reach the server. Please check your connection or try again in a moment.')
+    throw new Error(
+      isUpload
+        ? 'The upload did not complete. Nothing was imported — check your connection and try again.'
+        : 'Unable to reach the server. Please check your connection or try again in a moment.'
+    )
   }
 
 

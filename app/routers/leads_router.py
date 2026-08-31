@@ -91,6 +91,12 @@ def preview_upload(
             campaign_purpose=campaign_purpose,
             offer_hook=offer_hook,
         )
+    except ValueError as exc:
+        # A file we cannot read is a 400 the uploader can act on - the wrong
+        # column, the wrong sheet - not a 500. Raised as a real HTTP error so
+        # the browser gets a CORS-headed response and shows the reason instead
+        # of reporting a network failure.
+        raise HTTPException(status_code=400, detail=str(exc))
     finally:
         os.unlink(tmp_path)
 
@@ -146,6 +152,9 @@ def confirm_upload(
             offer_hook=offer_hook,
             imported_by_name=current_user.full_name or current_user.email,
         )
+    except ValueError as exc:
+        # Same as the preview: an unreadable file is a 400 with the reason.
+        raise HTTPException(status_code=400, detail=str(exc))
     finally:
         os.unlink(tmp_path)
 

@@ -50,7 +50,14 @@ from app.services.dedup_service import (check_and_register, normalize_phone,
 HEADER_MAP = {
     "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name", "given name"],
     "last_name": ["last name", "lastname", "lname", "last", "surname", "buyerlastname", "buyer last name", "family name"],
-    "phone": ["phone", "phone number", "cell", "cell phone", "mobile", "telephone", "buyerphone", "buyer phone", "phone 1 - value", "phone 2 - value"],
+    # ONE name column is the common CRM export shape, not an edge case.
+    # Only consulted when no explicit last-name column exists - see split_full_name.
+    "full_name": ["full name", "fullname", "name", "contact name", "lead name",
+                  "customer name", "client name", "display name", "primary contact"],
+    "phone": ["phone", "phone number", "cell", "cell phone", "mobile", "telephone", "buyerphone", "buyer phone", "phone 1 - value", "phone 2 - value",
+              # E.164 is how any export that normalises its numbers labels them.
+              "phone e164", "phone (e164)", "phone_e164", "e164", "e.164",
+              "mobile phone", "mobile number", "primary phone", "phone1", "home phone"],
     "email": ["email", "email address", "e-mail", "buyeremail", "buyer email", "e-mail 1 - value", "e-mail 2 - value"],
     "tier": ["tier", "data tier", "lead type", "status type", "salescontractneedtypedescription", "sales contract need type description", "need type"],
     "status_reason": ["status reason", "status", "lead status"],
@@ -166,6 +173,64 @@ def _merge_custom_fields(
     return json.dumps(base) if base else None
 
 
+# A CRM export very often carries ONE name column, not two. Restland's own
+# Dynamics export is exactly that shape: "Full Name" and "Phone E164", with no
+# "Last Name" anywhere. The importer required a last-name column and knew none
+# of those spellings, so it raised before reading a single row and a legitimate
+# 100-lead file could not be imported at all.
+#
+# Honorifics and suffixes are stripped so the LAST TOKEN is genuinely the
+# family name: "Dr. Daniel Pham" is Pham, and "John Smith Jr." is Smith, not
+# Jr. Getting this wrong matters more here than in most systems - the name is
+# what a funeral home says out loud to a grieving family, and dedup keys on the
+# last name, so "Jr." as a surname both misaddresses people and silently
+# corrupts duplicate matching.
+_HONORIFICS = {
+    "mr", "mrs", "ms", "miss", "mx", "dr", "prof", "rev", "fr", "sr.",
+    "sir", "madam", "rabbi", "pastor", "capt", "col", "lt", "sgt", "hon",
+}
+_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v", "md", "phd", "dds", "esq", "do", "rn"}
+
+
+def _strip_dots(token: str) -> str:
+    return token.replace(".", "").replace(",", "").strip().lower()
+
+
+def split_full_name(full: str) -> tuple[str, str]:
+    """('Dr. Daniel Pham') -> ('Daniel', 'Pham'). Returns (first, last).
+
+    Handles the "Last, First" form some exports use, drops honorifics and
+    generational suffixes, and keeps middle names with the first name rather
+    than discarding information the office may recognise a person by.
+
+    A single-token name becomes the LAST name, never the first: last name is
+    what dedup and the greeting both rely on, so a lone "Cher" is safer as a
+    surname than as a first name with an empty surname.
+    """
+    raw = (full or "").strip()
+    if not raw:
+        return "", ""
+
+    # "Cordon, Donna Barrows" — the comma form is unambiguous, so trust it.
+    if "," in raw:
+        head, _, tail = raw.partition(",")
+        head, tail = head.strip(), tail.strip()
+        if head and tail and _strip_dots(tail) not in _SUFFIXES:
+            return tail, head
+
+    tokens = [t for t in raw.split() if t.strip()]
+    while tokens and _strip_dots(tokens[0]) in _HONORIFICS:
+        tokens.pop(0)
+    while len(tokens) > 1 and _strip_dots(tokens[-1]) in _SUFFIXES:
+        tokens.pop()
+
+    if not tokens:
+        return "", raw
+    if len(tokens) == 1:
+        return "", tokens[0]
+    return " ".join(tokens[:-1]), tokens[-1]
+
+
 def _build_column_lookup(columns) -> dict:
     lookup = {}
     lowered = {c: str(c).strip().lower() for c in columns}
@@ -250,9 +315,9 @@ def parse_excel_file(file_path: str) -> list[dict]:
             f"Could not find a phone OR email column in file. "
             f"Found columns: {list(df.columns)}"
         )
-    if "last_name" not in lookup:
+    if "last_name" not in lookup and "full_name" not in lookup:
         raise ValueError(
-            f"Could not find required column 'last name' in file. "
+            "Could not find a name column. Expected 'Last Name' or 'Full Name'. "
             f"Found columns: {list(df.columns)}"
         )
 
@@ -269,9 +334,21 @@ def parse_excel_file(file_path: str) -> list[dict]:
             if col not in mapped_raw_cols and str(row[col]).strip()
         }
 
+        first_name = row.get(lookup.get("first_name", ""), "").strip()
+        last_name = row.get(lookup.get("last_name", ""), "").strip()
+        # An explicit Last Name column always wins; the single-column form is
+        # only consulted to fill what is genuinely missing, so a file carrying
+        # both is never second-guessed.
+        if not last_name and "full_name" in lookup:
+            split_first, split_last = split_full_name(
+                row.get(lookup["full_name"], "").strip())
+            last_name = split_last
+            if not first_name:
+                first_name = split_first
+
         rows.append({
-            "first_name": row.get(lookup.get("first_name", ""), "").strip(),
-            "last_name": row.get(lookup["last_name"], "").strip(),
+            "first_name": first_name,
+            "last_name": last_name,
             "phone": row.get(lookup.get("phone", ""), "").strip(),
             "email": row.get(lookup.get("email", ""), "").strip(),
             "tier_raw": row.get(lookup.get("tier", ""), "").strip(),

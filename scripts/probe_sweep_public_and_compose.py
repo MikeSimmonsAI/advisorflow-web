@@ -1923,6 +1923,89 @@ check("28. the refusal names the level required and the level held",
 check("28.    and never tells the user to sign in again for a role problem",
       "you don't need to sign in again" in access_jsx)
 
+
+# ---------------------------------------------------------------------------
+# 29. A REAL CRM EXPORT MUST IMPORT, AND A REJECTED FILE MUST SAY WHY
+#
+# Restland's Dynamics export carries "Full Name" and "Phone E164" and no
+# "Last Name" column at all. The importer required a last-name column and knew
+# neither spelling, so it raised before reading a single row — and because the
+# ValueError was uncaught, it became a bare 500 raised ABOVE the CORS
+# middleware, reaching the browser with no CORS headers. The browser refused
+# the response, `fetch` rejected, and the only honest thing the frontend could
+# say was "Unable to reach the server". A wrong column name and a dead backend
+# produced the identical message.
+# ---------------------------------------------------------------------------
+import app.services.import_service as _imp
+
+REAL_EXPORT_COLUMNS = [
+    'Current Owner', 'Full Name', 'Email', 'Phone E164', 'Lead Type',
+    'Status Reason', 'Last Action', 'Last Activity Date',
+    'Days Since Last Activity', 'Contact Age Bucket', 'Email Status',
+    'Address Status', 'Lead Source', 'Local Lead Source', 'Veteran Status',
+    'Created On', 'Original Owner', 'Current Modified On', 'Changed Fields',
+]
+_lk = _imp._build_column_lookup(REAL_EXPORT_COLUMNS)
+
+check("29. a single 'Full Name' column is recognised", _lk.get("full_name") == "Full Name")
+check("29. 'Phone E164' is recognised as a phone column", _lk.get("phone") == "Phone E164")
+check("29.    which is the half that failed SILENTLY - every number dropped",
+      "phone e164" in _imp.HEADER_MAP["phone"])
+check("29. and the rest of the export still maps",
+      _lk.get("email") == "Email" and _lk.get("tier") == "Lead Type")
+
+# The name is what a funeral home says out loud to a family, and dedup keys on
+# the last name — an honorific or a suffix landing there is not cosmetic.
+_split = _imp.split_full_name
+for _raw, _want in [
+    ("Dr. Daniel Pham",       ("Daniel", "Pham")),
+    ("Mrs. Thu-Anh Vu",       ("Thu-Anh", "Vu")),
+    ("Donna Barrows Cordon",  ("Donna Barrows", "Cordon")),
+    ("Callie Griffith-Tarr",  ("Callie", "Griffith-Tarr")),
+    ("Carol O'Neil",          ("Carol", "O'Neil")),
+    ("John Smith Jr.",        ("John", "Smith")),
+    ("Nicholas Cade III",     ("Nicholas", "Cade")),
+    ("Cordon, Donna Barrows", ("Donna Barrows", "Cordon")),
+]:
+    check("29. %-24s -> %s" % (_raw, _want[1]), _split(_raw) == _want, _split(_raw))
+check("29. a one-word name becomes the LAST name, never a nameless first",
+      _split("Cher") == ("", "Cher"))
+check("29. an empty name stays empty rather than inventing one",
+      _split("") == ("", "") and _split("   ") == ("", ""))
+
+# An explicit column must never be second-guessed by the fallback.
+imp_src = read("app/services/import_service.py")
+check("29. an explicit Last Name column always wins over Full Name",
+      'if not last_name and "full_name" in lookup:' in imp_src)
+check("29. and the name requirement now accepts either shape",
+      'if "last_name" not in lookup and "full_name" not in lookup:' in imp_src)
+
+# A file the server cannot read is the uploader's problem to fix - say so.
+lr_src29 = read("app/routers/leads_router.py")
+check("29. an unreadable file is a 400 carrying the reason, not a 500",
+      lr_src29.count("raise HTTPException(status_code=400, detail=str(exc))") == 2)
+check("29.    on BOTH preview and confirm",
+      lr_src29.count("except ValueError as exc:") == 2)
+
+# The reason the message was wrong in the first place.
+main29 = read("app/main.py")
+check("29. an unhandled error returns a response instead of escaping the stack",
+      "@app.exception_handler(Exception)" in main29
+      and "status_code=500," in main29)
+check("29.    so the browser stops calling a server crash a network problem",
+      "Access-Control-Allow-Origin" in main29)
+check("29.    and the traceback is still logged in full",
+      'logging.getLogger(__name__).exception(' in main29)
+check("29.    while the client-facing body stays generic",
+      "Something went wrong on our end" in main29)
+
+# Replaying an upload is not free.
+client29 = jsx_code_only(read("frontend/src/api/client.js"))
+check("29. a file upload is never retried - a replayed confirm imports twice",
+      "const retriesAllowed = isUpload ? 0 : MAX_RETRIES" in client29)
+check("29.    and its failure says nothing was imported",
+      "Nothing was imported" in client29)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:
