@@ -769,6 +769,10 @@ export default function LeadDetail() {
     ? voiceReadiness.reason
     : (ch ? ch.voice.reason : null)
   const smsSender = composeCtx?.sms_sender || null
+  // Email is now the ONLY channel carrying the booking link, so whether we
+  // can actually send one belongs on screen beside the button - not
+  // discovered by pressing it.
+  const emailSender = composeCtx?.email_sender || null
   // SMS carries no URL under the current campaign - see the backend's
   // sms_content_policy. The composer must reflect that BEFORE the advisor
   // writes, not strip their text afterwards: no link is offered, and the
@@ -1540,6 +1544,21 @@ export default function LeadDetail() {
                     </>
                   )}
                 </div>
+                {/* WHO THE FAMILY WILL SEE THIS FROM. Same contract as the SMS
+                    sender line above: never hidden, and stated while the
+                    advisor is writing rather than after they press Send. */}
+                {emailSender && !emailSender.ready && (
+                  <div style={SX.senderWarn}>{emailSender.reason}</div>
+                )}
+                {emailSender && emailSender.ready && emailSender.from_email && (
+                  <div style={SX.senderOk}>
+                    Sending from {emailSender.from_email}
+                    {emailSender.reply_to_email
+                      ? ` · replies go to ${emailSender.reply_to_email}`
+                      : ''}
+                  </div>
+                )}
+
                 <div className="compose-footer">
                   <label className="compose-checkbox">
                     <input
@@ -1552,7 +1571,8 @@ export default function LeadDetail() {
                   <button
                     className="btn btn--primary"
                     onClick={handleSendEmail}
-                    disabled={sendingEmail || !emailBody.trim()}
+                    disabled={sendingEmail || !emailBody.trim()
+                              || (emailSender ? !emailSender.ready : false)}
                   >
                     {sendingEmail ? 'Sending…' : emailAttachment ? '📎 Send with attachment' : 'Send email'}
                   </button>

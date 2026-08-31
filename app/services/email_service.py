@@ -25,6 +25,10 @@ import os
 from sqlalchemy.orm import Session
 from app.models.models import Lead, User, EmailMessage, MessageTrack
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")
 
@@ -313,3 +317,69 @@ def send_email_batch(db: Session, advisor: User, leads: list[Lead]) -> dict:
         except Exception:
             failed.append(lead.id)
     return {"sent_count": len(sent), "failed_count": len(failed), "skipped_count": len(skipped)}
+
+
+def describe_email_sender(db, organization_id) -> dict:
+    """Which address this organization would send from, WITHOUT sending.
+
+    The counterpart to sms_service.describe_sms_sender, and it exists for the
+    same reason: the composer reported EMAIL as available whenever the LEAD had
+    an email address, and checked nothing about whether we could actually send
+    one. An organization with no verified From address showed a green, enabled
+    Email button, and the advisor discovered the refusal by pressing Send.
+
+    That asymmetry got worse the moment SMS stopped carrying the booking link.
+    Email is now the only channel that carries it, so an email the product
+    believes it can send and cannot is the difference between a family being
+    offered a time and being offered nothing at all.
+
+    This walks the SAME resolution the send performs - organization override,
+    then platform, then verified registry, then nothing - via
+    sending_identity_for_org, and applies the SAME refusal rule
+    send_email_via_provider applies, so what the page reports and what the send
+    does cannot disagree. It never raises and never returns a secret.
+    """
+    from app.services.public_identity import sending_identity_for_org
+    from app.services.email_service import RESEND_API_KEY
+
+    try:
+        ident = sending_identity_for_org(db, organization_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("describe_email_sender: identity failed for org %s",
+                         organization_id)
+        return {"ready": False, "from_email": None, "reply_to_email": None,
+                "source": None,
+                "reason": "The sending address could not be read."}
+
+    from_email = getattr(ident, "from_email", None)
+    api_key = getattr(ident, "resend_api_key", None) or RESEND_API_KEY
+
+    if not from_email:
+        return {
+            "ready": False, "from_email": None,
+            "reply_to_email": getattr(ident, "reply_to_email", None),
+            "source": (ident.source or {}).get("from_email") if getattr(ident, "source", None) else None,
+            "reason": ("No verified sending address is configured for this "
+                       "organization or its brand. Set the From address in "
+                       "Org Settings -> Email Sender."),
+        }
+
+    if not api_key:
+        return {
+            "ready": False, "from_email": from_email,
+            "reply_to_email": getattr(ident, "reply_to_email", None),
+            "source": (ident.source or {}).get("from_email") if getattr(ident, "source", None) else None,
+            "reason": ("No email provider key is configured, so nothing can be "
+                       "sent from this address yet."),
+        }
+
+    return {
+        "ready": True,
+        "from_email": from_email,
+        "reply_to_email": getattr(ident, "reply_to_email", None),
+        # WHOSE address this is - organization, platform, or registry - so an
+        # advisor can see at a glance that a Restland family will receive mail
+        # from Restland and not from a brand they have never heard of.
+        "source": (ident.source or {}).get("from_email") if getattr(ident, "source", None) else None,
+        "reason": None,
+    }

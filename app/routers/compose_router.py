@@ -113,6 +113,21 @@ def compose_context(lead_id: str,
                   "account_sid_last4": None,
                   "reason": "The messaging sender could not be read."}
 
+    # ── the email sender ─────────────────────────────────────────────────────
+    # Email used to be reported as available on the strength of the LEAD having
+    # an address, with nothing asked about whether we could send one. Now that
+    # SMS carries no booking link, email is the only channel that does, so a
+    # green Email button on an organization with no verified From address is
+    # the difference between a family being offered a time and offered nothing.
+    from app.services.email_service import describe_email_sender
+    try:
+        email_sender = describe_email_sender(db, lead.organization_id)
+    except Exception:
+        log.exception("compose: could not describe email sender for lead %s", lead_id)
+        email_sender = {"ready": False, "from_email": None,
+                        "reply_to_email": None, "source": None,
+                        "reason": "The sending address could not be read."}
+
     # ── voice ────────────────────────────────────────────────────────────────
     voice_ready, voice_reason = False, "Voice is not configured."
     if has_phone:
@@ -145,14 +160,19 @@ def compose_context(lead_id: str,
         sms_ok = has_phone and bool(sender.get("ready"))
         sms_reason = ("This lead has no phone number." if not has_phone
                       else sender.get("reason"))
-        email_ok = has_email
+        # BOTH halves, like SMS: the lead must be reachable AND we must have a
+        # sender. Either one missing means the channel cannot be used, and the
+        # reason names whichever it actually is.
+        email_ok = has_email and bool(email_sender.get("ready"))
+        email_reason = ("This lead has no email address." if not has_email
+                        else email_sender.get("reason"))
         channels = {
             "sms": cap(sms_ok, sms_reason),
-            "email": cap(email_ok, "This lead has no email address."),
+            "email": cap(email_ok, email_reason),
             "voice": cap(voice_ready, voice_reason),
             "both": cap(sms_ok and email_ok,
                         "Sending on both channels needs a phone number with a "
-                        "configured sender and an email address."),
+                        "configured sender and an email address with a verified sending address."),
         }
 
     # ── the booking link, exactly as it will be sent ─────────────────────────
@@ -189,6 +209,7 @@ def compose_context(lead_id: str,
         "channels": channels,
         "sms_sender": sender,
         "booking": booking,
+        "email_sender": email_sender,
         # The composer must not offer a booking link for a channel that will
         # not carry one. The frontend reads this to hide the "Include booking
         # link" affordance for SMS and say why, instead of showing a URL the

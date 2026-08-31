@@ -2006,6 +2006,59 @@ check("29. a file upload is never retried - a replayed confirm imports twice",
 check("29.    and its failure says nothing was imported",
       "Nothing was imported" in client29)
 
+
+# ---------------------------------------------------------------------------
+# 30. THE COMPOSER MUST KNOW WHETHER IT CAN SEND AN EMAIL, NOT JUST WHETHER
+#     THE LEAD HAS ONE
+#
+# SMS reported availability from BOTH halves - the lead has a number, and a
+# sender resolves. Email reported availability from the lead alone and asked
+# nothing about the sending address, so an organization with no verified From
+# address showed a green, enabled Email button and the advisor learned about
+# the refusal by pressing Send.
+#
+# That asymmetry stopped being cosmetic when SMS stopped carrying the booking
+# link: email is now the only channel that carries it.
+# ---------------------------------------------------------------------------
+from app.services.email_service import describe_email_sender as _des
+
+_es_unknown = _des(db, "no-such-organization-id")
+check("30. an organization with no sending address is NOT ready",
+      _es_unknown["ready"] is False)
+check("30.    and is told what to set, not just refused",
+      "Org Settings" in (_es_unknown["reason"] or ""))
+check("30. the readiness probe never returns a provider key",
+      "resend_api_key" not in _es_unknown
+      and not any("re_" in str(v) for v in _es_unknown.values() if v))
+
+email_src30 = read("app/services/email_service.py")
+check("30. readiness walks the same resolution the send performs",
+      "from app.services.public_identity import sending_identity_for_org"
+      in email_src30.split("def describe_email_sender")[1])
+check("30.    and applies the same refusal rule, so page and send agree",
+      "No verified sending address is configured"
+      in email_src30.split("def describe_email_sender")[1])
+
+compose30 = read("app/routers/compose_router.py")
+check("30. the composer asks whether an email can actually be sent",
+      "email_sender = describe_email_sender(db, lead.organization_id)" in compose30)
+check("30.    and email availability needs BOTH halves, like SMS",
+      'email_ok = has_email and bool(email_sender.get("ready"))' in compose30)
+check("30.    naming which half is missing",
+      'email_reason = ("This lead has no email address." if not has_email' in compose30)
+check("30.    and publishes the sender for the composer to show",
+      '"email_sender": email_sender,' in compose30)
+
+ld30 = jsx_code_only(read("frontend/src/pages/LeadDetail.jsx"))
+check("30. the composer states the From address while the advisor writes",
+      "Sending from {emailSender.from_email}" in ld30)
+check("30.    and where replies will go",
+      "replies go to ${emailSender.reply_to_email}" in ld30)
+check("30.    shows the reason when it cannot send",
+      "{emailSender && !emailSender.ready && (" in ld30)
+check("30.    and disables Send rather than inviting a failure",
+      "|| (emailSender ? !emailSender.ready : false)" in ld30)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:
