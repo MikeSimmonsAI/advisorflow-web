@@ -138,6 +138,40 @@ class Platform(Base):
     slug = Column(String, unique=True, nullable=False)  # bookaboost | evosyspro | harmonyhustle
     domain = Column(String, nullable=True)        # e.g. "app.bookaboost.live"
     support_email = Column(String, nullable=True) # e.g. "support@bookaboost.live"
+    # BRAND PRESENTATION — the single source of truth.
+    #
+    # These values used to live in four unsynchronised places that never read
+    # the database: BRAND_IDENTITY in appointment_invites, _BRAND_MAP in
+    # branding_router, BRAND_CONFIG in frontend/src/theme.js, and a pre-bundle
+    # IIFE in frontend/index.html. Adding a brand meant editing four files, and
+    # they had already drifted — EvoSys Pro's accent was #087cff in two of them
+    # and #1d4ed8 in the third.
+    #
+    # Every column is nullable: app/services/brand_config.py falls back field by
+    # field to a frozen copy of the old literals, so a deployment that has not
+    # been backfilled renders exactly as it did before.
+    #
+    # What is NOT here, deliberately: the [data-theme="<slug>"] block in
+    # index.css. That is ~40 custom properties and ~28 component overrides per
+    # brand — a stylesheet, not configuration. `theme_slug` names which one to
+    # use; the stylesheet says what it looks like.
+    short_name          = Column(String, nullable=True)   # "E", "BB", "HH"
+    logo_initial        = Column(String, nullable=True)   # letter mark in the sidebar
+    logo_url            = Column(String, nullable=True)   # full wordmark, data: or https:
+    favicon_url         = Column(String, nullable=True)   # overrides the generated mark
+    tagline             = Column(String, nullable=True)
+    theme_slug          = Column(String, nullable=True)   # which index.css theme block
+    accent_color        = Column(String, nullable=True)
+    accent_color_2      = Column(String, nullable=True)
+    green_color         = Column(String, nullable=True)
+    bg_color            = Column(String, nullable=True)
+    # Invite email has always used a different blue from the UI. Kept separate
+    # rather than silently unified.
+    invite_accent_color = Column(String, nullable=True)
+    support_phone       = Column(String, nullable=True)
+    website_url         = Column(String, nullable=True)   # marketing site
+    app_base_url        = Column(String, nullable=True)   # customer-facing app host
+
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 

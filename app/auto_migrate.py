@@ -269,6 +269,22 @@ COLUMNS_TO_ADD = [
     ("messages", "delivery_status_at", "TIMESTAMP"),
     # Explicit send-state vocabulary + provider error detail.
     # blocked | queued | sent | delivered | failed — app/services/message_state.py
+    # Brand presentation on the platform row — see app/services/brand_config.py.
+    # All nullable; the resolver falls back to frozen literals field by field.
+    ("platforms", "short_name", "VARCHAR"),
+    ("platforms", "logo_initial", "VARCHAR"),
+    ("platforms", "logo_url", "VARCHAR"),
+    ("platforms", "favicon_url", "VARCHAR"),
+    ("platforms", "tagline", "VARCHAR"),
+    ("platforms", "theme_slug", "VARCHAR"),
+    ("platforms", "accent_color", "VARCHAR"),
+    ("platforms", "accent_color_2", "VARCHAR"),
+    ("platforms", "green_color", "VARCHAR"),
+    ("platforms", "bg_color", "VARCHAR"),
+    ("platforms", "invite_accent_color", "VARCHAR"),
+    ("platforms", "support_phone", "VARCHAR"),
+    ("platforms", "website_url", "VARCHAR"),
+    ("platforms", "app_base_url", "VARCHAR"),
     ("messages", "send_state", "VARCHAR"),
     ("messages", "error_code", "VARCHAR"),
     ("messages", "error_message", "VARCHAR"),
@@ -888,6 +904,41 @@ def run_auto_migrations(engine) -> None:
                 conn.rollback()
                 print(f"[auto_migrate] Platform seed skipped ({p['slug']}): {e}")
     print("[auto_migrate] Platform seed check complete.")
+
+    # ── Brand presentation backfill ───────────────────────────────────────────
+    # Copies the values that were live in the four hardcoded registries onto the
+    # platform rows, so consolidation changes NOTHING visually on the way in.
+    #
+    # COALESCE means only NULL columns are written. Run it a hundred times and
+    # it does nothing after the first; edit a brand's colour in the product and
+    # this will never overwrite that choice. That is what makes the database the
+    # source of truth rather than a cache of these literals.
+    try:
+        from app.services.brand_config import FROZEN_BRAND_DEFAULTS as _FROZEN
+    except Exception as _e:                                        # noqa: BLE001
+        _FROZEN = {}
+        print(f"[auto_migrate] brand backfill skipped (import): {_e}")
+
+    if _FROZEN:
+        _FIELDS = ("short_name", "logo_initial", "tagline", "theme_slug",
+                   "accent_color", "accent_color_2", "green_color", "bg_color",
+                   "invite_accent_color", "support_phone", "website_url",
+                   "app_base_url")
+        with engine.connect() as conn:
+            for _slug, _cfg in _FROZEN.items():
+                try:
+                    _sets = ", ".join(
+                        "%s = COALESCE(%s, :%s)" % (f, f, f) for f in _FIELDS)
+                    _params = {f: _cfg.get(f) for f in _FIELDS}
+                    _params["slug"] = _slug
+                    conn.execute(text(
+                        "UPDATE platforms SET " + _sets + " WHERE slug = :slug"),
+                        _params)
+                    conn.commit()
+                except Exception as _e:                            # noqa: BLE001
+                    conn.rollback()
+                    print(f"[auto_migrate] brand backfill skipped ({_slug}): {_e}")
+        print("[auto_migrate] Brand presentation backfill complete.")
 
     # ── CRM connections table ─────────────────────────────────────────────────
     # Not managed via SQLAlchemy models — created here so it's always present

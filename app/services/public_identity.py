@@ -235,7 +235,7 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
     else:
         # 3. code registry, keyed on the platform slug
         slug = getattr(plat, "slug", None) if plat is not None else None
-        reg = _registry_for(slug)
+        reg = _registry_for_db(db, slug)
         if reg and reg.get("from_email"):
             ident.from_email = reg["from_email"]
             ident.source["from_email"] = "registry"
@@ -282,7 +282,7 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
         ident.source["public_base_url"] = "platform"
     else:
         slug = getattr(plat, "slug", None) if plat is not None else None
-        reg = _registry_for(slug)
+        reg = _registry_for_db(db, slug)
         if reg and reg.get("app_base_url"):
             ident.public_base_url = reg["app_base_url"].rstrip("/")
             ident.source["public_base_url"] = "registry"
@@ -297,7 +297,7 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
 
     # ── the rest, registry-only for now ─────────────────────────────────────
     slug = getattr(plat, "slug", None) if plat is not None else None
-    reg = _registry_for(slug)
+    reg = _registry_for_db(db, slug)
     if reg:
         ident.support_phone = reg.get("support_phone")
         ident.website = reg.get("website")
@@ -308,7 +308,12 @@ def identity_for_org(db: Session, organization_id: Optional[str]) -> PublicIdent
 
 
 def _registry_for(slug):
-    """The verified in-code identities. Imported lazily to avoid a cycle."""
+    """The verified in-code identities. Imported lazily to avoid a cycle.
+
+    Kept as the fallback layer. BRAND_IDENTITY only ever had an evosyspro entry,
+    so this returned None for BookaBoost and Harmony Hustle - which is why they
+    resolved no support_phone and no website at all.
+    """
     if not slug:
         return None
     try:
@@ -316,6 +321,33 @@ def _registry_for(slug):
         return BRAND_IDENTITY.get(slug)
     except Exception:
         return None
+
+
+def _registry_for_db(db, slug):
+    """Registry values for a slug, preferring the platforms table.
+
+    Level 3 of the identity walk is no longer a dict compiled into the image.
+    A brand configured in the product answers here; the literal above only
+    answers for a deployment whose columns have not been backfilled.
+    """
+    key = (slug or "").strip().lower()
+    if not key:
+        return None
+    try:
+        from app.services.brand_config import config_for_slug
+        cfg = config_for_slug(db, key)
+    except Exception:                                            # noqa: BLE001
+        cfg = None
+    if cfg and cfg.get("source") == "database":
+        return {
+            "name":          cfg.get("display_name"),
+            "from_email":    cfg.get("support_email"),
+            "support_phone": cfg.get("support_phone"),
+            "website":       cfg.get("website_url"),
+            "app_base_url":  cfg.get("app_base_url"),
+            "accent":        cfg.get("accent_color"),
+        }
+    return _registry_for(key)
 
 
 # ── adapters ────────────────────────────────────────────────────────────────

@@ -2161,6 +2161,68 @@ check("32.    without swallowing the platform-boundary gate beside it",
       "PLATFORM BOUNDARY CHECKS FAILED - not deploying." in deploy32
       and "$script:gateFailed" not in deploy32)
 
+
+# ---------------------------------------------------------------------------
+# 33. ONE BRAND REGISTRY, NOT FOUR
+#
+# Brand presentation lived in four unsynchronised places that never read the
+# database, and they had already drifted: EvoSys Pro's accent was #087cff in
+# two and #1d4ed8 in the third, BookaBoost's was #c9973d in the frontend and
+# #2fb6ff in the branding API with no consumer to notice. The platform row is
+# the answer now; the literals survive only as a frozen first-paint fallback.
+#
+# Behavioural proof, including that neither brand changed appearance, lives in
+# scripts/probe_brand_config.py. This is the static half.
+# ---------------------------------------------------------------------------
+bc_src = read("app/services/brand_config.py")
+check("33. one resolver exists, and reads the platform row",
+      "def config_for_slug(" in bc_src and "Platform.slug == key" in bc_src)
+check("33.    the database wins FIELD BY FIELD, so a partial row still renders",
+      "for column, field in _COLUMN_MAP.items():" in bc_src
+      and 'out["source"] = "database" if filled else "frozen"' in bc_src)
+check("33.    and the old literals are labelled a fallback, not the truth",
+      "FROZEN_BRAND_DEFAULTS" in bc_src and "This is a FALLBACK" in bc_src)
+
+# The registry that only ever knew one brand.
+inv_src = read("app/services/appointment_invites.py")
+check("33. invites resolve the brand from the platform row first",
+      "_identity_from_platform(db, plat.slug)" in inv_src)
+pi_src33 = read("app/services/public_identity.py")
+check("33. the identity walk's level 3 reads the database",
+      "def _registry_for_db(" in pi_src33
+      and pi_src33.count("reg = _registry_for_db(db, slug)") == 3)
+
+br_src = read("app/routers/branding_router.py")
+check("33. the branding API no longer carries a hostname table",
+      "_BRAND_MAP" not in br_src and "_DEFAULT_BRAND" not in br_src)
+check("33.    and answers from the resolver",
+      "from app.services.brand_config import public_payload" in br_src)
+
+# The frontend stops treating its compiled-in table as authoritative.
+th_src = jsx_code_only(read("frontend/src/theme.js"))
+check("33. the frontend hydrates from the platform row",
+      "export async function hydrateBrand" in th_src)
+check("33.    caches it so the next paint needs no fetch",
+      "af_platform_brand" in th_src)
+# Read the RAW file: jsx_code_only strips comments, and this marker lives in
+# one - the label is documentation for the next reader, which is the point.
+check("33.    and its literals are marked BOOTSTRAP ONLY",
+      "BOOTSTRAP ONLY" in read("frontend/src/theme.js"))
+
+# The schema has to actually carry it.
+mig33 = read("app/auto_migrate.py")
+for _c in ("short_name", "logo_initial", "tagline", "theme_slug", "accent_color",
+           "invite_accent_color", "support_phone", "website_url", "app_base_url"):
+    check("33. platforms.%s is added without a shell" % _c,
+          '("platforms", "%s", "VARCHAR")' % _c in mig33)
+check("33. the backfill only ever fills a NULL, never overwrites a choice",
+      "COALESCE" in mig33 and "Brand presentation backfill" in mig33)
+
+deploy33 = read("deploy.ps1")
+check("33. the behavioural gate blocks a deploy on its own",
+      "probe_brand_config.py" in deploy33
+      and "BRAND CONFIG CHECKS FAILED - not deploying." in deploy33)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

@@ -8,9 +8,11 @@ Used by:
   - Frontend on load (to confirm the hostname-detected theme matches backend config)
   - White-label login pages (to render the correct logo/colors before auth)
 
-The frontend does hostname detection client-side (see theme.js) for zero-flash
-rendering. This endpoint exists as the server-authoritative source of truth and
-for any server-side rendering or health checks.
+This endpoint IS the source of truth. The frontend still detects a hostname
+client-side for the very first paint - a fetch cannot beat the first frame, and
+a flash of the wrong brand is worse than a bootstrap literal - but it then
+fetches this and caches the answer, so every load after the first is driven by
+the platform row. See app/services/brand_config.py and frontend/src/theme.js.
 
 GET /branding
   Returns: { brand, displayName, supportEmail, accentColor, bgColor }
@@ -28,58 +30,31 @@ from app.models.models import User, Organization
 
 router = APIRouter(prefix="/branding", tags=["branding"])
 
-# Brand configs keyed by hostname substring
-_BRAND_MAP = {
-    "evosyspro": {
-        "brand": "evosyspro",
-        "displayName": "EvoSys Pro",
-        "supportEmail": "support@evosyspro.live",
-        "accentColor": "#087cff",
-        "accentColor2": "#22a3ff",
-        "greenColor": "#19d67c",
-        "bgColor": "#040812",
-        "logoInitial": "E",
-        "theme": "evosyspro",
-    },
-    "harmonyhustle": {
-        "brand": "harmonyhustle",
-        "displayName": "Harmony Hustle",
-        "supportEmail": "support@harmonyhustle.com",
-        "accentColor": "#10b981",
-        "accentColor2": "#34d399",
-        "greenColor": "#10b981",
-        "bgColor": "#030b07",
-        "logoInitial": "HH",
-        "theme": "harmonyhustle",
-    },
-}
-
-_DEFAULT_BRAND = {
-    "brand": "bookaboost",
-    "displayName": "BookaBoost",
-    "supportEmail": "support@bookaboost.live",
-    "accentColor": "#2fb6ff",
-    "accentColor2": "#1ef0a8",
-    "greenColor": "#1ef0a8",
-    "bgColor": "#03060f",
-    "logoInitial": "BB",
-    "theme": "bookaboost",
-}
+# The hostname->brand table that used to live here is gone. It was one of four
+# unsynchronised copies of the same brand data, none of which read the database,
+# and its BookaBoost accent (#2fb6ff) had already drifted from the frontend's
+# (#c9973d) with no consumer to notice. app/services/brand_config.py is the one
+# resolver now: platform row first, frozen literals only as a fallback for a
+# deployment whose columns are not backfilled yet.
 
 
 @router.get("")
-def get_branding(request: Request):
-    """Return the brand config for the requesting hostname."""
-    host = request.headers.get("host", "").lower()
+@router.get("/")
+def get_branding(request: Request, db: Session = Depends(get_db)):
+    """Public, unauthenticated: which brand this hostname is, and how it looks.
 
-    # Allow PLATFORM_SLUG env override (useful for Render service config)
-    platform_slug = os.environ.get("PLATFORM_SLUG", "").lower()
-
-    for key, config in _BRAND_MAP.items():
-        if key in host or key in platform_slug:
-            return JSONResponse(content=config)
-
-    return JSONResponse(content=_DEFAULT_BRAND)
+    The frontend themes itself from this and caches the answer, so a brand's
+    name, colours, logo, favicon and tab title come from its platform row rather
+    than from a literal compiled into the bundle.
+    """
+    from app.services.brand_config import public_payload
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    slug = os.environ.get("PLATFORM_SLUG", "").strip().lower() or None
+    payload = public_payload(db, host, slug=None)
+    # An explicit PLATFORM_SLUG wins only when the host told us nothing useful.
+    if slug and payload.get("source") == "frozen" and payload.get("brand") != slug:
+        payload = public_payload(db, host, slug=slug)
+    return payload
 
 
 @router.get("/org")

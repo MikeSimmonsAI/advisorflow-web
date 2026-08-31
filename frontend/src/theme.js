@@ -78,12 +78,31 @@ export function applyTheme(theme) {
  * Called from main.jsx before React renders.
  */
 export function initTheme() {
-  const theme = detectTheme()
+  // The cached platform row wins over hostname sniffing: it is what the
+  // database actually says this host is, and applying it synchronously here is
+  // what removes the flash the bootstrap literal exists to prevent.
+  const cached = getCachedBrand()
+  const theme = (cached && cached.theme) || detectTheme()
   applyTheme(theme)
+  if (cached) applyBrandPayload(cached)
   return theme
 }
 
 /**
+ * BOOTSTRAP ONLY - the platform row is the source of truth.
+ *
+ * These literals used to be one of four unsynchronised copies of the same brand
+ * data. They are now a FIRST-PAINT FALLBACK and nothing more: `hydrateBrand()`
+ * below fetches GET /branding, which reads the platform row, and caches the
+ * answer so every load after the first is database-driven.
+ *
+ * They cannot simply be deleted. A network fetch cannot beat the first frame,
+ * and a flash of the wrong brand - a funeral home's staff seeing another
+ * company's name and colours for 300ms on every load - is worse than carrying a
+ * bootstrap literal. Adding a brand no longer requires editing this table; a
+ * brand missing from it renders from its row on the first paint after the
+ * cache warms, and correctly from then on.
+ *
  * Brand config per theme â€” logos, display names, support emails, colors.
  * Used in Layout.jsx to render the correct sidebar logo and brand name.
  */
@@ -116,4 +135,97 @@ export const BRAND_CONFIG = {
     accentColor: '#10b981',
     websiteUrl: 'https://harmonyhustle.com',
   },
+}
+
+// ---------------------------------------------------------------------------
+// DATABASE-DRIVEN BRANDING
+// ---------------------------------------------------------------------------
+
+const BRAND_CACHE_KEY = 'af_platform_brand'
+
+/** The cached platform brand, or null. Never throws - storage can be blocked. */
+export function getCachedBrand() {
+  try {
+    const raw = localStorage.getItem(BRAND_CACHE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Apply a brand payload from GET /branding to the document.
+ *
+ * Only writes what the payload actually carries. A brand whose row has no logo
+ * must render with no logo, never with another brand's - the same rule the
+ * backend's public_identity applies to customer-facing pages.
+ */
+export function applyBrandPayload(brand) {
+  if (!brand || typeof document === 'undefined') return
+
+  if (brand.theme) document.documentElement.setAttribute('data-theme', brand.theme)
+  if (brand.documentTitle) document.title = brand.documentTitle
+
+  if (brand.faviconUrl) {
+    let link = document.querySelector("link[rel~='icon']")
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.href = brand.faviconUrl
+  }
+
+  if (brand.accentColor) {
+    document.documentElement.style.setProperty('--brand-platform-accent', brand.accentColor)
+  }
+}
+
+/**
+ * Fetch the brand for this hostname and cache it.
+ *
+ * Called once after mount. The cached copy is applied synchronously on the NEXT
+ * load, before this fetch resolves, which is what makes the database the source
+ * of truth without reintroducing a flash.
+ */
+export async function hydrateBrand(apiBase) {
+  if (typeof window === 'undefined') return null
+  try {
+    const base = apiBase || ''
+    const res = await fetch(base + '/branding', { credentials: 'omit' })
+    if (!res.ok) return null
+    const brand = await res.json()
+    if (!brand || !brand.brand) return null
+    try {
+      localStorage.setItem(BRAND_CACHE_KEY, JSON.stringify(brand))
+    } catch {
+      /* storage blocked - the fetch still themed this page */
+    }
+    applyBrandPayload(brand)
+    return brand
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The brand values a component should render.
+ *
+ * Cached platform row first, bootstrap literal second - so Layout, Login and
+ * Billing stop reading a compiled-in table and start reading the database,
+ * without any of them needing to know that is what changed.
+ */
+export function resolveBrand(theme) {
+  const cached = getCachedBrand() || {}
+  const boot = BRAND_CONFIG[theme] || BRAND_CONFIG[THEMES.BOOKABOOST] || {}
+  return {
+    displayName:  cached.displayName  || boot.displayName,
+    shortName:    cached.shortName    || boot.shortName,
+    supportEmail: cached.supportEmail || boot.supportEmail,
+    accentColor:  cached.accentColor  || boot.accentColor,
+    websiteUrl:   cached.websiteUrl   || boot.websiteUrl,
+    logoUrl:      cached.logoUrl      || boot.logoUrl,
+    tagline:      cached.tagline      || boot.tagline || null,
+    source:       cached.brand ? 'database' : 'bootstrap',
+  }
 }

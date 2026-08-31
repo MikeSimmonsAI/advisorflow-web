@@ -102,6 +102,31 @@ FALLBACK_IDENTITY = {
 }
 
 
+def _identity_from_platform(db: Session, slug: str) -> dict | None:
+    """BRAND_IDENTITY, but from the database.
+
+    BRAND_IDENTITY below only ever had an evosyspro entry, so every other brand
+    fell through to FALLBACK_IDENTITY and signed its invites "AdvisorFlow". The
+    platform row now answers, and the literal stays as the fallback for a
+    deployment that has not been backfilled.
+    """
+    try:
+        from app.services.brand_config import config_for_slug
+        cfg = config_for_slug(db, slug)
+    except Exception:                                            # noqa: BLE001
+        return None
+    if not cfg or cfg.get("source") != "database":
+        return None
+    return {
+        "name":          cfg.get("display_name"),
+        "from_email":    cfg.get("support_email"),
+        "support_phone": cfg.get("support_phone"),
+        "website":       cfg.get("website_url"),
+        "app_base_url":  cfg.get("app_base_url"),
+        "accent":        cfg.get("invite_accent_color") or cfg.get("accent_color"),
+    }
+
+
 def brand_identity_for_brand(db: Session, brand_sales_org_id: str) -> dict:
     """The identity for a brand sales org. Never raises.
 
@@ -117,6 +142,18 @@ def brand_identity_for_brand(db: Session, brand_sales_org_id: str) -> dict:
                .filter(BrandSalesOrg.id == brand_sales_org_id).first())
         if bso and bso.platform_id:
             plat = db.query(Platform).filter(Platform.id == bso.platform_id).first()
+            # THE PLATFORM ROW ANSWERS FIRST.
+            #
+            # BRAND_IDENTITY below only ever had an evosyspro entry, so every
+            # other brand fell through to FALLBACK_IDENTITY and signed its
+            # invites "AdvisorFlow" - a BookaBoost prospect received an
+            # appointment from a company they had never heard of. The row now
+            # answers; the literal remains for a deployment not yet backfilled.
+            if plat:
+                _db_ident = _identity_from_platform(db, plat.slug)
+                if _db_ident:
+                    _db_ident["name"] = plat.name or _db_ident["name"]
+                    return _db_ident
             if plat and plat.slug in BRAND_IDENTITY:
                 ident = dict(BRAND_IDENTITY[plat.slug])
                 ident["name"] = plat.name or ident["name"]
