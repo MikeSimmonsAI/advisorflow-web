@@ -874,9 +874,24 @@ export default function Leads() {
             <div className="leads-preview-box">
               <div className="leads-preview-grid">
                 <PreviewStat label="Total rows" value={preview.total_rows} />
-                <PreviewStat label="Active SMS leads" value={preview.new_active_sms_leads} accent="green" />
-                <PreviewStat label="Email-only queued" value={preview.email_only_leads_queued} accent="blue" />
-                <PreviewStat label="Duplicates flagged" value={preview.duplicates_flagged} accent="amber" />
+                {/* REACHABILITY FIRST. These two are the question an operator is
+                    actually asking before committing an import - how many of
+                    these people can we contact, and on which channel - and
+                    neither had an answer on this screen. "Email-only queued"
+                    answers something else entirely and was read as this. */}
+                <PreviewStat label="Usable phone" value={preview.usable_phone}
+                             accent="green" hint="Can be texted" />
+                <PreviewStat label="Usable email" value={preview.usable_email}
+                             accent="green" hint="Can receive the booking link" />
+                <PreviewStat label="Bad email" value={preview.flagged_bad_email}
+                             accent={preview.flagged_bad_email ? 'red' : 'neutral'}
+                             hint="Unusable or placeholder — will not be emailed" />
+                <PreviewStat label="Active SMS leads" value={preview.new_active_sms_leads}
+                             accent="green" hint="Ready for outreach after import" />
+                <PreviewStat label="Email only" value={preview.email_only_leads_queued}
+                             accent="blue" hint="Has an email but no usable phone" />
+                <PreviewStat label="Duplicates flagged" value={preview.duplicates_flagged} accent="amber"
+                             hint="Kept, not deleted — review after import" />
                 <PreviewStat label="Call-restricted" value={preview.flagged_call_restricted} accent="red" />
                 <PreviewStat label="Needs tier review" value={preview.flagged_needs_tier_review} accent="amber" />
               </div>
@@ -887,6 +902,21 @@ export default function Leads() {
                   </span>
                 ))}
               </div>
+              {preview.flagged_bad_email > 0 && (
+                <div style={{
+                  margin: '10px 0 0', padding: '10px 12px', borderRadius: 8,
+                  background: 'rgba(231,76,60,0.10)',
+                  border: '1px solid rgba(231,76,60,0.30)',
+                  color: 'var(--signal-red)', fontSize: 12, lineHeight: 1.5,
+                }}>
+                  <strong>{preview.flagged_bad_email}</strong> of these rows have an
+                  unusable email address (a placeholder such as
+                  {' '}<span className="mono">unknow@unknown</span>, or a malformed
+                  domain). They will still import and can still be texted, but they
+                  are flagged and will not be emailed — sending to them would bounce
+                  and damage this organization's sending reputation.
+                </div>
+              )}
               <div className="leads-preview-actions">
                 <button className="btn btn--secondary" onClick={cancelPreview}>Cancel</button>
                 <button className="btn btn--primary" onClick={handleConfirmUpload} disabled={confirming}>
@@ -1641,11 +1671,16 @@ export default function Leads() {
   )
 }
 
-function PreviewStat({ label, value, accent = 'neutral' }) {
+function PreviewStat({ label, value, accent = 'neutral', hint }) {
   return (
-    <div className="preview-stat">
+    <div className="preview-stat" title={hint || undefined}>
       <div className="preview-stat-label">{label}</div>
       <div className={`preview-stat-value preview-stat-value--${accent}`}>{value}</div>
+      {hint && (
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.35, marginTop: 2 }}>
+          {hint}
+        </div>
+      )}
     </div>
   )
 }

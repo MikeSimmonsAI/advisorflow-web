@@ -258,6 +258,21 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     if not lead.email:
         raise ValueError(f"Lead {lead.id} has no email address.")
 
+    # A FLAGGED ADDRESS IS AS GOOD AS NO ADDRESS.
+    #
+    # The batch queue already refuses manually flagged leads; the single send
+    # did not, so the one path an advisor uses by hand was the one that would
+    # cheerfully mail "unknow@unknown". Sending there costs a hard bounce
+    # against the domain's sending reputation, and every bounce makes the
+    # deliverability of the REAL families' mail worse.
+    if (getattr(lead, "manual_flag", None) or "") == "bad_email":
+        raise ValueError(
+            f"{lead.first_name or 'This lead'} is flagged with an unusable "
+            f"email address ({lead.email}). Correct the address before "
+            f"emailing - sending to it would bounce and damage the "
+            f"organization's sending reputation."
+        )
+
     from app.services.sms_service import create_booking_link
     from app.models.models import Organization
     import os as _os

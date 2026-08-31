@@ -2059,6 +2059,62 @@ check("30.    shows the reason when it cannot send",
 check("30.    and disables Send rather than inviting a failure",
       "|| (emailSender ? !emailSender.ready : false)" in ld30)
 
+
+# ---------------------------------------------------------------------------
+# 31. THE IMPORT PREVIEW MUST TELL THE TRUTH ABOUT REACHABILITY
+#
+# "Email-only queued: 0" was read as "no emails were picked up". It actually
+# counts rows with an email and NO usable phone - a different question - and
+# there was no tile answering the one being asked. Worse, "unknow@unknown"
+# counted as a usable address: the domain is in no blocklist and is nobody's
+# typo, so two unreachable rows looked emailable, and email is now the only
+# channel carrying the booking link.
+# ---------------------------------------------------------------------------
+_q = _imp._check_email_quality
+
+check("31. a domain with no dot is not an address",
+      _q("unknow@unknown") == "invalid_format" and _q("a@b") == "invalid_format")
+check("31. placeholder words are not addresses either",
+      _q("none@none") is not None and _q("x@unknown.com") == "placeholder")
+check("31. and a real address is still fine",
+      _q("elizabethvallen@gmail.com") is None
+      and _q("123@yahoo.com") is None
+      and _q("t@gmail.com") is None)
+
+imp31 = read("app/services/import_service.py")
+check("31. the preview reports reachability, per channel",
+      '"usable_phone": usable_phone_count,' in imp31
+      and '"usable_email": usable_email_count,' in imp31)
+check("31. usable email means present AND not flagged",
+      'if row["email"] and not email_quality_issue:' in imp31)
+
+# The flag has to reach the field the send paths actually consult.
+check("31. a bad address is FLAGGED on the lead, not just described",
+      'manual_flag=("bad_email" if email_quality_issue else None),' in imp31)
+check("31.    with a reason a human can read",
+      "Imported with an unusable email address" in imp31)
+
+email31 = read("app/services/email_service.py")
+check("31. the single send refuses a flagged address, as the batch already did",
+      'if (getattr(lead, "manual_flag", None) or "") == "bad_email":' in email31)
+check("31.    and says why it matters, not just that it refused",
+      "damage the" in email31 and "sending reputation" in email31)
+
+leads31 = jsx_code_only(read("frontend/src/pages/Leads.jsx"))
+check("31. the preview shows Usable phone and Usable email",
+      'label="Usable phone"' in leads31 and 'label="Usable email"' in leads31)
+check("31. and Bad email, red only when there are some",
+      'label="Bad email"' in leads31
+      and "accent={preview.flagged_bad_email ? 'red' : 'neutral'}" in leads31)
+check("31. Email only now says what it means",
+      'label="Email only"' in leads31
+      and "Has an email but no usable phone" in leads31)
+check("31. a bad-email batch is warned about BEFORE the confirm button",
+      "{preview.flagged_bad_email > 0 && (" in leads31
+      and "will not be emailed" in leads31)
+check("31.    and the warning is honest that they still import and can be texted",
+      "can still be texted" in leads31)
+
 db.close()
 if os.path.exists(DB_FILE):
     try:

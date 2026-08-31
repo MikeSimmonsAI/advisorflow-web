@@ -75,6 +75,15 @@ HEADER_MAP = {
 INTERNAL_EMAIL_MARKERS = ["@nsmg.com"]
 
 # Email prefixes that belong to notification systems, not real inboxes
+# What a CRM writes into an email column when it has no email. These are not
+# typos to be corrected - they are the absence of an address, wearing the shape
+# of one.
+BAD_EMAIL_PLACEHOLDERS = {
+    "unknow", "unknown", "none", "null", "na", "n/a", "nan", "test",
+    "noemail", "no-email", "no_email", "nomail", "email", "blank", "empty",
+    "notprovided", "not-provided", "missing", "xxx", "tbd", "placeholder",
+}
+
 BAD_EMAIL_PREFIXES = {
     "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
     "notifications", "notification", "automated", "mailer", "mailer-daemon",
@@ -128,6 +137,16 @@ def _check_email_quality(email: str) -> str | None:
     if "@" not in low:
         return "invalid_format"
     prefix, domain = low.split("@", 1)
+
+    # A DOMAIN WITH NO DOT IS NOT A DOMAIN. "unknow@unknown" passed every check
+    # below - the domain is not a known system domain, matches no pattern and
+    # is not a typo of a real one - so it counted as a usable address and the
+    # lead looked emailable. It cannot receive anything. Two rows of Restland's
+    # first 100 were exactly this.
+    if "." not in domain or domain.startswith(".") or domain.endswith("."):
+        return "invalid_format"
+    if prefix in BAD_EMAIL_PLACEHOLDERS or domain.split(".")[0] in BAD_EMAIL_PLACEHOLDERS:
+        return "placeholder"
     if prefix in BAD_EMAIL_PREFIXES:
         return "system_address"
     if domain in BAD_EMAIL_SYSTEM_DOMAINS:
@@ -404,6 +423,8 @@ def import_leads_from_excel(
     flagged_needs_tier_review = 0
     email_only_count = 0
     flagged_bad_email = 0
+    usable_phone_count = 0
+    usable_email_count = 0
     tier_counts = {}
 
     # Within-batch dedup sets (catch duplicates inside the same uploaded file)
@@ -438,6 +459,11 @@ def import_leads_from_excel(
         if tier == "partial":
             flagged_needs_tier_review += 1
 
+        if phone_norm:
+            usable_phone_count += 1
+        if row["email"] and not email_quality_issue:
+            usable_email_count += 1
+
         if email_quality_issue:
             flagged_bad_email += 1
 
@@ -466,6 +492,19 @@ def import_leads_from_excel(
             last_action_raw=row["last_action_raw"] or None,
             last_contact_date=last_contact_dt,
             status_reason_raw=row["status_reason_raw"] or None,
+            # A DEAD ADDRESS IS FLAGGED, NOT QUIETLY KEPT.
+            #
+            # The quality issue was recorded in custom_fields and nowhere the
+            # send paths look, so a lead carrying "unknow@unknown" was a
+            # perfectly ordinary emailable lead as far as the product was
+            # concerned. `manual_flag` is the field the email queue already
+            # excludes on, so setting it here stops the send instead of merely
+            # describing the problem. Only the EMAIL channel is affected -
+            # these leads still have good phone numbers and remain textable.
+            manual_flag=("bad_email" if email_quality_issue else None),
+            manual_flag_reason=(("Imported with an unusable email address (%s)"
+                                 % email_quality_issue)
+                                if email_quality_issue else None),
             street_address=row.get("street_address") or None,
             city=row.get("city") or None,
             state=row.get("state") or None,
@@ -614,6 +653,14 @@ def import_leads_from_excel(
         "flagged_call_restricted": flagged_call_restricted,
         "flagged_needs_tier_review": flagged_needs_tier_review,
         "flagged_bad_email": flagged_bad_email,
+        # What the preview must be able to state plainly BEFORE anything is
+        # committed: how many of these people we can actually reach, on which
+        # channel. "email_only_leads_queued" answers a different question - it
+        # counts rows with an email and NO usable phone - and reading it as
+        # "did the emails come through" is what sent Mike looking for a bug
+        # that was not there.
+        "usable_phone": usable_phone_count,
+        "usable_email": usable_email_count,
         "skipped_no_contact_info": skipped_no_contact_info,
         "skipped_internal_records": skipped_internal_records,
         "tier_breakdown": tier_counts,
