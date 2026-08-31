@@ -1696,6 +1696,24 @@ check("26.    deriving that URL rather than hardcoding a hostname",
       and "onrender.com" not in trace_src)
 check("26.    and says whether Twilio itself received anything inbound",
       '"inbound_count"' in trace_src)
+
+# Alerts/Debugger: the ONLY thing that separates "Twilio never dispatched"
+# from "Twilio dispatched and our guard refused it". Without it that leg is
+# unknown, and reporting a guess there would be worse than reporting nothing.
+check("26. the alert trace reports the code, status, URL and our own response",
+      all(k in trace_src for k in ('"error_code"', '"http_status"',
+                                   '"request_url"', '"response_body"')))
+check("26.    reads the failure description Twilio provides",
+      '"more_info"' in trace_src and '"log_level"' in trace_src)
+check("26.    and treats an empty alert log as a RESULT, not a gap",
+      '"interpretation"' in trace_src
+      and "No failed webhook deliveries recorded" in trace_src)
+# request_variables carries the whole inbound payload, including the family's
+# message. Only an allowlist leaves this endpoint, and headers never do.
+check("26.    surfacing only an allowlist of the inbound payload",
+      "_ALERT_SAFE_VARS" in trace_src and "body[:60]" in trace_src)
+check("26.    and never returning request headers",
+      '"request_headers"' not in trace_src)
 check("26. and never returns an auth token",
       "auth_token" not in trace_src)
 check("26. and says plainly when a row was never submitted",

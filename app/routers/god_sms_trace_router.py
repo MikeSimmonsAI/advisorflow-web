@@ -479,3 +479,145 @@ def trace_inbound(
         "number": number,
         "messaging_services_holding_this_number": services,
     }
+
+
+# ---------------------------------------------------------------------------
+# DID TWILIO'S WEBHOOK POST ACTUALLY SUCCEED? READ-ONLY.
+#
+# The Messages API says whether Twilio RECEIVED a message. It says nothing
+# about what happened when Twilio then POSTed it to our webhook. So when a
+# message exists in Twilio and no Reply row exists in EvoSys, two very
+# different failures look identical:
+#
+#     Twilio never dispatched, or could not reach us   (11200, 11205, 15003…)
+#     Twilio dispatched and our own guard rejected it  (403 from guard_inbound)
+#
+# Twilio records every failed webhook delivery in Monitor/Alerts with the error
+# code, the request URL, and our response. Reading that log is the only way to
+# tell those two apart without guessing, which is the whole point of this.
+#
+# Deliberately NOT a monitoring system: one window, one filter, no storage, no
+# scheduling, no alerting. Diagnostic visibility for an inbound test.
+#
+# STRICTLY READ-ONLY, and privacy-bounded: `request_variables` carries the full
+# inbound payload, so only a small allowlist is surfaced and the message body
+# is truncated. Request headers are never returned - they carry the Twilio
+# signature and add nothing a human needs here.
+# ---------------------------------------------------------------------------
+_ALERT_SAFE_VARS = ("MessageSid", "SmsSid", "From", "To", "MessageStatus", "ErrorCode")
+
+
+def _parse_alert_vars(raw: Optional[str]) -> dict:
+    """`request_variables` arrives as a urlencoded blob. Take only what helps."""
+    from urllib.parse import parse_qs
+    try:
+        parsed = parse_qs(raw or "")
+    except Exception:                                     # noqa: BLE001
+        return {}
+    out = {k: parsed[k][0] for k in _ALERT_SAFE_VARS if parsed.get(k)}
+    body = (parsed.get("Body") or [""])[0]
+    if body:
+        out["Body"] = body[:60]
+    return out
+
+
+def _http_status_from(alert_text: Optional[str]) -> Optional[str]:
+    """Twilio folds the HTTP status into `alert_text` as httpResponse=NNN."""
+    from urllib.parse import parse_qs
+    try:
+        parsed = parse_qs(alert_text or "")
+    except Exception:                                     # noqa: BLE001
+        return None
+    for key in ("httpResponse", "responseCode", "statusCode"):
+        if parsed.get(key):
+            return parsed[key][0]
+    return None
+
+
+@router.get("/alerts/{organization_id}")
+def trace_webhook_alerts(
+    organization_id: str,
+    hours: int = Query(default=6, ge=1, le=168),
+    contains: Optional[str] = Query(
+        default="/sms/webhook/",
+        description="Only alerts whose request URL contains this. Blank for all.",
+    ),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _god: User = Depends(require_god),
+):
+    import datetime as _dt
+
+    from app.models.models import Organization
+    from app.services.sms_service import _resolve_twilio_creds
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise HTTPException(404, "No such organization.")
+
+    client = None
+    for who in db.query(User).filter(User.organization_id == organization_id).all():
+        try:
+            client, _f, _c = _resolve_twilio_creds(who, db)
+            break
+        except Exception:                                 # noqa: BLE001
+            continue
+    if client is None:
+        return {"resolved": False,
+                "reason": "No user in this organization resolves Twilio credentials."}
+
+    since = _dt.datetime.utcnow() - _dt.timedelta(hours=hours)
+
+    rows = []
+    try:
+        for a in client.monitor.v1.alerts.list(start_date=since, limit=limit):
+            url = a.request_url or ""
+            if contains and contains not in url:
+                continue
+
+            entry = {
+                "sid": a.sid,
+                "date_generated": (a.date_generated.isoformat()
+                                   if a.date_generated else None),
+                "error_code": str(a.error_code) if a.error_code else None,
+                "log_level": a.log_level,
+                "request_method": a.request_method,
+                "request_url": url,
+                "resource_sid": a.resource_sid,
+                "http_status": _http_status_from(a.alert_text),
+                "request_variables": _parse_alert_vars(a.request_variables),
+                "more_info": a.more_info,
+            }
+
+            # The detail fetch is what carries our own response body - the
+            # difference between "we never answered" and "we answered 403".
+            try:
+                full = client.monitor.v1.alerts(a.sid).fetch()
+                if getattr(full, "response_body", None):
+                    entry["response_body"] = str(full.response_body)[:600]
+                if entry["http_status"] is None:
+                    entry["http_status"] = _http_status_from(
+                        getattr(full, "alert_text", None))
+            except Exception as exc:                      # noqa: BLE001
+                entry["detail_error"] = str(exc)[:200]
+
+            rows.append(entry)
+    except Exception as exc:                              # noqa: BLE001
+        return {"resolved": True, "error": str(exc)[:400], "alerts": []}
+
+    return {
+        "organization": org.name,
+        "window_hours": hours,
+        "filter_contains": contains or None,
+        "alert_count": len(rows),
+        # No alerts is a real result, not a gap: Twilio logs FAILED webhook
+        # deliveries here. Silence means no delivery failed - which, paired
+        # with a missing Reply row, points at the message never having been
+        # dispatched rather than at our backend refusing it.
+        "interpretation": (
+            "No failed webhook deliveries recorded in this window."
+            if not rows else
+            "Failed webhook deliveries recorded - see error_code and http_status."
+        ),
+        "alerts": rows,
+    }
