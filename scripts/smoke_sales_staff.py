@@ -524,14 +524,50 @@ def test_no_plaintext_passwords(c, god):
         check("...and did not invent a tenancy for a tenant-less role",
               r.json().get("organization_id") is None, r.json().get("organization_id"))
 
+    # THIS ASSERTION WAS INVERTED, AND IT ENCODED A BUG.
+    #
+    # It used to require that POST /admin/users SUCCEEDS for a god_admin with
+    # no customer selected. That call wrote organization_id=current_user.
+    # organization_id, which for a neutral owner is None - and an org-NULL user
+    # is this system's POSITIVE ASSERTION that someone is a brand-sales
+    # identity. So the "passing" behaviour was the manufacture of a phantom
+    # seller: refused by every tenant route, holding no membership, useless in
+    # the sales workspace, and indistinguishable from a real one.
+    #
+    # The route now refuses without a context. Both halves are proved here, so
+    # this is strictly stronger than what it replaced - a guard that refuses
+    # everything would fail the second half.
     r = c.post("/admin/users", json={"email": "adminmade@probe-corp.com",
                                      "full_name": "Admin Made",
                                      "role": "advisor"}, headers=god)
-    check("POST /admin/users still works", r.status_code in (200, 201), r.text[:200])
+    check("POST /admin/users REFUSES a context-less create", r.status_code == 409,
+          "%s %s" % (r.status_code, r.text[:160]))
+    check("...and the refusal names the context to select",
+          "customer" in r.text.lower(), r.text[:160])
+    no_password_anywhere("POST /admin/users (refused)", r)
+
+    # ...and it still works for the person it was always meant for: an owner
+    # who has said which customer this user belongs to.
+    r = c.post("/admin/users", json={"email": "adminmade@probe-corp.com",
+                                     "full_name": "Admin Made",
+                                     "role": "advisor"},
+               headers={**god, "X-Org-Override": "org-cust"})
+    check("POST /admin/users still works WITH a customer selected",
+          r.status_code in (200, 201), r.text[:200])
     no_password_anywhere("POST /admin/users", r)
     if r.status_code in (200, 201):
         check("...and hands over a one-time link instead",
               bool(r.json().get("setup_url")), r.json())
+        from app.deps import SessionLocal as _SL
+        from app.models.models import User as _U
+        _db = _SL()
+        try:
+            _made = _db.query(_U).filter(_U.email == "adminmade@probe-corp.com").first()
+            check("...and the user BELONGS to that customer, not to nobody",
+                  _made is not None and _made.organization_id == "org-cust",
+                  None if _made is None else _made.organization_id)
+        finally:
+            _db.close()
 
     r = c.post("/admin/provision-client",
                json={"org_name": "Probe Cemetery", "org_slug": "probe-cemetery",
