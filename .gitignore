@@ -95,3 +95,7 @@ app/routers/sales_router.optimized.bak
 .verify_live.ps1
 
 .deploy_commit_msg.txt
+
+# Reconciliation output contains real contact data. Never commit it.
+.reconcile*
+reconciliation_findings*.csv

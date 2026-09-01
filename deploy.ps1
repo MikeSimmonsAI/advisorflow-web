@@ -248,6 +248,16 @@ if ($SkipSmoke) {
     # any batch size - and that a qualified send still works. Six reverts.
     python scripts\probe_qualification.py 2>&1 | Select-String "OPEN |BROKE|REVERT|checks passed|NARROWS AUTHORIZATION" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "QUALIFICATION CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 36 - RECONCILIATION MAY RESTRICT, NEVER RELEASE. Comparing operational
+    # records against a historical source is how compliance gets quietly undone:
+    # a source row that says "Allow" overwrites a local opt-out, a column named
+    # for a denial has cells that state permission, a shared household phone
+    # merges two families, a timestamp column gets read as an action and counted
+    # as engagement. Every one of those is asserted here, including a sweep of
+    # all permission combinations requiring a denial on either side to win.
+    # Six reverts.
+    python scripts\probe_reconciliation.py 2>&1 | Select-String "FAIL|MISSED|checks,|reverts caught" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "RECONCILIATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }
