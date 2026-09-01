@@ -42,7 +42,7 @@ from app.models.models import (                                        # noqa: E
 )
 from app.models.sales_models import (                                  # noqa: E402
     BrandSalesOrg, BrandPackage, Opportunity, Membership, DiscoveryRecord,
-    SCOPE_BRAND_SALES_ORG, ROLE_SALES_MANAGER, ROLE_SALES_REP,
+    SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG, ROLE_SALES_MANAGER, ROLE_SALES_REP,
     STAGE_WON, STAGE_CLOSING, STAGE_ONBOARDING, STAGE_LIVE,
 )
 from app.models.implementation_models import (                         # noqa: E402
@@ -430,8 +430,24 @@ def test_customer_admin(c):
     check("admin belongs to the new customer organisation",
           u is not None and u.organization_id == org_id)
     check("admin is on the customer's platform", u.platform_id == "plt-evo", u.platform_id)
+    # TIGHTENED, NOT LOOSENED. This counted EVERY membership and expected zero,
+    # which was the same thing as the check's name while `Membership` was only
+    # ever a brand-sales row. Creating a customer admin now writes a
+    # customer_org membership - that IS the workspace-access fix, and without it
+    # a paying customer has an account and no door - so an all-memberships count
+    # would fire on the intended change and say nothing about brand sales.
+    # It now asserts what it is named: no BRAND-SALES membership. And the
+    # customer_org row it must have is asserted directly below, so provisioning
+    # granting the wrong SCOPE would still fail here.
     check("admin holds no brand-sales membership",
-          db.query(Membership).filter(Membership.user_id == u.id).count() == 0)
+          db.query(Membership).filter(
+              Membership.user_id == u.id,
+              Membership.scope_type == SCOPE_BRAND_SALES_ORG).count() == 0)
+    check("admin holds exactly one customer-workspace membership, for THIS org",
+          [(m.scope_id, m.is_active) for m in db.query(Membership).filter(
+              Membership.user_id == u.id,
+              Membership.scope_type == SCOPE_CUSTOMER_ORG).all()]
+          == [(org_id, True)])
     act = db.query(CustomerActivation).filter(CustomerActivation.user_id == u.id).first()
     check("only a hash is stored, never the token",
           act is not None and token not in (act.token_hash or "")
@@ -539,12 +555,45 @@ def test_customer_admin(c):
     db.commit()
     db.close()
 
+    # THE 409 IS GONE ON PURPOSE, AND THE PROTECTION IT BOUGHT IS ASSERTED
+    # DIRECTLY INSTEAD.
+    #
+    # This refused outright because customer tenancy was ONE COLUMN, so being
+    # in a second customer was not something the schema could say and "add"
+    # could only have meant "move". That refusal is exactly why a BookaBoost
+    # salesperson could not also administer a customer workspace.
+    #
+    # Membership is additive now, so adding SUCCEEDS. The word that mattered in
+    # this check's name was never "refused" - it was NOT TRANSFERRED, and that
+    # is still true and now checked head-on: a new customer_org membership
+    # appears, and the tenant they were already in is untouched. If a future
+    # edit ever repoints organization_id out from under somebody, this fails.
+    dana_id = (SessionLocal().query(User)
+               .filter(User.email == "dana@greenwoodchapel.test").first().id)
+    db = SessionLocal()
+    before_org = db.query(User).filter(User.id == dana_id).first().organization_id
+    before_ws = {m.scope_id for m in db.query(Membership).filter(
+        Membership.user_id == dana_id,
+        Membership.scope_type == SCOPE_CUSTOMER_ORG).all()}
+    db.close()
+
     r = c.post("/god/ops/implementations/%s/customer-user" % STATE["impl2_id"],
-               json={"user_id": (SessionLocal().query(User)
-                                 .filter(User.email == "dana@greenwoodchapel.test")
-                                 .first().id)}, headers=god)
-    check("a user already inside another tenant is refused, not transferred",
-          r.status_code == 409, r.text[:250])
+               json={"user_id": dana_id}, headers=god)
+    check("a user already inside a tenant is ADDED to the second one",
+          r.status_code == 200, "%s %s" % (r.status_code, r.text[:200]))
+
+    db = SessionLocal()
+    after_org = db.query(User).filter(User.id == dana_id).first().organization_id
+    after_ws = {m.scope_id for m in db.query(Membership).filter(
+        Membership.user_id == dana_id,
+        Membership.scope_type == SCOPE_CUSTOMER_ORG,
+        Membership.is_active.is_(True)).all()}
+    db.close()
+    check("...and NOT TRANSFERRED - their original tenant is untouched",
+          after_org == before_org, "%s -> %s" % (before_org, after_org))
+    check("...they now hold BOTH workspaces, not one instead of the other",
+          after_ws > before_ws and before_ws <= after_ws,
+          "%s -> %s" % (sorted(before_ws), sorted(after_ws)))
 
 
 # ── §10, §32 customer isolation ─────────────────────────────────────────────
