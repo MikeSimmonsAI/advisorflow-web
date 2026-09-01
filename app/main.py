@@ -261,13 +261,46 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
 ]
 
+# ── EVERY HEADER THE BROWSER IS ALLOWED TO SEND ─────────────────────────────
+#
+# THIS LIST IS LOAD-BEARING AND IT FAILED SILENTLY ONCE. When the workspace
+# work added X-Workspace-Id to every request the client makes, this list was
+# not updated. Starlette's CORSMiddleware answers a preflight naming an
+# unlisted header with 400 "Disallowed CORS headers" - a non-2xx - so the
+# browser reported:
+#
+#   Response to preflight request doesn't pass access control check:
+#   It does not have HTTP ok status.
+#
+# and then net::ERR_FAILED. The request never left the browser. The server
+# never saw it, never refused it, and had nothing to log. From the page's side
+# every call to the API simply rejected, which is why one advisor saw an empty
+# dashboard and a screen telling him he had no access to his own workspace: the
+# guard read a rejected fetch as a refusal, and the refusal had never happened.
+#
+# The trap is that this breaks ONLY for the people who send the new header.
+# Anybody without a workspace selected - the owner in God Mode, a brand-sales
+# user, anyone testing before the header was set - kept working perfectly, so
+# the failure looked like a permissions bug affecting one person rather than a
+# transport bug affecting one header.
+#
+# So the header is no longer typed twice. It comes from the same constant the
+# server reads it with, and Gate 34 asserts that every custom header the
+# frontend client sends appears here.
+from app.services.workspace_access import WORKSPACE_HEADER
+
+BROWSER_HEADERS = [
+    "Authorization", "Content-Type", "Accept", "Origin",
+    "X-Org-Override", "X-Brand-Override",
+    WORKSPACE_HEADER,
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin",
-                   "X-Org-Override", "X-Brand-Override"],
+    allow_headers=BROWSER_HEADERS,
 )
 
 # ── Public compliance pages - registered FIRST so nothing else intercepts them.

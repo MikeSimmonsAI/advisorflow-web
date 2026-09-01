@@ -44,6 +44,16 @@ function networkErr() {
   return new Error('Unable to reach the server. Please check your connection or try again in a moment.')
 }
 
+// THE ONE THAT ACTUALLY HAPPENED. A blocked CORS preflight is invisible to
+// JavaScript: fetch rejects with a bare TypeError carrying no status, no
+// headers and no body, because the browser refused to send the request at all.
+// It is indistinguishable in code from an unreachable server - which is the
+// point. It must never be read as a refusal, because no refusal occurred.
+function corsBlockedErr() {
+  // client.js converts the fetch TypeError into this, with no `status`.
+  return new Error('Unable to reach the server. Please check your connection or try again in a moment.')
+}
+
 function sessionExpiredErr() {
   // client.js throws this bare Error after a 401 while it redirects to /login.
   return new Error('Session expired')
@@ -102,6 +112,8 @@ check('...on the server\'s own list, with no second request',
 console.log('\n── 2. FAILURES ARE NOT REFUSALS (the actual bug) ──')
 
 const TRANSPORT_CASES = [
+  ['a BLOCKED CORS PREFLIGHT (the production cause)', corsBlockedErr()],
+  ['a raw fetch TypeError, as the browser throws it', new TypeError('Failed to fetch')],
   ['500 from the server', httpErr(500, 'Internal Server Error')],
   ['502 bad gateway (Render restart)', httpErr(502, 'Bad Gateway')],
   ['503 service unavailable (cold start)', httpErr(503, 'Service Unavailable')],

@@ -222,6 +222,15 @@ if ($SkipSmoke) {
     # next, and a failed dashboard request rendering as the number 0.
     python scripts\probe_workspace_route_guard.py 2>&1 | Select-String "REVERT|BROKE|checks passed|NO DENIAL" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "WORKSPACE ROUTE GUARD CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 34 - THE BROWSER CAN SEND WHAT THE CLIENT SENDS. A header added to
+    # the API client and not to CORSMiddleware's allow_headers makes the
+    # browser refuse to send the request at all: the preflight is answered 400
+    # "Disallowed CORS headers", the server never sees the call, and the page
+    # sees every request reject. This reads the headers OUT OF client.js and
+    # sends real preflights for both production brand origins, so the next
+    # header cannot be added in one place only.
+    python scripts\probe_cors_preflight.py 2>&1 | Select-String "MISSING|BROKE|checks passed|PREFLIGHT SUCCEEDS" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "CORS PREFLIGHT CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }
