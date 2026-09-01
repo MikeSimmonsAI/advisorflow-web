@@ -227,6 +227,13 @@ COLUMNS_TO_ADD = [
     ("organizations", "meta_webhook_verify_token", "VARCHAR"),
     ("organizations", "tiktok_webhook_secret", "VARCHAR"),
     ("organizations", "enabled_features", "TEXT"),
+    # ── GATE 1 of administrative delegation (2026-09-01) ───────────────────
+    # Separate from enabled_features on purpose: that column says the customer
+    # may USE a service, this one says the ORGANIZATION may ADMINISTER the
+    # infrastructure behind it. Nullable with no default, and NULL reads as
+    # "nothing delegated", so every existing customer arrives at this gate
+    # closed - which is the intended state for all of them.
+    ("organizations", "delegated_capabilities", "TEXT"),
     # Fiber + generic intake form — service address and JSON blob for industry-specific fields
     ("leads", "service_address", "VARCHAR"),
     ("leads", "extra_data", "TEXT"),

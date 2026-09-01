@@ -29,6 +29,7 @@ from app.routers.audit_log_router import log_action
 from app.services import customer_provisioning as cp
 from app.services import customer_readiness as cr
 from app.services import entitlements
+from app.services import capabilities
 from app.services import platform_owner as po
 from app.services import staff_activation as _activation
 from app.models.staff_models import PURPOSE_SETUP as _PURPOSE_SETUP
@@ -333,6 +334,83 @@ def put_features(org_id: str, req: FeaturesIn, db: Session = Depends(get_db),
     db.commit()
     db.refresh(org)
     return entitlements.feature_report(org)
+
+
+# ── STEP 5b: ADMINISTRATION - the two delegation gates ──────────────────────
+#
+# THREE STATES, THREE ENDPOINTS, ON PURPOSE. The features endpoints above
+# answer "what may this customer USE". These answer the two questions that are
+# NOT the same as that one and not the same as each other:
+#
+#   PUT /{org}/self-management               may this ORGANIZATION administer it?
+#   PUT /{org}/users/{user}/capabilities     may THIS administrator administer it?
+#
+# They are deliberately not folded into `put_features`. One endpoint taking one
+# list of flags is exactly the shape that lets enabling a feature quietly hand
+# over its credentials, and it would make the God screen infer one state from
+# another rather than state all three.
+
+@router.get("/{org_id}/administration")
+def get_administration(org_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_god)):
+    """All three states in one read, as three named blocks.
+
+    One read rather than three so the screen cannot render a half-updated
+    picture, but three blocks rather than one merged list so it cannot present
+    them as the same question.
+    """
+    return capabilities.administration_report(db, _load(db, org_id))
+
+
+class SelfManagementIn(BaseModel):
+    # GATE 1. [] means the organization administers nothing itself, which is
+    # the default every customer starts at and where most should stay.
+    allowed: Optional[List[str]] = None
+
+
+@router.put("/{org_id}/self-management")
+def put_self_management(org_id: str, req: SelfManagementIn,
+                        db: Session = Depends(get_db),
+                        user: User = Depends(require_god)):
+    """GATE 1 - whether this organization may self-manage a capability at all.
+
+    Refuses a platform-wide capability with a 400 rather than storing it: master
+    billing, pricing, brand administration and platform secrets are
+    `delegable=False` in the registry and no amount of clicking here can
+    delegate them.
+    """
+    org = _load(db, org_id)
+    capabilities.set_self_management(db, org, user, req.allowed)
+    db.commit()
+    db.refresh(org)
+    return capabilities.administration_report(db, org)
+
+
+class AdminCapabilitiesIn(BaseModel):
+    # GATE 2. [] revokes every capability from this administrator without
+    # touching the organization's entitlement or anybody else's grants.
+    capabilities: Optional[List[str]] = None
+
+
+@router.put("/{org_id}/users/{user_id}/capabilities")
+def put_admin_capabilities(org_id: str, user_id: str, req: AdminCapabilitiesIn,
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_god)):
+    """GATE 2 - which specific administrator inside this organization holds it.
+
+    The target must be a member of THIS organization and must hold an eligible
+    admin role. Both are refused rather than stored: a grant that can never take
+    effect would show on this screen as an authorized administrator whose every
+    request is denied.
+    """
+    org = _load(db, org_id)
+    target = (db.query(User)
+              .filter(User.id == user_id, User.organization_id == org.id).first())
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    capabilities.set_user_grants(db, target, org, user, req.capabilities)
+    db.commit()
+    return capabilities.administration_report(db, org)
 
 
 # ── STEP 10: review, then activate ──────────────────────────────────────────

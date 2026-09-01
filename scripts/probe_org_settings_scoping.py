@@ -46,7 +46,9 @@ sys.path.insert(0, REPO)
 from fastapi.testclient import TestClient                              # noqa: E402
 from app.main import app                                               # noqa: E402
 from app.deps import SessionLocal, engine                              # noqa: E402
-from app.models.models import Base, Platform, Organization, User       # noqa: E402
+from app.models.models import (                                        # noqa: E402
+    Base, Platform, Organization, User, AuditLogEntry, UserCapabilityGrant,
+)
 from app.services.auth_service import hash_password                    # noqa: E402
 
 PW = "ProbeTest!2026"
@@ -80,9 +82,33 @@ def build():
                 Platform(id="plt-b", name="Brand B", slug="brand-b")])
     db.flush()
     db.add_all([
-        Organization(id="org-a", name="Alpha Cemetery", slug="alpha", platform_id="plt-a"),
+        # BOTH ORGS DELEGATE twilio_credentials, AND BOTH SUPER ADMINS ARE
+        # GRANTED IT BELOW. That is not this gate going soft - it is this gate
+        # testing the thing it is named after.
+        #
+        # As of the delegation model, `/org-settings/twilio` requires the
+        # organization to be allowed to self-manage AND the caller to hold the
+        # capability. Without the fixture below, every request here is refused
+        # by `require_capability` BEFORE `_resolve_org` ever runs - so the
+        # cross-brand checks would "pass" while proving nothing about the
+        # platform boundary, and the legitimate-access checks would fail for a
+        # reason that has nothing to do with brands.
+        #
+        # Opening the delegation gates puts the boundary back under test: a
+        # fully entitled operator, refused solely because the org belongs to
+        # another brand. probe_delegation.py owns the other question - that an
+        # operator WITHOUT these grants is refused - and it must stay owned
+        # there rather than being half-asserted in two places.
+        Organization(id="org-a", name="Alpha Cemetery", slug="alpha", platform_id="plt-a",
+                     enabled_features='["sms"]',
+                     delegated_capabilities='["twilio_credentials", "twilio_numbers"]'),
+        # Brand B's entitlements start at a KNOWN, NON-EMPTY value. If they
+        # started as NULL, "unchanged" would also be true after a successful
+        # cross-brand write of NULL, and the assertion would prove nothing.
         Organization(id="org-b", name="Bravo Funeral Home", slug="bravo", platform_id="plt-b",
-                     org_twilio_account_sid=B_SID),
+                     org_twilio_account_sid=B_SID,
+                     enabled_features='["campaigns", "reports", "sms"]',
+                     delegated_capabilities='["twilio_credentials", "twilio_numbers"]'),
     ])
     db.flush()
 
@@ -99,6 +125,18 @@ def build():
     mk("u-sa-a", "sa.a@probe.test", "Super A", "super_admin", org="org-a", platform="plt-a")
     mk("u-sa-b", "sa.b@probe.test", "Super B", "super_admin", org="org-b", platform="plt-b")
     mk("u-oa-a", "oa.a@probe.test", "Org Admin A", "org_admin", org="org-a")
+    db.flush()
+
+    # GATE 2 for the two platform operators, so the only thing that can refuse
+    # them below is the brand boundary. See the comment on org-a above.
+    db.add_all([
+        UserCapabilityGrant(id="cap-sa-a", user_id="u-sa-a", organization_id="org-a",
+                            capability="twilio_credentials", is_active=True),
+        UserCapabilityGrant(id="cap-sa-a2", user_id="u-sa-a", organization_id="org-a",
+                            capability="twilio_numbers", is_active=True),
+        UserCapabilityGrant(id="cap-sa-b", user_id="u-sa-b", organization_id="org-b",
+                            capability="twilio_credentials", is_active=True),
+    ])
     db.commit()
     db.close()
 
@@ -115,6 +153,45 @@ def sid_of(org_id):
     try:
         row = db.query(Organization).filter(Organization.id == org_id).first()
         return getattr(row, "org_twilio_account_sid", None) if row else None
+    finally:
+        db.close()
+
+
+def features_of(org_id):
+    """The org's stored allow-list, read straight from the column.
+
+    Read from the DATABASE, never from a response body. A route can return
+    {"updated": true} and have written nothing, or refuse and have written
+    anyway; the column is the only thing that says which actually happened.
+    """
+    import json as _json
+    db = SessionLocal()
+    try:
+        row = db.query(Organization).filter(Organization.id == org_id).first()
+        raw = getattr(row, "enabled_features", None) if row else None
+        if raw is None:
+            return None
+        try:
+            return _json.loads(raw)
+        except (ValueError, TypeError):
+            return raw
+    finally:
+        db.close()
+
+
+def audit_has(action):
+    """True if an audit row with this action exists. The god-side writer has
+    always written one; the super_admin-side writer used not to.
+
+    The model is `AuditLogEntry` (table `audit_log_entries`). Imported at module
+    scope, NOT inside a try/except: a rename would then raise here and stop the
+    gate, rather than being swallowed into a quiet False that reads as a real
+    failure of the code under test.
+    """
+    db = SessionLocal()
+    try:
+        return db.query(AuditLogEntry).filter(
+            AuditLogEntry.action == action).count() > 0
     finally:
         db.close()
 
@@ -172,6 +249,62 @@ def main():
         after = sid_of("org-b")
         refused("   and Brand B's stored Account SID is UNCHANGED",
                 after == before == B_SID, "before=%s after=%s" % (before, after))
+
+        # ── THE ONE THAT WAS MISSED THE FIRST TIME ──────────────────────────
+        #
+        # PATCH /org-settings/features never called _resolve_org, so the sweep
+        # that fixed the other thirteen endpoints in this file never found it.
+        # It loaded the Organization by the raw query-parameter id after
+        # checking only that the caller held super_admin - which means Brand A's
+        # operator could switch Brand B's customer's paid features off, or on.
+        #
+        # Entitlement is what the customer is BUYING. Being able to rewrite
+        # another brand's customer's entitlements is not a smaller hole than the
+        # Twilio one above; it is the same hole pointed at the invoice.
+        section("cross-brand FEATURE ENTITLEMENT WRITE")
+        before_feats = features_of("org-b")
+        r = c.patch("/org-settings/features", params={"org_id": "org-b"}, headers=sa_a,
+                    json={"enabled_features": []})
+        refused("PATCH /org-settings/features?org_id=<other brand> is refused",
+                r.status_code in (403, 404), "%s %s" % (r.status_code, body_text(r)[:120]))
+        refused("   the refusal is 404, not 422 - the guard ran, not validation",
+                r.status_code != 422, "%s" % r.status_code)
+        after_feats = features_of("org-b")
+        refused("   and Brand B's stored entitlements are UNCHANGED",
+                after_feats == before_feats,
+                "before=%s after=%s" % (before_feats, after_feats))
+
+        # BOTH WRITERS TO THIS COLUMN MUST NOW OBEY THE SAME RULES. The god path
+        # has always rejected an unregistered key and written an audit row; this
+        # path used to json.dumps() whatever it was handed. That difference is
+        # exactly how `a2p_10dlc` and `master_dashboard` ended up stored in a
+        # column whose registry has never contained them, which is the "unknown
+        # feature key" warning on the God Features screen.
+        section("the two feature writers share one set of rules")
+        r = c.patch("/org-settings/features", params={"org_id": "org-a"}, headers=sa_a,
+                    json={"enabled_features": ["campaigns", "not_a_real_feature"]})
+        refused("PATCH /org-settings/features rejects an UNREGISTERED key",
+                r.status_code == 400, "%s %s" % (r.status_code, body_text(r)[:160]))
+        refused("   and the rejection names the key",
+                "not_a_real_feature" in body_text(r), body_text(r)[:160])
+        refused("   and nothing was written",
+                "not_a_real_feature" not in str(features_of("org-a")), features_of("org-a"))
+        # `sms` IS IN THIS LIST DELIBERATELY. This write REPLACES org-a's
+        # entitlements, and the Twilio checks further down need the org to still
+        # own `sms` - `require_capability("twilio_credentials")` refuses with 402
+        # when the underlying feature is absent, because administering the Twilio
+        # account of a customer with no SMS is not a permission question.
+        # Dropping sms here made those later checks fail for a reason that had
+        # nothing to do with the boundary this gate exists to test.
+        r = c.patch("/org-settings/features", params={"org_id": "org-a"}, headers=sa_a,
+                    json={"enabled_features": ["campaigns", "reports", "sms"]})
+        allowed("...and a VALID key list still writes normally",
+                r.status_code == 200, "%s %s" % (r.status_code, body_text(r)[:160]))
+        allowed("   and it persisted",
+                set(features_of("org-a") or []) == {"campaigns", "reports", "sms"},
+                features_of("org-a"))
+        allowed("   and it wrote a customer.features_set audit row",
+                audit_has("customer.features_set"), "no audit row found")
 
         section("cross-brand appointment types and CRM stages")
         r = c.get("/settings/appointment-types", params={"org_id": "org-b"}, headers=sa_a)

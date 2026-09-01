@@ -107,8 +107,25 @@ export default function SystemHealth() {
         </div>
         <div className="cadence-health-value">
           <span className="mono">{loading ? 'Loading...' : formatDate(status?.last_cadence_run)}</span>
+          {/* WAS: "BookaBoost currently tracks per-lead cadence timestamps..."
+              — a hardcoded brand name rendering on every brand's build, including
+              EvoSys Pro. The single React bundle serves all brands, so a literal
+              brand name in a component is always wrong for somebody.
+
+              Rewritten brand-neutral rather than swapped for the active brand:
+              this sentence describes how the PLATFORM tracks cadence, which is
+              the same on every brand, so naming any brand here would be noise.
+
+              THE STATEMENT ITSELF IS STILL TRUE AND CADENCE IS UNCHANGED. The
+              scheduler runs — `_cadence_loop` in app/main.py, hourly, with
+              double-send protection — and `_get_last_cadence_run` returns None
+              deliberately because no job-run ledger table exists. The blank
+              timestamp is that None, not a stalled scheduler. Nothing about
+              cadence behaviour was touched by this change. */}
           <p>
-            BookaBoost currently tracks per-lead cadence timestamps. A dedicated cadence job-run timestamp has not been added yet.
+            Cadence progress is tracked per lead. A dedicated scheduler job-run
+            timestamp has not been added yet, so this reads blank by design
+            rather than indicating a problem.
           </p>
         </div>
       </section>

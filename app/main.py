@@ -71,6 +71,10 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
 import app.models.demo_site_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
+# The SECOND gate pair. require_feature asks whether the customer may USE a
+# service; require_capability asks whether this organization may ADMINISTER the
+# infrastructure behind it AND whether this particular administrator holds it.
+from app.services.capabilities import require_capability  # noqa: E402
 from app.routers import (
     auth_router, leads_router, sms_router, admin_router,
     cadence_router, email_router, calendar_router, notification_router,
@@ -461,7 +465,16 @@ app.include_router(crm_native_router,
                    dependencies=[Depends(require_feature("crm"))])
 app.include_router(survey_router)
 app.include_router(tier_definitions_router)
-app.include_router(dlc_router)
+# A2P 10DLC — GOD-ONLY BY DEFAULT.
+#
+# Every route here was `_require_admin`, so holding org_admin meant being able
+# to register the company's A2P brand and campaign. A brand binds permanently to
+# the Twilio account that created it. `require_capability` needs BOTH gates: the
+# organization must be permitted to self-manage A2P, and the caller must be one
+# of its named authorized administrators. Neither follows from a role, and no
+# customer has either until God says so.
+app.include_router(dlc_router,
+                   dependencies=[Depends(require_capability("a2p_10dlc"))])
 app.include_router(case_file_router,
                    dependencies=[Depends(require_feature("case_files"))])
 app.include_router(social_webhooks_router)

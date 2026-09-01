@@ -44,6 +44,7 @@ from app.models.models import Organization, User
 # The registry. A feature that is not here cannot be granted, which stops the
 # allow-list quietly filling with typos that grant nothing and are never noticed.
 FEATURES: Dict[str, str] = {
+    # ── Operational features: what the customer's staff DO all day ──────────
     "leads":        "Lead management and the leads list",
     "campaigns":    "Bulk campaigns and campaign builder",
     "cadences":     "Automated multi-touch cadences",
@@ -51,13 +52,46 @@ FEATURES: Dict[str, str] = {
     "email":        "Outbound email",
     "voice":        "Outbound and inbound voice / AI calling",
     "crm":          "Native CRM contacts and pipeline",
+    "crm_connectors": "CRM connectors (GoHighLevel, HubSpot)",
     "booking":      "Public booking pages and appointment scheduling",
     "calendar":     "Calendar connections and availability",
+    "availability": "Advisor availability management",
     "reports":      "Reporting and analytics",
     "imports":      "CSV and bulk data import",
     "ai_assist":    "AI drafting, classification and suggestions",
     "compliance":   "Suppression lists and DNC handling",
     "case_files":   "Case files / family file review",
+
+    # ── Admin features: sellable, and still only FEATURES ───────────────────
+    #
+    # THE SIDEBAR HAS GATED ON THESE SEVEN FOR A LONG TIME AND THE SERVER HAD
+    # NEVER HEARD OF THEM. `Layout.jsx` asked `isFeatureEnabled('master_dashboard')`
+    # while this registry held fourteen entirely different keys, and
+    # `OrgManager.jsx` carried a third list again, complete with a plan -> feature
+    # map that priced them. Anything written through the un-normalized
+    # `PATCH /org-settings/features` therefore landed in `enabled_features` as a
+    # key nothing recognised, and the God Features screen - which renders from
+    # THIS dict - reported it as unknown. That was the warning.
+    #
+    # They are registered rather than deleted because OrgManager's PLAN_FEATURES
+    # shows they are part of the commercial model: trial includes the master
+    # dashboard and users, growth adds lead cleanup. They are real things
+    # customers buy. Registering them is what makes one vocabulary out of three.
+    "users":            "User management for the organization",
+    "master_dashboard": "Team performance dashboard",
+    "branding_settings": "Organization branding and settings",
+    "audit_log":        "Audit log",
+    "tier_config":      "Lead tier configuration",
+    "lead_cleanup":     "Lead cleanup and duplicate merging",
+
+    # `a2p_10dlc` IS DELIBERATELY ABSENT, and it is the eighth key the sidebar
+    # used to ask for. A2P brand and campaign registration is not something a
+    # customer USES, it is infrastructure somebody ADMINISTERS - and an A2P
+    # brand binds permanently to the Twilio account that registers it. It moved
+    # to CAPABILITIES in app/services/capabilities.py, behind both delegation
+    # gates. Putting it back here would make enabling a feature hand over the
+    # power to re-register the customer's carrier identity, which is the exact
+    # collapse the two-gate model exists to prevent.
 }
 
 ALL_FEATURE_KEYS = tuple(sorted(FEATURES))

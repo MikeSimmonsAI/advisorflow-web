@@ -3,21 +3,26 @@ import { useNavigate } from 'react-router-dom'
 import { api, setOrgContext } from '../api/client'
 import './OrgManager.css'
 
-const ALL_FEATURES = [
-  { key: 'master_dashboard', label: 'Master Dashboard' },
-  { key: 'reports',          label: 'Reports' },
-  { key: 'users',            label: 'Users' },
-  { key: 'availability',     label: 'Availability' },
-  { key: 'campaigns',        label: 'Campaigns' },
-  { key: 'crm',              label: 'CRM (Contact Management)' },
-  { key: 'crm_connectors',   label: 'CRM Connectors (GoHighLevel / HubSpot)' },
-  { key: 'lead_cleanup',     label: 'Lead Cleanup' },
-  { key: 'tier_config',      label: 'Tier Config' },
-  { key: 'a2p_10dlc',        label: 'A2P 10DLC Registration' },
-  { key: 'branding_settings',label: 'Branding & Settings' },
-  { key: 'compliance',       label: 'Compliance' },
-  { key: 'audit_log',        label: 'Audit Log' },
-]
+// THE FEATURE LIST NO LONGER LIVES HERE.
+//
+// This file used to carry its own thirteen-key list, `Layout.jsx` carried a
+// different nine, and the server's registry held a third fourteen. Three
+// vocabularies, one `enabled_features` column, and no agreement between them:
+// seven of the keys this screen could write had never existed on the server, so
+// writing them produced entitlements the God Features screen then reported as
+// unknown.
+//
+// It is now fetched from GET /god/customers/{id}/features, whose `available`
+// array is built from the server's registry. Add a feature in
+// app/services/entitlements.py and it appears here; there is nothing to keep in
+// sync because there is only one list.
+//
+// `a2p_10dlc` is deliberately gone rather than moved: A2P registration is not a
+// feature a customer USES, it is infrastructure somebody ADMINISTERS, and it
+// now lives behind the two delegation gates on the customer's Administration
+// panel. Granting "all features" must never hand over the power to re-register
+// a customer's carrier brand.
+const FEATURES_FALLBACK = []
 // Plan tiers — matches BookaBoost / EvoSys Pro pricing
 const PLANS = [
   { value: 'trial',        label: 'Trial',        price: null },
@@ -27,15 +32,23 @@ const PLANS = [
   { value: 'enterprise',   label: 'Enterprise',   price: 'Custom' },
 ]
 
-// Features each plan tier includes by default
+// Features each plan tier includes by default.
+//
+// `a2p_10dlc` HAS BEEN REMOVED FROM EVERY TIER. It was in growth, professional
+// and standard, which meant buying the Growth plan silently included the right
+// to register the customer's A2P brand and campaign against their Twilio
+// account. A2P is no longer a feature at all: it is a capability behind the two
+// delegation gates, granted per organization and then per named administrator
+// on that customer's Administration panel. A plan can sell the SMS service; it
+// cannot sell the carrier identity behind it.
 const PLAN_FEATURES = {
   trial:        ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log'],
   starter:      ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns'],
-  growth:       ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc'],
-  professional: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc', 'crm', 'crm_connectors'],
+  growth:       ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup'],
+  professional: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'crm', 'crm_connectors'],
   enterprise:   null, // null = all features
   // legacy alias kept so existing orgs on 'standard' still work
-  standard:     ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'a2p_10dlc'],
+  standard:     ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup'],
 }
 
 function getPlanLabel(plan) {
@@ -73,6 +86,9 @@ export default function OrgManager() {
   const [platformFilter, setPlatformFilter] = useState('all')
   const [expanded, setExpanded] = useState({})
   const [featuresExpanded, setFeaturesExpanded] = useState({})
+  // The server's feature registry. Empty until fetched, and left empty if the
+  // fetch fails — see FEATURES_FALLBACK at the top of this file.
+  const [allFeatures, setAllFeatures] = useState(FEATURES_FALLBACK)
   const [orgFeatures, setOrgFeatures] = useState({})
   const [saving, setSaving] = useState({})
   const [platformSaving, setPlatformSaving] = useState({})
@@ -98,6 +114,22 @@ export default function OrgManager() {
             ? o.enabled_features : null
         })
         setOrgFeatures(featInit)
+
+        // THE ONE FEATURE VOCABULARY, fetched rather than hardcoded.
+        // `available` is built from the server registry, so this screen and
+        // the God Features screen can no longer offer different keys.
+        if (orgsData.length) {
+          try {
+            const rep = await api.get(`/god/customers/${orgsData[0].id}/features`)
+            if (Array.isArray(rep?.available)) {
+              setAllFeatures(rep.available.map(f => ({ key: f.key, label: f.label })))
+            }
+          } catch {
+            // Leave the list empty rather than falling back to a local copy.
+            // An empty panel that says so is honest; a stale local list is the
+            // bug this change exists to remove.
+          }
+        }
       } catch (e) {
         setError(e.message)
       } finally {
@@ -132,7 +164,7 @@ export default function OrgManager() {
   function toggleFeature(orgId, key) {
     setOrgFeatures(prev => {
       const current = prev[orgId]
-      const asList = current === null ? ALL_FEATURES.map(f => f.key) : [...current]
+      const asList = current === null ? allFeatures.map(f => f.key) : [...current]
       const idx = asList.indexOf(key)
       if (idx === -1) asList.push(key)
       else asList.splice(idx, 1)
@@ -460,7 +492,7 @@ export default function OrgManager() {
                             Admin Feature Access{' '}
                             {features === null
                               ? <span className="org-features-status org-features-status--all">All enabled</span>
-                              : <span className="org-features-status">{features.length}/{ALL_FEATURES.length} enabled</span>
+                              : <span className="org-features-status">{features.length}/{allFeatures.length} enabled</span>
                             }
                           </span>
                           <button type="button" className="org-features-grant-all" onClick={() => grantAll(org.id)}>
@@ -468,7 +500,13 @@ export default function OrgManager() {
                           </button>
                         </div>
                         <div className="org-features-grid">
-                          {ALL_FEATURES.map(f => {
+                          {allFeatures.length === 0 && (
+                            <p className="org-user-empty">
+                              Feature list unavailable — could not read the server
+                              registry.
+                            </p>
+                          )}
+                          {allFeatures.map(f => {
                             const checked = features === null || features.includes(f.key)
                             return (
                               <label key={f.key} className="org-feature-checkbox">

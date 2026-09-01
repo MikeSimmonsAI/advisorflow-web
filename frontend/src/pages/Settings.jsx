@@ -214,25 +214,10 @@ export default function Settings() {
     }
   }
 
-  async function saveTwilio(e) {
-    e.preventDefault()
-    setSavingTwilio(true)
-    setTwilioSaved(false)
-    try {
-      await api.put('/settings/twilio', {
-        twilio_account_sid: sid,
-        twilio_auth_token: authToken,
-        twilio_phone_number: phoneNumber,
-        twilio_caller_id_name: callerIdName || null,
-      })
-      setAuthToken('')
-      setTwilioSaved(true)
-    } catch (err) {
-      alert(`Failed to save: ${err.message}`)
-    } finally {
-      setSavingTwilio(false)
-    }
-  }
+  // `saveTwilio` was here. It PUT /settings/twilio, which now returns 410 — a
+  // user's own Twilio credentials are not a thing this product has any more.
+  // Removed rather than left calling a dead route, so nothing offers a Save
+  // button that cannot succeed.
 
   async function saveNotifications(e) {
     e.preventDefault()
@@ -770,50 +755,37 @@ export default function Settings() {
         </section>
       )}
 
-      {/* ── Own Twilio — org admin and above only ── */}
-      {isAdmin && (
-        <section id="twilio" className="panel" style={{ marginBottom: 16 }}>
-          <div className="panel-header">
-            <h2 className="panel-title">Twilio</h2>
-            {profile.twilio_configured && <span className="badge badge--green">Connected</span>}
-          </div>
-          <p className="settings-help">
-            Each advisor connects their own Twilio account so your texts bill to your own number.
-            Find these values in your Twilio console.
-          </p>
-          <form onSubmit={saveTwilio} className="settings-form">
-            <label className="settings-label">
-              Account SID
-              <input className="settings-input" value={sid} onChange={(e) => setSid(e.target.value)} placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required />
-            </label>
-            <label className="settings-label">
-              Auth token
-              <input
-                className="settings-input"
-                type="password"
-                value={authToken}
-                onChange={(e) => setAuthToken(e.target.value)}
-                placeholder={profile.twilio_configured ? 'Leave blank to keep current token' : 'Your Twilio auth token'}
-                required={!profile.twilio_configured}
-              />
-            </label>
-            <label className="settings-label">
-              Phone number
-              <input className="settings-input" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+12145551234" required />
-            </label>
-            <label className="settings-label">
-              Caller ID name <span className="settings-optional">optional</span>
-              <input className="settings-input" value={callerIdName} onChange={(e) => setCallerIdName(e.target.value)} placeholder="Your Organization Name" />
-            </label>
-            <div className="settings-actions">
-              {twilioSaved && <span className="settings-saved">Saved</span>}
-              <button className="btn btn--primary" type="submit" disabled={savingTwilio}>
-                {savingTwilio ? 'Saving…' : 'Save Twilio settings'}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
+      {/* ── TWILIO CREDENTIALS ARE NO LONGER EDITED FROM MY SETTINGS ──
+          This panel offered Account SID, Auth token, Phone number and Caller ID
+          with a Save button, and the endpoint behind it — PUT /settings/twilio —
+          had no role check at all, so every advisor could point their own sends
+          at any Twilio account they liked, off the organization's registered
+          A2P campaign and its carrier reputation.
+
+          The credentials belong to the ORGANIZATION now: one Twilio account and
+          one A2P brand per customer, with sending numbers handed out to staff
+          underneath it. The account is configured in Organization Settings by an
+          administrator who holds the `twilio_credentials` capability; numbers are
+          assigned by one who holds `twilio_numbers`. Neither follows from a role.
+
+          What remains here is READ-ONLY: the person's own sending number, so they
+          can still see what they send from and who to ask if it is wrong. */}
+      <section id="twilio" className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">Your sending number</h2>
+          {profile.twilio_configured
+            ? <span className="badge badge--green">Assigned</span>
+            : <span className="badge">Not assigned</span>}
+        </div>
+        <p className="settings-help">
+          {profile.twilio_phone_number
+            ? <>You send from <strong>{profile.twilio_phone_number}</strong>.</>
+            : <>No sending number is assigned to you yet.</>}
+          {' '}Sending numbers and the Twilio account behind them are managed for
+          your organization by an authorized administrator — ask them if this
+          needs to change.
+        </p>
+      </section>
 
       {/* ── Scheduling calendars ──
           One panel for both providers, driven by the backend's own view of

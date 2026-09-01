@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Organization
+from app.services.capabilities import require_capability
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -104,10 +105,23 @@ def _get_or_create_customer(org: Organization, db: Session) -> str:
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/plans  (public)
+# GET /billing/plans
+#
+# WAS PUBLIC - no auth at all - and served the platform's whole price list,
+# per-plan lead and user ceilings included, to anyone who asked. It was marked
+# "(public)" for a plan-picker UI that does not exist: nothing in frontend/src
+# calls this endpoint. So there is no deliberate public-product requirement to
+# weigh against closing it, which is the only thing that would have justified
+# leaving it open.
+#
+# `_require_admin` rather than merely authenticated, matching /subscription,
+# /checkout and /portal below: the plan catalogue is for the person who can
+# actually change the plan. If a public pricing page is wanted later it should
+# serve a marketing catalogue written for that purpose, not the live billing
+# configuration.
 # ---------------------------------------------------------------------------
 @router.get("/plans")
-def get_plans():
+def get_plans(current_user: User = Depends(_require_admin)):
     return {"plans": PLANS}
 
 
@@ -309,7 +323,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 def get_all_billing(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _cap: User = Depends(require_capability("platform_billing")),
 ):
+    """Master billing across every customer. God only, and permanently so.
+
+    The inline role check below was already correct and is kept - two
+    independent refusals for the platform's whole revenue picture is the right
+    number. What `require_capability` adds is that "master billing is God-only"
+    now lives in the capability registry as `delegable=False` rather than as a
+    role literal in one function. `set_self_management` refuses to delegate it
+    with a 400, so no route and no God screen can hand it to a customer, however
+    it is used.
+    """
     if current_user.role != "god_admin":
         raise HTTPException(status_code=403, detail="God admin only.")
     orgs = db.query(Organization).order_by(Organization.name).all()

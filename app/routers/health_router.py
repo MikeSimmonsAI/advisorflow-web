@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
 from app.models.models import User
+from app.services.capabilities import require_capability
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -151,7 +152,29 @@ def _ai_features_status() -> IntegrationStatus:
 def advisor_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _cap: User = Depends(require_capability("platform_health")),
 ) -> AdvisorHealthStatus:
+    """SYSTEM HEALTH IS NOW GOD-ONLY BY DEFAULT.
+
+    This endpoint returns only the CALLER's own integration flags, so the data
+    exposure was never the problem. The problem was the surface: the sidebar
+    carried "System Health" under Administration with `adminOnly` and no feature
+    key at all, so no entitlement could switch it off and every org_admin on the
+    platform had a page that reads as platform operations.
+
+    `platform_health` is registered as DELEGABLE - so an organization can be
+    given its own health view by delegating it and naming an administrator,
+    with no code change - but nothing is delegated by default, which is what
+    "God-only by default" means here.
+
+    WORTH KNOWING: this closes the advisor's own "why is my Twilio not
+    connected" page, which is what the module docstring above says this endpoint
+    was rebuilt to provide. That path was already narrowing - advisors can no
+    longer write their own Twilio credentials either - so the two changes agree
+    rather than conflict. If self-service integration status should come back
+    for staff, it wants its own small endpoint scoped to the caller, not this
+    page reopened.
+    """
     twilio = _twilio_status(current_user)
     google = _google_calendar_status(current_user)
     microsoft = _microsoft_365_status(current_user)

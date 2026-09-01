@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.deps import get_db, get_current_user, require_tenant_user, load_org_in_scope
 from app.services.platform_owner import require_tenant_context
+from app.services import capabilities
 from app.models.models import User
 from app.utils.crypto import encrypt_value
 from app.routers.audit_log_router import log_action
@@ -202,34 +203,77 @@ def update_booking_settings(
     return {"success": True}
 
 
+@router.get("/my-capabilities")
+def get_my_capabilities(
+    db: Session = Depends(get_db),
+    # `require_tenant_user`, NOT `get_current_user`. This is a customer-workspace
+    # question, and a brand-sales identity (organization_id NULL by positive
+    # assertion) has no customer to hold capabilities in. Answering them with an
+    # empty 200 would repeat exactly the mistake `require_tenant_user`'s own
+    # docstring describes: a route that looks authorized because it happens to
+    # return nothing, rather than because anything refused it. GATE 24's
+    # brand-owner sweep caught this the first time it ran.
+    # god_admin passes through, which is what makes the God sidebar work.
+    current_user: User = Depends(require_tenant_user),
+):
+    """What the CALLER may actually administer, decided by the server.
+
+    THE SIDEBAR USED TO DECIDE THIS ITSELF, from `user.role` plus a hardcoded
+    list of feature keys, and that is how it came to disagree with the server:
+    seven of the nine keys it gated on had never existed in the backend
+    registry. A screen that computes its own version of an authorization rule
+    will eventually compute a different answer from the route it is guarding.
+
+    So the answer comes from `capabilities.resolve` - the SAME function
+    `require_capability` calls - and the frontend renders what it is told.
+
+    This is not access control. Hiding a nav item never was: every capability
+    below is enforced on its own routes, and this endpoint exists so the UI
+    stops offering doors that open onto a 403.
+    """
+    return capabilities.my_capabilities(db, current_user)
+
+
 @router.put("/twilio")
 def update_twilio_config(
     req: TwilioConfigRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_context),
 ):
+    """ANY ADVISOR COULD WRITE THEIR OWN TWILIO ACCOUNT SID AND AUTH TOKEN HERE.
+
+    This route carried `require_tenant_context` and no role check at all - not
+    even `require_admin` - so every advisor in every customer could set the
+    credentials their own sends resolve through. It dates from an earlier
+    design in which each advisor genuinely brought their own Twilio account and
+    their own bill. That design is gone: `_get_twilio_client` and the A2P router
+    both resolve the ORGANIZATION's credentials now, one account and one A2P
+    brand per customer, with numbers handed out to staff underneath it. The
+    per-user credential columns survive only as a fallback for advisors who
+    brought their own before that change.
+
+    What was left was a route that let an advisor point their sends at any
+    Twilio account they liked, off the organization's registered A2P campaign
+    and its carrier reputation, and bill it wherever they wanted. Nothing in the
+    product needs that, so the write is gone rather than gated: a capability
+    nobody should hold is better deleted than delegated.
+
+    THE NUMBER, NOT THE CREDENTIALS, IS THE PART STAFF ACTUALLY NEED, and it
+    already has a correct home - `PUT /org-settings/twilio/numbers/{user_id}`,
+    which writes a number only, never a SID or token, and now requires the
+    `twilio_numbers` capability. `PUT /settings/admin/twilio/{user_id}` below
+    remains for an org admin assigning a number within their own organization.
+
+    410 rather than 403: this is not a permission you might be given, it is a
+    route that no longer does anything.
     """
-    Lets each advisor enter their own Twilio account details, so each
-    person's SMS usage bills to their own Twilio account rather than
-    Mike's - matches the multi-tenant design where every advisor brings
-    their own number. The auth token is encrypted before it touches the
-    database; it's never stored or returned in plaintext.
-    """
-    current_user.twilio_account_sid = req.twilio_account_sid
-    current_user.twilio_auth_token_encrypted = encrypt_value(req.twilio_auth_token)
-    current_user.twilio_phone_number = req.twilio_phone_number
-    current_user.twilio_caller_id_name = req.twilio_caller_id_name
-    db.commit()
-    log_action(
-        db,
-        organization_id=current_user.organization_id,
-        actor_user_id=current_user.id,
-        action="settings.twilio_updated",
-        target_type="user",
-        target_id=current_user.id,
-        details={"twilio_account_sid": req.twilio_account_sid, "twilio_phone_number": req.twilio_phone_number},
+    raise HTTPException(
+        status_code=410,
+        detail="Twilio credentials belong to the organization, not to an "
+               "individual user. Ask an administrator to assign you a sending "
+               "number; the account itself is configured in Organization "
+               "Settings by an authorized administrator.",
     )
-    return {"success": True}
 
 
 @router.put("/admin/twilio/{user_id}")

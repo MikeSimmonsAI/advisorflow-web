@@ -34,9 +34,25 @@ logger = logging.getLogger(__name__)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _require_admin(current_user: User) -> None:
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
-        raise HTTPException(status_code=403, detail="Admin access required")
+# `_require_admin` USED TO LIVE HERE, AND IT WAS THE WHOLE GUARD.
+#
+# It passed org_admin, super_admin and god_admin, which meant any customer's
+# office manager could create a Messaging Service, register the company's A2P
+# brand and register a campaign. An A2P brand binds permanently to the Twilio
+# account that created it; registering against the wrong one is the single
+# messaging mistake that cannot be cleanly undone.
+#
+# Every route in this router is one thing - A2P 10DLC administration - so the
+# gate is applied ONCE, at include time in main.py:
+#
+#     app.include_router(dlc_router,
+#                        dependencies=[Depends(require_capability("a2p_10dlc"))])
+#
+# Gating the router rather than each route is the same reasoning main.py already
+# gives for require_feature: a per-route list is a list somebody forgets to add
+# the next route to. `require_capability` demands BOTH gates - the organization
+# must be permitted to self-manage A2P, and the caller must be one of its named
+# authorized administrators - and neither is implied by holding org_admin.
 
 
 def _get_org(db: Session, current_user: User) -> Organization:
@@ -137,7 +153,6 @@ def get_status(
     current_user: User = Depends(require_tenant_user),
 ):
     """Returns current A2P 10DLC registration status for this org."""
-    _require_admin(current_user)
     org = _get_org(db, current_user)
     return _status_response(org)
 
@@ -152,7 +167,6 @@ def create_messaging_service(
     the existing one if already created). The Messaging Service is the
     Twilio container that holds the phone number(s) and campaign.
     """
-    _require_admin(current_user)
     org = _get_org(db, current_user)
 
     existing_sid = getattr(org, "twilio_messaging_service_sid", None)
@@ -209,7 +223,6 @@ def register_brand(
     Brand approval typically takes 1–5 business days. Check /10dlc/status
     after submitting and again the next day.
     """
-    _require_admin(current_user)
     org = _get_org(db, current_user)
 
     existing_brand = getattr(org, "twilio_a2p_brand_sid", None)
@@ -286,7 +299,6 @@ def register_campaign(
     Campaign describes HOW you use SMS (appointment scheduling, follow-up, etc.)
     and provides sample messages for carrier review.
     """
-    _require_admin(current_user)
     org = _get_org(db, current_user)
 
     messaging_service_sid = getattr(org, "twilio_messaging_service_sid", None)
@@ -363,7 +375,6 @@ def add_phone_number(
     This links your registered number to the A2P campaign so messages sent
     from that number benefit from the campaign registration.
     """
-    _require_admin(current_user)
     org = _get_org(db, current_user)
 
     messaging_service_sid = getattr(org, "twilio_messaging_service_sid", None)
@@ -457,7 +468,6 @@ def patch_sids(
     Admin-only: Saves known Twilio SIDs directly to the org record.
     Use when SIDs exist in Twilio but were never persisted to the DB.
     """
-    _require_admin(current_user)
     org = _get_org(db, current_user)
 
     if req.messaging_service_sid and hasattr(org, "twilio_messaging_service_sid"):
@@ -485,7 +495,6 @@ def refresh_status(
     the database, and returns the latest registration state. Call this
     a day after submitting to see if TCR has approved/rejected.
     """
-    _require_admin(current_user)
     org = _get_org(db, current_user)
 
     client, account_sid = _get_twilio_client(db, current_user)

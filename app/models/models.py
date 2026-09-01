@@ -276,6 +276,28 @@ class Organization(Base):
     # [] = no optional features. ["campaigns", "reports", ...] = explicit allow-list.
     enabled_features = Column(Text, nullable=True)
 
+    # GATE 1 OF ADMINISTRATIVE DELEGATION — and a DIFFERENT question from the
+    # line above it, which is why it is a different column.
+    #
+    #   enabled_features        may this customer USE the service?
+    #   delegated_capabilities  may this ORGANIZATION ADMINISTER the
+    #                           infrastructure behind it?
+    #
+    # Restland has "sms" in enabled_features and nothing in this column: their
+    # advisors send messages all day and nobody there can see the Twilio
+    # account those messages go through. Keeping the two lists apart is what
+    # makes that expressible - one merged list would mean enabling a feature
+    # silently handed over its credentials.
+    #
+    # NULL and [] mean the same thing here: nothing delegated. That is the
+    # opposite of enabled_features, where NULL means "legacy, keep everything",
+    # and the asymmetry is deliberate - the safe reading of "God never said" is
+    # NO for infrastructure and YES for a feature a working customer already
+    # uses. Every existing customer therefore arrives at this gate closed.
+    #
+    # JSON array of keys from app/services/capabilities.py CAPABILITIES.
+    delegated_capabilities = Column(Text, nullable=True)
+
     # What this org calls their non-admin users (e.g. "Agent", "Rep", "Advisor", "FSA").
     # Null = use industry default. Overrides the hardcoded "Advisor" label throughout the UI.
     member_label = Column(String(100), nullable=True)   # singular e.g. "Agent"
@@ -908,6 +930,53 @@ class SuppressionEntry(Base):
     )
 
 
+
+
+# ---------------------------------------------------------------------------
+# UserCapabilityGrant - GATE 2 of the administrative delegation model.
+#
+# "This named administrator may administer this piece of infrastructure inside
+# this organization." It is the second of two gates; the first is
+# Organization.delegated_capabilities, which says whether the organization is
+# permitted to self-manage the thing at all. A row here is inert until that one
+# also says yes, which is deliberate: revoking an organization's
+# self-management must not require finding and unpicking every personal grant.
+#
+# NOT `Membership`. That table's column is `role`, its documented vocabulary is
+# sales_manager | sales_rep, and `sales_access` reads it to decide who runs a
+# sales team. A role is who you ARE; a capability is what you MAY DO. Putting
+# "manage_twilio" into a column called `role` puts a capability one careless
+# query away from being read as a sales role.
+#
+# See app/services/capabilities.py for the resolution order and the registry.
+# ---------------------------------------------------------------------------
+class UserCapabilityGrant(Base):
+    __tablename__ = "user_capability_grants"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False)
+    # Scoped to the ORGANIZATION as well as the user. The same person can
+    # administer one customer and not another, and a grant made for one is not
+    # a statement about any other.
+    organization_id = Column(String, ForeignKey("organizations.id",
+                                                ondelete="CASCADE"),
+                             nullable=False)
+    capability = Column(String, nullable=False)   # a key in CAPABILITIES
+
+    # Revocation DEACTIVATES rather than deletes. "Who held the Twilio account
+    # in June" is exactly the question an incident asks afterwards, and a
+    # deleted row cannot answer it.
+    is_active = Column(Boolean, default=True, nullable=False)
+    granted_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "organization_id", "capability",
+                         name="uq_user_capability_grant"),
+        Index("ix_user_capability_grants_lookup",
+              "user_id", "organization_id", "is_active"),
+    )
 
 
 # ---------------------------------------------------------------------------

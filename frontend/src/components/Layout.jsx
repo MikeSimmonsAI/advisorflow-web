@@ -79,10 +79,29 @@ const NAV_GROUPS = [
       { to: '/settings', label: 'My Settings', icon: 'settings' },
       { to: '/org-settings', label: 'Organization', icon: 'building', adminOnly: true, featureKey: 'branding_settings' },
       { to: '/tier-definitions', label: 'Tier Config', icon: 'layers', adminOnly: true, featureKey: 'tier_config' },
-      { to: '/10dlc', label: 'A2P 10DLC', icon: 'shield-check', adminOnly: true, featureKey: 'a2p_10dlc' },
       { to: '/audit-log', label: 'Audit Log', icon: 'activity', adminOnly: true, featureKey: 'audit_log' },
-      { to: '/system-health', label: 'System Health', icon: 'activity', adminOnly: true },
-      { to: '/billing', label: 'Billing', icon: 'credit-card', adminOnly: true },
+
+      // ── ADMINISTRATION OF INFRASTRUCTURE, not use of a feature ───────────
+      //
+      // `capability` is a different test from `featureKey` and the difference
+      // is the point of this whole change:
+      //
+      //   featureKey   does this customer USE the service?
+      //   capability   may this organization ADMINISTER the infrastructure,
+      //                AND is THIS person one of its named administrators?
+      //
+      // A2P used to sit above with `featureKey: 'a2p_10dlc'` — a key the
+      // server had never heard of — plus `adminOnly`, so any org admin could
+      // register the company's carrier brand. System Health and Billing had no
+      // key at all, so no entitlement could switch them off.
+      //
+      // The list comes from GET /settings/my-capabilities, which calls the SAME
+      // resolver the routes call. This is not access control: every route below
+      // enforces its own capability. It stops the sidebar offering doors that
+      // open onto a 403.
+      { to: '/10dlc', label: 'A2P 10DLC', icon: 'shield-check', capability: 'a2p_10dlc' },
+      { to: '/system-health', label: 'System Health', icon: 'activity', capability: 'platform_health' },
+      { to: '/billing', label: 'Billing', icon: 'credit-card', capability: 'platform_billing' },
     ],
   },
 ]
@@ -204,6 +223,23 @@ export default function Layout({ children }) {
 
   const enabledFeatures = isElevated ? null : (branding?.enabled_features ?? null)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
+
+  // WHAT THIS PERSON MAY ADMINISTER, ANSWERED BY THE SERVER.
+  //
+  // Starts as null meaning "not answered yet", which renders as NO capability
+  // items rather than as all of them. A sidebar that shows A2P for a moment
+  // before the answer arrives has already told an org admin the door exists.
+  const [myCaps, setMyCaps] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    api.get('/settings/my-capabilities')
+      .then(d => { if (!cancelled) setMyCaps(Array.isArray(d?.capabilities) ? d.capabilities : []) })
+      // A failed call means "not entitled" for rendering purposes. It cannot
+      // grant anything, and the routes refuse independently either way.
+      .catch(() => { if (!cancelled) setMyCaps([]) })
+    return () => { cancelled = true }
+  }, [orgContext])
+  const hasCapability = (key) => !key || (myCaps !== null && myCaps.includes(key))
 
   function handleExitOrg() {
     clearOrgContext()
@@ -439,6 +475,10 @@ export default function Layout({ children }) {
             const isOrgAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
+              // A capability item is NEVER shown on the strength of a role.
+              // That is the whole difference: `adminOnly` asks who you are,
+              // `capability` asks what the server says you may administer.
+              if (item.capability) return hasCapability(item.capability)
               if (item.adminOnly && !isOrgAdmin) return false
               if (item.featureKey !== undefined && !isFeatureEnabled(item.featureKey)) return false
               return true

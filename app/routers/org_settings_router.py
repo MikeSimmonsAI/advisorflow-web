@@ -24,6 +24,13 @@ def _validate_url(url: Optional[str], field: str) -> Optional[str]:
 
 from app.deps import get_db, get_current_user, require_admin, load_org_in_scope
 from app.models.models import Organization, User
+# The SAME writer the god-side Features screen uses. Importing it rather than
+# reimplementing it is the point of this import: one column, one set of rules.
+from app.services.entitlements import set_features
+# GATE 1 + GATE 2 for the Twilio routes at the bottom of this file. `/branding`
+# is a setting; `/twilio` is the account that bills and sends. They are not the
+# same kind of thing and no longer sit behind the same guard.
+from app.services.capabilities import require_capability
 
 router = APIRouter(prefix="/org-settings", tags=["org-settings"])
 
@@ -375,22 +382,49 @@ def update_enabled_features(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Super admin only: set which admin features an org can access.
-    Pass enabled_features=null to restore all-enabled state.
-    Pass enabled_features=[] to disable all optional features.
+    """Super admin only: set which features an org is entitled to USE.
+
+    TWO THINGS WERE WRONG HERE, AND THEY WERE THE SAME MISTAKE TWICE: this route
+    carried its own version of work that already had one correct implementation.
+
+    1. NO PLATFORM BOUNDARY. Every other endpoint in this file resolves its org
+       through `_resolve_org` -> `load_org_in_scope`. This one loaded the
+       Organization by the raw query-parameter id after checking only that the
+       caller held super_admin. `require_super_admin` proves the caller is *a*
+       platform operator and says nothing about *which* platform, so a
+       super_admin on one brand could rewrite another brand's customer's
+       entitlements - switching a competitor's customer's features off, or
+       switching paid features on. It is the identical hole closed across the
+       other thirteen endpoints here; it survived that pass precisely because it
+       does not call `_resolve_org`, so a search for that helper never found it.
+
+    2. NO VALIDATION AND NO AUDIT. It wrote `json.dumps(req.enabled_features)`
+       straight into the column. The god-side writer for the SAME column,
+       `PUT /god/customers/{org_id}/features`, goes through
+       `entitlements.set_features` -> `normalize_keys`, which rejects an
+       unregistered key with 400 and writes a `customer.features_set` audit row.
+       Two writers, one column, different rules: this path is how unregistered
+       keys such as `a2p_10dlc` and `master_dashboard` were persisted, and the
+       God Features screen - which renders from the registry - then reported
+       them as unknown. That warning was this endpoint.
+
+    Both are fixed by deleting the local implementations and calling the shared
+    ones. `_resolve_org` refuses with 404 rather than 403 for the reason
+    `load_org_in_scope` documents: a 403 on a record you may not touch confirms
+    it exists, which is how another brand's customer list gets enumerated one id
+    at a time.
+
+    Pass enabled_features=null to restore the legacy all-enabled state.
+    Pass enabled_features=[] to disable every optional feature.
     Pass enabled_features=["campaigns","reports",...] to restrict to a subset.
     """
     if current_user.role not in ("super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Super admin only")
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
-    if req.enabled_features is None:
-        org.enabled_features = None
-    else:
-        org.enabled_features = json.dumps(req.enabled_features)
+    org = _resolve_org(current_user, org_id, db)
+    effective = set_features(db, org, current_user, req.enabled_features)
     db.commit()
-    return {"updated": True, "enabled_features": req.enabled_features}
+    return {"updated": True, "enabled_features": req.enabled_features,
+            "effective": effective}
 
 
 # ---------------------------------------------------------------------------
@@ -504,11 +538,23 @@ class AdvisorNumberUpdate(BaseModel):
     twilio_caller_id_name: Optional[str] = None
 
 
+# THE FIVE ROUTES BELOW ARE INFRASTRUCTURE, NOT SETTINGS.
+#
+# They read and write the Twilio account that bills and sends, and decide which
+# number each person sends from. They sat behind `require_admin` like
+# `/branding` and `/contact` above them, so holding org_admin meant holding the
+# customer's Twilio credentials - and USING a service and CONFIGURING THE
+# INFRASTRUCTURE FOR IT are different permissions.
+#
+# `require_capability` is additive here: `require_admin` proved a role,
+# `_resolve_org` proves the platform boundary, and this proves the two
+# delegation gates. None of the three replaces another, and all three still run.
 @router.get("/twilio", response_model=OrgTwilioRead)
 def get_org_twilio(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    _cap: User = Depends(require_capability("twilio_credentials")),
 ):
     """Return the org's shared Twilio config (auth token is never returned)."""
     org = _resolve_org(current_user, org_id, db)
@@ -532,6 +578,7 @@ def update_org_twilio(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    _cap: User = Depends(require_capability("twilio_credentials")),
 ):
     """Save org-level Twilio credentials (auth token is encrypted at rest).
 
@@ -566,6 +613,7 @@ def update_org_twilio_phone(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Update the shared phone number / caller ID only — no auth token re-entry.
 
@@ -596,6 +644,7 @@ def list_org_sending_numbers(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Who in this organization holds which sending number.
 
@@ -634,6 +683,7 @@ def assign_org_sending_number(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Assign (or clear) one advisor's sending number.
 
