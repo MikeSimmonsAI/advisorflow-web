@@ -45,6 +45,7 @@ from app.main import app                                                # noqa: 
 from app.deps import SessionLocal, engine                               # noqa: E402
 from app.models.models import (                                         # noqa: E402
     Base, Platform, Organization, User, Lead, SuppressionEntry, Reply,
+    EmailMessage,
 )
 from app.models.qualification_models import QualificationRule           # noqa: E402
 from app.services import qualification                                  # noqa: E402
@@ -640,6 +641,141 @@ def main():
     allowed("a human resolving a duplicate un-excludes it",
             r.status_code == 200 and r.json()["bucket"] != qualification.EXCLUDED,
             r.text[:200])
+
+    # ─────────────────────────────────────────────────────────────────────────
+    section("THE GOD DIAGNOSTIC - god only, read only, no send")
+    god = None
+    db = SessionLocal()
+    db.add(User(id="u-god", organization_id=None, email="god@platform.test",
+                full_name="Platform Owner", password_hash=hash_password(PW),
+                role="god_admin", platform_id="plt", must_change_password=False,
+                is_active=True, last_login_at=datetime.utcnow()))
+    db.commit()
+    db.close()
+    god = token(c, "god@platform.test")
+
+    DIAG = "/god/ops/diagnostics/qualification"
+    r = c.get("%s?email=ada@northwind.test&channel=email" % DIAG, headers=god)
+    allowed("god can run the qualification diagnostic", r.status_code == 200,
+            r.text[:200])
+    rep = r.json() if r.status_code == 200 else {}
+    allowed("...it names the subject", rep.get("subject", {}).get("email")
+            == "ada@northwind.test", rep.get("subject"))
+    runs = rep.get("runs") or []
+    allowed("...and returns at least one workspace scenario", len(runs) >= 1)
+    if runs:
+        run0 = runs[0]
+        for key in ("total_authorized", "total_selected", "ready", "review",
+                    "excluded", "priority", "exclusion_reasons",
+                    "review_reasons", "priority_factors", "counts_agree"):
+            allowed("...the report carries %s" % key, key in run0, sorted(run0))
+        allowed("...the counts reconcile against the authorized population",
+                run0.get("counts_agree") is True,
+                "%s authorized vs %s selected" % (run0.get("total_authorized"),
+                                                  run0.get("total_selected")))
+        allowed("...and the authorized total is Ada's own book",
+                run0.get("total_authorized") == len(LEADS),
+                run0.get("total_authorized"))
+        allowed("...HIGH / MEDIUM / LOW are engine counts, not invented",
+                set(run0.get("priority", {})) == {"HIGH", "MEDIUM", "LOW"})
+
+    refused("a plain ADVISOR cannot reach the diagnostic",
+            c.get("%s?email=ada@northwind.test" % DIAG, headers=ada).status_code == 403)
+    refused("an ORG ADMIN cannot reach it either",
+            c.get("%s?email=ada@northwind.test" % DIAG, headers=cara).status_code == 403)
+    refused("another tenant's advisor cannot reach it",
+            c.get("%s?email=ada@northwind.test" % DIAG, headers=otto).status_code == 403)
+    refused("unauthenticated is refused",
+            c.get("%s?email=ada@northwind.test" % DIAG).status_code == 401)
+
+    r = c.get("%s?email=nobody@nowhere.invalid" % DIAG, headers=god)
+    refused("a user who does not exist is a clean 404, not an empty report",
+            r.status_code == 404, "%s %s" % (r.status_code, r.text[:120]))
+    r = c.get("%s?email=ada@northwind.test&channel=carrier-pigeon" % DIAG, headers=god)
+    refused("an unknown channel is refused rather than defaulted",
+            r.status_code == 400, r.status_code)
+
+    section("the diagnostic writes nothing and sends nothing")
+    db = SessionLocal()
+    before = {(l.id, l.status, l.manual_flag, l.assigned_to_id, l.organization_id)
+              for l in db.query(Lead).all()}
+    msgs_before = db.query(EmailMessage).count()
+    db.close()
+    c.get("%s?email=ada@northwind.test&channel=email&sample=50" % DIAG, headers=god)
+    c.get("%s?email=ada@northwind.test&channel=sms" % DIAG, headers=god)
+    db = SessionLocal()
+    after = {(l.id, l.status, l.manual_flag, l.assigned_to_id, l.organization_id)
+             for l in db.query(Lead).all()}
+    msgs_after = db.query(EmailMessage).count()
+    db.close()
+    allowed("no lead changed while the diagnostic ran", before == after)
+    allowed("NO EMAIL WAS SENT by running the diagnostic",
+            msgs_before == msgs_after, "%s -> %s" % (msgs_before, msgs_after))
+
+    section("the drilldown carries decisions, never contact details")
+    r = c.get("%s?email=ada@northwind.test&channel=email&sample=50" % DIAG, headers=god)
+    blob = r.text
+    allowed("the sample is returned", r.status_code == 200
+            and any("sample" in run for run in (r.json().get("runs") or [])))
+    for pii in ("@example.test", "+1214555", "FIELDOWNED"):
+        allowed("...and carries no '%s'" % pii, pii not in blob,
+                "lead contact detail leaked into a diagnostic")
+    allowed("...and no other advisor's lead id appears",
+            "ld-ben" not in blob and "ld-otto" not in blob)
+
+    section("the God UI page is wired, honest, and has no send control")
+    ui = open(os.path.join(REPO, "frontend", "src", "pages", "god",
+                           "QualificationDiagnostic.jsx"),
+              encoding="utf-8", errors="replace").read()
+    app_src = open(os.path.join(REPO, "frontend", "src", "App.jsx"),
+                   encoding="utf-8", errors="replace").read()
+    shell = open(os.path.join(REPO, "frontend", "src", "pages", "GodShell.jsx"),
+                 encoding="utf-8", errors="replace").read()
+
+    allowed("the page is routed under GodRoute",
+            "/god/diagnostics/qualification" in app_src
+            and "QualificationDiagnostic" in app_src)
+    allowed("...BEFORE the /god/* catch-all, or it would never render",
+            app_src.index("/god/diagnostics/qualification") < app_src.index('"/god/*"'))
+    allowed("it appears in the God PLATFORM navigation",
+            "/god/diagnostics/qualification" in shell)
+    allowed("ACCESS DIAGNOSTIC IS UNTOUCHED and still routed",
+            "/god/diagnostics/user-access" in app_src
+            and "/god/diagnostics/user-access" in shell
+            and "UserAccessDiagnostic" in app_src)
+
+    allowed("the page calls the read-only diagnostic endpoint",
+            "/god/ops/diagnostics/qualification" in ui)
+    # NO SEND CONTROL. The page is a diagnostic; a send button on it would be a
+    # bulk outreach trigger sitting behind a screen nobody thinks of as one.
+    for danger in ("/email/send", "send-batch", "builder/send", "api.post",
+                   "api.put", "api.delete"):
+        allowed("the page contains no '%s'" % danger, danger not in ui,
+                "a diagnostic must not be able to send or mutate")
+    allowed("...and reads only", ui.count("api.get") >= 1)
+
+    allowed("counts_agree false renders an alert, not a quiet note",
+            "DOES NOT MATCH AUTHORIZED SCOPE" in ui and "role='alert'" in ui
+            .replace('role="alert"', "role='alert'"))
+    allowed("...and says not to treat it as send-ready",
+            "send-ready" in ui or "send ready" in ui)
+    allowed("counts_agree true is stated positively too",
+            "AUTHORIZED POPULATION RECONCILED" in ui)
+
+    # A FAILURE MUST NEVER RENDER AS ZERO - the same rule the dashboard follows.
+    allowed("an absent value renders an em-dash rather than 0",
+            "value !== null && value !== undefined" in ui)
+    allowed("a failed request is explicitly not a population of zero",
+            "not a population of zero" in ui)
+    allowed("permission denied, not found and server failure are told apart",
+            all(s in ui for s in ("403", "404", "401", ">= 500")))
+    allowed("a scenario that errored shows the error, not counts",
+            "could not be evaluated" in ui)
+
+    # NO INVENTED REASONS. The reason vocabulary belongs to the engine.
+    for invented in ("UNSUBSCRIBED", "'DNC'", '"DNC"', "INVALID EMAIL"):
+        allowed("the page hardcodes no reason %s" % invented, invented not in ui,
+                "reasons must be rendered from what the engine returned")
 
     # ─────────────────────────────────────────────────────────────────────────
     if not os.environ.get("QUAL_GATE_CHILD"):

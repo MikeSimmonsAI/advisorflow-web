@@ -91,6 +91,7 @@ import Prospects from './pages/sales/Prospects'
 import GodUsers from './pages/god/GodUsers'
 import Workspaces from './pages/god/Workspaces'
 import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
+import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -645,6 +646,9 @@ export default function App() {
             endpoint behind it is require_god, so a typed URL is refused by the
             server rather than by the absence of a link. */}
         <Route path="/god/diagnostics/user-access" element={<GodRoute><GodModeLayout><UserAccessDiagnostic /></GodModeLayout></GodRoute>} />
+        {/* Both diagnostics, registered BEFORE the /god/* catch-all - a route
+            added after it would silently render the Command Center instead. */}
+        <Route path="/god/diagnostics/qualification" element={<GodRoute><GodModeLayout><QualificationDiagnostic /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

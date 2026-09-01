@@ -112,6 +112,12 @@ const NAV = [
   // Control-plane diagnostics. Owner-only by the endpoint behind it, not by
   // the absence of this link.
   { label: 'Access Diagnostic', path: '/god/diagnostics/user-access', icon: 'shield' },
+  // TWO DIAGNOSTICS, AND THEY ANSWER DIFFERENT QUESTIONS. Access asks WHAT MAY
+  // THIS PERSON REACH - identity, memberships, workspace resolution, scope.
+  // Qualification asks, of the population they may already reach, WHO MAY
+  // ACTUALLY BE CONTACTED on a channel, and why not for the rest. Merging them
+  // would produce one screen that answers neither question well.
+  { label: 'Lead Qualification', path: '/god/diagnostics/qualification', icon: 'shield' },
   { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
   { label: 'Roadmap',          path: '/god#product-status',   icon: 'flag'     },
