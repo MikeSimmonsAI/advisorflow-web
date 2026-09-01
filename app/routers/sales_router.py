@@ -71,17 +71,61 @@ CALENDAR_SYNC_NOT_BUILT = {
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+def _no_workspace_error(user: User, db: Session) -> HTTPException:
+    """Why is there no sales workspace to open? TWO DIFFERENT ANSWERS.
+
+    THE OWNER IS NEVER REFUSED FOR WANT OF A MEMBERSHIP. `sales_org_ids` does
+    not read memberships at all in its god branch - it returns the brand sales
+    orgs belonging to the SELECTED brand, or every one of them when the owner is
+    neutral. So an empty list for god never means "you have no membership"; it
+    means the brand you selected has no sales team record yet.
+
+    Reporting that as "No active brand sales membership." sent the owner looking
+    for a permission problem that does not exist, and the obvious "fix" - grant
+    god a membership - would have been a fake row papering over a provisioning
+    gap. Two genuinely different conditions had one message, so this splits them:
+
+        god, brand selected   -> that BRAND has no sales team yet   (409)
+        god, neutral          -> NO brand has a sales team yet      (409)
+        anyone else           -> no active membership               (403, unchanged)
+
+    409 rather than 403 because nothing is being refused: the workspace is not
+    forbidden, it does not exist yet, and the fix is to create it rather than to
+    ask for access.
+    """
+    if not is_god(user):
+        # UNCHANGED, deliberately and byte-for-byte. Normal enforcement is not
+        # what is being fixed here, and a membership is still required.
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                             detail="No active brand sales membership.")
+
+    from app.services import platform_owner as _po
+    brand_id = _po.selected_brand_id(user)
+    if brand_id:
+        plat = db.query(Platform).filter(Platform.id == brand_id).first()
+        name = plat.name if plat else "This brand"
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="%s has no sales team yet, so there is no sales workspace to "
+                   "open. Create one from Workspaces." % name)
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="No brand has a sales team yet. Create one from Workspaces.")
+
+
 def _resolve_context(user: User, db: Session, brand_sales_org_id: Optional[str] = None):
     """Which brand sales org is this request operating in, and as what role?
 
     A user may hold several memberships (Mike holds god plus a manager seat).
     An explicit id wins; otherwise the single membership wins; otherwise the
     first, deterministically ordered so the answer never flickers.
+
+    For god the answer comes from the SELECTED BRAND, never from a membership -
+    see `sales_access.sales_org_ids` and `_no_workspace_error` above.
     """
     allowed = sales_org_ids(user, db)
     if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="No active brand sales membership.")
+        raise _no_workspace_error(user, db)
     if brand_sales_org_id:
         if brand_sales_org_id not in allowed:
             # 404 rather than 403 — do not confirm the org exists.

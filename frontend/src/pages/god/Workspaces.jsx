@@ -15,7 +15,7 @@
  * consolidated onto the platforms table. A new brand appears in this doorway the
  * moment its row exists — no navigation entry to add.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { enterCustomer } from './enterCustomer'
@@ -56,7 +56,7 @@ export default function Workspaces() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
 
-  useEffect(() => {
+  const loadBrands = useCallback(() => {
     api.get('/god/platform/overview', { noOrgContext: true })
       .then(r => {
         const list = r?.platforms || r?.brands || (Array.isArray(r) ? r : [])
@@ -72,6 +72,22 @@ export default function Workspaces() {
       .catch(e => setError(e.message || 'Could not load brands.'))
   }, [])
 
+  useEffect(() => { loadBrands() }, [loadBrands])
+
+  // Does this brand have a sales team at all?
+  //
+  // `/god/platform/overview` has always returned `brand_sales_orgs` per
+  // platform and this page ignored it, drawing "Sales -> Enter" on every card
+  // unconditionally. Only one brand has ever had a sales team - nothing outside
+  // the demo seeder created one - so every other card offered a door onto a
+  // screen that said "No active brand sales membership", which was neither true
+  // nor fixable by granting a membership.
+  //
+  // Read from the platform record, so a brand that gains a sales team gains a
+  // working Enter with no change here.
+  const salesOrgOf = (b) => (b?.brand_sales_orgs || []).find(s => s.is_active !== false)
+                            || (b?.brand_sales_orgs || [])[0] || null
+
   async function goBrand(b) {
     setBusy('brand:' + b.id); setError('')
     try {
@@ -79,6 +95,19 @@ export default function Workspaces() {
       navigate('/sales')
     } catch (e) {
       setError(e.message || 'Could not enter that brand.')
+    } finally { setBusy('') }
+  }
+
+  async function createSalesTeam(b) {
+    setBusy('mksales:' + b.id); setError('')
+    try {
+      await api.post(`/god/platform/brands/${b.id}/sales-org`, {},
+                     { noOrgContext: true })
+      // Re-read rather than patching state locally: the server decides the
+      // name and slug, and this page should show what it decided.
+      loadBrands()
+    } catch (e) {
+      setError(e.message || 'Could not create the sales team.')
     } finally { setBusy('') }
   }
 
@@ -131,12 +160,26 @@ export default function Workspaces() {
                 <div style={S.row}>
                   <div>
                     <div style={S.rowName}>{b.name} Sales Workspace</div>
-                    <div style={S.rowMeta}>Pipeline, proposals, scheduling</div>
+                    <div style={S.rowMeta}>
+                      {salesOrgOf(b)
+                        ? 'Pipeline, proposals, scheduling'
+                        : 'No sales team yet — nothing to open'}
+                    </div>
                   </div>
-                  <button style={S.btn} onClick={() => goBrand(b)}
-                          disabled={busy === 'brand:' + b.id}>
-                    {busy === 'brand:' + b.id ? 'Entering…' : 'Enter'}
-                  </button>
+                  {/* Enter only when there is somewhere to go. Otherwise offer
+                      the thing that makes it possible, rather than a button
+                      that lands on an error. */}
+                  {salesOrgOf(b) ? (
+                    <button style={S.btn} onClick={() => goBrand(b)}
+                            disabled={busy === 'brand:' + b.id}>
+                      {busy === 'brand:' + b.id ? 'Entering…' : 'Enter'}
+                    </button>
+                  ) : (
+                    <button style={S.btn} onClick={() => createSalesTeam(b)}
+                            disabled={busy === 'mksales:' + b.id}>
+                      {busy === 'mksales:' + b.id ? 'Creating…' : 'Create sales team'}
+                    </button>
+                  )}
                 </div>
 
                 <div style={{ ...S.label, marginTop: 6 }}>

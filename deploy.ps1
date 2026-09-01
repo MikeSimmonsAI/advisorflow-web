@@ -179,6 +179,12 @@ if ($SkipSmoke) {
     # advisors can never be granted one at all, and that God needs neither gate.
     python scripts\probe_delegation.py 2>&1 | Select-String "LEAK|BROKE|checks passed|HOLDS" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "DELEGATION MODEL CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 28 - god reaches EVERY brand's sales workspace through god authority
+    # plus the selected brand, holding no membership anywhere, while a normal
+    # user still needs an active membership and a brand header grants nobody
+    # anything.
+    python scripts\probe_god_sales_workspace.py 2>&1 | Select-String "FAIL|checks passed|GOD REACHES" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "GOD SALES WORKSPACE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

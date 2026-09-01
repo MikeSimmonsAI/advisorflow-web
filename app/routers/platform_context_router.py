@@ -195,6 +195,77 @@ def brand_customers(platform_id: str, db: Session = Depends(get_db),
     }
 
 
+class SalesOrgIn(BaseModel):
+    # Defaults derive from the brand itself, so nothing here names a brand.
+    name: Optional[str] = None
+    timezone: Optional[str] = None
+
+
+@router.post("/brands/{platform_id}/sales-org", status_code=201)
+def create_brand_sales_org(platform_id: str, req: SalesOrgIn,
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_god)):
+    """Create the sales team for a brand. THE MISSING HALF OF THE DOORWAY.
+
+    Workspaces has offered "Sales -> Enter" on every brand card since it shipped,
+    but a BrandSalesOrg row could only ever come from the DEMO SEEDER - there is
+    no other code path in the product that creates one. So exactly one brand had
+    a sales team, its card worked, and every other brand's card led to a screen
+    saying "No active brand sales membership", which was not the reason and not
+    something a membership would have fixed.
+
+    Two ways to close that. Auto-create a sales org the moment a brand is
+    entered, which invents a company record as a side effect of looking at a
+    screen. Or make it a deliberate, audited act the owner performs. This is the
+    second: one row, created on purpose, from the browser - which is also the
+    standing rule that this must never require a seed script, a Render shell or
+    a direct database insert.
+
+    NOT IDEMPOTENT BY DESIGN. A brand has one sales team; asking twice is a
+    mistake worth reporting rather than silently absorbing, and 409 says which.
+    """
+    platform = db.query(Platform).filter(Platform.id == platform_id).first()
+    if not platform:
+        raise HTTPException(status_code=404, detail="Platform not found")
+
+    existing = (db.query(BrandSalesOrg)
+                .filter(BrandSalesOrg.platform_id == platform_id).first())
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="%s already has a sales team (%s)." % (platform.name, existing.name))
+
+    name = (req.name or "").strip() or ("%s Sales" % platform.name)
+    slug_base = "%s-sales" % (platform.slug or platform.id)
+    slug = slug_base
+    n = 2
+    while db.query(BrandSalesOrg).filter(BrandSalesOrg.slug == slug).first():
+        slug = "%s-%d" % (slug_base, n)
+        n += 1
+
+    bso = BrandSalesOrg(platform_id=platform.id, name=name, slug=slug,
+                        timezone=(req.timezone or "").strip() or "America/Chicago")
+    db.add(bso)
+    db.flush()
+
+    # NO MEMBERSHIP IS CREATED, for the owner or for anyone. God reaches this
+    # workspace through god authority plus the selected brand; a membership row
+    # would be a fake employment record standing in for an authorization answer
+    # the system already has. Staff are added through the brand's own sales-team
+    # endpoint, deliberately, one person at a time.
+    log_action(db, None, user.id,
+               action="platform.brand_sales_org_created",
+               target_type="brand_sales_org", target_id=bso.id,
+               platform_id=platform.id,
+               after={"name": bso.name, "slug": bso.slug,
+                      "timezone": bso.timezone},
+               commit=False)
+    db.commit()
+    return {"brand_sales_org": {"id": bso.id, "name": bso.name, "slug": bso.slug,
+                                "timezone": bso.timezone, "is_active": True},
+            "platform": {"id": platform.id, "name": platform.name}}
+
+
 # ── entering and leaving a context ──────────────────────────────────────────
 
 def _membership_count(db: Session, user_id: str) -> int:

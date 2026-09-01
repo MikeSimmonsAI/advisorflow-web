@@ -118,10 +118,19 @@ export default function SalesShell({ title, subtitle, actions, children }) {
         <div style={{ padding: 60, maxWidth: 560, margin: '0 auto' }}>
           <h2 style={{ fontSize: 18, margin: '0 0 10px' }}>Sales workspace unavailable</h2>
           <ErrorBar error={error} onRetry={load} />
+          {/* THE SERVER'S REASON, NOT THIS FILE'S GUESS.
+              This used to state "This account has no active brand-sales
+              membership" unconditionally, whatever the server actually said.
+              For the platform owner that sentence was simply false — god access
+              never consults memberships — and it pointed at a fix (grant a
+              membership) that would have papered over the real condition: the
+              selected brand had no sales team record yet. ErrorBar above already
+              renders the server's own message; this line now only adds the
+              membership explanation when that IS the reason. */}
           <p style={{ fontSize: 12, color: '#5f7182', lineHeight: 1.7 }}>
-            This account has no active brand-sales membership, so there is no
-            sales workspace to open. If that is wrong, ask an administrator to
-            grant the membership.
+            {/membership/i.test(error || '')
+              ? 'This account has no active brand-sales membership, so there is no sales workspace to open. If that is wrong, ask an administrator to grant the membership.'
+              : 'Pick a different workspace, or return to God Mode above.'}
           </p>
           <button className="sw-btn sw-mt" onClick={handleSignOut}>Sign out</button>
         </div>
