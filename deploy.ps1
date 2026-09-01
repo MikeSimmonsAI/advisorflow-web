@@ -64,8 +64,16 @@ Write-Host "[1/6] Saving current work..."
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 git add -A
 $staged = git diff --cached --name-only
+# Remembered so step 5 can give this commit the real message. The auto-save is
+# a SAFETY NET, not a description of the work, and it was quietly becoming the
+# permanent record: step 1 committed everything, so by step 5 there was nothing
+# left to stage, the `git commit -m $Message` there was skipped, and the deploy
+# shipped under "wip: auto-save before deploy" with the actual explanation
+# discarded. Two production commits landed that way before it was noticed.
+$WIP_COMMITTED = $false
 if ($staged) {
     git commit -m "wip: auto-save before deploy [$ts]" | Out-Null
+    $WIP_COMMITTED = $true
     Write-Host "  Committed uncommitted changes on $branch"
 } else {
     Write-Host "  Nothing to commit on $branch"
@@ -298,7 +306,17 @@ Write-Host "[5/6] Pushing to GitHub..."
 git add -f frontend/dist
 git add -A
 $staged2 = git diff --cached --name-only
-if ($staged2) { git commit -m $Message | Out-Null }
+if ($staged2) {
+    git commit -m $Message | Out-Null
+} elseif ($WIP_COMMITTED) {
+    # Nothing new to stage because step 1 already committed it all. Give that
+    # auto-save commit its real message rather than shipping "wip". Amending is
+    # safe here and needs no force-push: this commit was created moments ago in
+    # step 1 and has not been pushed yet - the push is the next line.
+    git commit --amend -m $Message | Out-Null
+    $SHIP_SHA = (git rev-parse HEAD).Trim()
+    Write-Host "  Auto-save commit reworded with the deploy message"
+}
 git push origin main
 if ($LASTEXITCODE -ne 0) {
     Write-Host "PUSH FAILED - check git credentials. Your work is in $SHIP_SHA."
