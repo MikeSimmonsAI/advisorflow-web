@@ -68,6 +68,27 @@ def section(t):
     print("\n--- %s " % t + "-" * max(0, 66 - len(t)))
 
 
+def _walk_numbers(obj):
+    """Every integer anywhere in a response, so a count tile cannot hide.
+
+    Booleans are excluded deliberately - in Python `True` IS an int, and a
+    payload full of flags would otherwise read as a wall of 1s and 0s and make
+    the assertion meaningless.
+    """
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, int):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            for n in _walk_numbers(v):
+                yield n
+    elif isinstance(obj, list):
+        for v in obj:
+            for n in _walk_numbers(v):
+                yield n
+
+
 def build():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -104,6 +125,19 @@ def build():
     mk("u-michael", "michael@weepic.test", "Michael Advisor", "advisor")
     mk("u-legacy", "legacy@weepic.test", "Legacy User", "org_admin", WEG)
     mk("u-god", "god@probe.test", "Owner", "god_admin")
+
+    # THE PRODUCTION-SHAPED ADVISOR.
+    #
+    # Every advisor in the field today looks like this and NOT like u-jason
+    # above: `users.organization_id` is SET because that column was tenancy for
+    # the product's whole life, the backfill gives them a membership, and their
+    # browser sends NO X-Workspace-Id because they never touched a switcher.
+    # u-jason deliberately has a NULL column to prove membership is the
+    # authority - which is the right thing to prove and the WRONG shape to stop
+    # at, because it is not the shape of anybody real. An advisor who cannot see
+    # their own book is the failure that matters most, so the realistic shape
+    # gets its own case.
+    mk("u-field", "field@weepic.test", "Field Advisor", "advisor", WEG)
     db.flush()
 
     def plat(uid, role=ROLE_SALES_MANAGER):
@@ -145,6 +179,13 @@ def build():
                     assigned_to_id=None, first_name="Lead",
                     last_name="RESTLANDONLY%d" % n, phone="+1214557%04d" % n,
                     email="ld-r%d@example.test" % n, status="new",
+                    tier="pre_need"))
+    # The field advisor's own book - four leads, distinctively named.
+    for n in range(4):
+        db.add(Lead(id="ld-f%d" % n, organization_id=WEG,
+                    assigned_to_id="u-field", first_name="Lead",
+                    last_name="FIELDOWNED%d" % n, phone="+1214559%04d" % n,
+                    email="ld-f%d@example.test" % n, status="new",
                     tier="pre_need"))
     db.commit()
     db.close()
@@ -386,6 +427,111 @@ def main():
         r = c.get("/leads/ld-m0", headers={**jason, "X-Workspace-Id": WEG})
         refused("   and Jason is still 404 on it", r.status_code == 404,
                 "%s" % r.status_code)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # THE PRODUCTION-SHAPED ADVISOR - AND THE FOUR COUNTS MUST AGREE
+        #
+        # A real advisor has users.organization_id SET, a backfilled membership,
+        # and sends NO X-Workspace-Id because they have never touched a
+        # switcher. If any of the membership work broke a working advisor, THIS
+        # is where it shows, and it shows as an empty screen rather than an
+        # error - which is why the four counts are compared rather than just
+        # eyeballing the list:
+        #
+        #   A. raw assigned    - the database, no authorization at all
+        #   B. lead_scope      - the canonical authorization answer
+        #   C. /leads API      - what the endpoint returns
+        #   D. dashboard tiles - what the advisor actually reads on screen
+        #
+        # A disagreement between any adjacent pair names the exact layer that
+        # is wrong. All four equal means the advisor sees their book.
+        # ═══════════════════════════════════════════════════════════════════
+        section("production-shaped advisor: legacy column, no workspace header")
+        field = token(c, "field@weepic.test")
+
+        db = SessionLocal()
+        field_row = db.query(User).filter(User.id == "u-field").first()
+        # A. RAW - what the database holds, before any authorization runs.
+        # Named raw_count, not raw: the activation section below binds `raw` to
+        # a one-time token, and a count silently becoming a token string is the
+        # kind of collision that makes a gate assert nothing while still passing.
+        raw_count = db.query(Lead).filter(Lead.assigned_to_id == "u-field").count()
+        allowed("A. raw assigned leads exist in the database",
+                raw_count == 4, raw_count)
+        allowed("   their legacy organization_id is still set",
+                field_row.organization_id == WEG, field_row.organization_id)
+        ms = [m for m in db.query(Membership).filter(
+            Membership.user_id == "u-field",
+            Membership.scope_type == SCOPE_CUSTOMER_ORG).all()]
+        allowed("   the backfill gave them ONE active customer_org membership",
+                [(m.scope_id, m.role, m.is_active) for m in ms]
+                == [(WEG, "advisor", True)],
+                [(m.scope_id, m.role, m.is_active) for m in ms])
+        # B. CANONICAL - lead_scope's own answer, called directly with no
+        # request, exactly as a background job would see it.
+        from app.services import lead_scope as _ls
+        scoped = _ls.authorized_lead_query(db, field_row).count()
+        allowed("B. lead_scope agrees with the raw count", scoped == raw_count,
+                "raw=%s scoped=%s" % (raw_count, scoped))
+        allowed("   the resolved workspace is their organization",
+                _ls.active_workspace_org_id(field_row) == WEG,
+                _ls.active_workspace_org_id(field_row))
+        allowed("   and the resolved role is advisor, not a manager",
+                _ls.effective_role(field_row, db) == "advisor",
+                _ls.effective_role(field_row, db))
+        db.close()
+
+        # C. THE API - no X-Workspace-Id header, exactly as a real browser that
+        # has never used the switcher would call it.
+        r = c.get("/leads/", headers=field)
+        b = text(r)
+        allowed("C. the /leads API returns 200", r.status_code == 200,
+                "%s %s" % (r.status_code, b[:140]))
+        api_total = r.json().get("total") if r.status_code == 200 else None
+        allowed("   and its total equals the raw count", api_total == raw_count,
+                "raw=%s api=%s" % (raw_count, api_total))
+        allowed("   with their own leads actually in the body",
+                "FIELDOWNED0" in b, b[:200])
+        refused("   and NOT another advisor's",
+                "JASONOWNED" not in b and "MICHAELONLY" not in b, b[:200])
+        refused("   and NOT another organization's",
+                "RESTLANDONLY" not in b, b[:200])
+
+        # D. THE DASHBOARD - the numbers on screen. Every integer anywhere in
+        # the payload is walked, because a tile computed from a wider query
+        # than the list is the failure the P0 named and it hides in one field.
+        r = c.get("/leads/status-funnel", headers=field)
+        if r.status_code == 200:
+            nums = [n for n in _walk_numbers(r.json())]
+            refused("D. no dashboard tile exceeds their own book",
+                    all(n <= raw_count for n in nums), (raw_count, sorted(set(nums))[-5:]))
+        r = c.get("/leads/engagement-breakdown", headers=field)
+        if r.status_code == 200:
+            nums = [n for n in _walk_numbers(r.json())]
+            refused("   nor does any engagement tile",
+                    all(n <= raw_count for n in nums), (raw_count, sorted(set(nums))[-5:]))
+
+        # The same advisor, by direct id, both directions.
+        r = c.get("/leads/ld-f0", headers=field)
+        allowed("they can open their own lead by id", r.status_code == 200,
+                "%s" % r.status_code)
+        r = c.get("/leads/ld-m0", headers=field)
+        refused("   and are 404 on a colleague's", r.status_code == 404,
+                "%s" % r.status_code)
+        r = c.get("/leads/ld-r0", headers=field)
+        refused("   and 404 on another organization's",
+                r.status_code == 404, "%s" % r.status_code)
+
+        # And the header changes nothing for them: naming their OWN workspace
+        # must give the identical answer, and naming another must not move them.
+        r = c.get("/leads/", headers={**field, "X-Workspace-Id": WEG})
+        allowed("naming their own workspace gives the identical count",
+                r.json().get("total") == raw_count, r.json().get("total"))
+        r = c.get("/leads/", headers={**field, "X-Workspace-Id": REST})
+        refused("naming another organization does NOT move them into it",
+                "RESTLANDONLY" not in text(r), text(r)[:200])
+        allowed("   and leaves their own book intact",
+                r.json().get("total") == raw_count, r.json().get("total"))
 
         # ── ONBOARDING: THE TEST THAT PROVES A CUSTOMER CAN USE WHAT THEY BOUGHT
         section("new customer activation writes a real workspace membership")
