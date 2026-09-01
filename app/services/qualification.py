@@ -118,22 +118,26 @@ MEDIUM_THRESHOLD = 22
 
 # THE CEILING WITHOUT EVIDENCE, ARITHMETIC RATHER THAN OPINION.
 #
-#   reachability      valid email 4 + valid mobile 4 + both 4        = 12
+#   reachability      valid email 4 + valid phone 4 + both 4         = 12
 #   contact history   the best non-evidence branch, never contacted  =  8
 #   relationship      batch-stamped assertion                        =  4
 #   record quality    no completed outcome 4 + complete 3 + full 2   =  9
-#   cohort            newest possible source year                    =  6
 #                                                                     ---
-#                                                                      39
+#                                                                      33
+#
+# The cohort line that used to sit here is GONE, not reduced. `source_year` is
+# typed by whoever runs the import; scoring recency from it meant a family last
+# worked with in 2018 and uploaded under 2026 read as a recent lead. Lowering
+# its weight would have kept the same falsehood at a lower volume.
 #
 # EVIDENCE is what a person did, or a relationship the organization holds:
 # replied (30), booked (22), existing customer (18), contacted in the last 90
 # days (14). HIGH sits above the ceiling so that no amount of reachability,
 # tidiness or import metadata can reach it without one of those.
 #
-# A gate constructs the best possible evidence-free lead and asserts it scores
-# below HIGH, so this comment cannot quietly stop being true.
-MAX_SCORE_WITHOUT_EVIDENCE = 39
+# A gate sweeps every evidence-free combination and asserts the maximum equals
+# this number, so the comment cannot quietly stop being true.
+MAX_SCORE_WITHOUT_EVIDENCE = 33
 
 # A ceiling so one call cannot try to score an entire estate in one request.
 MAX_QUALIFY_ROWS = 50000
@@ -173,7 +177,11 @@ REASONS = {
 
     # ── priority factors ──
     "has_valid_email": "Valid email address",
-    "has_valid_mobile": "Valid mobile number",
+    # NOT "valid mobile". The platform holds no line-type or carrier data, so
+    # it cannot tell a mobile from a landline and must not say it can. The
+    # column is a normalized dialable number and the label now says exactly
+    # that. If line-type lookup is ever added, this can say mobile and mean it.
+    "has_valid_phone": "Valid phone number",
     "reachable_both": "Reachable by both email and phone",
     "existing_relationship": "Existing or former customer relationship",
     # NAMED FOR WHAT IT ACTUALLY IS. This was "Prior interest or referral on
@@ -193,11 +201,65 @@ REASONS = {
     "no_completed_outcome": "No completed outcome recorded",
     "complete_record": "Complete contact record",
     "full_contact_record": "Address, email and phone all on file",
-    "recent_cohort": "Recent source cohort",
-    "aged_cohort": "Old source cohort",
     "org_rule_boost": "Matches an organization priority rule",
     "org_rule_demote": "Matches an organization de-prioritization rule",
 }
+
+
+# ── EVERY PRIORITY FACTOR, CLASSIFIED BY WHAT IT IS EVIDENCE OF ─────────────
+#
+# The audit that produced this table found two factors ranking leads on values
+# that are constant within an import batch - `relationship_type`, chosen once
+# per file, and `source_year`, typed once by the person uploading. Neither can
+# distinguish anybody inside the batch it labels, and one of them was inventing
+# recency out of upload metadata.
+#
+# So every factor now declares which of three things it is, and the rule that
+# follows from it:
+#
+#   evidence   Something this PERSON did, or a relationship the organization
+#              actually holds with them. This is what may carry a lead to HIGH.
+#   quality    A property of the RECORD - is it complete, can we reach them.
+#              Small weights. Contactability is the entry fee for READY, not a
+#              distinction, and a tidy record is not an interested family.
+#   batch      An assertion about the FILE the lead arrived in. Kept, because
+#              the organization is telling us something real about provenance,
+#              but weighted so it can never rank one lead above another - and
+#              labelled so nobody reads it as a fact about the person.
+#
+# Published by /qualification/vocabulary so the UI can show the distinction,
+# and asserted by a gate: no factor classified `batch` may be worth more than
+# the smallest `evidence` factor.
+FACTOR_KINDS = {
+    "prior_response": "evidence",
+    "prior_appointment": "evidence",
+    "existing_relationship": "evidence",
+    "recent_contact": "evidence",
+    "contact_within_year": "evidence",
+    "long_since_contact": "evidence",
+    "prior_contact_undated": "evidence",
+    "contacted_no_response": "evidence",
+    "never_contacted": "evidence",
+    "org_rule_boost": "evidence",
+    "org_rule_demote": "evidence",
+
+    "has_valid_email": "quality",
+    "has_valid_phone": "quality",
+    "reachable_both": "quality",
+    "no_completed_outcome": "quality",
+    "complete_record": "quality",
+    "full_contact_record": "quality",
+
+    "batch_relationship": "batch",
+}
+
+# Fields that are BATCH METADATA: chosen once for a whole import and identical
+# for every lead in it. The scorer must not read these. Listed so the rule is
+# checkable rather than a convention somebody remembers.
+BATCH_METADATA_FIELDS = (
+    "source_year", "source_file", "import_list_name", "imported_by_name",
+    "source_category", "relationship_type",
+)
 
 
 def reason(code: str, detail: str = "") -> Dict[str, str]:
@@ -657,15 +719,24 @@ def _score(lead: Lead, channel: str, ctx: QualificationContext):
        it is an assertion about a FILE rather than an observation about a
        PERSON, and its label now says so.
 
+    3. RECENCY WAS INVENTED FROM UPLOAD METADATA. `source_year` is typed by
+       whoever runs the import, so a family last worked with in 2018 and
+       uploaded under 2026 was scored as a recent lead. That factor is removed
+       entirely rather than reduced - a smaller wrong number is still wrong.
+
     What DOES differentiate is per-lead observed fact: did they reply, did they
-    book, how long since anyone contacted them, how complete is their record,
-    how old is the cohort. Those carry the weight now.
+    book, how long since anyone actually contacted them, how complete is their
+    record. Those carry the weight now, and every factor declares which kind it
+    is in FACTOR_KINDS.
     """
     factors: List[Dict[str, Any]] = []
 
     def add(points: int, code: str, detail: str = ""):
         r = reason(code, detail)
         r["points"] = points
+        # Carried on every factor so a reader can see at a glance whether a
+        # reason is something the person did or something the file said.
+        r["kind"] = FACTOR_KINDS.get(code, "quality")
         factors.append(r)
 
     # ── reachability: the entry fee, priced as one ──
@@ -674,7 +745,7 @@ def _score(lead: Lead, channel: str, ctx: QualificationContext):
     if email_ok:
         add(4, "has_valid_email")
     if phone_ok:
-        add(4, "has_valid_mobile")
+        add(4, "has_valid_phone")
     if email_ok and phone_ok:
         add(4, "reachable_both")
 
@@ -720,15 +791,23 @@ def _score(lead: Lead, channel: str, ctx: QualificationContext):
             and getattr(lead, "phone", None):
         add(2, "full_contact_record")
 
-    year = getattr(lead, "source_year", None)
-    if isinstance(year, int) and year > 1900:
-        age = ctx.now.year - year
-        if age <= 1:
-            add(6, "recent_cohort", "%d" % year)
-        elif age <= 3:
-            add(3, "recent_cohort", "%d" % year)
-        elif age >= 8:
-            add(-3, "aged_cohort", "%d" % year)
+    # ── source_year IS NOT READ HERE, DELIBERATELY ──
+    #
+    # It was, and it was wrong. `source_year` is chosen by the person running
+    # the import - it is a label on the FILE, not a fact about the family. A
+    # customer the business last worked with in 2018, uploaded under 2026,
+    # would have been scored as a recent lead on the strength of a dropdown.
+    # Inventing recency from upload metadata is exactly the failure this whole
+    # audit was about, and lowering its weight would have kept the lie and made
+    # it quieter.
+    #
+    # The column stays in the database and stays useful - provenance, batch
+    # reporting, filtering, source inventory, admin analytics - and it stays in
+    # RULE_FIELDS so an organization can still filter or exclude on it. What it
+    # may not do is change one lead's priority relative to another in the same
+    # batch, because within a batch it is a constant.
+    #
+    # A gate asserts this function never reads it.
 
     for rule in _rules_for(ctx, channel, "boost"):
         if evaluate_rule(lead, rule, ctx.now):
@@ -894,6 +973,7 @@ def summarize(decisions: Sequence[Dict[str, Any]], channel: str,
     def bump(store, r):
         row = store.setdefault(r["code"], {"code": r["code"],
                                            "label": REASONS.get(r["code"], r["code"]),
+                                           "kind": FACTOR_KINDS.get(r["code"]),
                                            "count": 0})
         row["count"] += 1
 

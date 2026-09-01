@@ -114,6 +114,23 @@ function Reasons({ title, rows, tone }) {
             {Number(r.count).toLocaleString('en-US')}
           </div>
           <div style={{ flex: 1, fontSize: 13.5 }}>{r.label}</div>
+          {/* WHAT KIND OF FACT THIS IS. A reason derived from the import file
+              and a reason derived from something the person did are not the
+              same claim, and a list that renders them identically is how a
+              batch setting came to be read as a warm lead. */}
+          {r.kind && (
+            <span style={{
+              fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em',
+              padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase',
+              background: r.kind === 'evidence' ? 'rgba(30,200,130,0.16)'
+                : r.kind === 'batch' ? 'rgba(235,170,40,0.18)'
+                : 'rgba(128,128,128,0.16)',
+              color: r.kind === 'evidence' ? '#1a9c6b'
+                : r.kind === 'batch' ? '#b6830f' : 'inherit',
+            }}>
+              {r.kind === 'batch' ? 'batch metadata' : r.kind}
+            </span>
+          )}
           <div style={{ fontSize: 11, opacity: 0.42, fontFamily: MONO }}>{r.code}</div>
           <div style={{ width: 90, height: 6, borderRadius: 3,
                         background: 'rgba(128,128,128,0.16)', overflow: 'hidden' }}>
@@ -267,10 +284,15 @@ function PriorityAudit({ audit }) {
         <Row label="Has ZIP" value={`${inputs.with_zip_code} of ${total}`} />
         <Row label="Has street address"
              value={`${inputs.with_street_address} of ${total}`} />
+        {/* SHOWN, AND LABELLED AS WHAT IT IS. source_year is typed by whoever
+            ran the import, so it is provenance and not lead history. It is
+            reported here because it is useful for exactly that, and it is not
+            read by the scorer at all. */}
         {inputs.source_year_distribution && (
-          <Row label="Source year"
+          <Row label="Source year (import metadata)"
                value={Object.entries(inputs.source_year_distribution)
-                 .map(([k, v]) => `${k}: ${v}`).join('   ')} />
+                 .map(([k, v]) => `${k}: ${v}`).join('   ')
+                 + '   — provenance only, not scored'} />
         )}
       </div>
     </Panel>

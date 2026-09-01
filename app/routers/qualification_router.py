@@ -111,7 +111,18 @@ def vocabulary():
         "authoritative_channels": list(qualification.AUTHORITATIVE_CHANNELS),
         "buckets": list(qualification.BUCKETS),
         "priorities": list(qualification.PRIORITIES),
-        "reasons": [{"code": c, "label": l} for c, l in sorted(qualification.REASONS.items())],
+        "reasons": [{"code": c, "label": l,
+                     "kind": qualification.FACTOR_KINDS.get(c)}
+                    for c, l in sorted(qualification.REASONS.items())],
+        # WHAT EACH PRIORITY FACTOR IS EVIDENCE OF. Published so a client can
+        # show the difference between something the person did and something
+        # the import file said, rather than presenting both as the same kind
+        # of fact.
+        "factor_kinds": dict(qualification.FACTOR_KINDS),
+        # Fields that are constant across an import batch. The scorer reads
+        # none of them; they remain available for filtering and org rules.
+        "batch_metadata_fields": list(qualification.BATCH_METADATA_FIELDS),
+        "max_score_without_evidence": qualification.MAX_SCORE_WITHOUT_EVIDENCE,
         "rule_effects": list(RULE_EFFECTS),
         "rule_operators": list(RULE_OPERATORS),
         "rule_fields": list(qualification.RULE_FIELDS),

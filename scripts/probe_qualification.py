@@ -74,6 +74,32 @@ def section(t):
     print("\n--- %s " % t + "-" * max(0, 66 - len(t)))
 
 
+def _strip_py(src):
+    """Python source with comments and docstrings removed, lowercased."""
+    import io
+    import tokenize
+    import textwrap
+    out = []
+    prev = tokenize.INDENT
+    try:
+        for tok in tokenize.generate_tokens(
+                io.StringIO(textwrap.dedent(src)).readline):
+            if tok.type == tokenize.COMMENT:
+                continue
+            if tok.type == tokenize.STRING and prev in (
+                    tokenize.INDENT, tokenize.NEWLINE, tokenize.NL,
+                    tokenize.DEDENT, tokenize.ENCODING):
+                prev = tok.type
+                continue
+            if tok.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+                                tokenize.DEDENT, tokenize.ENCODING):
+                out.append(tok.string)
+            prev = tok.type
+    except Exception:
+        return src.lower()
+    return " ".join(out).lower()
+
+
 def _code_only(path):
     """A python file with its comments and docstrings removed, lowercased.
 
@@ -718,6 +744,7 @@ def main():
     # combination of the non-evidence conditions, nothing reaches HIGH.
     import itertools
     worst = 0
+    seen_by_year = {}
     for names, zipc, addr, rel, year, hist in itertools.product(
             (True, False), (True, False), (True, False),
             ("cold_lead", "re_engagement", "warm_lead", None),
@@ -737,6 +764,9 @@ def main():
             kw["last_action_raw"] = "Called: LM"
         s, _f = qualification._score(_mk(**kw), qualification.CHANNEL_EMAIL, _Ctx())
         worst = max(worst, s)
+        # Same lead, differing ONLY in source_year, must score identically.
+        key = (names, zipc, addr, rel, hist)
+        seen_by_year.setdefault(key, set()).add(s)
     allowed("swept every evidence-free combination: none reaches HIGH",
             worst < qualification.HIGH_THRESHOLD,
             "best evidence-free score was %d, HIGH is %d"
@@ -745,6 +775,71 @@ def main():
             worst == qualification.MAX_SCORE_WITHOUT_EVIDENCE,
             "swept %d, documented %d"
             % (worst, qualification.MAX_SCORE_WITHOUT_EVIDENCE))
+
+    section("BATCH METADATA CANNOT RANK ANYTHING")
+    # source_year is typed by whoever runs the import. Two identical leads that
+    # differ only in the year on their upload must be indistinguishable, or the
+    # platform is inventing recency out of a dropdown.
+    disagreeing = {k: v for k, v in seen_by_year.items() if len(v) > 1}
+    refused("source_year NEVER changes a score - swept across 2012/2024/2026",
+            not disagreeing,
+            list(disagreeing.items())[:2] or "identical across every year")
+
+    for lead_year, label in ((2026, "uploaded this year"), (2012, "uploaded long ago")):
+        _s, fs = qualification._score(
+            _mk(relationship_type="cold_lead", source_year=lead_year),
+            qualification.CHANNEL_EMAIL, _Ctx())
+        codes_y = {f["code"] for f in fs}
+        refused("%s: no cohort factor is awarded" % label,
+                not (codes_y & {"recent_cohort", "aged_cohort"}), sorted(codes_y))
+
+    refused("the cohort factors are gone from the vocabulary entirely",
+            not ({"recent_cohort", "aged_cohort"} & set(qualification.REASONS)),
+            [c for c in ("recent_cohort", "aged_cohort") if c in qualification.REASONS])
+
+    # THE SCORER MUST NOT READ BATCH METADATA AT ALL. Asserted against the
+    # function's own source, so a future edit that reaches for one of these
+    # fields is caught even if its arithmetic happens to look harmless.
+    import inspect
+    # CODE, NOT COMMENTARY. The function's own docstring and comments EXPLAIN
+    # that it must not read these fields, and naming them there is the point.
+    # A checker that failed on its own explanation would be the second time
+    # this gate cried wolf on correct code.
+    scorer_src = _strip_py(inspect.getsource(qualification._score))
+    for field in qualification.BATCH_METADATA_FIELDS:
+        if field == "relationship_type":
+            continue  # kept deliberately, weighted as batch, labelled as batch
+        refused("the scorer does not read %s" % field,
+                field not in scorer_src,
+                "batch metadata must not rank leads inside the batch it labels")
+
+    section("every factor declares what kind of fact it is")
+    kinds = qualification.FACTOR_KINDS
+    allowed("relationship_type's factor is classified as batch metadata",
+            kinds.get("batch_relationship") == "batch")
+    allowed("a reply is classified as evidence",
+            kinds.get("prior_response") == "evidence")
+    allowed("contactability is classified as record quality, not evidence",
+            kinds.get("has_valid_email") == "quality"
+            and kinds.get("has_valid_phone") == "quality")
+    # No batch-classified factor may outweigh the smallest piece of evidence.
+    batch_codes = [c for c, k in kinds.items() if k == "batch"]
+    _s5, all_factors = qualification._score(
+        _mk(relationship_type="re_engagement"), qualification.CHANNEL_EMAIL, _Ctx())
+    by_code = {f["code"]: f["points"] for f in all_factors}
+    worst_batch = max([by_code.get(c, 0) for c in batch_codes] or [0])
+    allowed("no batch factor outweighs the smallest evidence factor",
+            worst_batch <= 4, "largest batch factor is %d" % worst_batch)
+
+    section("the phone factor does not claim knowledge we do not have")
+    refused("nothing claims to know the number is a MOBILE",
+            "mobile" not in qualification.REASONS.get("has_valid_phone", "").lower(),
+            qualification.REASONS.get("has_valid_phone"))
+    allowed("...it says phone, which is what the column actually holds",
+            "phone" in qualification.REASONS.get("has_valid_phone", "").lower(),
+            qualification.REASONS.get("has_valid_phone"))
+    refused("the old mobile-claiming code is gone",
+            "has_valid_mobile" not in qualification.REASONS)
 
     section("never_contacted uses COMPLETE history, not just our own tables")
     # The second defect: a family the customer's previous CRM called five times
