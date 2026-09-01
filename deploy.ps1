@@ -319,7 +319,11 @@ $staged2 = git diff --cached --name-only
 # saying, the commit never happened, and the work shipped under the step 1
 # auto-save message instead. -F takes the bytes as they are.
 $MSG_FILE = Join-Path $REPO ".deploy_commit_msg.txt"
-Set-Content -LiteralPath $MSG_FILE -Value $Message -Encoding UTF8 -NoNewline
+# WriteAllText with an explicit UTF8Encoding($false) rather than Set-Content
+# -Encoding UTF8: on Windows PowerShell 5.1 that switch writes a BOM, and the
+# BOM ends up as the first character of the commit subject.
+[System.IO.File]::WriteAllText($MSG_FILE, $Message,
+    (New-Object System.Text.UTF8Encoding $false))
 if ($staged2) {
     git commit -F $MSG_FILE | Out-Null
     if ($LASTEXITCODE -ne 0) {
