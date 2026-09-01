@@ -207,6 +207,12 @@ if ($SkipSmoke) {
     # to mint at all once the migration completes.
     python scripts\probe_workspace_backfill.py 2>&1 | Select-String "MINT |BROKE|checks passed|CANNOT MINT" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "LEGACY BACKFILL CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 32 - THE GOD-ONLY ACCESS DIAGNOSTIC. It reads one named person's
+    # identity, memberships, workspace resolution and lead counts, which is as
+    # sensitive as the database shell it replaces: god only, writes nothing,
+    # leaks no credential, and names the actual cause rather than shrugging.
+    python scripts\probe_access_diagnostic.py 2>&1 | Select-String "OPEN |BROKE|checks passed|GOD ONLY" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "ACCESS DIAGNOSTIC CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

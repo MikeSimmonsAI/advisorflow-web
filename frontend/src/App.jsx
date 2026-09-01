@@ -90,6 +90,7 @@ import Salespeople from './pages/sales/Salespeople'
 import Prospects from './pages/sales/Prospects'
 import GodUsers from './pages/god/GodUsers'
 import Workspaces from './pages/god/Workspaces'
+import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from './api/client'
 import { exitCustomer } from './pages/god/enterCustomer'
@@ -530,6 +531,10 @@ export default function App() {
             see the header of GodUsers.jsx. */}
         <Route path="/god/workspaces" element={<GodRoute><GodModeLayout><Workspaces /></GodModeLayout></GodRoute>} />
         <Route path="/god/users-all" element={<GodRoute><GodModeLayout><GodUsers /></GodModeLayout></GodRoute>} />
+        {/* Control-plane diagnostics. GodRoute here is convenience only - the
+            endpoint behind it is require_god, so a typed URL is refused by the
+            server rather than by the absence of a link. */}
+        <Route path="/god/diagnostics/user-access" element={<GodRoute><GodModeLayout><UserAccessDiagnostic /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

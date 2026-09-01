@@ -1098,3 +1098,46 @@ def control_plane_audit(action: Optional[str] = None,
         "actions": list(CONTROL_PLANE_ACTIONS),
         "categories": {k: list(v) for k, v in AUDIT_CATEGORIES.items()},
     }
+
+
+# ── USER ACCESS DIAGNOSTIC ───────────────────────────────────────────────────
+#
+# GOD ONLY, READ ONLY. `require_god` and nothing else: not a capability, not a
+# delegation, not super_admin, not org_admin. This reads one person's identity,
+# memberships, workspace resolution and lead counts across every layer, which
+# is exactly the information a database shell would give and exactly the
+# information that must never be reachable from a customer surface.
+#
+# It answers the question a screenshot cannot: an advisor reporting "my leads
+# are gone" could have no assigned leads, no membership, a REVOKED membership,
+# a workspace resolving elsewhere, a role resolving wrong, or a count tile built
+# from a different query than the list under it. Those need different fixes and
+# look identical from outside.
+#
+# Returns RESULTS ONLY - counts, names, ids, timings. No DATABASE_URL, no
+# connection string, no environment variable, no credential of any kind. The
+# service it calls constructs none of those and this route returns its payload
+# unchanged.
+
+@router.get("/diagnostics/user-access")
+def user_access_diagnostic(user_id: Optional[str] = Query(None),
+                           email: Optional[str] = Query(None),
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_god)):
+    """Diagnose one user's access. Exact id or exact email - never a guess."""
+    from app.services import access_diagnostic
+
+    target = access_diagnostic.resolve_target(db, user_id=user_id, email=email)
+    report = access_diagnostic.run(db, target)
+
+    # AUDITED, because reading one named person's access footprint is a
+    # privileged act even when it changes nothing. The subject is recorded; the
+    # report is not, since it would put lead counts for a named individual into
+    # a permanent log for no diagnostic gain.
+    log_action(db, None, user.id,
+               action="user_access_diagnostic",
+               target_type="user", target_id=target.id,
+               details={"subject_email": target.email,
+                        "lookup": "user_id" if user_id else "email"},
+               note="God ran a read-only access diagnostic.")
+    return report
