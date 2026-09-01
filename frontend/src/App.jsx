@@ -78,6 +78,8 @@ import GodControlAudit from './pages/GodControlAudit'
 import SalesImplementations from './pages/SalesImplementations'
 import Activate from './pages/Activate'
 import LeadScraper from './pages/LeadScraper'
+import ImportBatches from './pages/ImportBatches'
+import ImportBatchReview from './pages/ImportBatchReview'
 import MyDay from './pages/sales/MyDay'
 import MyPipeline from './pages/sales/MyPipeline'
 import ManagerCommand from './pages/sales/ManagerCommand'
@@ -579,6 +581,8 @@ export default function App() {
         <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
+        <Route path="/import-batches" element={<ProtectedRoute requireAdmin><ImportBatches /></ProtectedRoute>} />
+        <Route path="/import-batches/:batchId" element={<ProtectedRoute requireAdmin><ImportBatchReview /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
         <Route path="/cadence" element={<ProtectedRoute><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute><EmailQueue /></ProtectedRoute>} />

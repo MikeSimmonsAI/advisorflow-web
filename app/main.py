@@ -70,6 +70,10 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 # only in whatever browser tab asked for it.
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
 import app.models.demo_site_models  # noqa: F401  (imported for side effects)
+# Lead Import Intelligence staging tables (import_batches / import_staged_rows).
+# Same Base, same reason. Without this import those tables are never created and
+# every upload silently has nowhere to write.
+import app.models.import_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 # The SECOND gate pair. require_feature asks whether the customer may USE a
 # service; require_capability asks whether this organization may ADMINISTER the
@@ -131,6 +135,7 @@ from app.routers.integrations_router import router as integrations_router
 # legacy Twilio voice stack), which stays fail-closed and untouched.
 from app.routers.voice_webhooks_router import router as voice_webhooks_router
 from app.routers.demo_router import router as demo_router
+from app.routers.import_batch_router import router as import_batch_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -613,6 +618,7 @@ app.include_router(voice_webhooks_router)
 # environments no longer serve the same application.
 app.include_router(demo_router)
 app.include_router(proposal_router.router)
+app.include_router(import_batch_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

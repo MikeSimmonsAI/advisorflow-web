@@ -1,0 +1,51 @@
+/* ImportBatches.css */
+.import-batches-page { max-width: 1100px; margin: 0 auto; padding: 28px 24px 60px; }
+.import-batches-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+.page-title { font-size: 1.5rem; font-weight: 700; color: var(--text-primary, #111); margin: 0 0 4px; }
+.page-subtitle { font-size: 0.875rem; color: var(--text-secondary, #666); margin: 0; max-width: 520px; }
+.upload-panel { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 24px; margin-bottom: 28px; }
+.upload-panel-title { font-size: 1rem; font-weight: 600; margin: 0 0 20px; color: var(--text-primary, #111); }
+.upload-form { display: flex; flex-direction: column; gap: 16px; }
+.form-row { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+.form-row-group { display: flex; gap: 16px; flex-wrap: wrap; }
+.form-label { font-size: 0.8125rem; font-weight: 600; color: var(--text-primary, #111); }
+.form-label .required { color: #dc2626; }
+.form-row input[type="text"], .form-row input[type="number"], .form-row select { padding: 8px 10px; border: 1px solid var(--border, #d1d5db); border-radius: 6px; font-size: 0.875rem; background: var(--input-bg, #fff); color: var(--text-primary, #111); outline: none; transition: border-color 0.15s; }
+.form-row input:focus, .form-row select:focus { border-color: #2563eb; }
+.form-hint { font-size: 0.75rem; color: var(--text-secondary, #888); }
+.form-error { padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; color: #dc2626; font-size: 0.875rem; }
+.form-actions { display: flex; gap: 10px; }
+.import-batches-filters { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.filter-label { font-size: 0.8125rem; font-weight: 600; color: var(--text-secondary, #666); }
+.import-batches-filters select { padding: 6px 10px; border: 1px solid var(--border, #d1d5db); border-radius: 6px; font-size: 0.875rem; background: var(--input-bg, #fff); color: var(--text-primary, #111); outline: none; }
+.import-batch-list { display: flex; flex-direction: column; gap: 10px; }
+.import-batch-row { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.batch-row-main { display: flex; flex-direction: column; gap: 4px; }
+.batch-row-name { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.batch-display-name { font-size: 0.9375rem; font-weight: 600; color: var(--text-primary, #111); }
+.batch-row-meta { font-size: 0.8125rem; color: var(--text-secondary, #888); display: flex; gap: 4px; flex-wrap: wrap; }
+.batch-error-msg { font-size: 0.8125rem; color: #dc2626; padding: 6px 10px; background: #fef2f2; border-radius: 6px; margin-top: 4px; }
+.batch-row-counts { display: flex; gap: 16px; flex-wrap: wrap; }
+.count-cell { display: flex; flex-direction: column; align-items: center; min-width: 52px; }
+.count-num { font-size: 1.125rem; font-weight: 700; color: var(--text-primary, #111); line-height: 1; }
+.count-new { color: #16a34a; } .count-matched { color: #2563eb; } .count-warn { color: #d97706; }
+.count-pending { color: #7c3aed; } .count-rejected { color: #dc2626; } .count-committed { color: #16a34a; }
+.count-label { font-size: 0.6875rem; color: var(--text-secondary, #888); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+.batch-row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.batch-inline-error { font-size: 0.8125rem; color: #dc2626; }
+.import-status-pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.status-processing { background: #eff6ff; color: #1d4ed8; } .status-ready { background: #ecfdf5; color: #15803d; }
+.status-reviewing { background: #f5f3ff; color: #6d28d9; } .status-ready-commit { background: #fefce8; color: #a16207; }
+.status-committed { background: #dcfce7; color: #15803d; } .status-failed { background: #fef2f2; color: #b91c1c; }
+.status-archived { background: #f3f4f6; color: #6b7280; } .status-uploading, .status-processing { background: #eff6ff; color: #1d4ed8; }
+.status-partially-committed { background: #fefce8; color: #a16207; }
+.import-batches-loading, .import-batches-empty { text-align: center; padding: 48px 24px; color: var(--text-secondary, #888); font-size: 0.9375rem; }
+.import-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 28px; }
+.pagination-label { font-size: 0.875rem; color: var(--text-secondary, #888); }
+.page-error { padding: 12px 16px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; color: #dc2626; font-size: 0.875rem; margin-bottom: 16px; }
+.btn { cursor: pointer; border-radius: 6px; font-weight: 500; border: none; }
+.btn-sm { padding: 6px 12px; font-size: 0.8125rem; }
+.btn-primary { background: #2563eb; color: #fff; padding: 9px 18px; font-size: 0.875rem; }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-outline { background: transparent; border: 1px solid var(--border, #d1d5db); color: var(--text-primary, #111); padding: 8px 14px; font-size: 0.875rem; }
+.btn-danger { background: #dc2626; color: #fff; } .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
