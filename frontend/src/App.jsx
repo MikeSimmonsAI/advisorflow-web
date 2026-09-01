@@ -49,7 +49,7 @@ import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
-import { Unauthorized, NotFound } from './pages/AccessState'
+import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -92,7 +92,10 @@ import GodUsers from './pages/god/GodUsers'
 import Workspaces from './pages/god/Workspaces'
 import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
-         api, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from './api/client'
+         api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
+         clearWorkspaceContext } from './api/client'
+import { decideWorkspaceAccess, contextsListWorkspace,
+         VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
@@ -182,7 +185,12 @@ function HomeRedirect() {
   // all, so this asks the server which contexts they actually have. While the
   // answer is in flight the old assumption stands, so nothing regresses for
   // the users it was already right about.
-  const ctx = useAuthorizedContexts()
+  //
+  // `ctx` is null until the server answers and null again if it never does, so
+  // a failure falls through to the pre-existing legacy behaviour below rather
+  // than to a refusal. This is a REDIRECT, not a guard: nothing it does grants
+  // anything, and the workspace it sends you to checks you on arrival.
+  const { ctx } = useAuthorizedContexts()
   if (ctx) {
     const def = ctx.default_context || {}
     if (def.type === 'workspace' && def.organization_id) {
@@ -211,15 +219,32 @@ function HomeRedirect() {
  * pre-existing behaviour rather than inventing access.
  */
 function useAuthorizedContexts() {
-  const [ctx, setCtx] = useState(null)
+  const [state, setState] = useState({ phase: 'loading', ctx: null, error: null })
+  // Bumped by retry(). A guard that can only fail once is a dead end for the
+  // person reading it; this is what makes "Try again" mean anything.
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
     let live = true
-    fetchMyContexts()
-      .then(d => { if (live) setCtx(d) })
-      .catch(() => { if (live) setCtx(null) })
+    setState(s => ({ phase: 'loading', ctx: s.ctx, error: null }))
+    // force on a retry only: the first call shares the fetch the login
+    // redirect already made, and a retry must not be served the memo.
+    fetchMyContexts({ force: attempt > 0 })
+      .then(d => { if (live) setState({ phase: 'ready', ctx: d, error: null }) })
+      // THE ERROR IS KEPT, NOT DISCARDED. It used to become `null`, which is
+      // the same value as "not loaded yet" and the same value as "loaded, and
+      // you have nothing" - three different facts collapsed into one, and the
+      // caller had to guess which it was holding.
+      .catch(err => { if (live) setState({ phase: 'error', ctx: null, error: err }) })
     return () => { live = false }
-  }, [])
-  return ctx
+  }, [attempt])
+
+  return {
+    phase: state.phase,
+    ctx: state.ctx,
+    error: state.error,
+    retry: () => setAttempt(a => a + 1),
+  }
 }
 
 /**
@@ -229,44 +254,129 @@ function useAuthorizedContexts() {
  * who types another customer's id gets the same refusal as a person who never
  * saw a button, which is the only arrangement where hiding the button is
  * cosmetic rather than load-bearing.
+ *
+ * ── WHY THIS WAS REWRITTEN ────────────────────────────────────────────────
+ * The first version asked one question - GET /auth/workspace/{id} - and ran
+ * `.catch(() => denied)` over the answer. So it had two states where the
+ * problem has four, and every way of not getting an answer arrived at the
+ * screen that says "You don't have access to this page":
+ *
+ *     401 while the session was settling  -> "no access"
+ *     500 from the server                 -> "no access"
+ *     a dropped connection / cold start   -> "no access"
+ *     404 from an older backend           -> "no access"
+ *     403, an actual refusal              -> "no access"   (the only true one)
+ *
+ * The fix is NOT to fail open. It is to stop pretending the browser knows
+ * something it was never told, and it has two halves:
+ *
+ * 1. THE EXTRA HOP IS GONE FOR THE PEOPLE IT WAS HURTING. /auth/my-contexts
+ *    is the canonical, server-built list of every context this caller may
+ *    enter - the same list the login redirect navigates from and the switcher
+ *    renders. If the server put this workspace in it, that IS the server's
+ *    answer, already given. Asking a second endpoint the same question a few
+ *    hundred milliseconds later added no authority; it added one more request
+ *    that could fail, and one more failure that got read as a refusal.
+ *
+ * 2. FOUR STATES, and only one of them accuses anybody. VERIFYING renders
+ *    neither the workspace nor a refusal. AUTHORIZED renders the workspace.
+ *    DENIED requires an authenticated HTTP 403 from the enforcement endpoint.
+ *    UNVERIFIED - anything else - says the check could not be completed and
+ *    offers to retry. It does not enter the workspace either: not failing
+ *    open and not failing shut are the same requirement seen from two sides.
+ *
+ * Nothing here grants access. The backend re-checks customer_org membership
+ * on every request inside the workspace, exactly as before.
  */
 function WorkspaceRoute() {
   const { organizationId } = useParams()
-  const [state, setState] = useState({ status: 'checking' })
+  const { phase: contextsPhase, ctx, error: contextsError,
+          retry: retryContexts } = useAuthorizedContexts()
+  const [confirm, setConfirm] = useState({ phase: 'idle', error: null })
+  const [confirmAttempt, setConfirmAttempt] = useState(0)
+
+  // Only when the server's own list does NOT name this workspace. For every
+  // advisor with one workspace - Jason's shape - this is false and no second
+  // request is ever made.
+  const listed = contextsListWorkspace(ctx, organizationId)
+  const needsConfirmation = contextsPhase === 'ready' && !listed
 
   useEffect(() => {
+    if (!needsConfirmation) {
+      setConfirm({ phase: 'idle', error: null })
+      return
+    }
     let live = true
-    // Stored BEFORE the check so the request carries the header it is asking
-    // about, and so the tenant screens behind it resolve to the right
-    // workspace on their first load rather than the previous one.
-    setWorkspaceContext(organizationId)
+    setConfirm({ phase: 'loading', error: null })
     api.get('/auth/workspace/' + organizationId)
-      .then(d => { if (live) setState({ status: 'ok', workspace: d }) })
-      .catch(err => {
-        if (!live) return
-        // A refused workspace must not leave its id selected - every later
-        // request would keep asking for a door that is closed.
-        clearWorkspaceContext()
-        setState({ status: 'denied', message: err?.message || '' })
-      })
+      .then(() => { if (live) setConfirm({ phase: 'ok', error: null }) })
+      // The error OBJECT is kept, not its message. `err.status` is the whole
+      // point: it is the difference between a refusal and a bad afternoon.
+      .catch(err => { if (live) setConfirm({ phase: 'error', error: err }) })
     return () => { live = false }
-  }, [organizationId])
+  }, [needsConfirmation, organizationId, confirmAttempt])
+
+  const decision = decideWorkspaceAccess({
+    organizationId,
+    contextsPhase,
+    contexts: ctx,
+    contextsError,
+    confirmPhase: confirm.phase,
+    confirmError: confirm.error,
+  })
 
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
-  if (state.status === 'checking') return null
-  if (state.status === 'denied') {
+
+  const here = typeof window !== 'undefined' ? window.location.pathname : ''
+
+  if (decision.state === AUTHORIZED) {
+    // WRITTEN DURING RENDER, DELIBERATELY. Effects run child-first, so setting
+    // this in an effect here would land AFTER Overview's first burst of
+    // requests, and that burst would carry the previous workspace's header -
+    // a wrong-numbers bug, which is worse than an error because it looks fine.
+    // Idempotent and guarded, so it is a write at most once per entry.
+    if (getWorkspaceContext() !== organizationId) setWorkspaceContext(organizationId)
+    // ProtectedRoute already wraps its children in Layout + ContextBanner; the
+    // second banner this used to add was the same banner drawn twice.
+    return <ProtectedRoute><Overview /></ProtectedRoute>
+  }
+
+  if (decision.state === DENIED) {
+    // A refused workspace must not leave its id selected - every later request
+    // would keep asking for a door the server has closed.
+    if (getWorkspaceContext() === organizationId) clearWorkspaceContext()
     return (
       <Layout>
         <Unauthorized
           required="workspace membership"
           role={getCurrentUser()?.role}
-          path={typeof window !== 'undefined' ? window.location.pathname : ''}
+          path={here}
         />
       </Layout>
     )
   }
-  return <ProtectedRoute><ContextBanner /><Overview /></ProtectedRoute>
+
+  if (decision.state === UNVERIFIED) {
+    // NOT entered, NOT refused. The selection is left alone: it is not known
+    // to be wrong, and clearing it would silently change what the next request
+    // asks for on the strength of a failure.
+    return (
+      <Layout>
+        <VerificationUnavailable
+          status={decision.status}
+          message={decision.message}
+          path={here}
+          onRetry={() => { retryContexts(); setConfirmAttempt(a => a + 1) }}
+        />
+      </Layout>
+    )
+  }
+
+  // VERIFYING - and this is the state that must render nothing rather than
+  // guess. It also covers the 401 case, where the API client is already on its
+  // way to /login.
+  return null
 }
 
 /**
@@ -274,7 +384,7 @@ function WorkspaceRoute() {
  * office, so there is no header to hang a switcher on yet.
  */
 function WorkspaceSelector() {
-  const ctx = useAuthorizedContexts()
+  const { ctx } = useAuthorizedContexts()
   const navigate = useNavigate()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (!ctx) return null

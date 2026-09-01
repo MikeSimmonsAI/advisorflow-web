@@ -191,6 +191,10 @@ export async function login(email, password) {
   }
   const data = await res.json()
   setToken(data.access_token)
+  // A NEW SESSION GETS A NEW ANSWER. The shared context list belongs to
+  // whoever was signed in when it was fetched; carrying it across a sign-in
+  // would show one person the other's workspaces until something refetched.
+  resetMyContexts()
   localStorage.setItem(KEY_USER, JSON.stringify({
     full_name: data.full_name, role: data.role, organization_id: data.organization_id,
     must_change_password: data.must_change_password,
@@ -244,6 +248,23 @@ export async function logout() {
   localStorage.removeItem('bookaboost_user') // clean up legacy key
   localStorage.removeItem(KEY_BRANDING)
   localStorage.removeItem('bb_branding')     // clean up legacy key
+  // THE CONTEXT GOES TOO, AND IT DID NOT USED TO.
+  //
+  // Logging out cleared the token, the user and the branding, and left
+  // af_org_context, af_brand_context and af_workspace_id sitting in
+  // localStorage. So the NEXT person to sign in on that browser sent the
+  // previous person's X-Org-Override, X-Brand-Override and X-Workspace-Id on
+  // every request - most obviously after somebody used God Mode to enter a
+  // customer and then handed the laptop over.
+  //
+  // The server refuses all three for a user who is not entitled to them, so
+  // this was never a way IN. It is still wrong: a signed-out context is not
+  // this person's context, and "it fails closed" is a property of today's
+  // server rather than a promise the browser is keeping. clearAllContext()
+  // already existed and did exactly this; logout simply never called it.
+  clearAllContext()
+  // The in-memory context list goes with them for the same reason.
+  resetMyContexts()
 }
 
 // â”€â”€ Keep-alive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -485,8 +506,36 @@ export function clearWorkspaceContext() {
 // THE SERVER BUILDS THIS LIST. The browser renders it and invents nothing:
 // no context is derived from a role label, from organization_id, or from
 // anything cached locally.
-export async function fetchMyContexts() {
-  return api.get('/auth/my-contexts')
+//
+// SHARED FOR THE SIGNED-IN SESSION, AND ONLY FOR IT.
+//
+// Landing on "/" and then entering a workspace used to ask the server this
+// same question twice within a few hundred milliseconds, on a free-tier host
+// where the second of two near-simultaneous cold requests is the one that
+// fails. The answer cannot change between those two moments, so it is fetched
+// once and shared.
+//
+// Two rules keep that from becoming a cached authorization:
+//   1. A FAILURE IS NEVER CACHED - the promise is dropped so the next caller
+//      re-asks. A transient error must not become a permanent one.
+//   2. It is dropped on login and on logout, so it can never outlive the
+//      session that earned it.
+// And it is not the control in any case: every route behind every entry in
+// this list re-checks membership server-side on its own.
+let _contextsPromise = null
+
+export function fetchMyContexts(opts = {}) {
+  if (opts.force || !_contextsPromise) {
+    _contextsPromise = api.get('/auth/my-contexts').catch(err => {
+      _contextsPromise = null
+      throw err
+    })
+  }
+  return _contextsPromise
+}
+
+export function resetMyContexts() {
+  _contextsPromise = null
 }
 
 // Leaving everything means leaving the brand as well - a stale brand under a

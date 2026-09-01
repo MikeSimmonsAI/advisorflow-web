@@ -70,6 +70,43 @@ export function Unauthorized({ required, role, path }) {
   )
 }
 
+/**
+ * VerificationUnavailable — "we could not ask", which is not "you may not".
+ *
+ * The third state the workspace guard was missing. A 500, a dropped
+ * connection, a timeout or a 404 from a backend older than this bundle all
+ * used to land on Unauthorized above, which told a properly authorized advisor
+ * that he lacked access to his own workspace. That is a lie the app told with
+ * complete confidence, and the person who reads it has no way to know it is
+ * one.
+ *
+ * This screen refuses to enter the workspace - it is not fail-open, and the
+ * server has still granted nothing - while refusing to accuse the reader of
+ * anything. It also gives them the only useful action: try again.
+ */
+export function VerificationUnavailable({ status, message, path, onRetry }) {
+  return (
+    <div style={WRAP}>
+      <div style={{ fontSize: 32, marginBottom: 12 }} aria-hidden="true">⚠️</div>
+      <h1 style={TITLE}>We couldn't check your access just now</h1>
+      <p style={BODY}>
+        The server didn't answer the access check{status ? ` (HTTP ${status})` : ''},
+        so this workspace hasn't been opened yet. <strong>This is not a refusal.</strong>{' '}
+        Nothing about your account has changed and nothing here says you lack access.
+      </p>
+      <p style={BODY}>
+        Try again in a moment. If it keeps happening, tell your administrator
+        {status ? ` that the access check returned ${status}.` : ' that the access check could not be reached.'}
+      </p>
+      {message && <div style={META}>{message}</div>}
+      {path && <div style={META}>{path}</div>}
+      <button className="btn btn--ghost" type="button" onClick={onRetry}>
+        Try again
+      </button>
+    </div>
+  )
+}
+
 export function NotFound({ path }) {
   return (
     <div style={WRAP}>

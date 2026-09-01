@@ -213,6 +213,15 @@ if ($SkipSmoke) {
     # leaks no credential, and names the actual cause rather than shrugging.
     python scripts\probe_access_diagnostic.py 2>&1 | Select-String "OPEN |BROKE|checks passed|GOD ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "ACCESS DIAGNOSTIC CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 33 - THE WORKSPACE ROUTE GUARD. An authorization guard must be able
+    # to tell "the server refused you" from "the server did not answer": 401,
+    # 404, 500, a timeout and a dropped connection are not refusals, and they
+    # are not access either. Executes the real decision module over every
+    # lifecycle, proves the suite by four reverts, and holds the two sibling
+    # defects fixed - logout leaving one person's workspace context for the
+    # next, and a failed dashboard request rendering as the number 0.
+    python scripts\probe_workspace_route_guard.py 2>&1 | Select-String "REVERT|BROKE|checks passed|NO DENIAL" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "WORKSPACE ROUTE GUARD CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

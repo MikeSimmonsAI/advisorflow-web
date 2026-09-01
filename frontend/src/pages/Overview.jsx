@@ -31,7 +31,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, getCurrentUser, getBranding } from '../api/client'
+import { api, getCurrentUser, getBranding, getWorkspaceContext } from '../api/client'
 import './Overview.css'
 
 // ── Industry-aware labels ─────────────────────────────────────────────────────
@@ -115,18 +115,58 @@ export default function Overview() {
     return () => clearInterval(t)
   }, [])
 
+  // A REFUSED REQUEST IS NOT AN EMPTY PIPELINE.
+  //
+  // Every call below used to end in `.catch(() => null)` or `.catch(() => [])`,
+  // which turned "the server refused me" into "you have no leads" - silently,
+  // and in two different shapes. A failed `/leads/` left totalLeads null and
+  // rendered Total leads as an em-dash; a failed status-funnel left an empty
+  // array and rendered every stage as 0. That is exactly the screen an advisor
+  // reported: one widget blank, the rest confidently zero, and nothing anywhere
+  // saying a request had failed.
+  //
+  // The rule this restores is the one already applied to CONNECTED/HEALTHY
+  // elsewhere, pointed the other way: do not display "0 leads" unless the
+  // backend actually said 0.
+  const [loadError, setLoadError] = useState('')
+
+  // THE WORKSPACE AND THE IDENTITY ARE DEPENDENCIES.
+  //
+  // The dependency array was [isManager]. For an ADVISOR that value is false
+  // before the user hydrates and false after, so the effect never re-ran: a
+  // first burst that failed stayed failed until a full page reload. For a
+  // manager it flips false->true and silently refetches, which is why this
+  // reproduced for advisors and not for admins looking at the same build.
+  //
+  // Switching workspace does not remount this component either - React
+  // reconciles the same element in the same position - so without the
+  // workspace in the deps the dashboard kept showing the previous workspace's
+  // numbers after a switch.
+  const identityKey = `${user?.role || ''}|${user?.organization_id || ''}`
+  const workspaceKey = getWorkspaceContext() || ''
+
   useEffect(() => {
     let live = true
+    const failures = []
+    // Records WHY a call failed instead of discarding it. The fallback value
+    // keeps the existing render shape; the recorded message is what makes the
+    // failure visible.
+    const attempt = (label, promise, fallback) =>
+      promise.catch(e => {
+        failures.push(`${label}: ${e?.message || 'request failed'}`)
+        return fallback
+      })
+
     const calls = [
-      api.get('/leads/?page=1&page_size=1').catch(() => null),
-      api.get('/leads/?status=dnc&page=1&page_size=1').catch(() => null),
-      api.get('/leads/status-funnel').catch(() => []),
-      api.get('/leads/daily-briefing').catch(() => null),
-      api.get('/sms/replies?needs_attention=true').catch(() => []),
-      api.get('/leads/?page=1&page_size=40').catch(() => null),
-      api.get('/activity/sent?limit=8&days=7').catch(() => []),
-      api.get('/outcomes/summary').catch(() => null),
-      api.get('/pipeline/forecast').catch(() => null),
+      attempt('leads', api.get('/leads/?page=1&page_size=1'), null),
+      attempt('suppression', api.get('/leads/?status=dnc&page=1&page_size=1'), null),
+      attempt('status funnel', api.get('/leads/status-funnel'), []),
+      attempt('daily briefing', api.get('/leads/daily-briefing'), null),
+      attempt('replies', api.get('/sms/replies?needs_attention=true'), []),
+      attempt('lead list', api.get('/leads/?page=1&page_size=40'), null),
+      attempt('activity', api.get('/activity/sent?limit=8&days=7'), []),
+      attempt('outcomes', api.get('/outcomes/summary'), null),
+      attempt('forecast', api.get('/pipeline/forecast'), null),
       isManager
         ? api.get('/admin/dashboard/metrics').catch(e => ({ __err: e?.message || 'unavailable' }))
         : Promise.resolve(null),
@@ -143,10 +183,11 @@ export default function Overview() {
       setOutcomes(oc)
       setForecast(fc)
       if (tm && tm.__err) { setTeamError(tm.__err); setTeam(null) } else { setTeam(tm) }
+      setLoadError(failures.join(' · '))
       setLoading(false)
     })
     return () => { live = false }
-  }, [isManager])
+  }, [isManager, identityKey, workspaceKey])
 
   // ── derived ───────────────────────────────────────────────────────────────
   const stage = (s) => funnel.find(x => x.status === s)?.count ?? 0
@@ -268,6 +309,24 @@ export default function Overview() {
           </button>
         </div>
       </div>
+
+      {/* THE FAILURE IS SAID OUT LOUD, ABOVE THE NUMBERS IT INVALIDATES.
+          Placed here rather than inside one widget because a failed request
+          poisons several tiles at once, and an advisor reading "0 leads" needs
+          to know the figure is not an answer before they act on it. */}
+      {!loading && loadError && (
+        <div className="ov-load-error" role="alert" style={{
+          margin: '0 0 16px', padding: '11px 14px', borderRadius: 10,
+          background: 'rgba(240,80,80,0.12)',
+          border: '1px solid rgba(240,80,80,0.35)', fontSize: 13.5,
+        }}>
+          <strong>Some of this dashboard could not load.</strong>{' '}
+          The numbers below are incomplete — this is not an empty pipeline.
+          <div style={{ marginTop: 5, opacity: 0.75, fontSize: 12.5 }}>
+            {loadError}
+          </div>
+        </div>
+      )}
 
       {/* ── hero ── */}
       <div className="ov-hero">
