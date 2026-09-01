@@ -35,6 +35,7 @@ from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Base
 from app.routers.audit_log_router import log_action
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 router = APIRouter(prefix="/auto-send", tags=["auto-send"])
 
@@ -185,10 +186,16 @@ def edit_item(
     current_user: User = Depends(get_current_user),
 ):
     """Edit the message body of a pending item before approving."""
-    item = db.query(AutoSendItem).filter(
-        AutoSendItem.id == item_id,
-        AutoSendItem.organization_id == current_user.organization_id,
-        AutoSendItem.status == "pending",
+    # OWN QUEUE ONLY. This was organization-scoped, so an advisor could rewrite
+    # the body of a colleague's pending message and let the colleague approve
+    # and send it under their own name.
+    item = lead_scope.own_records_only(
+        db.query(AutoSendItem).filter(
+            AutoSendItem.id == item_id,
+            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.status == "pending",
+        ),
+        AutoSendItem.advisor_id, current_user,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found or already actioned")
@@ -201,7 +208,7 @@ def edit_item(
         item.subject = req.subject
     db.commit()
     db.refresh(item)
-    lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
+    lead = lead_scope.load_lead_in_scope(db, current_user, item.lead_id)
     return _serialize(item, lead)
 
 
@@ -212,17 +219,24 @@ def approve_item(
     current_user: User = Depends(get_current_user),
 ):
     """Approve and send a queued message."""
-    item = db.query(AutoSendItem).filter(
-        AutoSendItem.id == item_id,
-        AutoSendItem.organization_id == current_user.organization_id,
-        AutoSendItem.status == "pending",
+    # OWN QUEUE ONLY. Organization scope here meant an advisor could approve a
+    # colleague's queued message and send it to a family that is not theirs -
+    # from their own Twilio identity, with their own name substituted in.
+    item = lead_scope.own_records_only(
+        db.query(AutoSendItem).filter(
+            AutoSendItem.id == item_id,
+            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.status == "pending",
+        ),
+        AutoSendItem.advisor_id, current_user,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found or already actioned")
 
-    lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+    # Second gate: the LEAD must also be in scope. The item and the lead can
+    # disagree after a reassignment, and the message is what actually reaches a
+    # family, so the family is checked as well as the queue row.
+    lead = lead_scope.load_lead_in_scope(db, current_user, item.lead_id)
 
     try:
         if item.channel == "email" and lead.email:
@@ -251,10 +265,16 @@ def skip_item(
     current_user: User = Depends(get_current_user),
 ):
     """Skip a queued message without sending."""
-    item = db.query(AutoSendItem).filter(
-        AutoSendItem.id == item_id,
-        AutoSendItem.organization_id == current_user.organization_id,
-        AutoSendItem.status == "pending",
+    # Own queue only - same reason as edit and approve above. Skipping somebody
+    # else's queued message is quieter than sending it and just as wrong: the
+    # follow-up they were relying on never goes out and nothing tells them.
+    item = lead_scope.own_records_only(
+        db.query(AutoSendItem).filter(
+            AutoSendItem.id == item_id,
+            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.status == "pending",
+        ),
+        AutoSendItem.advisor_id, current_user,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found or already actioned")
@@ -492,35 +512,42 @@ def proactive_scan(
 
     cutoff = datetime.utcnow() - timedelta(days=req.days_dormant)
 
-    from sqlalchemy import text
-    rows = db.execute(text("""
-        SELECT l.id, l.first_name, l.last_name, l.phone, l.email,
-               l.tier, l.status, l.organization_id
-        FROM leads l
-        WHERE l.user_id = :advisor_id
-          AND l.organization_id = :org_id
-          AND l.status = ANY(:statuses)
-          AND l.status != 'dnc'
-          AND l.phone IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM auto_send_queue asq
-            WHERE asq.lead_id = l.id AND asq.status = 'pending'
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM messages m
-            WHERE m.lead_id = l.id
-              AND m.direction = 'outbound'
-              AND m.sent_at > :cutoff
-          )
-        ORDER BY l.updated_at ASC
-        LIMIT :max_leads
-    """), {
-        "advisor_id": current_user.id,
-        "org_id": current_user.organization_id,
-        "statuses": req.statuses,
-        "cutoff": cutoff,
-        "max_leads": req.max_leads,
-    }).fetchall()
+    # REWRITTEN FROM RAW SQL, FOR TWO REASONS.
+    #
+    # It selected `WHERE l.user_id = :advisor_id` and `WHERE m.direction =
+    # 'outbound'`. Neither column exists: leads owns its advisor through
+    # assigned_to_id, and `messages` has no direction at all - it is the
+    # outbound table, with `replies` holding the inbound side. Postgres rejects
+    # the statement on both counts, so this endpoint has never once run in
+    # production. Every Message row IS an outbound message, so the dormancy
+    # test is simply "nothing sent since the cutoff".
+    #
+    # And hand-written SQL is exactly how the org-wide default crept back in
+    # everywhere else: it cannot be reached by the one authorization function.
+    # Starting from authorized_lead_query means the scan is confined to the
+    # caller's own book by the same code that confines the lead list, and a
+    # future edit to the scope reaches this query for free.
+    from app.models.models import Message as _Msg
+    from app.services.lead_scope import authorized_lead_query as _alq
+
+    pending_lead_ids = db.query(AutoSendItem.lead_id).filter(
+        AutoSendItem.status == "pending").subquery()
+    contacted_lead_ids = db.query(_Msg.lead_id).filter(
+        _Msg.sent_at > cutoff).subquery()
+
+    rows = (
+        _alq(db, current_user)
+        .filter(
+            Lead.status.in_(req.statuses),
+            Lead.status != "dnc",
+            Lead.phone.isnot(None),
+            ~Lead.id.in_(db.query(pending_lead_ids.c.lead_id)),
+            ~Lead.id.in_(db.query(contacted_lead_ids.c.lead_id)),
+        )
+        .order_by(Lead.updated_at.asc())
+        .limit(req.max_leads)
+        .all()
+    )
 
     if not rows:
         return {"queued": 0, "message": "No dormant leads found matching criteria"}
@@ -531,10 +558,9 @@ def proactive_scan(
 
     for row in rows:
         try:
-            # Compliance check
-            lead = db.query(Lead).filter(Lead.id == row.id).first()
-            if not lead:
-                continue
+            # `rows` are Lead entities straight out of the authorized query now,
+            # so there is nothing to re-fetch and no second chance to widen.
+            lead = row
             try:
                 from app.routers.compliance_router import compliance_preflight
                 ok, _ = compliance_preflight(db, lead, "sms")

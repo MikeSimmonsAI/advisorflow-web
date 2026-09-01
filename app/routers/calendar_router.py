@@ -14,6 +14,7 @@ from app.services.calendar_service import (
     get_authorization_url, handle_oauth_callback,
     create_calendar_event_for_booking, cancel_calendar_event,
 )
+from app.services import lead_scope
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 logger = logging.getLogger(__name__)
@@ -865,10 +866,19 @@ def cancel_booking(booking_id: str, db: Session = Depends(get_db), current_user:
     """
     from app.models.models import Lead as LeadModel
 
+    # SCOPED BY THE LEAD, NOT THE ORGANIZATION. This joined Lead purely to reach
+    # organization_id, so any advisor could cancel any colleague's appointment
+    # and fire the cancellation SMS and email at that family. The join now
+    # carries the authorized lead ids, so the booking is only findable when its
+    # family is the caller's - and an out-of-scope booking is 404, not 403, for
+    # the same enumeration reason as everywhere else.
+    authorized_ids = lead_scope.authorized_lead_query(db, current_user, LeadModel.id).subquery()
     booking = (
         db.query(BookingLink)
-        .join(LeadModel, BookingLink.lead_id == LeadModel.id)
-        .filter(BookingLink.id == booking_id, LeadModel.organization_id == current_user.organization_id)
+        .filter(
+            BookingLink.id == booking_id,
+            BookingLink.lead_id.in_(db.query(authorized_ids.c.id)),
+        )
         .first()
     )
     if not booking:

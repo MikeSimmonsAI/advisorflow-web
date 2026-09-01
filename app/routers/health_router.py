@@ -29,9 +29,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_user, get_db
+from app.deps import get_current_user, get_db, require_tenant_user
 from app.models.models import User
 from app.services.capabilities import require_capability
+from app.services import lead_scope
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -145,6 +146,111 @@ def _ai_features_status() -> IntegrationStatus:
     return IntegrationStatus(
         key="ai_features", title="AI Features (templates, reply drafts, classification)",
         connected=False, reason=reason, settings_path="/system-health",
+    )
+
+
+class MySetupStatus(BaseModel):
+    """Deliberately NOT AdvisorHealthStatus.
+
+    Reusing that model is how a caller-scoped page grows platform fields back:
+    the moment a platform item is added to the shared model it appears here too,
+    silently. A separate model means adding a platform fact to this response is
+    an edit somebody has to make on purpose.
+    """
+    integrations: list[IntegrationStatus]
+    all_ready: bool
+
+
+def _messaging_status(db: Session, user: User) -> IntegrationStatus:
+    """Can THIS caller's messages actually go out - and nothing else.
+
+    Reports booleans and plain language only. It never returns an Account SID,
+    an auth token, a messaging service SID or any fragment of one, because the
+    answer the advisor needs is "yes" or "no, ask your administrator", and a
+    last-four is still a credential detail an advisor has no business holding.
+
+    It reflects the REAL resolution order in sms_service: the organization's
+    credentials first, the caller's own only as a fallback. Checking just the
+    user's columns would tell an advisor in a properly configured Restland that
+    their SMS is not connected, which is the same class of lie as showing
+    CONNECTED for something unverified - it is just pointed the other way.
+    """
+    org = None
+    org_id = lead_scope.active_workspace_org_id(user)
+    if org_id:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+
+    org_creds = bool(org and org.org_twilio_account_sid
+                     and org.org_twilio_auth_token_encrypted)
+    org_sender = bool(org and (org.org_twilio_phone_number
+                               or org.twilio_messaging_service_sid))
+    own_creds = bool(user.twilio_account_sid and user.twilio_auth_token_encrypted
+                     and user.twilio_phone_number)
+
+    if (org_creds and org_sender) or own_creds:
+        return IntegrationStatus(
+            key="messaging", title="Text messaging", connected=True,
+            settings_path="/settings",
+        )
+
+    if org_creds and not org_sender:
+        reason = ("Your organization's messaging account is set up but has no "
+                  "sending number yet. An administrator needs to finish this - "
+                  "your texts will not go out until they do.")
+    else:
+        reason = ("Text messaging is not set up for your organization yet. An "
+                  "administrator needs to configure it - your texts will not go "
+                  "out until they do.")
+    return IntegrationStatus(key="messaging", title="Text messaging",
+                             connected=False, reason=reason,
+                             settings_path="/settings")
+
+
+@router.get("/my-setup", response_model=MySetupStatus)
+def my_setup(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+) -> MySetupStatus:
+    """IS MY OWN SETUP WORKING - the advisor's question, and only that.
+
+    /advisor-status is God-only by default because System Health reads as
+    platform operations. That was right, and it took with it the one thing an
+    advisor legitimately needs: whether their own texting and calendar work.
+    This is that thing, given its own endpoint rather than reopening the page.
+
+    WHAT IT WILL NOT ANSWER, and why each is excluded rather than filtered:
+
+      - the platform OpenAI key. /advisor-status reports whether the
+        deployment has one at all. That is a fact about the platform's
+        environment, identical for every customer, and no customer's advisor
+        is entitled to it.
+      - the cadence scheduler's last run. A platform job, not the caller's.
+      - any credential value, including a last-four.
+      - anything about another user, or about the organization beyond the one
+        boolean "your messaging is or is not configured", which the caller
+        needs in order to know whether to ask an administrator.
+
+    No capability gate: every authenticated TENANT user may ask about their own
+    setup. That is the whole point - an advisor should not need
+    `platform_health`, and granting it to make this page work would hand them
+    the platform view to fix a personal one.
+
+    `require_tenant_user`, not `get_current_user`: I wrote this with the looser
+    dependency first and the gate caught it. A brand-sales identity with no
+    customer workspace got a cheerful 200 saying "text messaging is not set up
+    for your organization" - a statement about an organization they are not in,
+    and the two-context rule says platform access is not workspace access. They
+    are refused here rather than answered inaccurately.
+    """
+    items = [
+        _messaging_status(db, current_user),
+        _google_calendar_status(current_user),
+        _microsoft_365_status(current_user),
+    ]
+    return MySetupStatus(
+        integrations=items,
+        all_ready=all(i.connected for i in items),
     )
 
 

@@ -25,6 +25,7 @@ from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope,
                                      assert_leads_in_scope, reject_ownership_fields)
 from app.models.models import Campaign, Lead, Message, Reply, User
 from app.routers.audit_log_router import log_action
+from app.services import lead_scope
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -385,8 +386,16 @@ def preview_campaign_leads(
     current_user: User = Depends(require_tenant_user),
 ):
     """Preview which leads match the filter criteria."""
+    # THE SECOND COPY OF THE IMPORT-FILENAME BREACH. This started from
+    # db.query(Lead) with organization scope only, then returned total_matched
+    # for the whole organization plus a ten-lead sample carrying names, phones
+    # AND source_file - the same filenames /leads/import-batches was handing
+    # out, through a different door. It now starts at the authorized query, so
+    # both the count and the sample are the caller's own book.
     criteria = req.filter_criteria.dict(exclude_none=True)
-    query = _apply_filters(db.query(Lead), current_user.organization_id, criteria)
+    query = _apply_filters(
+        lead_scope.authorized_lead_query(db, current_user),
+        current_user.organization_id, criteria)
     total = query.count()
     sample = query.limit(10).all()
 
@@ -586,7 +595,10 @@ def builder_preview(
     current_user: User = Depends(require_tenant_user),
 ):
     """Preview leads matching the Campaign Builder filters. Returns full lead list. Open to all advisors."""
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    # This was already advisor-scoped and correct. The role list was its OWN
+    # copy of who counts as a manager, which is how the vocabularies drift
+    # apart; it now asks lead_scope, the same function the query uses.
+    is_manager = lead_scope.is_manager(current_user)
     criteria = {}
     if tier: criteria["tier"] = tier
     if status: criteria["status"] = status
@@ -652,6 +664,14 @@ def builder_send(
     """
     from app.services.sms_service import send_sms
 
+    # REFUSE, DO NOT SILENTLY DROP - AND REFUSE BEFORE ANYTHING IS WRITTEN.
+    # The authorized query alone would quietly skip the ids this caller may not
+    # touch and then report a send that did not happen for them, which reads as
+    # success. assert_leads_in_scope refuses the whole batch and names the
+    # count. It runs here, ahead of the campaign row, so a refused request
+    # leaves no orphan campaign stuck in "sending".
+    lead_scope.assert_leads_in_scope(db, current_user, req.lead_ids)
+
     now = datetime.utcnow()
 
     # Create campaign record for history
@@ -678,7 +698,6 @@ def builder_send(
     db.commit()
     db.refresh(campaign)
 
-    # Fetch the leads
     leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
 
     sent = 0

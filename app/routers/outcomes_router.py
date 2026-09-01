@@ -15,6 +15,7 @@ from datetime import datetime
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, LeadOutcome
+from app.services import lead_scope
 
 router = APIRouter(prefix="/outcomes", tags=["outcomes"])
 
@@ -51,11 +52,17 @@ class OutcomeResponse(BaseModel):
     created_at: datetime
 
 
-def _get_lead_or_404(db: Session, lead_id: str, organization_id: str) -> Lead:
-    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == organization_id).first()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
+def _get_lead_or_404(db: Session, lead_id: str, current_user) -> Lead:
+    """One lead this caller is entitled to, else 404.
+
+    Took an organization_id and filtered on it, so every outcomes route answered
+    for ANY lead in the organization. It now takes the USER, because the
+    organization was never the whole answer: an advisor is entitled to their own
+    book, not the org's. Signature changed deliberately rather than adding an
+    optional argument - an org_id-shaped hole is what let this happen, and a
+    caller that has not been updated should fail loudly at import time.
+    """
+    return lead_scope.load_lead_in_scope(db, current_user, lead_id)
 
 
 @router.post("/", response_model=OutcomeResponse)
@@ -69,7 +76,7 @@ def record_outcome(
     not an overwrite of a single record, so history across multiple
     visits is preserved (see LeadOutcome model docstring for why).
     """
-    _get_lead_or_404(db, req.lead_id, current_user.organization_id)
+    _get_lead_or_404(db, req.lead_id, current_user)
 
     if req.has_open_closed_status and req.has_open_closed_status not in ("open", "closed"):
         raise HTTPException(status_code=400, detail="has_open_closed_status must be 'open', 'closed', or omitted.")
@@ -107,7 +114,7 @@ def list_outcomes_for_lead(
     (e.g. "this family doesn't have a marker yet") without having to
     re-ask or guess.
     """
-    _get_lead_or_404(db, lead_id, current_user.organization_id)
+    _get_lead_or_404(db, lead_id, current_user)
     outcomes = (
         db.query(LeadOutcome)
         .filter(LeadOutcome.lead_id == lead_id)
@@ -130,7 +137,7 @@ def get_latest_gaps(
     lead missing a marker should get marker-focused follow-up copy,
     not the generic pre-need pitch).
     """
-    _get_lead_or_404(db, lead_id, current_user.organization_id)
+    _get_lead_or_404(db, lead_id, current_user)
     latest = (
         db.query(LeadOutcome)
         .filter(LeadOutcome.lead_id == lead_id)
@@ -171,10 +178,16 @@ def get_outcomes_summary(
     """
     from app.models.models import Lead
 
+    # SAME SCOPE AS THE LIST. These are count tiles, and a count tile built from
+    # a wider query than the list it sits above is the exact failure the P0
+    # names: an advisor seeing 400 appointments over a list of 6 has been told
+    # the size of everybody else's book. A manager still gets the team total,
+    # because authorized_lead_query gives a manager the organization.
+    scoped_lead_ids = lead_scope.authorized_lead_query(db, current_user, Lead.id).subquery()
+
     org_outcomes = (
         db.query(LeadOutcome)
-        .join(Lead, LeadOutcome.lead_id == Lead.id)
-        .filter(Lead.organization_id == current_user.organization_id)
+        .filter(LeadOutcome.lead_id.in_(db.query(scoped_lead_ids.c.id)))
         .all()
     )
 
@@ -183,8 +196,7 @@ def get_outcomes_summary(
     conversion_rate = round((sales_count / total_appointments * 100)) if total_appointments > 0 else 0
 
     # Count booked leads as pipeline - these are real, in-progress
-    booked_count = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
+    booked_count = lead_scope.authorized_lead_query(db, current_user).filter(
         Lead.status == "booked",
     ).count()
 

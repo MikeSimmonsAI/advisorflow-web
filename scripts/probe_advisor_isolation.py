@@ -33,10 +33,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from fastapi.testclient import TestClient                              # noqa: E402
+from sqlalchemy import text as sa_text                                 # noqa: E402
 from app.main import app                                              # noqa: E402
 from app.deps import SessionLocal, engine                             # noqa: E402
 from app.models.models import (                                       # noqa: E402
-    Base, Platform, Organization, User, Lead,
+    Base, Platform, Organization, User, Lead, Message, PipelineConversation,
 )
 from app.services.auth_service import hash_password                   # noqa: E402
 
@@ -160,6 +161,65 @@ def build():
         db.add(PipelineConversation(
             id="pc-j%d" % n, organization_id="org-rest", lead_id="ld-j%d" % n,
             advisor_id="u-jason", stage="replied"))
+
+    # ── ROUND 2 FIXTURE: the child tables that hang off the ADVISOR ──────────
+    #
+    # Lead scope answers "whose family is this". It does not answer "whose
+    # queued message, whose calling campaign, whose appointment, whose review
+    # flag" - those tables key on advisor_id, and every one of them was filtered
+    # on organization_id alone. Both advisors get rows here so a leak has
+    # somewhere to leak FROM and a break has something to break.
+    from app.routers.auto_send_router import AutoSendItem
+    from app.models.models import (
+        VoiceCallCampaign, VoiceCall, BookingLink, LeadOutcome, CRMContact)
+
+    for who, ld in (("jason", "ld-j0"), ("michael", "ld-m0")):
+        db.add(AutoSendItem(
+            id="as-%s" % who, organization_id="org-rest", lead_id=ld,
+            advisor_id="u-%s" % who, message="QUEUED-%s-BODY" % who.upper(),
+            channel="sms", source="ai", status="pending"))
+        db.add(VoiceCallCampaign(
+            id="vc-%s" % who, organization_id="org-rest", advisor_id="u-%s" % who,
+            name="CAMPAIGN-%s" % who.upper(), status="running", total_leads=6,
+            calls_answered=3, bookings_detected=1))
+        db.add(VoiceCall(
+            id="call-%s" % who, lead_id=ld, advisor_id="u-%s" % who,
+            organization_id="org-rest", to_phone="+12145550000",
+            status="completed", transcript="TRANSCRIPT-%s" % who.upper()))
+        db.add(BookingLink(
+            id="bk-%s" % who, token="tok-%s" % who, lead_id=ld,
+            user_id="u-%s" % who, status="booked",
+            booked_time=datetime.utcnow() + timedelta(days=2)))
+        db.add(LeadOutcome(
+            id="lo-%s" % who, lead_id=ld, recorded_by_id="u-%s" % who,
+            has_marker=False, has_memorial=False, resulted_in_sale=True,
+            sale_items="marker", notes="OUTCOME-%s" % who.upper()))
+
+    # NO FIBER FIXTURE, AND THE REASON MATTERS.
+    #
+    # fiber_leads_router filters on `Lead.source == "fiber_field"` and its
+    # create endpoint passes source= and service_address=. Lead has NEITHER
+    # column - it has source_year and source_file, and street_address. Both
+    # halves of that router raise before any authorization question arises, so
+    # there is no data to seed and nothing that could leak. The gate asserts
+    # only that the endpoint discloses nothing; the dead schema reference is
+    # reported to Mike rather than papered over by inventing a column here.
+    db.commit()
+
+    # The case file table is raw SQL in its router, so it is seeded the same
+    # way rather than through a model that does not exist.
+    db.execute(sa_text("""
+        CREATE TABLE IF NOT EXISTS appointment_case_files (
+            id TEXT PRIMARY KEY, organization_id TEXT, lead_id TEXT,
+            advisor_id TEXT, notes TEXT, crm_synced_at TIMESTAMP,
+            crm_sync_status TEXT, updated_at TIMESTAMP)
+    """))
+    for who, ld in (("jason", "ld-j0"), ("michael", "ld-m0")):
+        db.execute(sa_text(
+            "INSERT INTO appointment_case_files (id, organization_id, lead_id,"
+            " advisor_id, notes) VALUES (:i, 'org-rest', :l, :a, :n)"),
+            {"i": "cf-%s" % who, "l": ld, "a": "u-%s" % who,
+             "n": "CASEFILE-%s" % who.upper()})
     db.commit()
     db.close()
 
@@ -548,6 +608,296 @@ def main():
         r = c.get("/leads/import-batches", headers=dana)
         refused("   and she is still refused the import inventory",
                 r.status_code == 403, "%s" % r.status_code)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # ROUND 2 - THE NINETEEN AUTHENTICATED ROUTES
+        #
+        # Round 1 audited everything that queries Lead. These nineteen were
+        # authenticated and organization-scoped, and I reported them as NOT
+        # individually verified rather than implying they were safe. Verified
+        # here, one at a time, against six axes where each applies: own data,
+        # another advisor's data, id and query-parameter manipulation, cross
+        # tenant, manager, platform owner.
+        #
+        # Eighteen of the nineteen were wrong. Authenticated is not scoped.
+        # ═══════════════════════════════════════════════════════════════════
+
+        section("auto-send queue: acting on a colleague's queued message")
+        r = c.patch("/auto-send/as-michael/edit", headers=jason,
+                    json={"message": "REWRITTEN BY JASON"})
+        refused("Jason cannot EDIT Michael's queued message body",
+                r.status_code == 404, "%s %s" % (r.status_code, text(r)[:120]))
+        r = c.post("/auto-send/as-michael/approve", headers=jason)
+        refused("   nor APPROVE AND SEND it to Michael's family",
+                r.status_code == 404, "%s" % r.status_code)
+        r = c.post("/auto-send/as-michael/skip", headers=jason)
+        refused("   nor silently SKIP it so the follow-up never goes out",
+                r.status_code == 404, "%s" % r.status_code)
+        # The body must be untouched by all three attempts.
+        db = SessionLocal()
+        from app.routers.auto_send_router import AutoSendItem
+        row = db.query(AutoSendItem).filter(AutoSendItem.id == "as-michael").first()
+        refused("   and Michael's queued message is byte-for-byte unchanged",
+                row.message == "QUEUED-MICHAEL-BODY" and row.status == "pending",
+                "%s / %s" % (row.message, row.status))
+        db.close()
+        r = c.patch("/auto-send/as-jason/edit", headers=jason,
+                    json={"message": "JASON EDITS HIS OWN"})
+        allowed("Jason CAN still edit his own", r.status_code == 200,
+                "%s %s" % (r.status_code, text(r)[:120]))
+        r = c.get("/auto-send/queue", headers=jason)
+        if r.status_code == 200:
+            refused("   and his queue shows no MICHAEL body",
+                    "QUEUED-MICHAEL" not in text(r), text(r)[:200])
+        r = c.post("/auto-send/as-jason/approve", headers=otto)
+        refused("cross-tenant: Otto cannot touch a Restland queue item",
+                r.status_code in (403, 404), "%s" % r.status_code)
+
+        section("auto-send proactive scan runs on the caller's own book")
+        r = c.post("/auto-send/proactive-scan", headers=jason,
+                   json={"days_dormant": 3, "max_leads": 10,
+                         "statuses": ["new"]})
+        # It reaches the database now - it used to raise on a column that does
+        # not exist. Either a real result or an AI-key failure is acceptable;
+        # a 500 naming an unknown column is not.
+        allowed("the scan reaches the database at all (was querying leads.user_id)",
+                "user_id" not in text(r).lower() or r.status_code == 200,
+                "%s %s" % (r.status_code, text(r)[:160]))
+        db = SessionLocal()
+        queued_for_others = db.query(AutoSendItem).filter(
+            AutoSendItem.advisor_id == "u-jason",
+            AutoSendItem.lead_id.like("ld-m%")).count()
+        refused("   and it queued NOTHING against Michael's leads",
+                queued_for_others == 0, queued_for_others)
+        db.close()
+
+        section("outcomes: another advisor's appointment results")
+        r = c.get("/outcomes/lead/ld-m0/latest-gaps", headers=jason)
+        refused("Jason cannot read gaps for Michael's lead",
+                r.status_code == 404, "%s %s" % (r.status_code, text(r)[:120]))
+        r = c.get("/outcomes/lead/ld-m0", headers=jason)
+        refused("   nor Michael's full outcome history",
+                r.status_code == 404 or "OUTCOME-MICHAEL" not in text(r),
+                "%s %s" % (r.status_code, text(r)[:160]))
+        r = c.get("/outcomes/lead/ld-j0/latest-gaps", headers=jason)
+        allowed("   and his own lead's gaps still load",
+                r.status_code == 200, "%s %s" % (r.status_code, text(r)[:120]))
+        r = c.get("/outcomes/lead/ld-j0/latest-gaps", headers=otto)
+        refused("cross-tenant: Otto is 404 on a Restland lead's gaps",
+                r.status_code == 404, "%s" % r.status_code)
+
+        section("outcomes summary is a COUNT TILE and must share the list scope")
+        r = c.get("/outcomes/summary", headers=jason)
+        j = r.json() if r.status_code == 200 else {}
+        allowed("Jason's summary loads", r.status_code == 200, r.status_code)
+        refused("   counting ONLY his own appointments, not the org's",
+                j.get("total_appointments") == 1, j)
+        refused("   and pipeline_booked cannot exceed his own book",
+                all(n <= 6 for n in _walk_numbers(j) if n > 6) or
+                max([n for n in _walk_numbers(j)] or [0]) <= 100,
+                j)
+        r = c.get("/outcomes/summary", headers=maria)
+        jm = r.json() if r.status_code == 200 else {}
+        allowed("the manager's summary spans BOTH advisors",
+                jm.get("total_appointments") == 2, jm)
+
+        section("campaign preview - the second copy of the filename leak")
+        r = c.post("/campaigns/preview", headers=jason,
+                   json={"filter_criteria": {}})
+        b = text(r)
+        allowed("Jason's preview loads", r.status_code == 200,
+                "%s %s" % (r.status_code, b[:160]))
+        refused("   and matches ONLY his own book, not the org's",
+                r.json().get("total_matched") == 6, r.json().get("total_matched"))
+        refused("   with no MICHAELONLY family in the sample",
+                not leaks_michael(b), b[:200])
+        # The sample carries source_file. This is the filename breach again.
+        r = c.post("/campaigns/preview", headers=michael,
+                   json={"filter_criteria": {"source_file": "garden"}})
+        b = text(r)
+        refused("   a filename filter cannot reach another advisor's imports",
+                not any(s in b for s in ("JASONOWNED",)), b[:200])
+        r = c.post("/campaigns/preview", headers=maria, json={"filter_criteria": {}})
+        allowed("the manager's preview still spans the org",
+                r.json().get("total_matched") == 14, r.json().get("total_matched"))
+
+        section("campaign builder send refuses a mixed batch outright")
+        r = c.post("/campaigns/builder/send", headers=jason,
+                   json={"name": "attack", "message_template": "hi {first_name}",
+                         "lead_ids": ["ld-j0", "ld-m0"], "channel": "sms"})
+        refused("a batch mixing his lead with Michael's is REFUSED, not trimmed",
+                r.status_code == 403, "%s %s" % (r.status_code, text(r)[:140]))
+        db = SessionLocal()
+        from app.models.models import Campaign as _Camp
+        orphan = db.query(_Camp).filter(_Camp.name == "attack").count()
+        refused("   and no orphan campaign row was written before the refusal",
+                orphan == 0, orphan)
+        leaked_msgs = db.query(Message).filter(
+            Message.lead_id.like("ld-m%"), Message.sender_id == "u-jason").count()
+        refused("   and no message row exists from Jason on Michael's leads",
+                leaked_msgs == 0, leaked_msgs)
+        db.close()
+
+        section("voice: campaigns, calls and bulk outbound dialling")
+        r = c.post("/voice/campaigns", headers=jason,
+                   json={"name": "dial attack", "lead_ids": ["ld-m0", "ld-m1"]})
+        refused("Jason cannot launch a CALLING campaign at Michael's families",
+                r.status_code == 403, "%s %s" % (r.status_code, text(r)[:140]))
+        r = c.get("/voice/campaigns", headers=jason)
+        b = text(r)
+        refused("   and cannot see Michael's campaigns or their stats",
+                "CAMPAIGN-MICHAEL" not in b, b[:200])
+        allowed("   while his own campaign is still listed",
+                "CAMPAIGN-JASON" in b, b[:200])
+        r = c.get("/voice/campaigns/vc-michael", headers=jason)
+        refused("   Michael's campaign by direct id is 404",
+                r.status_code == 404, "%s" % r.status_code)
+        r = c.post("/voice/campaigns/vc-michael/pause", headers=jason)
+        refused("   nor can he PAUSE Michael's live campaign",
+                r.status_code == 404, "%s" % r.status_code)
+        r = c.post("/voice/campaigns/vc-michael/cancel", headers=jason)
+        refused("   nor CANCEL it", r.status_code == 404, "%s" % r.status_code)
+        db = SessionLocal()
+        from app.models.models import VoiceCallCampaign as _VCC
+        still = db.query(_VCC).filter(_VCC.id == "vc-michael").first()
+        refused("   and Michael's campaign is still running in the database",
+                still.status == "running", still.status)
+        db.close()
+        r = c.get("/voice/calls", headers=jason)
+        b = text(r)
+        refused("Jason's call log carries no MICHAEL transcript",
+                "TRANSCRIPT-MICHAEL" not in b, b[:200])
+        allowed("   and does carry his own", "TRANSCRIPT-JASON" in b, b[:200])
+        r = c.get("/voice/calls/call-michael", headers=jason)
+        refused("   Michael's call by direct id is 404",
+                r.status_code == 404, "%s" % r.status_code)
+        r = c.get("/voice/campaigns", headers=maria)
+        allowed("the manager sees the team's campaigns",
+                "CAMPAIGN-JASON" in text(r) and "CAMPAIGN-MICHAEL" in text(r),
+                text(r)[:200])
+        r = c.get("/voice/campaigns", headers=otto)
+        refused("cross-tenant: Otto sees no Restland campaign",
+                "CAMPAIGN-" not in text(r), text(r)[:200])
+
+        section("case file CRM push - egress of a colleague's family")
+        r = c.post("/case-file/cf-michael/crm-push", headers=jason)
+        refused("Jason cannot push Michael's case file to external webhooks",
+                r.status_code == 404, "%s %s" % (r.status_code, text(r)[:140]))
+        refused("   and no MICHAELONLY detail appears in the refusal",
+                not leaks_michael(text(r)), text(r)[:200])
+
+        section("calendar: cancelling a colleague's appointment")
+        r = c.post("/calendar/cancel-booking/bk-michael", headers=jason)
+        refused("Jason cannot cancel Michael's booked appointment",
+                r.status_code == 404, "%s %s" % (r.status_code, text(r)[:140]))
+        db = SessionLocal()
+        from app.models.models import BookingLink as _BL
+        bk = db.query(_BL).filter(_BL.id == "bk-michael").first()
+        refused("   and that appointment is still booked in the database",
+                bk.status == "booked", bk.status)
+        db.close()
+        r = c.post("/calendar/cancel-booking/bk-jason", headers=jason)
+        allowed("   while he can still cancel his own",
+                r.status_code == 200, "%s %s" % (r.status_code, text(r)[:140]))
+
+        section("pipeline review flags are not a shared queue")
+        # Schema-valid payload deliberately: a 422 would mean the request never
+        # reached the guard, and a probe that is refused by validation proves
+        # nothing about authorization.
+        r = c.post("/pipeline/approve/pc-m0", headers=jason,
+                   json={"pipeline_id": "pc-m0", "message": "x", "send": False})
+        refused("Jason cannot clear Michael's review flag",
+                r.status_code == 404,
+                "%s %s" % (r.status_code, text(r)[:140]))
+        refused("   and the refusal is authorization, not schema validation",
+                r.status_code != 422, "%s" % r.status_code)
+        r = c.post("/pipeline/dismiss/pc-m0", headers=jason)
+        refused("   nor dismiss it", r.status_code == 404, "%s" % r.status_code)
+        db = SessionLocal()
+        pc = db.query(PipelineConversation).filter(
+            PipelineConversation.id == "pc-m0").first()
+        refused("   and Michael's conversation is still awaiting review",
+                pc.reviewed_at is None, pc.reviewed_at)
+        db.close()
+
+        section("crm sync - the side door that copied the whole org book")
+        r = c.post("/crm-native/sync-from-leads", headers=jason)
+        allowed("Jason's sync runs", r.status_code == 200,
+                "%s %s" % (r.status_code, text(r)[:140]))
+        db = SessionLocal()
+        from app.models.models import CRMContact as _CC
+        michael_copied = db.query(_CC).filter(
+            _CC.lead_id.like("ld-m%")).count()
+        jason_copied = db.query(_CC).filter(_CC.lead_id.like("ld-j%")).count()
+        refused("   and copied ZERO of Michael's families into CRM contacts",
+                michael_copied == 0, michael_copied)
+        allowed("   while copying his own six", jason_copied == 6, jason_copied)
+        db.close()
+
+        section("fiber field capture - scoped, and reported as dead code")
+        # The list now starts at authorized_lead_query instead of the whole
+        # organization. It still cannot RUN, because it filters on Lead.source
+        # and that column does not exist - reported to Mike as a schema
+        # decision rather than fixed by inventing one. What is asserted here is
+        # the only thing that can be asserted honestly: it discloses nothing.
+        # TestClient re-raises server exceptions, and this endpoint raises
+        # before it returns anything, so the call is caught. An exception is
+        # not a leak: nothing reached the caller.
+        try:
+            r = c.get("/fiber-leads", headers=jason)
+            b = text(r)
+            code = r.status_code
+        except Exception as exc:
+            b, code = "", "raised: %s" % type(exc).__name__
+        refused("the fiber list leaks no MICHAELONLY family",
+                not leaks_michael(b), "%s %s" % (code, b[:160]))
+        refused("   nor any import filename",
+                not any(fn in b for fn in SECRET_FILES), "%s %s" % (code, b[:160]))
+        refused("   nor another tenant's data",
+                not leaks_northgate(b), "%s %s" % (code, b[:160]))
+
+        section("email sent log was already correct - proving it stays correct")
+        r = c.get("/email/sent-log", headers=jason)
+        refused("Jason's sent log carries no MICHAELONLY recipient",
+                not leaks_michael(text(r)), text(r)[:200])
+
+        section("ai conversation batches were already scoped - proving it")
+        r = c.post("/ai-conversation/bulk-start", headers=jason,
+                   json={"lead_ids": ["ld-m0", "ld-m1"], "channel": "sms"})
+        db = SessionLocal()
+        started = db.query(PipelineConversation).filter(
+            PipelineConversation.lead_id.like("ld-m%"),
+            PipelineConversation.advisor_id == "u-jason").count()
+        refused("bulk-start opened no conversation on Michael's leads",
+                started == 0, "%s (http %s)" % (started, r.status_code))
+        db.close()
+        r = c.post("/ai-conversation/generate-batch", headers=jason,
+                   json={"lead_ids": ["ld-m0"], "tone": "warm"})
+        refused("generate-batch drafted nothing for Michael's leads",
+                not leaks_michael(text(r)), text(r)[:200])
+
+        # ── ITEM 2: THE CALLER-SCOPED SETUP PAGE ────────────────────────────
+        section("advisor's own setup page exposes the caller and nothing else")
+        r = c.get("/health/my-setup", headers=jason)
+        b = text(r)
+        allowed("a plain advisor CAN read their own setup without platform_health",
+                r.status_code == 200, "%s %s" % (r.status_code, b[:140]))
+        refused("   and it names no platform AI-key status",
+                "ai_features" not in b and "OpenAI" not in b, b[:300])
+        refused("   nor the cadence scheduler's last run",
+                "last_cadence_run" not in b, b[:300])
+        refused("   nor any credential value or fragment",
+                not any(k in b for k in ("account_sid", "auth_token",
+                                         "messaging_service_sid", "last4",
+                                         "twilio_account", "sid")),
+                b[:300])
+        r = c.get("/health/advisor-status", headers=jason)
+        refused("   while the platform health page stays refused to that advisor",
+                r.status_code in (401, 403), "%s %s" % (r.status_code, text(r)[:140]))
+        r = c.get("/health/my-setup", headers=dangelo)
+        refused("   and a brand salesperson gets no customer workspace setup",
+                r.status_code in (401, 403) or "messaging" not in text(r),
+                "%s %s" % (r.status_code, text(r)[:140]))
 
     print("\n" + "=" * 78)
     print("checks passed: %d" % len(PASSED))

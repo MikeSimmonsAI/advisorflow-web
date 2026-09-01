@@ -27,6 +27,7 @@ from app.deps import get_db, get_current_user, require_tenant_user, load_org_in_
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Organization, CRMContact, CRMNote, Lead
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 router = APIRouter(prefix="/crm-native", tags=["crm-native"])
 
@@ -562,12 +563,16 @@ def sync_leads_to_crm(
     stages = _get_org_stages(org) if org else GENERIC_STAGES
     default_stage = stages[0]["key"] if stages else "new_lead"
 
+    # THE SIDE DOOR. This read every lead in the organization and copied each
+    # one into crm_contacts - name, phone, email - which an advisor could then
+    # read back through the CRM screens. Nothing here was labelled a lead
+    # endpoint, so it survived a lead-by-lead audit while quietly materialising
+    # the whole book for whoever pressed Sync. Starting from the authorized
+    # query means an advisor syncs their own families and a manager syncs the
+    # team's, which is what the button was always meant to do.
     leads = (
-        db.query(Lead)
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            Lead.is_duplicate == False,
-        )
+        lead_scope.authorized_lead_query(db, current_user)
+        .filter(Lead.is_duplicate == False)
         .all()
     )
 

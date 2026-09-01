@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.services.platform_owner import require_tenant_context
 from app.models.models import Lead, gen_uuid
+from app.services import lead_scope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/fiber-leads", tags=["fiber-leads"])
@@ -127,13 +128,13 @@ def list_fiber_leads(
     db: Session = Depends(get_db),
     current_user=Depends(require_tenant_user),
 ):
-    """Return recent fiber_field leads for this org (last 100)."""
+    """Return recent fiber_field leads the caller is entitled to (last 100)."""
+    # Was the whole organization's door-knock capture list - names, phones,
+    # emails and SERVICE ADDRESSES - to any advisor. A rep sees the doors they
+    # knocked; a manager sees the team's.
     leads = (
-        db.query(Lead)
-        .filter(
-            Lead.organization_id == current_user.organization_id,
-            Lead.source == "fiber_field",
-        )
+        lead_scope.authorized_lead_query(db, current_user)
+        .filter(Lead.source == "fiber_field")
         .order_by(Lead.created_at.desc())
         .limit(100)
         .all()

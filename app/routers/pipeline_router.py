@@ -15,6 +15,7 @@ from app.services.pipeline_service import (
 )
 from app.routers.audit_log_router import log_action
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 
 def _get_org_ids(db: Session, current_user: User) -> list:
@@ -171,9 +172,16 @@ def approve_flagged(
     current_user: User = Depends(require_tenant_user),
 ):
     """Approve and optionally send the suggested response for a flagged conversation."""
-    pipeline = db.query(PipelineConversation).filter(
-        PipelineConversation.id == pipeline_id,
-        PipelineConversation.organization_id == current_user.organization_id,
+    # OWN CONVERSATION ONLY. /pipeline/flagged and /pipeline/conversations both
+    # scope the READ to the advisor; these two WRITES did not, so an advisor
+    # could clear a colleague's review flag - marking handled a conversation
+    # nobody had handled, on a queue that exists specifically for human review.
+    pipeline = lead_scope.own_records_only(
+        db.query(PipelineConversation).filter(
+            PipelineConversation.id == pipeline_id,
+            PipelineConversation.organization_id == current_user.organization_id,
+        ),
+        PipelineConversation.advisor_id, current_user,
     ).first()
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
@@ -210,9 +218,13 @@ def dismiss_flagged(
     current_user: User = Depends(require_tenant_user),
 ):
     """Dismiss a flagged conversation without sending — advisor will handle manually."""
-    pipeline = db.query(PipelineConversation).filter(
-        PipelineConversation.id == pipeline_id,
-        PipelineConversation.organization_id == current_user.organization_id,
+    # Own conversation only - same reason as approve above.
+    pipeline = lead_scope.own_records_only(
+        db.query(PipelineConversation).filter(
+            PipelineConversation.id == pipeline_id,
+            PipelineConversation.organization_id == current_user.organization_id,
+        ),
+        PipelineConversation.advisor_id, current_user,
     ).first()
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")

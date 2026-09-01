@@ -95,6 +95,27 @@ def active_workspace_org_id(user: User) -> Optional[str]:
     return getattr(user, "organization_id", None)
 
 
+def own_records_only(query, owner_column, user: User):
+    """Narrow an ALREADY organization-scoped query on a child table to the caller.
+
+    Lead scope answers "which families may this person see". It does not answer
+    "which queued messages, voice campaigns, bookings or review flags are this
+    person's", because those tables hang off the advisor rather than off the
+    lead. Every one of them was filtered on organization_id alone, which is how
+    an advisor could approve another advisor's queued message, cancel another
+    advisor's appointment or pause another advisor's calling campaign.
+
+    Managers and god pass through unchanged - seeing the team's queue is the
+    job. A plain advisor is confined to rows they own. Pass the model's own
+    owner column, because these tables do not agree on a name: AutoSendItem and
+    VoiceCallCampaign say advisor_id, PipelineConversation says advisor_id,
+    EmailMessage says sender_id.
+    """
+    if is_owner_scoped(user):
+        return query.filter(owner_column == user.id)
+    return query
+
+
 def log_denial(user: Optional[User], reason: str,
                resource_id: Optional[str] = None,
                request: Optional[Request] = None,

@@ -30,6 +30,7 @@ import uuid, json, logging
 
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead
+from app.services import lead_scope
 
 router = APIRouter(prefix="/case-file", tags=["case-file"])
 logger = logging.getLogger(__name__)
@@ -473,8 +474,12 @@ async def crm_push(
     """
     cf = _get_case_file(db, case_file_id, current_user.organization_id)
 
-    # Enrich with lead info
-    lead = db.query(Lead).filter(Lead.id == cf["lead_id"]).first()
+    # THE LEAD DECIDES, NOT THE ORGANIZATION. This pushed a colleague's family -
+    # name, phone, email, tier - out to the organization's configured external
+    # CRM webhooks, which is an egress of data the caller was never entitled to
+    # read. load_lead_in_scope refuses with 404 before anything leaves the
+    # building, and the case file's own org check above still stands.
+    lead = lead_scope.load_lead_in_scope(db, current_user, cf["lead_id"])
     payload = {
         **cf,
         "lead_first_name": lead.first_name if lead else None,

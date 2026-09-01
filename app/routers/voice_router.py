@@ -468,9 +468,14 @@ def list_calls(
         VoiceCall.advisor_id == current_user.id,
     ).order_by(VoiceCall.created_at.desc()).limit(100).all()
 
+    # The call rows are already the caller's own. The lead behind one can have
+    # been reassigned since, so the NAME is resolved through the authorized
+    # query rather than fetched directly - a reassigned family shows as Unknown
+    # instead of leaking a name the caller is no longer entitled to.
     result = []
     for call in calls:
-        lead = db.query(Lead).filter(Lead.id == call.lead_id).first()
+        lead = lead_scope.authorized_lead_query(db, current_user).filter(
+            Lead.id == call.lead_id).first()
         result.append({
             "id": call.id,
             "lead_id": call.lead_id,
@@ -502,7 +507,8 @@ def get_call(
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
 
-    lead = db.query(Lead).filter(Lead.id == call.lead_id).first()
+    lead = lead_scope.authorized_lead_query(db, current_user).filter(
+        Lead.id == call.lead_id).first()
     return {
         "id": call.id,
         "lead_id": call.lead_id,
@@ -617,6 +623,7 @@ from app.models.models import VoiceCallCampaign
 import json as _json
 import threading
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 
 class CreateCampaignRequest(BaseModel):
@@ -642,11 +649,15 @@ def create_campaign(
     if not req.lead_ids:
         raise HTTPException(status_code=400, detail="No leads selected")
 
-    # Validate leads belong to this org
+    # Validate leads belong to this CALLER, not merely to this organization.
+    # Organization scope here meant an advisor could launch a bulk outbound
+    # CALLING campaign against a colleague's families. Refused as a whole batch
+    # rather than filtered down, because a campaign that quietly shrank from 400
+    # numbers to 6 would look like a compliance filter, not a refusal.
     from app.models.models import Lead as LeadModel
-    valid_leads = db.query(LeadModel).filter(
+    lead_scope.assert_leads_in_scope(db, current_user, req.lead_ids)
+    valid_leads = lead_scope.authorized_lead_query(db, current_user).filter(
         LeadModel.id.in_(req.lead_ids),
-        LeadModel.organization_id == current_user.organization_id,
         LeadModel.status != "dnc",
         LeadModel.phone != None,
     ).all()
@@ -862,9 +873,14 @@ def list_campaigns(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all voice campaigns for current advisor's org."""
-    campaigns = db.query(VoiceCallCampaign).filter(
-        VoiceCallCampaign.organization_id == current_user.organization_id,
+    """List voice campaigns. An advisor sees their own; a manager sees the team's."""
+    # Was organization-wide, so every advisor could read every other advisor's
+    # campaigns and their per-campaign answer, voicemail and booking counts.
+    campaigns = lead_scope.own_records_only(
+        db.query(VoiceCallCampaign).filter(
+            VoiceCallCampaign.organization_id == current_user.organization_id,
+        ),
+        VoiceCallCampaign.advisor_id, current_user,
     ).order_by(VoiceCallCampaign.created_at.desc()).limit(50).all()
 
     return [{
@@ -893,9 +909,12 @@ def get_campaign(
     current_user: User = Depends(get_current_user),
 ):
     """Get campaign details with real-time progress."""
-    c = db.query(VoiceCallCampaign).filter(
-        VoiceCallCampaign.id == campaign_id,
-        VoiceCallCampaign.organization_id == current_user.organization_id,
+    c = lead_scope.own_records_only(
+        db.query(VoiceCallCampaign).filter(
+            VoiceCallCampaign.id == campaign_id,
+            VoiceCallCampaign.organization_id == current_user.organization_id,
+        ),
+        VoiceCallCampaign.advisor_id, current_user,
     ).first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -930,9 +949,14 @@ def pause_campaign(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = db.query(VoiceCallCampaign).filter(
-        VoiceCallCampaign.id == campaign_id,
-        VoiceCallCampaign.organization_id == current_user.organization_id,
+    # Own campaign only. Organization scope let an advisor pause a colleague's
+    # live calling campaign.
+    c = lead_scope.own_records_only(
+        db.query(VoiceCallCampaign).filter(
+            VoiceCallCampaign.id == campaign_id,
+            VoiceCallCampaign.organization_id == current_user.organization_id,
+        ),
+        VoiceCallCampaign.advisor_id, current_user,
     ).first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -947,9 +971,13 @@ def cancel_campaign(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = db.query(VoiceCallCampaign).filter(
-        VoiceCallCampaign.id == campaign_id,
-        VoiceCallCampaign.organization_id == current_user.organization_id,
+    # Own campaign only - same reason as pause.
+    c = lead_scope.own_records_only(
+        db.query(VoiceCallCampaign).filter(
+            VoiceCallCampaign.id == campaign_id,
+            VoiceCallCampaign.organization_id == current_user.organization_id,
+        ),
+        VoiceCallCampaign.advisor_id, current_user,
     ).first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
