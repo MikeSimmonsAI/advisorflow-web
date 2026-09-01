@@ -48,6 +48,7 @@ Game; both are true, neither implies the other.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request, status
@@ -444,8 +445,82 @@ def workspace_role_for_user_row(user: User) -> str:
     return DEFAULT_WORKSPACE_ROLE
 
 
+# The completion marker. Once this key exists, the legacy column is finished as
+# a source of memberships and every backfill call returns without reading it.
+BACKFILL_COMPLETE_KEY = "workspace_backfill_completed_at"
+
+
+def _config_get(db: Session, key: str) -> Optional[str]:
+    """Read a system_config value. Absent table or row both mean None."""
+    from sqlalchemy import text as _text
+    try:
+        row = db.execute(_text("SELECT value FROM system_config WHERE key = :k"),
+                         {"k": key}).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _config_set(db: Session, key: str, value: str) -> None:
+    from sqlalchemy import text as _text
+    try:
+        db.execute(_text("DELETE FROM system_config WHERE key = :k"), {"k": key})
+        db.execute(_text("INSERT INTO system_config (key, value) VALUES (:k, :v)"),
+                   {"k": key, "v": value})
+        db.commit()
+    except Exception:
+        _log.warning("could not record %s in system_config", key, exc_info=True)
+
+
+def backfill_is_complete(db: Session) -> Optional[str]:
+    """When the legacy column stopped being able to mint anything, or None."""
+    return _config_get(db, BACKFILL_COMPLETE_KEY)
+
+
+def is_valid_customer_workspace(db: Session, org_id: Optional[str]) -> bool:
+    """Is this id a REAL customer workspace - not a dangling id, not the platform?
+
+    `users.organization_id` is a nullable string column that has been written
+    by a decade of different code paths. Before it is allowed to mint anything
+    it has to be shown to point at an organization that actually exists and is
+    actually a customer:
+
+      - a NULL or empty value is not a workspace
+      - an id with no Organization row is STALE. The org was deleted, or the
+        value was never valid. Minting from it would create a membership
+        pointing at nothing, which shows up in a switcher as a menu entry that
+        404s and, worse, is a live grant to an id somebody could later reuse.
+      - the platform's own pseudo-organization is not a customer. Recognised
+        three ways, because `is_platform_pseudo_org` matches on the id and its
+        own module says the plan is "how you recognise it if the id was ever
+        changed": by id, by slug, and by plan.
+
+    A SUSPENDED customer org DOES pass. It is a real workspace that is
+    currently closed, and closed is `authorized_contexts`'s job - it already
+    filters `is_active is False` out of the switcher. Refusing to write the
+    membership here instead would mean a customer coming back from suspension
+    has staff with no memberships and no obvious reason why. One concept, one
+    place: membership says MAY ENTER, org.is_active says IS OPEN.
+    """
+    from app.services.platform_owner import (
+        GOD_PLATFORM_ORG_ID, GOD_PLATFORM_ORG_SLUG, GOD_PLATFORM_ORG_PLAN,
+        is_platform_pseudo_org,
+    )
+    if not org_id:
+        return False
+    if is_platform_pseudo_org(org_id) or str(org_id) == GOD_PLATFORM_ORG_ID:
+        return False
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org is None:
+        return False
+    if org.slug == GOD_PLATFORM_ORG_SLUG or org.plan == GOD_PLATFORM_ORG_PLAN:
+        return False
+    return True
+
+
 def backfill_from_legacy_column(db: Session, user: Optional[User] = None,
-                                commit: bool = True) -> int:
+                                commit: bool = True,
+                                force: bool = False) -> Dict[str, Any]:
     """Materialise `users.organization_id` into real customer_org memberships.
 
     THIS IS A MIGRATION, NOT A FALLBACK. It writes exactly what the column
@@ -453,15 +528,63 @@ def backfill_from_legacy_column(db: Session, user: Optional[User] = None,
     they could not already reach this morning. After it runs, membership is the
     authority and the column is only the thing that seeded it.
 
-    It runs in two places, both idempotent:
-      - startup, for everybody, so the switcher is right on the first load
-      - login, for the one person signing in, so a user created between
-        deploys is never stranded waiting for a restart
+    THE SEVEN RULES IT IS HELD TO, AND HOW EACH IS ENFORCED:
 
-    Skipped deliberately: god_admin (the owner reaches customers through
-    X-Org-Override, not through membership) and the platform pseudo-org (not a
-    customer, never a place to stand).
+    1. ONLY A VALID CUSTOMER WORKSPACE. `is_valid_customer_workspace` above.
+       A stale id with no Organization row, or the platform pseudo-org by id,
+       slug or plan, mints NOTHING and is counted in the report as refused.
+
+    2. NEVER INFERRED FROM A PLATFORM OR BRAND-SALES RELATIONSHIP. The only
+       input is `users.organization_id`. This function does not read
+       Membership rows of any other scope, does not read BrandSalesOrg, does
+       not read Platform, and does not consult `users.role` for anything except
+       excluding god_admin and choosing the WORKSPACE role for a person the
+       column already places inside a customer. A brand-sales identity has a
+       NULL column and is never a candidate.
+
+    3. NEVER OVERWRITES OR TRANSFERS `users.organization_id`. Nothing here
+       assigns to a User at all. Read-only on that table, by construction.
+
+    4. NEVER DUPLICATES. Existence is checked on (user, scope_type, scope_id)
+       and a match short-circuits, so re-running produces nothing.
+
+    5. NEVER RESURRECTS A REVOKED MEMBERSHIP. This is the subtle one, and it is
+       deliberate rather than incidental: the existence check does NOT filter on
+       `is_active`. A revoked row therefore COUNTS as existing, and the user is
+       skipped - somebody whose access was deliberately taken away does not get
+       it back because a legacy column still remembers where they used to work.
+       Do not "fix" this query by adding `is_active.is_(True)`: that would turn
+       every revocation into a temporary one, undone on the next restart.
+       Reinstating access is `grant_workspace_membership`, called by a person.
+
+    6. IDEMPOTENT. Rules 4 and 5 together mean a second run is a no-op, and the
+       gate asserts the row count is unchanged after a repeat.
+
+    7. IT STOPS BEING ABLE TO MINT. Once a full pass finds nothing left to
+       create, a completion timestamp is written to `system_config` and every
+       later call returns immediately without looking at the column at all.
+       That is what "the column must not remain the long-term authority" means
+       operationally: not a promise in a comment, a switch that flips itself.
+       `force=True` is the deliberate override for an operator who needs to
+       re-run it, and it is never set by the startup or login callers.
+
+    Returns a REPORT rather than a bare count, so what it did is auditable:
+    every created membership is listed, and every refusal is counted by reason.
     """
+    report: Dict[str, Any] = {
+        "ran": False, "complete_at": None, "created": 0, "created_rows": [],
+        "skipped_existing": 0, "skipped_revoked": 0,
+        "refused_stale_org": 0, "refused_platform_org": 0,
+        "candidates": 0,
+    }
+
+    already = _config_get(db, BACKFILL_COMPLETE_KEY)
+    if already and not force:
+        # The column can no longer mint anything. Say so and touch nothing.
+        report["complete_at"] = already
+        return report
+    report["ran"] = True
+
     q = db.query(User).filter(
         User.organization_id.isnot(None),
         User.is_active.is_(True),
@@ -470,13 +593,26 @@ def backfill_from_legacy_column(db: Session, user: Optional[User] = None,
     if user is not None:
         q = q.filter(User.id == user.id)
 
-    made = 0
-    for u in q.all():
+    candidates = q.all()
+    report["candidates"] = len(candidates)
+
+    for u in candidates:
         org_id = u.organization_id
-        if not org_id or org_id == "org-god-platform":
+        if not is_valid_customer_workspace(db, org_id):
+            from app.services.platform_owner import is_platform_pseudo_org
+            if is_platform_pseudo_org(org_id):
+                report["refused_platform_org"] += 1
+            else:
+                report["refused_stale_org"] += 1
+                _log.warning(
+                    "workspace backfill REFUSED user=%s: organization_id=%s is not "
+                    "a valid customer workspace", u.id, org_id)
             continue
-        exists = (
-            db.query(Membership.id)
+
+        # NO is_active FILTER HERE. See rule 5 above - a revoked membership
+        # counts as existing precisely so that it is not resurrected.
+        existing = (
+            db.query(Membership)
             .filter(
                 Membership.user_id == u.id,
                 Membership.scope_type == SCOPE_CUSTOMER_ORG,
@@ -484,18 +620,51 @@ def backfill_from_legacy_column(db: Session, user: Optional[User] = None,
             )
             .first()
         )
-        if exists:
+        if existing is not None:
+            if existing.is_active:
+                report["skipped_existing"] += 1
+            else:
+                report["skipped_revoked"] += 1
+                _log.info(
+                    "workspace backfill left a REVOKED membership revoked: "
+                    "user=%s org=%s", u.id, org_id)
             continue
+
+        role = workspace_role_for_user_row(u)
         db.add(Membership(
             user_id=u.id,
             scope_type=SCOPE_CUSTOMER_ORG,
             scope_id=org_id,
-            role=workspace_role_for_user_row(u),
+            role=role,
             is_active=True,
         ))
-        made += 1
+        report["created"] += 1
+        report["created_rows"].append(
+            {"user_id": u.id, "email": u.email, "organization_id": org_id,
+             "role": role})
+        _log.info("workspace backfill CREATED membership user=%s org=%s role=%s",
+                  u.id, org_id, role)
 
-    if made and commit:
+    if commit and report["created"]:
         db.commit()
-        _log.info("workspace backfill: created %d customer_org membership(s)", made)
-    return made
+
+    _log.info(
+        "workspace backfill: candidates=%d created=%d existing=%d revoked-left=%d "
+        "refused-stale=%d refused-platform=%d",
+        report["candidates"], report["created"], report["skipped_existing"],
+        report["skipped_revoked"], report["refused_stale_org"],
+        report["refused_platform_org"])
+
+    # THE SWITCH FLIPS ITSELF. Only a FULL pass may declare completion - a
+    # per-user call at login has seen one row and knows nothing about the rest
+    # of the estate. When a full pass creates nothing, every legacy column that
+    # could ever have produced a membership already has, and the column is done
+    # being a source.
+    if user is None and report["created"] == 0 and not already:
+        stamp = datetime.utcnow().isoformat()
+        _config_set(db, BACKFILL_COMPLETE_KEY, stamp)
+        report["complete_at"] = stamp
+        _log.info("workspace backfill COMPLETE at %s - the legacy column can no "
+                  "longer create a membership", stamp)
+
+    return report

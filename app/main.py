@@ -706,24 +706,14 @@ async def on_startup():
     #     reaches anything they could not reach before it ran. Idempotent, so it
     #     is a no-op on every restart after the first, and it runs again per
     #     person at login so a user created between deploys is never stranded.
-    try:
-        from app.deps import SessionLocal as _SL
-        from app.services import workspace_access as _wa
-        _db = _SL()
-        try:
-            _made = _wa.backfill_from_legacy_column(_db)
-            if _made:
-                import logging as _logging
-                _logging.getLogger(__name__).info(
-                    "workspace backfill: created %d customer_org membership(s)", _made)
-        finally:
-            _db.close()
-    except Exception as e:
-        import logging as _logging
-        _logging.getLogger(__name__).warning("workspace membership backfill note: %s", e)
-
     # 2b. System config table — stores god_admin-controlled global settings
     #     (role permission overrides, feature flags, etc.)
+    #
+    #     CREATED BEFORE THE BACKFILL BELOW, DELIBERATELY. The backfill records
+    #     its own completion here, and it fails soft on a missing table - so
+    #     with the old ordering the marker silently never persisted and the
+    #     legacy column would have stayed a live source forever while the code
+    #     claimed otherwise.
     try:
         with engine.connect() as conn:
             conn.execute(_text("""
@@ -736,6 +726,36 @@ async def on_startup():
     except Exception as e:
         import logging as _logging
         _logging.getLogger(__name__).warning("system_config table migration note: %s", e)
+
+    try:
+        from app.deps import SessionLocal as _SL
+        from app.services import workspace_access as _wa
+        _db = _SL()
+        try:
+            _rep = _wa.backfill_from_legacy_column(_db)
+            import logging as _logging
+            _wl = _logging.getLogger(__name__)
+            if not _rep["ran"]:
+                _wl.info("workspace backfill already complete at %s - the legacy "
+                         "column is no longer a source", _rep["complete_at"])
+            else:
+                # Reported at startup, not just counted: an operator needs to be
+                # able to see WHICH memberships a migration created, and every
+                # id it refused as stale or non-customer.
+                _wl.info(
+                    "workspace backfill: candidates=%d created=%d existing=%d "
+                    "revoked-left=%d refused-stale=%d refused-platform=%d",
+                    _rep["candidates"], _rep["created"], _rep["skipped_existing"],
+                    _rep["skipped_revoked"], _rep["refused_stale_org"],
+                    _rep["refused_platform_org"])
+                for _row in _rep["created_rows"]:
+                    _wl.info("  backfilled membership: user=%s org=%s role=%s",
+                             _row["user_id"], _row["organization_id"], _row["role"])
+        finally:
+            _db.close()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("workspace membership backfill note: %s", e)
 
     # 3. AI-conversation columns on pipeline_conversations (IF NOT EXISTS)
     migration_sql = """

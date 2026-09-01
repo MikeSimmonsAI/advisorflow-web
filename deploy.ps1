@@ -199,6 +199,14 @@ if ($SkipSmoke) {
     # backfill, and a clean customer activation end to end.
     python scripts\probe_workspace_context.py 2>&1 | Select-String "OPEN |BROKE|checks passed|MEMBERSHIP DECIDES" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "WORKSPACE ACCESS CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 31 - THE LEGACY COLUMN CANNOT MINT WORKSPACE ACCESS. users.organization_id
+    # is the migration SOURCE for customer_org memberships, so it is held to seven
+    # rules: only a real customer workspace, never inferred from a platform or
+    # brand-sales relationship, never writes the column back, never duplicates,
+    # never resurrects a revoked membership, idempotent, and it stops being able
+    # to mint at all once the migration completes.
+    python scripts\probe_workspace_backfill.py 2>&1 | Select-String "MINT |BROKE|checks passed|CANNOT MINT" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "LEGACY BACKFILL CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

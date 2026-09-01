@@ -199,9 +199,17 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     # no workspace - so the same idempotent migration runs for them here.
     # It writes only what their own column already says: nobody gains access to
     # anything they could not reach before it ran.
+    # Once the estate-wide pass has completed, this returns immediately without
+    # reading the column at all - the migration is over and the column is no
+    # longer a source. It refuses a stale or non-customer organization_id, and
+    # it never resurrects a membership somebody deliberately revoked.
     try:
         from app.services import workspace_access
-        workspace_access.backfill_from_legacy_column(db, user=user)
+        rep = workspace_access.backfill_from_legacy_column(db, user=user)
+        for row in rep.get("created_rows", []):
+            _log.info("workspace backfill at login CREATED membership "
+                      "user=%s org=%s role=%s",
+                      row["user_id"], row["organization_id"], row["role"])
     except Exception:
         # A migration must never be the reason a valid password is refused.
         _log.warning("workspace backfill at login failed for user=%s", user.id,
