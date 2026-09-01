@@ -4,7 +4,8 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import (APIRouter, Depends, HTTPException, Query, Request,
+                     UploadFile, File, Form)
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -13,9 +14,56 @@ from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, EmailMessage
 from app.services.email_service import send_email_to_lead, send_email_batch
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
-from app.services import lead_scope
+from app.services import lead_scope, qualification
 
 router = APIRouter(prefix="/email", tags=["email"])
+
+
+# ── qualification, applied at the door ──────────────────────────────────────
+#
+# EMAIL IS THE CHANNEL THE ENGINE IS AUTHORITATIVE FOR. Every send path in this
+# router asks it before anything leaves, and the answer is enforced differently
+# for a bulk queue than for one person clicking Send on one lead they are
+# looking at:
+#
+#   BULK      READY_TO_SEND only. REVIEW_REQUIRED does not become sendable
+#             because somebody selected five thousand rows - reviewing is an
+#             act on the lead, not a checkbox on the send screen.
+#
+#   SINGLE    EXCLUDED is refused. REVIEW_REQUIRED is allowed through and the
+#             reasons come back with the response, because a human with the
+#             record open IS the review this bucket exists to ask for. What
+#             they may not do, at any scale, is mail somebody on the DNC list
+#             or an address that cannot receive mail.
+
+def _refuse(exc: qualification.NotQualified):
+    raise HTTPException(status_code=400,
+                        detail=qualification.send_refusal_detail(exc))
+
+
+def _assert_ready_bulk(db: Session, current_user: User, lead_ids, request) -> list:
+    try:
+        return qualification.assert_ready_for_send(
+            db, current_user, lead_ids,
+            channel=qualification.CHANNEL_EMAIL, request=request)
+    except qualification.NotQualified as exc:
+        _refuse(exc)
+
+
+def _assert_not_excluded(db: Session, current_user: User, lead: Lead, request) -> dict:
+    """One lead, one human, one decision. Returns the decision so the caller can
+    hand the review reasons back rather than swallowing them."""
+    org_id = lead_scope.active_workspace_org_id(current_user, db, request)
+    ctx = qualification.QualificationContext(
+        db, [lead], org_id, qualification.org_rules(db, org_id))
+    decision = qualification.qualify_one(lead, qualification.CHANNEL_EMAIL, ctx)
+    if decision["bucket"] == qualification.EXCLUDED:
+        raise HTTPException(status_code=400, detail={
+            "message": "This lead is excluded from email and was not sent.",
+            "channel": qualification.CHANNEL_EMAIL,
+            "reasons": decision["reasons"],
+        })
+    return decision
 
 
 class EmailBatchRequest(BaseModel):
@@ -32,15 +80,21 @@ class SingleEmailRequest(BaseModel):
 @router.post("/send/{lead_id}")
 def send_single_email(
     lead_id: str,
+    request: Request,
     req: SingleEmailRequest = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
+    lead = authorized_lead_query(db, current_user, request=request).filter(
+        Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.status == 'dnc':
         raise HTTPException(status_code=400, detail='Lead is on the Do Not Contact list')
+    # The DNC line above stays as the proven guard. This asks the engine the
+    # wider question - suppression, unusable address, duplicate, internal
+    # record, organization rule - and refuses on the same terms.
+    _decision = _assert_not_excluded(db, current_user, lead, request)
 
     # If custom body provided, use it directly
     if req and req.body:
@@ -127,14 +181,36 @@ def send_single_email(
 
 
 @router.post("/send-batch")
-def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
-    leads = authorized_lead_query(db, current_user).filter(
-        Lead.id.in_(req.lead_ids),
+def send_email_batch_endpoint(req: EmailBatchRequest, request: Request,
+                              db: Session = Depends(get_db),
+                              current_user: User = Depends(require_tenant_user)):
+    """THE BULK EMAIL SEND. Qualification decides who may be in it.
+
+    ONLY READY_TO_SEND LEAVES HERE. `assert_ready_for_send` starts from the
+    caller's authorized scope, refuses the whole batch if any id is outside it,
+    and then refuses again if any lead is EXCLUDED or REVIEW_REQUIRED - with
+    the per-lead reasons, so the refusal is actionable rather than a shrug.
+    All-or-nothing on purpose: a batch that mailed the qualified half and said
+    nothing about the rest reports success for work it did not do.
+    
+    Select All reaches this function with the same ids a single send would, so
+    there is no size of selection at which the rule relaxes.
+
+    The three filters below are NOT removed. They are the proven per-channel
+    guard and they stay as defence in depth while the engine is being rolled
+    out; qualification is now the authority for email, and this is the belt
+    that keeps its trousers up if the authority is ever wrong.
+    """
+    ready_ids = _assert_ready_bulk(db, current_user, req.lead_ids, request)
+
+    leads = authorized_lead_query(db, current_user, request=request).filter(
+        Lead.id.in_(ready_ids),
         Lead.contact_channel == "email_only",
         Lead.status != "dnc",
         Lead.manual_flag == None,  # never send to manually flagged leads
     ).all()
     result = send_email_batch(db, current_user, leads)
+    result["qualified"] = len(ready_ids)
     return result
 
 
@@ -188,6 +264,7 @@ class EmailWithAttachmentRequest(BaseModel):
 @router.post("/send-with-attachment/{lead_id}")
 async def send_email_with_attachment(
     lead_id: str,
+    request: Request,
     subject: str = Form(...),
     body_html: str = Form(...),
     file: UploadFile = File(None),
@@ -200,13 +277,19 @@ async def send_email_with_attachment(
     """
     from app.services.email_service import send_email_via_provider
 
-    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
+    lead = authorized_lead_query(db, current_user, request=request).filter(
+        Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.status == 'dnc':
         raise HTTPException(status_code=400, detail='Lead is on the Do Not Contact list')
     if not lead.email:
         raise HTTPException(status_code=400, detail="Lead has no email address")
+    # Same door as the other two send paths. An attachment is not a reason for
+    # a lead to be qualified differently, and this route being the one that
+    # forgot is exactly how the single-send path came to be the only one that
+    # would cheerfully mail a flagged address.
+    _assert_not_excluded(db, current_user, lead, request)
 
     attachments = []
     if file and file.filename:

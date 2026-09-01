@@ -69,7 +69,13 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 # import a deletion plan has nowhere durable to live, and the manifest exists
 # only in whatever browser tab asked for it.
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
-import app.models.demo_site_models  # noqa: F401  (imported for side effects)
+import app.models.demo_site_models
+# Organization-defined qualification rules (qualification_rules) - same Base,
+# same reason. Without this import the table is never created and every
+# organization silently has no way to say what a valuable lead is, which the
+# engine reads as "this organization has defined no rules" rather than as an
+# error - a quiet wrong answer instead of a loud one.
+import app.models.qualification_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 # The SECOND gate pair. require_feature asks whether the customer may USE a
 # service; require_capability asks whether this organization may ADMINISTER the
@@ -522,6 +528,13 @@ app.include_router(workqueue_router.router)
 # a 402 on an inbound provider callback would drop real traffic.
 app.include_router(campaign_router.router,
                    dependencies=[Depends(require_feature("campaigns"))])
+# Qualification is NOT behind a feature flag. It answers "who may we contact",
+# which every organization needs before any outreach and which a customer
+# without the campaigns add-on still needs in order to see why a lead is
+# excluded. Gating the honest answer behind a paid feature would leave the
+# unpaid customer with a silent empty list instead.
+from app.routers import qualification_router  # noqa: E402
+app.include_router(qualification_router.router)
 app.include_router(pipeline_router)
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)

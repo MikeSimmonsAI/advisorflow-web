@@ -239,6 +239,15 @@ if ($SkipSmoke) {
     # header cannot be added in one place only.
     python scripts\probe_cors_preflight.py 2>&1 | Select-String "MISSING|BROKE|checks passed|PREFLIGHT SUCCEEDS" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "CORS PREFLIGHT CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 35 - QUALIFICATION NARROWS AUTHORIZATION, NEVER WIDENS IT. The whole
+    # risk of a qualification engine is that it becomes a second way to select
+    # leads, and a second selector is a second place tenancy gets decided. This
+    # asks an advisor to qualify a colleague's lead and another tenant's lead
+    # through every entry point and requires the same refusal lead_scope gives,
+    # then proves EXCLUDED and REVIEW_REQUIRED cannot reach the email queue at
+    # any batch size - and that a qualified send still works. Six reverts.
+    python scripts\probe_qualification.py 2>&1 | Select-String "OPEN |BROKE|REVERT|checks passed|NARROWS AUTHORIZATION" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "QUALIFICATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

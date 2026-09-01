@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope,
                                      assert_leads_in_scope, reject_ownership_fields)
 from app.models.models import Campaign, Lead, Message, Reply, User
 from app.routers.audit_log_router import log_action
-from app.services import lead_scope
+from app.services import lead_scope, qualification
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -382,10 +382,22 @@ def generate_message(
 @router.post("/preview")
 def preview_campaign_leads(
     req: CampaignBuildPreview,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    """Preview which leads match the filter criteria."""
+    """Preview which leads match the filter criteria — AND which are qualified.
+
+    "Do not force the largest possible list."   - Mike
+
+    `total_matched` answers how many rows the filter selected. That number on
+    its own is what pushes an admin to send to all of them, because it is the
+    only number on the screen and it looks like an audience. The qualification
+    block underneath it answers the question that actually decides the send:
+    how many of those may be contacted on this channel, how many need a person
+    to look first, how many must not be contacted at all - and WHY, per reason,
+    so "960 excluded" becomes "310 have no email address on file".
+    """
     # THE SECOND COPY OF THE IMPORT-FILENAME BREACH. This started from
     # db.query(Lead) with organization scope only, then returned total_matched
     # for the whole organization plus a ten-lead sample carrying names, phones
@@ -399,9 +411,22 @@ def preview_campaign_leads(
     total = query.count()
     sample = query.limit(10).all()
 
+    # The channel is part of the question. A lead with no email is excluded for
+    # email and may be perfectly ready for SMS, so a preview that did not name
+    # a channel would be answering a different question than the one the send
+    # is about to ask.
+    channel = (criteria.get("channel") or qualification.CHANNEL_EMAIL).lower()
+    if channel not in qualification.CHANNELS:
+        channel = qualification.CHANNEL_EMAIL
+
     return {
         "total_matched": total,
         "criteria": criteria,
+        # Same authorized scope, same filters, evaluated rather than filtered -
+        # so an excluded lead is COUNTED AND EXPLAINED here instead of
+        # disappearing before the question was asked.
+        "qualification": qualification.qualify_leads(
+            db, current_user, channel=channel, filters=criteria, request=request),
         "sample": [
             {
                 "id": l.id,
@@ -671,6 +696,40 @@ def builder_send(
     # count. It runs here, ahead of the campaign row, so a refused request
     # leaves no orphan campaign stuck in "sending".
     lead_scope.assert_leads_in_scope(db, current_user, req.lead_ids)
+
+    # ── QUALIFICATION, FOR THE EMAIL PORTION OF THIS SEND ──
+    #
+    # Email is the channel the qualification engine is authoritative for, so
+    # the leads that would receive email are held to it here - BEFORE the
+    # campaign row is written, for the same reason the scope check is: a
+    # refused request must not leave an orphan campaign stuck in "sending".
+    #
+    # It refuses rather than skipping. `_compliance_check` below still runs and
+    # still skips, and that is the right behaviour for the channels it remains
+    # the authority for; but a bulk email send that quietly dropped 960 people
+    # and reported success is the failure this engine exists to end. The caller
+    # gets the reasons and re-submits the ids it meant.
+    #
+    # SMS and voice are deliberately NOT gated here. Their existing guards stay
+    # the enforcement path until each is migrated and independently tested.
+    _req_channel = req.channel or "sms"
+    if _req_channel in ("email", "auto"):
+        _rows = (lead_scope.authorized_lead_query(
+                    db, current_user, Lead.id, Lead.contact_channel)
+                 .filter(Lead.id.in_(req.lead_ids)).all())
+        _email_ids = [
+            r[0] for r in _rows
+            if _req_channel == "email" or r[1] == "email_only"
+        ]
+        if _email_ids:
+            try:
+                qualification.assert_ready_for_send(
+                    db, current_user, _email_ids,
+                    channel=qualification.CHANNEL_EMAIL)
+            except qualification.NotQualified as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=qualification.send_refusal_detail(exc))
 
     now = datetime.utcnow()
 

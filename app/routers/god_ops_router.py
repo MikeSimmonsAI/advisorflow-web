@@ -1141,3 +1141,53 @@ def user_access_diagnostic(user_id: Optional[str] = Query(None),
                         "lookup": "user_id" if user_id else "email"},
                note="God ran a read-only access diagnostic.")
     return report
+
+
+
+# ── QUALIFICATION DIAGNOSTIC ─────────────────────────────────────────────────
+#
+# GOD ONLY, READ ONLY, SENDS NOTHING. Same guard, same reasoning and same audit
+# as the access diagnostic above.
+#
+# It exists so a new qualification engine can be validated against a REAL
+# production book without borrowing anybody's password and without the
+# operator's own session quietly supplying the answer. It runs the engine AS
+# the named subject, against a synthetic request carrying exactly the workspace
+# header under test, and reports counts and reasons.
+#
+# It is a report about who WOULD be qualified. No message leaves the building
+# because this ran.
+
+@router.get("/diagnostics/qualification")
+def qualification_diagnostic_report(user_id: Optional[str] = Query(None),
+                                    email: Optional[str] = Query(None),
+                                    channel: str = Query("email"),
+                                    organization_id: Optional[str] = Query(None),
+                                    sample: int = Query(0, ge=0, le=100),
+                                    db: Session = Depends(get_db),
+                                    user: User = Depends(require_god)):
+    """Qualify one named user's own authorized leads. Exact id or exact email."""
+    from app.services import qualification as _qual
+    from app.services import qualification_diagnostic as _qd
+
+    if channel not in _qual.CHANNELS:
+        raise HTTPException(status_code=400,
+                            detail="channel must be one of: %s"
+                                   % ", ".join(_qual.CHANNELS))
+
+    report = _qd.run(db, user_id=user_id, email=email, channel=channel,
+                     organization_id=organization_id, sample_size=sample)
+
+    # Audited for the same reason: reading one named person's book is a
+    # privileged act even when it changes nothing. The subject is recorded, the
+    # counts are not - putting a named individual's lead numbers into a
+    # permanent log buys no diagnostic value.
+    log_action(db, None, user.id,
+               action="qualification_diagnostic",
+               target_type="user",
+               target_id=(report.get("subject") or {}).get("user_id") or "unknown",
+               details={"subject_email": (report.get("subject") or {}).get("email"),
+                        "channel": channel,
+                        "lookup": "user_id" if user_id else "email"},
+               note="God ran a read-only qualification diagnostic. Nothing was sent.")
+    return report
