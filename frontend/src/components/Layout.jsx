@@ -6,6 +6,8 @@ import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
 import GodReturnBar from './GodReturnBar'
+import ContextSwitcher from './ContextSwitcher'
+import './ContextSwitcher.css'
 import './Layout.css'
 
 // Detect which platform brand is running on this hostname — resolved once at module
@@ -447,22 +449,7 @@ export default function Layout({ children }) {
                 )}
               </div>}
 
-              <NavLink to="/scraper"
-                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
-                style={({ isActive }) => ({
-                  color: isActive ? '#f59e0b' : '#d97706',
-                  background: isActive ? 'rgba(245,158,11,0.12)' : 'transparent',
-                  borderLeft: isActive ? '3px solid #f59e0b' : '3px solid transparent',
-                  fontWeight: 600,
-                })}
-                onClick={closeSidebar}
-                title="Lead Scraper"
-              >
-                <Icon name="search" />
-                {!sidebarCollapsed && 'Lead Scraper'}
-              </NavLink>
-
-              <div className="nav-divider" />
+              {/* Lead Scraper removed from sidebar — accessible via God Command Center at /god */}
             </>
           )}
 
@@ -557,6 +544,12 @@ export default function Layout({ children }) {
         <header className="top-bar">
           <LiveClock />
           <div className="top-bar-right">
+            {/* The way BACK OUT of a customer workspace. Renders nothing for a
+                customer's own staff - they have no back office to return to,
+                and offering the button would advertise a door that refuses
+                them. It appears only for somebody the server confirms holds
+                brand-sales access as well. */}
+            <ContextSwitcher current="workspace" />
             <ThemeToggle />
             <NotificationBell />
           </div>

@@ -13,6 +13,7 @@ from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, EmailMessage
 from app.services.email_service import send_email_to_lead, send_email_batch
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 router = APIRouter(prefix="/email", tags=["email"])
 
@@ -155,7 +156,7 @@ def email_only_queue(
     # dnc = opt-out or dup, sent+ = already in flight and visible in Replies.
     ACTIONABLE = ("new", "needs_tier_review", "queued")
     query = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.assigned_to_id == current_user.id,
         Lead.contact_channel == "email_only",
         Lead.status.in_(ACTIONABLE),
@@ -291,7 +292,7 @@ def email_sent_log(
         db.query(EmailMessage, Lead)
         .join(Lead, EmailMessage.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             EmailMessage.sender_id == current_user.id,
         )
         .order_by(desc(EmailMessage.sent_at))

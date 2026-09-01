@@ -25,6 +25,7 @@ from app.routers.audit_log_router import log_action
 # Refuses a write the owner has not given a destination for. See the
 # create_user comment below.
 from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
+from app.services import lead_scope
 
 # ── Industry-specific tier presets ────────────────────────────────────────────
 # Each entry: (tier_key, tier_label, track_key, track_label, ai_tone_context, sort_order)
@@ -239,7 +240,7 @@ def all_org_leads(
     """
     query = (
         db.query(Lead)
-        .filter(Lead.organization_id == current_user.organization_id)
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     )
     total = query.count()
     leads = (
@@ -1268,7 +1269,7 @@ def reassign_leads(
             raise HTTPException(status_code=404, detail="Target advisor not found or inactive in this organization.")
 
     leads = db.query(Lead).filter(
-        Lead.id.in_(req.lead_ids), Lead.organization_id == current_user.organization_id
+        Lead.id.in_(req.lead_ids), Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)
     ).all()
     found_ids = {l.id for l in leads}
     skipped_ids = [lid for lid in req.lead_ids if lid not in found_ids]
@@ -1306,7 +1307,7 @@ def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = De
     """
     leads = (
         db.query(Lead)
-        .filter(Lead.organization_id == current_user.organization_id, Lead.assigned_to_id.is_(None))
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db), Lead.assigned_to_id.is_(None))
         .order_by(Lead.created_at.desc())
         .limit(500)
         .all()
@@ -1493,7 +1494,7 @@ def potential_duplicate_leads(
     leads = (
         db.query(Lead)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             (Lead.is_duplicate == False) | (Lead.is_duplicate.is_(None)),
         )
         .order_by(Lead.created_at.desc())
@@ -1560,7 +1561,7 @@ def flagged_duplicate_leads(
     dupes = (
         db.query(Lead)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.is_duplicate == True,
         )
         .order_by(Lead.created_at.desc())
@@ -1607,7 +1608,7 @@ def merge_leads(
     try:
         keep_lead = (
             db.query(Lead)
-            .filter(Lead.id == req.keep_lead_id, Lead.organization_id == current_user.organization_id)
+            .filter(Lead.id == req.keep_lead_id, Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
             .first()
         )
         if not keep_lead:
@@ -1615,7 +1616,7 @@ def merge_leads(
 
         merge_leads = (
             db.query(Lead)
-            .filter(Lead.id.in_(req.merge_lead_ids), Lead.organization_id == current_user.organization_id)
+            .filter(Lead.id.in_(req.merge_lead_ids), Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
             .all()
         )
         found_ids = {lead.id for lead in merge_leads}
@@ -1712,7 +1713,7 @@ def fix_lead_contact_info(
 
     lead = (
         db.query(Lead)
-        .filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
+        .filter(Lead.id == lead_id, Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
         .first()
     )
     if not lead:

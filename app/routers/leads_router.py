@@ -209,7 +209,7 @@ def list_import_batches(
             func.min(Lead.created_at).label("imported_at"),
         )
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.source_file.isnot(None),
         )
         .group_by(Lead.source_file, Lead.import_list_name, Lead.imported_by_name)
@@ -378,7 +378,7 @@ def list_leads(
     text blobs (notes, ai_quality_note, custom_fields). This keeps the Leads
     page fast even with thousands of leads.
     """
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_manager = lead_scope.is_manager_here(current_user, db)
 
     # Select only the columns the list view needs — avoids loading large text
     # fields (notes, ai_lead_quality_note, custom_fields, extra_data) and
@@ -459,9 +459,9 @@ def list_flagged_leads(
     current_user: User = Depends(require_tenant_user),
 ):
     """Return all manually flagged leads for this org (both bad_email and remove_all)."""
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_manager = lead_scope.is_manager_here(current_user, db)
     query = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.manual_flag != None,
     )
     if not is_manager:
@@ -513,7 +513,7 @@ def leads_needing_tier_review(
         "organization_id", "case_status",
     ]
     query = db.query(*COLS).filter(
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.assigned_to_id == current_user.id,
         Lead.status == "needs_tier_review",
     )
@@ -592,8 +592,8 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(r
     end_of_today = datetime.combine(now.date(), time.max)
     start_7d = now - timedelta(days=7)
 
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
-    base_lead_filters = [Lead.organization_id == current_user.organization_id]
+    is_manager = lead_scope.is_manager_here(current_user, db)
+    base_lead_filters = [Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)]
     if not is_manager:
         base_lead_filters.append(Lead.assigned_to_id == current_user.id)
 
@@ -671,8 +671,8 @@ def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Dep
     Advisor-scoped engagement temperature counts for the Overview chart.
     Uses the real Lead.engagement_temperature field; no client-side guesses.
     """
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
-    eng_filters = [Lead.organization_id == current_user.organization_id]
+    is_manager = lead_scope.is_manager_here(current_user, db)
+    eng_filters = [Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)]
     if not is_manager:
         eng_filters.append(Lead.assigned_to_id == current_user.id)
     rows = (
@@ -701,9 +701,9 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(re
         "hot",
         "booked",
     ]
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_manager = lead_scope.is_manager_here(current_user, db)
     funnel_filters = [
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.status.in_(stages),
     ]
     if not is_manager:
@@ -727,20 +727,27 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(re
 def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     """Returns full contact-card detail for a single lead.
 
-    Advisors can only access leads assigned to them. Org admins and above
-    can access any lead in their organization.
+    A P0 MISS, FOUND BY THE WORKSPACE GATE.
+
+    This route wrote the authorization rule out by hand - its own manager role
+    list, its own filter on current_user.organization_id, its own owner filter -
+    and because that hand-written rule happened to be CORRECT, the P0 sweep left
+    it alone and the P0 gate passed on it. A fourth copy of a rule is still a
+    fourth copy: it cannot be reached by the one function, so it does not
+    inherit anything the one function learns.
+
+    It learned two things this round, and this route had neither. The workspace
+    a request is in can now come from a validated membership rather than the
+    column, and the role that decides scope inside a workspace is the
+    MEMBERSHIP's role, not `users.role`. Standing on the column and the column
+    alone, this refused Michael his own lead the moment he entered through a
+    membership - a 404 on a record he owns.
+
+    Routed through load_lead_in_scope, which is the same 404 for an
+    out-of-scope lead and the same reason: a 403 here confirms the record
+    exists.
     """
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
-    q = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    )
-    if not is_manager:
-        q = q.filter(Lead.assigned_to_id == current_user.id)
-    lead = q.first()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
+    return load_lead_in_scope(db, current_user, lead_id)
 
 
 @router.get("/{lead_id}/timeline")
@@ -760,8 +767,8 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     """
     from app.models.models import Message, Reply, BookingLink, EmailMessage, CadenceState, VoiceCall as _VoiceCall
 
-    is_manager_tl = current_user.role in ("org_admin", "super_admin", "god_admin")
-    q_tl = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
+    is_manager_tl = lead_scope.is_manager_here(current_user, db)
+    q_tl = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     if not is_manager_tl:
         q_tl = q_tl.filter(Lead.assigned_to_id == current_user.id)
     lead = q_tl.first()
@@ -1255,7 +1262,7 @@ def repair_duplicate_dnc(
         raise HTTPException(status_code=403, detail="Admin role required.")
 
     candidates = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.status == "dnc",
         Lead.is_duplicate == True,
     ).all()
@@ -1328,7 +1335,7 @@ def repair_stale_tier_review(
         raise HTTPException(status_code=403, detail="Admin role required.")
 
     parked = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.status == "needs_tier_review",
     ).all()
 
@@ -1387,7 +1394,7 @@ def bulk_delete_duplicate_leads(
         raise HTTPException(status_code=403, detail="Admin role required to bulk delete leads.")
 
     duplicates = db.query(Lead).filter(
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Lead.is_duplicate == True,
     ).all()
 
@@ -1435,7 +1442,7 @@ def deduplicate_email_leads(
     email_leads = (
         db.query(Lead)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.contact_channel == "email_only",
             Lead.email.isnot(None),
             Lead.last_name.isnot(None),
@@ -1593,7 +1600,7 @@ def create_lead_manually(
     dup_of = None
     if phone_normalized and last_name_normalized:
         for existing in db.query(Lead).filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.phone == phone_normalized,
             Lead.is_duplicate == False,
             Lead.duplicate_resolved_at.is_(None),

@@ -55,6 +55,25 @@ OWNER_SCOPED_ROLES = ("advisor",)
 GOD_ROLE = "god_admin"
 
 
+def _ambient_request() -> Optional[Request]:
+    """The request being served, for the call sites that were never handed one.
+
+    Forty-five routes call `authorized_lead_query(db, current_user)` without a
+    request, which was correct until the scope gained a second input - the
+    selected workspace, which arrives in a header. Rather than change
+    forty-five signatures and rely on every future one remembering, the request
+    is published once by middleware and read here.
+
+    Returns None outside a request - background jobs, scripts, tests - and the
+    scope then falls back to the legacy tenant exactly as before.
+    """
+    try:
+        from app.services.request_context import get_current_request
+        return get_current_request()
+    except Exception:
+        return None
+
+
 def is_god(user: User) -> bool:
     return getattr(user, "role", None) == GOD_ROLE
 
@@ -69,30 +88,108 @@ def is_owner_scoped(user: User) -> bool:
     return getattr(user, "role", None) in OWNER_SCOPED_ROLES
 
 
-def active_workspace_org_id(user: User) -> Optional[str]:
+def active_workspace_org_id(user: User, db: Session = None,
+                            request: Optional[Request] = None) -> Optional[str]:
     """WHICH CUSTOMER WORKSPACE IS THIS REQUEST IN — the one seam for that answer.
 
-    Today the answer is `users.organization_id`, because that column is how a
-    person is put inside a customer organization and there is no other path.
-    It is read HERE and nowhere else in this module on purpose.
+    THE ORDER, AND WHY IT IS THIS ORDER:
 
-    The product has two independent access contexts - the brand sales back
-    office (a Platform / BrandSalesOrg) and a customer workspace (an
-    Organization) - and one person may legitimately hold both, or several of
-    the second. `Membership` already models that: it is polymorphic over
-    scope_type, and SCOPE_CUSTOMER_ORG is already one of its declared scopes.
-    What does not exist yet is any code that WRITES a customer_org membership
-    or lets a person choose between two of them, so a single column is still
-    the true answer and pretending otherwise here would be inventing state.
+    1. A workspace the caller SELECTED and holds a membership in. The selection
+       arrives as X-Workspace-Id and is thrown away unless `workspace_access`
+       finds an active customer_org membership behind it. A browser cannot
+       select a workspace by asserting one; it can only pick among the ones it
+       already holds. This is the branch that makes the switcher real.
 
-    When workspace entry does move to memberships, this function resolves the
-    selected workspace and every lead-authorization decision in the product
-    follows automatically, because they all run through the query below. A
-    platform-only identity keeps returning None here and is refused lead access
-    by that alone - which is the rule Mike stated: a salesperson with no
-    workspace membership gets no customer workspace data.
+    2. `users.organization_id`. Still the answer for every request that names no
+       workspace, which today is nearly all of them - hundreds of routes resolve
+       the current tenant through it, and P0 filters every lead query on it.
+       `workspace_access.backfill_from_legacy_column` has already materialised
+       this column into a real membership for the same person, so what this
+       branch returns is a workspace they hold; it is the same answer arrived at
+       by the cheaper route, not a second authority.
+
+    Step 1 runs only when a db session is available. Callers inside a request
+    pass one; the handful that hold only a detached user get step 2, which is
+    exactly what they got before this existed and is never wider.
+
+    A platform-only identity returns None from both branches and is refused lead
+    access by that alone - a brand salesperson with no workspace membership gets
+    no customer workspace data.
     """
+    request = request or _ambient_request()
+    if db is not None and request is not None:
+        try:
+            from app.services import workspace_access
+            selected = workspace_access.selected_workspace_id(user, db, request)
+            if selected:
+                return selected
+        except Exception:
+            # A failure to resolve a SELECTION must never widen scope - it falls
+            # through to the tenant the caller was already in.
+            _sec.warning("workspace selection could not be resolved for user=%s",
+                         getattr(user, "id", None))
     return getattr(user, "organization_id", None)
+
+
+def effective_role(user: User, db: Session = None,
+                   request: Optional[Request] = None) -> Optional[str]:
+    """THE ROLE THAT DECIDES SCOPE IN THIS WORKSPACE — not necessarily users.role.
+
+    WORKSPACE ROLE IS NOT PLATFORM ROLE, and this function is where that stops
+    being a slogan. `users.role` is the person's role on the PLATFORM. When they
+    are standing inside a customer workspace they hold a membership in, the role
+    that decides what they see is the one on THAT MEMBERSHIP.
+
+    D'Angelo is the case that found this. `users.role` says advisor - he is a
+    BookaBoost salesperson. His We Epic Game membership says org_admin. Reading
+    the column gave him an owner-scoped view of a workspace he administers, so
+    the team's book came back EMPTY: not a leak, but a screen that lies about
+    the customer's data to the person responsible for it.
+
+    god is answered first and never from a membership: the owner's authority is
+    not a customer's grant.
+
+    Falls back to `users.role` whenever no workspace was selected or no session
+    is available, which is every request that behaved correctly before this
+    existed. It can only ever return the role of a membership the caller
+    actually holds - `selected_workspace_id` re-derives that from the database,
+    so an asserted header changes nothing here.
+    """
+    if is_god(user):
+        return GOD_ROLE
+    request = request or _ambient_request()
+    if db is not None and request is not None:
+        try:
+            from app.services import workspace_access
+            selected = workspace_access.selected_workspace_id(user, db, request)
+            if selected:
+                role = workspace_access.workspace_role(user, db, selected)
+                if role:
+                    return role
+        except Exception:
+            _sec.warning("workspace role could not be resolved for user=%s",
+                         getattr(user, "id", None))
+    return getattr(user, "role", None)
+
+
+def is_manager_here(user: User, db: Session = None,
+                    request: Optional[Request] = None) -> bool:
+    """Does this person see the whole workspace they are STANDING IN?
+
+    The drop-in replacement for the inline
+
+        current_user.role in ("org_admin", "super_admin", "god_admin")
+
+    that sixty-one sites across thirteen routers wrote out by hand. Every one
+    of those was correct while `users.role` was the only role a person had.
+    Under memberships it is the PLATFORM role, so D'Angelo - a BookaBoost
+    salesperson who administers We Epic Game - read as an advisor inside the
+    workspace he runs, and its team screens came back empty.
+
+    Identical to the inline list for every request that names no workspace, so
+    this changes nothing anywhere else.
+    """
+    return effective_role(user, db, request) in MANAGER_ROLES + (GOD_ROLE,)
 
 
 def own_records_only(query, owner_column, user: User):
@@ -164,11 +261,11 @@ def authorized_lead_query(db: Session, user: User, *columns,
         # `_god_all_orgs` is set by get_current_user when no X-Org-Override is
         # present, and organization_id is None in the same state - either is
         # sufficient, both are checked because they are set independently.
-        if getattr(user, "_god_all_orgs", False) or not active_workspace_org_id(user):
+        if getattr(user, "_god_all_orgs", False) or not active_workspace_org_id(user, db, request):
             return q
-        return q.filter(Lead.organization_id == active_workspace_org_id(user))
+        return q.filter(Lead.organization_id == active_workspace_org_id(user, db, request))
 
-    org_id = active_workspace_org_id(user)
+    org_id = active_workspace_org_id(user, db, request)
     if not org_id:
         # A brand-sales identity or a context-less account. `require_tenant_user`
         # normally catches this first; if some route forgets that dependency,
@@ -179,9 +276,15 @@ def authorized_lead_query(db: Session, user: User, *columns,
 
     q = q.filter(Lead.organization_id == org_id)
 
-    if is_manager(user):
+    # THE ROLE THAT DECIDES SCOPE IS THE ROLE IN THIS WORKSPACE. For every
+    # request that names no workspace this is `users.role` and nothing changes;
+    # for somebody standing inside a workspace they hold a membership in, it is
+    # the membership's role. See effective_role.
+    role = effective_role(user, db, request)
+
+    if role in MANAGER_ROLES + (GOD_ROLE,):
         return q
-    if is_owner_scoped(user):
+    if role in OWNER_SCOPED_ROLES:
         return q.filter(Lead.assigned_to_id == user.id)
 
     _deny(user, "Your role is not permitted to read lead data.", request=request)

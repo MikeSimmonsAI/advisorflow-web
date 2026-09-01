@@ -26,6 +26,7 @@ from app.deps import get_db, require_admin, get_current_user, require_tenant_use
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, SuppressionEntry, SuppressionSource
 from app.routers.audit_log_router import log_action
+from app.services import lead_scope
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -175,7 +176,7 @@ def add_permanent_dnc(
 
     leads = (
         db.query(Lead)
-        .filter(Lead.organization_id == current_user.organization_id, Lead.phone == normalized_phone)
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db), Lead.phone == normalized_phone)
         .all()
     )
     for lead in leads:

@@ -65,7 +65,7 @@ def create_fiber_lead(
     # Deduplicate by phone within org
     existing = db.query(Lead).filter(
         Lead.phone == phone_clean,
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
     ).first()
     if existing:
         return {

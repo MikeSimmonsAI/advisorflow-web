@@ -13,6 +13,7 @@ from app.services.sms_service import send_sms, send_batch, send_mms
 from app.routers.compose_router import acting_advisor
 from app.utils.twilio_webhook_guard import guard_inbound, guard_status_callback
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 router = APIRouter(prefix="/sms", tags=["sms"])
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def _get_org_reply_or_404(db: Session, reply_id: str, current_user: User) -> Rep
         db.query(Reply)
         .join(Lead, Reply.lead_id == Lead.id)
         .filter(Reply.id == reply_id)
-        .filter(Lead.organization_id == current_user.organization_id)
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
         .first()
     )
     if not reply:
@@ -459,9 +460,9 @@ def reply_activity_by_day(
     start_date = (now.date() - timedelta(days=days - 1))
     start_at = datetime.combine(start_date, datetime.min.time())
 
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_manager = lead_scope.is_manager_here(current_user, db)
     activity_filters = [
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         Reply.received_at.isnot(None),
         Reply.received_at >= start_at,
     ]
@@ -511,11 +512,11 @@ def list_replies(
     """
     from app.models.models import ReplyClassification
 
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_manager = lead_scope.is_manager_here(current_user, db)
     query = (
         db.query(Reply)
         .join(Lead, Reply.lead_id == Lead.id)
-        .filter(Lead.organization_id == current_user.organization_id)
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     )
     if not is_manager:
         query = query.filter(Lead.assigned_to_id == current_user.id)

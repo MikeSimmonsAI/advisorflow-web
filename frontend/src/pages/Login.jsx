@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop } from '../api/client'
+import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop,
+         fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
@@ -149,7 +150,35 @@ export default function Login() {
       await fetchAndStoreBranding()
       startKeepAlive()
       startRefreshLoop()
-      navigate(user?.role === 'god_admin' ? '/god' : '/')
+      // WHERE LOGIN LANDS — the SERVER decides, not a role label.
+      //
+      // This used to be `role === 'god_admin' ? '/god' : '/'`, one branch for
+      // one column. It sent a workspace-only customer and a platform-only
+      // salesperson to the same tenant home, and the salesperson's version of
+      // that home is a screen belonging to the other domain.
+      //
+      // /auth/my-contexts returns a default_context built from real
+      // memberships: the back office when they have one, their single
+      // workspace when that is all they hold, a selector when they hold
+      // several. A failure falls back to the old behaviour rather than
+      // stranding somebody at a blank page.
+      let dest = user?.role === 'god_admin' ? '/god' : '/'
+      try {
+        const ctx = await fetchMyContexts()
+        const def = ctx && ctx.default_context
+        if (def && def.path) {
+          dest = def.path
+          if (def.type === 'workspace' && def.organization_id) {
+            setWorkspaceContext(def.organization_id)
+          } else {
+            clearWorkspaceContext()
+          }
+        }
+      } catch (ctxErr) {
+        // Keep the legacy destination. A context lookup that fails must not
+        // turn a successful sign-in into an error screen.
+      }
+      navigate(dest)
     } catch (err) {
       setError(err.message)
     } finally {

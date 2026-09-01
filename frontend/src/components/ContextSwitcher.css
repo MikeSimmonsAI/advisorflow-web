@@ -1,0 +1,112 @@
+/* ContextSwitcher — a header control, deliberately quiet.
+   It sits beside the brand and the user menu, so it reads as navigation
+   rather than as a call to action. */
+
+.ctx-switch-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ctx-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.ctx-switch-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.ctx-switch-btn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.ctx-switch-caret {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.ctx-switch-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 240px;
+  padding: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #16181d;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  z-index: 1000;
+}
+
+.ctx-switch-menu-head {
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.ctx-switch-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-switch-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.ctx-switch-item.is-active {
+  background: rgba(47, 182, 255, 0.14);
+}
+
+.ctx-switch-item-name {
+  font-weight: 600;
+}
+
+/* The WORKSPACE role. Shown small and secondary because it is context, not a
+   claim about who the person is on the platform. */
+.ctx-switch-item-role {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ctx-switch-menu {
+    background: #1b1e24;
+    color: #e8eaee;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .ctx-switch-item:hover { background: rgba(255, 255, 255, 0.08); }
+}

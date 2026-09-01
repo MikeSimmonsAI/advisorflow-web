@@ -13,6 +13,10 @@ from app.services.auth_service import authenticate_user, create_access_token, ha
 from app.models.models import User, Organization, Platform
 from app.models.sales_models import Membership, BrandSalesOrg, SCOPE_BRAND_SALES_ORG
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # ---------------------------------------------------------------------------
@@ -186,6 +190,23 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
                     detail="Incorrect email or password",
                 )
 
+    # SELF-HEALING BACKFILL, for this one person, at the one moment it matters.
+    #
+    # Customer tenancy used to be the single column `users.organization_id`.
+    # Workspace entry now reads customer_org Membership rows instead, and
+    # startup materialises the column into those rows for everybody. A user
+    # created BETWEEN restarts would otherwise sign in to an empty switcher and
+    # no workspace - so the same idempotent migration runs for them here.
+    # It writes only what their own column already says: nobody gains access to
+    # anything they could not reach before it ran.
+    try:
+        from app.services import workspace_access
+        workspace_access.backfill_from_legacy_column(db, user=user)
+    except Exception:
+        # A migration must never be the reason a valid password is refused.
+        _log.warning("workspace backfill at login failed for user=%s", user.id,
+                     exc_info=True)
+
     token = create_access_token(user, db)
     return TokenResponse(
         access_token=token,
@@ -194,6 +215,56 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         organization_id=user.organization_id,
         must_change_password=user.must_change_password,
     )
+
+
+@router.get("/my-contexts")
+def my_contexts(request: Request,
+                db: Session = Depends(get_db),
+                current_user: User = Depends(get_current_user)):
+    """EVERY CONTEXT THIS CALLER MAY ENTER — built by the server.
+
+    The browser renders navigation from this and invents nothing. It does not
+    read `users.organization_id`, it does not read localStorage, and it does not
+    derive a workspace from a role label. A context absent from this response
+    does not exist as far as the UI is concerned.
+
+    And the response is not the control. Every route behind every entry here
+    re-checks membership on its own, so hiding a button and refusing a request
+    are two independent answers to the same question - which is the only
+    arrangement where typing the URL fails too.
+    """
+    from app.services import workspace_access
+    return workspace_access.authorized_contexts(db, current_user)
+
+
+@router.get("/workspace/{organization_id}")
+def enter_workspace(organization_id: str, request: Request,
+                    db: Session = Depends(get_db),
+                    current_user: User = Depends(get_current_user)):
+    """MAY I ENTER THIS WORKSPACE — the check the URL bar has to pass too.
+
+    The switcher calls this before it navigates, but that is not why it exists.
+    It exists so that typing /workspace/some-other-org gets the same answer as
+    clicking a button that was never rendered: `assert_workspace_membership`
+    raises 403 unless an ACTIVE customer_org membership backs the id.
+
+    Returns the workspace's own identity plus the caller's role IN IT - which is
+    not `users.role` and is never derived from it. D'Angelo is a sales_manager
+    on the platform and whatever his membership says inside We Epic Game.
+    """
+    from app.services import workspace_access
+    m = workspace_access.assert_workspace_membership(
+        db, current_user, organization_id, request)
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    return {
+        "organization_id": org.id,
+        "organization_name": org.name,
+        "organization_slug": org.slug,
+        "workspace_role": m.role,
+        "has_back_office": workspace_access.has_back_office(current_user, db),
+    }
 
 
 @router.post("/verify", response_model=TokenResponse)

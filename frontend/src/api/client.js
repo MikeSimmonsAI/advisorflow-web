@@ -82,6 +82,16 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // views, and the brand is exactly what should narrow them.
   const brandCtx = getBrandContext()
   if (brandCtx) headers['X-Brand-Override'] = brandCtx.platformId
+  // THE SELECTED WORKSPACE TRAVELS TOO — as a REQUEST, never as a grant.
+  //
+  // A person can hold memberships in several customer workspaces, so which one
+  // they are standing in has to reach the server on every request. It is stored
+  // locally only as the current UI selection: the server re-derives it against
+  // an active customer_org membership on arrival and ignores it otherwise, so
+  // editing this value in devtools changes which workspace you ASK for and
+  // never which one you get.
+  const wsId = getWorkspaceContext()
+  if (wsId) headers['X-Workspace-Id'] = wsId
   if (!(options.body instanceof FormData) && options.body) {
     headers['Content-Type'] = 'application/json'
   }
@@ -445,11 +455,47 @@ export function clearOrgContext() {
   localStorage.removeItem('bb_org_context') // clean up legacy key
 }
 
+// ── THE SELECTED CUSTOMER WORKSPACE ────────────────────────────────────────
+//
+// Stored, and worth being precise about what "stored" means here: this is the
+// current UI SELECTION and nothing else. It is not a credential, it is not
+// authorization, and changing it in devtools buys nothing - the server checks
+// every request against an active customer_org membership and ignores an id
+// the caller does not hold. It lives in localStorage so a refresh keeps you in
+// the workspace you were working in rather than dumping you back at the door.
+const WORKSPACE_CONTEXT_KEY = 'af_workspace_id'
+
+export function setWorkspaceContext(organizationId) {
+  if (organizationId) localStorage.setItem(WORKSPACE_CONTEXT_KEY, organizationId)
+  else localStorage.removeItem(WORKSPACE_CONTEXT_KEY)
+}
+
+export function getWorkspaceContext() {
+  try {
+    return localStorage.getItem(WORKSPACE_CONTEXT_KEY) || null
+  } catch (e) {
+    return null
+  }
+}
+
+export function clearWorkspaceContext() {
+  localStorage.removeItem(WORKSPACE_CONTEXT_KEY)
+}
+
+// THE SERVER BUILDS THIS LIST. The browser renders it and invents nothing:
+// no context is derived from a role label, from organization_id, or from
+// anything cached locally.
+export async function fetchMyContexts() {
+  return api.get('/auth/my-contexts')
+}
+
 // Leaving everything means leaving the brand as well - a stale brand under a
-// cleared customer would render a trail the server does not agree with.
+// cleared customer would render a trail the server does not agree with. The
+// workspace goes with them for the same reason.
 export function clearAllContext() {
   clearOrgContext()
   clearBrandContext()
+  clearWorkspaceContext()
 }
 
 

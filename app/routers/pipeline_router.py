@@ -55,7 +55,7 @@ def launch(
     """Launch AI pipeline for selected leads."""
     leads = db.query(Lead).filter(
         Lead.id.in_(req.lead_ids),
-        Lead.organization_id == current_user.organization_id,
+        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
     ).all()
 
     if not leads:

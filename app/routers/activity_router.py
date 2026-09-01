@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Message, EmailMessage
+from app.services import lead_scope
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -34,14 +35,14 @@ def sent_activity(
     god_admin with no org selected sees activity across ALL orgs.
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
-    is_manager = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_manager = lead_scope.is_manager_here(current_user, db)
     god_all = getattr(current_user, '_god_all_orgs', False)
 
     # ── SMS sends ──────────────────────────────────────────────────────────
     sms_base = db.query(Message, Lead).join(Lead, Message.lead_id == Lead.id)
     sms_filters = [Message.sent_at >= cutoff]
     if not god_all:
-        sms_filters.append(Lead.organization_id == current_user.organization_id)
+        sms_filters.append(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     sms_query = sms_base.filter(*sms_filters)
     if not is_manager:
         sms_query = sms_query.filter(Message.sender_id == current_user.id)
@@ -67,7 +68,7 @@ def sent_activity(
     email_base = db.query(EmailMessage, Lead).join(Lead, EmailMessage.lead_id == Lead.id)
     email_filters = [EmailMessage.sent_at >= cutoff]
     if not god_all:
-        email_filters.append(Lead.organization_id == current_user.organization_id)
+        email_filters.append(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     email_query = email_base.filter(*email_filters)
     if not is_manager:
         email_query = email_query.filter(EmailMessage.sender_id == current_user.id)

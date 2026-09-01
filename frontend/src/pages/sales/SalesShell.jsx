@@ -14,6 +14,8 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { NavLink, useNavigate } from 'react-router-dom'
 import { api, logout } from '../../api/client'
 import GodReturnBar from '../../components/GodReturnBar'
+import ContextSwitcher from '../../components/ContextSwitcher'
+import '../../components/ContextSwitcher.css'
 import SalesStyles from './SalesStyles'
 import { initials, ErrorBar } from './parts'
 
@@ -249,6 +251,11 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               {subtitle && <p>{subtitle}</p>}
             </div>
             <div className="sw-spacer" />
+            {/* The way INTO a customer workspace. Renders nothing at all for a
+                salesperson with no customer_org membership, which is most of
+                them - the button is not a feature everybody gets, it is the
+                visible half of an authorization the server already made. */}
+            <ContextSwitcher current="back_office" />
             {actions}
           </header>
           <div className="sw-body">

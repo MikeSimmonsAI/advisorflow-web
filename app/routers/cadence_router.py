@@ -9,6 +9,7 @@ from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
 )
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 router = APIRouter(prefix="/cadence", tags=["cadence"])
 
@@ -62,7 +63,7 @@ def control_cadence(
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
             CadenceState.id == cadence_state_id,
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         )
         .first()
     )
@@ -101,7 +102,7 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
         db.query(CadenceState)
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.assigned_to_id == current_user.id,
         )
         .all()
@@ -142,7 +143,7 @@ def start_all_eligible(db: Session = Depends(get_db), current_user: User = Depen
     leads = (
         db.query(Lead)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.status == "new",
             Lead.is_duplicate.is_(False),
         )
@@ -161,12 +162,12 @@ def start_all_eligible(db: Session = Depends(get_db), current_user: User = Depen
 
 @router.get("/active")
 def list_active_cadences(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
-    is_admin = current_user.role in ("org_admin", "super_admin", "god_admin")
+    is_admin = lead_scope.is_manager_here(current_user, db)
     query = (
         db.query(CadenceState)
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
-            Lead.organization_id == current_user.organization_id,
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             CadenceState.status.in_(["active", "paused"]),
         )
     )

@@ -129,6 +129,19 @@ def create_customer_admin(
     db.add(user)
     db.flush()
 
+    # The membership is written HERE, not only on acceptance. An operator who
+    # creates a workspace admin has decided that person belongs in that
+    # workspace; the activation link decides when they can log in, which is a
+    # different question. Writing it now also means an operator can see the
+    # membership on the customer's page before the invite is opened, rather
+    # than having to trust that acceptance will produce one.
+    from app.services import workspace_access
+    workspace_access.grant_workspace_membership(
+        db, user_id=user.id, organization_id=org.id,
+        role=workspace_access.workspace_role_for_user_row(user),
+        granted_by=actor.id, commit=False,
+    )
+
     activation, raw = _issue(db, user, org, actor, implementation, ttl_hours)
 
     log_action(
@@ -165,31 +178,49 @@ def add_existing_user(
     salesperson with a customer's domain in their address ends up inside the
     tenant.
 
-    NOTE ON THE ARCHITECTURE'S LIMIT, STATED PLAINLY: customer tenancy in this
-    codebase is a single column, `users.organization_id`. There is no customer
-    membership table - `Membership` with `SCOPE_CUSTOMER_ORG` exists but grants
-    nothing, as the Checkpoint 6 survey recorded. So a user belongs to exactly
-    ONE customer organisation at a time, and moving them means moving them.
-    This function therefore refuses to move a user who is already inside a
-    different tenant, rather than silently transferring them out of it. Making
-    customer membership genuinely additive is a schema change, not something to
-    fake here.
+    MEMBERSHIP IS ADDITIVE NOW - THIS FUNCTION USED TO REFUSE.
+
+    Customer tenancy was a single column, `users.organization_id`, so belonging
+    to a second customer was not something the schema could say. This function
+    therefore 409'd rather than silently transfer somebody out of the tenant
+    they were already in, which was the right call while the column was the only
+    answer - and it is exactly why D'Angelo could sell BookaBoost or administer
+    We Epic Game and never both.
+
+    Customer workspaces are `Membership` rows with `SCOPE_CUSTOMER_ORG` now, and
+    a person may hold several. So a second workspace ADDS a membership instead
+    of being refused. The legacy column is still set when it is empty, because
+    hundreds of routes resolve the current tenant through it - but it is no
+    longer moved out from under an existing tenant, which is the transfer the
+    old 409 was protecting against and which is still not what "add" means.
     """
     u = db.query(User).filter(User.id == user_id).first()
     if u is None:
         raise HTTPException(status_code=404, detail="User not found.")
-    if u.organization_id and u.organization_id != org.id:
-        raise HTTPException(status_code=409,
-                            detail="That user already belongs to another customer organisation. "
-                                   "Customer tenancy is a single organisation per identity in this "
-                                   "architecture; move them deliberately or create a separate identity.")
     if role is not None and role not in CUSTOMER_ADMIN_ROLES:
         raise HTTPException(status_code=400,
                             detail="Role must be one of: %s." % ", ".join(CUSTOMER_ADMIN_ROLES))
 
     before = {"organization_id": u.organization_id, "role": u.role, "platform_id": u.platform_id}
-    u.organization_id = org.id
-    if role:
+
+    from app.services import workspace_access
+    membership = workspace_access.grant_workspace_membership(
+        db, user_id=u.id, organization_id=org.id,
+        role=(role or workspace_access.workspace_role_for_user_row(u)),
+        granted_by=actor.id, commit=False,
+    )
+    workspace_access.invalidate_workspace_memberships(u)
+
+    # THE LEGACY COLUMN IS SEEDED, NEVER REASSIGNED.
+    #
+    # Empty means this is their first workspace and every route that still reads
+    # the column needs an answer. Already pointing somewhere means they work in
+    # that tenant today, and quietly repointing it would move them out of it -
+    # the exact harm the old 409 existed to prevent. Their new workspace is
+    # reachable through the switcher, which resolves from membership.
+    if not u.organization_id:
+        u.organization_id = org.id
+    if role and u.organization_id == org.id:
         u.role = role
     if not u.platform_id:
         u.platform_id = org.platform_id
@@ -200,8 +231,10 @@ def add_existing_user(
         target_type="user", target_id=u.id,
         platform_id=org.platform_id,
         before=before,
-        after={"organization_id": u.organization_id, "role": u.role},
-        note="Existing identity added to customer organisation by explicit id.",
+        after={"organization_id": u.organization_id, "role": u.role,
+               "workspace_membership_id": membership.id,
+               "workspace_role": membership.role},
+        note="Existing identity granted a customer workspace membership by explicit id.",
         commit=False,
     )
     db.commit()
@@ -314,6 +347,28 @@ def accept(db: Session, raw_token: str, new_password: str) -> User:
     user.lockout_until = None
     row.status = INVITE_ACCEPTED
     row.accepted_at = now
+
+    # THE STEP THAT WAS MISSING, AND THE WHOLE REASON A PAID CUSTOMER COULD NOT
+    # GET IN.
+    #
+    # Everything above set a password. Nothing anywhere created the membership
+    # that says which workspace this person may enter, because until now
+    # customer tenancy was the single column `users.organization_id` and the
+    # comment in `add_existing_user` says so in as many words. The account
+    # existed, the password worked, and the workspace had no door.
+    #
+    # The activation row already carries both halves - `user_id` and
+    # `organization_id` - so nothing is inferred here and no email is matched.
+    # `grant_workspace_membership` looks the row up by (user, scope, org)
+    # WITHOUT the role, so opening the same valid link twice updates one
+    # membership rather than creating a second one in the same workspace.
+    from app.services import workspace_access
+    workspace_access.grant_workspace_membership(
+        db, user_id=user.id, organization_id=row.organization_id,
+        role=workspace_access.workspace_role_for_user_row(user),
+        commit=False,
+    )
+    workspace_access.invalidate_workspace_memberships(user)
 
     log_action(
         db, row.organization_id, user.id,

@@ -152,7 +152,9 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     return user
 
 
-def require_tenant_user(user: User = Depends(get_current_user)) -> User:
+def require_tenant_user(request: Request = None,
+                        user: User = Depends(get_current_user),
+                        db: Session = Depends(get_db)) -> User:
     """This route belongs to a CUSTOMER TENANT. The caller must be inside one.
 
     A brand-sales user has `organization_id = NULL` as a positive architectural
@@ -171,15 +173,43 @@ def require_tenant_user(user: User = Depends(get_current_user)) -> User:
     So the answer is now a refusal rather than an empty list. god_admin passes:
     the owner legitimately operates inside tenants, and `get_current_user`
     already resolves an org for them via X-Org-Override.
+
+    A SECOND WAY OF BEING INSIDE A TENANT — added with the context switcher.
+
+    "NULL organization_id means brand sales" was true while customer tenancy WAS
+    that column. It is not any more: a person can hold customer_org memberships
+    and no column value at all, which is precisely D'Angelo - a BookaBoost sales
+    manager who also administers We Epic Game. Judging him by the column alone
+    refuses him from the workspace he was deliberately given, and the refusal
+    would read as the old, correct message while being the wrong answer.
+
+    So the column is checked first because it is free and covers nearly every
+    request, and a caller without one is asked the real question: did you SELECT
+    a workspace you hold a membership in? `selected_workspace_id` re-derives that
+    from the database and returns nothing for an id the caller merely asserted,
+    so this widens access to exactly the people an operator already added to a
+    workspace and to nobody else. A brand salesperson with no customer
+    membership still gets the same refusal, in the same words.
     """
     if user.role == "god_admin":
         return user
-    if getattr(user, "organization_id", None) is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This is a customer workspace route. Your account belongs to a "
-                   "brand sales organization, not a customer organization.")
-    return user
+    if getattr(user, "organization_id", None) is not None:
+        return user
+
+    selected = None
+    if request is not None and db is not None:
+        try:
+            from app.services import workspace_access
+            selected = workspace_access.selected_workspace_id(user, db, request)
+        except Exception:
+            selected = None
+    if selected:
+        return user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This is a customer workspace route. Your account belongs to a "
+               "brand sales organization, not a customer organization.")
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

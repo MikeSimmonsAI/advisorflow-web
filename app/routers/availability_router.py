@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, AdvisorAvailabilityBlock, BlockType, BookingLink, Lead
+from app.services import lead_scope
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -264,7 +265,7 @@ class RecurringBlockRequest(BaseModel):
 
 def _resolve_advisor(db: Session, current_user: User, advisor_id: Optional[str]) -> User:
     """Return the target advisor. Admins may pass advisor_id to manage another advisor."""
-    if advisor_id and current_user.role in ("org_admin", "super_admin", "god_admin"):
+    if advisor_id and lead_scope.is_manager_here(current_user, db):
         target = db.query(User).filter(
             User.id == advisor_id,
             User.organization_id == current_user.organization_id,

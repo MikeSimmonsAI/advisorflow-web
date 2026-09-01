@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import lead_scope
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -108,7 +109,7 @@ def get_objection_reply(
     reply = (
         db.query(Reply)
         .join(Lead, Reply.lead_id == Lead.id)
-        .filter(Reply.id == reply_id, Lead.organization_id == current_user.organization_id)
+        .filter(Reply.id == reply_id, Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
         .first()
     )
     if not reply:

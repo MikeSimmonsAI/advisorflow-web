@@ -192,6 +192,13 @@ if ($SkipSmoke) {
     # check cannot mean "the table was empty".
     python scripts\probe_advisor_isolation.py 2>&1 | Select-String "LEAK|BROKE|checks passed|HOLDS" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "ADVISOR ISOLATION CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 30 - PLATFORM / WORKSPACE ACCESS. Membership decides who may ENTER a
+    # customer workspace; P0 still decides what they see once inside. Covers the
+    # platform-only, workspace-only, dual-access and multi-workspace users, a
+    # revoked membership losing both the button and the route, the legacy-column
+    # backfill, and a clean customer activation end to end.
+    python scripts\probe_workspace_context.py 2>&1 | Select-String "OPEN |BROKE|checks passed|MEMBERSHIP DECIDES" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "WORKSPACE ACCESS CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

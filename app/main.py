@@ -178,6 +178,43 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
 # ── Security headers middleware ───────────────────────────────────────────────
 # Injected on every response. These headers harden the app against clickjacking,
 # MIME sniffing, info leakage, and cross-origin data access.
+class RequestContextMiddleware:
+    """Publish the current request so lead_scope can read the workspace header.
+
+    P0 put every lead query behind one function precisely so there would be one
+    place to change. The context switcher adds one input to that function -
+    which workspace this request selected - and threading it through the
+    forty-five call sites would have thrown that property away, with the site
+    that forgot failing silently rather than loudly.
+
+    RAW ASGI, NOT BaseHTTPMiddleware, AND THAT IS THE WHOLE POINT.
+    BaseHTTPMiddleware runs the rest of the app in a SEPARATE anyio task, and a
+    ContextVar set in its `dispatch` does not reach the endpoint. Written that
+    way first, this silently did nothing: the list route worked because it
+    passes `request=` explicitly, and every by-id route fell back to the legacy
+    tenant and 404'd on the caller's own lead. A plain ASGI class runs the
+    downstream app in THIS task, so the value is there for the endpoint and for
+    the threadpool call that anyio spawns for a sync route.
+
+    It carries no authority: the header it exposes is a REQUEST for a workspace,
+    and workspace_access refuses it unless an active membership backs it.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        from app.services import request_context
+        token = request_context.set_current_request(Request(scope, receive=receive))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            request_context.reset_current_request(token)
+
+
+# ── Security headers middleware ───────────────────────────────────────────────
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -204,6 +241,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+# Added LAST, so Starlette runs it FIRST - the request must be published before
+# any route or dependency that reads the selected workspace runs.
+app.add_middleware(RequestContextMiddleware)
 
 ALLOWED_ORIGINS = [
     "https://advisorflow-frontend.onrender.com",
@@ -653,6 +693,34 @@ async def on_startup():
     # 2. Safe column/enum migrations (idempotent — no-ops if already applied)
     from app.auto_migrate import run_auto_migrations
     run_auto_migrations(engine)
+
+    # 2a. WORKSPACE MEMBERSHIP BACKFILL — the migration off the single column.
+    #
+    #     Customer tenancy was `users.organization_id` and nothing else, so
+    #     `Membership` with SCOPE_CUSTOMER_ORG existed and granted nothing. It
+    #     is the authority for workspace ENTRY now, which means every existing
+    #     customer user needs the row their column already implies before the
+    #     switcher can be right about them.
+    #
+    #     Writes only what the column says: no inference, no widening, nobody
+    #     reaches anything they could not reach before it ran. Idempotent, so it
+    #     is a no-op on every restart after the first, and it runs again per
+    #     person at login so a user created between deploys is never stranded.
+    try:
+        from app.deps import SessionLocal as _SL
+        from app.services import workspace_access as _wa
+        _db = _SL()
+        try:
+            _made = _wa.backfill_from_legacy_column(_db)
+            if _made:
+                import logging as _logging
+                _logging.getLogger(__name__).info(
+                    "workspace backfill: created %d customer_org membership(s)", _made)
+        finally:
+            _db.close()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("workspace membership backfill note: %s", e)
 
     # 2b. System config table — stores god_admin-controlled global settings
     #     (role permission overrides, feature flags, etc.)

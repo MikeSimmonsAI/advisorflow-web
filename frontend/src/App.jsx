@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
@@ -90,7 +90,8 @@ import Salespeople from './pages/sales/Salespeople'
 import Prospects from './pages/sales/Prospects'
 import GodUsers from './pages/god/GodUsers'
 import Workspaces from './pages/god/Workspaces'
-import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext } from './api/client'
+import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
+         api, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from './api/client'
 import { exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
@@ -174,10 +175,144 @@ function HomeRedirect() {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
+  // `!organization_id` was the whole test, and it was a guess dressed as a
+  // rule: a NULL column meant brand sales because tenancy WAS that column.
+  // A person can now hold customer_org memberships with no column value at
+  // all, so this asks the server which contexts they actually have. While the
+  // answer is in flight the old assumption stands, so nothing regresses for
+  // the users it was already right about.
+  const ctx = useAuthorizedContexts()
+  if (ctx) {
+    const def = ctx.default_context || {}
+    if (def.type === 'workspace' && def.organization_id) {
+      return <Navigate to={'/workspace/' + def.organization_id} replace />
+    }
+    if (def.type === 'workspace_selector') {
+      return <Navigate to="/workspaces" replace />
+    }
+    if (ctx.has_back_office && ctx.workspace_count === 0 &&
+        user?.role !== 'god_admin') {
+      return <Navigate to="/sales" replace />
+    }
+    return <ProtectedRoute><Overview /></ProtectedRoute>
+  }
   if (user && user.role !== 'god_admin' && !user.organization_id) {
     return <Navigate to="/sales" replace />
   }
   return <ProtectedRoute><Overview /></ProtectedRoute>
+}
+
+/**
+ * The authorized-context list, fetched once and shared.
+ *
+ * The browser NEVER derives a context. Every consumer of this reads the
+ * server's answer, and a failure yields null so callers fall back to their
+ * pre-existing behaviour rather than inventing access.
+ */
+function useAuthorizedContexts() {
+  const [ctx, setCtx] = useState(null)
+  useEffect(() => {
+    let live = true
+    fetchMyContexts()
+      .then(d => { if (live) setCtx(d) })
+      .catch(() => { if (live) setCtx(null) })
+    return () => { live = false }
+  }, [])
+  return ctx
+}
+
+/**
+ * WorkspaceRoute — entering one customer workspace.
+ *
+ * The id in the URL is checked SERVER-SIDE before anything renders. A person
+ * who types another customer's id gets the same refusal as a person who never
+ * saw a button, which is the only arrangement where hiding the button is
+ * cosmetic rather than load-bearing.
+ */
+function WorkspaceRoute() {
+  const { organizationId } = useParams()
+  const [state, setState] = useState({ status: 'checking' })
+
+  useEffect(() => {
+    let live = true
+    // Stored BEFORE the check so the request carries the header it is asking
+    // about, and so the tenant screens behind it resolve to the right
+    // workspace on their first load rather than the previous one.
+    setWorkspaceContext(organizationId)
+    api.get('/auth/workspace/' + organizationId)
+      .then(d => { if (live) setState({ status: 'ok', workspace: d }) })
+      .catch(err => {
+        if (!live) return
+        // A refused workspace must not leave its id selected - every later
+        // request would keep asking for a door that is closed.
+        clearWorkspaceContext()
+        setState({ status: 'denied', message: err?.message || '' })
+      })
+    return () => { live = false }
+  }, [organizationId])
+
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  if (state.status === 'checking') return null
+  if (state.status === 'denied') {
+    return (
+      <Layout>
+        <Unauthorized
+          required="workspace membership"
+          role={getCurrentUser()?.role}
+          path={typeof window !== 'undefined' ? window.location.pathname : ''}
+        />
+      </Layout>
+    )
+  }
+  return <ProtectedRoute><ContextBanner /><Overview /></ProtectedRoute>
+}
+
+/**
+ * WorkspaceSelector — for somebody who holds several workspaces and no back
+ * office, so there is no header to hang a switcher on yet.
+ */
+function WorkspaceSelector() {
+  const ctx = useAuthorizedContexts()
+  const navigate = useNavigate()
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (!ctx) return null
+  const workspaces = ctx.workspace_contexts || []
+  if (workspaces.length === 1) {
+    return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
+  }
+  return (
+    <div style={{ maxWidth: 520, margin: '12vh auto', padding: '0 24px' }}>
+      <h1 style={{ fontSize: 22, marginBottom: 4 }}>Choose a workspace</h1>
+      <p style={{ opacity: 0.65, marginTop: 0, fontSize: 14 }}>
+        You have access to more than one.
+      </p>
+      <div style={{ display: 'grid', gap: 10, marginTop: 24 }}>
+        {workspaces.map(w => (
+          <button
+            key={w.organization_id}
+            onClick={() => {
+              setWorkspaceContext(w.organization_id)
+              navigate('/workspace/' + w.organization_id)
+            }}
+            style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'baseline', gap: 12, padding: '14px 16px',
+              borderRadius: 10, border: '1px solid rgba(128,128,128,0.28)',
+              background: 'transparent', color: 'inherit', font: 'inherit',
+              fontSize: 15, textAlign: 'left', cursor: 'pointer',
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>{w.organization_name}</span>
+            <span style={{ fontSize: 11, textTransform: 'uppercase',
+                           letterSpacing: '0.04em', opacity: 0.55 }}>
+              {w.role}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function GodRoute({ children }) {
@@ -260,6 +395,12 @@ export default function App() {
       <DemoBanner />
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
+        {/* ── CUSTOMER WORKSPACE ENTRY ──
+            Membership answers "may this person enter"; P0's lead_scope still
+            answers "what may they see once inside". Two questions, two
+            mechanisms, deliberately not merged. */}
+        <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
+        <Route path="/workspaces" element={<WorkspaceSelector />} />
         <Route path="/onboarding" element={<Onboarding />} />
         {/* Public by necessity: the invited customer has no account yet. */}
         <Route path="/activate" element={<Activate />} />
