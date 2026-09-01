@@ -105,8 +105,8 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                     street_address=row.street_address, city=row.city,
                     state=row.state, zip_code=row.zip_code,
                     source_category=row.source_category or "import",
-                    tier=tier, track=TIER_TO_TRACK.get(tier, "needs_review"),
-                    status="new", created_by_id=committer_id,
+                    tier=tier, message_track=TIER_TO_TRACK.get(tier, "needs_review"),
+                    status="new",
                 )
                 db.add(lead)
                 db.flush()
