@@ -168,8 +168,16 @@ export default function CampaignBuilder() {
       try { setAdvisorName(JSON.parse(raw).full_name || '') } catch {}
     }
 
-    // Load import batches for the batch filter
-    api.get('/leads/import-batches').then(setImportBatches).catch(() => {})
+    // Load import batches for the batch filter.
+    //
+    // The server refuses this for a non-manager now (it was returning the whole
+    // organization's import inventory to every advisor). The .catch keeps the
+    // 403 from surfacing as a page error: an advisor simply gets no batch
+    // filter, which is the intended state. The empty list is the UI adapting to
+    // the refusal, not the refusal itself.
+    api.get('/leads/import-batches')
+      .then(setImportBatches)
+      .catch(() => setImportBatches([]))
   }, [])
 
   function loadHistory() {

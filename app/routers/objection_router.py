@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.deps import get_db, get_current_user
 from app.models.models import User
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -113,10 +114,7 @@ def get_objection_reply(
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
 
-    lead = db.query(Lead).filter(
-        Lead.id == reply.lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == reply.lead_id).first()
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "the lead"
     first_name = lead_name.split()[0] if lead_name else "there"
     lead_tier = lead.tier if lead and lead.tier else "unknown"

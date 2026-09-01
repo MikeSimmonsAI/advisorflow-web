@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin, require_tenant_user
 from app.services.platform_owner import require_tenant_context
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope,
+                                     assert_leads_in_scope, reject_ownership_fields)
 from app.models.models import Campaign, Lead, Message, Reply, User
 from app.routers.audit_log_router import log_action
 
@@ -677,10 +679,7 @@ def builder_send(
     db.refresh(campaign)
 
     # Fetch the leads
-    leads = db.query(Lead).filter(
-        Lead.id.in_(req.lead_ids),
-        Lead.organization_id == current_user.organization_id,
-    ).all()
+    leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
 
     sent = 0
     skipped = 0

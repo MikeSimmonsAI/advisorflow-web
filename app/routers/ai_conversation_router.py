@@ -19,6 +19,7 @@ from app.services.ai_conversation_service import (
     process_scheduled_touches,
 )
 from app.routers.audit_log_router import log_action
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/ai-conversation", tags=["ai-conversation"])
 
@@ -68,10 +69,7 @@ def start_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(
-        Lead.id == req.lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     result = start_ai_conversation(db, lead, current_user, channel=req.channel)
@@ -94,10 +92,7 @@ def bulk_start_conversations(
     if len(req.lead_ids) > 500:
         raise HTTPException(status_code=400, detail="Maximum 500 leads per bulk start request.")
 
-    leads = db.query(Lead).filter(
-        Lead.id.in_(req.lead_ids),
-        Lead.organization_id == current_user.organization_id,
-    ).all()
+    leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
 
     lead_map = {str(l.id): l for l in leads}
 
@@ -151,7 +146,7 @@ def pause_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     result = pause_ai_conversation(db, req.lead_id, current_user.id, req.reason or "Advisor paused")
@@ -165,7 +160,7 @@ def resume_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     result = resume_ai_conversation(db, req.lead_id, current_user.id)
@@ -179,7 +174,7 @@ def conversation_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return get_conversation_status(db, lead_id, current_user.id)
@@ -201,7 +196,7 @@ def preview_auto_reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     result = generate_auto_reply(db, lead, current_user, tone=req.tone)
@@ -214,7 +209,7 @@ def generate_batch_replies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    leads = db.query(Lead).filter(Lead.id.in_(req.lead_ids), Lead.organization_id == current_user.organization_id).all()
+    leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
     results = []
     sent = skipped = queued = errors = 0
     for lead in leads:
@@ -254,7 +249,7 @@ def send_approved_reply(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if not lead.phone:

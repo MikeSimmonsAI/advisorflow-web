@@ -2,7 +2,9 @@ import os
 import shutil
 import tempfile
 import json as _json
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, HTTPException
+from fastapi import (
+    APIRouter, Depends, UploadFile, File, Form, Query, HTTPException, Request,
+)
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from pydantic import BaseModel
@@ -15,6 +17,11 @@ from app.models.models import User, Lead, Reply, ReplyClassification, CadenceSta
 from app.services.import_service import import_leads_from_excel
 from app.services.dedup_service import normalize_phone
 from app.routers.audit_log_router import log_action
+# THE ONE AUTHORIZED LEAD SCOPE. Every list, count, search, export and
+# single-record fetch in this file goes through it, so the advisor boundary is
+# stated once instead of re-derived per route.
+from app.services import lead_scope
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -163,10 +170,36 @@ def confirm_upload(
 
 @router.get("/import-batches")
 def list_import_batches(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    """Returns all import batches for this org, newest first. Includes import_list_name for display."""
+    """Import batch inventory for this organization. ADMINS ONLY.
+
+    THIS ENDPOINT WAS THE REPORTED BREACH. It carried `require_tenant_user` and
+    grouped over the whole organization, so any plain advisor received the
+    complete import inventory: every source filename, every import list name,
+    the name of the person who imported each one, and a lead count per batch -
+    `Restland_Dallas.csv`, `garden memories.csv`, `All Active Leads (2012).xlsx`,
+    `google_contacts_restland_...`, `voice:Taffiney`. None of that is data an
+    advisor is authorized to see, and the filenames alone disclose the
+    organization's data sources, its acquisition history and its other staff.
+
+    An advisor has no use for batch inventory: their leads are the ones assigned
+    to them, and which file a lead arrived in is operational provenance for
+    whoever runs imports. So this is refused outright rather than filtered down
+    to a sanitized subset - a narrowed inventory is still an inventory, and it
+    would still leak filenames through whichever batches happen to contain one
+    of the advisor's leads.
+
+    The DELETE beside this endpoint was already admin-only. The read was not.
+    """
+    if not lead_scope.is_manager(current_user):
+        lead_scope.log_denial(current_user, "advisor requested org import inventory",
+                              None, request)
+        raise HTTPException(
+            status_code=403,
+            detail="Import batches are managed by an administrator.")
     rows = (
         db.query(
             Lead.source_file,
@@ -328,6 +361,7 @@ def delete_import_batch(
 
 @router.get("/")
 def list_leads(
+    request: Request,
     status_filter: Optional[str] = Query(None, alias="status"),
     tier: Optional[str] = Query(None),
     message_track: Optional[str] = Query(None),
@@ -376,13 +410,14 @@ def list_leads(
         "last_messaged_at",
     ]
 
-    # god_admin in "All Orgs" mode (no X-Org-Override) sees leads from every org
-    if getattr(current_user, '_god_all_orgs', False):
-        query = db.query(*COLS)
-    else:
-        query = db.query(*COLS).filter(Lead.organization_id == current_user.organization_id)
-    if not is_manager:
-        query = query.filter(Lead.assigned_to_id == current_user.id)
+    # THE ONE AUTHORIZED SCOPE. This route used to build its own: an inline
+    # `_god_all_orgs` branch, an organization filter, and `if not is_manager:
+    # filter(assigned_to_id)`. That was correct - and it was correct in
+    # ISOLATION, which is why the counts, the timeline, the AI hub, the email
+    # queue and eighty other routes each had their own version and most of them
+    # were wrong. Sharing the function is what stops the list and the tiles
+    # above it from ever disagreeing about who this advisor is.
+    query = authorized_lead_query(db, current_user, *COLS, request=request)
     if status_filter:
         query = query.filter(Lead.status == status_filter)
     if tier:
@@ -516,9 +551,7 @@ def set_lead_tier(
     from app.models.models import LeadTier
     from app.services.import_service import TIER_TO_TRACK
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id, Lead.organization_id == current_user.organization_id
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -901,9 +934,7 @@ def preview_messages_for_leads(
     from app.services.cadence_service import render_cadence_message
     from app.services.sms_service import BOOKING_BASE_URL
 
-    leads = db.query(Lead).filter(
-        Lead.id.in_(req.lead_ids), Lead.organization_id == current_user.organization_id
-    ).all()
+    leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
     found_by_id = {l.id: l for l in leads}
 
     results = []
@@ -978,9 +1009,7 @@ def confirm_send_batch(
     sent_ids = []
     skipped = []
     for item in req.items:
-        lead = db.query(Lead).filter(
-            Lead.id == item.lead_id, Lead.organization_id == current_user.organization_id
-        ).first()
+        lead = authorized_lead_query(db, current_user).filter(Lead.id == item.lead_id).first()
         if not lead:
             skipped.append({"lead_id": item.lead_id, "reason": "not_found"})
             continue
@@ -1023,10 +1052,7 @@ def keep_lead_separate(
     the same identifying data will not undo a human's decision. Materially
     changing the identifying data is a different lead and gets re-evaluated.
     """
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -1135,10 +1161,7 @@ def explain_duplicate(
                                             PLACEHOLDER_LAST_NAME)
     from app.models.models import ContactRegistry
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -1644,6 +1667,20 @@ def create_lead_manually(
 # ── Edit basic lead fields ────────────────────────────────────────────────────
 
 class LeadFieldUpdate(BaseModel):
+    # EXTRAS ARE ACCEPTED SO THEY CAN BE REFUSED.
+    #
+    # By default pydantic DISCARDS a field the model does not declare, which
+    # meant `{"assigned_to_id": "<other advisor>"}` was silently dropped: the
+    # lead did not move, but nothing was reported either. Silent success is the
+    # wrong answer to an attempt to reassign somebody else's lead - it looks
+    # identical to a normal edit in the logs, and it leaves the caller believing
+    # the field is simply not implemented yet rather than forbidden.
+    #
+    # Allowing extras puts them in `model_fields_set`, which is exactly what
+    # `reject_ownership_fields` inspects. Undeclared fields that are NOT
+    # ownership fields keep their old behaviour: ignored.
+    model_config = {"extra": "allow"}
+
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
@@ -1661,14 +1698,17 @@ class LeadFieldUpdate(BaseModel):
 def update_lead_fields(
     lead_id: str,
     payload: LeadFieldUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
     """Edit basic contact fields on a lead. Advisors can edit their own; admins can edit any."""
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    # OWNERSHIP IS NOT AN EDITABLE FIELD. Checked BEFORE the lead is loaded, so
+    # an advisor probing another advisor's id with a reassignment payload gets
+    # the same answer whether or not that lead exists.
+    reject_ownership_fields(current_user, payload, request)
+
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -1753,10 +1793,7 @@ def delete_lead(
     current_user: User = Depends(require_tenant_user),
 ):
     """Permanently delete a single lead. Advisors can delete their own leads; admins can delete any."""
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -1785,10 +1822,7 @@ def update_lead_type(
     current_user: User = Depends(require_tenant_user),
 ):
     """Set the lead type and/or AI direction override for a lead."""
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -1821,10 +1855,7 @@ def flag_lead(
     flag_type = None          → unflag, fully restore to all lists
     """
     # Advisors can only flag leads in their own org for security
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -2077,10 +2108,7 @@ def resend_booking_link(
     from app.services.email_service import send_email_via_provider
     from app.services.ai_conversation_service import _build_email_html
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.status == "dnc":

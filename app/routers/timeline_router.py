@@ -23,6 +23,7 @@ from app.models.models import (
     Lead, Message, Reply, BookingLink, LeadOutcome,
     CadenceState, EmailMessage, User, VoiceCall
 )
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/leads", tags=["timeline"])
 
@@ -45,10 +46,7 @@ def get_lead_timeline(
     Each event: { id, type, ts, label, body, meta }.
     """
     # Scope check — advisor sees only their org's leads
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(404, "Lead not found")
 

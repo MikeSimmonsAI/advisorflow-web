@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Base
 from app.routers.audit_log_router import log_action
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/auto-send", tags=["auto-send"])
 
@@ -320,10 +321,7 @@ def enqueue_item(
     current_user: User = Depends(get_current_user),
 ):
     """Add a message to the auto-send queue for advisor review."""
-    lead = db.query(Lead).filter(
-        Lead.id == req.lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 

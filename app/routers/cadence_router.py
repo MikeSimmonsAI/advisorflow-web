@@ -8,6 +8,7 @@ from app.models.models import User, Lead, CadenceState
 from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
 )
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/cadence", tags=["cadence"])
 
@@ -20,7 +21,7 @@ class CadenceControlRequest(BaseModel):
 
 @router.post("/start/{lead_id}")
 def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
-    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     state = start_cadence(db, lead)
@@ -31,9 +32,7 @@ def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user
 
 @router.post("/start-batch")
 def start_batch_cadence(lead_ids: list[str], db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
-    leads = db.query(Lead).filter(
-        Lead.id.in_(lead_ids), Lead.organization_id == current_user.organization_id
-    ).all()
+    leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(lead_ids)).all()
     started, skipped = 0, 0
     for lead in leads:
         state = start_cadence(db, lead)

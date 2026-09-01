@@ -202,13 +202,29 @@ export default function Leads() {
   const [batchesLoading, setBatchesLoading] = useState(false)
   const [deletingBatch, setDeletingBatch] = useState(null)   // source_file being deleted
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // batch object awaiting confirm
-  const canManageBatches = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  // god_admin included: the platform owner operating inside a customer is an
+  // administrator of it, and omitting them here would blank the batch panel in
+  // God Mode while the server happily served it.
+  const canManageBatches = currentUser?.role === 'org_admin'
+    || currentUser?.role === 'super_admin'
+    || currentUser?.role === 'god_admin'
   const [deletingLeads, setDeletingLeads] = useState(false)
   const [dedupeRunning, setDedupeRunning] = useState(false)
   const [dedupeResult, setDedupeResult] = useState(null)
 
   function loadImportBatches() {
-    // All advisors load batches (needed for batch filter dropdown)
+    // WAS: "All advisors load batches (needed for batch filter dropdown)".
+    //
+    // That comment described the breach. Every advisor fetched the whole
+    // organization's import inventory — source filenames, import list names,
+    // who imported each batch — to populate a filter dropdown. The server now
+    // refuses this for a non-manager, so this call would only produce a 403 in
+    // the console; not making it is the honest version.
+    //
+    // This is NOT the security fix. The server refuses regardless of what this
+    // file does; removing the request only stops the UI asking for something it
+    // is not entitled to.
+    if (!canManageBatches) { setImportBatches([]); return }
     setBatchesLoading(true)
     api.get('/leads/import-batches').then(setImportBatches).catch(() => {}).finally(() => setBatchesLoading(false))
   }

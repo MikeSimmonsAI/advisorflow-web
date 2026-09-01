@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User, Lead, EmailMessage
 from app.services.email_service import send_email_to_lead, send_email_batch
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/email", tags=["email"])
 
@@ -34,7 +35,7 @@ def send_single_email(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.status == 'dnc':
@@ -126,9 +127,8 @@ def send_single_email(
 
 @router.post("/send-batch")
 def send_email_batch_endpoint(req: EmailBatchRequest, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
-    leads = db.query(Lead).filter(
+    leads = authorized_lead_query(db, current_user).filter(
         Lead.id.in_(req.lead_ids),
-        Lead.organization_id == current_user.organization_id,
         Lead.contact_channel == "email_only",
         Lead.status != "dnc",
         Lead.manual_flag == None,  # never send to manually flagged leads
@@ -199,10 +199,7 @@ async def send_email_with_attachment(
     """
     from app.services.email_service import send_email_via_provider
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.status == 'dnc':
@@ -266,10 +263,7 @@ def draft_email(
     Respects relationship_type as the primary AI constraint.
     If sample_message is provided, AI uses it as the foundation.
     """
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 

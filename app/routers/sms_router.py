@@ -12,6 +12,7 @@ from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
 from app.routers.compose_router import acting_advisor
 from app.utils.twilio_webhook_guard import guard_inbound, guard_status_callback
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/sms", tags=["sms"])
 logger = logging.getLogger(__name__)
@@ -86,10 +87,7 @@ def _get_org_reply_or_404(db: Session, reply_id: str, current_user: User) -> Rep
 
 
 def _get_lead_for_current_org_or_404(db: Session, lead_id: str, current_user: User) -> Lead:
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
@@ -136,7 +134,7 @@ def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: U
     a number that is not their advisor's - which is exactly what per-advisor
     number assignment exists to prevent.
     """
-    lead = db.query(Lead).filter(Lead.id == req.lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     try:
@@ -161,10 +159,7 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
     a batch sent under an impersonating platform owner would have reported
     every lead as merely "skipped" - no error, no sends, nothing to explain it.
     """
-    leads = db.query(Lead).filter(
-        Lead.id.in_(req.lead_ids),
-        Lead.organization_id == current_user.organization_id,
-    ).all()
+    leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
 
     groups: dict[str, tuple[User, list[Lead]]] = {}
     for lead in leads:
@@ -575,10 +570,7 @@ def send_mms_endpoint(
 
     Same sender rule as `/send`: the lead's assigned advisor, not the caller.
     """
-    lead = db.query(Lead).filter(
-        Lead.id == req.lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 

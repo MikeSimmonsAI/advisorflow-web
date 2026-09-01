@@ -185,6 +185,13 @@ if ($SkipSmoke) {
     # anything.
     python scripts\probe_god_sales_workspace.py 2>&1 | Select-String "FAIL|checks passed|GOD REACHES" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "GOD SALES WORKSPACE CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 29 - P0 ADVISOR DATA ISOLATION. A plain advisor reaches no lead,
+    # batch, count, conversation, activity or organization record outside their
+    # own assignment - proved with two advisors in one org, a manager, a second
+    # tenant, and real child records on the other advisor's leads so a passing
+    # check cannot mean "the table was empty".
+    python scripts\probe_advisor_isolation.py 2>&1 | Select-String "LEAK|BROKE|checks passed|HOLDS" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "ADVISOR ISOLATION CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

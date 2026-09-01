@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user, require_tenant_user, load_org_in_scope
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Organization, CRMContact, CRMNote, Lead
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/crm-native", tags=["crm-native"])
 
@@ -347,7 +348,7 @@ def get_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     result = _contact_dict(contact)
     if contact.lead_id:
-        lead = db.query(Lead).filter(Lead.id == contact.lead_id, Lead.organization_id == current_user.organization_id).first()
+        lead = authorized_lead_query(db, current_user).filter(Lead.id == contact.lead_id).first()
         if lead:
             result["linked_lead"] = {"id": lead.id, "status": lead.status, "tier": lead.tier}
     return result
@@ -511,7 +512,7 @@ def create_from_lead(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_context),
 ):
-    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == current_user.organization_id).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     existing = db.query(CRMContact).filter(

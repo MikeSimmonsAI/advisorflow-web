@@ -24,6 +24,7 @@ from app.deps import get_db, get_current_user
 from app.models.models import (
     BookingFollowup, Lead, Organization, SurveyResponse, User, gen_uuid
 )
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/survey", tags=["survey"])
@@ -115,10 +116,7 @@ def get_survey_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     responses = (

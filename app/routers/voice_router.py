@@ -91,10 +91,7 @@ def call_readiness(
     """
     from app.services.voice_orchestrator import check_call_eligibility
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -147,10 +144,7 @@ def initiate_call(
     from app.services.voice_orchestrator import (check_call_eligibility,
                                                  start_file_check_call)
 
-    lead = db.query(Lead).filter(
-        Lead.id == lead_id,
-        Lead.organization_id == current_user.organization_id,
-    ).first()
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -622,6 +616,7 @@ async def handle_inbound_call(request: Request, db: Session = Depends(get_db)):
 from app.models.models import VoiceCallCampaign
 import json as _json
 import threading
+from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 
 class CreateCampaignRequest(BaseModel):
