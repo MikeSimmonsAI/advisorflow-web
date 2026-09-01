@@ -306,14 +306,36 @@ Write-Host "[5/6] Pushing to GitHub..."
 git add -f frontend/dist
 git add -A
 $staged2 = git diff --cached --name-only
+# THE MESSAGE GOES THROUGH A FILE, NOT THROUGH -m.
+#
+# PowerShell re-parses the arguments it hands to a native command, so a double
+# quote INSIDE $Message splits it into several arguments. git then read the
+# fragments as pathspecs and failed:
+#
+#   error: pathspec 'access' did not match any file(s) known to git
+#
+# Every deploy message here quotes something - an HTTP body, an error string, a
+# status word - so this failed silently on every deploy that had anything worth
+# saying, the commit never happened, and the work shipped under the step 1
+# auto-save message instead. -F takes the bytes as they are.
+$MSG_FILE = Join-Path $REPO ".deploy_commit_msg.txt"
+Set-Content -LiteralPath $MSG_FILE -Value $Message -Encoding UTF8 -NoNewline
 if ($staged2) {
-    git commit -m $Message | Out-Null
+    git commit -F $MSG_FILE | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "COMMIT FAILED - refusing to push a deploy with no record of what it is."
+        exit 1
+    }
 } elseif ($WIP_COMMITTED) {
     # Nothing new to stage because step 1 already committed it all. Give that
     # auto-save commit its real message rather than shipping "wip". Amending is
     # safe here and needs no force-push: this commit was created moments ago in
     # step 1 and has not been pushed yet - the push is the next line.
-    git commit --amend -m $Message | Out-Null
+    git commit --amend -F $MSG_FILE | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "REWORD FAILED - refusing to push a deploy with no record of what it is."
+        exit 1
+    }
     $SHIP_SHA = (git rev-parse HEAD).Trim()
     Write-Host "  Auto-save commit reworded with the deploy message"
 }

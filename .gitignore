@@ -93,3 +93,5 @@ app/routers/sales_router.optimized.bak
 .syntax_check.py
 .gates.log
 .verify_live.ps1
+
+.deploy_commit_msg.txt
