@@ -643,6 +643,170 @@ def main():
             r.text[:200])
 
     # ─────────────────────────────────────────────────────────────────────────
+    section("PRIORITY MEANS SOMETHING - reachability alone can never be HIGH")
+    # THE DEFECT THIS SECTION EXISTS FOR. The first production run scored an
+    # entire 94-lead book identically, every one of them landing exactly on the
+    # HIGH threshold, because contact details plus two conditions that are true
+    # of every freshly imported lead added up to exactly the boundary. A band
+    # every row reaches is a label, not a ranking.
+    class _Ctx:
+        """A context with no engagement history at all, for calibration maths."""
+        now = datetime.utcnow()
+        rules = []
+        organization_id = NW
+        contacted = set()
+        replied = set()
+        booked = set()
+        outcome_recorded = set()
+        suppressed_phones = set()
+
+    def _mk(**kw):
+        base = dict(id="calc", organization_id=NW, assigned_to_id="u-ada",
+                    first_name="A", last_name="B", email="a@b.test",
+                    phone="+12145550199", zip_code="75001",
+                    street_address="1 Main St", status="new",
+                    contact_channel="email_only")
+        base.update(kw)
+        return Lead(**base)
+
+    # The best a lead can do on reachability, tidiness and a batch stamp alone.
+    best_without_evidence = _mk(relationship_type="re_engagement")
+    score, factors = qualification._score(best_without_evidence,
+                                          qualification.CHANNEL_EMAIL, _Ctx())
+    codes = {f["code"] for f in factors}
+    allowed("a perfectly reachable, tidy, batch-warm lead with NO engagement "
+            "history scores below HIGH",
+            score < qualification.HIGH_THRESHOLD,
+            "scored %d, HIGH starts at %d, factors %s"
+            % (score, qualification.HIGH_THRESHOLD, sorted(codes)))
+    allowed("...and the documented ceiling is honest",
+            score <= qualification.MAX_SCORE_WITHOUT_EVIDENCE,
+            "scored %d, documented ceiling %d"
+            % (score, qualification.MAX_SCORE_WITHOUT_EVIDENCE))
+    allowed("...that ceiling is itself below HIGH",
+            qualification.MAX_SCORE_WITHOUT_EVIDENCE < qualification.HIGH_THRESHOLD)
+
+    # Reachability is the ENTRY FEE, not a distinction. Measured directly from
+    # the factors rather than from a whole-lead score, so the assertion is
+    # about the thing it names.
+    reach_only = _mk(first_name=None, last_name=None, zip_code=None,
+                     street_address=None, relationship_type="cold_lead")
+    reach_score, reach_factors = qualification._score(
+        reach_only, qualification.CHANNEL_EMAIL, _Ctx())
+    reach_pts = sum(f["points"] for f in reach_factors
+                    if f["code"] in ("has_valid_email", "has_valid_mobile",
+                                     "reachable_both"))
+    allowed("having an email and a phone is worth a small fraction of HIGH",
+            reach_pts <= qualification.HIGH_THRESHOLD / 3,
+            "reachability worth %d, HIGH is %d"
+            % (reach_pts, qualification.HIGH_THRESHOLD))
+
+    # And real evidence must actually reach HIGH, or the band is unreachable.
+    class _Engaged(_Ctx):
+        replied = {"calc"}
+        booked = {"calc"}
+    engaged = _mk(relationship_type="existing_customer")
+    eng_score, eng_factors = qualification._score(engaged,
+                                                  qualification.CHANNEL_EMAIL, _Engaged())
+    allowed("a lead who replied AND booked AND is an existing customer is HIGH",
+            qualification._band(eng_score) == "HIGH",
+            "scored %d -> %s" % (eng_score, qualification._band(eng_score)))
+    allowed("...and engagement outweighs the best evidence-free lead",
+            eng_score > score, "%d vs %d" % (eng_score, score))
+
+    # THE PROPERTY THAT MATTERS, swept rather than sampled: over every
+    # combination of the non-evidence conditions, nothing reaches HIGH.
+    import itertools
+    worst = 0
+    for names, zipc, addr, rel, year, hist in itertools.product(
+            (True, False), (True, False), (True, False),
+            ("cold_lead", "re_engagement", "warm_lead", None),
+            (None, 2026, 2024, 2012), ("none", "old", "year", "undated")):
+        kw = dict(relationship_type=rel, source_year=year)
+        if not names:
+            kw.update(first_name=None, last_name=None)
+        if not zipc:
+            kw["zip_code"] = None
+        if not addr:
+            kw["street_address"] = None
+        if hist == "old":
+            kw["last_contact_date"] = datetime.utcnow() - timedelta(days=365 * 5)
+        elif hist == "year":
+            kw["last_contact_date"] = datetime.utcnow() - timedelta(days=200)
+        elif hist == "undated":
+            kw["last_action_raw"] = "Called: LM"
+        s, _f = qualification._score(_mk(**kw), qualification.CHANNEL_EMAIL, _Ctx())
+        worst = max(worst, s)
+    allowed("swept every evidence-free combination: none reaches HIGH",
+            worst < qualification.HIGH_THRESHOLD,
+            "best evidence-free score was %d, HIGH is %d"
+            % (worst, qualification.HIGH_THRESHOLD))
+    allowed("...and the documented ceiling matches the swept maximum",
+            worst == qualification.MAX_SCORE_WITHOUT_EVIDENCE,
+            "swept %d, documented %d"
+            % (worst, qualification.MAX_SCORE_WITHOUT_EVIDENCE))
+
+    section("never_contacted uses COMPLETE history, not just our own tables")
+    # The second defect: a family the customer's previous CRM called five times
+    # in 2013 was scored "never contacted" because OUR tables held no message.
+    imported_history = _mk(
+        relationship_type="cold_lead",
+        last_contact_date=datetime.utcnow() - timedelta(days=365 * 4),
+        last_action_raw="Called: LM/No Answer")
+    has_hist, when, src = qualification.contact_history(imported_history, _Ctx())
+    allowed("an imported last-contact date counts as contact history",
+            has_hist is True and src == "imported history", "%s / %s" % (has_hist, src))
+    _s, hist_factors = qualification._score(imported_history,
+                                            qualification.CHANNEL_EMAIL, _Ctx())
+    hist_codes = {f["code"] for f in hist_factors}
+    refused("...so it is NOT scored as never contacted",
+            "never_contacted" not in hist_codes, sorted(hist_codes))
+    allowed("...it is scored as long since contact instead",
+            "long_since_contact" in hist_codes, sorted(hist_codes))
+
+    action_only = _mk(relationship_type="cold_lead",
+                      last_action_raw="Called: Left Voicemail")
+    has_hist2, _w, src2 = qualification.contact_history(action_only, _Ctx())
+    allowed("an imported last ACTION with no date still counts as history",
+            has_hist2 is True, "%s / %s" % (has_hist2, src2))
+
+    truly_new = _mk(relationship_type="cold_lead")
+    _s2, new_factors = qualification._score(truly_new,
+                                            qualification.CHANNEL_EMAIL, _Ctx())
+    allowed("a lead with no history anywhere IS scored never contacted",
+            "never_contacted" in {f["code"] for f in new_factors})
+
+    section("a batch-stamped relationship is named as one, and weighted as one")
+    # relationship_type is an IMPORT PARAMETER applied to every row in a file,
+    # so it cannot differentiate anybody within a batch. It must not be worth
+    # enough to carry a lead into HIGH on its own.
+    batch = _mk(relationship_type="re_engagement")
+    _s3, batch_factors = qualification._score(batch, qualification.CHANNEL_EMAIL, _Ctx())
+    batch_pts = [f["points"] for f in batch_factors if f["code"] == "batch_relationship"]
+    allowed("the batch relationship factor exists and is named honestly",
+            bool(batch_pts) and "Import batch" in qualification.REASONS["batch_relationship"],
+            qualification.REASONS.get("batch_relationship"))
+    allowed("...and is worth less than a real reply",
+            batch_pts and batch_pts[0] < 30, batch_pts)
+    refused("the old over-broad label is gone",
+            "warm_relationship" not in qualification.REASONS)
+
+    real_customer = _mk(relationship_type="existing_customer")
+    _s4, cust_factors = qualification._score(real_customer,
+                                             qualification.CHANNEL_EMAIL, _Ctx())
+    allowed("a genuine existing-customer relationship still scores properly",
+            "existing_relationship" in {f["code"] for f in cust_factors})
+
+    section("the score is still exactly the sum of its named factors")
+    for label, lead_obj, ctx_obj in (("no evidence", best_without_evidence, _Ctx()),
+                                     ("engaged", engaged, _Engaged()),
+                                     ("imported history", imported_history, _Ctx())):
+        s, fs = qualification._score(lead_obj, qualification.CHANNEL_EMAIL, ctx_obj)
+        allowed("%s: score == sum(factors)" % label,
+                s == sum(f["points"] for f in fs),
+                "%d vs %d" % (s, sum(f["points"] for f in fs)))
+
+    # ─────────────────────────────────────────────────────────────────────────
     section("THE GOD DIAGNOSTIC - god only, read only, no send")
     god = None
     db = SessionLocal()

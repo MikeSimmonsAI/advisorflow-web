@@ -114,11 +114,14 @@ def _one_run(db: Session, target: User, channel: str, label: str,
     try:
         resolved = lead_scope.active_workspace_org_id(target, db, req)
         role = lead_scope.effective_role(target, db, req)
-        total_authorized = lead_scope.authorized_lead_query(
-            db, target, Lead.id, request=req).count()
+        authorized = lead_scope.authorized_lead_query(db, target, request=req).all()
+        total_authorized = len(authorized)
+        # ALWAYS computed with per-lead detail. `sample_size` controls what is
+        # RETURNED, not what is measured - the priority audit below needs every
+        # decision, and a diagnostic that could not tell you whether a score
+        # varies is the one that let an entire book sit on one number.
         result = qualification.qualify_leads(
-            db, target, channel=channel, request=req,
-            include_leads=bool(sample_size))
+            db, target, channel=channel, request=req, include_leads=True)
     except Exception as exc:  # a failed scenario is reported, never swallowed
         return {"scenario": label, "workspace_header": workspace_id,
                 "error": "%s: %s" % (type(exc).__name__, str(exc)[:300])}
@@ -157,4 +160,87 @@ def _one_run(db: Session, target: User, channel: str, label: str,
             for d in result.get("leads", [])[:sample_size]
         ]
     run["counts_agree"] = (total_authorized == result["total_selected"])
+    run["priority_audit"] = _priority_audit(result.get("leads", []), authorized)
     return run
+
+
+def _priority_audit(decisions, leads) -> Dict[str, Any]:
+    """CAN THE PRIORITY ACTUALLY TELL THESE LEADS APART.
+
+    A band that every lead reaches carries no information, and the only way to
+    see that is to look at the SPREAD rather than the counts. An entire book
+    landing on one score is invisible in "94 HIGH" and obvious in
+    "distinct_scores: 1".
+
+    It also reports the raw inputs the priority factors are computed FROM, so a
+    factor that is true for everybody can be traced to the field that made it
+    true - which is how a value stamped on a whole import file gets caught
+    being read as a fact about a person.
+
+    Counts and distributions only. No names, no addresses, no lead ids.
+    """
+    scored = [d["score"] for d in decisions
+              if d.get("score") is not None]
+    audit: Dict[str, Any] = {
+        "scored_leads": len(scored),
+        "distinct_scores": len(set(scored)),
+        "min_score": min(scored) if scored else None,
+        "max_score": max(scored) if scored else None,
+        "spread": (max(scored) - min(scored)) if scored else None,
+    }
+    if scored:
+        ordered = sorted(scored)
+        audit["median_score"] = ordered[len(ordered) // 2]
+        hist: Dict[str, int] = {}
+        for s in scored:
+            key = "%d-%d" % ((s // 10) * 10, (s // 10) * 10 + 9)
+            hist[key] = hist.get(key, 0) + 1
+        audit["score_histogram"] = dict(sorted(hist.items(),
+                                               key=lambda kv: int(kv[0].split("-")[0])))
+        # THE SENTENCE THAT MATTERS. Stated by the diagnostic rather than left
+        # for somebody to infer from a histogram they may not read.
+        if audit["distinct_scores"] <= 1:
+            audit["verdict"] = ("Every scored lead has an IDENTICAL score. The "
+                                "priority band is carrying no information about "
+                                "this population - it is a label, not a ranking.")
+        elif audit["spread"] is not None and audit["spread"] < 10:
+            audit["verdict"] = ("Scores vary by less than 10 points. The priority "
+                                "band is barely distinguishing these leads.")
+        else:
+            audit["verdict"] = ("Scores vary meaningfully across this population.")
+
+    # ── the raw inputs, so a uniform factor can be traced to its field ──
+    def share(pred):
+        return sum(1 for l in leads if pred(l))
+
+    rel: Dict[str, int] = {}
+    years: Dict[str, int] = {}
+    for l in leads:
+        key = (getattr(l, "relationship_type", None) or "(none)")
+        rel[key] = rel.get(key, 0) + 1
+        y = getattr(l, "source_year", None)
+        years[str(y) if y else "(none)"] = years.get(str(y) if y else "(none)", 0) + 1
+
+    audit["inputs"] = {
+        "total_leads": len(leads),
+        # If this has ONE key covering every lead, the relationship factor
+        # cannot differentiate anybody - it came from the import, not the person.
+        "relationship_type_distribution": dict(
+            sorted(rel.items(), key=lambda kv: -kv[1])),
+        "source_year_distribution": dict(
+            sorted(years.items(), key=lambda kv: kv[0])),
+        "with_imported_last_contact_date": share(
+            lambda l: getattr(l, "last_contact_date", None) is not None),
+        "with_imported_last_action": share(
+            lambda l: bool((getattr(l, "last_action_raw", None) or "").strip())),
+        "with_imported_status_reason": share(
+            lambda l: bool((getattr(l, "status_reason_raw", None) or "").strip())),
+        "with_platform_last_messaged_at": share(
+            lambda l: getattr(l, "last_messaged_at", None) is not None),
+        "with_zip_code": share(lambda l: bool(getattr(l, "zip_code", None))),
+        "with_street_address": share(lambda l: bool(getattr(l, "street_address", None))),
+        "with_both_names": share(
+            lambda l: bool(getattr(l, "first_name", None))
+            and bool(getattr(l, "last_name", None))),
+    }
+    return audit

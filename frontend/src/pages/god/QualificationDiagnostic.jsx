@@ -172,6 +172,112 @@ function Reconciliation({ run }) {
 }
 
 /**
+ * CAN THE PRIORITY ACTUALLY TELL THESE LEADS APART.
+ *
+ * The counts above cannot answer that. "94 HIGH" looks like a finding and can
+ * equally mean the band is a constant - which is exactly what the first
+ * production run turned out to be. Spread is the number that tells them apart,
+ * so it is shown next to the counts rather than buried in the raw report, and
+ * the server states the verdict in a sentence rather than leaving it to be
+ * inferred from a histogram nobody reads.
+ */
+function PriorityAudit({ audit }) {
+  const degenerate = audit.distinct_scores !== null
+    && audit.distinct_scores !== undefined && audit.distinct_scores <= 1
+  const thin = !degenerate && audit.spread !== null
+    && audit.spread !== undefined && audit.spread < 10
+  const tone = degenerate ? 'bad' : thin ? 'warn' : 'good'
+  const inputs = audit.inputs || {}
+  const total = inputs.total_leads || 0
+
+  return (
+    <Panel title="Priority quality — does the band distinguish anything">
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Card label="Distinct scores" value={audit.distinct_scores} tone={tone} />
+        <Card label="Spread" value={audit.spread} tone={tone}
+              hint="highest minus lowest" />
+        <Card label="Lowest" value={audit.min_score} />
+        <Card label="Median" value={audit.median_score} />
+        <Card label="Highest" value={audit.max_score} />
+      </div>
+
+      {audit.verdict && (
+        <div role={degenerate ? 'alert' : undefined}
+             style={{ marginTop: 14, padding: '12px 16px', borderRadius: 10,
+                      fontSize: 13.5, fontWeight: degenerate ? 600 : 400,
+                      background: degenerate ? 'rgba(240,80,80,0.14)'
+                        : thin ? 'rgba(235,170,40,0.14)' : 'rgba(30,200,130,0.12)',
+                      color: degenerate ? '#d8434a' : thin ? '#b6830f' : '#1a9c6b',
+                      border: `1px solid ${degenerate ? 'rgba(240,80,80,0.5)'
+                        : 'rgba(128,128,128,0.25)'}` }}>
+          {audit.verdict}
+        </div>
+      )}
+
+      {audit.score_histogram && (
+        <div style={{ marginTop: 14 }}>
+          {Object.entries(audit.score_histogram).map(([band, n]) => (
+            <div key={band} style={{ display: 'flex', alignItems: 'center',
+                                     gap: 12, padding: '4px 0' }}>
+              <span style={{ minWidth: 70, fontFamily: MONO, fontSize: 12,
+                             opacity: 0.7 }}>{band}</span>
+              <span style={{ minWidth: 50, textAlign: 'right', fontWeight: 700,
+                             fontSize: 13,
+                             fontVariantNumeric: 'tabular-nums' }}>{n}</span>
+              <span style={{ flex: 1, height: 8, borderRadius: 4,
+                             background: 'rgba(128,128,128,0.16)' }}>
+                <span style={{ display: 'block', height: '100%', borderRadius: 4,
+                               width: audit.scored_leads
+                                 ? `${(n / audit.scored_leads) * 100}%` : 0,
+                               background: '#7a8ba0' }} />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* THE RAW INPUTS. A factor true for everybody is traced to the field
+          that made it true - which is how a value stamped on a whole import
+          file gets caught being read as a fact about a person. */}
+      <div style={{ marginTop: 18 }}>
+        <div style={{ fontSize: 11.5, letterSpacing: '0.06em',
+                      textTransform: 'uppercase', opacity: 0.5,
+                      marginBottom: 6 }}>
+          What the factors are computed from
+        </div>
+        {inputs.relationship_type_distribution && (
+          <Row label="relationship_type"
+               value={Object.entries(inputs.relationship_type_distribution)
+                 .map(([k, v]) => `${k}: ${v}`).join('   ')
+                 + (Object.keys(inputs.relationship_type_distribution).length === 1
+                    && total > 1
+                      ? '   ← one value for the whole book: an import setting, not a per-lead fact'
+                      : '')} />
+        )}
+        <Row label="Imported last contact date"
+             value={`${inputs.with_imported_last_contact_date} of ${total}`} />
+        <Row label="Imported last action"
+             value={`${inputs.with_imported_last_action} of ${total}`} />
+        <Row label="Imported status reason"
+             value={`${inputs.with_imported_status_reason} of ${total}`} />
+        <Row label="Messaged from this platform"
+             value={`${inputs.with_platform_last_messaged_at} of ${total}`} />
+        <Row label="Has both names"
+             value={`${inputs.with_both_names} of ${total}`} />
+        <Row label="Has ZIP" value={`${inputs.with_zip_code} of ${total}`} />
+        <Row label="Has street address"
+             value={`${inputs.with_street_address} of ${total}`} />
+        {inputs.source_year_distribution && (
+          <Row label="Source year"
+               value={Object.entries(inputs.source_year_distribution)
+                 .map(([k, v]) => `${k}: ${v}`).join('   ')} />
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+/**
  * One run: a workspace scenario, its counts and its reasons.
  *
  * A run that ERRORED renders the error. It does not render zeros, and it does
@@ -237,6 +343,8 @@ function Run({ run, subject, channel }) {
           Bands are the sum of the named factors below — no opaque score.
         </div>
       </Panel>
+
+      {run.priority_audit && <PriorityAudit audit={run.priority_audit} />}
 
       <Reasons title="Why leads qualified — priority factors"
                rows={run.priority_factors} tone="good" />

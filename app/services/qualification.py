@@ -98,11 +98,42 @@ MEDIUM = "MEDIUM"
 LOW = "LOW"
 PRIORITIES = (HIGH, MEDIUM, LOW)
 
-HIGH_THRESHOLD = 60
-MEDIUM_THRESHOLD = 30
+# ── the bands ───────────────────────────────────────────────────────────────
+#
+# CALIBRATED AGAINST THE MAXIMUM A LEAD CAN SCORE ON REACHABILITY ALONE, which
+# is 12 (valid email 4 + valid mobile 4 + both 4). The first version set HIGH at
+# 60 while contact details plus two default-true conditions were worth exactly
+# 60, so every reachable lead with no history landed exactly on the boundary and
+# an entire book scored HIGH with zero spread. A band that every row reaches is
+# not a priority, it is a label.
+#
+# HIGH now requires ENGAGEMENT EVIDENCE - a reply, a booking, a genuine customer
+# relationship, or contact within the last 90 days. Everything else a lead can
+# accumulate tops out at MAX_SCORE_WITHOUT_EVIDENCE below, which is deliberately
+# under this line. There is no combination of "we can reach them and their
+# record is tidy" that reaches HIGH, and a gate asserts it by constructing
+# exactly that lead and checking the number.
+HIGH_THRESHOLD = 45
+MEDIUM_THRESHOLD = 22
 
-# How long without contact before "long time since contact" earns points.
-STALE_CONTACT_DAYS = 180
+# THE CEILING WITHOUT EVIDENCE, ARITHMETIC RATHER THAN OPINION.
+#
+#   reachability      valid email 4 + valid mobile 4 + both 4        = 12
+#   contact history   the best non-evidence branch, never contacted  =  8
+#   relationship      batch-stamped assertion                        =  4
+#   record quality    no completed outcome 4 + complete 3 + full 2   =  9
+#   cohort            newest possible source year                    =  6
+#                                                                     ---
+#                                                                      39
+#
+# EVIDENCE is what a person did, or a relationship the organization holds:
+# replied (30), booked (22), existing customer (18), contacted in the last 90
+# days (14). HIGH sits above the ceiling so that no amount of reachability,
+# tidiness or import metadata can reach it without one of those.
+#
+# A gate constructs the best possible evidence-free lead and asserts it scores
+# below HIGH, so this comment cannot quietly stop being true.
+MAX_SCORE_WITHOUT_EVIDENCE = 39
 
 # A ceiling so one call cannot try to score an entire estate in one request.
 MAX_QUALIFY_ROWS = 50000
@@ -145,13 +176,25 @@ REASONS = {
     "has_valid_mobile": "Valid mobile number",
     "reachable_both": "Reachable by both email and phone",
     "existing_relationship": "Existing or former customer relationship",
-    "warm_relationship": "Prior interest or referral on record",
-    "never_contacted": "Never contacted",
+    # NAMED FOR WHAT IT ACTUALLY IS. This was "Prior interest or referral on
+    # record", which reads as a fact about the person. It is not: it is the
+    # relationship_type chosen once for a whole import file and stamped on
+    # every row in it. The label now says whose assertion it is, so nobody
+    # reading a reason list mistakes a batch setting for a warm lead.
+    "batch_relationship": "Import batch classified with this relationship",
+    "never_contacted": "Never contacted by anyone on record",
+    "recent_contact": "Contacted recently",
+    "contact_within_year": "Contacted within the last year",
     "long_since_contact": "No contact in a long time",
+    "prior_contact_undated": "Prior contact on record, no date",
+    "contacted_no_response": "Contacted before and never replied",
     "prior_response": "Has replied to us before",
     "prior_appointment": "Has booked an appointment before",
     "no_completed_outcome": "No completed outcome recorded",
     "complete_record": "Complete contact record",
+    "full_contact_record": "Address, email and phone all on file",
+    "recent_cohort": "Recent source cohort",
+    "aged_cohort": "Old source cohort",
     "org_rule_boost": "Matches an organization priority rule",
     "org_rule_demote": "Matches an organization de-prioritization rule",
 }
@@ -549,10 +592,75 @@ def _rules_for(ctx: QualificationContext, channel: str, effect: str) -> List[Any
     return out
 
 
+def contact_history(lead: Lead, ctx: QualificationContext):
+    """Everything known about whether this person has been contacted before.
+
+    THIS IS THE FIX FOR A REAL DEFECT. The first version asked only whether
+    OUR tables held a Message or an EmailMessage for the lead. Every lead
+    imported from a customer's previous CRM therefore looked "never contacted"
+    - including a family the funeral home had called five times in 2013, whose
+    own record carries `last_action_raw = "Called: LM/No Answer"` and a
+    `last_contact_date` to prove it. The import writes both columns; the scorer
+    ignored both, and then awarded points for the silence it had created.
+
+    "Never contacted" now means never contacted BY ANYONE ON RECORD: no
+    outbound from us, no imported contact date, and no imported last action.
+
+    Returns (has_history, most_recent, source).
+    """
+    # Our own outbound, either as a logged message or as the denormalized
+    # timestamp the send paths stamp. Both are checked: a lead can carry
+    # `last_messaged_at` from a path that did not write a Message row, and
+    # trusting only the join would call that lead never contacted.
+    platform_sent = getattr(lead, "last_messaged_at", None)
+    if lead.id in ctx.contacted or isinstance(platform_sent, datetime):
+        return True, platform_sent, "this platform"
+
+    imported_date = getattr(lead, "last_contact_date", None)
+    imported_action = (getattr(lead, "last_action_raw", None) or "").strip()
+    if isinstance(imported_date, datetime):
+        return True, imported_date, "imported history"
+    if imported_action:
+        # An action with no date is still evidence of contact. It just cannot
+        # say when, so it earns the smallest recency credit rather than the
+        # largest.
+        return True, None, "imported history"
+    return False, None, "none on record"
+
+
 def _score(lead: Lead, channel: str, ctx: QualificationContext):
     """Points and the reasons for them. No opaque model, no hidden weights -
     the factors this returns ARE the explanation, and they add up to the score
-    the band is derived from, so a person can check the arithmetic."""
+    the band is derived from, so a person can check the arithmetic.
+
+    ── EVIDENCE vs CONTEXT, and why the split matters ──────────────────────
+    An audit of the first production run found every lead in one advisor's
+    book scoring IDENTICALLY, and landing exactly on the HIGH threshold. The
+    band was not measuring anything; it was a constant with a number in front
+    of it. Two causes, both fixed here:
+
+    1. REACHABILITY WAS PRICED LIKE ENGAGEMENT. Having a valid email and a
+       valid phone was worth 25 of the 60 points needed for HIGH. But being
+       contactable is what READY already means - it is the entry fee, not a
+       distinction. It is now worth 12, and no combination of contact details
+       alone can reach HIGH. That is asserted by a gate.
+
+    2. A BATCH STAMP WAS READ AS PER-LEAD EVIDENCE. `relationship_type` is an
+       IMPORT PARAMETER: `import_leads(..., relationship_type=...)` applies one
+       value to every row in the file. So "prior interest or referral on
+       record" was worth 12 points to all of them because somebody chose it
+       once in a dropdown - it can never differentiate anybody within a batch,
+       because by construction every lead in that batch shares it.
+
+       It is not worthless - the organization is asserting something real about
+       where the list came from - so it is kept, at a weight that reflects that
+       it is an assertion about a FILE rather than an observation about a
+       PERSON, and its label now says so.
+
+    What DOES differentiate is per-lead observed fact: did they reply, did they
+    book, how long since anyone contacted them, how complete is their record,
+    how old is the cohort. Those carry the weight now.
+    """
     factors: List[Dict[str, Any]] = []
 
     def add(points: int, code: str, detail: str = ""):
@@ -560,44 +668,67 @@ def _score(lead: Lead, channel: str, ctx: QualificationContext):
         r["points"] = points
         factors.append(r)
 
+    # ── reachability: the entry fee, priced as one ──
     email_ok = email_validity(lead) == "ok"
     phone_ok = phone_validity(lead) == "ok"
-
     if email_ok:
-        add(10, "has_valid_email")
+        add(4, "has_valid_email")
     if phone_ok:
-        add(10, "has_valid_mobile")
+        add(4, "has_valid_mobile")
     if email_ok and phone_ok:
-        add(5, "reachable_both")
+        add(4, "reachable_both")
 
+    # ── engagement evidence: what this person actually did ──
+    if lead.id in ctx.replied:
+        add(30, "prior_response")
+    if lead.id in ctx.booked:
+        add(22, "prior_appointment")
+
+    # ── contact history and its recency ──
+    has_history, most_recent, source = contact_history(lead, ctx)
+    if not has_history:
+        add(8, "never_contacted")
+    else:
+        if isinstance(most_recent, datetime):
+            days = max(0, (ctx.now - most_recent).days)
+            if days <= 90:
+                # EVIDENCE: somebody is in an active thread with this family.
+                add(14, "recent_contact", "%d days ago, %s" % (days, source))
+            elif days <= 365:
+                add(6, "contact_within_year", "%d days ago, %s" % (days, source))
+            else:
+                add(3, "long_since_contact", "%d days ago, %s" % (days, source))
+        else:
+            add(2, "prior_contact_undated", source)
+        if lead.id not in ctx.replied:
+            add(2, "contacted_no_response")
+
+    # ── relationship, and how much of it is evidence ──
     rel = (getattr(lead, "relationship_type", None) or "").lower()
     if rel in ("existing_customer", "past_customer"):
-        add(20, "existing_relationship", rel.replace("_", " "))
+        add(18, "existing_relationship", rel.replace("_", " "))
     elif rel in ("warm_lead", "previous_prospect", "re_engagement"):
-        add(12, "warm_relationship", rel.replace("_", " "))
+        add(4, "batch_relationship", rel.replace("_", " "))
 
-    if lead.id in ctx.replied:
-        add(20, "prior_response")
-    if lead.id in ctx.booked:
-        add(15, "prior_appointment")
-
-    if lead.id not in ctx.contacted:
-        add(15, "never_contacted")
-    else:
-        last = getattr(lead, "last_messaged_at", None) or getattr(lead, "last_contact_date", None)
-        if isinstance(last, datetime):
-            days = (ctx.now - last).days
-            if days >= STALE_CONTACT_DAYS:
-                add(12, "long_since_contact", "%d days" % days)
-        else:
-            add(6, "long_since_contact", "no contact date on record")
-
+    # ── record quality and cohort age: real per-lead variation ──
     if lead.id not in ctx.outcome_recorded:
-        add(8, "no_completed_outcome")
-
+        add(4, "no_completed_outcome")
     if all([getattr(lead, "first_name", None), getattr(lead, "last_name", None),
             getattr(lead, "zip_code", None)]):
-        add(5, "complete_record")
+        add(3, "complete_record")
+    if getattr(lead, "street_address", None) and getattr(lead, "email", None) \
+            and getattr(lead, "phone", None):
+        add(2, "full_contact_record")
+
+    year = getattr(lead, "source_year", None)
+    if isinstance(year, int) and year > 1900:
+        age = ctx.now.year - year
+        if age <= 1:
+            add(6, "recent_cohort", "%d" % year)
+        elif age <= 3:
+            add(3, "recent_cohort", "%d" % year)
+        elif age >= 8:
+            add(-3, "aged_cohort", "%d" % year)
 
     for rule in _rules_for(ctx, channel, "boost"):
         if evaluate_rule(lead, rule, ctx.now):
