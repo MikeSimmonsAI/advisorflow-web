@@ -139,21 +139,22 @@ CAPABILITIES: Dict[str, Capability] = dict([
          why="Shared across every tenant by definition."),
 
     # Ã¢â€â‚¬Ã¢â€â‚¬ Lead Import Intelligence (feature capabilities Ã¢â‚¬â€ role-resolved) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    _cap("import_leads",
+    _cap("lead_import_stage",
          "Upload and process CSV / Excel / Google Contacts lead imports",
          requires_feature=None, delegable=True,
          why="Org admins auto-qualify by role; advisors or managers need an "
              "explicit grant to upload on the org's behalf."),
-    _cap("import_review",
+    _cap("lead_import_review",
          "Review staged import rows and set accept / merge / reject decisions",
          requires_feature=None, delegable=True,
-         why="Anyone with import_review may triage rows but cannot commit them."),
-    _cap("import_commit",
+         why="Anyone with lead_import_review may triage rows but cannot "
+             "commit them."),
+    _cap("lead_import_commit",
          "Commit reviewed import rows to live leads",
          requires_feature=None, delegable=True,
          why="Separate from review so a manager can review without having the "
              "power to write to the live database."),
-    _cap("import_admin",
+    _cap("lead_import_manage",
          "Archive and manage import batches",
          requires_feature=None, delegable=True,
          why="Administrative housekeeping Ã¢â‚¬â€ archive batches, purge old staging "
@@ -161,9 +162,37 @@ CAPABILITIES: Dict[str, Capability] = dict([
              "commit authority."),
 ])
 
-CAPABILITIES["import_stage"] = CAPABILITIES["import_leads"]
-CAPABILITIES["lead_import_stage"] = CAPABILITIES["import_leads"]
-CAPABILITIES["import_manage"] = CAPABILITIES["import_admin"]
+# ONE NAME PER PERMISSION.
+#
+# These four capabilities previously appeared in the registry under three
+# overlapping naming schemes at once - import_leads / import_stage /
+# lead_import_stage all resolved to the same Capability object, and
+# import_admin / import_manage to another. That is not a harmless alias:
+#
+#   * grants_for() reads UserCapabilityGrant.capability as a STRING, so a
+#     grant written under 'lead_import_stage' never satisfies a route that
+#     checks 'import_leads'. The God screen showed the grant as saved and
+#     every request the grantee made was still refused.
+#   * ALL_CAPABILITY_KEYS drives the delegation UI, so the same permission
+#     was offered three times, each row labelled identically, and only one
+#     of the three spellings actually did anything.
+#
+# The registry now holds exactly one key per permission. Python-level
+# aliases for the dependency FUNCTIONS still live in import_permissions.py -
+# those are import names, not authorization keys, and cost nothing.
+#
+# Grants already stored under a legacy spelling are renamed once at boot;
+# see LEGACY_CAPABILITY_KEY_RENAMES below and auto_migrate.py. Until that
+# runs, an unrenamed row is inert rather than dangerous: grants_for() drops
+# any key that is not in this registry, so the failure direction is denial.
+LEGACY_CAPABILITY_KEY_RENAMES = {
+    "import_leads":  "lead_import_stage",
+    "import_stage":  "lead_import_stage",
+    "import_review": "lead_import_review",
+    "import_commit": "lead_import_commit",
+    "import_admin":  "lead_import_manage",
+    "import_manage": "lead_import_manage",
+}
 
 ALL_CAPABILITY_KEYS = tuple(sorted(CAPABILITIES))
 DELEGABLE_KEYS = tuple(sorted(k for k, c in CAPABILITIES.items() if c.delegable))
@@ -486,7 +515,7 @@ def require_feature_capability(key: str):
         others       -> must hold an explicit UserCapabilityGrant
 
     An org_admin can import leads on day one without God having to delegate
-    'import_leads' to every customer org. That is the right default for a
+    'lead_import_stage' to every customer org. That is the right default for a
     product feature that all customers use, not for access to Twilio credentials
     that only some customers self-manage.
 

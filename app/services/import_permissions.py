@@ -18,18 +18,28 @@ Resolution for every dep below:
 
 from app.services.capabilities import require_feature_capability
 
-# Who may upload a file or kick off a Google Contacts pull.
-require_import_leads = require_feature_capability("import_leads")
-require_import_stage = require_import_leads  # alias for leads_router.py
+# ONE CAPABILITY KEY PER DEP.
+#
+# Each dep below names exactly one registered capability key, and every key it
+# names is the canonical one. The old spellings (import_leads, import_admin)
+# survive here only as PYTHON NAMES bound to the same dependency object, for
+# the routers that already import them - they are not separate keys and they
+# do not reach the grant table. Binding by assignment rather than by a second
+# require_feature_capability() call is deliberate: `is` identity is what makes
+# "these two names are the same permission" a fact rather than a comment.
 
-# Alias used by leads_router.py for the stage/upload gate.
-require_import_stage = require_import_leads
+# Who may upload a file or kick off a Google Contacts pull.
+require_import_stage = require_feature_capability("lead_import_stage")
 
 # Who may view staged rows and set accept / merge / reject.
-require_import_review = require_feature_capability("import_review")
+require_import_review = require_feature_capability("lead_import_review")
 
 # Who may commit a reviewed batch to live leads.
-require_import_commit = require_feature_capability("import_commit")
+require_import_commit = require_feature_capability("lead_import_commit")
 
 # Who may archive or otherwise manage import batches.
-require_import_admin = require_feature_capability("import_admin")
+require_import_manage = require_feature_capability("lead_import_manage")
+
+# Legacy import names, same objects.
+require_import_leads = require_import_stage
+require_import_admin = require_import_manage

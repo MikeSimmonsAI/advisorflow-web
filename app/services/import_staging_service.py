@@ -162,7 +162,24 @@ def _build_dedup_index(db: Session, org_id: str,
 
 def _classify_dedup(phone: Optional[str], ln_norm: Optional[str],
                     email: Optional[str], idx: dict) -> tuple:
-    """Classify this row against the pre-built dedup index."""
+    """Classify this row against the pre-built dedup index.
+
+    CONFIDENCE IS GRADED BY THE STRENGTH OF THE IDENTIFIER THAT MATCHED, not
+    merely by whether something matched.
+
+        phone + last name  -> MATCHED_EXISTING / HIGH
+        email + last name  -> MATCHED_EXISTING / LOW
+        identifier only    -> POSSIBLE_DUPLICATE / MEDIUM
+        nothing            -> NEW / NONE
+
+    Email and phone are not equally strong evidence of the same PERSON. A
+    phone number is normally held by one individual; an email address is
+    routinely shared by a household, and in this market the household shares
+    the last name too - so "email + last name" is exactly the shape a husband
+    and wife produce, and reporting it as HIGH is how one family member's
+    record gets merged onto another's. It is still a match and still links to
+    the lead; it is reported as the weak match it is so the reviewer looks.
+    """
     candidates = []
     if phone and phone in idx["phone"]:
         for r in idx["phone"][phone]:
@@ -172,7 +189,7 @@ def _classify_dedup(phone: Optional[str], ln_norm: Optional[str],
     if email and email in idx["email"]:
         for r in idx["email"][email]:
             if ln_norm and _norm_name(r.last_name) == ln_norm:
-                return r, ImportDuplicateStatus.MATCHED_EXISTING, ImportMatchConfidence.HIGH
+                return r, ImportDuplicateStatus.MATCHED_EXISTING, ImportMatchConfidence.LOW
         candidates.extend(idx["email"][email])
     if candidates:
         return candidates[0], ImportDuplicateStatus.POSSIBLE_DUPLICATE, ImportMatchConfidence.MEDIUM

@@ -1157,6 +1157,38 @@ def run_auto_migrations(engine) -> None:
         conn.rollback()
         print(f"[auto_migrate] proposal_files table note: {e}")
 
+    # ── Import capability key rename (idempotent) ─────────────────────────────
+    #
+    # The four Lead Import Intelligence capabilities were registered under
+    # three overlapping spellings. The registry now holds one key per
+    # permission (see capabilities.LEGACY_CAPABILITY_KEY_RENAMES). Grants are
+    # stored as key STRINGS, so a grant row still carrying a legacy spelling
+    # matches nothing and its holder silently loses import access. This
+    # renames those rows 1:1 - same permission, current spelling. It never
+    # creates a grant, never widens one, and never touches a row whose user
+    # already holds the canonical key.
+    try:
+        from app.services.capabilities import LEGACY_CAPABILITY_KEY_RENAMES
+        with engine.connect() as conn:
+            renamed = 0
+            for old_key, new_key in LEGACY_CAPABILITY_KEY_RENAMES.items():
+                res = conn.execute(text("""
+                    UPDATE user_capability_grants g
+                       SET capability = :new_key
+                     WHERE g.capability = :old_key
+                       AND NOT EXISTS (
+                           SELECT 1 FROM user_capability_grants d
+                            WHERE d.user_id = g.user_id
+                              AND d.organization_id = g.organization_id
+                              AND d.capability = :new_key)
+                """), {"old_key": old_key, "new_key": new_key})
+                renamed += res.rowcount or 0
+            conn.commit()
+            if renamed:
+                print(f"[auto_migrate] import capability grants renamed: {renamed}")
+    except Exception as e:
+        print(f"[auto_migrate] import capability key rename note: {e}")
+
     # ONE-TIME ORG RENAME: Restland → Greenland (idempotent — no-op if already done)
     try:
         with engine.connect() as conn:
