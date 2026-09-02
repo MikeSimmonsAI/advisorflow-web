@@ -229,6 +229,15 @@ def split_full_name(full: str) -> tuple[str, str]:
     return parts[0], parts[-1]
 
 
+def _canonical_polarity(col: str) -> str | None:
+    """The polarity permission_values declares for this column, if it knows it."""
+    for cols in pv.COLUMN_TABLE.values():
+        for name, polarity in cols:
+            if name == col:
+                return polarity
+    return None
+
+
 def _permission(low: dict, key: str) -> bool | None:
     """
     Resolve one channel's permission from every column that speaks to it.
@@ -240,7 +249,14 @@ def _permission(low: dict, key: str) -> bool | None:
     for col, polarity in PERMISSION_FIELDS[key]:
         if col not in low:
             continue
-        val = parse_permission(low[col], polarity)
+        # POLARITY HAS ONE OWNER TOO. permission_values.COLUMN_TABLE is the
+        # authority on how a bare boolean reads in a given column - including
+        # the "deny_ambiguous" columns whose cells are self-descriptive - so it
+        # is consulted first and this module's local table is only a fallback
+        # for a column the canonical table has not been taught yet.
+        canonical = _canonical_polarity(col)
+        val = (pv.to_bool(pv.interpret_cell_ex(low[col], canonical)[0])
+               if canonical else parse_permission(low[col], polarity))
         if val is None:
             continue
         if val is False:

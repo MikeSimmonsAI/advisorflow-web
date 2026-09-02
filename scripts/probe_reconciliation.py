@@ -76,13 +76,25 @@ def _strip_py(path: str) -> str:
 
 def apply_revert(name: str) -> None:
     if name == "R1_polarity_ignores_value":
-        def bad(v, polarity):
-            b = sa.parse_bool(v)
-            if b is None:
-                s = str(v).strip().lower()
-                b = s.startswith("allow")
-            return b if polarity == "positive" else (not b)
-        sa.parse_permission = bad
+        # PATCHES THE REAL INTERPRETER, NOT THE OLD ENTRY POINT.
+        #
+        # `_permission` now resolves through permission_values for every column
+        # the canonical table knows, so replacing `sa.parse_permission` alone
+        # changed nothing and this revert was passing vacuously. It has to break
+        # the function that actually decides.
+        from app.services import permission_values as _pv
+
+        def bad(value, polarity):
+            s = _pv.normalize_cell(value)
+            if s in _pv.BLANK_VALUES:
+                return _pv.UNKNOWN, False
+            truthy = s in _pv.BOOL_TRUE or s.startswith("allow")
+            grant = polarity == "grant"
+            return ((_pv.ALLOW if truthy else _pv.DENY) if grant
+                    else (_pv.DENY if truthy else _pv.ALLOW)), False
+        _pv.interpret_cell_ex = bad
+        sa.parse_permission = lambda v, polarity: _pv.to_bool(
+            bad(v, "grant" if polarity == "positive" else "deny")[0])
     elif name == "R2_compliance_can_loosen":
         def bad(t, s):
             out = {"channels": {}, "findings": [], "discovered_restriction": False,
@@ -141,10 +153,18 @@ def s1_polarity():
                           "Do not allow Bulk Emails": "Do Not Allow"})
     check("bulk 'Do Not Allow' is denial", r.allow_bulk_email is False,
           f"got {r.allow_bulk_email}")
-    # A bare yes/no in the same column reads through the column's polarity.
+    # A BARE yes/no in THIS column is genuinely undecidable, because the same
+    # column carries self-descriptive "Allow" / "Do Not Allow" on other rows of
+    # the same export. Both directions resolve to unknown and go to review -
+    # an ambiguous staged row is held and never auto-committed, so nothing is
+    # sent either way and a person sees the cell instead of inheriting a guess.
+    # (A plainly-negative column such as "Do not call" still denies on a bare
+    # true; that case is asserted in the import compliance gate.)
     r = sa.row_to_record({"Full Name": "A B", "Email": "a@b.com",
                           "Do not allow Bulk Emails": "Yes"})
-    check("bulk 'Yes' inverts on a do-not column", r.allow_bulk_email is False,
+    check("bulk 'Yes' never grants", r.allow_bulk_email is not True,
+          f"got {r.allow_bulk_email}")
+    check("bulk 'Yes' is unknown, not a guess", r.allow_bulk_email is None,
           f"got {r.allow_bulk_email}")
     # UNIFIED RULE (permission_values.interpret_cell_ex): a bare boolean in a
     # negatively-named column is read in the RESTRICTIVE direction ONLY.

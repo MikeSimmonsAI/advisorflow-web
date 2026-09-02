@@ -436,8 +436,28 @@ def s6_ambiguity():
     check("'No' in a do-not column is unknown", state == pv.UNKNOWN, state)
     check("'No' in a do-not column is flagged ambiguous", amb is True, str(amb))
     state, amb = pv.interpret_cell_ex("Yes", "deny")
-    check("'Yes' in a do-not column denies without review",
+    check("'Yes' in a plainly-negative column denies without review",
           state == pv.DENY and amb is False, f"{state} {amb}")
+    # AND THE THIRD POLARITY. A column whose cells are self-descriptive
+    # elsewhere in the same file ("Do not allow Bulk Emails" carrying
+    # "Allow" / "Do Not Allow") makes a BARE boolean genuinely undecidable.
+    # Both directions go to review: an ambiguous staged row is held and never
+    # auto-committed, so nothing is sent either way and a person sees the cell
+    # rather than inheriting a guess.
+    for v in ("Yes", "No", "1", "0", "true", "false"):
+        state, amb = pv.interpret_cell_ex(v, "deny_ambiguous")
+        check(f"bare {v!r} on a self-descriptive deny column is unknown",
+              state == pv.UNKNOWN, state)
+        check(f"bare {v!r} on a self-descriptive deny column raises review",
+              amb is True, str(amb))
+    check("the bulk-email column is declared deny_ambiguous",
+          pv.CANONICAL_KEYS["allow_bulk_emails"][1] == "deny_ambiguous",
+          str(pv.CANONICAL_KEYS["allow_bulk_emails"]))
+    # "Unknown" is a person recording that they could not tell. That is a
+    # review item, not an empty cell.
+    state, amb = pv.interpret_cell_ex("Unknown", "grant")
+    check("a cell reading 'Unknown' raises review",
+          state == pv.UNKNOWN and amb is True, f"{state} {amb}")
     for v in ("Allow", "Do Not Allow", "opted out"):
         for pol in ("grant", "deny"):
             s, a = pv.interpret_cell_ex(v, pol)

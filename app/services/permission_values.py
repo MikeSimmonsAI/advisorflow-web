@@ -88,8 +88,11 @@ BOOL_TRUE = frozenset({"yes", "y", "true", "t", "1", "1.0", "on", "checked", "x"
 BOOL_FALSE = frozenset({"no", "n", "false", "f", "0", "0.0", "off", "unchecked"})
 
 # Values that mean the cell is empty. Blank is UNKNOWN, never consent.
+# "unknown" is deliberately NOT here. An empty cell is silence. A cell that
+# says "Unknown" is somebody recording that they could not determine it - which
+# is a review item, not a blank, and the operational pipeline's own tests say so.
 BLANK_VALUES = frozenset({"", "null", "none", "n/a", "na", "nan", "-", "--",
-                          "unknown", "not set", "notset", "(blank)", "#n/a"})
+                          "not set", "notset", "(blank)", "#n/a"})
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +116,10 @@ COLUMN_TABLE: dict[str, tuple[tuple[str, str], ...]] = {
         ("unsubscribed", "deny"),
     ),
     BULK_EMAIL: (
-        ("do not allow bulk emails", "deny"),
+        # deny_ambiguous: this column's cells are self-descriptive elsewhere in
+        # the observed export, so a bare boolean here is genuinely undecidable
+        # and goes to review rather than being resolved by inversion.
+        ("do not allow bulk emails", "deny_ambiguous"),
         ("do not allow bulk email", "deny"),
         ("do not bulk email", "deny"),
         ("bulk email opt out", "deny"),
@@ -160,7 +166,7 @@ ALL_PERMISSION_COLUMNS = frozenset(
 # without changing its own signature, its column names, or its storage.
 CANONICAL_KEYS: dict[str, tuple[str, str]] = {
     "allow_emails":      (EMAIL,      "grant"),
-    "allow_bulk_emails": (BULK_EMAIL, "deny"),   # "Do not allow Bulk Emails"
+    "allow_bulk_emails": (BULK_EMAIL, "deny_ambiguous"),
     "allow_sms":         (SMS,        "grant"),
     "allow_calls":       (VOICE,      "grant"),
     # Aliases, so a caller using either vocabulary lands in the same place.
@@ -238,14 +244,25 @@ def interpret_cell_ex(value, polarity: str) -> tuple[str, bool]:
         return DENY, False
     if s in SELF_ALLOW:
         return ALLOW, False
-    if s in BOOL_TRUE:
+    if s in BOOL_TRUE or s in BOOL_FALSE:
+        truthy = s in BOOL_TRUE
         if polarity == "grant":
-            return ALLOW, False
-        return DENY, False             # restrictive reading of the inversion
-    if s in BOOL_FALSE:
-        if polarity == "grant":
-            return DENY, False
-        return UNKNOWN, True           # would grant on a guess - refuse
+            return (ALLOW if truthy else DENY), False
+        if polarity == "deny_ambiguous":
+            # THE COLUMN'S OWN CELLS ARE SELF-DESCRIPTIVE ELSEWHERE IN THIS FILE.
+            # "Do not allow Bulk Emails" carries "Allow" / "Do Not Allow" on most
+            # rows, so a bare "Yes" on one row is genuinely undecidable: it may
+            # mean "yes, do not allow" or a mis-mapped "yes, allowed".
+            #
+            # Resolving it either way BURIES that. Review does not: an ambiguous
+            # staged row is held and never auto-committed, so nothing is sent
+            # either way, and a person sees the cell instead of inheriting a
+            # guess. Safety is equal; information is not. Review wins.
+            return UNKNOWN, True
+        # A plainly-negative column ("Do not call", "DNC", "Opt out"). A bare
+        # true there denies, and losing that denial is the dangerous direction.
+        # A bare false would GRANT on an inversion, which is refused.
+        return (DENY, False) if truthy else (UNKNOWN, True)
     return UNKNOWN, True               # never seen it; a human decides
 
 
