@@ -415,9 +415,16 @@ def inherit_restrictions(db: Session, lead, organization_id: str) -> bool:
 
 
 def _is_call_restricted(allow_calls_raw: str) -> bool:
+    """
+    Legacy call-restriction predicate, now reading through the one interpreter.
+
+    It used to carry its own substring test for "do not allow" - a third copy
+    of the platform's opinion about what a permission cell says. It keeps its
+    name and its callers; only the vocabulary moved.
+    """
     if not allow_calls_raw:
         return False
-    return "do not allow" in allow_calls_raw.strip().lower()
+    return pv.interpret_cell(allow_calls_raw, "grant") == pv.DENY
 
 
 def parse_excel_file(file_path: str) -> list[dict]:

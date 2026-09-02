@@ -146,10 +146,19 @@ def s1_polarity():
                           "Do not allow Bulk Emails": "Yes"})
     check("bulk 'Yes' inverts on a do-not column", r.allow_bulk_email is False,
           f"got {r.allow_bulk_email}")
+    # UNIFIED RULE (permission_values.interpret_cell_ex): a bare boolean in a
+    # negatively-named column is read in the RESTRICTIVE direction ONLY.
+    # "Yes" -> deny (a plausible reading that denies is still a denial, take it).
+    # "No"  -> would GRANT marketing permission on a guess about what the column
+    #          meant, so it is refused: UNKNOWN, flagged for a human.
+    # This assertion used to expect True. It was the less safe of the two
+    # implementations that were consolidated, and it is not what should happen.
     r = sa.row_to_record({"Full Name": "A B", "Email": "a@b.com",
                           "Do not allow Bulk Emails": "No"})
-    check("bulk 'No' inverts on a do-not column", r.allow_bulk_email is True,
-          f"got {r.allow_bulk_email}")
+    check("bulk 'No' on a do-not column never grants",
+          r.allow_bulk_email is not True, f"got {r.allow_bulk_email}")
+    check("bulk 'No' on a do-not column is unknown, not a guess",
+          r.allow_bulk_email is None, f"got {r.allow_bulk_email}")
     # Silence is never permission.
     r = sa.row_to_record({"Full Name": "A B", "Email": "a@b.com",
                           "Allow Text Message?": ""})

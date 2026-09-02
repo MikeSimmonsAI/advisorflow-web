@@ -57,46 +57,49 @@ def _is_dnc(lead: Lead) -> bool:
 #   False = consent denied
 #   None  = unknown / ambiguous — MUST NOT be treated as consent
 
-_CONSENT_ALLOW = {"allow", "yes", "y", "1", "true", "opt-in", "opt in", "allowed", "permitted"}
-_CONSENT_DENY  = {"do not allow", "donotallow", "no", "n", "0", "false", "opt-out", "opt out",
-                  "denied", "not allowed", "block", "blocked"}
+# THE VALUE TABLES LIVE IN ONE MODULE NOW.
+#
+# These two sets were the second copy of the platform's opinion about what
+# "allow" and "do not allow" mean. Two copies is how the operational pipeline
+# and the historical layer end up disagreeing about a single family's consent.
+# They are gone; permission_values owns the vocabulary, and a gate asserts this
+# module declares no value table of its own.
+from app.services import permission_values as _pv  # noqa: E402
 
 def _norm_consent(raw: Optional[str], col_key: str) -> tuple[Optional[bool], bool]:
     """
     Normalize a consent field value.
 
+    DELEGATES to the single platform interpreter. Returns (value, ambiguous)
+    exactly as before, so every caller and every consent_* column is unchanged.
+
     For 'allow_bulk_emails' the column name carries negative polarity
     ("Do not allow Bulk Emails") but the VALUES are self-descriptive:
         "Allow"        → True  (bulk email IS allowed)
         "Do Not Allow" → False (bulk email is NOT allowed)
-    Boolean-like values (Yes/No/1/0/true/false) on this column are AMBIGUOUS
-    because the column name inverts their meaning → requires review.
+    A bare boolean on that column is read in the RESTRICTIVE direction only:
+    "Yes" → False (denied), "No" → None + review, because granting marketing
+    permission on a guess about what the column meant is the one outcome worth
+    refusing.
 
     For all other consent columns (positive polarity), standard mapping applies.
     """
-    if not raw:
-        return None, False  # unknown, no ambiguity flag needed
-    val = str(raw).strip().lower()
-    if not val or val in ("nan", "none", "null", "n/a", ""):
-        return None, False
-
-    if col_key == "allow_bulk_emails":
-        # Self-descriptive values take precedence over boolean interpretation
-        if val in ("allow", "allowed"):
-            return True, False
-        if val in ("do not allow", "donotallow", "do_not_allow"):
-            return False, False
-        # Boolean-like values are AMBIGUOUS on a negatively-named column
-        if val in ("yes", "y", "1", "true", "no", "n", "0", "false"):
-            return None, True  # ambiguous — needs review
-        return None, True  # unrecognized — ambiguous
-
-    # Positive-polarity columns
-    if val in _CONSENT_ALLOW:
-        return True, False
-    if val in _CONSENT_DENY:
-        return False, False
-    return None, True  # unrecognized — ambiguous, goes to review
+    # ONE INTERPRETER, PLATFORM-WIDE.
+    #
+    # This function keeps its name, its signature and its callers; what it no
+    # longer keeps is its own opinion about what a cell means. Interpretation
+    # lives in app/services/permission_values.py and NOWHERE ELSE, so the
+    # operational import pipeline and the historical source layer cannot drift
+    # into disagreeing about the word "Allow".
+    #
+    # The unified rule is strictly more restrictive than the two it replaces.
+    # This function used to send BOTH "Do not allow Bulk Emails = Yes" and
+    # "= No" to review; the first has a restrictive reading (deny), and a
+    # denial reached by a plausible reading is still a denial, so it is now
+    # taken rather than deferred. The permissive direction is still refused.
+    # Nothing that previously denied now allows.
+    state, ambiguous = _pv.interpret_canonical(raw, col_key)
+    return _pv.to_bool(state), ambiguous
 
 # ── Historical activity date normalisation ─────────────────────────────────
 

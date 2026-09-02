@@ -152,6 +152,37 @@ ALL_PERMISSION_COLUMNS = frozenset(
     col for cols in COLUMN_TABLE.values() for col, _ in cols
 )
 
+# The CANONICAL FIELD KEYS the operational import pipeline uses, mapped to the
+# permission they carry and the polarity a bare boolean is read through.
+#
+# `import_staging_service` addresses consent by these keys rather than by raw
+# header text, so this is the bridge that lets it call the one interpreter
+# without changing its own signature, its column names, or its storage.
+CANONICAL_KEYS: dict[str, tuple[str, str]] = {
+    "allow_emails":      (EMAIL,      "grant"),
+    "allow_bulk_emails": (BULK_EMAIL, "deny"),   # "Do not allow Bulk Emails"
+    "allow_sms":         (SMS,        "grant"),
+    "allow_calls":       (VOICE,      "grant"),
+    # Aliases, so a caller using either vocabulary lands in the same place.
+    "allow_email":       (EMAIL,      "grant"),
+    "allow_bulk_email":  (BULK_EMAIL, "deny"),
+    "allow_voice":       (VOICE,      "grant"),
+    "allow_phone_calls": (VOICE,      "grant"),
+}
+
+
+def interpret_canonical(raw, col_key: str) -> tuple[str, bool]:
+    """
+    Interpret a cell addressed by CANONICAL FIELD KEY rather than header text.
+
+    An unknown key is not guessed at: it is read as a grant-polarity column,
+    which is the conservative choice for a bare boolean (True->ALLOW is only
+    reachable when the key really is a grant column; the caller passing an
+    unknown key gets no inversion invented on its behalf).
+    """
+    _, polarity = CANONICAL_KEYS.get(col_key, (None, "grant"))
+    return interpret_cell_ex(raw, polarity)
+
 
 def normalize_cell(value) -> str:
     """Lowercase, collapse whitespace, and strip trailing punctuation."""
@@ -166,26 +197,61 @@ def normalize_cell(value) -> str:
     return s
 
 
-def interpret_cell(value, polarity: str) -> str:
+def interpret_cell_ex(value, polarity: str) -> tuple[str, bool]:
     """
-    One cell -> ALLOW / DENY / UNKNOWN.
+    THE ONE INTERPRETER. One cell -> (ALLOW / DENY / UNKNOWN, ambiguous).
 
-    Self-describing values win over the column's polarity. Bare booleans are
-    read through it. Everything else - blanks, empties, and anything this module
-    has never seen - is UNKNOWN, which is not consent.
+    This is the only place in the platform that decides what a permission cell
+    means. `import_staging_service._norm_consent` delegates here, so the
+    operational pipeline and the historical source layer cannot drift apart.
+
+    THE RULE, AND WHY IT IS SHAPED LIKE THIS
+    ----------------------------------------
+    Two implementations existed and disagreed on exactly one case: a BARE
+    BOOLEAN sitting in a NEGATIVELY-NAMED column, e.g. "Do not allow Bulk
+    Emails = Yes". One inverted it; the other called it ambiguous and sent it
+    to review. Each was safer than the other in one direction, so neither was
+    adopted whole:
+
+      "Do not allow Bulk Emails = Yes"  inversion says DENY.
+          A denial is the restrictive answer, and a denial arrived at by a
+          plausible reading is still a denial. TAKE IT.
+
+      "Do not allow Bulk Emails = No"   inversion says ALLOW.
+          This is the dangerous direction: it would GRANT marketing permission
+          on the strength of a guess about what the column meant. REFUSE.
+          UNKNOWN, and flagged for a human.
+
+    So: never grant from an ambiguous inversion, never lose a denial from one.
+    That is strictly more restrictive than either implementation was alone, and
+    it is the same "more restrictive wins" doctrine used everywhere else here.
+
+    A SELF-DESCRIBING value ("Allow", "Do Not Allow", "Opted Out") states the
+    permission outright and the column's polarity is not consulted at all -
+    which is what stops a column named for a denial, whose cells read "Allow",
+    from turning 85,751 permissions into denials.
     """
     s = normalize_cell(value)
     if s in BLANK_VALUES:
-        return UNKNOWN
-    if s in SELF_DENY:
-        return DENY
+        return UNKNOWN, False          # silence is not consent, and not a puzzle
+    if s in SELF_DENY or s.startswith("do not "):
+        return DENY, False
     if s in SELF_ALLOW:
-        return ALLOW
+        return ALLOW, False
     if s in BOOL_TRUE:
-        return ALLOW if polarity == "grant" else DENY
+        if polarity == "grant":
+            return ALLOW, False
+        return DENY, False             # restrictive reading of the inversion
     if s in BOOL_FALSE:
-        return DENY if polarity == "grant" else ALLOW
-    return UNKNOWN
+        if polarity == "grant":
+            return DENY, False
+        return UNKNOWN, True           # would grant on a guess - refuse
+    return UNKNOWN, True               # never seen it; a human decides
+
+
+def interpret_cell(value, polarity: str) -> str:
+    """The state alone. Ambiguity is available from `interpret_cell_ex`."""
+    return interpret_cell_ex(value, polarity)[0]
 
 
 def read_permission(row_lowercased: dict, permission: str) -> tuple[str, list[dict]]:
@@ -206,12 +272,8 @@ def read_permission(row_lowercased: dict, permission: str) -> tuple[str, list[di
         if col not in row_lowercased:
             continue
         raw = row_lowercased[col]
-        cell = interpret_cell(raw, polarity)
-        norm = normalize_cell(raw)
-        if norm == "" or norm in BLANK_VALUES:
-            recognised = True          # a blank cell is legitimately silent
-        else:
-            recognised = cell != UNKNOWN
+        cell, ambiguous = interpret_cell_ex(raw, polarity)
+        recognised = not ambiguous
         evidence.append({
             "column": col,
             "polarity": polarity,

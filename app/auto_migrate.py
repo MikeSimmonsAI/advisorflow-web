@@ -558,20 +558,16 @@ COLUMNS_TO_ADD = [
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
 TABLES_TO_CREATE = [
-    """
-    CREATE TABLE IF NOT EXISTS crm_contacts (
-        id VARCHAR PRIMARY KEY,
-        organization_id VARCHAR NOT NULL REFERENCES organizations(id),
-        created_by_id VARCHAR REFERENCES users(id),
-        full_name VARCHAR,
-        phone VARCHAR,
-        email VARCHAR,
-        company VARCHAR,
-        pipeline_stage VARCHAR DEFAULT 'new',
-        last_contact_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT NOW()
-    )
-    """,
+    # crm_contacts IS NOT HERE ANY MORE, AND THAT IS THE POINT.
+    #
+    # It was created BOTH here and by the ORM (models.CRMContact, tablename
+    # "crm_contacts"). Two mechanisms owning one table is how a schema drifts:
+    # whichever runs first wins, the other logs a skipped statement forever, and
+    # a column added to the model silently never reaches the hand-written copy.
+    # This statement was also invalid on SQLite (NOW()), so every local boot
+    # printed a failure for a table that had already been created correctly.
+    #
+    # The ORM owns it. One owner per table.
     """
     CREATE TABLE IF NOT EXISTS crm_contact_notes (
         id VARCHAR PRIMARY KEY,

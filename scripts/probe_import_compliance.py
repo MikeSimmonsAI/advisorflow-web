@@ -66,24 +66,54 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def _strip_py(path: str) -> str:
+    """
+    Source with comments and docstrings BLANKED OUT IN PLACE.
+
+    The previous version rebuilt the file by joining token strings with
+    newlines. That silently broke every assertion looking for more than one
+    token: "app.models.source_records" became five lines, and a check for
+    "Lead(" could never match because "Lead" and "(" were separated - so a
+    check that was meant to prove the staging layer never constructs a Lead was
+    passing vacuously. A gate that cannot fail is worse than no gate, and this
+    one had four of them.
+
+    Blanking the comment and docstring SPANS inside the original text keeps
+    every other byte, and every offset, exactly where it was.
+    """
     with open(path, "r", encoding="utf-8") as f:
         src = f.read()
-    out, prev = [], tokenize.INDENT
+    lines = src.splitlines(keepends=True)
+    starts = [0]
+    for ln in lines:
+        starts.append(starts[-1] + len(ln))
+
+    def offset(row: int, col: int) -> int:
+        return starts[row - 1] + col
+
+    spans: list[tuple[int, int]] = []
+    prev = tokenize.INDENT
     try:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            drop = False
             if tok.type == tokenize.COMMENT:
-                continue
-            if tok.type == tokenize.STRING and prev in (
+                drop = True
+            elif tok.type == tokenize.STRING and prev in (
                     tokenize.INDENT, tokenize.NEWLINE, tokenize.NL,
                     tokenize.DEDENT, tokenize.ENCODING):
-                prev = tok.type
-                continue
-            out.append(tok.string)
+                drop = True          # a bare string statement is a docstring
+            if drop:
+                spans.append((offset(*tok.start), offset(*tok.end)))
             if tok.type not in (tokenize.NL, tokenize.NEWLINE):
                 prev = tok.type
-    except tokenize.TokenError:
+    except (tokenize.TokenError, IndentationError):
         return src
-    return "\n".join(out)
+
+    chars = list(src)
+    for a, b in spans:
+        for i in range(a, min(b, len(chars))):
+            if chars[i] != "\n":
+                chars[i] = " "
+    return "".join(chars)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +211,44 @@ def apply_revert(name: str) -> None:
                             status="new"))
             return out
         si.stage_records = bad
+    elif name == "R12_second_compliance_engine":
+        # The staging service grows its own opinion back. This is the exact
+        # drift the consolidation exists to prevent: two modules deciding
+        # separately what "Do Not Allow" means for one family.
+        from app.services import import_staging_service as iss
+
+        def bad(raw, col_key):
+            if not raw:
+                return None, False
+            v = str(raw).strip().lower()
+            if v in ("allow", "yes", "y", "1", "true"):
+                return True, False
+            if v in ("do not allow", "no", "n", "0", "false"):
+                return False, False
+            return None, True
+        iss._norm_consent = bad
+    elif name == "R13_qualification_router_unmounted":
+        # Exactly what the merge did: the router silently stops being mounted.
+        import app.main as _m
+        _m.app.router.routes = [r for r in _m.app.router.routes
+                                if not getattr(r, "path", "").startswith("/qualification")]
+    elif name == "R15_column_tuples_in_tables_to_create":
+        # THE EXACT MERGE DEFECT: column tuples appended to the list of
+        # CREATE TABLE strings. text(tuple) raises TypeError, which the loop
+        # does not catch, and the backend cannot start.
+        import app.auto_migrate as _am
+        _am.TABLES_TO_CREATE = list(_am.TABLES_TO_CREATE) + [
+            ("import_staged_rows", "consent_email", "BOOLEAN")]
+    elif name == "R14_source_models_unregistered":
+        # And the other half of it: a model registration disappears from main.
+        real = _strip_py
+
+        def bad(path):
+            src = real(path)
+            if path.endswith("main.py"):
+                src = src.replace("app.models.source_records", "")
+            return src
+        globals()["_strip_py"] = bad
     else:
         raise SystemExit(f"unknown revert {name}")
 
@@ -358,7 +426,22 @@ def s6_ambiguity():
     check("'Yes' grants in a grant column", pv.interpret_cell("Yes", "grant") == pv.ALLOW)
     check("'Yes' denies in a do-not column", pv.interpret_cell("Yes", "deny") == pv.DENY)
     check("'No' denies in a grant column", pv.interpret_cell("No", "grant") == pv.DENY)
-    check("'No' grants in a do-not column", pv.interpret_cell("No", "deny") == pv.ALLOW)
+    # THE UNIFIED RULE. A bare boolean in a negatively-named column is read in
+    # the RESTRICTIVE direction only. "Do not allow bulk emails = Yes" has a
+    # plausible reading that denies, and a denial reached that way is still a
+    # denial - take it. "= No" would GRANT on a guess about what the column
+    # meant, which is the one outcome worth refusing outright.
+    state, amb = pv.interpret_cell_ex("No", "deny")
+    check("'No' in a do-not column does NOT grant", state != pv.ALLOW, state)
+    check("'No' in a do-not column is unknown", state == pv.UNKNOWN, state)
+    check("'No' in a do-not column is flagged ambiguous", amb is True, str(amb))
+    state, amb = pv.interpret_cell_ex("Yes", "deny")
+    check("'Yes' in a do-not column denies without review",
+          state == pv.DENY and amb is False, f"{state} {amb}")
+    for v in ("Allow", "Do Not Allow", "opted out"):
+        for pol in ("grant", "deny"):
+            s, a = pv.interpret_cell_ex(v, pol)
+            check(f"self-describing {v!r} is never ambiguous", a is False, str(a))
     check("'1' grants in a grant column", pv.interpret_cell("1", "grant") == pv.ALLOW)
     check("'0' denies in a grant column", pv.interpret_cell("0", "grant") == pv.DENY)
     check("'true' grants in a grant column", pv.interpret_cell("true", "grant") == pv.ALLOW)
@@ -829,17 +912,217 @@ def s13_deceased_is_do_not_contact():
     db.close()
 
 
+def s14_one_compliance_engine():
+    """
+    ONE COMPLIANCE NORMALIZATION IMPLEMENTATION. NOT TWO.
+
+    The operational import pipeline (import_staged_rows / consent_*) and the
+    historical source layer (source_records / allow_*) must interpret a cell
+    identically, because they are describing the same family's consent. The way
+    to guarantee that is not discipline, it is having one function.
+    """
+    from app.services import import_staging_service as iss
+
+    # 1. Behavioural: both paths agree on every observed value.
+    cases = [
+        ("Allow", "allow_bulk_emails", "do not allow bulk emails", pv.BULK_EMAIL),
+        ("Do Not Allow", "allow_bulk_emails", "do not allow bulk emails", pv.BULK_EMAIL),
+        ("Yes", "allow_bulk_emails", "do not allow bulk emails", pv.BULK_EMAIL),
+        ("No", "allow_bulk_emails", "do not allow bulk emails", pv.BULK_EMAIL),
+        ("Allow", "allow_emails", "allow emails?", pv.EMAIL),
+        ("Do Not Allow", "allow_emails", "allow emails?", pv.EMAIL),
+        ("Yes", "allow_emails", "allow emails?", pv.EMAIL),
+        ("No", "allow_emails", "allow emails?", pv.EMAIL),
+        ("", "allow_emails", "allow emails?", pv.EMAIL),
+        ("maybe", "allow_sms", "allow text message?", pv.SMS),
+        ("Do Not Allow", "allow_calls", "allow phone calls?", pv.VOICE),
+        ("opted out", "allow_calls", "allow phone calls?", pv.VOICE),
+    ]
+    for raw, key, header, permission in cases:
+        op_value, op_amb = iss._norm_consent(raw, key)
+        hist_state, _ = pv.read_permission({header: raw}, permission)
+        check(f"operational and historical agree on {raw!r} / {key}",
+              op_value == pv.to_bool(hist_state),
+              f"operational={op_value} historical={hist_state}")
+        canon_state, canon_amb = pv.interpret_canonical(raw, key)
+        check(f"the operational path returns the interpreter's answer for {raw!r}",
+              op_value == pv.to_bool(canon_state) and op_amb == canon_amb,
+              f"{op_value}/{op_amb} vs {canon_state}/{canon_amb}")
+
+    # 2. Structural: the operational module declares no vocabulary of its own.
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = _strip_py(os.path.join(root, "app/services/import_staging_service.py"))
+    check("the staging service delegates to permission_values",
+          "permission_values" in code)
+    check("the staging service calls interpret_canonical",
+          "interpret_canonical" in code)
+    for banned in ("_CONSENT_ALLOW", "_CONSENT_DENY"):
+        check(f"the staging service declares no {banned} table of its own",
+              banned not in code)
+    # A second copy of the vocabulary is the failure this section exists for.
+    for word in ('"do not allow"', "'do not allow'", '"opt-out"', "'opt-out'"):
+        check(f"the staging service does not restate {word}", word not in code)
+
+    # 3. Nothing else interprets either. Only permission_values may hold tables.
+    import glob
+    owners = []
+    for path in glob.glob(os.path.join(root, "app/services/*.py")):
+        name = os.path.basename(path)
+        if name == "permission_values.py":
+            continue
+        src = _strip_py(path)
+        if '"do not allow"' in src or "'do not allow'" in src:
+            owners.append(name)
+    check("permission_values is the only module holding the value vocabulary",
+          not owners, str(owners))
+
+
+def s15_structural_registration():
+    """
+    THE MERGE-COLLISION GATE.
+
+    A concurrent merge deleted SourceRecord, SourceOpportunity, the
+    qualification_models registration and the qualification router mount - and
+    every one of those failures was silent at import time. Nothing shouted; the
+    API simply answered 404 and a table simply never got created.
+
+    This asserts each registration EXISTS, so removing one fails the gate
+    instead of shipping.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_src = _strip_py(os.path.join(root, "app/main.py"))
+
+    # Model registrations - Base.metadata.create_all only sees imported modules.
+    for mod in ("app.models.import_models", "app.models.source_records",
+                "app.models.qualification_models"):
+        check(f"main.py registers {mod}", mod in main_src)
+
+    # Router mounts.
+    check("main.py mounts the qualification router",
+          "qualification_router.router" in main_src)
+    check("main.py mounts the import batch router",
+          "import_batch_router" in main_src)
+
+    # And the objects actually resolve on the live app, not just in the text.
+    import os as _os
+    _os.environ.setdefault("DATABASE_URL", "sqlite://")
+    from app.main import app as _app
+    paths = {r.path for r in _app.routes}
+    check("the qualification API is mounted",
+          any(p.startswith("/qualification") for p in paths), "no /qualification route")
+    for p in ("/qualification/preview", "/qualification/vocabulary"):
+        check(f"{p} is routable", p in paths, str(sorted(
+            x for x in paths if x.startswith("/qualification"))[:5]))
+    check("the god qualification diagnostic is mounted",
+          "/god/ops/diagnostics/qualification" in paths)
+    check("the import batch API is mounted",
+          any("import" in p and "batch" in p for p in paths))
+
+    # Tables are declared exactly once, by exactly one model.
+    from app.models.models import Base
+    tables = Base.metadata.tables
+    for t in ("import_batches", "import_staged_rows", "source_records",
+              "source_opportunities", "qualification_rules"):
+        check(f"table {t} is registered", t in tables, str(t in tables))
+    owners = {}
+    for mapper_table, tbl in tables.items():
+        owners.setdefault(mapper_table, 0)
+        owners[mapper_table] += 1
+    check("no table is declared twice",
+          all(v == 1 for v in owners.values()),
+          str([k for k, v in owners.items() if v != 1]))
+
+
+def s16_migration_ownership():
+    """
+    ONE OWNER PER TABLE, AND A BOOT THAT CANNOT BE BROKEN BY SHAPE.
+
+    A concurrent merge put COLUMN TUPLES into TABLES_TO_CREATE - a list of
+    CREATE TABLE strings - and `text(tuple)` raises TypeError, which the loop's
+    `except (OperationalError, ProgrammingError)` does not catch. The backend
+    could not start at all. This asserts the shape of both migration lists, that
+    no table is owned by two mechanisms, and that a boot succeeds on a FRESH
+    database and again on an EXISTING one.
+    """
+    import re as _re
+    from app.auto_migrate import (COLUMNS_TO_ADD, TABLES_TO_CREATE,
+                                  run_auto_migrations)
+    from app.models.models import Base
+
+    # 1. Shape. This is the exact defect, asserted directly.
+    check("every TABLES_TO_CREATE entry is a string",
+          all(isinstance(s, str) for s in TABLES_TO_CREATE),
+          str([type(s).__name__ for s in TABLES_TO_CREATE if not isinstance(s, str)]))
+    check("every TABLES_TO_CREATE entry is a CREATE TABLE statement",
+          all("create table" in s.lower() for s in TABLES_TO_CREATE),
+          str([s[:40] for s in TABLES_TO_CREATE if "create table" not in s.lower()]))
+    bad_cols = [t for t in COLUMNS_TO_ADD
+                if not (isinstance(t, tuple) and len(t) == 3
+                        and all(isinstance(x, str) for x in t))]
+    check("every COLUMNS_TO_ADD entry is a 3-tuple of strings",
+          not bad_cols, str(bad_cols[:3]))
+
+    # 2. Ownership. A table is created by the ORM or by raw SQL, never both.
+    raw_tables = set()
+    for s in TABLES_TO_CREATE:
+        m = _re.search(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([A-Za-z_][\w]*)",
+                       s, _re.I)
+        if m:
+            raw_tables.add(m.group(1).lower())
+    orm_tables = {t.lower() for t in Base.metadata.tables}
+    both = raw_tables & orm_tables
+    check("no table is created by BOTH the ORM and raw SQL", not both, str(both))
+
+    # 3. Every column migration names a table something actually owns.
+    known = raw_tables | orm_tables
+    orphan = sorted({t for t, _c, _d in COLUMNS_TO_ADD if t.lower() not in known})
+    check("every COLUMNS_TO_ADD table has an owner", not orphan, str(orphan))
+
+    # 4. The five tables this consolidation is about, each owned exactly once.
+    for t in ("import_batches", "import_staged_rows", "source_records",
+              "source_opportunities", "qualification_rules"):
+        n = (1 if t in orm_tables else 0) + (1 if t in raw_tables else 0)
+        check(f"{t} has exactly one migration owner", n == 1, f"owners={n}")
+
+    # 5. Clean boot: fresh database, then the SAME database again.
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    try:
+        run_auto_migrations(engine)
+        check("auto migrations run on a fresh database", True)
+    except Exception as exc:
+        check("auto migrations run on a fresh database", False,
+              f"{type(exc).__name__}: {exc}")
+    try:
+        run_auto_migrations(engine)      # idempotent - every statement a no-op
+        check("auto migrations run again on an existing database", True)
+    except Exception as exc:
+        check("auto migrations run again on an existing database", False,
+              f"{type(exc).__name__}: {exc}")
+
+    # 6. And the boot path does not swallow a TypeError into silence.
+    src = _strip_py(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "app/auto_migrate.py"))
+    check("the table-create loop does not catch bare Exception",
+          "except Exception" not in src.split("for create_sql")[-1][:400],
+          "a bare except would hide the next shape error")
+
+
 SECTIONS = (s1_denial_survives_simple, s5_no_weakening, s6_ambiguity, s7_tenancy,
             s8_activity_mapping, s9_never_contacted, s10_not_parked,
             s11_send_gate_reads_it, s12_historical_staging,
-            s13_deceased_is_do_not_contact)
+            s13_deceased_is_do_not_contact, s14_one_compliance_engine,
+            s15_structural_registration, s16_migration_ownership)
 
 REVERTS = ("R1_unknown_becomes_allow", "R2_incoming_overwrites",
            "R3_no_inheritance", "R4_polarity_from_name",
            "R5_activity_date_unmapped", "R6_permission_columns_parked",
            "R7_inheritance_ignores_tenant", "R8_send_gate_ignores_permission",
            "R9_unknown_treated_as_denial", "R10_deceased_ignored",
-           "R11_staging_promotes_to_leads")
+           "R11_staging_promotes_to_leads", "R12_second_compliance_engine",
+           "R13_qualification_router_unmounted", "R14_source_models_unregistered",
+           "R15_column_tuples_in_tables_to_create")
 
 
 def main() -> int:

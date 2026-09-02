@@ -116,8 +116,16 @@ PERMISSION_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
                     ("do not phone", "negative")),
 }
 
-TRUE_WORDS = {"yes", "y", "true", "1", "on"}
-FALSE_WORDS = {"no", "n", "false", "0", "off"}
+from app.services import permission_values as pv  # noqa: E402
+
+# THE VOCABULARY LIVES IN permission_values AND NOWHERE ELSE.
+#
+# These names are kept as thin aliases so existing readers of this module still
+# resolve, but they are the SAME objects the interpreter uses - not a second
+# copy that can drift. A gate asserts no module outside permission_values
+# declares a permission value table of its own.
+TRUE_WORDS = pv.BOOL_TRUE
+FALSE_WORDS = pv.BOOL_FALSE
 
 # Values that state a PERMISSION in their own words. A cell reading "Allow"
 # means allow no matter what the column above it is called.
@@ -129,11 +137,8 @@ FALSE_WORDS = {"no", "n", "false", "0", "off"}
 # what the flag is FOR; the cell says which way it points. When the cell says
 # it, the cell wins - and only a bare yes/no is read through the column's
 # polarity.
-SELF_ALLOW = {"allow", "allowed", "permitted", "opt in", "opted in",
-              "subscribe", "subscribed"}
-SELF_DENY = {"do not allow", "donotallow", "not allowed", "deny", "denied",
-             "blocked", "opt out", "opted out", "unsubscribe", "unsubscribed",
-             "do not contact", "do not call", "do not email", "do not text"}
+SELF_ALLOW = pv.SELF_ALLOW
+SELF_DENY = pv.SELF_DENY
 
 
 def _lower_keys(row: dict) -> dict:
@@ -182,23 +187,13 @@ def parse_permission(v, polarity: str) -> bool | None:
     """
     Resolve one permission cell to allow (True) / deny (False) / silent (None).
 
-    A self-describing value ("Allow", "Do Not Allow", "Opted Out") states the
-    permission directly and IGNORES the column's polarity. Only a bare yes/no
-    is read through the polarity of the column it sits in.
+    DELEGATES to the single platform interpreter. This module's `positive` /
+    `negative` polarity names map onto the interpreter's `grant` / `deny`;
+    nothing about what a VALUE means is decided here any more.
     """
-    if v is None:
-        return None
-    s = str(v).strip().lower()
-    if not s:
-        return None
-    if s in SELF_DENY or s.startswith("do not "):
-        return False
-    if s in SELF_ALLOW:
-        return True
-    b = parse_bool(v)
-    if b is None:
-        return None
-    return b if polarity == "positive" else (not b)
+    state, _ambiguous = pv.interpret_cell_ex(
+        v, "grant" if polarity == "positive" else "deny")
+    return pv.to_bool(state)
 
 
 def parse_date(v) -> datetime | None:
