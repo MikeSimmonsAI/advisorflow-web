@@ -131,6 +131,13 @@ def _one_run(db: Session, target: User, channel: str, label: str,
         # is not allowed to see.
         from app.services import import_provenance
         provenance = import_provenance.summarize(authorized)
+        # WHICH HISTORICAL RECORD EACH OF THESE LEADS IS. Provenance says where
+        # the book came from; this says, per lead, which staged historical
+        # contact it binds to - so a reconciliation finding can name a Lead id
+        # instead of a spreadsheet row. Computed from the SAME authorized set,
+        # scoped to the SAME resolved workspace, so it cannot widen either.
+        from app.services import reconciliation_diagnostic as _recon
+        reconciliation = _recon.run(db, authorized, resolved)
     except Exception as exc:  # a failed scenario is reported, never swallowed
         return {"scenario": label, "workspace_header": workspace_id,
                 "error": "%s: %s" % (type(exc).__name__, str(exc)[:300])}
@@ -162,6 +169,9 @@ def _one_run(db: Session, target: User, channel: str, label: str,
         # PARKED, and how much permission is simply unknown. This is what makes
         # a population bindable to a source file rather than assumed to be one.
         "provenance": provenance,
+        # Per-lead binding to the historical layer: current_lead_id,
+        # historical_contact_guid, match_status, match_confidence.
+        "reconciliation": reconciliation,
     }
     if sample_size:
         # Ids and buckets only. A diagnostic about one named person's book does
