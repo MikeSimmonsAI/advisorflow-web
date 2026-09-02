@@ -74,6 +74,10 @@ import app.models.demo_site_models  # noqa: F401  (imported for side effects)
 # Same Base, same reason. Without this import those tables are never created and
 # every upload silently has nowhere to write.
 import app.models.import_models  # noqa: F401  (imported for side effects)
+# Staged historical evidence (source_records / source_opportunities). Separate
+# module from import_models on purpose - a merge on that filename already
+# deleted these once, and Base.metadata.create_all only sees what is imported.
+import app.models.source_records  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 # The SECOND gate pair. require_feature asks whether the customer may USE a
 # service; require_capability asks whether this organization may ADMINISTER the

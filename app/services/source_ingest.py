@@ -1,4 +1,4 @@
-"""
+﻿"""
 STAGE A HISTORICAL SOURCE - without creating a single operational lead.
 
     classify_columns(header)     -> what every column is, and where it lands
@@ -21,8 +21,8 @@ from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
-from app.models.import_models import (ImportBatch, SourceKind, SourceOpportunity,
-                                      SourceRecord)
+from app.models.import_models import ImportBatch
+from app.models.source_records import SourceKind, SourceOpportunity, SourceRecord
 from app.services import permission_values as pv
 from app.services.dedup_service import normalize_phone, normalize_last_name
 
@@ -246,6 +246,11 @@ ACTIVITY_DATE_COLUMNS = ("last activity date", "last activity/note", "last activ
                          "last completed activity")
 
 
+def _batch_source(batch) -> str | None:
+    return (getattr(batch, "source_system", None)
+            or getattr(batch, "source_type", None))
+
+
 def build_source_record(row: dict, organization_id: str, row_number: int = 0,
                         batch: ImportBatch | None = None) -> SourceRecord:
     """One raw row -> one normalized, auditable SourceRecord. Nothing is sent."""
@@ -274,7 +279,11 @@ def build_source_record(row: dict, organization_id: str, row_number: int = 0,
     return SourceRecord(
         organization_id=organization_id,
         import_batch_id=(batch.id if batch else None),
-        source_system=(batch.source_system if batch else None),
+        # The authoritative ImportBatch names this `source_type`; the original
+        # shape named it `source_system`. Read whichever the model in play has
+        # rather than assuming, so a staged row records its provenance either
+        # way instead of raising on an attribute that moved.
+        source_system=(_batch_source(batch) if batch else None),
         source_entity="contact",
         source_key=_s(_first(low, CONTACT_KEY_COLUMNS)) or None,
         source_row_number=row_number,
@@ -385,23 +394,47 @@ def open_batch(db: Session, organization_id: str, *, source_filename: str,
                source_system: str = "", name: str = "", uploaded_by_id: str = None,
                uploaded_by_name: str = "", header: list[str] | None = None,
                mapping: Any = None, source_year: int = None) -> ImportBatch:
-    batch = ImportBatch(
-        organization_id=organization_id,
-        name=name or source_filename,
-        source_filename=source_filename,
-        source_system=source_system or None,
-        kind=SourceKind.HISTORICAL.value,
-        column_count=(len(header) if header else None),
-        header_json=json.dumps(list(header)) if header else None,
-        mapping_json=json.dumps(mapping) if mapping is not None else None,
-        uploaded_by_id=uploaded_by_id,
-        uploaded_by_name=uploaded_by_name or None,
-        source_year=source_year,
-        status="staged",
-    )
+    # ImportBatch IS THE MERGED BRANCH'S MODEL AND IS AUTHORITATIVE.
+    #
+    # It carries a different, richer set of columns than the one this module
+    # was originally written against (review and commit counters rather than
+    # header/mapping provenance). Rather than add columns to somebody else's
+    # model to suit this caller - which is how two teams end up fighting over
+    # one table - only fields that actually exist are set, and the provenance
+    # this module needs is kept where it belongs: on the staged rows, each of
+    # which carries its own verbatim raw row.
+    fields = {c.name for c in ImportBatch.__table__.columns}
+    values = {
+        "organization_id": organization_id,
+        "source_filename": source_filename,
+        "display_name": name or source_filename,
+        "source_type": source_system or "file",
+        "created_by_id": uploaded_by_id,
+        "created_by_name": uploaded_by_name or None,
+        "status": "staged",
+        # Kept for the original model shape if it is ever the one in play.
+        "name": name or source_filename,
+        "source_system": source_system or None,
+        "kind": SourceKind.HISTORICAL.value,
+        "column_count": (len(header) if header else None),
+        "header_json": json.dumps(list(header)) if header else None,
+        "mapping_json": json.dumps(mapping) if mapping is not None else None,
+        "uploaded_by_id": uploaded_by_id,
+        "uploaded_by_name": uploaded_by_name or None,
+        "source_year": source_year,
+    }
+    batch = ImportBatch(**{k: v for k, v in values.items() if k in fields})
     db.add(batch)
     db.flush()
     return batch
+
+
+def _set_if_present(obj, **kw) -> None:
+    """Set only attributes the model actually declares."""
+    fields = {c.name for c in type(obj).__table__.columns}
+    for k, v in kw.items():
+        if k in fields:
+            setattr(obj, k, v)
 
 
 def stage_records(db: Session, organization_id: str, batch: ImportBatch,
@@ -430,9 +463,8 @@ def stage_records(db: Session, organization_id: str, batch: ImportBatch,
                 denials[p] += 1
         if commit_every and n % commit_every == 0:
             db.flush()
-    batch.row_count = n
-    batch.status = "loaded"
-    batch.completed_at = datetime.utcnow()
+    _set_if_present(batch, row_count=n, total_rows=n, status="loaded",
+                    completed_at=datetime.utcnow(), updated_at=datetime.utcnow())
     return {"staged": n, "with_source_key": with_key,
             "permission_denials": denials, "permission_needs_review": review}
 
@@ -451,8 +483,7 @@ def stage_opportunities(db: Session, organization_id: str, batch: ImportBatch,
             joinable += 1
         if commit_every and n % commit_every == 0:
             db.flush()
-    batch.row_count = n
-    batch.status = "loaded"
-    batch.completed_at = datetime.utcnow()
+    _set_if_present(batch, row_count=n, total_rows=n, status="loaded",
+                    completed_at=datetime.utcnow(), updated_at=datetime.utcnow())
     return {"staged": n, "with_contact_key": joinable,
             "unjoinable": n - joinable}
