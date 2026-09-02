@@ -15,7 +15,7 @@ import json, logging, os, shutil, tempfile
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.deps import get_db
 from app.models.import_models import (
     ImportBatch, ImportBatchStatus, ImportRowReviewStatus, ImportStagedRow,
 )

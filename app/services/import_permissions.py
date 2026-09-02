@@ -20,6 +20,10 @@ from app.services.capabilities import require_feature_capability
 
 # Who may upload a file or kick off a Google Contacts pull.
 require_import_leads = require_feature_capability("import_leads")
+require_import_stage = require_import_leads  # alias for leads_router.py
+
+# Alias used by leads_router.py for the stage/upload gate.
+require_import_stage = require_import_leads
 
 # Who may view staged rows and set accept / merge / reject.
 require_import_review = require_feature_capability("import_review")
