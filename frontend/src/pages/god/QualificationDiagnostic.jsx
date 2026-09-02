@@ -305,6 +305,111 @@ function PriorityAudit({ audit }) {
  * A run that ERRORED renders the error. It does not render zeros, and it does
  * not render nothing - a scenario that failed is itself a finding.
  */
+// IMPORT PROVENANCE — the panel that makes a population BINDABLE to a file.
+//
+// It renders only what the server returned. The two numbers that matter most
+// are the permission breakdown (how much consent is genuinely unknown) and
+// "activity date parked only" — leads whose contact history arrived in the
+// file and was never read onto the record, which is what a false
+// "never contacted" looks like from the outside.
+function Provenance({ p }) {
+  if (!p) return null
+  const rows = (arr) => (Array.isArray(arr) ? arr : [])
+  const Bar = ({ title, items }) => (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase',
+                    opacity: 0.55, marginBottom: 4 }}>{title}</div>
+      {rows(items).length === 0
+        ? <div style={{ fontSize: 12, opacity: 0.5 }}>—</div>
+        : rows(items).map((r, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '3px 0',
+                                  borderBottom: '1px solid rgba(128,128,128,0.10)' }}>
+              <span style={{ fontFamily: MONO, fontSize: 11.5, minWidth: 60,
+                             textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {r.count}
+              </span>
+              <span style={{ fontSize: 12.5, wordBreak: 'break-word' }}>{r.value}</span>
+            </div>
+          ))}
+    </div>
+  )
+
+  const perm = p.permissions || {}
+  const hist = p.history || {}
+  const parkedOnly = hist.activity_date_parked_only
+
+  return (
+    <Panel title="Import provenance — where this book came from">
+      <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 10 }}>
+        Batch metadata and import behaviour for the same authorized leads counted
+        above. Nothing here is scored; it is here so a population can be matched
+        to the file that produced it.
+      </div>
+
+      <Bar title="Source file" items={p.batch?.source_file} />
+      <Bar title="Import list" items={p.batch?.import_list_name} />
+      <Bar title="Uploaded by" items={p.batch?.imported_by_name} />
+      <Bar title="Source year (import metadata — never scored)"
+           items={p.batch?.source_year} />
+      <Bar title="Permission source" items={p.batch?.permission_source} />
+
+      <div style={{ marginTop: 16, fontSize: 11, letterSpacing: 0.6,
+                    textTransform: 'uppercase', opacity: 0.55 }}>
+        Channel permission of record
+      </div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 6 }}>
+        {['email', 'bulk_email', 'sms', 'voice'].map(k => {
+          const v = perm[k] || {}
+          return (
+            <div key={k} style={{ border: '1px solid rgba(128,128,128,0.22)',
+                                  borderRadius: 8, padding: '8px 12px', minWidth: 150 }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>{k}</div>
+              <div style={{ fontFamily: MONO, fontSize: 12, marginTop: 4 }}>
+                allow {v.allow ?? 0} · <b>deny {v.deny ?? 0}</b> ·
+                {' '}unknown {v.unknown ?? 0}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+        Unknown means the source never stated a permission. It is not consent —
+        it is also not a denial, so it does not exclude.
+        {' '}Cells nobody could read: <b>{p.permission_needs_review ?? 0}</b>.
+      </div>
+
+      <div style={{ marginTop: 16, fontSize: 11, letterSpacing: 0.6,
+                    textTransform: 'uppercase', opacity: 0.55 }}>
+        History actually on the record
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 12.5, marginTop: 6, lineHeight: 1.7 }}>
+        contact date {hist.with_contact_date_on_record ?? 0} ·
+        {' '}last action {hist.with_last_action_on_record ?? 0} ·
+        {' '}status reason {hist.with_status_reason_on_record ?? 0} ·
+        {' '}platform send {hist.with_platform_send ?? 0}
+      </div>
+      {parkedOnly > 0 && (
+        <div role="alert"
+             style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8,
+                      border: '1px solid rgba(200,60,60,0.5)',
+                      background: 'rgba(200,60,60,0.10)', fontSize: 13 }}>
+          <b>{parkedOnly}</b> lead{parkedOnly === 1 ? '' : 's'} carry an activity
+          date in their imported data that never reached the record. Those leads
+          are not untouched — the import parked the history. Do not read
+          &ldquo;never contacted&rdquo; on them as a fact about the person.
+        </div>
+      )}
+
+      <Bar title={`Columns parked into custom_fields (${p.parked_columns?.distinct_keys ?? 0} distinct)`}
+           items={p.parked_columns?.keys} />
+      {p.parked_columns?.identity_values &&
+        Object.entries(p.parked_columns.identity_values).map(([k, v]) => (
+          <Bar key={k} title={`Parked: ${k}`} items={v} />
+        ))}
+    </Panel>
+  )
+}
+
 function Run({ run, subject, channel }) {
   if (run.error) {
     return (
@@ -367,6 +472,8 @@ function Run({ run, subject, channel }) {
       </Panel>
 
       {run.priority_audit && <PriorityAudit audit={run.priority_audit} />}
+
+      {run.provenance && <Provenance p={run.provenance} />}
 
       <Reasons title="Why leads qualified — priority factors"
                rows={run.priority_factors} tone="good" />

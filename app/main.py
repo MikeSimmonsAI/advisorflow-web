@@ -76,6 +76,10 @@ import app.models.demo_site_models
 # engine reads as "this organization has defined no rules" rather than as an
 # error - a quiet wrong answer instead of a loud one.
 import app.models.qualification_models  # noqa: F401  (imported for side effects)
+# Staged historical source records. New TABLES come from Base.metadata.create_all,
+# which only sees a model whose module has actually been imported - so this line
+# is what creates import_batches / source_records / source_opportunities.
+import app.models.import_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 # The SECOND gate pair. require_feature asks whether the customer may USE a
 # service; require_capability asks whether this organization may ADMINISTER the

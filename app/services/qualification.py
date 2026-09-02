@@ -539,6 +539,13 @@ def load_suppressed_phones(db: Session, organization_id: str) -> set:
 
 # ── the decision ────────────────────────────────────────────────────────────
 
+def _permission_detail(lead, channel: str) -> str:
+    """Say WHERE the denial came from, so a refusal can be checked, not trusted."""
+    src = (getattr(lead, "permission_source", None) or "").strip()
+    return f"{channel} permission denied on record ({src})" if src \
+        else f"{channel} permission denied on record"
+
+
 def qualify_one(lead: Lead, channel: str, ctx: QualificationContext) -> Dict[str, Any]:
     """One lead, one channel, one explainable answer.
 
@@ -590,6 +597,25 @@ def qualify_one(lead: Lead, channel: str, ctx: QualificationContext) -> Dict[str
 
     # ── 3. CHANNEL ELIGIBILITY ──
     review_reasons: List[Dict[str, str]] = []
+
+    # CHANNEL PERMISSION OF RECORD, BEFORE ANY QUESTION OF REACHABILITY.
+    #
+    # `allow_<channel>` is tri-state: True allowed, False DENIED, NULL never
+    # stated. Only False excludes. NULL must not - most rows predate these
+    # columns, and reading "we don't know" as "no" would silently empty every
+    # existing send pool; reading it as "yes" is the failure the import fix
+    # exists to prevent, and that one is handled at the point the value is
+    # WRITTEN, not here.
+    #
+    # This is the reason those columns exist. A denial stored on a lead that no
+    # send path consults is not a compliance record, it is a note.
+    _permission_field = {CHANNEL_EMAIL: "allow_email",
+                         CHANNEL_SMS: "allow_sms",
+                         CHANNEL_VOICE: "allow_voice"}.get(channel)
+    if _permission_field and getattr(lead, _permission_field, None) is False:
+        return _decision(lead, EXCLUDED,
+                         [reason("opted_out", _permission_detail(lead, channel))],
+                         channel)
 
     if channel == CHANNEL_EMAIL:
         if (getattr(lead, "manual_flag", None) or "") == "bad_email":

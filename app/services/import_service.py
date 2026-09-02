@@ -44,6 +44,7 @@ import pandas as pd
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Lead, LeadTier
+from app.services import permission_values as pv
 from app.services.dedup_service import (check_and_register, normalize_phone,
                                          normalize_last_name, PLACEHOLDER_LAST_NAME)
 
@@ -61,9 +62,24 @@ HEADER_MAP = {
     "email": ["email", "email address", "e-mail", "buyeremail", "buyer email", "e-mail 1 - value", "e-mail 2 - value"],
     "tier": ["tier", "data tier", "lead type", "status type", "salescontractneedtypedescription", "sales contract need type description", "need type"],
     "status_reason": ["status reason", "status", "lead status"],
+    # Kept for the legacy call-restriction path. The AUTHORITATIVE permission
+    # reader is app/services/permission_values.py, which covers all four
+    # channels; this entry only keeps the historical `allow_calls_raw` field
+    # populated for callers that already read it.
     "allow_calls": ["allow phone calls?", "allow phone calls", "do not call"],
     "last_action": ["last action"],
-    "last_contact_date": ["last activity/note", "last activity", "last contact date", "open activity date"],
+    # HISTORICAL CONTACT DATE. "last activity date" was the missing one: a real
+    # production export writes that header, this list did not name it, matching
+    # is EXACT, and so 92 of 100 real activity dates were parked in
+    # custom_fields. The lead then read as never contacted - a silence the
+    # platform created and then scored.
+    #
+    # "last logged activity" is deliberately here and NOT in `last_action`: in
+    # these exports it holds a timestamp, and a timestamp is not an action.
+    "last_contact_date": ["last activity date", "last activity/note",
+                          "last activity", "last contact date",
+                          "open activity date", "last logged activity",
+                          "last completed activity", "last activity note"],
     "street_address": ["street address", "address", "street", "addr", "address 1", "address1", "street addr", "mailing address", "home address"],
     "city": ["city", "town", "municipality"],
     "state": ["state", "st", "province", "state/province", "state abbr", "state abbreviation"],
@@ -251,12 +267,34 @@ def split_full_name(full: str) -> tuple[str, str]:
 
 
 def _build_column_lookup(columns) -> dict:
+    """
+    Map canonical field -> the file's column name. EXACT MATCH, ALIAS ORDER.
+
+    This is DETERMINISTIC ALIAS MATCHING, not fuzzy matching. A header must
+    appear verbatim (case- and whitespace-insensitive) in the alias list; a
+    header the list does not name is not matched approximately, it is parked in
+    custom_fields.
+
+    Two properties matter and neither is accidental:
+
+    1. ALIAS ORDER DECIDES, NOT COLUMN ORDER. The previous version iterated the
+       FILE's columns and took whichever appeared first, so a file holding both
+       "Last Activity/Note" and "Open Activity Date" mapped whichever the export
+       happened to put on the left. The alias lists are written most-preferred
+       first, and that preference is now what wins - the same file always maps
+       the same way.
+
+    2. NO FUZZY MATCHING, DELIBERATELY. Approximate header matching on a
+       COMPLIANCE column is how "Do not allow Bulk Emails" gets read as
+       "Allow Emails?". Permission columns are resolved by their own explicit
+       table in app/services/permission_values.py and never by similarity.
+    """
+    lowered = {str(c).strip().lower(): c for c in columns}
     lookup = {}
-    lowered = {c: str(c).strip().lower() for c in columns}
     for canonical, variants in HEADER_MAP.items():
-        for col, low in lowered.items():
-            if low in variants:
-                lookup[canonical] = col
+        for variant in variants:
+            if variant in lowered:
+                lookup[canonical] = lowered[variant]
                 break
     return lookup
 
@@ -295,6 +333,65 @@ def _is_internal_record(email: str, last_name: str) -> bool:
         if "nsmg-dl" in low or "restland-dl" in low or low.endswith("-dl-all employees"):
             return True
     return False
+
+
+PERMISSION_FIELDS = ("allow_email", "allow_bulk_email", "allow_sms", "allow_voice")
+
+
+def inherit_restrictions(db: Session, lead, organization_id: str) -> bool:
+    """
+    A LATER IMPORT MAY NOT WEAKEN AN EARLIER DENIAL.
+
+    Import creates rows; it does not update them. That alone looked safe - the
+    old row keeps its denial - but it is not, because the NEW row is a live,
+    sendable record for the same human. A person who opted out in March and is
+    re-uploaded in September from a file that says "Allow" becomes reachable
+    again through the second row. The opt-out was never overwritten; it was
+    out-voted.
+
+    So every newly imported lead inherits the MOST RESTRICTIVE state held by any
+    existing lead in the same organization that identifies the same person -
+    by normalized phone, or by normalized email. Restriction only ever travels
+    in one direction: `more_restrictive` cannot return allow where either side
+    said deny, and this function has no branch that sets a permission to True.
+
+    Returns True if anything was tightened, so the import can report it.
+    """
+    match = []
+    if lead.phone:
+        match.append(Lead.phone == lead.phone)
+    if lead.email:
+        match.append(func.lower(Lead.email) == lead.email.strip().lower())
+    if not match:
+        return False
+
+    from sqlalchemy import or_
+    priors = db.query(Lead).filter(
+        Lead.organization_id == organization_id,      # NEVER across tenants
+        Lead.id != lead.id,
+        or_(*match),
+    ).all()
+    if not priors:
+        return False
+
+    tightened = False
+    for field in PERMISSION_FIELDS:
+        state = pv.from_bool(getattr(lead, field, None))
+        for prior in priors:
+            state = pv.more_restrictive(state, pv.from_bool(getattr(prior, field, None)))
+        # A prior row that is itself suppressed denies every channel.
+        for prior in priors:
+            if (prior.status or "").strip().lower() == "dnc" or \
+                    (prior.manual_flag or "").strip().lower() == "remove_all":
+                state = pv.DENY
+            if field == "allow_email" and \
+                    (prior.manual_flag or "").strip().lower() == "bad_email":
+                state = pv.DENY
+        new_value = pv.to_bool(state)
+        if new_value != getattr(lead, field, None):
+            setattr(lead, field, new_value)
+            tightened = True
+    return tightened
 
 
 def _is_call_restricted(allow_calls_raw: str) -> bool:
@@ -344,6 +441,17 @@ def parse_excel_file(file_path: str) -> list[dict]:
     # so we can capture everything else as custom_fields
     mapped_raw_cols = set(lookup.values())
 
+    # PERMISSION COLUMNS ARE NEVER "EXTRA".
+    #
+    # They are read by their own table, so they are not in `lookup` and would
+    # otherwise be swept into custom_fields - which is exactly the bug: an
+    # opt-out that exists only inside a JSON blob is an opt-out no send path
+    # will ever see. They are excluded from the parked set AND still recorded
+    # raw, so the states below can always be audited against the cells.
+    perm_cols = {c for c in df.columns
+                 if str(c).strip().lower() in pv.ALL_PERMISSION_COLUMNS}
+    mapped_raw_cols |= perm_cols
+
     rows = []
     for _, row in df.iterrows():
         # Capture extra columns not in HEADER_MAP as a JSON blob
@@ -380,6 +488,8 @@ def parse_excel_file(file_path: str) -> list[dict]:
             "state": row.get(lookup.get("state", ""), "").strip(),
             "zip_code": row.get(lookup.get("zip_code", ""), "").strip(),
             "custom_fields": json.dumps(custom) if custom else None,
+            "permissions": pv.read_all(
+                {str(c).strip().lower(): row[c] for c in df.columns}),
         })
     return rows
 
@@ -430,6 +540,9 @@ def import_leads_from_excel(
     # Within-batch dedup sets (catch duplicates inside the same uploaded file)
     seen_phone_keys: set = set()   # (norm_phone, norm_last_name)
     seen_email_keys: set = set()   # (norm_email, norm_last_name) for email-only leads
+    inherited_restrictions = 0     # rows tightened by a denial already on record
+    permission_review_count = 0    # rows carrying a permission cell nobody can read
+    permission_denials = {p: 0 for p in pv.PERMISSIONS}
 
     for row in rows:
         phone_norm = normalize_phone(row["phone"])
@@ -444,7 +557,23 @@ def import_leads_from_excel(
             continue
 
         tier = _infer_tier(row["tier_raw"], row["status_reason_raw"])
-        call_restricted = _is_call_restricted(row["allow_calls_raw"])
+
+        # CHANNEL PERMISSION, ALL FOUR, FROM THE CANONICAL TABLE.
+        #
+        # `perm[...]` is one of allow / deny / unknown. Unknown is not consent
+        # and never becomes one. `_is_call_restricted` is kept alongside so the
+        # legacy DNC behaviour is unchanged, and a denial from EITHER reader
+        # restricts - the new reader can only add restriction, never remove it.
+        perm_read = row.get("permissions") or {
+            "permissions": {}, "needs_review": False, "evidence": {}}
+        perm = perm_read.get("permissions", {})
+        call_restricted = (_is_call_restricted(row["allow_calls_raw"])
+                           or perm.get(pv.VOICE) == pv.DENY)
+        if perm_read.get("needs_review"):
+            permission_review_count += 1
+        for _p in pv.PERMISSIONS:
+            if perm.get(_p) == pv.DENY:
+                permission_denials[_p] += 1
         email_quality_issue = _check_email_quality(row["email"]) if row["email"] else None
 
         # Route: phone present -> SMS channel. No phone but email present -> email-only channel.
@@ -520,9 +649,29 @@ def import_leads_from_excel(
                 campaign_purpose=campaign_purpose,
                 offer_hook=offer_hook,
             ),
+            # A bad email address is a denial of the EMAIL channel, stated as
+            # one. It was already flagged; now it is also a permission, so the
+            # two cannot disagree.
+            allow_email=pv.to_bool(
+                pv.more_restrictive(
+                    perm.get(pv.EMAIL, pv.UNKNOWN),
+                    pv.DENY if email_quality_issue else pv.UNKNOWN)),
+            allow_bulk_email=pv.to_bool(perm.get(pv.BULK_EMAIL, pv.UNKNOWN)),
+            allow_sms=pv.to_bool(perm.get(pv.SMS, pv.UNKNOWN)),
+            allow_voice=pv.to_bool(
+                pv.DENY if call_restricted else perm.get(pv.VOICE, pv.UNKNOWN)),
+            permission_review=bool(perm_read.get("needs_review")),
+            permission_source=("import:%s" % source_filename) if source_filename else "import",
+            permission_raw=(json.dumps(perm_read.get("evidence"))
+                            if perm_read.get("evidence") else None),
         )
         db.add(lead)
         db.flush()
+
+        # The one-way valve, applied to every row: whatever this file says, a
+        # denial already on record for this person in this organization wins.
+        if inherit_restrictions(db, lead, organization_id):
+            inherited_restrictions += 1
 
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
@@ -651,6 +800,12 @@ def import_leads_from_excel(
         "email_only_leads_queued": email_only_count,
         "duplicates_flagged": duplicate_count,
         "flagged_call_restricted": flagged_call_restricted,
+        # Compliance the file actually stated, per channel, stated back rather
+        # than absorbed silently. An import that drops 5,612 email opt-outs
+        # should say so on the screen that says it succeeded.
+        "permission_denials": dict(permission_denials),
+        "permission_needs_review": permission_review_count,
+        "permission_inherited_restrictions": inherited_restrictions,
         "flagged_needs_tier_review": flagged_needs_tier_review,
         "flagged_bad_email": flagged_bad_email,
         # What the preview must be able to state plainly BEFORE anything is

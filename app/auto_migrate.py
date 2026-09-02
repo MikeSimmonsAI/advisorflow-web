@@ -94,6 +94,22 @@ COLUMNS_TO_ADD = [
     ("leads", "callback_phone_source", "VARCHAR"),
     ("leads", "callback_phone_at", "TIMESTAMP"),
 
+    # Channel permission of record. ALL NULL ON EXISTING ROWS BY DESIGN.
+    #
+    # NULL means "the source never said", which is NOT permission. Adding these
+    # columns therefore changes nothing about any lead already in the database:
+    # no row is granted a permission it did not have, and no send path may read
+    # NULL as a yes. Existing rows gain a state only when a human sets one or a
+    # future import supplies one, and a later import can only ever make the
+    # state MORE restrictive (permission_values.more_restrictive).
+    ("leads", "allow_email", "BOOLEAN"),
+    ("leads", "allow_bulk_email", "BOOLEAN"),
+    ("leads", "allow_sms", "BOOLEAN"),
+    ("leads", "allow_voice", "BOOLEAN"),
+    ("leads", "permission_review", "BOOLEAN"),
+    ("leads", "permission_source", "VARCHAR"),
+    ("leads", "permission_raw", "TEXT"),
+
     # Attempt policy, configurable instead of a constant in the orchestrator.
     # All NULL by default, which defers to the next level down and finally to
     # the system default of 3 - so this migration changes no live behaviour.

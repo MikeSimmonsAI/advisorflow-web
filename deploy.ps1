@@ -258,6 +258,17 @@ if ($SkipSmoke) {
     # Six reverts.
     python scripts\probe_reconciliation.py 2>&1 | Select-String "FAIL|MISSED|checks,|reverts caught" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "RECONCILIATION CHECKS FAILED - not deploying."; exit 1 }
+    # GATE 37 - AN IMPORT MAY RESTRICT, NEVER RELEASE. The platform imported
+    # leads for its entire life with ONE permission column mapped - allow_calls -
+    # and no mapping at all for email, bulk email or SMS, so every export's
+    # opt-outs were discarded while the import reported success. This asserts a
+    # denial in any of the four channels survives the import, that a later
+    # permissive file cannot revive a person who opted out, that an unreadable
+    # cell never becomes consent, that one tenant's denial cannot touch another
+    # tenant, that "Last Activity Date" reaches the record instead of being
+    # parked, and that the send gate actually reads the result. Nine reverts.
+    python scripts\probe_import_compliance.py 2>&1 | Select-String "FAIL|MISSED|checks,|reverts caught|RESTRICT" | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "IMPORT COMPLIANCE CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_brand_owner_boundary.py 2>&1 | Select-String "REACHED|BROKEN|checks passed|WORKSPACE ONLY" | ForEach-Object { "    $_" }
     if ($LASTEXITCODE -ne 0) { Write-Host "BRAND OWNER BOUNDARY CHECKS FAILED - not deploying."; exit 1 }
     python scripts\probe_platform_owner.py 2>&1 | Select-String "FAIL|checks passed|NEUTRAL" | ForEach-Object { "    $_" }

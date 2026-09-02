@@ -122,6 +122,15 @@ def _one_run(db: Session, target: User, channel: str, label: str,
         # varies is the one that let an entire book sit on one number.
         result = qualification.qualify_leads(
             db, target, channel=channel, request=req, include_leads=True)
+        # WHERE THIS BOOK CAME FROM, alongside what it qualifies as.
+        #
+        # The two questions are inseparable: a population that scores as
+        # "never contacted" may be one whose contact history was parked at
+        # import, and only the provenance report can tell those apart. Computed
+        # from the SAME authorized set - it cannot describe a lead the caller
+        # is not allowed to see.
+        from app.services import import_provenance
+        provenance = import_provenance.summarize(authorized)
     except Exception as exc:  # a failed scenario is reported, never swallowed
         return {"scenario": label, "workspace_header": workspace_id,
                 "error": "%s: %s" % (type(exc).__name__, str(exc)[:300])}
@@ -149,6 +158,10 @@ def _one_run(db: Session, target: User, channel: str, label: str,
         "exclusion_reasons": result["exclusion_reasons"],
         "review_reasons": result["review_reasons"],
         "priority_factors": result["priority_factors"],
+        # Provenance: which file, which list, which uploader, what the import
+        # PARKED, and how much permission is simply unknown. This is what makes
+        # a population bindable to a source file rather than assumed to be one.
+        "provenance": provenance,
     }
     if sample_size:
         # Ids and buckets only. A diagnostic about one named person's book does

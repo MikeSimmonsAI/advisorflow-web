@@ -711,6 +711,37 @@ class Lead(Base):
     sms_consent_text      = Column(Text, nullable=True)
     sms_consent_source    = Column(String, nullable=True)
 
+    # ---- CHANNEL PERMISSION OF RECORD (from the source system) ------------
+    #
+    # TRI-STATE, AND THE THIRD STATE MATTERS: True = allowed, False = DENIED,
+    # NULL = the source never said. NULL IS NOT PERMISSION. Every send path
+    # must treat False as a hard stop and must not read NULL as a yes.
+    #
+    # These exist because the importer had exactly one permission field -
+    # allow_calls - and no mapping at all for email, bulk email or SMS. Every
+    # import the platform ever ran silently discarded those opt-outs while
+    # reporting success. A CRM export that carries "Do Not Allow" on 5,612
+    # email addresses landed 5,612 emailable leads.
+    #
+    # FOUR PERMISSIONS, NOT ONE. Bulk email is a separate fact from email: an
+    # advisor writing to one family is not a campaign, and a person who opted
+    # out of marketing has not refused correspondence. Interpretation lives in
+    # app/services/permission_values.py and nowhere else.
+    #
+    # These are written by import and by an explicit human edit. They are
+    # merged with more_restrictive() and can never be weakened by a later file.
+    allow_email       = Column(Boolean, nullable=True)
+    allow_bulk_email  = Column(Boolean, nullable=True)
+    allow_sms         = Column(Boolean, nullable=True)
+    allow_voice       = Column(Boolean, nullable=True)
+    # An imported permission cell the platform could not interpret. Ambiguity is
+    # surfaced for a human, never resolved into consent.
+    permission_review = Column(Boolean, default=False, nullable=True)
+    permission_source = Column(String, nullable=True)   # e.g. "import:<file>"
+    # The raw cells the states above were derived from, kept verbatim so a
+    # decision can be audited against the source rather than trusted.
+    permission_raw    = Column(Text, nullable=True)     # JSON
+
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
