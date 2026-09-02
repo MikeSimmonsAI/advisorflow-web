@@ -62,6 +62,13 @@ import GodCommandCenter from './pages/GodCommandCenter'
 import Billing from './pages/Billing'
 import GodShell from './pages/GodShell'
 import GodOrganizations from './pages/GodOrganizations'
+// Executive Suite — brand-scoped read-only portal. Separate shell from the
+// owner shell (GodShell) and from the tenant Layout. An executive sees their
+// brand's KPIs and customer portfolio; they cannot enter workspaces or use
+// any owner controls. Internal terminology (god, etc.) never appears here.
+import ExecutiveSuite from './pages/executive/ExecutiveSuite'
+import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
+import ExecutiveOrganizations from './pages/executive/ExecutiveOrganizations'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
 import GodSalesOps from './pages/GodSalesOps'
@@ -165,6 +172,20 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
  * calls /sales/me and shows a plain refusal if the server says no.
  */
 function SalesRoute({ children }) {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  return <>{children}</>
+}
+
+/**
+ * ExecutiveRoute — the Executive Suite frame.
+ *
+ * No tenant Layout. No owner shell. Auth is fully server-side:
+ * /executive/context returns 403 if the caller holds no brand_executive grant,
+ * and ExecutiveSuite renders an access-denied screen. The route guard here only
+ * enforces that the user is authenticated and has changed their password.
+ */
+function ExecutiveRoute({ children }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   return <>{children}</>
@@ -627,6 +648,14 @@ export default function App() {
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
         <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
         <Route path="/scraper" element={<ProtectedRoute requireGodAdmin><LeadScraper /></ProtectedRoute>} />
+        {/* ── Executive Suite routes ── brand-scoped, read-only.
+               ExecutiveSuite wraps every child in the executive shell and
+               verifies the brand_executive grant server-side. If the check
+               fails it renders its own access-denied screen — no tenant data,
+               no owner controls, no cross-brand visibility ever reaches here. */}
+        <Route path="/executive" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />

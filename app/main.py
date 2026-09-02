@@ -151,6 +151,10 @@ from app.routers.import_batch_router import router as import_batch_router
 # /qualification/vocabulary and the organization rules CRUD - answers 404, and
 # the God Mode Lead Qualification screen has nothing to call.
 from app.routers import qualification_router  # noqa: E402
+# Executive Suite — brand-scoped read-only portal for brand executives.
+# Separate from god_router (owner control plane) and sales_router (brand sales
+# workspace). No tenant Layout; no god controls; no cross-brand visibility.
+from app.routers.executive_router import router as executive_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -639,6 +643,10 @@ app.include_router(import_batch_router)
 # does not include a feature flag must not thereby lose the guard that keeps
 # outreach off a person who opted out.
 app.include_router(qualification_router.router)
+# Executive Suite: /executive/* — brand-scoped, read-only.
+# god_admin only for /executive/admin/grant|revoke; require_brand_executive
+# guards everything else. No tenant data; no cross-brand visibility.
+app.include_router(executive_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

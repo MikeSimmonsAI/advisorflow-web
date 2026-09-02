@@ -233,6 +233,50 @@ def require_god(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_brand_executive(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Executive Suite guard — caller must hold a brand_executive membership.
+
+    Returns a 3-tuple (user, membership, platform) so routes have the
+    brand's Platform object without a second query.
+
+    Architecture notes:
+    - Authority comes from the membership row, not from users.role.
+    - scope_type="platform" + scope_id=<platform_id> naturally isolates
+      one brand's executive from every other brand; no extra filter needed.
+    - god_admin is intentionally NOT whitelisted here: the owner uses the
+      owner shell. An executive portal and an owner shell are different tools
+      for different roles.
+    """
+    from app.models.sales_models import Membership, ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+    from app.models.models import Platform
+
+    mem = (
+        db.query(Membership)
+        .filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_PLATFORM,
+            Membership.role == ROLE_BRAND_EXECUTIVE,
+            Membership.is_active.is_(True),
+        )
+        .first()
+    )
+    if not mem:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Executive Suite access required.",
+        )
+    platform = db.query(Platform).filter(Platform.id == mem.scope_id).first()
+    if not platform:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Executive Suite access required.",
+        )
+    return user, mem, platform
+
+
 def get_platform_org_ids(user: User, db) -> list:
     """Return org IDs scoped to the user's access level:
     - god_admin  → all orgs across all platforms

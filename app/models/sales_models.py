@@ -58,9 +58,16 @@ SCOPE_BRAND_SALES_ORG = "brand_sales_org"
 SCOPE_CUSTOMER_ORG    = "customer_org"
 SCOPE_TYPES = (SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG)
 
-ROLE_SALES_MANAGER = "sales_manager"
-ROLE_SALES_REP     = "sales_rep"
-BRAND_SALES_ROLES  = (ROLE_SALES_MANAGER, ROLE_SALES_REP)
+ROLE_SALES_MANAGER   = "sales_manager"
+ROLE_SALES_REP       = "sales_rep"
+BRAND_SALES_ROLES    = (ROLE_SALES_MANAGER, ROLE_SALES_REP)
+
+# Executive Suite role — platform-scoped, brand-isolated.
+# scope_type = SCOPE_PLATFORM, scope_id = <platform_id>, role = ROLE_BRAND_EXECUTIVE
+# One person per platform per grant; grants are created by god_admin only.
+# An executive can VIEW their brand's KPIs and portfolio; they cannot
+# enter customer workspaces or operate on any AdvisorFlow control plane.
+ROLE_BRAND_EXECUTIVE = "brand_executive"
 
 
 class Membership(Base):
