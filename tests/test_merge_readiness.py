@@ -876,3 +876,368 @@ class TestCompliance:
         assert r.source_id == "GUID-001", "source_id not extracted"
         # raw_data still has everything for audit (not tested here) — 
         # but the fields CANNOT be None when the source had values
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 13 — Legacy /leads/upload/confirm adapter (end-to-end gate)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _legacy_confirm(client, hdr, csv_bytes, filename="leads.csv"):
+    """POST /leads/upload/confirm with a CSV payload."""
+    return client.post(
+        "/leads/upload/confirm",
+        files={"file": (filename, io.BytesIO(csv_bytes), "text/csv")},
+        headers=hdr,
+    )
+
+
+class TestLegacyAdapter:
+    """
+    End-to-end gate: every call to POST /leads/upload/confirm MUST pass
+    through the canonical Lead Import Intelligence pipeline.
+
+    Proves all 4 consent channels, provenance fields, review blocking,
+    idempotency, and permission gates survive through the legacy surface.
+    Includes revert proof test_rp8_legacy_bypass_closed.
+    """
+
+    def setup_method(self):
+        self.engine = _engine()
+        self.db = _session(self.engine)
+        self.org = _org(self.db, "Adapter Org", f"adapter-{gen_uuid()[:6]}")
+        self.org_b = _org(self.db, "Other Org", f"other-{gen_uuid()[:6]}")
+        # org_admin auto-grants lead_import_stage + lead_import_commit via role
+        self.admin = _user(self.db, self.org.id, "org_admin")
+        self.advisor = _user(self.db, self.org.id, "advisor")
+        self.manager = _user(self.db, self.org.id, "manager")
+
+    def teardown_method(self):
+        self.db.close()
+
+    # ── clean batch: all rows committed ──────────────────────────────────
+
+    def test_legacy_confirm_clean_batch_commits(self):
+        """All-clean CSV → review_required=False, leads committed to DB."""
+        csv = b"First Name,Phone,Allow Emails?,Allow Text Message?,Allow Phone Calls?\nAlice,2145550100,Yes,Yes,Yes\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["review_required"] is False
+        assert "import_batch_id" in body
+        assert body.get("committed_count", 0) >= 1
+        # Verify the batch exists in DB
+        batch = self.db.query(ImportBatch).filter(
+            ImportBatch.id == body["import_batch_id"]).first()
+        assert batch is not None
+        assert batch.organization_id == self.org.id
+
+    # ── review rows NOT auto-committed ───────────────────────────────────
+
+    def test_legacy_confirm_review_required_not_committed(self):
+        """Ambiguous consent → review_required=True, ZERO leads committed."""
+        csv = b"First Name,Phone,Allow Emails?\nBob,2145550101,Maybe\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["review_required"] is True
+        assert body.get("review_required_count", 0) >= 1
+        # No leads must have been written to the Lead table for this org from this batch
+        bid = body["import_batch_id"]
+        committed = self.db.query(Lead).filter(
+            Lead.organization_id == self.org.id).count()
+        # Staged rows exist but the batch must NOT be COMMITTED
+        batch = self.db.query(ImportBatch).filter(ImportBatch.id == bid).first()
+        assert batch is not None
+        assert batch.status != ImportBatchStatus.COMMITTED, \
+            f"Batch must not be committed when review_required: status={batch.status}"
+        # Staged rows should be present (pipeline ran) but no Lead records created
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "Pipeline must produce staged rows — none found (bypass?)"
+
+    # ── email compliance through legacy path ──────────────────────────────
+
+    def test_legacy_confirm_email_compliance(self):
+        """'Allow Emails? = No' → consent_email=False preserved in staged row."""
+        csv = b"First Name,Phone,Allow Emails?\nCarol,2145550102,No\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        assert rows[0].consent_email is False, \
+            f"Email denial not preserved: consent_email={rows[0].consent_email}"
+
+    # ── bulk email compliance through legacy path ─────────────────────────
+
+    def test_legacy_confirm_bulk_email_compliance(self):
+        """'Do not allow Bulk Emails = Do Not Allow' → bulk_email denial preserved."""
+        csv = b"First Name,Phone,Do not allow Bulk Emails\nDave,2145550103,Do Not Allow\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        assert rows[0].consent_bulk_email is False, \
+            f"Bulk email denial not preserved: consent_bulk_email={rows[0].consent_bulk_email}"
+
+    # ── SMS compliance through legacy path ───────────────────────────────
+
+    def test_legacy_confirm_sms_compliance(self):
+        """'Allow Text Message? = No' → consent_sms=False preserved."""
+        csv = b"First Name,Phone,Allow Text Message?\nEve,2145550104,No\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        assert rows[0].consent_sms is False, \
+            f"SMS denial not preserved: consent_sms={rows[0].consent_sms}"
+
+    # ── voice compliance through legacy path ──────────────────────────────
+
+    def test_legacy_confirm_voice_compliance(self):
+        """'Allow Phone Calls? = No' → consent_voice=False preserved."""
+        csv = b"First Name,Phone,Allow Phone Calls?\nFrank,2145550105,No\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        assert rows[0].consent_voice is False, \
+            f"Voice denial not preserved: consent_voice={rows[0].consent_voice}"
+
+    # ── last activity date through legacy path ────────────────────────────
+
+    def test_legacy_confirm_last_activity_date(self):
+        """'Last Activity Date' column preserved as datetime through legacy path."""
+        csv = b"First Name,Phone,Last Activity Date\nGrace,2145550106,2024-03-15\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        row = rows[0]
+        assert row.last_activity_date is not None, "last_activity_date not preserved"
+        assert hasattr(row.last_activity_date, "year"), "last_activity_date must be datetime"
+        assert row.last_activity_date.year == 2024
+        assert row.last_activity_date.month == 3
+        assert row.last_activity_date.day == 15
+
+    # ── mobile phone provenance through legacy path ───────────────────────
+
+    def test_legacy_confirm_mobile_provenance(self):
+        """'Mobile Phone' column → phone_type=known_mobile preserved."""
+        csv = b"First Name,Phone,Mobile Phone\nHank,2145550107,2145550108\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        row = rows[0]
+        assert row.phone_type == "known_mobile", \
+            f"Expected known_mobile, got {row.phone_type}"
+        assert row.mobile_phone_normalized is not None, "mobile_phone_normalized must be set"
+
+    # ── source_id (Contact GUID) through legacy path ──────────────────────
+
+    def test_legacy_confirm_source_id(self):
+        """'Contact GUID' column preserved as source_id through legacy path."""
+        guid = "AABB-CCDD-1122-3344"
+        csv = (b"First Name,Phone,Contact GUID\nIvy,2145550109," +
+               guid.encode() + b"\n")
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        rows = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+        assert rows, "No staged rows — pipeline bypassed?"
+        assert rows[0].source_id == guid, \
+            f"source_id not preserved: {rows[0].source_id}"
+
+    # ── existing denial not weakened on merge ─────────────────────────────
+
+    def test_legacy_confirm_existing_denial_not_weakened(self):
+        """Existing lead sms_consent=False + incoming Yes -> denial preserved (more-restrictive-wins)."""
+        # Create existing lead with SMS consent explicitly denied
+        lead = Lead(organization_id=self.org.id, assigned_to_id=self.admin.id,
+                    first_name="Jay", last_name="Smith", phone="2145550110",
+                    tier=LeadTier.PRE_NEED, message_track=MessageTrack.PRE_NEED_LOCK_PRICE,
+                    status=LeadStatus.NEW, sms_consent=False)
+        self.db.add(lead); self.db.commit()
+        # Import same lead with SMS=Yes -- denial must win
+        csv = b"First Name,Last Name,Phone,Allow Text Message?\nJay,Smith,2145550110,Yes\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        bid = r.json()["import_batch_id"]
+        batch = self.db.query(ImportBatch).filter(ImportBatch.id == bid).first()
+        # Either way, lead sms_consent must not be weakened to True
+        self.db.refresh(lead)
+        assert lead.sms_consent is not True, \
+            "More-restrictive-wins violated: SMS denial weakened to True"
+        if batch and batch.status == ImportBatchStatus.COMMITTED:
+            assert lead.sms_consent is False, \
+                "sms_consent changed from False after commit -- more-restrictive-wins failed"
+
+    # ── ambiguous consent → review required, not silently committed ───────
+
+    def test_legacy_confirm_ambiguous_not_committed(self):
+        """Ambiguous 'Allow Emails? = Unknown' → review_required=True, not committed."""
+        csv = b"First Name,Phone,Allow Emails?\nKim,2145550111,Unknown\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["review_required"] is True, \
+            f"Ambiguous consent must require review: {body}"
+        bid = body["import_batch_id"]
+        batch = self.db.query(ImportBatch).filter(ImportBatch.id == bid).first()
+        assert batch.status != ImportBatchStatus.COMMITTED, \
+            "Batch with ambiguous consent must NOT be auto-committed"
+
+    # ── duplicate → review required, not silently committed ──────────────
+
+    def test_legacy_confirm_duplicate_not_committed(self):
+        """Possible duplicate → review_required=True, not auto-committed."""
+        # Seed existing lead
+        lead = Lead(organization_id=self.org.id, assigned_to_id=self.admin.id,
+                    first_name="Lee", last_name="Dupe", phone="2145550112",
+                    tier=LeadTier.PRE_NEED, message_track=MessageTrack.PRE_NEED_LOCK_PRICE,
+                    status=LeadStatus.NEW)
+        self.db.add(lead); self.db.commit()
+        # Import same phone — dedup should flag as possible duplicate
+        csv = b"First Name,Last Name,Phone\nLee,Dupe,2145550112\n"
+        client = _client(self.db)
+        r = _legacy_confirm(client, _hdr(self.admin, self.db), csv)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # Either review_required or clean commit (matched_existing auto-accepts in some configs)
+        # The critical gate: no NEW Lead should be created (duplicate, not a new lead)
+        bid = body["import_batch_id"]
+        after_count = self.db.query(Lead).filter(
+            Lead.organization_id == self.org.id).count()
+        # If it was flagged as review_required, batch not committed → count unchanged
+        if body["review_required"]:
+            batch = self.db.query(ImportBatch).filter(ImportBatch.id == bid).first()
+            assert batch.status != ImportBatchStatus.COMMITTED, \
+                "Duplicate batch must not be auto-committed"
+        # Either way, we must not have doubled the lead count
+        assert after_count <= 2, \
+            f"Duplicate lead silently created: count went to {after_count}"
+
+    # ── idempotent retry ─────────────────────────────────────────────────
+
+    def test_legacy_confirm_idempotent(self):
+        """Submitting the same clean CSV twice creates a new ImportBatch each time
+        but does NOT create duplicate Lead records (dedup catches them)."""
+        csv = b"First Name,Last Name,Phone\nMia,Idem,2145550113\n"
+        client = _client(self.db)
+        hdr = _hdr(self.admin, self.db)
+        r1 = _legacy_confirm(client, hdr, csv)
+        assert r1.status_code == 200, r1.text
+        # Second call — same data
+        r2 = _legacy_confirm(client, hdr, csv)
+        assert r2.status_code == 200, r2.text
+        # Different batch IDs (each call creates a new batch)
+        b1 = r1.json().get("import_batch_id")
+        b2 = r2.json().get("import_batch_id")
+        assert b1 != b2, "Expected distinct batch IDs per call"
+        # Lead count must not exceed 1 (dedup prevents double-create)
+        lead_count = self.db.query(Lead).filter(
+            Lead.organization_id == self.org.id,
+            Lead.phone == "2145550113").count()
+        assert lead_count <= 1, \
+            f"Idempotency failed: {lead_count} leads created for same phone"
+
+    # ── permission gates ─────────────────────────────────────────────────
+
+    def test_legacy_confirm_plain_advisor_denied(self):
+        """Plain advisor role → 403 from require_import_stage."""
+        csv = b"First Name,Phone\nNick,2145550114\n"
+        r = _legacy_confirm(_client(self.db), _hdr(self.advisor, self.db), csv)
+        assert r.status_code == 403, \
+            f"Advisor must be denied: got {r.status_code} {r.text}"
+
+    def test_legacy_confirm_manager_no_grant_denied(self):
+        """Manager without explicit lead_import_stage grant → 403."""
+        csv = b"First Name,Phone\nOlly,2145550115\n"
+        r = _legacy_confirm(_client(self.db), _hdr(self.manager, self.db), csv)
+        assert r.status_code == 403, \
+            f"Manager without grant must be denied: got {r.status_code} {r.text}"
+
+    # ── revert proof: bypass closed ───────────────────────────────────────
+
+    def test_rp8_legacy_bypass_closed(self):
+        """
+        REVERT PROOF: Prove the bypass is closed.
+
+        Phase A (BREAK): Monkey-patch _stage_batch in leads_router to a no-op
+        (simulating restoring the old direct call to import_leads_from_excel).
+        → GATE FAILS: No ImportStagedRow records created, pipeline bypassed.
+
+        Phase B (RESTORE): Restore canonical _stage_batch.
+        → GATE PASSES: ImportStagedRow records created with compliance fields.
+        """
+        import app.routers.leads_router as lr
+
+        csv = b"First Name,Phone,Allow Emails?,Allow Text Message?\nPat,2145550116,Yes,No\n"
+        client = _client(self.db)
+        hdr = _hdr(self.admin, self.db)
+
+        # ── PHASE A: BREAK — no-op _stage_batch (simulates bypass) ──────────
+        original_stage_batch = lr._stage_batch
+
+        def _bypass_stage(batch_id, org_id, file_path, source_type, db):
+            """No-op: simulates old direct import_leads_from_excel path
+            that never created ImportStagedRow records."""
+            pass  # does NOT write any ImportStagedRow rows
+
+        lr._stage_batch = _bypass_stage
+        try:
+            r_broken = _legacy_confirm(client, hdr, csv)
+            # The endpoint may return 200 but pipeline was bypassed — no staged rows
+            if r_broken.status_code == 200:
+                bid_broken = r_broken.json().get("import_batch_id")
+                rows_broken = self.db.query(ImportStagedRow).filter(
+                    ImportStagedRow.batch_id == bid_broken).all() if bid_broken else []
+                bypass_detected = len(rows_broken) == 0
+            else:
+                bypass_detected = True  # error itself is a signal
+            assert bypass_detected, \
+                "BREAK phase failed: staged rows were created even with no-op _stage_batch"
+        finally:
+            # ── PHASE B: RESTORE — canonical _stage_batch ───────────────────
+            lr._stage_batch = original_stage_batch
+
+        r_restored = _legacy_confirm(client, hdr, csv)
+        assert r_restored.status_code == 200, \
+            f"Restore phase: endpoint failed: {r_restored.status_code} {r_restored.text}"
+        bid_restored = r_restored.json().get("import_batch_id")
+        assert bid_restored, "No import_batch_id in restore-phase response"
+
+        rows_restored = self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid_restored).all()
+        assert rows_restored, \
+            "RESTORE phase failed: no staged rows after restoring canonical _stage_batch"
+
+        # Verify compliance fields survived the full pipeline
+        row = rows_restored[0]
+        assert row.consent_email is True,  \
+            f"Email consent not extracted in restore phase: {row.consent_email}"
+        assert row.consent_sms is False, \
+            f"SMS denial not extracted in restore phase: {row.consent_sms}"

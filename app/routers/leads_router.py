@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import json as _json
 from fastapi import (
-    APIRouter, Depends, UploadFile, File, Form, Query, HTTPException, Request,
+    APIRouter, Depends, UploadFile, File, Form, Query, HTTPException, Request, Response,
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
@@ -15,6 +15,14 @@ from app.deps import get_db, require_tenant_user
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
 from app.services.import_service import import_leads_from_excel
+from app.services.import_permissions import require_import_stage, require_import_commit
+from app.services.import_staging_service import stage_batch as _stage_batch
+from app.services.import_commit_service import commit_batch as _commit_batch_svc
+from app.models.import_models import (
+    ImportBatch, ImportBatchStatus, ImportStagedRow,
+    ImportRowReviewStatus, ImportDuplicateStatus, ImportValidationStatus,
+)
+from app.models.models import gen_uuid
 from app.services.dedup_service import normalize_phone
 from app.routers.audit_log_router import log_action
 # THE ONE AUTHORIZED LEAD SCOPE. Every list, count, search, export and
@@ -43,24 +51,18 @@ def preview_upload(
     offer_hook: Optional[str] = Form(None),          # what we're offering
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_context),
+    _response: Response = None,
 ):
-    """
-    Step 1: advisor uploads an Excel file, we run the REAL import logic
-    (tier routing, dedup, compliance flags) in dry_run mode so the preview
-    numbers always match what confirm_upload will actually do.
-
-    source_year and force_new_inquiry are explicitly marked as Form(...)
-    fields, not bare params - without that marker FastAPI treats them as
-    query parameters when mixed with a File(...) upload, which silently
-    ignored the frontend's multipart form value for source_year (a real,
-    pre-existing bug found and fixed while wiring up force_new_inquiry,
-    which would have had the exact same problem).
-
-    force_new_inquiry: manual override for batches of brand-new web/cold
-    leads - tags every row as New Inquiry regardless of auto-detection
-    from a source column. See import_service.import_leads_from_excel for
-    the full reasoning.
-    """
+    # DEPRECATED — retained for backward compatibility with the existing advisor
+    # upload flow.  New callers should POST to POST /import-batches which routes
+    # through the full Lead Import Intelligence pipeline (stage → review → commit).
+    # This endpoint still calls import_leads_from_excel in dry_run=True mode and
+    # creates no live Leads, so it is safe to keep running indefinitely, but it
+    # bypasses the staging review gate.
+    if _response is not None:
+        _response.headers["Deprecation"] = "true"
+        _response.headers["Sunset"] = "2027-01-01"
+        _response.headers["Link"] = '</import-batches>; rel="successor-version"'
     import os as _os
     original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
     if original_ext not in (".xlsx", ".xls", ".csv"):
@@ -120,52 +122,162 @@ def confirm_upload(
     campaign_purpose: Optional[str] = Form(None),
     offer_hook: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_context),
+    # Legacy surface; canonical pipeline authority enforced.
+    # Caller must hold BOTH lead_import_stage AND lead_import_commit — the adapter
+    # performs both operations on behalf of the caller.
+    current_user: User = Depends(require_import_stage),
+    _commit_check=Depends(require_import_commit),
+    _response: Response = None,
 ):
-    """Step 2: advisor confirms - actually import and persist the leads. See preview_upload above for why source_year/force_new_inquiry use Form(...)."""
+    """Legacy compatibility adapter for POST /leads/upload/confirm.
+
+    IMPLEMENTATION NOTE: This endpoint is DEPRECATED as an API surface but is
+    NOT deprecated as an implementation. It routes every request through the
+    canonical Lead Import Intelligence pipeline (stage → compliance → dedup →
+    review classification → commit). There is NO path here that creates a live
+    Lead without passing through import_staging_service and import_commit_service.
+
+    Backward-compatible response contract:
+    - All rows clean   → { review_required: False, import_batch_id, committed_count, ... }
+    - Any row flagged  → { review_required: True,  import_batch_id, batch_status,
+                           ready_count, review_required_count, excluded_count }
+      In this case NO rows are committed. The batch remains open for human review
+      at /import-batches/{import_batch_id}.
+    """
+    if _response is not None:
+        _response.headers["Deprecation"] = "true"
+        _response.headers["Sunset"] = "2027-01-01"
+        _response.headers["Link"] = '</import-batches>; rel="successor-version"'
+
     import os as _os
     original_ext = _os.path.splitext(file.filename or "upload.xlsx")[1].lower() or ".xlsx"
     if original_ext not in (".xlsx", ".xls", ".csv"):
         raise HTTPException(status_code=400, detail="Only .xlsx, .xls, and .csv files are accepted.")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
-        MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
-        written = 0
-        chunk_size = 1024 * 64
-        while True:
-            chunk = file.file.read(chunk_size)
-            if not chunk:
-                break
-            written += len(chunk)
-            if written > MAX_UPLOAD_BYTES:
-                tmp.close()
-                os.unlink(tmp.name)
-                raise HTTPException(status_code=413, detail="File too large. Maximum upload size is 50 MB.")
-            tmp.write(chunk)
-        tmp_path = tmp.name
-
+    # ── 1. Stream to temp file ────────────────────────────────────────────────
+    tmp_path = None
+    batch_id = gen_uuid()
     try:
-        result = import_leads_from_excel(
-            db,
-            file_path=tmp_path,
-            organization_id=current_user.organization_id,
-            uploading_user_id=current_user.id,
-            source_year=source_year,
-            source_filename=file.filename,
-            force_new_inquiry=force_new_inquiry,
-            relationship_type=relationship_type or "cold_lead",
-            import_list_name=import_list_name,
-            campaign_purpose=campaign_purpose,
-            offer_hook=offer_hook,
-            imported_by_name=current_user.full_name or current_user.email,
-        )
-    except ValueError as exc:
-        # Same as the preview: an unreadable file is a 400 with the reason.
-        raise HTTPException(status_code=400, detail=str(exc))
-    finally:
-        os.unlink(tmp_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
+            MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+            written = 0
+            chunk_size = 1024 * 64
+            while True:
+                chunk = file.file.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    tmp.close()
+                    os.unlink(tmp.name)
+                    raise HTTPException(status_code=413,
+                                        detail="File too large. Maximum upload size is 50 MB.")
+                tmp.write(chunk)
+            tmp_path = tmp.name
 
-    return result
+        # ── 2. Create ImportBatch record ──────────────────────────────────────
+        display_name = (import_list_name or
+                        os.path.splitext(file.filename or "upload")[0] or
+                        "Legacy Upload")
+        batch = ImportBatch(
+            id=batch_id,
+            organization_id=current_user.organization_id,
+            display_name=display_name,
+            source_type=original_ext.lstrip("."),
+            source_filename=file.filename,
+            status=ImportBatchStatus.UPLOADING,
+            created_by_id=current_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(batch)
+        db.commit()
+
+        # ── 3. Canonical staging — compliance, bulk dedup, provenance ─────────
+        try:
+            _stage_batch(batch_id, current_user.organization_id, tmp_path,
+                         original_ext.lstrip("."), db)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    # ── 4. Classify staged rows ───────────────────────────────────────────────
+    # A row needs human review if:
+    #   a) any consent channel was ambiguous (consent_review_required=True), OR
+    #   b) it is a possible duplicate requiring merge decision
+    # Invalid rows are auto-rejected. All others are auto-accepted for commit.
+    rows = db.query(ImportStagedRow).filter(
+        ImportStagedRow.batch_id == batch_id
+    ).all()
+
+    review_required_count = 0
+    excluded_count = 0
+
+    for row in rows:
+        needs_review = (
+            row.consent_review_required
+            or row.duplicate_status == ImportDuplicateStatus.POSSIBLE_DUPLICATE
+        )
+        if needs_review:
+            review_required_count += 1
+            # Leave row.review_status as PENDING — visible in review UI
+        elif row.validation_status == ImportValidationStatus.INVALID:
+            row.review_status = ImportRowReviewStatus.REJECTED
+            excluded_count += 1
+        else:
+            row.review_status = ImportRowReviewStatus.ACCEPTED
+
+    db.commit()
+    batch.recount(db)
+
+    ready_count = (batch.total_rows or 0) - review_required_count - excluded_count
+
+    # ── 5. If any row requires human review: stop here ────────────────────────
+    # NEVER auto-commit a batch that contains ambiguous consent or duplicate
+    # conflicts. Return a review-required response so the frontend can direct
+    # the user to /import-batches/{batch_id}.
+    if review_required_count > 0:
+        batch.status = ImportBatchStatus.READY_FOR_REVIEW
+        db.commit()
+        return {
+            "review_required": True,
+            "import_batch_id": batch.id,
+            "batch_status": batch.status,
+            "ready_count": ready_count,
+            "review_required_count": review_required_count,
+            "excluded_count": excluded_count,
+            "message": (
+                f"{review_required_count} record(s) need review before they can be imported. "
+                f"Open the import batch to review them."
+            ),
+        }
+
+    # ── 6. All rows are clean — commit through canonical service ──────────────
+    try:
+        committed_batch = _commit_batch_svc(
+            batch_id, current_user.organization_id, db, current_user.id
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"Commit failed: {str(exc)[:200]}")
+
+    committed_batch_refreshed = db.query(ImportBatch).filter(
+        ImportBatch.id == batch_id
+    ).first()
+
+    return {
+        "review_required": False,
+        "import_batch_id": batch_id,
+        "batch_status": committed_batch_refreshed.status if committed_batch_refreshed else "committed",
+        "committed_count": committed_batch_refreshed.committed_rows if committed_batch_refreshed else ready_count,
+        "excluded_count": excluded_count,
+        # Backward-compatible fields the old UI may have checked
+        "created": committed_batch_refreshed.committed_rows if committed_batch_refreshed else ready_count,
+        "updated": 0,
+        "skipped": excluded_count,
+    }
 
 
 @router.get("/import-batches")
