@@ -72,6 +72,7 @@ const NAV_GROUPS = [
       { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users', adminOnly: true, featureKey: 'lead_cleanup' },
       { to: '/admin', label: 'Team Performance', icon: 'shield', adminOnly: true, featureKey: 'master_dashboard' },
       { to: '/reports', label: 'Reports', icon: 'activity', adminOnly: true, featureKey: 'reports' },
+      { to: '/import-batches', label: 'Lead Imports', icon: 'upload', adminOnly: true },
     ],
   },
   {
@@ -145,6 +146,7 @@ function Icon({ name }) {
     database: <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
     'credit-card': <><rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" /></>,
     search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+    upload: <><polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

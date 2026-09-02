@@ -69,16 +69,10 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 # import a deletion plan has nowhere durable to live, and the manifest exists
 # only in whatever browser tab asked for it.
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
-import app.models.demo_site_models
-# Organization-defined qualification rules (qualification_rules) - same Base,
-# same reason. Without this import the table is never created and every
-# organization silently has no way to say what a valuable lead is, which the
-# engine reads as "this organization has defined no rules" rather than as an
-# error - a quiet wrong answer instead of a loud one.
-import app.models.qualification_models  # noqa: F401  (imported for side effects)
-# Staged historical source records. New TABLES come from Base.metadata.create_all,
-# which only sees a model whose module has actually been imported - so this line
-# is what creates import_batches / source_records / source_opportunities.
+import app.models.demo_site_models  # noqa: F401  (imported for side effects)
+# Lead Import Intelligence staging tables (import_batches / import_staged_rows).
+# Same Base, same reason. Without this import those tables are never created and
+# every upload silently has nowhere to write.
 import app.models.import_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 # The SECOND gate pair. require_feature asks whether the customer may USE a
@@ -141,6 +135,7 @@ from app.routers.integrations_router import router as integrations_router
 # legacy Twilio voice stack), which stays fail-closed and untouched.
 from app.routers.voice_webhooks_router import router as voice_webhooks_router
 from app.routers.demo_router import router as demo_router
+from app.routers.import_batch_router import router as import_batch_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -532,13 +527,6 @@ app.include_router(workqueue_router.router)
 # a 402 on an inbound provider callback would drop real traffic.
 app.include_router(campaign_router.router,
                    dependencies=[Depends(require_feature("campaigns"))])
-# Qualification is NOT behind a feature flag. It answers "who may we contact",
-# which every organization needs before any outreach and which a customer
-# without the campaigns add-on still needs in order to see why a lead is
-# excluded. Gating the honest answer behind a paid feature would leave the
-# unpaid customer with a silent empty list instead.
-from app.routers import qualification_router  # noqa: E402
-app.include_router(qualification_router.router)
 app.include_router(pipeline_router)
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
@@ -630,6 +618,7 @@ app.include_router(voice_webhooks_router)
 # environments no longer serve the same application.
 app.include_router(demo_router)
 app.include_router(proposal_router.router)
+app.include_router(import_batch_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

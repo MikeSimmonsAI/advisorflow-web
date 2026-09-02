@@ -59,6 +59,8 @@ export default function Leads() {
   const [bulkAiStartResult, setBulkAiStartResult] = useState(null)
   const [view, setView] = useState('all')
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
+  const [reviewBatchId, setReviewBatchId] = useState(null)
+  const [reviewBatchCount, setReviewBatchCount] = useState(0)
   // "/leads?import=1" opens the import panel directly — that is what the
   // Overview's Import leads button means. Read from location rather than the
   // useSearchParams hook below, which is declared further down this list.
@@ -340,6 +342,8 @@ export default function Leads() {
   async function handleConfirmUpload() {
     if (!pendingFile.current) return
     setConfirming(true)
+    setReviewBatchId(null)
+    setReviewBatchCount(0)
     try {
       const formData = new FormData()
       formData.append('file', pendingFile.current)
@@ -356,7 +360,13 @@ export default function Leads() {
       setShowImport(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
       loadLeads()
-      if (result.created_lead_ids && result.created_lead_ids.length > 0) {
+      if (result.review_required && result.import_batch_id) {
+        // Some records require human review before they can be imported.
+        // Surface the batch so the user can open the review UI.
+        // IMPORTANT: do NOT treat this as a completed import.
+        setReviewBatchId(result.import_batch_id)
+        setReviewBatchCount(result.review_required_count || 0)
+      } else if (result.created_lead_ids && result.created_lead_ids.length > 0) {
         setReviewLeadIds(result.created_lead_ids)
       }
     } catch (err) {
@@ -1676,6 +1686,28 @@ export default function Leads() {
         />
       )}
 
+      {reviewBatchId && (
+        <div className="import-review-required-notice" style={{
+          background: 'var(--color-warning-bg, #fffbea)',
+          border: '1px solid var(--color-warning, #f59e0b)',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          <span style={{ flex: 1 }}>
+            <strong>{reviewBatchCount} record{reviewBatchCount !== 1 ? 's' : ''} need review</strong>
+            {' '}before they can be imported. They are waiting in your import batch.
+          </span>
+          <button className="btn btn-primary btn-sm"
+            onClick={() => { setReviewBatchId(null); navigate(`/import-batches/${reviewBatchId}`) }}>
+            Open Import Review
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={() => setReviewBatchId(null)}>Dismiss</button>
+        </div>
+      )}
       {reviewLeadIds && (
         <MessageReview
           leadIds={reviewLeadIds}

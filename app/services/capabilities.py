@@ -137,6 +137,28 @@ CAPABILITIES: Dict[str, Capability] = dict([
          "Platform secrets and shared integration credentials",
          requires_feature=None, delegable=False,
          why="Shared across every tenant by definition."),
+
+    # ── Lead Import Intelligence (feature capabilities — role-resolved) ────────
+    _cap("import_leads",
+         "Upload and process CSV / Excel / Google Contacts lead imports",
+         requires_feature=None, delegable=True,
+         why="Org admins auto-qualify by role; advisors or managers need an "
+             "explicit grant to upload on the org's behalf."),
+    _cap("import_review",
+         "Review staged import rows and set accept / merge / reject decisions",
+         requires_feature=None, delegable=True,
+         why="Anyone with import_review may triage rows but cannot commit them."),
+    _cap("import_commit",
+         "Commit reviewed import rows to live leads",
+         requires_feature=None, delegable=True,
+         why="Separate from review so a manager can review without having the "
+             "power to write to the live database."),
+    _cap("import_admin",
+         "Archive and manage import batches",
+         requires_feature=None, delegable=True,
+         why="Administrative housekeeping — archive batches, purge old staging "
+             "data. Separate from commit so batch management does not require "
+             "commit authority."),
 ])
 
 ALL_CAPABILITY_KEYS = tuple(sorted(CAPABILITIES))
@@ -446,6 +468,57 @@ def require_capability(key: str):
             raise HTTPException(status_code=decision.status,
                                 detail=decision.reason)
         return user
+
+    return _dep
+
+
+def require_feature_capability(key: str):
+    """Feature-level capability gate for import and similar product features.
+
+    Resolution order differs from require_capability deliberately:
+        god_admin    -> ALLOW (always)
+        super_admin  -> ALLOW (platform staff, always)
+        org_admin    -> ALLOW by role alone (no org-level delegation needed)
+        others       -> must hold an explicit UserCapabilityGrant
+
+    An org_admin can import leads on day one without God having to delegate
+    'import_leads' to every customer org. That is the right default for a
+    product feature that all customers use, not for access to Twilio credentials
+    that only some customers self-manage.
+
+    Uses the SAME CAPABILITIES registry and the SAME UserCapabilityGrant table
+    as require_capability — this is not a second authorization system. Only the
+    resolution path differs.
+    """
+    if key not in CAPABILITIES:
+        raise RuntimeError(
+            "require_feature_capability(%r): not a registered capability" % key)
+
+    def _dep(user: User = Depends(get_current_user),
+             db: Session = Depends(get_db)) -> User:
+        role = getattr(user, "role", None)
+
+        # God and super_admin: always allowed
+        if role in ("god_admin", "super_admin"):
+            return user
+
+        # org_admin: allowed by role (no explicit grant needed for feature use)
+        if role == "org_admin":
+            return user
+
+        # Everyone else: must have an explicit UserCapabilityGrant
+        org_id = getattr(user, "organization_id", None)
+        if org_id and user_has_grant(db, user.id, org_id, key):
+            return user
+
+        _log.info(
+            "AUDIT: feature-capability DENIED user=%s role=%s cap=%s",
+            getattr(user, "email", "?"), role, key)
+        cap = CAPABILITIES[key]
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to %s. "
+                   "Contact your organization administrator." % cap.label)
 
     return _dep
 

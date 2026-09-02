@@ -1,242 +1,303 @@
 """
-IMPORT INTELLIGENCE - staged historical source records.
-
-THE DISTINCTION THIS FILE EXISTS TO HOLD
-----------------------------------------
-A `Lead` is an OPERATIONAL record: it has an owner, a status, a cadence, and
-every send path in the platform reads it. A `SourceRecord` is a HISTORICAL
-record: it is evidence about a person, it is queryable for reconciliation, and
-NOTHING SENDS TO IT.
-
-Turning a 93,434-row CRM export into 93,434 Leads would create ninety thousand
-sendable rows in order to answer questions about a hundred of them. The export
-is a reference table, not a work queue, and this is where a reference table
-lives.
-
-WHAT A STAGED RECORD KEEPS
+Import Intelligence Models
 --------------------------
-  * the ORIGINAL source identifier - the CRM's own contact GUID - untouched,
-    so the same person can be recognised across exports taken months apart
-  * the RAW ROW, verbatim, so every derived value can be audited against the
-    cell it came from rather than trusted
-  * NORMALIZED identity columns, indexed, so reconciliation is a join and not
-    a scan of ninety thousand JSON blobs
-  * COMPLIANCE as a tri-state, read by the canonical table in
-    app/services/permission_values.py
-  * HISTORICAL ACTIVITY, DISPOSITION and SALE indicators, which is the evidence
-    the operational row usually lacks
+ImportBatch  — one per upload/source session. State machine drives the
+               workflow: UPLOADING → PROCESSING → READY_FOR_REVIEW →
+               REVIEWING → READY_TO_COMMIT → COMMITTING → COMMITTED.
 
-WHAT IT DOES NOT HAVE, DELIBERATELY
------------------------------------
-No `assigned_to_id`. No `status`. No cadence, no message relationship, no
-consent-of-record. There is no column here that a send path could read as
-permission to contact somebody, and a gate asserts that these tables are not
-reachable from any send path.
+ImportStagedRow — one row per contact parsed from the source. Never
+                  directly creates a live Lead; that happens only at
+                  commit time, from explicitly reviewed rows.
 
-TENANCY
--------
-`organization_id` is NOT NULL on both tables and is the first column of every
-index. A historical record belongs to exactly one tenant, and a reconciliation
-query that forgets to scope is a query that returns nothing rather than
-somebody else's data.
+Column naming convention: the router and services drove the names; the
+model matches them exactly so there is one canonical name per field with
+no translation layer.
+
+ISOLATION RULE: Nothing in this module creates or modifies a live Lead.
+The word "Lead" appears only in FK references for post-commit provenance
+(committed_lead_id, merged_into_lead_id, matched_lead_id).
 """
 
-import enum
-
-from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text)
-from sqlalchemy.sql import func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import func
+from sqlalchemy.orm import relationship
 
 from app.models.models import Base, gen_uuid
 
 
-class SourceKind(str, enum.Enum):
-    """What a batch was loaded FOR. It decides what may read the rows."""
-    OPERATIONAL = "operational"   # became Leads
-    HISTORICAL = "historical"     # staged evidence, never contacted directly
+# ──────────────────────────────────────────────────────────────────────────────
+# Enumerations  (plain strings — no PG ENUM type, stays portable and safe to
+# add values without a migration)
+# ──────────────────────────────────────────────────────────────────────────────
 
+class ImportBatchStatus:
+    UPLOADING           = "uploading"
+    PROCESSING          = "processing"
+    READY_FOR_REVIEW    = "ready_for_review"
+    REVIEWING           = "reviewing"
+    READY_TO_COMMIT     = "ready_to_commit"
+    COMMITTING          = "committing"
+    COMMITTED           = "committed"
+    PARTIALLY_COMMITTED = "partially_committed"
+    FAILED              = "failed"
+    ARCHIVED            = "archived"
+
+    ALL = (
+        UPLOADING, PROCESSING, READY_FOR_REVIEW, REVIEWING,
+        READY_TO_COMMIT, COMMITTING, COMMITTED, PARTIALLY_COMMITTED,
+        FAILED, ARCHIVED,
+    )
+    COMMITTABLE = (READY_TO_COMMIT, REVIEWING, READY_FOR_REVIEW)
+    TERMINAL    = (COMMITTED, PARTIALLY_COMMITTED, FAILED)
+
+
+class ImportSourceType:
+    EXCEL           = "excel"
+    CSV             = "csv"
+    GOOGLE_CONTACTS = "google_contacts"
+    API             = "api"
+
+
+class ImportDuplicateStatus:
+    NEW                    = "new"
+    MATCHED_EXISTING       = "matched_existing"
+    POSSIBLE_DUPLICATE     = "possible_duplicate"
+    WITHIN_BATCH_DUPLICATE = "within_batch_duplicate"
+    DNC_BLOCKED            = "dnc_blocked"
+
+
+class ImportRowReviewStatus:
+    PENDING   = "pending"
+    ACCEPTED  = "accepted"
+    MERGED    = "merged"
+    REJECTED  = "rejected"
+    COMMITTED = "committed"
+
+
+class ImportValidationStatus:
+    VALID   = "valid"
+    WARNING = "warning"
+    INVALID = "invalid"
+
+
+class ImportMatchConfidence:
+    HIGH   = "high"
+    MEDIUM = "medium"
+    LOW    = "low"
+    NONE   = "none"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ImportBatch
+# ──────────────────────────────────────────────────────────────────────────────
 
 class ImportBatch(Base):
-    """
-    One upload. The provenance record every staged row points back to.
-
-    This is what makes "where did this value come from" answerable a year
-    later: the file name, its shape, who uploaded it, when, and the exact
-    header row it carried - so a mapping decision can be re-derived rather
-    than remembered.
-    """
+    """One per upload session. Holds aggregate state and stats."""
     __tablename__ = "import_batches"
 
-    id = Column(String, primary_key=True, default=gen_uuid)
+    id              = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
 
-    name = Column(String, nullable=True)              # human label
-    source_filename = Column(String, nullable=True)
-    source_system = Column(String, nullable=True)     # e.g. "dynamics"
-    kind = Column(String, default=SourceKind.HISTORICAL.value, nullable=False)
+    # Who kicked off this import
+    created_by_id   = Column(String, ForeignKey("users.id"), nullable=True)
+    created_by_name = Column(String, nullable=True)
 
-    row_count = Column(Integer, nullable=True)
-    column_count = Column(Integer, nullable=True)
-    # The header row verbatim, plus how each column was classified. A mapping
-    # audit is then a stored fact rather than something re-run from a file that
-    # may no longer exist.
-    header_json = Column(Text, nullable=True)
-    mapping_json = Column(Text, nullable=True)
+    display_name      = Column(String, nullable=True)
+    source_type       = Column(String, nullable=False)   # csv | xlsx | google_contacts
+    source_filename   = Column(String, nullable=True)    # original uploaded filename
 
-    uploaded_by_id = Column(String, ForeignKey("users.id"), nullable=True)
-    uploaded_by_name = Column(String, nullable=True)
-    source_year = Column(Integer, nullable=True)      # batch metadata, never scored
-    notes = Column(Text, nullable=True)
+    status = Column(String, default=ImportBatchStatus.UPLOADING, nullable=False)
 
-    status = Column(String, default="staged", nullable=False)  # staged/loaded/failed
-    error_text = Column(Text, nullable=True)
+    # Row-level counters (refreshed by recount())
+    total_rows    = Column(Integer, default=0)
+    new_rows      = Column(Integer, default=0)
+    matched_rows  = Column(Integer, default=0)
+    warning_rows  = Column(Integer, default=0)  # possible duplicates / low-confidence
+    rejected_rows = Column(Integer, default=0)
+    pending_rows  = Column(Integer, default=0)
+    committed_rows = Column(Integer, default=0)
+    merged_rows    = Column(Integer, default=0)
+    invalid_rows   = Column(Integer, default=0)
+
+    error_message    = Column(Text, nullable=True)
+    committed_at     = Column(DateTime, nullable=True)
+    committed_by_id  = Column(String, ForeignKey("users.id"), nullable=True)
+    committed_by_name = Column(String, nullable=True)
+    archived_at      = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
-    completed_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    __table_args__ = (
-        Index("ix_import_batches_org_created", "organization_id", "created_at"),
-        Index("ix_import_batches_org_kind", "organization_id", "kind"),
+    staged_rows = relationship(
+        "ImportStagedRow",
+        back_populates="import_batch",
+        passive_deletes=True,
+        lazy="dynamic",
     )
 
+    __table_args__ = (
+        Index("ix_import_batches_org_status",  "organization_id", "status"),
+        Index("ix_import_batches_org_created", "organization_id", "created_at"),
+        Index("ix_import_batches_creator",     "created_by_id"),
+    )
 
-class SourceRecord(Base):
-    """
-    One historical contact record, staged for reconciliation. NOT a lead.
+    def recount(self, db):
+        """Refresh all row-count columns from live ImportStagedRow table.
+        Idempotent — safe to call after any row-level change."""
+        from sqlalchemy import func as _func
 
-    `source_key` is the source system's own identifier - for a Dynamics export,
-    the "(Do Not Modify) Contact" GUID. It is preserved exactly as given,
-    because it is the only identifier that survives a person changing their
-    phone number, their email, or their surname.
-    """
-    __tablename__ = "source_records"
+        rows = (
+            db.query(ImportStagedRow)
+            .filter(ImportStagedRow.batch_id == self.id)
+            .all()
+        )
+        self.total_rows    = len(rows)
+        self.new_rows      = sum(1 for r in rows if r.duplicate_status == ImportDuplicateStatus.NEW)
+        self.matched_rows  = sum(1 for r in rows if r.duplicate_status == ImportDuplicateStatus.MATCHED_EXISTING)
+        self.warning_rows  = sum(1 for r in rows if r.duplicate_status == ImportDuplicateStatus.POSSIBLE_DUPLICATE)
+        self.rejected_rows = sum(1 for r in rows if r.review_status == ImportRowReviewStatus.REJECTED)
+        self.pending_rows  = sum(1 for r in rows if r.review_status in (
+            ImportRowReviewStatus.PENDING, ImportRowReviewStatus.ACCEPTED))
+        self.invalid_rows  = sum(1 for r in rows if r.validation_status == ImportValidationStatus.INVALID)
+        self.committed_rows = sum(
+            1 for r in rows
+            if r.review_status == ImportRowReviewStatus.COMMITTED
+            and r.duplicate_status not in (ImportDuplicateStatus.MATCHED_EXISTING,
+                                           ImportDuplicateStatus.POSSIBLE_DUPLICATE)
+        )
+        self.merged_rows = sum(
+            1 for r in rows
+            if r.review_status == ImportRowReviewStatus.COMMITTED
+            and r.duplicate_status in (ImportDuplicateStatus.MATCHED_EXISTING,
+                                       ImportDuplicateStatus.POSSIBLE_DUPLICATE)
+        )
 
-    id = Column(String, primary_key=True, default=gen_uuid)
+    def counter_reconciliation(self) -> dict:
+        """Return a dict showing row accounting. Sum must equal total_rows."""
+        accounted = (
+            self.committed_rows + self.merged_rows +
+            self.rejected_rows + self.pending_rows
+        )
+        return {
+            "total": self.total_rows,
+            "committed": self.committed_rows,
+            "merged": self.merged_rows,
+            "rejected": self.rejected_rows,
+            "pending": self.pending_rows,
+            "accounted": accounted,
+            "unaccounted": self.total_rows - accounted,
+            "balanced": accounted == self.total_rows,
+        }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ImportStagedRow
+# ──────────────────────────────────────────────────────────────────────────────
+
+class ImportStagedRow(Base):
+    """One row per contact parsed from the source file.
+    Never creates a live Lead until commit.
+    DNC blocks are authoritative and cannot be overridden by import."""
+    __tablename__ = "import_staged_rows"
+
+    id         = Column(String, primary_key=True, default=gen_uuid)
+    batch_id   = Column(String, ForeignKey("import_batches.id", ondelete="CASCADE"), nullable=False)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-    import_batch_id = Column(String, ForeignKey("import_batches.id"), nullable=True)
+    row_number = Column(Integer, nullable=False)
 
-    # ---- provenance ------------------------------------------------------
-    source_system = Column(String, nullable=True)
-    source_entity = Column(String, default="contact", nullable=True)
-    source_key = Column(String, nullable=True)        # the CRM's own contact id
-    source_row_number = Column(Integer, nullable=True)
-    row_checksum = Column(String, nullable=True)       # source's own, if given
-    # The entire row as it arrived. This is the auditable original; every other
-    # column on this table is derived from it and can be re-derived from it.
-    raw_json = Column(Text, nullable=True)
+    raw_data = Column(Text, nullable=True)   # JSON: original col→val map
 
-    # ---- identity, normalized and indexed --------------------------------
-    first_name = Column(String, nullable=True)
-    last_name = Column(String, nullable=True)
-    full_name = Column(String, nullable=True)
-    norm_first_name = Column(String, nullable=True)
-    norm_last_name = Column(String, nullable=True)
+    first_name       = Column(String, nullable=True)
+    last_name        = Column(String, nullable=True)
+    phone_raw        = Column(String, nullable=True)
+    phone_normalized = Column(String, nullable=True)
+    email_raw        = Column(String, nullable=True)
+    email_normalized = Column(String, nullable=True)
 
-    email = Column(String, nullable=True)
-    norm_email = Column(String, nullable=True)
-    email_alt = Column(String, nullable=True)
-
-    phone = Column(String, nullable=True)
-    norm_phone = Column(String, nullable=True)
-    # A SEPARATE COLUMN BECAUSE IT IS SEPARATE EVIDENCE. The platform has no
-    # line-type lookup, so it may not call a number mobile - unless the source
-    # system says so in a column of its own, which is what this is.
-    mobile_phone = Column(String, nullable=True)
-    norm_mobile_phone = Column(String, nullable=True)
-    phones_json = Column(Text, nullable=True)          # every other number found
+    tier             = Column(String, nullable=True)   # inferred tier label
+    relationship_type = Column(String, nullable=True)
+    source_category  = Column(String, nullable=True)
 
     street_address = Column(String, nullable=True)
-    city = Column(String, nullable=True)
-    state = Column(String, nullable=True)
-    zip_code = Column(String, nullable=True)
-    norm_zip = Column(String, nullable=True)
+    city           = Column(String, nullable=True)
+    state          = Column(String, nullable=True)
+    zip_code       = Column(String, nullable=True)
 
-    # ---- compliance, tri-state: True allow / False DENY / NULL not stated --
-    allow_email = Column(Boolean, nullable=True)
-    allow_bulk_email = Column(Boolean, nullable=True)
-    allow_sms = Column(Boolean, nullable=True)
-    allow_voice = Column(Boolean, nullable=True)
-    permission_review = Column(Boolean, default=False, nullable=True)
-    permission_raw = Column(Text, nullable=True)       # the cells, verbatim
+    extra_fields = Column(Text, nullable=True)   # JSON: unmapped columns
 
-    # ---- historical activity --------------------------------------------
-    last_activity_at = Column(DateTime, nullable=True)
-    last_action = Column(String, nullable=True)        # an ACTION, never a date
-    open_activity_at = Column(DateTime, nullable=True)
-    last_assigned_at = Column(DateTime, nullable=True)
-    activity_count = Column(Integer, nullable=True)
+    validation_status = Column(String, default=ImportValidationStatus.VALID, nullable=False)
+    validation_errors = Column(Text, nullable=True)   # JSON list of error strings
 
-    # ---- status / disposition -------------------------------------------
-    status_reason = Column(String, nullable=True)
-    lead_type = Column(String, nullable=True)
-    lead_source = Column(String, nullable=True)
-    owner_name = Column(String, nullable=True)
-    original_owner_name = Column(String, nullable=True)
+    duplicate_status           = Column(String, default=ImportDuplicateStatus.NEW, nullable=False)
+    match_confidence           = Column(String, nullable=True)
+    matched_lead_id            = Column(String, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    duplicate_of_staged_row_id = Column(String, ForeignKey("import_staged_rows.id", ondelete="SET NULL"), nullable=True)
+    match_reason               = Column(String, nullable=True)
 
-    # ---- sale / contract indicators --------------------------------------
-    sale_made = Column(Boolean, nullable=True)
-    last_sold_at = Column(DateTime, nullable=True)
-    last_sale_type = Column(String, nullable=True)
+    review_status    = Column(String, default=ImportRowReviewStatus.PENDING, nullable=False)
+    review_note      = Column(Text, nullable=True)
+    reviewed_by_id   = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at      = Column(DateTime, nullable=True)
 
-    source_created_at = Column(DateTime, nullable=True)   # created in the CRM
-    source_modified_at = Column(DateTime, nullable=True)
+    # Set at commit time
+    committed_lead_id   = Column(String, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    merged_into_lead_id = Column(String, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    committed_by_id     = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    committed_at        = Column(DateTime, nullable=True)
+
+
+    # ── Compliance / consent (4 channels, independently preserved) ─────────
+    # True=allowed, False=denied, None=unknown/ambiguous.
+    # NEVER let None silently become consent.  More-restrictive wins on MERGE.
+    consent_email            = Column(Boolean, nullable=True)
+    consent_email_raw        = Column(String, nullable=True)   # exact source value
+    consent_bulk_email       = Column(Boolean, nullable=True)
+    consent_bulk_email_raw   = Column(String, nullable=True)
+    consent_sms              = Column(Boolean, nullable=True)
+    consent_sms_raw          = Column(String, nullable=True)
+    consent_voice            = Column(Boolean, nullable=True)
+    consent_voice_raw        = Column(String, nullable=True)
+    consent_review_required  = Column(Boolean, default=False, nullable=False)
+
+    # ── Source identity ────────────────────────────────────────────────────
+    # Preserve external CRM IDs (e.g. Dynamics Contact GUID) as first-class
+    # provenance.  Used for dedup before weaker phone/email matching.
+    source_id      = Column(String, nullable=True)   # e.g. "6a1b2c3d-…"
+    source_id_type = Column(String, nullable=True)   # e.g. "dynamics_contact_guid"
+
+    # ── Historical activity ────────────────────────────────────────────────
+    # Last Activity Date from CRM — authoritative for "was this lead ever
+    # contacted?" evidence.  NOT the same as Last Action (free text).
+    last_activity_date     = Column(DateTime, nullable=True)
+    last_activity_date_raw = Column(String, nullable=True)
+
+    # ── Mobile phone provenance ────────────────────────────────────────────
+    # Preserved when the source has a dedicated Mobile Phone column.
+    mobile_phone_raw        = Column(String, nullable=True)
+    mobile_phone_normalized = Column(String, nullable=True)
+    # known_mobile | known_landline | unknown (never inferred from value alone)
+    phone_type = Column(String, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    __table_args__ = (
-        # Reconciliation joins. Organization first on every one of them.
-        Index("ix_source_records_org_key", "organization_id", "source_key"),
-        Index("ix_source_records_org_email", "organization_id", "norm_email"),
-        Index("ix_source_records_org_phone", "organization_id", "norm_phone"),
-        Index("ix_source_records_org_last", "organization_id", "norm_last_name"),
-        Index("ix_source_records_org_batch", "organization_id", "import_batch_id"),
+    import_batch            = relationship("ImportBatch", back_populates="staged_rows")
+    matched_lead            = relationship("Lead", foreign_keys=[matched_lead_id])
+    committed_lead          = relationship("Lead", foreign_keys=[committed_lead_id])
+    merged_into_lead        = relationship("Lead", foreign_keys=[merged_into_lead_id])
+    duplicate_of_staged_row = relationship(
+        "ImportStagedRow",
+        foreign_keys=[duplicate_of_staged_row_id],
+        remote_side="ImportStagedRow.id",
     )
 
-
-class SourceOpportunity(Base):
-    """
-    One historical opportunity / contract row. Also not a lead.
-
-    Joins to `SourceRecord.source_key` through `contact_source_key`. It is kept
-    as its own table rather than folded into the contact record because the
-    relationship is ONE CONTACT TO MANY OPPORTUNITIES - in the observed export,
-    up to thirty-one - and collapsing that into a "sold yes/no" column on the
-    person throws away which contract, for how much, and when.
-    """
-    __tablename__ = "source_opportunities"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-    import_batch_id = Column(String, ForeignKey("import_batches.id"), nullable=True)
-
-    source_key = Column(String, nullable=True)          # opportunity id
-    # The contact this opportunity belongs to, as the SOURCE states it. NULLABLE
-    # ON PURPOSE: in the observed export only a minority of rows carry a usable
-    # contact key, and an unjoinable opportunity is a fact to report, not a row
-    # to attach to whichever person looks closest.
-    contact_source_key = Column(String, nullable=True)
-    source_row_number = Column(Integer, nullable=True)
-    raw_json = Column(Text, nullable=True)
-
-    status = Column(String, nullable=True)              # Open / Won / Lost
-    status_reason = Column(String, nullable=True)       # In Progress / Bought-Sold / ...
-    close_status = Column(String, nullable=True)        # Sold / Pending - Sold / Lost
-    cancelled = Column(Boolean, nullable=True)
-
-    contract_number = Column(String, nullable=True)
-    contract_type = Column(String, nullable=True)       # Purchase / Proposal
-    contract_need = Column(String, nullable=True)       # Pre-Need / At-Need / PN -> AN
-    contract_total = Column(Float, nullable=True)
-    contract_at = Column(DateTime, nullable=True)
-    actual_close_at = Column(DateTime, nullable=True)
-
-    location = Column(String, nullable=True)
-    advisor_name = Column(String, nullable=True)
-
-    created_at = Column(DateTime, server_default=func.now())
-
     __table_args__ = (
-        Index("ix_source_opps_org_contact", "organization_id", "contact_source_key"),
-        Index("ix_source_opps_org_key", "organization_id", "source_key"),
-        Index("ix_source_opps_org_status", "organization_id", "status"),
+        Index("ix_isr_batch_id",            "batch_id"),
+        Index("ix_isr_org_id",              "organization_id"),
+        Index("ix_isr_batch_review",        "batch_id", "review_status"),
+        Index("ix_isr_batch_dup",           "batch_id", "duplicate_status"),
+        Index("ix_isr_phone_norm",          "phone_normalized"),
+        Index("ix_isr_committed_lead",      "committed_lead_id"),
+        Index("ix_isr_merged_lead",         "merged_into_lead_id"),
+        Index("ix_isr_matched_lead",        "matched_lead_id"),
     )

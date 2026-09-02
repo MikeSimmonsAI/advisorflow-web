@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod")
+os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod-32chars!!")
 os.environ.setdefault("BOOKING_BASE_URL", "https://advisorflow-booking.vercel.app")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-google-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
@@ -73,6 +73,7 @@ def sample_advisor(db_session, sample_org):
         full_name="Advisor One",
         role="advisor",
         twilio_phone_number="+12145551111",
+        must_change_password=False,
     )
     db_session.add(advisor)
     db_session.commit()
@@ -88,6 +89,7 @@ def second_advisor(db_session, sample_org):
         full_name="Advisor Two",
         role="advisor",
         twilio_phone_number="+12145552222",
+        must_change_password=False,
     )
     db_session.add(advisor)
     db_session.commit()
@@ -145,10 +147,10 @@ def client(db_session):
 
 
 @pytest.fixture()
-def auth_headers(sample_advisor):
+def auth_headers(db_session, sample_advisor):
     """Authorization header for sample_advisor, for hitting protected routes."""
     from app.services.auth_service import create_access_token
-    token = create_access_token(sample_advisor)
+    token = create_access_token(sample_advisor, db_session)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -164,8 +166,9 @@ def admin_auth_headers(db_session, sample_org):
     admin = User(
         organization_id=sample_org.id, email="admin@restland.com",
         password_hash=hash_password("AdminPass123!"), full_name="Org Admin", role="org_admin",
+        must_change_password=False,
     )
     db_session.add(admin)
     db_session.commit()
-    token = create_access_token(admin)
+    token = create_access_token(admin, db_session)
     return {"Authorization": f"Bearer {token}"}
