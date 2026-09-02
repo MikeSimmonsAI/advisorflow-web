@@ -57,11 +57,31 @@ HEADER_MAP = {
     "phone": ["phone", "phone number", "cell", "cell phone", "mobile", "telephone", "buyerphone", "buyer phone", "phone 1 - value", "phone 2 - value",
               # E.164 is how any export that normalises its numbers labels them.
               "phone e164", "phone (e164)", "phone_e164", "e164", "e.164",
-              "mobile phone", "mobile number", "primary phone", "phone1", "home phone"],
+              "primary phone", "phone1", "home phone"],
     "email": ["email", "email address", "e-mail", "buyeremail", "buyer email", "e-mail 1 - value", "e-mail 2 - value"],
     "tier": ["tier", "data tier", "lead type", "status type", "salescontractneedtypedescription", "sales contract need type description", "need type"],
     "status_reason": ["status reason", "status", "lead status"],
     "allow_calls": ["allow phone calls?", "allow phone calls", "do not call"],
+    # ── Compliance channels — preserved independently, never collapsed ─────
+    "allow_emails":      ["allow emails?", "allow emails", "allow email",
+                          "email opt-in", "email consent"],
+    # NOTE: "Do not allow Bulk Emails" has INVERTED column-name polarity.
+    # Values "Allow"/"Do Not Allow" are self-descriptive and authoritative.
+    # Boolean-like values (Yes/No/1/0) are ambiguous → REVIEW, not assumed.
+    "allow_bulk_emails": ["do not allow bulk emails", "bulk email", "allow bulk emails",
+                          "bulk email opt-in", "bulk email consent"],
+    "allow_sms":         ["allow text message?", "allow text messages", "allow sms",
+                          "allow texts", "text consent", "sms consent", "sms opt-in"],
+    # ── Source identity ────────────────────────────────────────────────────
+    "source_id":         ["contact guid", "contactid", "contact id", "contactguid",
+                          "crm id", "external id", "external_id", "dynamics id",
+                          "dynamics contact guid"],
+    # ── Mobile phone provenance ────────────────────────────────────────────
+    # Distinct from primary phone; only mapped when a dedicated column exists.
+    "mobile_phone":      ["mobile phone", "mobile number"],
+    # ── Historical activity timestamp ──────────────────────────────────────
+    # "Last Activity Date" is the canonical timestamp — NOT "Last Action" text.
+    "last_activity_date": ["last activity date", "last logged activity"],
     "last_action": ["last action"],
     "last_contact_date": ["last activity/note", "last activity", "last contact date", "open activity date"],
     "street_address": ["street address", "address", "street", "addr", "address 1", "address1", "street addr", "mailing address", "home address"],

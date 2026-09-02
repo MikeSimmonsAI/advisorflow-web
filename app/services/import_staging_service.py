@@ -1,9 +1,20 @@
 """
 import_staging_service.py — Parse uploaded file → ImportStagedRow records.
 NO live Lead is created here. DNC blocks are authoritative and not reversible.
+
+BULK DEDUP: Instead of per-row SELECT (N+1), we collect all candidate
+phone/email/source_id values upfront and load matching existing leads in
+bounded IN-query batches, then classify rows from an in-memory lookup.
+Tenant isolation is enforced: the org_id filter is applied to every query.
+
+COMPLIANCE: Four consent channels (email, bulk_email, sms, voice) are
+independently extracted and normalized.  Ambiguous values NEVER silently
+become consent — they enter REVIEW.  More-restrictive existing compliance
+is enforced at commit time (import_commit_service.py).
 """
 from __future__ import annotations
 import json, logging, re, unicodedata
+from datetime import datetime, timezone
 from typing import Any, Optional
 from sqlalchemy.orm import Session
 from app.models.import_models import (
@@ -20,6 +31,8 @@ log = logging.getLogger(__name__)
 
 _DIGIT_RE = re.compile(r"\D")
 _DNC_STATUSES = {"dnc", "do_not_contact", "deceased"}
+
+# ── Phone / email normalisation ────────────────────────────────────────────
 
 def _norm_phone(raw: Optional[str]) -> Optional[str]:
     if not raw: return None
@@ -38,43 +51,187 @@ def _norm_name(name: Optional[str]) -> Optional[str]:
 def _is_dnc(lead: Lead) -> bool:
     return bool(lead and lead.status and lead.status.lower() in _DNC_STATUSES)
 
-def _match_live(db: Session, org_id: str, phone: Optional[str],
-                ln_norm: Optional[str], email: Optional[str]):
-    """Returns (lead|None, dup_status, confidence)."""
-    if phone:
-        rows = db.query(Lead).filter(Lead.organization_id == org_id, Lead.phone == phone).all()
-        if rows:
-            for r in rows:
-                if ln_norm and _norm_name(r.last_name) == ln_norm:
-                    return r, ImportDuplicateStatus.MATCHED_EXISTING, ImportMatchConfidence.HIGH
-            return rows[0], ImportDuplicateStatus.POSSIBLE_DUPLICATE, ImportMatchConfidence.MEDIUM
-    if email and ln_norm:
-        r = db.query(Lead).filter(Lead.organization_id == org_id, Lead.email == email).first()
-        if r and _norm_name(r.last_name) == ln_norm:
-            return r, ImportDuplicateStatus.MATCHED_EXISTING, ImportMatchConfidence.LOW
+# ── Consent normalisation ──────────────────────────────────────────────────
+# Returns (normalized: bool|None, ambiguous: bool)
+#   True  = consent granted
+#   False = consent denied
+#   None  = unknown / ambiguous — MUST NOT be treated as consent
+
+_CONSENT_ALLOW = {"allow", "yes", "y", "1", "true", "opt-in", "opt in", "allowed", "permitted"}
+_CONSENT_DENY  = {"do not allow", "donotallow", "no", "n", "0", "false", "opt-out", "opt out",
+                  "denied", "not allowed", "block", "blocked"}
+
+def _norm_consent(raw: Optional[str], col_key: str) -> tuple[Optional[bool], bool]:
+    """
+    Normalize a consent field value.
+
+    For 'allow_bulk_emails' the column name carries negative polarity
+    ("Do not allow Bulk Emails") but the VALUES are self-descriptive:
+        "Allow"        → True  (bulk email IS allowed)
+        "Do Not Allow" → False (bulk email is NOT allowed)
+    Boolean-like values (Yes/No/1/0/true/false) on this column are AMBIGUOUS
+    because the column name inverts their meaning → requires review.
+
+    For all other consent columns (positive polarity), standard mapping applies.
+    """
+    if not raw:
+        return None, False  # unknown, no ambiguity flag needed
+    val = str(raw).strip().lower()
+    if not val or val in ("nan", "none", "null", "n/a", ""):
+        return None, False
+
+    if col_key == "allow_bulk_emails":
+        # Self-descriptive values take precedence over boolean interpretation
+        if val in ("allow", "allowed"):
+            return True, False
+        if val in ("do not allow", "donotallow", "do_not_allow"):
+            return False, False
+        # Boolean-like values are AMBIGUOUS on a negatively-named column
+        if val in ("yes", "y", "1", "true", "no", "n", "0", "false"):
+            return None, True  # ambiguous — needs review
+        return None, True  # unrecognized — ambiguous
+
+    # Positive-polarity columns
+    if val in _CONSENT_ALLOW:
+        return True, False
+    if val in _CONSENT_DENY:
+        return False, False
+    return None, True  # unrecognized — ambiguous, goes to review
+
+# ── Historical activity date normalisation ─────────────────────────────────
+
+_DATE_FMTS = [
+    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d",
+    "%m/%d/%Y %H:%M:%S", "%m/%d/%Y",
+    "%d/%m/%Y",
+]
+
+def _norm_datetime(raw: Optional[str]) -> Optional[datetime]:
+    if not raw: return None
+    s = str(raw).strip()
+    if not s or s.lower() in ("nan", "none", "null", "n/a", ""): return None
+    for fmt in _DATE_FMTS:
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+# ── Bulk dedup helpers ─────────────────────────────────────────────────────
+
+_CHUNK = 900  # stay well under SQLite's 999-variable limit; PostgreSQL handles larger
+
+def _build_dedup_index(db: Session, org_id: str,
+                       phones: set, emails: set, source_ids: set) -> dict:
+    """
+    One pass: load all existing leads for this org that match any candidate
+    phone, email, or source_id.  Returns three in-memory lookups:
+        { "phone": {norm_phone: [Lead, ...]}, "email": {...}, "source_id": {...} }
+
+    Tenant isolation: org_id is always included in every query.
+    """
+    idx: dict = {"phone": {}, "email": {}, "source_id": {}}
+
+    def _chunked_query(field, values):
+        vals = list(v for v in values if v)
+        results = []
+        for i in range(0, len(vals), _CHUNK):
+            chunk = vals[i:i+_CHUNK]
+            results.extend(
+                db.query(Lead).filter(
+                    Lead.organization_id == org_id,
+                    field.in_(chunk),
+                ).all()
+            )
+        return results
+
+    for lead in _chunked_query(Lead.phone, phones):
+        idx["phone"].setdefault(lead.phone, []).append(lead)
+    for lead in _chunked_query(Lead.email, emails):
+        idx["email"].setdefault(lead.email, []).append(lead)
+    # source_id matching against Lead.id is only meaningful for internal IDs;
+    # for external IDs we check against extra_fields (best-effort) or skip.
+    # For now, source_id dedup uses phone/email results (no dedicated column on Lead).
+
+    return idx
+
+
+def _classify_dedup(phone: Optional[str], ln_norm: Optional[str],
+                    email: Optional[str], idx: dict) -> tuple:
+    """Classify this row against the pre-built dedup index."""
+    candidates = []
+    if phone and phone in idx["phone"]:
+        for r in idx["phone"][phone]:
+            if ln_norm and _norm_name(r.last_name) == ln_norm:
+                return r, ImportDuplicateStatus.MATCHED_EXISTING, ImportMatchConfidence.HIGH
+        candidates.extend(idx["phone"][phone])
+    if email and email in idx["email"]:
+        for r in idx["email"][email]:
+            if ln_norm and _norm_name(r.last_name) == ln_norm:
+                return r, ImportDuplicateStatus.MATCHED_EXISTING, ImportMatchConfidence.HIGH
+        candidates.extend(idx["email"][email])
+    if candidates:
+        return candidates[0], ImportDuplicateStatus.POSSIBLE_DUPLICATE, ImportMatchConfidence.MEDIUM
     return None, ImportDuplicateStatus.NEW, ImportMatchConfidence.NONE
 
 
+# ── Row parsers ────────────────────────────────────────────────────────────
+
 def _parse_df_rows(df, org_id: str, batch_id: str, db: Session) -> list:
     lookup = _build_column_lookup(list(df.columns))
-    rows = []
-    for idx, raw_row in df.iterrows():
+
+    # ── Pass 1: collect all candidate identifiers for bulk dedup ──────────
+    cand_phones: set   = set()
+    cand_emails: set   = set()
+    cand_src_ids: set  = set()
+    parsed_rows = []
+
+    for idx_r, raw_row in df.iterrows():
         def g(key, _r=raw_row, _l=lookup):
-            return str(_r[_l[key]]).strip() if key in _l and str(_r[_l[key]]).strip() not in ("", "nan") else None
-        phone_raw = g("phone")
-        phone = _norm_phone(phone_raw)
-        email_raw = g("email")
-        email = _norm_email(email_raw)
+            v = str(_r[_l[key]]).strip() if key in _l and str(_r[_l[key]]).strip() not in ("", "nan") else None
+            return v
+
+        phone_raw   = g("phone")
+        phone       = _norm_phone(phone_raw)
+        # Mobile phone: dedicated column, if present
+        mob_raw     = g("mobile_phone")
+        mob_norm    = _norm_phone(mob_raw)
+        # If no primary phone but mobile exists, use mobile as primary
+        if not phone and mob_norm:
+            phone = mob_norm
+            phone_raw = mob_raw
+
+        email_raw   = g("email")
+        email       = _norm_email(email_raw)
+        source_id   = g("source_id")
+
+        if phone:   cand_phones.add(phone)
+        if email:   cand_emails.add(email)
+        if source_id: cand_src_ids.add(source_id)
+
+        parsed_rows.append((idx_r, raw_row, g, phone_raw, phone, mob_raw, mob_norm,
+                            email_raw, email, source_id))
+
+    # ── Pass 2: bulk dedup query ──────────────────────────────────────────
+    dedup_idx = _build_dedup_index(db, org_id, cand_phones, cand_emails, cand_src_ids)
+
+    # ── Pass 3: classify and build staged rows ────────────────────────────
+    staged_rows = []
+    for (idx_r, raw_row, g, phone_raw, phone, mob_raw, mob_norm,
+         email_raw, email, source_id) in parsed_rows:
+
         first = g("first_name")
-        last = g("last_name")
+        last  = g("last_name")
         if not first and not last:
             full = g("full_name")
             if full:
                 first, last = split_full_name(full)
         ln_norm = _norm_name(last)
-        live, dup_status, confidence = _match_live(db, org_id, phone, ln_norm, email)
-        errors = []
-        val_status = ImportValidationStatus.VALID
+
+        live, dup_status, confidence = _classify_dedup(phone, ln_norm, email, dedup_idx)
+
+        errors, val_status = [], ImportValidationStatus.VALID
         if not phone and not email:
             errors.append("Missing both phone and email")
             val_status = ImportValidationStatus.INVALID
@@ -85,15 +242,41 @@ def _parse_df_rows(df, org_id: str, batch_id: str, db: Session) -> list:
                 val_status = ImportValidationStatus.WARNING
         if live and _is_dnc(live):
             dup_status = ImportDuplicateStatus.DNC_BLOCKED
-        tier_raw = g("tier") or g("status_reason")
+
+        tier_raw     = g("tier") or g("status_reason")
         status_reason = g("status_reason")
         tier = _infer_tier(tier_raw, status_reason) if (tier_raw or status_reason) else None
+
+        # Phone type provenance
+        if mob_norm:
+            phone_type = "known_mobile"
+        elif phone_raw:
+            phone_type = "unknown"
+        else:
+            phone_type = None
+
+        # Consent fields
+        def _c(key):
+            raw_v = g(key)
+            norm_v, amb = _norm_consent(raw_v, key)
+            return raw_v, norm_v, amb
+
+        em_raw, em_norm, em_amb  = _c("allow_emails")
+        be_raw, be_norm, be_amb  = _c("allow_bulk_emails")
+        sm_raw, sm_norm, sm_amb  = _c("allow_sms")
+        vc_raw, vc_norm, vc_amb  = _c("allow_calls")  # voice/calls
+        review_required = any([em_amb, be_amb, sm_amb, vc_amb])
+
+        # Historical activity date
+        lad_raw  = g("last_activity_date")
+        lad_norm = _norm_datetime(lad_raw)
+
         staged = ImportStagedRow(
             batch_id=batch_id, organization_id=org_id,
-            row_number=int(idx) + 2,
+            row_number=int(idx_r) + 2,
             first_name=first, last_name=last,
             phone_raw=phone_raw, phone_normalized=phone,
-            email_normalized=email,
+            email_raw=email_raw, email_normalized=email,
             street_address=g("street_address"), city=g("city"),
             state=g("state"), zip_code=g("zip_code"),
             source_category=g("source_category"), tier=tier,
@@ -103,25 +286,52 @@ def _parse_df_rows(df, org_id: str, batch_id: str, db: Session) -> list:
             duplicate_status=dup_status, match_confidence=confidence,
             matched_lead_id=live.id if live else None,
             review_status=ImportRowReviewStatus.PENDING,
+            # compliance
+            consent_email=em_norm,           consent_email_raw=em_raw,
+            consent_bulk_email=be_norm,      consent_bulk_email_raw=be_raw,
+            consent_sms=sm_norm,             consent_sms_raw=sm_raw,
+            consent_voice=vc_norm,           consent_voice_raw=vc_raw,
+            consent_review_required=review_required,
+            # source identity
+            source_id=source_id,
+            source_id_type="dynamics_contact_guid" if source_id else None,
+            # historical activity
+            last_activity_date=lad_norm,     last_activity_date_raw=lad_raw,
+            # mobile phone provenance
+            mobile_phone_raw=mob_raw,        mobile_phone_normalized=mob_norm,
+            phone_type=phone_type,
         )
-        rows.append(staged)
-    return rows
+        staged_rows.append(staged)
+    return staged_rows
 
 
 def _parse_google_contacts_rows(contacts: list, org_id: str, batch_id: str, db: Session) -> list:
-    rows = []
+    # Pass 1: collect identifiers
+    parsed = []
+    cand_phones: set = set()
+    cand_emails: set = set()
     for idx, c in enumerate(contacts):
-        names = (c.get("names") or [{}])[0]
-        first = names.get("givenName") or None
-        last  = names.get("familyName") or None
+        names  = (c.get("names") or [{}])[0]
+        first  = names.get("givenName") or None
+        last   = names.get("familyName") or None
         phones = c.get("phoneNumbers") or []
         phone_raw = phones[0].get("value") if phones else None
-        phone = _norm_phone(phone_raw)
-        emails = c.get("emailAddresses") or []
-        email = _norm_email(emails[0].get("value")) if emails else None
-        addrs = (c.get("addresses") or [{}])[0]
+        phone     = _norm_phone(phone_raw)
+        emails    = c.get("emailAddresses") or []
+        email     = _norm_email(emails[0].get("value")) if emails else None
+        addrs     = (c.get("addresses") or [{}])[0]
+        if phone: cand_phones.add(phone)
+        if email: cand_emails.add(email)
+        parsed.append((idx, c, first, last, phone_raw, phone, email, addrs))
+
+    # Pass 2: bulk dedup
+    dedup_idx = _build_dedup_index(db, org_id, cand_phones, cand_emails, set())
+
+    # Pass 3: build rows
+    rows = []
+    for idx, c, first, last, phone_raw, phone, email, addrs in parsed:
         ln_norm = _norm_name(last)
-        live, dup_status, confidence = _match_live(db, org_id, phone, ln_norm, email)
+        live, dup_status, confidence = _classify_dedup(phone, ln_norm, email, dedup_idx)
         errors, val_status = [], ImportValidationStatus.VALID
         if not phone and not email:
             errors.append("Missing both phone and email")
@@ -140,6 +350,7 @@ def _parse_google_contacts_rows(contacts: list, org_id: str, batch_id: str, db: 
             duplicate_status=dup_status, match_confidence=confidence,
             matched_lead_id=live.id if live else None,
             review_status=ImportRowReviewStatus.PENDING,
+            consent_review_required=False,
         )
         rows.append(staged)
     return rows
@@ -181,5 +392,4 @@ def stage_batch(batch_id: str, org_id: str, file_path: Optional[str],
             db.commit()
         except Exception:
             pass
-        log.exception("Staging failed for batch %s", batch_id)
         raise

@@ -536,6 +536,23 @@ TABLES_TO_CREATE = [
         created_at TIMESTAMP DEFAULT NOW()
     )
     """,
+    # ── Lead Import Intelligence compliance fields (branch: lead-import-intelligence) ──
+    ("import_staged_rows", "consent_email",           "BOOLEAN"),
+    ("import_staged_rows", "consent_email_raw",       "VARCHAR"),
+    ("import_staged_rows", "consent_bulk_email",      "BOOLEAN"),
+    ("import_staged_rows", "consent_bulk_email_raw",  "VARCHAR"),
+    ("import_staged_rows", "consent_sms",             "BOOLEAN"),
+    ("import_staged_rows", "consent_sms_raw",         "VARCHAR"),
+    ("import_staged_rows", "consent_voice",           "BOOLEAN"),
+    ("import_staged_rows", "consent_voice_raw",       "VARCHAR"),
+    ("import_staged_rows", "consent_review_required", "BOOLEAN DEFAULT FALSE"),
+    ("import_staged_rows", "source_id",               "VARCHAR"),
+    ("import_staged_rows", "source_id_type",          "VARCHAR"),
+    ("import_staged_rows", "last_activity_date",      "TIMESTAMP"),
+    ("import_staged_rows", "last_activity_date_raw",  "VARCHAR"),
+    ("import_staged_rows", "mobile_phone_raw",        "VARCHAR"),
+    ("import_staged_rows", "mobile_phone_normalized", "VARCHAR"),
+    ("import_staged_rows", "phone_type",              "VARCHAR"),
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

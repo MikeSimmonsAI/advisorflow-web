@@ -57,6 +57,45 @@ def _blank_fill(lead: Lead, row: ImportStagedRow) -> bool:
     return changed
 
 
+
+def _apply_more_restrictive_consent(lead: Lead, row: ImportStagedRow) -> bool:
+    """
+    More-restrictive-wins rule for consent channels.
+    
+    On MERGE:
+    - If the existing lead has a consent channel denied (False), keep False —
+      an import can never GRANT permission that was previously denied.
+    - If the staged row has a channel denied (False), apply the denial even if
+      the lead currently has True or None (import of a denial is authoritative).
+    - None (unknown/ambiguous) on the staged row → do NOT change the existing value.
+      None on the lead → keep None; never set None to True from an import.
+    
+    This function writes only to sms_consent on the Lead model (the only consent
+    field currently on Lead).  Additional channels (email, bulk_email, voice) are
+    preserved in import_staged_rows for audit; they will be applied when the Lead
+    model gains those fields.
+
+    Returns True if any field was changed.
+    """
+    changed = False
+    # SMS consent is the only field currently on Lead
+    if row.consent_sms is not None:
+        if row.consent_sms is False:
+            # Staged denial is authoritative — apply even if lead currently allows
+            if lead.sms_consent is not False:
+                lead.sms_consent = False
+                changed = True
+        elif row.consent_sms is True:
+            # Staged grant only applies if lead has no opinion (None/False→None is safe,
+            # True→True is a no-op) — but NEVER override an existing False denial.
+            # Lead.sms_consent default is False, so we only grant if it was previously None.
+            # Actually: existing False means user previously opted out → do not grant.
+            # None (unknown) → grant from import is reasonable.
+            if lead.sms_consent is None:
+                lead.sms_consent = True
+                changed = True
+    return changed
+
 def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> ImportBatch:
     """Per-row idempotent commit. Rows already COMMITTED are skipped.
     Result: COMMITTED / PARTIALLY_COMMITTED / FAILED."""
@@ -94,6 +133,7 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                 lead = db.query(Lead).filter(Lead.id == row.matched_lead_id).first()
                 if lead:
                     _blank_fill(lead, row)
+                    _apply_more_restrictive_consent(lead, row)
                     db.flush()
             else:
                 tier = row.tier or "pre_need"

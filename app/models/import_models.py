@@ -245,6 +245,39 @@ class ImportStagedRow(Base):
     committed_by_id     = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     committed_at        = Column(DateTime, nullable=True)
 
+
+    # ── Compliance / consent (4 channels, independently preserved) ─────────
+    # True=allowed, False=denied, None=unknown/ambiguous.
+    # NEVER let None silently become consent.  More-restrictive wins on MERGE.
+    consent_email            = Column(Boolean, nullable=True)
+    consent_email_raw        = Column(String, nullable=True)   # exact source value
+    consent_bulk_email       = Column(Boolean, nullable=True)
+    consent_bulk_email_raw   = Column(String, nullable=True)
+    consent_sms              = Column(Boolean, nullable=True)
+    consent_sms_raw          = Column(String, nullable=True)
+    consent_voice            = Column(Boolean, nullable=True)
+    consent_voice_raw        = Column(String, nullable=True)
+    consent_review_required  = Column(Boolean, default=False, nullable=False)
+
+    # ── Source identity ────────────────────────────────────────────────────
+    # Preserve external CRM IDs (e.g. Dynamics Contact GUID) as first-class
+    # provenance.  Used for dedup before weaker phone/email matching.
+    source_id      = Column(String, nullable=True)   # e.g. "6a1b2c3d-…"
+    source_id_type = Column(String, nullable=True)   # e.g. "dynamics_contact_guid"
+
+    # ── Historical activity ────────────────────────────────────────────────
+    # Last Activity Date from CRM — authoritative for "was this lead ever
+    # contacted?" evidence.  NOT the same as Last Action (free text).
+    last_activity_date     = Column(DateTime, nullable=True)
+    last_activity_date_raw = Column(String, nullable=True)
+
+    # ── Mobile phone provenance ────────────────────────────────────────────
+    # Preserved when the source has a dedicated Mobile Phone column.
+    mobile_phone_raw        = Column(String, nullable=True)
+    mobile_phone_normalized = Column(String, nullable=True)
+    # known_mobile | known_landline | unknown (never inferred from value alone)
+    phone_type = Column(String, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

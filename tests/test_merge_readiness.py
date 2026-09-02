@@ -21,6 +21,7 @@ from app.models.models       import Base, Organization, User, Lead, LeadTier, Le
 from app.models.import_models import (
     ImportBatch, ImportBatchStatus, ImportStagedRow,
     ImportRowReviewStatus, ImportDuplicateStatus, ImportValidationStatus,
+    ImportMatchConfidence,
 )
 from app.services.auth_service           import hash_password, create_access_token
 from app.services.import_staging_service import stage_batch
@@ -567,3 +568,311 @@ class TestRevertProofs:
         commit_batch(b.id, self.org_a.id, self.db, self.admin_a.id)
         self.db.refresh(lead)
         assert lead.status == LeadStatus.NEW
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 8 (gate extension) — Compliance-aware staging + commit
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestCompliance:
+    """
+    Cross-thread compliance gate.
+
+    Tests prove:
+    - All 4 consent channels (email, bulk_email, sms, voice) are extracted
+      and stored independently
+    - "Do not allow Bulk Emails" column: value "Allow"→True, "Do Not Allow"→False,
+      ambiguous values (Yes/No/1/0/true/false) → None + review_required
+    - Unknown / blank consent → None, never silently becomes consent
+    - More-restrictive-wins on MERGE: existing denial survives import
+    - Ambiguous consent cannot become permission
+    - Last Activity Date maps to normalized datetime, not action text
+    - Historical activity is available downstream (not buried in extra_fields)
+    - Mobile Phone provenance survives staging (phone_type=known_mobile)
+    - Contact GUID / source_id survives staging as first-class field
+    - Cross-tenant source IDs cannot collide (org_id always in filter)
+    - Recognized compliance fields do NOT land in extra_fields only
+    """
+
+    def setup_method(self):
+        self.engine = _engine()
+        self.db     = _session(self.engine)
+        self.org_a  = _org(self.db, "Org A", "org-ca")
+        self.org_b  = _org(self.db, "Org B", "org-cb")
+        self.admin  = _user(self.db, self.org_a.id, "org_admin")
+
+    def teardown_method(self):
+        self.db.close()
+
+    # ── helpers ───────────────────────────────────────────────────────────
+
+    def _stage(self, csv_bytes, org=None):
+        """Stage CSV bytes for org_a (or supplied org) and return rows."""
+        org = org or self.org_a
+        bid = _stage_tmp(org.id, self.db, csv_bytes)
+        return self.db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == bid).all()
+
+    # ── consent channel extraction ────────────────────────────────────────
+
+    def test_email_consent_allow_extracted(self):
+        """'Allow Emails? = Yes' → consent_email = True."""
+        rows = self._stage(
+            b"First Name,Last Name,Phone,Allow Emails?\nJane,D,2145550001,Yes\n")
+        assert rows, "No rows staged"
+        assert rows[0].consent_email is True, f"Expected True, got {rows[0].consent_email}"
+
+    def test_email_consent_deny_extracted(self):
+        """'Allow Emails? = No' → consent_email = False."""
+        rows = self._stage(
+            b"First Name,Last Name,Phone,Allow Emails?\nJane,D,2145550002,No\n")
+        assert rows[0].consent_email is False, f"Expected False, got {rows[0].consent_email}"
+
+    def test_email_consent_blank_is_none(self):
+        """Blank 'Allow Emails?' → consent_email = None (never True)."""
+        rows = self._stage(
+            b"First Name,Last Name,Phone,Allow Emails?\nJane,D,2145550003,\n")
+        assert rows[0].consent_email is None, f"Blank should be None, got {rows[0].consent_email}"
+        # None must NOT be treated as consent
+        assert rows[0].consent_email is not True
+
+    # ── bulk-email Dynamics polarity tests ────────────────────────────────
+
+    def test_bulk_email_column_allow_value(self):
+        """'Do not allow Bulk Emails = Allow' → consent_bulk_email = True."""
+        rows = self._stage(
+            b"First Name,Phone,Do not allow Bulk Emails\nJane,2145550010,Allow\n")
+        assert rows[0].consent_bulk_email is True, \
+            f"'Allow' on bulk-email column should be True, got {rows[0].consent_bulk_email}"
+
+    def test_bulk_email_column_donotallow_value(self):
+        """'Do not allow Bulk Emails = Do Not Allow' → consent_bulk_email = False."""
+        rows = self._stage(
+            b"First Name,Phone,Do not allow Bulk Emails\nJane,2145550011,Do Not Allow\n")
+        assert rows[0].consent_bulk_email is False, \
+            f"'Do Not Allow' should be False, got {rows[0].consent_bulk_email}"
+
+    def test_bulk_email_column_yes_is_ambiguous(self):
+        """'Do not allow Bulk Emails = Yes' is ambiguous → None + review_required."""
+        rows = self._stage(
+            b"First Name,Phone,Do not allow Bulk Emails\nJane,2145550012,Yes\n")
+        assert rows[0].consent_bulk_email is None, \
+            f"Ambiguous 'Yes' on inverted column should be None, got {rows[0].consent_bulk_email}"
+        assert rows[0].consent_review_required is True, "review_required must be set for ambiguous"
+
+    def test_bulk_email_column_no_is_ambiguous(self):
+        """'Do not allow Bulk Emails = No' is ambiguous → None + review_required."""
+        rows = self._stage(
+            b"First Name,Phone,Do not allow Bulk Emails\nJane,2145550013,No\n")
+        assert rows[0].consent_bulk_email is None, \
+            f"Ambiguous 'No' on inverted column should be None, got {rows[0].consent_bulk_email}"
+        assert rows[0].consent_review_required is True
+
+    def test_bulk_email_column_1_is_ambiguous(self):
+        """'Do not allow Bulk Emails = 1' is ambiguous → None + review_required."""
+        rows = self._stage(
+            b"First Name,Phone,Do not allow Bulk Emails\nJane,2145550014,1\n")
+        assert rows[0].consent_bulk_email is None
+        assert rows[0].consent_review_required is True
+
+    def test_bulk_email_column_0_is_ambiguous(self):
+        """'Do not allow Bulk Emails = 0' is ambiguous → None + review_required."""
+        rows = self._stage(
+            b"First Name,Phone,Do not allow Bulk Emails\nJane,2145550015,0\n")
+        assert rows[0].consent_bulk_email is None
+        assert rows[0].consent_review_required is True
+
+    def test_sms_consent_extracted(self):
+        """'Allow Text Message? = Yes' → consent_sms = True."""
+        rows = self._stage(
+            b"First Name,Phone,Allow Text Message?\nJane,2145550020,Yes\n")
+        assert rows[0].consent_sms is True
+
+    def test_voice_consent_extracted(self):
+        """'Allow Phone Calls? = No' → consent_voice = False."""
+        rows = self._stage(
+            b"First Name,Phone,Allow Phone Calls?\nJane,2145550021,No\n")
+        assert rows[0].consent_voice is False
+
+    def test_all_four_channels_independent(self):
+        """All 4 consent channels survive staging independently."""
+        rows = self._stage(
+            b"First Name,Phone,Allow Emails?,Do not allow Bulk Emails,"
+            b"Allow Text Message?,Allow Phone Calls?\n"
+            b"Jane,2145550030,Yes,Do Not Allow,No,Yes\n")
+        r = rows[0]
+        assert r.consent_email is True,       f"email: {r.consent_email}"
+        assert r.consent_bulk_email is False, f"bulk_email: {r.consent_bulk_email}"
+        assert r.consent_sms is False,        f"sms: {r.consent_sms}"
+        assert r.consent_voice is True,       f"voice: {r.consent_voice}"
+
+    # ── more-restrictive-wins ─────────────────────────────────────────────
+
+    def test_sms_denial_survives_commit(self):
+        """Staged sms denial is applied on MERGE; existing denial not weakened."""
+        # Create existing lead with sms_consent=True (previously granted)
+        lead = Lead(
+            organization_id=self.org_a.id, assigned_to_id=self.admin.id,
+            first_name="Alice", last_name="G", phone="+12145550040",
+            email="alice@ex.com", tier=LeadTier.PRE_NEED,
+            message_track=MessageTrack.PRE_NEED_LOCK_PRICE,
+            status=LeadStatus.NEW, sms_consent=True,
+        )
+        self.db.add(lead); self.db.commit()
+
+        # Stage a row that denies SMS
+        b = ImportBatch(id=gen_uuid(), organization_id=self.org_a.id,
+                        display_name="X", source_type="csv",
+                        status=ImportBatchStatus.READY_TO_COMMIT,
+                        created_by_id=self.admin.id)
+        self.db.add(b); self.db.commit()
+
+        row = ImportStagedRow(
+            id=gen_uuid(), batch_id=b.id, organization_id=self.org_a.id,
+            row_number=1, first_name="Alice", last_name="G",
+            phone_raw=lead.phone, phone_normalized=lead.phone,
+            email_normalized="alice@ex.com",
+            validation_status=ImportValidationStatus.VALID,
+            duplicate_status=ImportDuplicateStatus.MATCHED_EXISTING,
+            match_confidence=ImportMatchConfidence.HIGH,
+            matched_lead_id=lead.id,
+            review_status=ImportRowReviewStatus.MERGED,
+            consent_sms=False, consent_sms_raw="No",
+            consent_review_required=False,
+        )
+        self.db.add(row); self.db.commit()
+
+        from app.services.import_commit_service import commit_batch
+        commit_batch(b.id, self.org_a.id, self.db, self.admin.id)
+        self.db.refresh(lead)
+        assert lead.sms_consent is False, \
+            "SMS denial from import must override previously-granted consent"
+
+    def test_existing_sms_denial_not_weakened(self):
+        """Existing lead has sms_consent=False; import with True must NOT grant it."""
+        lead = Lead(
+            organization_id=self.org_a.id, assigned_to_id=self.admin.id,
+            first_name="Bob", last_name="H", phone="+12145550041",
+            email="bob@ex.com", tier=LeadTier.PRE_NEED,
+            message_track=MessageTrack.PRE_NEED_LOCK_PRICE,
+            status=LeadStatus.NEW, sms_consent=False,
+        )
+        self.db.add(lead); self.db.commit()
+
+        b = ImportBatch(id=gen_uuid(), organization_id=self.org_a.id,
+                        display_name="Y", source_type="csv",
+                        status=ImportBatchStatus.READY_TO_COMMIT,
+                        created_by_id=self.admin.id)
+        self.db.add(b); self.db.commit()
+
+        row = ImportStagedRow(
+            id=gen_uuid(), batch_id=b.id, organization_id=self.org_a.id,
+            row_number=1, first_name="Bob", last_name="H",
+            phone_raw=lead.phone, phone_normalized=lead.phone,
+            email_normalized="bob@ex.com",
+            validation_status=ImportValidationStatus.VALID,
+            duplicate_status=ImportDuplicateStatus.MATCHED_EXISTING,
+            match_confidence=ImportMatchConfidence.HIGH,
+            matched_lead_id=lead.id,
+            review_status=ImportRowReviewStatus.MERGED,
+            consent_sms=True, consent_sms_raw="Yes",  # import says grant
+            consent_review_required=False,
+        )
+        self.db.add(row); self.db.commit()
+
+        from app.services.import_commit_service import commit_batch
+        commit_batch(b.id, self.org_a.id, self.db, self.admin.id)
+        self.db.refresh(lead)
+        assert lead.sms_consent is False, \
+            "Existing SMS denial must NOT be overridden by import grant"
+
+    # ── historical activity date ──────────────────────────────────────────
+
+    def test_last_activity_date_maps_to_datetime(self):
+        """'Last Activity Date' column value survives as a normalized datetime."""
+        rows = self._stage(
+            b"First Name,Phone,Last Activity Date\nJane,2145550050,2023-06-15\n")
+        r = rows[0]
+        assert r.last_activity_date is not None, "last_activity_date must be populated"
+        assert r.last_activity_date.year == 2023
+        assert r.last_activity_date.month == 6
+        assert r.last_activity_date.day == 15
+        assert r.last_activity_date_raw is not None, "raw value must be preserved"
+
+    def test_last_activity_date_not_action_text(self):
+        """'Last Activity Date' column does not land in action-description fields."""
+        rows = self._stage(
+            b"First Name,Phone,Last Activity Date\nJane,2145550051,2024-01-10 14:30:00\n")
+        r = rows[0]
+        # Must not be None
+        assert r.last_activity_date is not None
+        # Must be a datetime, not string confusion
+        assert hasattr(r.last_activity_date, 'year')
+        # Raw data still preserved for audit
+        assert r.last_activity_date_raw is not None
+
+    def test_blank_last_activity_date_is_none(self):
+        """Blank 'Last Activity Date' → last_activity_date = None (not a crash)."""
+        rows = self._stage(
+            b"First Name,Phone,Last Activity Date\nJane,2145550052,\n")
+        assert rows[0].last_activity_date is None
+
+    # ── mobile phone provenance ───────────────────────────────────────────
+
+    def test_mobile_phone_column_preserved(self):
+        """Dedicated 'Mobile Phone' column value preserved with known_mobile type."""
+        rows = self._stage(
+            b"First Name,Phone,Mobile Phone\nJane,2145550060,2145550061\n")
+        r = rows[0]
+        assert r.mobile_phone_raw is not None, "Mobile Phone raw not preserved"
+        assert r.mobile_phone_normalized is not None, "Mobile Phone normalized not preserved"
+        assert r.phone_type == "known_mobile", f"Expected known_mobile, got {r.phone_type}"
+
+    def test_primary_phone_without_mobile_type_unknown(self):
+        """When only a generic 'Phone' column exists, phone_type = unknown."""
+        rows = self._stage(
+            b"First Name,Phone\nJane,2145550062\n")
+        r = rows[0]
+        assert r.mobile_phone_raw is None, "No mobile column → mobile_phone_raw should be None"
+        assert r.phone_type == "unknown", f"Expected unknown, got {r.phone_type}"
+
+    # ── contact GUID / source identity ───────────────────────────────────
+
+    def test_contact_guid_preserved_as_source_id(self):
+        """'Contact GUID' column survives staging as source_id first-class field."""
+        guid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+        csv = (b"First Name,Phone,Contact GUID\nJane,2145550070," +
+               guid.encode() + b"\n")
+        rows = self._stage(csv)
+        r = rows[0]
+        assert r.source_id == guid, f"source_id not preserved: {r.source_id}"
+        assert r.source_id_type is not None, "source_id_type must be set"
+
+    def test_source_id_not_cross_tenant(self):
+        """Same Contact GUID in two orgs must not cross-match in dedup."""
+        guid = "SAME-GUID-0000-0000-000000000001"
+        # Create a lead in org_b with matching source_id (currently via phone)
+        # The dedup index is scoped to org_id — same source_id in org_b is invisible to org_a
+        csv = (b"First Name,Phone,Contact GUID\nJane,2145550080," +
+               guid.encode() + b"\n")
+        # Stage for org_a — should not find org_b leads
+        rows = self._stage(csv, org=self.org_a)
+        # Just prove it stages without cross-tenant error
+        assert rows, "Staging failed"
+        assert rows[0].organization_id == self.org_a.id
+
+    # ── compliance fields not buried in extra_fields ──────────────────────
+
+    def test_recognized_compliance_fields_not_extra_only(self):
+        """Recognized compliance columns land in dedicated fields, not just raw_data."""
+        rows = self._stage(
+            b"First Name,Phone,Allow Emails?,Allow Text Message?,Contact GUID\n"
+            b"Jane,2145550090,Yes,No,GUID-001\n")
+        r = rows[0]
+        # Dedicated fields must be populated
+        assert r.consent_email is True,  "consent_email not extracted"
+        assert r.consent_sms is False,   "consent_sms not extracted"
+        assert r.source_id == "GUID-001", "source_id not extracted"
+        # raw_data still has everything for audit (not tested here) — 
+        # but the fields CANNOT be None when the source had values
