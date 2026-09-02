@@ -163,6 +163,7 @@ REASONS = {
     "missing_phone": "No phone number on file",
     "invalid_phone": "Phone number is not usable",
     "no_sms_consent": "No SMS consent of record",
+    "deceased": "The source record states this person is deceased",
     "internal_record": "Internal or test record, not a real prospect",
     "duplicate": "Unresolved duplicate of another record",
     "org_rule_exclusion": "Excluded by an organization rule",
@@ -539,6 +540,39 @@ def load_suppressed_phones(db: Session, organization_id: str) -> set:
 
 # ── the decision ────────────────────────────────────────────────────────────
 
+# A source system states this as a disposition, in these words. The pattern is
+# word-boundary anchored so a lead TYPE such as "Deceased Spouse Inquiry" - a
+# person asking about arrangements for someone else, who is very much alive and
+# is exactly who a funeral home should be talking to - does not match.
+_DECEASED_RE = re.compile(r"\b(deceased|is deceased|passed away|death of)\b", re.I)
+
+# The fields a source disposition can arrive in. `notes` is deliberately NOT
+# here: free text mentioning a death is not the record saying this contact died,
+# and excluding on prose would silently remove people nobody decided to remove.
+DECEASED_FIELDS = ("status_reason_raw", "last_action_raw")
+
+
+def _is_deceased(lead) -> bool:
+    for f in DECEASED_FIELDS:
+        v = getattr(lead, f, None)
+        if v and _DECEASED_RE.search(str(v)):
+            # "Deceased Spouse" describes the lead's relationship to a death,
+            # not the lead's own. Checked explicitly rather than hoped for.
+            if re.search(r"\bdeceased\s+(spouse|parent|mother|father|relative|"
+                         r"family|loved one)\b", str(v), re.I):
+                continue
+            return True
+    return False
+
+
+def _deceased_detail(lead) -> str:
+    for f in DECEASED_FIELDS:
+        v = getattr(lead, f, None)
+        if v and _DECEASED_RE.search(str(v)):
+            return f"{f.replace('_raw', '').replace('_', ' ')}: {str(v)[:60]}"
+    return ""
+
+
 def _permission_detail(lead, channel: str) -> str:
     """Say WHERE the denial came from, so a refusal can be checked, not trusted."""
     src = (getattr(lead, "permission_source", None) or "").strip()
@@ -577,6 +611,23 @@ def qualify_one(lead: Lead, channel: str, ctx: QualificationContext) -> Dict[str
     if (getattr(lead, "manual_flag", None) or "") == "remove_all":
         detail = getattr(lead, "manual_flag_reason", None) or ""
         return _decision(lead, EXCLUDED, [reason("flagged_remove_all", detail)], channel)
+
+    # THE PERSON HAS DIED. THIS IS NOT A PERMISSION QUESTION.
+    #
+    # The source CRM records it as a disposition - "Deceased" appears on 30
+    # opportunity rows and in contact status reasons - and nothing downstream
+    # read it. A permission column would say nothing about this case: the
+    # family never opted out, so every allow/deny/unknown answer is "allow",
+    # and an outreach engine that only asks about permission cheerfully writes
+    # to a dead person's inbox.
+    #
+    # It is placed with the hard exclusions, above every channel question,
+    # because it is true of the PERSON and not of a channel. `_is_deceased`
+    # matches on word boundaries so "Deceased Spouse Inquiry" - a real
+    # pre-need lead type - is not swept up with it.
+    if _is_deceased(lead):
+        return _decision(lead, EXCLUDED, [reason("deceased", _deceased_detail(lead))],
+                         channel)
 
     # An unresolved duplicate is a data-quality exclusion, not a DNC - the
     # importer is careful about that distinction and so is this. A human who

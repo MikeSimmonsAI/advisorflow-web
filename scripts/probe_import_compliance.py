@@ -152,6 +152,23 @@ def apply_revert(name: str) -> None:
                     object.__setattr__(lead, f, False)
             return src(lead, channel, ctx)
         qual.qualify_one = bad
+    elif name == "R10_deceased_ignored":
+        qual._is_deceased = lambda lead: False
+    elif name == "R11_staging_promotes_to_leads":
+        # Staging quietly creates an operational, sendable row per source row.
+        real = si.stage_records
+
+        def bad(db, organization_id, batch, rows, **kw):
+            rows = list(rows)
+            out = real(db, organization_id, batch, rows, **kw)
+            for r in rows:
+                low = {str(k).strip().lower(): v for k, v in r.items()}
+                db.add(Lead(organization_id=organization_id,
+                            last_name=str(low.get("full name", "x")).split()[-1],
+                            email=low.get("email"), phone=low.get("phone"),
+                            status="new"))
+            return out
+        si.stage_records = bad
     else:
         raise SystemExit(f"unknown revert {name}")
 
@@ -566,15 +583,242 @@ def s11_send_gate_reads_it():
     db.close()
 
 
+def s12_historical_staging():
+    """
+    HISTORICAL INGESTION PROOF - staging is evidence, not an outreach list.
+
+    Uses the real staging model against a small slice shaped exactly like the
+    production export. Proves provenance, external identity, four independent
+    permissions, unknown staying unknown, prior denial surviving re-import,
+    DNC denying every channel, activity mapping, parked fields staying
+    provenance, opportunities staying separate, and that nothing is sent.
+    """
+    from app.models.import_models import (ImportBatch, SourceOpportunity,
+                                          SourceRecord)
+
+    db = fresh_db()
+    make_org(db, "T", "org-a")
+
+    # Shaped like the real 56-column export, including the polarity trap and a
+    # Deceased disposition.
+    rows = [
+        {"(Do Not Modify) Contact": "{GUID-AAA}",
+         "(Do Not Modify) Row Checksum": "chk-1",
+         "Full Name": "Ada Vale", "First Name": "Ada", "Last Name": "Vale",
+         "Phone": "2145551111", "Mobile Phone": "2145552222",
+         "Email": "ada@example.test", "Email Address 2": "ada2@example.test",
+         "Street Address": "1 Main St", "City": "Dallas", "State": "TX",
+         "ZIP Code": "75001-1234",
+         "Status Reason": "Appointment Set", "Lead Type": "Pre-Need",
+         "Last Action": "Called: Scheduled Appt.",
+         "Last Activity Date": "2023-11-07 13:18:00",
+         "Last Logged Activity": "2021-01-01 00:00:00",
+         "Owner": "M Tisdale", "Original Owner": "J Berthet",
+         "Created On": "2019-03-29 14:06:00",
+         "Sale Made?": "No", "Last Sold Date": "",
+         "Allow Emails?": "Allow",
+         "Do not allow Bulk Emails": "Do Not Allow",
+         "Allow Text Message?": "Allow",
+         "Allow Phone Calls?": "Allow",
+         "Seminar Lead?": "Yes", "Veteran Status": "No"},
+        {"(Do Not Modify) Contact": "{GUID-BBB}",
+         "Full Name": "Ben Wyle", "Phone": "2145553333",
+         "Email": "ben@example.test",
+         "Status Reason": "Deceased", "Lead Type": "Pre-Need",
+         "Allow Emails?": "Allow", "Do not allow Bulk Emails": "Allow",
+         "Allow Text Message?": "Allow", "Allow Phone Calls?": "Allow"},
+        {"(Do Not Modify) Contact": "{GUID-CCC}",
+         "Full Name": "Cy Xiu", "Phone": "2145554444",
+         "Email": "cy@example.test", "Status Reason": "New",
+         "Allow Emails?": "", "Do not allow Bulk Emails": "",
+         "Allow Text Message?": "maybe", "Allow Phone Calls?": ""},
+    ]
+
+    batch = si.open_batch(db, "org-a", source_filename="master.xlsx",
+                          source_system="dynamics", header=list(rows[0].keys()))
+    stats = si.stage_records(db, "org-a", batch, rows)
+    db.flush()
+    staged = {r.source_key: r for r in db.query(SourceRecord).all()}
+
+    # -- provenance --------------------------------------------------------
+    check("staging wrote one record per row", len(staged) == 3, str(len(staged)))
+    check("the batch records the file", batch.source_filename == "master.xlsx")
+    check("the batch records the source system", batch.source_system == "dynamics")
+    check("the batch records the header verbatim",
+          "(Do Not Modify) Contact" in (batch.header_json or ""))
+    check("the batch is marked loaded", batch.status == "loaded")
+    check("the batch counts its rows", batch.row_count == 3, str(batch.row_count))
+
+    a = staged["{GUID-AAA}"]
+    # -- external identity -------------------------------------------------
+    check("the CRM contact GUID is preserved exactly",
+          a.source_key == "{GUID-AAA}", repr(a.source_key))
+    check("the source row checksum is kept", a.row_checksum == "chk-1")
+    check("the raw row is kept verbatim",
+          "1 Main St" in (a.raw_json or ""), (a.raw_json or "")[:80])
+    check("identity is normalized for joining",
+          a.norm_phone == "12145551111" and a.norm_email == "ada@example.test"
+          and a.norm_last_name == "vale" and a.norm_zip == "75001",
+          f"{a.norm_phone} {a.norm_email} {a.norm_last_name} {a.norm_zip}")
+    check("a mobile number is kept as its OWN evidence",
+          a.norm_mobile_phone == "12145552222", repr(a.norm_mobile_phone))
+    check("every other number found is kept",
+          "2145552222" in (a.phones_json or ""), repr(a.phones_json))
+
+    # -- four independent permissions --------------------------------------
+    check("email allow is read", a.allow_email is True, repr(a.allow_email))
+    check("bulk email DENY is read from a 'Do Not Allow' cell",
+          a.allow_bulk_email is False, repr(a.allow_bulk_email))
+    check("bulk denial does not deny email",
+          a.allow_email is True and a.allow_bulk_email is False)
+    check("sms allow is read", a.allow_sms is True)
+    check("voice allow is read", a.allow_voice is True)
+    check("the permission cells are auditable",
+          "allow emails?" in (a.permission_raw or "").lower())
+
+    # -- UNKNOWN stays UNKNOWN --------------------------------------------
+    c = staged["{GUID-CCC}"]
+    check("a blank permission cell stays unknown", c.allow_email is None,
+          repr(c.allow_email))
+    check("a blank bulk cell stays unknown", c.allow_bulk_email is None)
+    check("a blank voice cell stays unknown", c.allow_voice is None)
+    check("an unreadable cell does not become consent",
+          c.allow_sms is not True, repr(c.allow_sms))
+    check("an unreadable cell raises review", c.permission_review is True)
+    check("staging counts the review", stats["permission_needs_review"] == 1,
+          str(stats["permission_needs_review"]))
+    check("staging counts the bulk denial",
+          stats["permission_denials"][pv.BULK_EMAIL] == 1,
+          str(stats["permission_denials"]))
+
+    # -- last activity mapping --------------------------------------------
+    check("the most recent activity date wins",
+          getattr(a.last_activity_at, "year", None) == 2023,
+          repr(a.last_activity_at))
+    check("the action is an action, not a timestamp",
+          a.last_action == "Called: Scheduled Appt.", repr(a.last_action))
+    check("the disposition is kept", a.status_reason == "Appointment Set")
+
+    # -- parked fields are provenance, not authority -----------------------
+    check("the owner is provenance", a.owner_name == "M Tisdale")
+    check("the original owner is provenance", a.original_owner_name == "J Berthet")
+    check("a staged record has no operational owner",
+          not hasattr(a, "assigned_to_id"))
+    check("a staged record has no operational status",
+          not hasattr(a, "status"))
+    check("a staged record has no consent of record",
+          not hasattr(a, "sms_consent"))
+    check("seminar/veteran columns survive only in the raw row",
+          "seminar lead?" in (a.raw_json or "").lower())
+
+    # -- opportunities stay separate --------------------------------------
+    opp_batch = si.open_batch(db, "org-a", source_filename="opps.xlsx",
+                              source_system="dynamics")
+    ostats = si.stage_opportunities(db, "org-a", opp_batch, [
+        {"(Do Not Modify) Opportunity": "{OPP-1}", "LeadID": "{GUID-AAA}",
+         "Status": "Won", "Status Reason": "Bought/Sold",
+         "Contract Close Status": "Sold", "Contract Total": "3,522.00",
+         "Contract Need": "Pre-Need", "Contract Cancelled": "No",
+         "Contract Date": "2022-04-01"},
+        {"(Do Not Modify) Opportunity": "{OPP-2}", "LeadID": "{GUID-AAA}",
+         "Status": "Open", "Status Reason": "In Progress"},
+        {"(Do Not Modify) Opportunity": "{OPP-3}", "LeadID": "",
+         "Status": "Open", "Status Reason": "In Progress"},
+    ], contact_key_column="leadid")
+    db.flush()
+    opps = db.query(SourceOpportunity).all()
+    check("opportunities are their own rows", len(opps) == 3, str(len(opps)))
+    check("one contact can hold several opportunities",
+          sum(1 for o in opps if o.contact_source_key == "{GUID-AAA}") == 2)
+    check("an unjoinable opportunity is reported, not attached",
+          ostats["unjoinable"] == 1, str(ostats))
+    won = [o for o in opps if o.source_key == "{OPP-1}"][0]
+    check("the contract total is parsed", won.contract_total == 3522.0,
+          repr(won.contract_total))
+    check("the close status is kept", won.close_status == "Sold")
+    check("no opportunity became a lead", db.query(Lead).count() == 0,
+          str(db.query(Lead).count()))
+
+    # -- staging sends nothing --------------------------------------------
+    check("staging created no leads", db.query(Lead).count() == 0)
+    from app.models.models import Message, EmailMessage, CadenceState
+    check("staging created no SMS", db.query(Message).count() == 0)
+    check("staging created no email", db.query(EmailMessage).count() == 0)
+    check("staging created no cadence", db.query(CadenceState).count() == 0)
+    db.close()
+
+
+def s13_deceased_is_do_not_contact():
+    """
+    STATUS REASON = DECEASED IS A DO-NOT-CONTACT SIGNAL.
+
+    A permission column says nothing about this case - the family never opted
+    out, so every allow/deny/unknown answer is "allow" - which is exactly why
+    an engine that only asks about permission writes to a dead person's inbox.
+    """
+    db = fresh_db()
+    make_org(db, "T", "org-a")
+    _import(db, [row("Ben Wyle", "2145553333", "ben@example.test",
+                     **{"Status Reason": "Deceased",
+                        "Allow Emails?": "Allow",
+                        "Allow Phone Calls?": "Allow"}),
+                 row("Cal Yew", "2145554444", "cal@example.test",
+                     **{"Status Reason": "Contacted",
+                        "Last Action": "Called: Deceased",
+                        "Allow Emails?": "Allow"}),
+                 row("Dee Zorn", "2145555555", "dee@example.test",
+                     **{"Status Reason": "Deceased Spouse Inquiry",
+                        "Allow Emails?": "Allow"}),
+                 row("Eli Ames", "2145556666", "eli@example.test",
+                     **{"Status Reason": "Appointment Set",
+                        "Allow Emails?": "Allow"})], "org-a")
+    leads = {l.last_name: l for l in db.query(Lead).all()}
+    ctx = qual.QualificationContext(db, list(leads.values()), "org-a", [])
+
+    for name, channel in (("Wyle", qual.CHANNEL_EMAIL), ("Wyle", qual.CHANNEL_VOICE),
+                          ("Wyle", qual.CHANNEL_SMS)):
+        d = qual.qualify_one(leads[name], channel, ctx)
+        check(f"a deceased contact is excluded on {channel}",
+              d["bucket"] == qual.EXCLUDED, d["bucket"])
+        check(f"the {channel} refusal says deceased",
+              any(r["code"] == "deceased" for r in d["reasons"]),
+              str([r["code"] for r in d["reasons"]]))
+
+    d = qual.qualify_one(leads["Yew"], qual.CHANNEL_EMAIL, ctx)
+    check("a deceased last action also excludes",
+          d["bucket"] == qual.EXCLUDED
+          and any(r["code"] == "deceased" for r in d["reasons"]),
+          str([r["code"] for r in d["reasons"]]))
+
+    # THE FALSE POSITIVE THAT WOULD MATTER MOST. A person asking about
+    # arrangements for a deceased spouse is alive, and is precisely who a
+    # funeral home should be talking to.
+    d = qual.qualify_one(leads["Zorn"], qual.CHANNEL_EMAIL, ctx)
+    check("'Deceased Spouse Inquiry' is NOT excluded as deceased",
+          not any(r["code"] == "deceased" for r in d["reasons"]),
+          str([r["code"] for r in d["reasons"]]))
+
+    d = qual.qualify_one(leads["Ames"], qual.CHANNEL_EMAIL, ctx)
+    check("an ordinary lead is unaffected",
+          not any(r["code"] == "deceased" for r in d["reasons"]))
+
+    check("permission alone would NOT have caught the deceased contact",
+          leads["Wyle"].allow_email is True and leads["Wyle"].allow_voice is True,
+          f"{leads['Wyle'].allow_email} {leads['Wyle'].allow_voice}")
+    db.close()
+
+
 SECTIONS = (s1_denial_survives_simple, s5_no_weakening, s6_ambiguity, s7_tenancy,
             s8_activity_mapping, s9_never_contacted, s10_not_parked,
-            s11_send_gate_reads_it)
+            s11_send_gate_reads_it, s12_historical_staging,
+            s13_deceased_is_do_not_contact)
 
 REVERTS = ("R1_unknown_becomes_allow", "R2_incoming_overwrites",
            "R3_no_inheritance", "R4_polarity_from_name",
            "R5_activity_date_unmapped", "R6_permission_columns_parked",
            "R7_inheritance_ignores_tenant", "R8_send_gate_ignores_permission",
-           "R9_unknown_treated_as_denial")
+           "R9_unknown_treated_as_denial", "R10_deceased_ignored",
+           "R11_staging_promotes_to_leads")
 
 
 def main() -> int:

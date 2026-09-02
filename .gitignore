@@ -99,3 +99,6 @@ app/routers/sales_router.optimized.bak
 # Reconciliation output contains real contact data. Never commit it.
 .reconcile*
 reconciliation_findings*.csv
+.g37.log
+.latency.log
+.datascan.log
