@@ -78,6 +78,12 @@ import app.models.import_models  # noqa: F401  (imported for side effects)
 # module from import_models on purpose - a merge on that filename already
 # deleted these once, and Base.metadata.create_all only sees what is imported.
 import app.models.source_records  # noqa: F401  (imported for side effects)
+# Organization-defined qualification rules (qualification_rules). RESTORED: the
+# feature/lead-import-intelligence merge dropped this line, and without it the
+# table is never created - which the engine reads as "this organization has
+# defined no rules" rather than as an error. A quiet wrong answer instead of a
+# loud one, which is the worst shape a missing migration can take.
+import app.models.qualification_models  # noqa: F401  (imported for side effects)
 from app.services.entitlements import require_feature  # noqa: E402
 # The SECOND gate pair. require_feature asks whether the customer may USE a
 # service; require_capability asks whether this organization may ADMINISTER the
@@ -140,6 +146,11 @@ from app.routers.integrations_router import router as integrations_router
 from app.routers.voice_webhooks_router import router as voice_webhooks_router
 from app.routers.demo_router import router as demo_router
 from app.routers.import_batch_router import router as import_batch_router
+# RESTORED: dropped by the feature/lead-import-intelligence merge. Without it
+# the entire qualification API - /qualification/preview, /qualification/lead/{id},
+# /qualification/vocabulary and the organization rules CRUD - answers 404, and
+# the God Mode Lead Qualification screen has nothing to call.
+from app.routers import qualification_router  # noqa: E402
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -623,6 +634,11 @@ app.include_router(voice_webhooks_router)
 app.include_router(demo_router)
 app.include_router(proposal_router.router)
 app.include_router(import_batch_router)
+# RESTORED alongside it. Deliberately NOT behind require_feature: qualification
+# is how the platform decides who may be contacted, and a customer whose plan
+# does not include a feature flag must not thereby lose the guard that keeps
+# outreach off a person who opted out.
+app.include_router(qualification_router.router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
