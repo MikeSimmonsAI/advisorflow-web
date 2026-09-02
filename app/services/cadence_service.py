@@ -298,9 +298,9 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             continue
 
         advisor = lead.assigned_to
-        if not advisor or not advisor.twilio_phone_number:
+        if not advisor:
             error_count += 1
-            errors.append(f"Lead {lead.id}: advisor has no Twilio number configured")
+            errors.append(f"Lead {lead.id}: no advisor assigned")
             continue
 
         touch_number = state.current_touch_number + 1
@@ -361,7 +361,7 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
 
             from app.services.sms_service import get_twilio_client
             from app.services.twilio_callbacks import apply_status_callback
-            client = get_twilio_client(advisor)
+            client, from_number, _ = get_twilio_client(advisor, db)
             # THIS PATH NEVER ASKED FOR A DELIVERY RECEIPT. It writes a Message
             # row below (Phase 2) with the column default delivery_status
             # 'pending', and without a status callback Twilio had no way to
@@ -370,7 +370,7 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
             # product, which is most of why production showed thousands of
             # messages and not one receipt.
             twilio_msg = client.messages.create(**apply_status_callback(dict(
-                body=body, from_=advisor.twilio_phone_number, to=lead.phone)))
+                body=body, from_=from_number, to=lead.phone)))
             sent_count += 1
 
         except Exception as e:
