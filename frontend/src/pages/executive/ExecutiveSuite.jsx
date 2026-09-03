@@ -17,9 +17,9 @@ function useExecutiveContext() {
   const [state, setState] = useState({ loading: true, ctx: null, error: null })
   useEffect(() => {
     api.get('/executive/context')
-      .then(r => setState({ loading: false, ctx: r.data, error: null }))
+      .then(r => setState({ loading: false, ctx: r, error: null }))
       .catch(err => {
-        const status = err?.response?.status
+        const status = err?.status
         setState({
           loading: false,
           ctx: null,
