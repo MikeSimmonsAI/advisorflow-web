@@ -7,30 +7,46 @@
  *
  * Auth: /executive/context — 401/403 if no brand_executive grant.
  * Isolation: every data call is server-side scoped to the executive's platform.
+ *
+ * GOD BRAND-SELECTION PATH
+ * When /executive/context returns 403 (no brand context set), we check
+ * executive_contexts from /auth/my-contexts:
+ *   - brands available → brand selector ("Choose Executive Suite")
+ *   - no brands        → "Access Not Available" (genuinely unauthorized)
+ * Selecting a brand calls setBrandContext (sets X-Brand-Override) and
+ * re-fetches /executive/context — no membership row is created.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { api, fetchMyContexts } from '../../api/client'
+import { api, fetchMyContexts, setBrandContext } from '../../api/client'
 
-function useExecutiveContext() {
-  const [state, setState] = useState({ loading: true, ctx: null, error: null })
+function useExecutiveContext(refreshKey) {
+  const [state, setState] = useState({ loading: true, ctx: null, needsBrandSelect: false, error: null })
   useEffect(() => {
+    setState({ loading: true, ctx: null, needsBrandSelect: false, error: null })
     api.get('/executive/context')
-      .then(r => setState({ loading: false, ctx: r, error: null }))
+      .then(r => setState({ loading: false, ctx: r, needsBrandSelect: false, error: null }))
       .catch(err => {
         const status = err?.status
-        setState({
-          loading: false,
-          ctx: null,
-          error: status === 403
-            ? 'You do not have Executive Suite access for any brand.'
-            : 'Unable to load your brand context. Please try again.',
-        })
+        if (status === 403) {
+          // Could be "no brand selected" (god) or genuinely unauthorized.
+          // We resolve this by checking executive_contexts from my-contexts
+          // in the parent; store needsBrandSelect=true so the parent can branch.
+          setState({ loading: false, ctx: null, needsBrandSelect: true, error: null })
+        } else {
+          setState({
+            loading: false,
+            ctx: null,
+            needsBrandSelect: false,
+            error: 'Unable to load your brand context. Please try again.',
+          })
+        }
       })
-  }, [])
+  }, [refreshKey])
   return state
 }
+
 /**
  * Fetches the server-authorized context list so the sidebar can show only
  * the contexts this user actually holds — never hardcoded, never guessed.
@@ -53,10 +69,16 @@ const NAV_ITEMS = [
 ]
 
 export default function ExecutiveSuite({ children }) {
-  const { loading, ctx, error } = useExecutiveContext()
+  const [refreshKey, setRefreshKey] = useState(0)
+  const { loading, ctx, needsBrandSelect, error } = useExecutiveContext(refreshKey)
   const switchCtx = useAuthorizedSwitcher()
   const location = useLocation()
   const navigate = useNavigate()
+
+  const selectBrand = useCallback((platformId, platformName) => {
+    setBrandContext(platformId, platformName)
+    setRefreshKey(k => k + 1)
+  }, [])
 
   if (loading) {
     return (
@@ -66,6 +88,67 @@ export default function ExecutiveSuite({ children }) {
     )
   }
 
+  // ── 403 PATH ─────────────────────────────────────────────────────────────
+  // /executive/context returned 403 — either no brand selected (god path)
+  // or genuinely unauthorized (non-executive user).
+  // Resolve by checking executive_contexts from my-contexts.
+  if (needsBrandSelect) {
+    // Wait for my-contexts to load (both fetches run in parallel)
+    if (switchCtx === null) {
+      return (
+        <div style={styles.fullPage}>
+          <p style={styles.muted}>Loading your brand context…</p>
+        </div>
+      )
+    }
+
+    const availableBrands = switchCtx.executive_contexts || []
+
+    if (availableBrands.length === 0) {
+      // Genuinely unauthorized — server confirms no executive grants
+      return (
+        <div style={styles.fullPage}>
+          <div style={styles.errorCard}>
+            <h2 style={styles.errorTitle}>Access Not Available</h2>
+            <p style={styles.errorMsg}>
+              You do not have Executive Suite access for any brand.
+            </p>
+            <button style={styles.btn} onClick={() => navigate('/login')}>
+              Sign in with a different account
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Has brands but no brand context set — show brand selector
+    return (
+      <div style={styles.fullPage}>
+        <div style={styles.selectorCard}>
+          <h2 style={styles.selectorTitle}>Choose Executive Suite</h2>
+          <p style={styles.selectorSub}>Select a brand to enter its Executive Suite.</p>
+          <div style={styles.brandList}>
+            {availableBrands.map(b => (
+              <button
+                key={b.platform_id}
+                style={styles.brandBtn}
+                onClick={() => selectBrand(b.platform_id, b.platform_name)}
+              >
+                {b.platform_name}
+              </button>
+            ))}
+          </div>
+          {switchCtx.has_back_office && (
+            <button style={styles.backLink} onClick={() => navigate('/sales')}>
+              ← Back Office / Sales
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── NON-403 ERROR ─────────────────────────────────────────────────────────
   if (error || !ctx) {
     return (
       <div style={styles.fullPage}>
@@ -80,6 +163,7 @@ export default function ExecutiveSuite({ children }) {
     )
   }
 
+  // ── AUTHORISED SHELL ──────────────────────────────────────────────────────
   return (
     <div style={styles.shell}>
       <aside style={styles.sidebar}>
@@ -215,5 +299,23 @@ const styles = {
   btn: {
     background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8,
     padding: '10px 24px', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+  },
+  // Brand selector styles
+  selectorCard: {
+    background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+    padding: '40px 48px', textAlign: 'center', maxWidth: 440, width: '100%',
+  },
+  selectorTitle: { margin: '0 0 8px', fontSize: 20, color: '#1a1f36', fontWeight: 700 },
+  selectorSub: { color: '#6b7280', margin: '0 0 24px', lineHeight: 1.5, fontSize: 14 },
+  brandList: { display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 },
+  brandBtn: {
+    background: '#f8fafc', color: '#1a1f36', border: '1px solid #e5e7eb',
+    borderRadius: 8, padding: '12px 20px', cursor: 'pointer',
+    fontSize: 15, fontWeight: 600, textAlign: 'left',
+    transition: 'background 0.15s',
+  },
+  backLink: {
+    background: 'transparent', border: 'none', color: '#6b7280',
+    fontSize: 13, cursor: 'pointer', marginTop: 4, padding: '4px 0',
   },
 }
