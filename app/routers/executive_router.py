@@ -55,7 +55,7 @@ def get_executive_context(
     return {
         "user_id": user.id,
         "email": user.email,
-        "name": (user.first_name or "") + " " + (user.last_name or ""),
+        "name": user.full_name or "",
         "platform_id": platform.id,
         "platform_name": platform.name,
         "platform_slug": platform.slug,
@@ -167,7 +167,7 @@ def get_executive_team(
             members.append({
                 "user_id": u.id,
                 "email": u.email,
-                "name": ((u.first_name or "") + " " + (u.last_name or "")).strip() or u.email,
+                "name": u.full_name or u.email,
                 "role": m.role,
                 "brand_sales_org_id": bso.id,
                 "brand_sales_org_name": bso.name,

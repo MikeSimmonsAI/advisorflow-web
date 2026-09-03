@@ -13,36 +13,10 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { api, fetchMyContexts } from '../../api/client'
 
-/**
- * Fetch /executive/context with automatic retry on network errors (e.g. Render
- * cold-start 503 that arrives before the instance is fully ready).  A 403 is
- * authoritative — no retry.  Any other error is retried up to MAX_RETRIES times
- * with exponential back-off before surfacing the error screen.
- */
-const MAX_RETRIES = 3
-const RETRY_BASE_MS = 1500
-
-async function fetchExecutiveContext(attempt = 0) {
-  try {
-    return await api.get('/executive/context')
-  } catch (err) {
-    // 403 → not authorised, surface immediately
-    if (err?.status === 403) throw err
-    // 401 → not authenticated, surface immediately
-    if (err?.status === 401) throw err
-    if (attempt < MAX_RETRIES) {
-      const delay = RETRY_BASE_MS * Math.pow(2, attempt)
-      await new Promise(res => setTimeout(res, delay))
-      return fetchExecutiveContext(attempt + 1)
-    }
-    throw err
-  }
-}
-
 function useExecutiveContext() {
   const [state, setState] = useState({ loading: true, ctx: null, error: null })
   useEffect(() => {
-    fetchExecutiveContext()
+    api.get('/executive/context')
       .then(r => setState({ loading: false, ctx: r, error: null }))
       .catch(err => {
         const status = err?.status
