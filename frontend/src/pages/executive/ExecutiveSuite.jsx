@@ -11,7 +11,7 @@
 
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { api } from '../../api/client'
+import { api, fetchMyContexts } from '../../api/client'
 
 function useExecutiveContext() {
   const [state, setState] = useState({ loading: true, ctx: null, error: null })
@@ -32,6 +32,21 @@ function useExecutiveContext() {
   return state
 }
 
+/**
+ * Fetches the server-authorized context list so the sidebar can show only
+ * the contexts this user actually holds — never hardcoded, never guessed.
+ * Failure is silent: the switcher simply does not render.
+ */
+function useAuthorizedSwitcher() {
+  const [switchCtx, setSwitchCtx] = useState(null)
+  useEffect(() => {
+    fetchMyContexts()
+      .then(d => setSwitchCtx(d))
+      .catch(() => {/* switcher hidden on error — not a fatal condition */})
+  }, [])
+  return switchCtx
+}
+
 const NAV_ITEMS = [
   { label: 'Command Center', to: '/executive/command-center' },
   { label: 'Organizations', to: '/executive/organizations' },
@@ -39,6 +54,7 @@ const NAV_ITEMS = [
 
 export default function ExecutiveSuite({ children }) {
   const { loading, ctx, error } = useExecutiveContext()
+  const switchCtx = useAuthorizedSwitcher()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -85,6 +101,25 @@ export default function ExecutiveSuite({ children }) {
             </Link>
           ))}
         </nav>
+        {/* Context switcher — only renders when the server has authorized
+            more than one context for this user. Labels and destinations are
+            derived entirely from the server response; nothing is hardcoded. */}
+        {switchCtx && (switchCtx.has_back_office || (switchCtx.executive_contexts || []).length > 1) && (
+          <div style={styles.switcherBlock}>
+            <span style={styles.switcherLabel}>Switch view</span>
+            {/* Current view — non-clickable active state */}
+            <div style={styles.switcherCurrent}>Executive Suite</div>
+            {/* Back Office / Sales — shown only when server grants it */}
+            {switchCtx.has_back_office && (
+              <button
+                style={styles.switcherBtn}
+                onClick={() => navigate('/sales')}
+              >
+                Back Office / Sales
+              </button>
+            )}
+          </div>
+        )}
         <div style={styles.sidebarFooter}>
           <span style={styles.userEmail}>{ctx.email}</span>
         </div>
@@ -144,6 +179,24 @@ const styles = {
     margin: '2px 8px',
   },
   navLinkActive: { background: '#2563eb22', color: '#7ea9ff' },
+  switcherBlock: {
+    padding: '12px 12px 16px',
+    borderTop: '1px solid #2d3354',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  switcherLabel: { fontSize: 10, color: '#7b83a6', fontWeight: 600,
+    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 },
+  switcherCurrent: {
+    padding: '7px 10px', fontSize: 13, color: '#7ea9ff',
+    background: '#2563eb22', borderRadius: 6, fontWeight: 600,
+  },
+  switcherBtn: {
+    padding: '7px 10px', fontSize: 13, color: '#b0b7d4',
+    background: 'transparent', border: '1px solid #2d3354',
+    borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontWeight: 500,
+  },
   sidebarFooter: { padding: '16px 20px', borderTop: '1px solid #2d3354' },
   userEmail: { fontSize: 11, color: '#7b83a6', wordBreak: 'break-all' },
   main: { flex: 1, overflowX: 'auto' },

@@ -55,9 +55,10 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
-from app.models.models import Organization, User
+from app.models.models import Organization, Platform, User
 from app.models.sales_models import (
     Membership, SCOPE_CUSTOMER_ORG, SCOPE_BRAND_SALES_ORG,
+    SCOPE_PLATFORM, ROLE_BRAND_EXECUTIVE,
 )
 
 _log = logging.getLogger(__name__)
@@ -202,6 +203,46 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "path": "/sales",
         })
 
+    # ── executive contexts (brand_executive platform grant) ──
+    # A user with an active Membership(scope_type=SCOPE_PLATFORM,
+    # role=ROLE_BRAND_EXECUTIVE) for a platform gets read-only brand KPI
+    # visibility in the Executive Suite. This is structurally separate from
+    # the back-office (sales) path: it is a higher-priority default and its
+    # own shell, not a tab inside the sales layout.
+    exec_mems = (
+        db.query(Membership)
+        .filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_PLATFORM,
+            Membership.role == ROLE_BRAND_EXECUTIVE,
+            Membership.is_active.is_(True),
+        )
+        .all()
+    )
+    executive: List[Dict[str, Any]] = []
+    if exec_mems:
+        plat_ids = [m.scope_id for m in exec_mems]
+        plats = {
+            str(p.id): p
+            for p in db.query(Platform).filter(Platform.id.in_(plat_ids)).all()
+        }
+        for m in exec_mems:
+            plat = plats.get(str(m.scope_id))
+            if plat is None:
+                _log.warning(
+                    "executive membership %s points at missing platform %s",
+                    m.id, m.scope_id,
+                )
+                continue
+            executive.append({
+                "type": "executive",
+                "label": "%s Executive Suite" % plat.name,
+                "role": "brand_executive",
+                "platform_id": str(plat.id),
+                "platform_name": plat.name,
+                "path": "/executive",
+            })
+
     # ── customer workspaces ──
     rows = workspace_memberships(user, db)
     org_ids = [m.scope_id for m in rows]
@@ -237,10 +278,17 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
 
     # ── where login should land ──
     #
-    # Exactly Mike's table. The one rule worth naming: a person with back-office
-    # access AND workspaces lands in the back office, because that is the
-    # context they were hired into; the switcher is how they leave it.
-    if platform:
+    # Priority (highest first):
+    #   1. Executive Suite — brand_executive grant means this is their primary
+    #      context; back-office is a secondary view they can switch into.
+    #   2. Platform Console — owner / god context stays first among platform rows.
+    #   3. Back-office / Sales — sales_manager / sales_rep with no executive grant.
+    #   4. Single workspace — straight in.
+    #   5. Multiple workspaces — selector.
+    #   6. No memberships — legacy tenant home (unchanged behaviour).
+    if executive:
+        default = executive[0]
+    elif platform:
         default = platform[0]
     elif len(workspaces) == 1:
         default = workspaces[0]
@@ -253,8 +301,9 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         default = {"type": "legacy_tenant", "path": "/"}
 
     return {
-        "contexts": contexts,
+        "contexts": contexts + executive,
         "platform_contexts": platform,
+        "executive_contexts": executive,
         "workspace_contexts": workspaces,
         "has_back_office": bool(platform),
         "workspace_count": len(workspaces),

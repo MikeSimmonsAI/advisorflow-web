@@ -217,6 +217,13 @@ function HomeRedirect() {
   const { ctx } = useAuthorizedContexts()
   if (ctx) {
     const def = ctx.default_context || {}
+    // Executive Suite — brand_executive grant. Highest routing priority because
+    // this is the primary context the person was invited into. The back-office
+    // switch lives inside the Executive Suite shell for users who also hold
+    // a sales grant.
+    if (def.type === 'executive') {
+      return <Navigate to="/executive" replace />
+    }
     if (def.type === 'workspace' && def.organization_id) {
       return <Navigate to={'/workspace/' + def.organization_id} replace />
     }
