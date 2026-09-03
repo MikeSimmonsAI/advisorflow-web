@@ -48,7 +48,8 @@ export default function ExecutiveCommandCenter() {
   const { loading, data, error } = useCCData()
 
   if (loading) return <PageWrap><p style={styles.muted}>Loading…</p></PageWrap>
-  if (error || !data) return <PageWrap><p style={styles.error}>{error}</p></PageWrap>
+  if (error) return <PageWrap><p style={styles.error}>{error}</p></PageWrap>
+  if (!data) return <PageWrap><p style={styles.muted}>No data available.</p></PageWrap>
 
   const opp = data.opportunities || {}
   const winRate = opp.total ? Math.round((opp.won / opp.total) * 100) : 0

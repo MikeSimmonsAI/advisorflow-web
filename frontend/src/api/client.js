@@ -240,12 +240,12 @@ export async function logout() {
   // Best-effort â€” if the network call fails the local state is still cleared.
   const token = getToken()
   if (token) {
-    try {
-      await fetch(`${API_BASE}/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-    } catch { /* silent â€” we're logging out regardless */ }
+    // Fire and forget — never await. Awaiting caused logout to hang on cold
+    // start, stranding the user on the executive shell indefinitely.
+    fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {})
   }
   clearToken()
   localStorage.removeItem(KEY_USER)

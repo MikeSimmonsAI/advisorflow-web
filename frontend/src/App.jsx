@@ -661,7 +661,7 @@ export default function App() {
                verifies the brand_executive grant server-side. If the check
                fails it renders its own access-denied screen — no tenant data,
                no owner controls, no cross-brand visibility ever reaches here. */}
-        <Route path="/executive" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive" element={<ExecutiveRoute><Navigate to="/executive/command-center" replace /></ExecutiveRoute>} />
         <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
         {/* Executive observation: renders a rich read-only dashboard for the target org.

@@ -327,3 +327,50 @@ class TestModelContractGate:
             f"executive_router.py references Opportunity.value at lines "
             f"{[n.lineno for n in bad_refs]} — must be Opportunity.deal_value"
         )
+
+
+class TestRoutingAndLogoutContract:
+    """
+    Gate N — /executive route must redirect, not render content directly.
+    Gate O — logout() must fire-and-forget the server call (never await fetch).
+
+    Both represent production regressions that were directly observed:
+    - Gate N: /executive rendered ExecutiveCommandCenter inline → blank content on load
+    - Gate O: awaiting /auth/logout caused the executive shell to hang indefinitely
+    """
+
+    def test_executive_root_route_is_redirect(self):
+        import re, pathlib
+        src = pathlib.Path("frontend/src/App.jsx").read_text(encoding="utf-8")
+        # Must contain Navigate redirect, not ExecutiveSuite render, at /executive root
+        assert 'path="/executive"' in src, "App.jsx must have /executive route"
+        # Find the /executive root route line (not /executive/*)
+        lines = src.splitlines()
+        exec_root_lines = [
+            l for l in lines
+            if 'path="/executive"' in l and 'path="/executive/' not in l
+        ]
+        assert exec_root_lines, "No /executive root route found in App.jsx"
+        line = exec_root_lines[0]
+        assert 'Navigate' in line, (
+            f"/executive root route must use Navigate redirect, not render content. "
+            f"Got: {line.strip()}"
+        )
+        assert 'ExecutiveSuite' not in line, (
+            f"/executive root route must not render ExecutiveSuite directly. "
+            f"Got: {line.strip()}"
+        )
+
+    def test_logout_does_not_await_fetch(self):
+        import ast, pathlib
+        src = pathlib.Path("frontend/src/api/client.js").read_text(encoding="utf-8")
+        # The logout function must not contain `await fetch` — fire-and-forget only
+        logout_start = src.find("export async function logout()")
+        assert logout_start != -1, "logout() function not found in client.js"
+        # Find end of function (next export or EOF)
+        next_export = src.find("\nexport ", logout_start + 10)
+        logout_body = src[logout_start:next_export] if next_export != -1 else src[logout_start:]
+        assert "await fetch" not in logout_body, (
+            "logout() must not await fetch — fire-and-forget required. "
+            "Awaiting the server call causes logout to hang on cold start."
+        )
