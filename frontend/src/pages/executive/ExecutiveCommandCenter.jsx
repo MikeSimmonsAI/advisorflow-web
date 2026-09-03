@@ -12,7 +12,7 @@ function useCCData() {
   const [state, setState] = useState({ loading: true, data: null, error: null })
   useEffect(() => {
     api.get('/executive/command-center')
-      .then(r => setState({ loading: false, data: r.data, error: null }))
+      .then(r => setState({ loading: false, data: r, error: null }))
       .catch(() => setState({ loading: false, data: null, error: 'Failed to load KPI data.' }))
   }, [])
   return state
