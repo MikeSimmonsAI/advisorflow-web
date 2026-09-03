@@ -17,9 +17,9 @@ function useExecutiveContext() {
   const [state, setState] = useState({ loading: true, ctx: null, error: null })
   useEffect(() => {
     api.get('/executive/context')
-      .then(r => setState({ loading: false, ctx: r.data, error: null }))
+      .then(r => setState({ loading: false, ctx: r, error: null }))
       .catch(err => {
-        const status = err?.response?.status
+        const status = err?.status
         setState({
           loading: false,
           ctx: null,
@@ -31,7 +31,6 @@ function useExecutiveContext() {
   }, [])
   return state
 }
-
 /**
  * Fetches the server-authorized context list so the sidebar can show only
  * the contexts this user actually holds — never hardcoded, never guessed.
@@ -49,7 +48,8 @@ function useAuthorizedSwitcher() {
 
 const NAV_ITEMS = [
   { label: 'Command Center', to: '/executive/command-center' },
-  { label: 'Organizations', to: '/executive/organizations' },
+  { label: 'Organizations',  to: '/executive/organizations' },
+  { label: 'Customer Health', to: '/executive/customer-health' },
 ]
 
 export default function ExecutiveSuite({ children }) {

@@ -69,6 +69,7 @@ import GodOrganizations from './pages/GodOrganizations'
 import ExecutiveSuite from './pages/executive/ExecutiveSuite'
 import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
 import ExecutiveOrganizations from './pages/executive/ExecutiveOrganizations'
+import ExecutiveCustomerHealth from './pages/executive/ExecutiveCustomerHealth'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
 import GodSalesOps from './pages/GodSalesOps'
@@ -663,6 +664,7 @@ export default function App() {
         <Route path="/executive" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
+            <Route path="/executive/customer-health" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCustomerHealth /></ExecutiveSuite></ExecutiveRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />

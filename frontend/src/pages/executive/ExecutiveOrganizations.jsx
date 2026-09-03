@@ -12,7 +12,7 @@ function useOrgs() {
   const [state, setState] = useState({ loading: true, data: null, error: null })
   useEffect(() => {
     api.get('/executive/organizations')
-      .then(r => setState({ loading: false, data: r.data, error: null }))
+      .then(r => setState({ loading: false, data: r, error: null }))
       .catch(() => setState({ loading: false, data: null, error: 'Failed to load organizations.' }))
   }, [])
   return state
@@ -40,7 +40,6 @@ export default function ExecutiveOrganizations() {
             <thead>
               <tr>
                 <th style={styles.th}>Organization</th>
-                <th style={styles.th}>ID</th>
                 <th style={styles.th}>Provisioned</th>
               </tr>
             </thead>
@@ -48,7 +47,6 @@ export default function ExecutiveOrganizations() {
               {orgs.map(org => (
                 <tr key={org.id} style={styles.row}>
                   <td style={styles.td}>{org.name}</td>
-                  <td style={{ ...styles.td, ...styles.mono }}>{org.id}</td>
                   <td style={styles.td}>
                     {org.created_at ? new Date(org.created_at).toLocaleDateString() : '—'}
                   </td>

@@ -53,8 +53,10 @@ export default function ContextSwitcher({ current = 'back_office' }) {
 
   if (!contexts) return null
 
-  const workspaces = contexts.workspace_contexts || []
+  const workspaces    = contexts.workspace_contexts || []
+  const executives    = contexts.executive_contexts || []
   const hasBackOffice = !!contexts.has_back_office
+  const hasExecutive  = executives.length > 0
 
   function enterWorkspace(ws) {
     setOpen(false)
@@ -63,6 +65,11 @@ export default function ContextSwitcher({ current = 'back_office' }) {
     // against the previous context and render the wrong tenant for one frame.
     setWorkspaceContext(ws.organization_id)
     navigate('/workspace/' + ws.organization_id)
+  }
+
+  function enterExecutive() {
+    setOpen(false)
+    navigate('/executive')
   }
 
   function backToOffice() {
@@ -85,45 +92,82 @@ export default function ContextSwitcher({ current = 'back_office' }) {
   }
 
   // ── INSIDE THE BACK OFFICE ───────────────────────────────────────────────
-  if (workspaces.length === 0) return null    // no membership, no button
+  // Executive Suite link — only when the server has confirmed an executive
+  // grant. Never derived from role label, never hardcoded.
+  if (current === 'back_office') {
+    if (workspaces.length === 0 && !hasExecutive) return null
 
-  if (workspaces.length === 1) {
-    const ws = workspaces[0]
+    // If only an executive link and no workspaces, show a single button.
+    if (workspaces.length === 0 && hasExecutive) {
+      return (
+        <button type="button" className="ctx-switch-btn" onClick={enterExecutive}
+                title="Executive Suite">
+          Executive Suite
+        </button>
+      )
+    }
+
+    // Mixed: workspaces + possibly executive. Render a dropdown.
+    if (workspaces.length === 1 && !hasExecutive) {
+      const ws = workspaces[0]
+      return (
+        <button type="button" className="ctx-switch-btn"
+                onClick={function () { enterWorkspace(ws) }}
+                title={'Enter ' + ws.organization_name}>
+          Workspace
+        </button>
+      )
+    }
+
+    // Dropdown for multiple workspaces and/or executive.
+    const activeId = getWorkspaceContext()
     return (
-      <button type="button" className="ctx-switch-btn"
-              onClick={function () { enterWorkspace(ws) }}
-              title={'Enter ' + ws.organization_name}>
-        Workspace
-      </button>
+      <div className="ctx-switch-wrap" ref={boxRef}>
+        <button type="button" className="ctx-switch-btn"
+                aria-haspopup="menu" aria-expanded={open}
+                onClick={function () { setOpen(!open) }}>
+          Switch View <span className="ctx-switch-caret">▾</span>
+        </button>
+        {open && (
+          <div className="ctx-switch-menu" role="menu">
+            {hasExecutive && (
+              <>
+                <div className="ctx-switch-menu-head">Executive</div>
+                {executives.map(function (ex) {
+                  return (
+                    <button key={ex.platform_id} type="button" role="menuitem"
+                            className={'ctx-switch-item' +
+                                       (current === 'executive' ? ' is-active' : '')}
+                            onClick={enterExecutive}>
+                      <span className="ctx-switch-item-name">{ex.platform_name} — Executive Suite</span>
+                    </button>
+                  )
+                })}
+              </>
+            )}
+            {workspaces.length > 0 && (
+              <>
+                <div className="ctx-switch-menu-head">Workspaces</div>
+                {workspaces.map(function (ws) {
+                  return (
+                    <button key={ws.organization_id} type="button" role="menuitem"
+                            className={'ctx-switch-item' +
+                                       (ws.organization_id === activeId ? ' is-active' : '')}
+                            onClick={function () { enterWorkspace(ws) }}>
+                      <span className="ctx-switch-item-name">{ws.organization_name}</span>
+                      {/* The WORKSPACE role, which is not this person's platform
+                          role and is never derived from it. */}
+                      <span className="ctx-switch-item-role">{ws.role}</span>
+                    </button>
+                  )
+                })}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     )
   }
 
-  const activeId = getWorkspaceContext()
-  return (
-    <div className="ctx-switch-wrap" ref={boxRef}>
-      <button type="button" className="ctx-switch-btn"
-              aria-haspopup="menu" aria-expanded={open}
-              onClick={function () { setOpen(!open) }}>
-        Workspaces <span className="ctx-switch-caret">▾</span>
-      </button>
-      {open && (
-        <div className="ctx-switch-menu" role="menu">
-          <div className="ctx-switch-menu-head">Workspaces</div>
-          {workspaces.map(function (ws) {
-            return (
-              <button key={ws.organization_id} type="button" role="menuitem"
-                      className={'ctx-switch-item' +
-                                 (ws.organization_id === activeId ? ' is-active' : '')}
-                      onClick={function () { enterWorkspace(ws) }}>
-                <span className="ctx-switch-item-name">{ws.organization_name}</span>
-                {/* The WORKSPACE role, which is not this person's platform
-                    role and is never derived from it. */}
-                <span className="ctx-switch-item-role">{ws.role}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
+  return null
 }

@@ -27,12 +27,14 @@ No response body or frontend label may contain "god", "god_admin",
 platform-owner terminology.
 """
 
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case as sa_case
 
 from app.deps import get_db, get_current_user, require_god, require_brand_executive
-from app.models.models import User, Organization, Platform
+from app.models.models import User, Organization, Platform, Lead, Message, Reply, BookingLink
 from app.models.sales_models import (
     Membership, BrandSalesOrg, Opportunity,
     SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG,
@@ -55,7 +57,7 @@ def get_executive_context(
     return {
         "user_id": user.id,
         "email": user.email,
-        "name": (user.first_name or "") + " " + (user.last_name or ""),
+        "name": user.full_name or "",
         "platform_id": platform.id,
         "platform_name": platform.name,
         "platform_slug": platform.slug,
@@ -87,9 +89,9 @@ def get_command_center(
             db.query(
                 func.count(Opportunity.id).label("total"),
                 func.sum(sa_case((Opportunity.stage == "won", 1), else_=0)).label("won"),
-                func.coalesce(func.sum(Opportunity.value), 0).label("pipeline_value"),
+                func.coalesce(func.sum(Opportunity.deal_value), 0).label("pipeline_value"),
                 func.coalesce(
-                    func.sum(sa_case((Opportunity.stage == "won", Opportunity.value), else_=0)),
+                    func.sum(sa_case((Opportunity.stage == "won", Opportunity.deal_value), else_=0)),
                     0
                 ).label("won_value"),
             )
@@ -167,7 +169,7 @@ def get_executive_team(
             members.append({
                 "user_id": u.id,
                 "email": u.email,
-                "name": ((u.first_name or "") + " " + (u.last_name or "")).strip() or u.email,
+                "name": u.full_name or u.email,
                 "role": m.role,
                 "brand_sales_org_id": bso.id,
                 "brand_sales_org_name": bso.name,
@@ -209,6 +211,267 @@ def get_executive_organizations(
             for org in orgs
         ],
     }
+
+# ── Customer Health ────────────────────────────────────────────────────────────
+
+def _classify_health(
+    age_days: int,
+    active_users: int,
+    total_leads: int,
+    days_since_op,          # int | None
+):
+    """
+    Classification priority order:
+      HEALTHY     → active_users >= 1, total_leads > 0, days_since_op <= 14
+      ONBOARDING  → org age <= 30 days AND not HEALTHY
+      INACTIVE    → no operational activity ever, or days_since_op > 60
+      AT_RISK     → days_since_op 31–60
+      WATCH       → everything else (15–30 days since op, zero users, zero leads)
+    """
+    has_users  = active_users >= 1
+    has_leads  = total_leads  > 0
+    has_recent = days_since_op is not None and days_since_op <= 14
+
+    if has_users and has_leads and has_recent:
+        reason = (
+            f"Active: {active_users} user{'s' if active_users != 1 else ''}, "
+            f"{total_leads} lead{'s' if total_leads != 1 else ''}, "
+            f"operational activity {days_since_op} day{'s' if days_since_op != 1 else ''} ago."
+        )
+        return "healthy", reason
+
+    if age_days <= 30:
+        parts = []
+        if not has_users:
+            parts.append("no active users yet")
+        if not has_leads:
+            parts.append("no leads imported yet")
+        if not has_recent:
+            parts.append("no operational activity yet" if days_since_op is None
+                         else f"last operational activity {days_since_op} days ago")
+        reason = "New organization (under 30 days old). " + ("; ".join(parts) if parts else "Getting started.")
+        return "onboarding", reason
+
+    if days_since_op is None or days_since_op > 60:
+        parts = []
+        if days_since_op is None:
+            parts.append("no outbound messages, inbound replies, or bookings on record")
+        else:
+            parts.append(f"last operational activity {days_since_op} days ago")
+        if not has_users:
+            parts.append("no active users")
+        if not has_leads:
+            parts.append("no leads imported")
+        reason = "Inactive. " + "; ".join(parts) + "."
+        return "inactive", reason
+
+    if days_since_op > 30:
+        reason = (
+            f"At risk: last operational activity {days_since_op} days ago "
+            f"(outbound message, inbound reply, or booking). "
+            f"{active_users} active user{'s' if active_users != 1 else ''}, "
+            f"{total_leads} lead{'s' if total_leads != 1 else ''}."
+        )
+        return "at_risk", reason
+
+    # 15–30 days
+    parts = []
+    if days_since_op is not None:
+        parts.append(f"last operational activity {days_since_op} days ago")
+    if not has_users:
+        parts.append("no active users")
+    if not has_leads:
+        parts.append("no leads imported")
+    if not parts:
+        parts.append("activity slowing")
+    reason = "Watch: " + "; ".join(parts) + "."
+    return "watch", reason
+
+
+@router.get("/customer-health")
+def get_customer_health(
+    executive=Depends(require_brand_executive),
+    db: Session = Depends(get_db),
+):
+    """
+    Portfolio-level health for every customer organization under this brand.
+
+    NO N+1: six aggregate queries regardless of org count.
+    Security: platform_id filter on every query; no god bypass.
+    NULL stays NULL — login excluded from operational signal.
+    """
+    user, mem, platform = executive
+    platform_id = platform.id
+    now = datetime.utcnow()
+
+    # ── 1. All orgs for this platform ─────────────────────────────────────────
+    orgs = (
+        db.query(Organization)
+        .filter(Organization.platform_id == platform_id)
+        .order_by(Organization.name)
+        .all()
+    )
+    if not orgs:
+        return {
+            "platform_id": platform_id,
+            "platform_name": platform.name,
+            "summary": {"total": 0, "healthy": 0, "watch": 0,
+                        "at_risk": 0, "inactive": 0, "onboarding": 0},
+            "organizations": [],
+        }
+
+    org_ids = [o.id for o in orgs]
+
+    # ── 2. Active-user count per org ──────────────────────────────────────────
+    user_rows = (
+        db.query(
+            User.organization_id,
+            func.count(User.id).label("active_users"),
+            func.max(User.last_login_at).label("last_login"),
+        )
+        .filter(
+            User.organization_id.in_(org_ids),
+            User.is_active.is_(True),
+        )
+        .group_by(User.organization_id)
+        .all()
+    )
+    user_map = {r.organization_id: r for r in user_rows}
+
+    # ── 3. Lead stats per org (exclude test leads) ────────────────────────────
+    thirty_days_ago = now - timedelta(days=30)
+    lead_rows = (
+        db.query(
+            Lead.organization_id,
+            func.count(Lead.id).label("total_leads"),
+            func.sum(
+                sa_case((Lead.created_at >= thirty_days_ago, 1), else_=0)
+            ).label("leads_last_30d"),
+            func.sum(
+                sa_case((Lead.status == "hot", 1), else_=0)
+            ).label("hot_leads"),
+            func.max(Lead.created_at).label("last_lead_import"),
+        )
+        .filter(
+            Lead.organization_id.in_(org_ids),
+            Lead.is_test.is_(False),
+        )
+        .group_by(Lead.organization_id)
+        .all()
+    )
+    lead_map = {r.organization_id: r for r in lead_rows}
+
+    # ── 4. Last outbound message per org ──────────────────────────────────────
+    msg_rows = (
+        db.query(
+            Lead.organization_id,
+            func.max(Message.sent_at).label("last_outbound_message"),
+        )
+        .join(Message, Message.lead_id == Lead.id)
+        .filter(Lead.organization_id.in_(org_ids))
+        .group_by(Lead.organization_id)
+        .all()
+    )
+    msg_map = {r.organization_id: r.last_outbound_message for r in msg_rows}
+
+    # ── 5. Last inbound reply per org ─────────────────────────────────────────
+    reply_rows = (
+        db.query(
+            Lead.organization_id,
+            func.max(Reply.received_at).label("last_inbound_reply"),
+  2     )
+        .join(Reply, Reply.lead_id == Lead.id)
+        .filter(Lead.organization_id.in_(org_ids))
+        .group_by(Lead.organization_id)
+        .all()
+    )
+    reply_map = {r.organization_id: r.last_inbound_reply for r in reply_rows}
+
+    # ── 6. Last booking per org ───────────────────────────────────────────────
+    booking_rows = (
+        db.query(
+            Lead.organization_id,
+            func.count(BookingLink.id).label("booked_count"),
+            func.max(BookingLink.booked_time).label("last_booking"),
+        )
+        .join(BookingLink, BookingLink.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id.in_(org_ids),
+            BookingLink.status == "booked",
+        )
+        .group_by(Lead.organization_id)
+        .all()
+    )
+    booking_map = {r.organization_id: r for r in booking_rows}
+
+    # ── Build per-org records ─────────────────────────────────────────────────
+    summary = {"total": len(orgs), "healthy": 0, "watch": 0,
+               "at_risk": 0, "inactive": 0, "onboarding": 0}
+    result_orgs = []
+
+    for org in orgs:
+        oid = org.id
+        u   = user_map.get(oid)
+        l   = lead_map.get(oid)
+        b   = booking_map.get(oid)
+
+        active_users   = u.active_users if u else 0
+        last_login     = u.last_login if u else None
+        total_leads    = int(l.total_leads or 0) if l else 0
+        leads_30d      = int(l.leads_last_30d or 0) if l else 0
+        hot_leads      = int(l.hot_leads or 0) if l else 0
+        last_import    = l.last_lead_import if l else None
+        booked_count   = int(b.booked_count or 0) if b else 0
+        last_booking   = b.last_booking if b else None
+        last_outbound  = msg_map.get(oid)
+        last_reply     = reply_map.get(oid)
+
+        # Operational activity = max of outbound message, inbound reply, booking
+        candidates = [t for t in (last_outbound, last_reply, last_booking) if t is not None]
+        last_op = max(candidates) if candidates else None
+
+        # last_activity = most recent of login OR operational activity
+        all_activity = [t for t in (last_login, last_op) if t is not None]
+        last_activity = max(all_activity) if all_activity else None
+
+        age_days     = (now - org.created_at).days if org.created_at else 0
+        days_since_op = (now - last_op).days if last_op else None
+
+        health, reason = _classify_health(age_days, active_users, total_leads, days_since_op)
+        summary[health] += 1
+
+        def _iso(dt):
+            return dt.isoformat() if dt else None
+
+        result_orgs.append({
+            "id":                       oid,
+            "name":                     org.name,
+            "health":                   health,
+            "reason":                   reason,
+            "plan":                     getattr(org, "plan", None),
+            "provisioned_at":           _iso(org.created_at),
+            "organization_age_days":    age_days,
+            "active_users":             active_users,
+            "total_leads":              total_leads,
+            "leads_last_30d":           leads_30d,
+            "hot_leads":                hot_leads,
+            "booked_count":             booked_count,
+            "last_login":               _iso(last_login),
+            "last_lead_import":         _iso(last_import),
+            "last_outbound_message":    _iso(last_outbound),
+            "last_inbound_reply":       _iso(last_reply),
+            "last_booking":             _iso(last_booking),
+            "last_operational_activity": _iso(last_op),
+            "last_activity":            _iso(last_activity),
+        })
+
+    return {
+        "platform_id":   platform_id,
+        "platform_name": platform.name,
+        "summary":       summary,
+        "organizations": result_orgs,
+    }
+
 
 # ── Admin: grant executive membership (god_admin only) ────────────────────────
 
