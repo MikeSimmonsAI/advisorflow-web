@@ -27,14 +27,12 @@ No response body or frontend label may contain "god", "god_admin",
 platform-owner terminology.
 """
 
-from datetime import datetime, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case as sa_case
 
 from app.deps import get_db, get_current_user, require_god, require_brand_executive
-from app.models.models import User, Organization, Platform, Lead, Message, Reply, BookingLink
+from app.models.models import User, Organization, Platform
 from app.models.sales_models import (
     Membership, BrandSalesOrg, Opportunity,
     SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG,
@@ -300,6 +298,9 @@ def get_customer_health(
     Security: platform_id filter on every query; no god bypass.
     NULL stays NULL — login excluded from operational signal.
     """
+    from datetime import datetime, timedelta
+    from app.models.models import Lead, Message, Reply, BookingLink
+
     user, mem, platform = executive
     platform_id = platform.id
     now = datetime.utcnow()
@@ -379,7 +380,7 @@ def get_customer_health(
         db.query(
             Lead.organization_id,
             func.max(Reply.received_at).label("last_inbound_reply"),
-  2     )
+        )
         .join(Reply, Reply.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(org_ids))
         .group_by(Lead.organization_id)
@@ -426,15 +427,13 @@ def get_customer_health(
         last_outbound  = msg_map.get(oid)
         last_reply     = reply_map.get(oid)
 
-        # Operational activity = max of outbound message, inbound reply, booking
         candidates = [t for t in (last_outbound, last_reply, last_booking) if t is not None]
         last_op = max(candidates) if candidates else None
 
-        # last_activity = most recent of login OR operational activity
         all_activity = [t for t in (last_login, last_op) if t is not None]
         last_activity = max(all_activity) if all_activity else None
 
-        age_days     = (now - org.created_at).days if org.created_at else 0
+        age_days      = (now - org.created_at).days if org.created_at else 0
         days_since_op = (now - last_op).days if last_op else None
 
         health, reason = _classify_health(age_days, active_users, total_leads, days_since_op)
@@ -444,25 +443,25 @@ def get_customer_health(
             return dt.isoformat() if dt else None
 
         result_orgs.append({
-            "id":                       oid,
-            "name":                     org.name,
-            "health":                   health,
-            "reason":                   reason,
-            "plan":                     getattr(org, "plan", None),
-            "provisioned_at":           _iso(org.created_at),
-            "organization_age_days":    age_days,
-            "active_users":             active_users,
-            "total_leads":              total_leads,
-            "leads_last_30d":           leads_30d,
-            "hot_leads":                hot_leads,
-            "booked_count":             booked_count,
-            "last_login":               _iso(last_login),
-            "last_lead_import":         _iso(last_import),
-            "last_outbound_message":    _iso(last_outbound),
-            "last_inbound_reply":       _iso(last_reply),
-            "last_booking":             _iso(last_booking),
+            "id":                        oid,
+            "name":                      org.name,
+            "health":                    health,
+            "reason":                    reason,
+            "plan":                      getattr(org, "plan", None),
+            "provisioned_at":            _iso(org.created_at),
+            "organization_age_days":     age_days,
+            "active_users":              active_users,
+            "total_leads":               total_leads,
+            "leads_last_30d":            leads_30d,
+            "hot_leads":                 hot_leads,
+            "booked_count":              booked_count,
+            "last_login":                _iso(last_login),
+            "last_lead_import":          _iso(last_import),
+            "last_outbound_message":     _iso(last_outbound),
+            "last_inbound_reply":        _iso(last_reply),
+            "last_booking":              _iso(last_booking),
             "last_operational_activity": _iso(last_op),
-            "last_activity":            _iso(last_activity),
+            "last_activity":             _iso(last_activity),
         })
 
     return {
