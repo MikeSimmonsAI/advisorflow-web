@@ -65,7 +65,6 @@ function useAuthorizedSwitcher() {
 const NAV_ITEMS = [
   { label: 'Command Center', to: '/executive/command-center' },
   { label: 'Organizations',  to: '/executive/organizations' },
-  { label: 'Customer Health', to: '/executive/customer-health' },
 ]
 
 export default function ExecutiveSuite({ children }) {
