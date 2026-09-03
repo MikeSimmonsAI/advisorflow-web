@@ -173,6 +173,79 @@ def has_back_office(user: User, db: Session) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PLATFORM-LOGIN AUTHORITY — which brand hostnames may this identity log in from
+# ─────────────────────────────────────────────────────────────────────────────
+
+def user_authorized_platform_slugs(user: User, db: Session) -> set:
+    """Every brand hostname slug this identity is authorized to authenticate from.
+
+    Three independent sources — all respect is_active:
+
+      A. LEGACY CUSTOMER TENANCY  — users.organization_id → Organization → Platform.
+         Legacy orgs with no platform_id continue defaulting to 'bookaboost'.
+         Preserved for backward compatibility; no existing user loses access.
+
+      B. ACTIVE BRAND-SALES MEMBERSHIP — Membership(scope_type=brand_sales_org)
+         → BrandSalesOrg → Platform. Covers salespeople who have no customer org.
+
+      C. ACTIVE PLATFORM MEMBERSHIP — Membership(scope_type=platform)
+         → Platform directly. Covers brand_executive and other platform-scoped
+         roles (e.g. Michael: brand_executive on EvoSys Pro with NULL org).
+
+    Returns empty set if the user has no platform authority at all. Callers MUST
+    treat an empty set as a refusal — no default, no fallback slug.
+
+    This is the canonical resolver. auth_router imports this function; it must
+    never re-derive platform authority inline.
+    """
+    from app.models.sales_models import BrandSalesOrg
+
+    slugs: set = set()
+
+    # Source A: legacy customer tenancy
+    if getattr(user, "organization_id", None):
+        org = db.query(Organization).filter(
+            Organization.id == user.organization_id
+        ).first()
+        if org:
+            plat = (
+                db.query(Platform).filter(Platform.id == org.platform_id).first()
+                if org.platform_id else None
+            )
+            slugs.add(plat.slug if plat else "bookaboost")
+
+    # Source B: active brand-sales memberships
+    sales_rows = (
+        db.query(Platform.slug)
+        .join(BrandSalesOrg, BrandSalesOrg.platform_id == Platform.id)
+        .join(Membership, Membership.scope_id == BrandSalesOrg.id)
+        .filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+            Membership.is_active.is_(True),
+            BrandSalesOrg.is_active.is_(True),
+        )
+        .all()
+    )
+    slugs.update(r[0] for r in sales_rows)
+
+    # Source C: active platform-scoped memberships (brand_executive and peers)
+    platform_rows = (
+        db.query(Platform.slug)
+        .join(Membership, Membership.scope_id == Platform.id)
+        .filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_PLATFORM,
+            Membership.is_active.is_(True),
+        )
+        .all()
+    )
+    slugs.update(r[0] for r in platform_rows)
+
+    return slugs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # THE AUTHORIZED CONTEXT LIST — built by the server, never by the browser
 # ─────────────────────────────────────────────────────────────────────────────
 

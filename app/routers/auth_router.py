@@ -12,6 +12,7 @@ from app.limiter import limiter
 from app.services.auth_service import authenticate_user, create_access_token, hash_password, verify_password
 from app.models.models import User, Organization, Platform
 from app.models.sales_models import Membership, BrandSalesOrg, SCOPE_BRAND_SALES_ORG
+from app.services.workspace_access import user_authorized_platform_slugs
 
 import logging
 
@@ -110,45 +111,8 @@ def _detect_platform_slug(request: Request) -> str | None:
     return "bookaboost"
 
 
-def _user_platform_slugs(db: Session, user: User) -> set:
-    """Every platform this user is entitled to log in from.
-
-    Two independent sources, because a person can belong to either domain — or,
-    like Mike, to both:
-
-      · CUSTOMER TENANCY — their organization's platform. Legacy orgs with no
-        platform_id keep defaulting to 'bookaboost', unchanged behaviour.
-      · BRAND SALES — the platform behind each active brand_sales_org
-        membership. A salesperson HAS no organization, so this is the only
-        source they have.
-
-    Returns an empty set for a user with neither. The caller must treat that as
-    a refusal: before this existed, a NULL-org user fell through to the
-    'bookaboost' legacy default, which both locked EvoSys Pro salespeople out of
-    their own domain AND let them in on someone else's.
-    """
-    slugs = set()
-
-    if user.organization_id:
-        org = db.query(Organization).filter(Organization.id == user.organization_id).first()
-        if org:
-            plat = (db.query(Platform).filter(Platform.id == org.platform_id).first()
-                    if org.platform_id else None)
-            # Legacy orgs predate platforms and have always been BookaBoost.
-            slugs.add(plat.slug if plat else "bookaboost")
-
-    sales_rows = (
-        db.query(Platform.slug)
-        .join(BrandSalesOrg, BrandSalesOrg.platform_id == Platform.id)
-        .join(Membership, Membership.scope_id == BrandSalesOrg.id)
-        .filter(Membership.user_id == user.id,
-                Membership.scope_type == SCOPE_BRAND_SALES_ORG,
-                Membership.is_active.is_(True),
-                BrandSalesOrg.is_active.is_(True))
-        .all()
-    )
-    slugs.update(r[0] for r in sales_rows)
-    return slugs
+# _user_platform_slugs has been promoted to the canonical workspace_access service
+# as user_authorized_platform_slugs(). Import above; call below.
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -180,7 +144,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
             # latter. An empty set means neither — refuse rather than fall back
             # to a default, which is how a NULL-org user used to land on the
             # wrong brand's domain.
-            allowed_slugs = _user_platform_slugs(db, user)
+            allowed_slugs = user_authorized_platform_slugs(user, db)
 
             if request_platform not in allowed_slugs:
                 # Return the same error as a bad password — don't leak that the
