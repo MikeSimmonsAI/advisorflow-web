@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="description" content="Atlantis Light & Power — energy marketplace, bill analysis, home services concierge, commercial procurement and partner referrals." />
+<title>Atlantis Light & Power | Energy Marketplace</title>
+<style>
+  :root{
+    --navy:#07182b;
+    --navy-2:#0b223a;
+    --ink:#0f1d2d;
+    --slate:#5d6d80;
+    --line:#dce5ee;
+    --bg:#f4f8fb;
+    --white:#ffffff;
+    --blue:#176bff;
+    --blue-2:#4fa2ff;
+    --cyan:#39d4e9;
+    --mint:#81ead5;
+    --good:#0e9f6e;
+    --warn:#f59e0b;
+    --shadow:0 18px 60px rgba(5,25,45,.12);
+    --radius:22px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);background:var(--white);line-height:1.55}
+  button,input,select{font:inherit}
+  button{cursor:pointer}
+  a{color:inherit;text-decoration:none}
+  .wrap{width:min(1180px,calc(100% - 40px));margin:auto}
+  .muted{color:var(--slate)}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;line-height:1;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#226ad5;background:#eaf3ff;border:1px solid #d3e5ff;padding:9px 11px;border-radius:999px}
+  .eyebrow:before{content:"";width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--cyan));box-shadow:0 0 0 4px rgba(23,107,255,.09)}
+  h1,h2,h3,p{margin-top:0}
+  h1{font-size:clamp(48px,6vw,80px);line-height:.98;letter-spacing:-.055em;margin-bottom:24px}
+  h2{font-size:clamp(34px,4vw,54px);line-height:1.03;letter-spacing:-.045em;margin-bottom:18px}
+  h3{font-size:22px;line-height:1.18;letter-spacing:-.02em}
+  .section-head{max-width:760px;margin-bottom:40px}
+  .section-head p{font-size:18px;color:var(--slate);max-width:680px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;border-radius:12px;padding:0 18px;border:1px solid transparent;font-weight:800;transition:.2s ease;white-space:nowrap}
+  .btn:hover{transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(135deg,var(--blue),#0d56dc);color:white;box-shadow:0 12px 24px rgba(23,107,255,.23)}
+  .btn-primary:hover{box-shadow:0 16px 28px rgba(23,107,255,.29)}
+  .btn-light{background:white;color:var(--navy);border-color:#d7e2ec}
+  .btn-dark{background:var(--navy);color:white}
+  .btn-ghost{background:transparent;color:white;border-color:rgba(255,255,255,.28)}
+  .btn-sm{min-height:40px;padding:0 14px;font-size:14px;border-radius:10px}
+  .icon{width:20px;height:20px;display:inline-block;vertical-align:middle}
+
+  /* NAV */
+  .topline{background:#041222;color:#d9e9fb;font-size:13px}
+  .topline .wrap{min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .topline strong{color:white}
+  nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.88);backdrop-filter:blur(16px);border-bottom:1px solid rgba(208,220,232,.85)}
+  .nav-inner{height:76px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+  .brand{display:flex;align-items:center;gap:12px;min-width:max-content}
+  .brand-mark{width:39px;height:39px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(145deg,#0a3060,#176bff);box-shadow:0 8px 20px rgba(11,63,128,.22);position:relative;overflow:hidden}
+  .brand-mark:after{content:"";position:absolute;width:24px;height:24px;border:2px solid rgba(255,255,255,.85);transform:rotate(45deg);top:15px;left:7px;border-radius:2px}
+  .brand-text{line-height:1}
+  .brand-text b{display:block;color:#123e74;letter-spacing:.16em;font-size:17px}
+  .brand-text span{display:block;font-size:9px;letter-spacing:.36em;margin-top:5px;color:#53677f}
+  .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;font-weight:750;color:#314154}
+  .nav-links a:hover{color:var(--blue)}
+  .nav-actions{display:flex;align-items:center;gap:10px}
+  .menu-btn{display:none;background:white;border:1px solid #dae3ed;width:44px;height:44px;border-radius:12px}
+
+  /* HERO */
+  .hero{position:relative;overflow:hidden;background:
+    radial-gradient(circle at 84% 18%,rgba(57,212,233,.16),transparent 28%),
+    radial-gradient(circle at 76% 65%,rgba(23,107,255,.12),transparent 30%),
+    linear-gradient(180deg,#f8fbff 0%,#fff 82%);padding:80px 0 66px}
+  .hero:before{content:"";position:absolute;right:-180px;top:-180px;width:560px;height:560px;border-radius:50%;border:1px solid rgba(23,107,255,.12);box-shadow:0 0 0 80px rgba(23,107,255,.025),0 0 0 160px rgba(23,107,255,.018)}
+  .hero-grid{display:grid;grid-template-columns:1.06fr .94fr;gap:58px;align-items:center;position:relative;z-index:1}
+  .hero-copy p{font-size:20px;color:#56687b;max-width:650px;margin-bottom:30px}
+  .hero-copy h1 span{color:transparent;background:linear-gradient(90deg,#0b4ea2 12%,#176bff 58%,#14b8c9);-webkit-background-clip:text;background-clip:text}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px}
+  .mini-trust{display:flex;align-items:center;gap:18px;flex-wrap:wrap;color:#556577;font-size:13px;font-weight:700}
+  .mini-trust span{display:flex;align-items:center;gap:7px}
+  .check-dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:#e9f8f2;color:#0d9468;font-size:12px;font-weight:900}
+  .hero-card{background:white;border:1px solid #dce7f2;border-radius:28px;box-shadow:0 28px 80px rgba(8,35,64,.15);overflow:hidden;position:relative}
+  .hero-card-top{padding:18px 20px;background:linear-gradient(135deg,#081e35,#0d2f52);color:white;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .hero-card-top small{color:#9fb9d1}
+  .live-pill{font-size:11px;font-weight:800;padding:7px 9px;border-radius:999px;background:rgba(129,234,213,.12);border:1px solid rgba(129,234,213,.28);color:#a9f3e4}
+  .hero-rate{padding:26px}
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);background:#eef4f9;padding:4px;border-radius:12px;margin-bottom:22px}
+  .seg button{border:0;background:transparent;border-radius:9px;padding:10px 8px;font-size:12px;font-weight:800;color:#657588}
+  .seg button.active{background:white;color:#174d8b;box-shadow:0 4px 15px rgba(15,44,72,.08)}
+  .field label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.07em;font-weight:800;color:#64768a;margin-bottom:8px}
+  .field-row{display:grid;grid-template-columns:1.5fr .8fr;gap:12px}
+  .input-shell{min-height:54px;border:1px solid #d5e1eb;background:#fbfdff;border-radius:12px;display:flex;align-items:center;padding:0 14px;gap:10px}
+  .input-shell:focus-within{border-color:#78aaff;box-shadow:0 0 0 4px rgba(23,107,255,.08)}
+  .input-shell input,.input-shell select{width:100%;border:0;outline:0;background:transparent;color:#18304b;font-weight:750}
+  .rate-helper{margin:16px 0 18px;background:#f4f9ff;border:1px solid #dfecfa;border-radius:14px;padding:13px 14px;display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12px;color:#61758b}
+  .rate-helper b{color:#183a62}
+  .micro-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+  .micro-metrics div{background:#f7fafc;border:1px solid #e4ebf1;border-radius:12px;padding:12px}
+  .micro-metrics strong{display:block;color:#143a65;font-size:15px}
+  .micro-metrics small{color:#7a8999;font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+
+  .trustbar{border-top:1px solid #edf2f6;border-bottom:1px solid #edf2f6;background:#fff}
+  .trustbar .wrap{min-height:88px;display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:16px;align-items:center}
+  .trustbar .lead{font-size:12px;color:#738397;text-transform:uppercase;letter-spacing:.12em;font-weight:800}
+  .trust-item{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:800;color:#34465a}
+  .trust-item i{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--cyan));box-shadow:0 0 0 5px #eef6ff}
+
+  /* SECTIONS */
+  section{padding:96px 0}
+  .paths{background:var(--bg)}
+  .path-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .path-card{background:white;border:1px solid #dde7ef;border-radius:22px;padding:28px;min-height:285px;display:flex;flex-direction:column;position:relative;overflow:hidden;box-shadow:0 10px 30px rgba(7,31,55,.04);transition:.25s ease}
+  .path-card:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:#c7ddf5}
+  .path-card:after{content:"";position:absolute;width:160px;height:160px;border-radius:50%;right:-60px;top:-70px;background:linear-gradient(135deg,rgba(23,107,255,.10),rgba(57,212,233,.06))}
+  .card-icon{width:50px;height:50px;border-radius:15px;background:#ecf5ff;border:1px solid #dcecff;display:grid;place-items:center;color:#176bff;margin-bottom:38px;position:relative;z-index:1}
+  .path-card p{color:#697a8c;font-size:15px}
+  .path-link{margin-top:auto;color:#176bff;font-weight:850;display:inline-flex;align-items:center;gap:8px}
+
+  /* MARKETPLACE */
+  .market{background:#fff}
+  .market-shell{border:1px solid #dce6ef;border-radius:28px;overflow:hidden;box-shadow:var(--shadow);background:white}
+  .market-top{display:grid;grid-template-columns:280px 1fr}
+  .market-side{background:#071b30;color:white;padding:28px 22px}
+  .market-side h3{font-size:18px;margin-bottom:20px}
+  .step-list{display:flex;flex-direction:column;gap:8px}
+  .step{display:flex;align-items:center;gap:11px;padding:12px;border-radius:12px;color:#91a8bf;font-size:13px;font-weight:750}
+  .step.active{background:rgba(79,162,255,.12);color:white;border:1px solid rgba(79,162,255,.17)}
+  .step-num{width:27px;height:27px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.08);font-size:11px}
+  .step.active .step-num{background:#176bff}
+  .market-main{padding:30px}
+  .market-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:22px}
+  .market-toolbar h3{margin:0}
+  .demo-pill{font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:850;color:#9b6b05;background:#fff8df;border:1px solid #f6dfa1;padding:7px 9px;border-radius:999px}
+  .plan-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .plan-card{border:1px solid #dce6ef;border-radius:18px;padding:18px;position:relative;transition:.2s ease}
+  .plan-card:hover{border-color:#9ec4ff;box-shadow:0 14px 30px rgba(16,64,113,.08)}
+  .plan-card.best{border:2px solid #176bff}
+  .best-tag{position:absolute;top:-11px;left:16px;background:#176bff;color:white;padding:5px 9px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.07em;text-transform:uppercase}
+  .provider{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:20px}
+  .provider-logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(145deg,#e8f2ff,#f7fbff);display:grid;place-items:center;font-weight:900;color:#1a5bb5;border:1px solid #dbe8f7}
+  .provider small{color:#8493a3}
+  .price{font-size:34px;font-weight:900;letter-spacing:-.04em;color:#102f52}
+  .price span{font-size:13px;color:#78899b;font-weight:700;letter-spacing:0}
+  .est{font-size:12px;color:#6f8092;margin:2px 0 14px}
+  .plan-features{display:flex;flex-direction:column;gap:8px;border-top:1px solid #edf1f5;padding-top:14px;margin-top:14px;font-size:12px;color:#506276}
+  .plan-features span{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .plan-card .btn{width:100%;margin-top:16px}
+  .upload-zone{border:1.5px dashed #b9cee3;border-radius:14px;background:#f8fbfe;padding:14px;display:flex;align-items:center;justify-content:space-between;gap:14px;margin:18px 0}
+  .upload-zone input{display:none}
+  .upload-copy{display:flex;align-items:center;gap:11px;font-size:12px;color:#65788b}
+  .upload-copy strong{color:#193b61;display:block;font-size:13px}
+  .market-bottom{background:#f6f9fc;border-top:1px solid #e3ebf2;padding:18px 30px;display:flex;align-items:center;justify-content:space-between;gap:20px;font-size:12px;color:#647487}
+
+  /* CONCIERGE */
+  .concierge{background:linear-gradient(145deg,#06172a,#0b2b4a 62%,#0d3759);color:white;position:relative;overflow:hidden}
+  .concierge:before{content:"";position:absolute;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(57,212,233,.15),transparent 65%);right:-140px;top:-120px}
+  .concierge-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:60px;align-items:center;position:relative;z-index:1}
+  .concierge .eyebrow{background:rgba(79,162,255,.12);border-color:rgba(79,162,255,.18);color:#afd2ff}
+  .concierge-copy p{color:#b6c9dc;font-size:18px}
+  .service-picker{background:white;color:var(--ink);border-radius:26px;padding:24px;box-shadow:0 30px 80px rgba(0,0,0,.22)}
+  .picker-head{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:18px}
+  .picker-head h3{margin:0}
+  .move-date{background:#f3f7fa;border:1px solid #e2eaf1;border-radius:11px;padding:8px 10px;font-size:12px;color:#62768a}
+  .service-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .svc{border:1px solid #dce6ee;border-radius:14px;padding:14px;min-height:98px;position:relative;background:white;transition:.18s ease;cursor:pointer}
+  .svc:hover{border-color:#9fc4f8}
+  .svc.selected{border-color:#176bff;background:#f3f8ff;box-shadow:0 0 0 2px rgba(23,107,255,.08)}
+  .svc strong{display:block;margin-top:12px;font-size:13px}
+  .svc small{color:#8090a0;font-size:10px}
+  .svc-check{position:absolute;right:10px;top:10px;width:18px;height:18px;border-radius:50%;border:1px solid #cfdae4;display:grid;place-items:center;font-size:10px;color:white}
+  .svc.selected .svc-check{background:#176bff;border-color:#176bff}
+  .picker-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px;padding-top:18px;border-top:1px solid #e9eef3}
+  .picker-foot small{color:#748598;max-width:320px}
+
+  /* COMMERCIAL */
+  .commercial{background:#f5f8fb}
+  .commercial-grid{display:grid;grid-template-columns:.85fr 1.15fr;gap:50px;align-items:center}
+  .dash{background:#07192c;border-radius:25px;color:white;overflow:hidden;box-shadow:0 26px 70px rgba(8,31,53,.16)}
+  .dash-top{height:62px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;padding:0 20px}
+  .dash-brand{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:850;color:#d8e8f8}
+  .dots{display:flex;gap:5px}.dots i{width:7px;height:7px;border-radius:50%;background:#4f6580}
+  .dash-body{padding:22px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}
+  .kpi{background:#0d2742;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:14px}
+  .kpi small{display:block;color:#7895b2;font-size:9px;text-transform:uppercase;letter-spacing:.08em}
+  .kpi strong{display:block;font-size:23px;margin:3px 0 0}
+  .kpi em{font-style:normal;color:#73e4cf;font-size:10px}
+  .chart-card{background:#0d2742;border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:18px;margin-bottom:10px}
+  .chart-head{display:flex;align-items:center;justify-content:space-between;color:#dbe9f5;font-size:11px;margin-bottom:16px}
+  .bars{height:150px;display:flex;align-items:flex-end;gap:9px;border-bottom:1px solid rgba(255,255,255,.08);padding:0 4px 0}
+  .bar{flex:1;border-radius:5px 5px 0 0;background:linear-gradient(180deg,#4fa2ff,#176bff);min-height:18px;position:relative;opacity:.9}
+  .bar:nth-child(2n){background:linear-gradient(180deg,#65d9e6,#159cb0)}
+  .quote-row{display:grid;grid-template-columns:1.4fr .7fr .7fr .6fr;gap:8px;padding:10px 12px;border-radius:10px;background:#0d2742;margin-top:8px;align-items:center;font-size:10px;color:#9eb3c7}
+  .quote-row strong{color:#eef7ff;font-size:11px}
+  .status{display:inline-flex;justify-content:center;border-radius:999px;background:rgba(129,234,213,.11);color:#8ff0dc;padding:4px 6px}
+  .commercial-copy ul{padding:0;margin:26px 0;list-style:none;display:grid;gap:14px}
+  .commercial-copy li{display:flex;gap:12px;color:#526579}
+  .li-icon{flex:0 0 auto;width:26px;height:26px;border-radius:9px;background:#e7f2ff;color:#176bff;display:grid;place-items:center;font-size:12px;font-weight:900}
+
+  /* PARTNERS */
+  .partners{background:white}
+  .partner-shell{display:grid;grid-template-columns:1.1fr .9fr;border:1px solid #dae5ee;border-radius:26px;overflow:hidden;box-shadow:0 20px 60px rgba(7,28,50,.07)}
+  .partner-copy{padding:44px}
+  .partner-copy p{color:#65778a;font-size:17px;max-width:590px}
+  .partner-tags{display:flex;gap:8px;flex-wrap:wrap;margin:24px 0}
+  .partner-tags span{background:#f3f7fb;border:1px solid #dfe8f0;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800;color:#4c6075}
+  .partner-panel{background:#071a2e;color:white;padding:30px;display:flex;flex-direction:column;justify-content:center}
+  .partner-panel h3{font-size:25px;margin-bottom:18px}
+  .ref-card{background:#0d2946;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:16px;margin-bottom:10px}
+  .ref-card-top{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px}
+  .ref-card small{color:#8ca8c3}
+  .ref-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .ref-stats div{padding:10px;border-radius:10px;background:rgba(255,255,255,.04)}
+  .ref-stats b{display:block;font-size:16px}.ref-stats span{font-size:9px;color:#8ca8c3;text-transform:uppercase}
+
+  /* PROCESS / PORTAL */
+  .process{background:#f5f9fc}
+  .process-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .process-card{background:white;border:1px solid #dde7ef;border-radius:18px;padding:20px;min-height:190px;position:relative}
+  .process-card .num{font-size:11px;font-weight:900;color:#176bff;margin-bottom:36px}
+  .process-card p{color:#6c7d8f;font-size:13px}
+  .portal{background:white}
+  .portal-grid{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center}
+  .portal-mock{border:1px solid #dbe5ee;border-radius:26px;background:#f7fafc;padding:14px;box-shadow:var(--shadow)}
+  .portal-window{border-radius:18px;background:white;overflow:hidden;border:1px solid #e0e7ee}
+  .portal-head{height:52px;border-bottom:1px solid #e7edf2;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+  .portal-nav{width:150px;background:#f5f8fb;border-right:1px solid #e7edf2;padding:14px}
+  .portal-body{display:grid;grid-template-columns:150px 1fr;min-height:330px}
+  .portal-nav span{display:block;padding:9px;border-radius:9px;font-size:10px;color:#718193;margin-bottom:4px}.portal-nav span.active{background:#e9f3ff;color:#176bff;font-weight:900}
+  .portal-content{padding:18px}
+  .portal-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
+  .portal-card{border:1px solid #e2e8ee;border-radius:12px;padding:13px}.portal-card small{color:#7b8998;font-size:9px;text-transform:uppercase}.portal-card b{display:block;margin-top:5px}
+  .renewal{border:1px solid #e1e8ee;border-radius:13px;padding:14px}.renewal-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid #edf1f4;font-size:10px}.renewal-row:first-of-type{border-top:0}
+
+  /* CTA / FOOTER */
+  .cta{padding:90px 0;background:linear-gradient(135deg,#0a2340,#0b3155);color:white;text-align:center;position:relative;overflow:hidden}
+  .cta:before,.cta:after{content:"";position:absolute;border-radius:50%;filter:blur(0)}
+  .cta:before{width:420px;height:420px;left:-190px;top:-200px;background:radial-gradient(circle,rgba(23,107,255,.28),transparent 67%)}
+  .cta:after{width:420px;height:420px;right:-190px;bottom:-240px;background:radial-gradient(circle,rgba(57,212,233,.18),transparent 67%)}
+  .cta .wrap{position:relative;z-index:1}.cta p{color:#b7c9db;font-size:18px;max-width:680px;margin:0 auto 26px}.cta-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+  footer{background:#041222;color:#8fa6bd;padding:44px 0 28px}
+  .footer-grid{display:grid;grid-template-columns:1.4fr repeat(3,1fr);gap:34px}
+  .footer-brand .brand-text b{color:white}.footer-brand p{font-size:13px;max-width:330px;margin-top:20px}
+  footer h4{color:#d6e5f3;margin:0 0 14px;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+  footer a{display:block;font-size:12px;margin:8px 0;color:#91a7bd}
+  .footer-bottom{border-top:1px solid rgba(255,255,255,.08);margin-top:32px;padding-top:22px;display:flex;justify-content:space-between;gap:20px;font-size:11px}
+
+  /* MODAL */
+  .modal{position:fixed;inset:0;background:rgba(2,12,23,.68);display:none;align-items:center;justify-content:center;padding:20px;z-index:100;backdrop-filter:blur(5px)}
+  .modal.open{display:flex}
+  .modal-card{width:min(620px,100%);background:white;border-radius:24px;box-shadow:0 30px 100px rgba(0,0,0,.35);overflow:hidden}
+  .modal-head{padding:20px 22px;background:#071a2e;color:white;display:flex;align-items:center;justify-content:space-between}.modal-head h3{margin:0;font-size:20px}.modal-close{border:0;background:rgba(255,255,255,.08);color:white;width:36px;height:36px;border-radius:10px;font-size:20px}
+  .modal-body{padding:24px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-field{display:flex;flex-direction:column;gap:7px}.form-field.full{grid-column:1/-1}.form-field label{font-size:11px;font-weight:850;color:#5d7185;text-transform:uppercase;letter-spacing:.06em}.form-field input,.form-field select{min-height:48px;border:1px solid #d7e1ea;border-radius:11px;padding:0 12px;outline:0}.form-field input:focus,.form-field select:focus{border-color:#6da5f6;box-shadow:0 0 0 4px rgba(23,107,255,.08)}
+  .consent{font-size:10px;color:#7b8998;margin:14px 0}.modal-actions{display:flex;justify-content:flex-end;gap:10px}
+  .toast{position:fixed;right:22px;bottom:22px;background:#08213a;color:white;border:1px solid rgba(255,255,255,.12);padding:14px 16px;border-radius:14px;box-shadow:0 20px 50px rgba(3,14,27,.28);display:none;z-index:120;font-size:13px;max-width:350px}.toast.show{display:block;animation:toastIn .28s ease}
+  @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+  @media(max-width:1000px){
+    .nav-links{display:none}.menu-btn{display:block}.hero-grid,.concierge-grid,.commercial-grid,.portal-grid,.partner-shell{grid-template-columns:1fr}.hero{padding-top:56px}.hero-grid{gap:38px}.trustbar .wrap{grid-template-columns:repeat(2,1fr);padding:18px 0}.trustbar .lead{grid-column:1/-1}.path-grid{grid-template-columns:1fr 1fr}.market-top{grid-template-columns:1fr}.market-side{display:none}.plan-grid{grid-template-columns:1fr 1fr}.process-grid{grid-template-columns:repeat(3,1fr)}.footer-grid{grid-template-columns:1fr 1fr}
+  }
+  @media(max-width:680px){
+    .wrap{width:min(100% - 28px,1180px)}.topline .wrap{justify-content:center}.topline .hide-mobile{display:none}.nav-actions .btn{display:none}.hero{padding:44px 0}.hero-copy p{font-size:17px}.field-row,.path-grid,.plan-grid,.service-grid,.kpis,.process-grid,.portal-cards,.form-grid{grid-template-columns:1fr}.form-field.full{grid-column:auto}.market-main{padding:20px}.market-bottom{padding:15px 20px;align-items:flex-start;flex-direction:column}.service-grid{grid-template-columns:1fr 1fr}.partner-copy{padding:28px}.partner-panel{padding:24px}.footer-grid{grid-template-columns:1fr}.footer-bottom{flex-direction:column}.micro-metrics{grid-template-columns:1fr}.process-card{min-height:150px}.picker-foot{align-items:flex-start;flex-direction:column}.hero-rate{padding:20px}.brand-text b{font-size:15px}.brand-text span{font-size:8px}.quote-row{grid-template-columns:1.4fr .7fr .7fr}.quote-row>span:last-child{display:none}
+  }
+</style>
+</head>
+<body>
+<div data-demo-concept-bar style="position:relative;z-index:9999;background:#0b1f38;color:#e8f1fb;
+  font:600 12px/1.5 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+  letter-spacing:.02em;padding:10px 16px;text-align:center;
+  border-bottom:1px solid rgba(255,255,255,.14)">
+  <b style="letter-spacing:.12em">DESIGN CONCEPT</b>
+  <span style="opacity:.82">&nbsp;·&nbsp;A proposed Atlantis Light and Power experience. Every plan, price, figure and contact detail shown is illustrative and nothing here is connected to a live system.</span>
+</div>
+  <div class="topline">
+    <div class="wrap">
+      <div><strong>Energy made simpler.</strong> Residential, commercial & multi-location procurement.</div>
+      <div class="hide-mobile">Energy Advisor: <strong>(855) 555-0101</strong></div>
+    </div>
+  </div>
+
+  <nav>
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="Atlantis Light and Power home">
+        <span class="brand-mark"></span>
+        <span class="brand-text"><b>ATLANTIS</b><span>LIGHT & POWER</span></span>
+      </a>
+      <div class="nav-links">
+        <a href="#marketplace">Shop Energy</a>
+        <a href="#concierge">Moving</a>
+        <a href="#commercial">Business</a>
+        <a href="#partners">Partners</a>
+        <a href="#portal">Customer Portal</a>
+      </div>
+      <div class="nav-actions">
+        <button class="btn btn-light btn-sm" data-open-modal="advisor">Talk to an Advisor</button>
+        <button class="btn btn-primary btn-sm" onclick="document.querySelector('#marketplace').scrollIntoView()">Check My Rate</button>
+        <button class="menu-btn" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <span class="eyebrow">Atlantis Energy Intelligence</span>
+          <h1>Buy energy <span>smarter.</span><br/>Run your move <span>easier.</span></h1>
+          <p>Compare energy options, analyze your current bill, connect essential home services, and manage commercial energy—all through one Atlantis experience.</p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" onclick="document.querySelector('#marketplace').scrollIntoView()">Explore Energy Options <span>→</span></button>
+            <button class="btn btn-light" data-open-modal="bill">Upload My Bill</button>
+          </div>
+          <div class="mini-trust">
+            <span><i class="check-dot">✓</i>No-cost rate review</span>
+            <span><i class="check-dot">✓</i>Advisor support</span>
+            <span><i class="check-dot">✓</i>Commercial procurement</span>
+          </div>
+        </div>
+
+        <div class="hero-card">
+          <div class="hero-card-top">
+            <div><strong>Find Your Energy Fit</strong><br/><small>Start with your location and usage</small></div>
+            <span class="live-pill">● Marketplace Ready</span>
+          </div>
+          <div class="hero-rate">
+            <div class="seg" id="heroSeg">
+              <button class="active" data-mode="home">Home</button>
+              <button data-mode="business">Business</button>
+              <button data-mode="move">Moving</button>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label>Service ZIP code</label>
+                <div class="input-shell"><span>⌖</span><input id="heroZip" inputmode="numeric" maxlength="5" placeholder="e.g. 76063" /></div>
+              </div>
+              <div class="field">
+                <label>Monthly usage</label>
+                <div class="input-shell"><select id="heroUsage"><option>1,000 kWh</option><option>500 kWh</option><option>2,000 kWh</option><option>Custom</option></select></div>
+              </div>
+            </div>
+            <div class="rate-helper"><span><b>Have a recent bill?</b><br/>Upload it and let Atlantis use the actual usage profile.</span><button class="btn btn-light btn-sm" data-open-modal="bill">Upload</button></div>
+            <button class="btn btn-primary" style="width:100%" onclick="startRateSearch()">Show My Options →</button>
+            <div class="micro-metrics">
+              <div><strong>Residential</strong><small>rate comparison</small></div>
+              <div><strong>Commercial</strong><small>supplier bids</small></div>
+              <div><strong>Concierge</strong><small>home services</small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="trustbar">
+      <div class="wrap">
+        <div class="lead">One platform, multiple energy paths</div>
+        <div class="trust-item"><i></i>Residential Energy</div>
+        <div class="trust-item"><i></i>Commercial Procurement</div>
+        <div class="trust-item"><i></i>Move Concierge</div>
+        <div class="trust-item"><i></i>Partner Referrals</div>
+      </div>
+    </div>
+
+    <section class="paths">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Start where you are</span>
+          <h2>One front door. The right path for every customer.</h2>
+          <p>The site stops making customers hunt through services. Atlantis identifies the job to be done, collects the right information, and routes the opportunity into the correct workflow.</p>
+        </div>
+        <div class="path-grid">
+          <article class="path-card">
+            <div class="card-icon">⌂</div>
+            <h3>I need electricity</h3>
+            <p>Enter your service area, use an estimated monthly usage or upload a bill, and compare available plan structures in one place.</p>
+            <a href="#marketplace" class="path-link">Shop energy <span>→</span></a>
+          </article>
+          <article class="path-card">
+            <div class="card-icon">↗</div>
+            <h3>I’m moving</h3>
+            <p>Build a move plan for electricity, internet, security, TV, home warranty and utility support—then coordinate the setup.</p>
+            <a href="#concierge" class="path-link">Build my move plan <span>→</span></a>
+          </article>
+          <article class="path-card">
+            <div class="card-icon">▦</div>
+            <h3>I run a business</h3>
+            <p>Upload invoices, organize locations and meters, request supplier pricing, review recommendations and monitor renewal opportunities.</p>
+            <a href="#commercial" class="path-link">Explore procurement <span>→</span></a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="market" id="marketplace">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Energy Marketplace</span>
+          <h2>Compare plans using the information that actually matters.</h2>
+          <p>Designed for an eventual provider/API integration. For the prototype, the plan cards below use demonstration pricing so the experience can be reviewed before live supplier data is connected.</p>
+        </div>
+        <div class="market-shell">
+          <div class="market-top">
+            <aside class="market-side">
+              <h3>Rate Analysis</h3>
+              <div class="step-list">
+                <div class="step active"><span class="step-num">1</span>Service location</div>
+                <div class="step"><span class="step-num">2</span>Usage profile</div>
+                <div class="step"><span class="step-num">3</span>Compare options</div>
+                <div class="step"><span class="step-num">4</span>Review details</div>
+                <div class="step"><span class="step-num">5</span>Enrollment / advisor</div>
+              </div>
+            </aside>
+            <div class="market-main">
+              <div class="market-toolbar">
+                <div><small class="muted">Sample results for</small><h3 style="margin-top:2px">Dallas–Fort Worth, TX · 1,000 kWh</h3></div>
+                <span class="demo-pill">Demo pricing</span>
+              </div>
+              <label class="upload-zone" for="marketBill">
+                <span class="upload-copy"><span style="font-size:22px">⇧</span><span><strong>Use your actual bill</strong>PDF or image — prototype simulates usage extraction</span></span>
+                <span class="btn btn-light btn-sm">Choose file</span>
+                <input type="file" id="marketBill" accept=".pdf,image/*" onchange="handleBillUpload(this)" />
+              </label>
+              <div class="plan-grid" id="planGrid">
+                <article class="plan-card best">
+                  <span class="best-tag">Recommended</span>
+                  <div class="provider"><div><div class="provider-logo">A1</div></div><div style="text-align:right"><strong>Smart Fixed 12</strong><br/><small>12 month fixed</small></div></div>
+                  <div class="price">13.8¢ <span>/ kWh</span></div>
+                  <div class="est">Est. $138/mo at 1,000 kWh*</div>
+                  <div class="plan-features"><span>Contract term <b>12 mo</b></span><span>Renewable content <b>25%</b></span><span>Bill credit structure <b>Simple</b></span></div>
+                  <button class="btn btn-primary" onclick="selectPlan('Smart Fixed 12')">Review Plan</button>
+                </article>
+                <article class="plan-card">
+                  <div class="provider"><div><div class="provider-logo">B2</div></div><div style="text-align:right"><strong>Secure 24</strong><br/><small>24 month fixed</small></div></div>
+                  <div class="price">14.1¢ <span>/ kWh</span></div>
+                  <div class="est">Est. $141/mo at 1,000 kWh*</div>
+                  <div class="plan-features"><span>Contract term <b>24 mo</b></span><span>Renewable content <b>100%</b></span><span>Rate stability <b>High</b></span></div>
+                  <button class="btn btn-light" onclick="selectPlan('Secure 24')">Review Plan</button>
+                </article>
+                <article class="plan-card">
+                  <div class="provider"><div><div class="provider-logo">C3</div></div><div style="text-align:right"><strong>Value Flex 12</strong><br/><small>12 month fixed</small></div></div>
+                  <div class="price">14.4¢ <span>/ kWh</span></div>
+                  <div class="est">Est. $144/mo at 1,000 kWh*</div>
+                  <div class="plan-features"><span>Contract term <b>12 mo</b></span><span>Renewable content <b>10%</b></span><span>Early termination <b>Standard</b></span></div>
+                  <button class="btn btn-light" onclick="selectPlan('Value Flex 12')">Review Plan</button>
+                </article>
+              </div>
+            </div>
+          </div>
+          <div class="market-bottom"><span>*Demonstration estimates only. Live launch should use authorized provider/supplier data, official plan documents and actual service-location eligibility.</span><button class="btn btn-light btn-sm" data-open-modal="advisor">Need help choosing?</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="concierge" id="concierge">
+      <div class="wrap concierge-grid">
+        <div class="concierge-copy">
+          <span class="eyebrow">Atlantis Home Concierge</span>
+          <h2>One move. One point of contact.</h2>
+          <p>Turn a stressful move into a guided service setup. Customers choose what they need, Atlantis builds the plan, and the back office tracks every activation from referral to completion.</p>
+          <div class="mini-trust" style="margin:26px 0 30px;color:#c5d6e6">
+            <span><i class="check-dot">✓</i>Personalized service plan</span>
+            <span><i class="check-dot">✓</i>Provider coordination</span>
+            <span><i class="check-dot">✓</i>Installation tracking</span>
+          </div>
+          <button class="btn btn-ghost" data-open-modal="move">Talk to a Move Concierge →</button>
+        </div>
+        <div class="service-picker">
+          <div class="picker-head"><div><small class="muted">Build your move</small><h3>What do you need connected?</h3></div><span class="move-date">Move date: Flexible</span></div>
+          <div class="service-grid" id="serviceGrid">
+            <div class="svc selected" data-service="Electricity"><span>⚡</span><span class="svc-check">✓</span><strong>Electricity</strong><small>Shop & connect</small></div>
+            <div class="svc selected" data-service="Internet"><span>◉</span><span class="svc-check">✓</span><strong>Internet</strong><small>Speed & pricing</small></div>
+            <div class="svc" data-service="Security"><span>⌾</span><span class="svc-check">✓</span><strong>Security</strong><small>Home protection</small></div>
+            <div class="svc" data-service="TV"><span>▣</span><span class="svc-check">✓</span><strong>TV</strong><small>Entertainment</small></div>
+            <div class="svc" data-service="Warranty"><span>⌂</span><span class="svc-check">✓</span><strong>Home Warranty</strong><small>Home coverage</small></div>
+            <div class="svc" data-service="Utilities"><span>◌</span><span class="svc-check">✓</span><strong>Utility Support</strong><small>Water & gas help</small></div>
+          </div>
+          <div class="picker-foot"><small><b id="svcCount">2 services selected.</b> We’ll use this to create one coordinated move workflow.</small><button class="btn btn-primary" data-open-modal="move">Build My Plan →</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="commercial" id="commercial">
+      <div class="wrap commercial-grid">
+        <div class="dash" aria-label="Commercial energy dashboard prototype">
+          <div class="dash-top"><div class="dash-brand"><span class="brand-mark" style="width:29px;height:29px;border-radius:9px"></span> ATLANTIS BUSINESS ENERGY</div><div class="dots"><i></i><i></i><i></i></div></div>
+          <div class="dash-body">
+            <div class="kpis"><div class="kpi"><small>Active locations</small><strong>18</strong><em>Portfolio view</em></div><div class="kpi"><small>Annual usage</small><strong>8.4G</strong><em>kWh tracked</em></div><div class="kpi"><small>Renewals due</small><strong>4</strong><em>Next 120 days</em></div></div>
+            <div class="chart-card"><div class="chart-head"><strong>Market opportunity trend</strong><span>Illustrative</span></div><div class="bars"><div class="bar" style="height:48%"></div><div class="bar" style="height:64%"></div><div class="bar" style="height:57%"></div><div class="bar" style="height:76%"></div><div class="bar" style="height:71%"></div><div class="bar" style="height:88%"></div><div class="bar" style="height:82%"></div><div class="bar" style="height:92%"></div></div></div>
+            <div class="quote-row"><strong>DFW Portfolio</strong><span>12 mo</span><span>Supplier A</span><span class="status">Review</span></div>
+            <div class="quote-row"><strong>Houston Ops</strong><span>24 mo</span><span>Supplier B</span><span class="status">Open</span></div>
+          </div>
+        </div>
+        <div class="commercial-copy">
+          <span class="eyebrow">Commercial Energy Procurement</span>
+          <h2>From scattered invoices to one buying strategy.</h2>
+          <p class="muted" style="font-size:18px">Atlantis can present a commercial workflow built around locations, meters, bills, supplier requests, recommendations, contracts and renewals—not disconnected email threads.</p>
+          <ul>
+            <li><span class="li-icon">1</span><span><b>Portfolio intake</b><br/>Capture locations, meters, utilities, current contracts and bill history.</span></li>
+            <li><span class="li-icon">2</span><span><b>Supplier marketplace</b><br/>Package the opportunity and request authorized pricing from connected suppliers.</span></li>
+            <li><span class="li-icon">3</span><span><b>Decision support</b><br/>Present rate structures, term options and documents in a consistent comparison view.</span></li>
+            <li><span class="li-icon">4</span><span><b>Renewal intelligence</b><br/>Track contract dates and trigger 120/90/60/30-day follow-up workflows.</span></li>
+          </ul>
+          <button class="btn btn-primary" data-open-modal="business">Request a Business Rate Analysis</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="partners" id="partners">
+      <div class="wrap">
+        <div class="partner-shell">
+          <div class="partner-copy">
+            <span class="eyebrow">Atlantis Partner Network</span>
+            <h2 style="font-size:43px">Give your clients a better move—and keep visibility after the referral.</h2>
+            <p>Build a partner channel for real estate agents, property managers, builders, mortgage professionals and insurance partners. One referral can open a guided electricity and home-services workflow while the partner tracks progress.</p>
+            <div class="partner-tags"><span>Real Estate Agents</span><span>Property Managers</span><span>Builders</span><span>Mortgage</span><span>Insurance</span></div>
+            <button class="btn btn-primary" data-open-modal="partner">Become an Atlantis Partner</button>
+          </div>
+          <div class="partner-panel">
+            <small style="color:#82a0bd;text-transform:uppercase;letter-spacing:.1em;font-weight:850">Partner Portal Preview</small>
+            <h3>Referral Command Center</h3>
+            <div class="ref-card"><div class="ref-card-top"><div><strong>September Pipeline</strong><br/><small>Client referrals and activation status</small></div><span class="status">Live</span></div><div class="ref-stats"><div><b>24</b><span>Referrals</span></div><div><b>18</b><span>Contacted</span></div><div><b>11</b><span>Activated</span></div></div></div>
+            <div class="ref-card"><div class="ref-card-top"><div><strong>Latest referral</strong><br/><small>Sarah M. · Moving Oct 12</small></div><span class="status">In progress</span></div><small>Electricity · Internet · Security</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="process">
+      <div class="wrap">
+        <div class="section-head"><span class="eyebrow">What happens behind the site</span><h2>The website becomes the front end of a real operating system.</h2><p>Every action should create structured data that Atlantis can actually work—not disappear into an inbox.</p></div>
+        <div class="process-grid">
+          <article class="process-card"><div class="num">01 / INTAKE</div><h3>Customer enters</h3><p>Website captures service type, location, contact details and timing.</p></article>
+          <article class="process-card"><div class="num">02 / QUALIFY</div><h3>Profile the need</h3><p>Usage, bill upload, move date, property or business requirements.</p></article>
+          <article class="process-card"><div class="num">03 / ROUTE</div><h3>Assign workflow</h3><p>Residential rate shopping, concierge, commercial procurement or partner.</p></article>
+          <article class="process-card"><div class="num">04 / CONVERT</div><h3>Advisor + automation</h3><p>SMS/email acknowledgements, tasks, appointments, quote follow-up and status.</p></article>
+          <article class="process-card"><div class="num">05 / RETAIN</div><h3>Monitor renewal</h3><p>Contracts, activation dates and renewal windows become future opportunities.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="portal" id="portal">
+      <div class="wrap portal-grid">
+        <div>
+          <span class="eyebrow">Customer Portal</span>
+          <h2>Your energy relationship shouldn’t end after enrollment.</h2>
+          <p class="muted" style="font-size:18px">Give customers one place to see service locations, plans, documents, upcoming renewals and support. For commercial accounts, expand that into portfolio-level visibility.</p>
+          <div class="mini-trust" style="margin:26px 0;color:#536678"><span><i class="check-dot">✓</i>Contracts & documents</span><span><i class="check-dot">✓</i>Renewal reminders</span><span><i class="check-dot">✓</i>Service support</span></div>
+          <button class="btn btn-dark" data-open-modal="advisor">See the Platform Strategy</button>
+        </div>
+        <div class="portal-mock">
+          <div class="portal-window">
+            <div class="portal-head"><div class="brand" style="transform:scale(.82);transform-origin:left"><span class="brand-mark"></span><span class="brand-text"><b>ATLANTIS</b><span>MY ENERGY</span></span></div><small class="muted">Welcome, Jordan</small></div>
+            <div class="portal-body"><aside class="portal-nav"><span class="active">Overview</span><span>My services</span><span>Documents</span><span>Renewals</span><span>Support</span></aside><div class="portal-content"><small class="muted">ACCOUNT OVERVIEW</small><h3 style="margin:5px 0 15px">Your energy at a glance</h3><div class="portal-cards"><div class="portal-card"><small>Current plan</small><b>Smart Fixed 12</b></div><div class="portal-card"><small>Renewal window</small><b>104 days</b></div></div><div class="renewal"><b style="font-size:12px">Service locations</b><div class="renewal-row"><span>Home · Mansfield, TX</span><b>Active</b></div><div class="renewal-row"><span>Internet setup</span><b>Complete</b></div><div class="renewal-row"><span>Annual rate review</span><b style="color:#176bff">Scheduled</b></div></div></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="wrap">
+        <span class="eyebrow" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#bcd8f2">Atlantis Light & Power</span>
+        <h2 style="max-width:780px;margin:18px auto">Energy shopping, moving services and commercial procurement—finally connected.</h2>
+        <p>Start with a rate review, upload a bill, talk to an advisor or build a move plan. Atlantis routes the rest.</p>
+        <div class="cta-actions"><button class="btn btn-primary" onclick="document.querySelector('#marketplace').scrollIntoView()">Check My Rate</button><button class="btn btn-ghost" data-open-modal="advisor">Talk to an Advisor</button></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand"><a class="brand" href="#top"><span class="brand-mark"></span><span class="brand-text"><b>ATLANTIS</b><span>LIGHT & POWER</span></span></a><p>A modern energy buying and customer-experience platform for homes, businesses and partner referrals.</p></div>
+        <div><h4>Solutions</h4><a href="#marketplace">Residential Energy</a><a href="#commercial">Business Energy</a><a href="#concierge">Move Concierge</a><a href="#partners">Partner Network</a></div>
+        <div><h4>Company</h4><a href="#">About Atlantis</a><a href="#">Coverage</a><a href="#">Contact</a><a href="#">Privacy</a></div>
+        <div><h4>Contact</h4><a href="tel:8555550101">(855) 555-0101</a><a href="mailto:info@example.com">info@example.com</a><a href="#" data-open-modal="advisor">Schedule a consultation</a></div>
+      </div>
+      <div class="footer-bottom"><span>© 2026 Atlantis Light & Power. Prototype concept.</span><span>Live launch requires authorized supplier/provider integrations, final legal disclosures, privacy/consent review and validated pricing data.</span></div>
+    </div>
+  </footer>
+
+  <div class="modal" id="leadModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-head"><div><small style="color:#8fa8bf">ATLANTIS LIGHT & POWER</small><h3 id="modalTitle">Talk to an Energy Advisor</h3></div><button class="modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
+      <div class="modal-body">
+        <form id="leadForm" onsubmit="submitLead(event)">
+          <input type="hidden" id="leadType" value="advisor" />
+          <div class="form-grid">
+            <div class="form-field"><label>First name</label><input required placeholder="First name" /></div>
+            <div class="form-field"><label>Last name</label><input required placeholder="Last name" /></div>
+            <div class="form-field"><label>Email</label><input type="email" required placeholder="you@example.com" /></div>
+            <div class="form-field"><label>Phone</label><input type="tel" required placeholder="(555) 555-0102" /></div>
+            <div class="form-field full" id="dynamicField"><label>How can we help?</label><select><option>Compare electricity options</option><option>Analyze my current bill</option><option>I'm moving</option><option>Commercial energy procurement</option><option>Partner / referral program</option></select></div>
+            <div class="form-field full"><label>Service ZIP or business location</label><input placeholder="ZIP code or city" /></div>
+          </div>
+          <p class="consent">Prototype consent text: By submitting, you agree Atlantis may contact you by phone, text or email about your request. Final production language should be reviewed for applicable TCPA/privacy requirements and provider-partner obligations.</p>
+          <div class="modal-actions"><button type="button" class="btn btn-light" onclick="closeModal()">Cancel</button><button class="btn btn-primary" type="submit">Continue →</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+  const modes = document.querySelectorAll('#heroSeg button');
+  modes.forEach(btn=>btn.addEventListener('click',()=>{
+    modes.forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+    const mode = btn.dataset.mode;
+    const usage = document.getElementById('heroUsage');
+    if(mode==='business') usage.innerHTML='<option>Small business</option><option>Multi-location</option><option>Industrial</option><option>Custom</option>';
+    else if(mode==='move') usage.innerHTML='<option>This week</option><option>Next week</option><option>2–4 weeks</option><option>5+ weeks</option>';
+    else usage.innerHTML='<option>1,000 kWh</option><option>500 kWh</option><option>2,000 kWh</option><option>Custom</option>';
+  }));
+
+  document.querySelectorAll('[data-open-modal]').forEach(el=>el.addEventListener('click',e=>{
+    e.preventDefault(); openModal(el.dataset.openModal);
+  }));
+
+  function openModal(type='advisor'){
+    const titles={advisor:'Talk to an Energy Advisor',bill:'Upload / Analyze My Bill',move:'Build My Move Plan',business:'Business Rate Analysis',partner:'Atlantis Partner Program'};
+    document.getElementById('modalTitle').textContent=titles[type]||titles.advisor;
+    document.getElementById('leadType').value=type;
+    document.getElementById('leadModal').classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+  function closeModal(){document.getElementById('leadModal').classList.remove('open');document.body.style.overflow=''}
+  document.getElementById('leadModal').addEventListener('click',e=>{if(e.target.id==='leadModal')closeModal()});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+
+  function startRateSearch(){
+    const zip=document.getElementById('heroZip').value.trim();
+    if(zip && !/^\d{5}$/.test(zip)){showToast('Enter a valid 5-digit ZIP code.');return}
+    document.querySelector('#marketplace').scrollIntoView();
+    showToast(zip?`Prototype rate search started for ZIP ${zip}. Connect an authorized live provider API for production results.`:'Showing the prototype marketplace. Enter a ZIP in production to load eligible plans.');
+  }
+  function selectPlan(name){openModal('advisor');document.getElementById('modalTitle').textContent=`Review ${name}`;}
+  function handleBillUpload(input){if(input.files && input.files[0]) showToast(`${input.files[0].name} selected. Production version would securely parse the bill/usage data.`)}
+
+  document.querySelectorAll('.svc').forEach(card=>card.addEventListener('click',()=>{
+    card.classList.toggle('selected');
+    const count=document.querySelectorAll('.svc.selected').length;
+    document.getElementById('svcCount').textContent=`${count} service${count===1?'':'s'} selected.`;
+  }));
+
+  function submitLead(e){
+    e.preventDefault();
+    const type=document.getElementById('leadType').value;
+    closeModal();
+    showToast(`Prototype ${type} request captured. Production version should create the lead/opportunity in Atlantis/EvoSys Pro and trigger the correct workflow.`);
+    e.target.reset();
+  }
+  function showToast(msg){
+    const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(window.__toastTimer);window.__toastTimer=setTimeout(()=>t.classList.remove('show'),5200)
+  }
+  function toggleMobileMenu(){showToast('Mobile menu control is wired as a prototype. Final build should open the production navigation drawer.');}
+</script>
+<script data-demo-anchor-fix>
+/* Published demos render inside <iframe srcdoc sandbox>, where a bare
+   href="#id" resolves against the HOST document's URL and navigates the frame
+   away from the demo. Intercept and scroll ourselves. */
+(function () {
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var id = a.getAttribute('href').slice(1);
+    e.preventDefault();
+    if (!id) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    var el = document.getElementById(id)
+          || document.querySelector('[name="' + (window.CSS && CSS.escape
+                                                 ? CSS.escape(id) : id) + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth' });
+  }, false);
+})();
+</script>
+</body>
+</html>
