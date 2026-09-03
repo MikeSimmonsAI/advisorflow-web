@@ -4,11 +4,31 @@ Shared FastAPI dependencies: DB session injection and auth guard.
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+
+
+@dataclass
+class ExecutiveObservationContext:
+    """Request-scoped observation authority for a brand executive.
+
+    Lives in request.state.executive_observation -- NOT on the User object.
+
+    The three concepts that must remain separate:
+      IDENTITY    -- user.organization_id stays None (Michael is Michael)
+      AUTHORITY   -- executive's brand membership (validated in get_current_user)
+      OBSERVATION -- which customer org is being read right now (this object)
+
+    read_only is always True. There is no write observation mode.
+    """
+    executive_user_id: str
+    platform_id: str
+    observed_org_id: str
+    read_only: bool = True
 
 from app.services.auth_service import decode_access_token
 from app.models.models import User, Organization
@@ -195,8 +215,12 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             db.expunge(user)
             # DO NOT set user.organization_id — identity must stay None.
             # Scope lives here, separate from identity.
-            user._executive_observation_org_id = obs_org_id
-            user._executive_observation = True
+            request.state.executive_observation = ExecutiveObservationContext(
+                executive_user_id=user.id,
+                platform_id=mem.scope_id,
+                observed_org_id=obs_org_id,
+                read_only=True,
+            )
             _log.info(
                 "AUDIT: brand_executive %s (id=%s) entered observation context -> org=%s from IP=%s",
                 user.email, user.id, obs_org_id,
@@ -206,7 +230,8 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     return user
 
 
-def require_not_observation(user: User = Depends(get_current_user)) -> User:
+def require_not_observation(request: Request,
+                            user: User = Depends(get_current_user)) -> User:
     """Mutation guard for Executive Observation Mode.
 
     Any endpoint that writes data must declare this dependency alongside
@@ -216,7 +241,8 @@ def require_not_observation(user: User = Depends(get_current_user)) -> User:
 
     Frontend hiding of buttons is UX, not security. This is security.
     """
-    if getattr(user, "_executive_observation", False):
+    obs = getattr(request.state, "executive_observation", None)
+    if obs is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This operation is not permitted in Executive Observation Mode.",
@@ -248,7 +274,10 @@ def require_tenant_or_observer(request: Request = None,
         return user
     if user.organization_id is not None:
         return user
-    if getattr(user, "_executive_observation", False):
+    _obs = None
+    if request is not None:
+        _obs = getattr(request.state, "executive_observation", None)
+    if _obs is not None and _obs.executive_user_id == user.id:
         return user
     from fastapi import HTTPException, status as http_status
     raise HTTPException(
