@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 
 function useOrgs() {
@@ -41,6 +42,7 @@ export default function ExecutiveOrganizations() {
               <tr>
                 <th style={styles.th}>Organization</th>
                 <th style={styles.th}>Provisioned</th>
+                <th style={styles.th}></th>
               </tr>
             </thead>
             <tbody>
@@ -49,6 +51,14 @@ export default function ExecutiveOrganizations() {
                   <td style={styles.td}>{org.name}</td>
                   <td style={styles.td}>
                     {org.created_at ? new Date(org.created_at).toLocaleDateString() : '—'}
+                  </td>
+                  <td style={{ ...styles.td, textAlign: 'right' }}>
+                    <Link
+                      to={`/executive/organizations/${org.id}`}
+                      style={styles.viewLink}
+                    >
+                      View →
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -79,4 +89,8 @@ const styles = {
   mono: { fontFamily: 'monospace', fontSize: 12, color: '#6b7280' },
   muted: { color: '#9ca3af', fontSize: 14 },
   error: { color: '#ef4444', fontSize: 14 },
+  viewLink: {
+    color: '#2563eb', fontSize: 13, fontWeight: 600, textDecoration: 'none',
+    whiteSpace: 'nowrap',
+  },
 }
