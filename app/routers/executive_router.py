@@ -579,9 +579,17 @@ def get_org_leads_summary(
     now = datetime.utcnow()
     thirty_days_ago = now - timedelta(days=30)
 
+    # METRIC DEFINITION — must match the normal customer Overview totalLeads.
+    # The Overview counts leads where manual_flag IS NULL or == 'bad_email',
+    # which excludes records flagged 'remove_all'. READ-ONLY observation must
+    # use the same definition: read-only changes permissions, not data scope.
+    _active_filter = (
+        (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email")  # noqa: E711
+    )
+
     rows = (
         db.query(Lead.status, func.count(Lead.id).label("count"))
-        .filter(Lead.organization_id == org_id, Lead.is_test.is_(False))
+        .filter(Lead.organization_id == org_id, Lead.is_test.is_(False), _active_filter)
         .group_by(Lead.status)
         .all()
     )
@@ -593,6 +601,7 @@ def get_org_leads_summary(
         .filter(
             Lead.organization_id == org_id,
             Lead.is_test.is_(False),
+            _active_filter,
             Lead.created_at >= thirty_days_ago,
         )
         .scalar() or 0

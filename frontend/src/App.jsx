@@ -224,7 +224,10 @@ function HomeRedirect() {
     // this is the primary context the person was invited into. The back-office
     // switch lives inside the Executive Suite shell for users who also hold
     // a sales grant.
-    if (def.type === 'executive') {
+    // god_admin is explicitly excluded: God's home is /god regardless of which
+    // executive contexts exist. Executive Suite is entered only by deliberate
+    // brand selection from the God console, never by login routing.
+    if (def.type === 'executive' && user?.role !== 'god_admin') {
       return <Navigate to="/executive" replace />
     }
     if (def.type === 'workspace' && def.organization_id) {

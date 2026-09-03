@@ -371,14 +371,25 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
     # ── where login should land ──
     #
     # Priority (highest first):
-    #   1. Executive Suite — brand_executive grant means this is their primary
+    #   1. Platform Console (god_admin) — God's home is ALWAYS /god, regardless
+    #      of what executive memberships or contexts exist. Executive Suite is
+    #      entered only by explicit selection; alphabetical platform ordering
+    #      must never determine login home.
+    #   2. Executive Suite — brand_executive grant means this is their primary
     #      context; back-office is a secondary view they can switch into.
-    #   2. Platform Console — owner / god context stays first among platform rows.
-    #   3. Back-office / Sales — sales_manager / sales_rep with no executive grant.
-    #   4. Single workspace — straight in.
-    #   5. Multiple workspaces — selector.
-    #   6. No memberships — legacy tenant home (unchanged behaviour).
-    if executive:
+    #   3. Platform Console (non-god) — owner context stays first among platform rows.
+    #   4. Back-office / Sales — sales_manager / sales_rep with no executive grant.
+    #   5. Single workspace — straight in.
+    #   6. Multiple workspaces — selector.
+    #   7. No memberships — legacy tenant home (unchanged behaviour).
+    if getattr(user, "role", None) == "god_admin":
+        # God's canonical home is the platform console (/god).
+        # Executive contexts exist so God can explicitly SELECT a brand's
+        # Executive Suite; they must never become the login default.
+        default = next((c for c in contexts if c["type"] == "platform" and c.get("path") == "/god"), None)
+        if default is None:
+            default = platform[0] if platform else (executive[0] if executive else {"type": "legacy_tenant", "path": "/"})
+    elif executive:
         default = executive[0]
     elif platform:
         default = platform[0]
