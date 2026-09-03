@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import func
-from app.deps import get_db, require_tenant_user
+from app.deps import get_db, require_tenant_user, require_tenant_or_observer
 from app.models.models import User, Lead, PipelineConversation, Organization
 from app.services.pipeline_service import (
     launch_pipeline, get_pipeline_stats, get_ai_forecast
@@ -120,11 +120,14 @@ def pipeline_stats(
 @router.get("/forecast")
 def forecast(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_or_observer),
 ):
     """Get AI forecast and alerts for overview dashboard."""
     advisor_id = None if _is_elevated(current_user) else current_user.id
-    return get_ai_forecast(db, current_user.organization_id, advisor_id=advisor_id)
+    # Use active_workspace_org_id so executive observers get the observed org,
+    # not current_user.organization_id which is None for brand executives.
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+    return get_ai_forecast(db, org_id, advisor_id=advisor_id)
 
 
 @router.get("/flagged")

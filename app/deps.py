@@ -150,12 +150,15 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             user.organization_id = None
 
     # ── EXECUTIVE OBSERVATION CONTEXT ────────────────────────────────────────
-    # A brand_executive (or god with brand context) may send X-Executive-Observe
-    # to enter a customer org's data in strict read-only mode.
+    # A brand_executive may send X-Executive-Observe to enter a customer org's
+    # data in strict read-only mode.
     #
-    # This sets organization_id in-flight (not persisted) so require_tenant_user
-    # passes on customer GET routes, and sets _executive_observation=True so
-    # require_not_observation can block every mutation endpoint.
+    # IDENTITY CONTRACT: user.organization_id is NEVER modified here.
+    # Michael's identity stays organization_id=None throughout the request.
+    # Observation scope is stored on user._executive_observation_org_id.
+    # lead_scope.active_workspace_org_id reads that attribute and returns the
+    # observed org_id for data queries. require_tenant_or_observer passes for
+    # authorized observers WITHOUT requiring organization_id to be set.
     #
     # Platform isolation is enforced here: org.platform_id must match the
     # executive's membership scope_id. A cross-brand org_id returns 403.
@@ -190,7 +193,9 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                     detail="Organization is not in your brand's portfolio.",
                 )
             db.expunge(user)
-            user.organization_id = obs_org_id
+            # DO NOT set user.organization_id — identity must stay None.
+            # Scope lives here, separate from identity.
+            user._executive_observation_org_id = obs_org_id
             user._executive_observation = True
             _log.info(
                 "AUDIT: brand_executive %s (id=%s) entered observation context -> org=%s from IP=%s",
@@ -217,6 +222,39 @@ def require_not_observation(user: User = Depends(get_current_user)) -> User:
             detail="This operation is not permitted in Executive Observation Mode.",
         )
     return user
+
+
+def require_tenant_or_observer(request: Request = None,
+                               user: User = Depends(get_current_user),
+                               db: Session = Depends(get_db)) -> User:
+    """Gate for routes that executive observers may read but normal non-tenant
+    callers may not.
+
+    Passes when ANY of these is true:
+    - user is god_admin
+    - user.organization_id is not None  (real tenant member)
+    - user._executive_observation is True  (authorized brand_executive observer)
+
+    MUST NOT set user.organization_id. Observation scope lives on
+    user._executive_observation_org_id. lead_scope.active_workspace_org_id
+    reads both sources and returns the right org_id for data queries.
+
+    require_tenant_user is NOT modified to accept observers. That dependency
+    guards mutation routes and must remain strict. This dependency is ONLY
+    wired onto the GET endpoints Overview calls during observation mode.
+    """
+    from app.services.lead_scope import is_god
+    if is_god(user):
+        return user
+    if user.organization_id is not None:
+        return user
+    if getattr(user, "_executive_observation", False):
+        return user
+    from fastapi import HTTPException, status as http_status
+    raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail="This route requires an active customer workspace.",
+    )
 
 
 def require_tenant_user(request: Request = None,

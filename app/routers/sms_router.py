@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from app.deps import get_db, get_current_user, require_tenant_user, require_not_observation
+from app.deps import get_db, get_current_user, require_tenant_user, require_not_observation, require_tenant_or_observer
 from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
 from app.routers.compose_router import acting_advisor
@@ -495,7 +495,7 @@ def list_replies(
     hot_only: bool = False,
     needs_attention: bool = False,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_or_observer),
 ):
     """
     Replies screen - shows replies for leads owned by current advisor.

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
-from app.deps import get_db, require_tenant_user
+from app.deps import get_db, require_tenant_user, require_tenant_or_observer
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
 from app.services.import_service import import_leads_from_excel
@@ -482,7 +482,7 @@ def list_leads(
     page: int = Query(1, ge=1),
     page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_user),
+    current_user: User = Depends(require_tenant_or_observer),
 ):
     """
     Advisors see only their own leads. org_admin/super_admin see all org leads.
@@ -690,7 +690,7 @@ def set_lead_tier(
 
 
 @router.get("/daily-briefing")
-def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_or_observer)):
     """
     Advisor-scoped daily briefing data for the Overview page.
 
@@ -801,7 +801,7 @@ def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Dep
 
 
 @router.get("/status-funnel")
-def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_or_observer)):
     """
     Advisor-scoped real lead status funnel for Overview.
     Only returns the stages displayed in the dashboard funnel.

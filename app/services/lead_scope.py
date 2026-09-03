@@ -128,6 +128,12 @@ def active_workspace_org_id(user: User, db: Session = None,
             # through to the tenant the caller was already in.
             _sec.warning("workspace selection could not be resolved for user=%s",
                          getattr(user, "id", None))
+    # Executive observer: scope lives on _executive_observation_org_id,
+    # not on organization_id (which stays None for the executive's identity).
+    if getattr(user, "_executive_observation", False):
+        obs_id = getattr(user, "_executive_observation_org_id", None)
+        if obs_id:
+            return obs_id
     return getattr(user, "organization_id", None)
 
 
