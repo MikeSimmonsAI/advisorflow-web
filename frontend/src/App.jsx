@@ -458,6 +458,16 @@ function WorkspaceSelector() {
   )
 }
 
+// GodCustomerApp — God views a customer tenant app without customer membership.
+// Relies on X-Org-Override (set by enterCustomer) which get_current_user
+// injects into user.organization_id. require_tenant_user exempts god_admin.
+// ContextBanner shows the trail and provides "Return to God Mode".
+function GodCustomerApp() {
+  const ctx = getOrgContext()
+  if (!ctx?.orgId) return <Navigate to="/god/customers" replace />
+  return <ProtectedRoute><Overview /></ProtectedRoute>
+}
+
 function GodRoute({ children }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
@@ -691,6 +701,7 @@ export default function App() {
         {/* Both diagnostics, registered BEFORE the /god/* catch-all - a route
             added after it would silently render the Command Center instead. */}
         <Route path="/god/diagnostics/qualification" element={<GodRoute><GodModeLayout><QualificationDiagnostic /></GodModeLayout></GodRoute>} />
+        <Route path="/god/customer-app" element={<GodRoute><GodCustomerApp /></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

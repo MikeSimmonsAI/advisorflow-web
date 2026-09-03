@@ -63,7 +63,17 @@ const ICONS = {
  * no link.
  */
 const JUMP = [
-  { label: 'Customer App',    path: '/',       icon: 'grid',
+  // Customer App is NOT a static NavLink. It must carry the currently-selected
+  // org context into the tenant application. Routing through "/" hits
+  // HomeRedirect, which reads default_context from /auth/my-contexts and sends
+  // God to /executive when executive_contexts exist — ignoring the org entirely.
+  // Routing through /workspace/{id} hits WorkspaceRoute → assert_workspace_membership,
+  // which deliberately does not exempt god_admin (the org switcher must not
+  // enumerate every workspace). The correct path is /god/customer-app, which
+  // requires god_admin, reads the org context already set via X-Org-Override,
+  // and renders the tenant application directly. action: 'customer_app' tells
+  // the render loop to produce a button with navigate() instead of a NavLink.
+  { label: 'Customer App',    action: 'customer_app', icon: 'grid',
     hint: 'The tenant application, as an organization sees it' },
   // WAS: a single 'Sales Workspace' jump straight to /sales, with the brand
   // named in this literal — 'EvoSys Pro brand sales'. There was no way to pick
@@ -312,16 +322,40 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               JUMP TO
             </div>
           )}
-          {JUMP.map(({ label, path, icon, hint }) => (
-            <NavLink key={path} to={path} className="gm-nav-item gm-jump"
-              title={collapsed ? label + ' — ' + hint : hint}
-              style={{ justifyContent: collapsed ? 'center' : 'flex-start',
-                       padding: collapsed ? '10px 0' : '9px 14px' }}
-            >
-              <Ico d={ICONS[icon]} size={14} />
-              {!collapsed && <span className="gm-nav-label">{label}</span>}
-            </NavLink>
-          ))}
+          {JUMP.map((item) => {
+            const { label, path, icon, hint, action } = item
+            // Customer App: dynamic — navigate to the selected workspace via the
+            // God-specific entry route, or to the customer list if none selected.
+            if (action === 'customer_app') {
+              const dest = orgSession?.org_id ? '/god/customer-app' : '/god/customers'
+              return (
+                <button key="customer-app"
+                  className="gm-nav-item gm-jump"
+                  title={collapsed ? label + ' — ' + hint : hint}
+                  style={{ justifyContent: collapsed ? 'center' : 'flex-start',
+                           padding: collapsed ? '10px 0' : '9px 14px',
+                           background: 'none', border: 'none', cursor: 'pointer',
+                           color: 'inherit', fontFamily: 'inherit', fontSize: 'inherit',
+                           width: '100%', textAlign: 'left' }}
+                  onClick={() => navigate(dest)}
+                >
+                  <Ico d={ICONS[icon]} size={14} />
+                  {!collapsed && <span className="gm-nav-label">{label}</span>}
+                </button>
+              )
+            }
+            // Static entries remain NavLinks.
+            return (
+              <NavLink key={path} to={path} className="gm-nav-item gm-jump"
+                title={collapsed ? label + ' — ' + hint : hint}
+                style={{ justifyContent: collapsed ? 'center' : 'flex-start',
+                         padding: collapsed ? '10px 0' : '9px 14px' }}
+              >
+                <Ico d={ICONS[icon]} size={14} />
+                {!collapsed && <span className="gm-nav-label">{label}</span>}
+              </NavLink>
+            )
+          })}
           {websiteUrl && (
             <a href={websiteUrl} target="_blank" rel="noopener noreferrer"
               className="gm-nav-item gm-jump"
