@@ -276,37 +276,23 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "path": "/sales",
         })
 
-    # ── executive contexts (brand_executive platform grant) ──
-    # A user with an active Membership(scope_type=SCOPE_PLATFORM,
-    # role=ROLE_BRAND_EXECUTIVE) for a platform gets read-only brand KPI
-    # visibility in the Executive Suite. This is structurally separate from
-    # the back-office (sales) path: it is a higher-priority default and its
-    # own shell, not a tab inside the sales layout.
-    exec_mems = (
-        db.query(Membership)
-        .filter(
-            Membership.user_id == user.id,
-            Membership.scope_type == SCOPE_PLATFORM,
-            Membership.role == ROLE_BRAND_EXECUTIVE,
-            Membership.is_active.is_(True),
-        )
-        .all()
-    )
+    # ── executive contexts ────────────────────────────────────────────────────
+    # Two paths build this list — god root authority and normal membership.
+    #
+    # GOD ROOT AUTHORITY: god_admin sees every platform as an executive context.
+    # God does not require a brand_executive membership row. Authority derives
+    # from root platform ownership. The UI presents one entry per platform so
+    # god explicitly selects which brand's Executive Suite to enter (brand
+    # isolation is preserved through that explicit selection).
+    #
+    # NORMAL PATH: a user with an active Membership(scope_type=SCOPE_PLATFORM,
+    # role=ROLE_BRAND_EXECUTIVE) gets the brands they hold that grant on.
     executive: List[Dict[str, Any]] = []
-    if exec_mems:
-        plat_ids = [m.scope_id for m in exec_mems]
-        plats = {
-            str(p.id): p
-            for p in db.query(Platform).filter(Platform.id.in_(plat_ids)).all()
-        }
-        for m in exec_mems:
-            plat = plats.get(str(m.scope_id))
-            if plat is None:
-                _log.warning(
-                    "executive membership %s points at missing platform %s",
-                    m.id, m.scope_id,
-                )
-                continue
+
+    if getattr(user, "role", None) == "god_admin":
+        # God sees all platforms — one executive entry per platform.
+        all_platforms = db.query(Platform).order_by(Platform.name).all()
+        for plat in all_platforms:
             executive.append({
                 "type": "executive",
                 "label": "%s Executive Suite" % plat.name,
@@ -315,6 +301,39 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
                 "platform_name": plat.name,
                 "path": "/executive",
             })
+    else:
+        exec_mems = (
+            db.query(Membership)
+            .filter(
+                Membership.user_id == user.id,
+                Membership.scope_type == SCOPE_PLATFORM,
+                Membership.role == ROLE_BRAND_EXECUTIVE,
+                Membership.is_active.is_(True),
+            )
+            .all()
+        )
+        if exec_mems:
+            plat_ids = [m.scope_id for m in exec_mems]
+            plats = {
+                str(p.id): p
+                for p in db.query(Platform).filter(Platform.id.in_(plat_ids)).all()
+            }
+            for m in exec_mems:
+                plat = plats.get(str(m.scope_id))
+                if plat is None:
+                    _log.warning(
+                        "executive membership %s points at missing platform %s",
+                        m.id, m.scope_id,
+                    )
+                    continue
+                executive.append({
+                    "type": "executive",
+                    "label": "%s Executive Suite" % plat.name,
+                    "role": "brand_executive",
+                    "platform_id": str(plat.id),
+                    "platform_name": plat.name,
+                    "path": "/executive",
+                })
 
     # ── customer workspaces ──
     rows = workspace_memberships(user, db)

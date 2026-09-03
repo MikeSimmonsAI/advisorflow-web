@@ -75,8 +75,15 @@ class TestRequireBrandExecutive:
         assert exc.value.status_code == 403
 
     def test_god_admin_not_whitelisted(self):
+        """god_admin without a valid brand context is denied.
+        After god root authority implementation: god requires an explicit
+        X-Brand-Override selection; without one (or with an invalid one) it
+        still gets a 403 — just via the god path rather than the membership path.
+        """
         from fastapi import HTTPException
         user = make_user(id="u-god", role="god_admin")
+        # No _selected_brand_id set → MagicMock auto-attr is truthy, so god path
+        # proceeds to Platform lookup which returns None → 403 "not found".
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = None
         with pytest.raises(HTTPException) as exc:
@@ -325,7 +332,7 @@ class TestCustomerHealthEndpoint:
 
     # G — ONBOARDING: new org, not yet healthy
     def test_G_onboarding_classification(self):
-           from app.routers.executive_router import _classify_health
+        from app.routers.executive_router import _classify_health
         health, reason = _classify_health(age_days=10, active_users=0, total_leads=0, days_since_op=None)
         assert health == "onboarding"
         assert "30" in reason or "new" in reason.lower() or "onboarding" in reason.lower() or "under" in reason.lower()
@@ -458,3 +465,357 @@ class TestCustomerHealthEndpoint:
             counts[health] = counts.get(health, 0) + 1
         total = sum(counts.values())
         assert total == len(cases)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GOD ROOT AUTHORITY — Tasks A–D regression coverage
+# Canonical rule: god_admin is highest authority; does NOT require brand_executive
+# membership; DOES require explicit brand context selection.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestGodRootAuthority:
+    """
+    require_brand_executive god path:
+      god + valid brand → (user, sentinel, platform) — no membership row needed
+      god + no brand   → 403 "Select a brand context..."
+      god + bad brand  → 403 "Selected brand context not found."
+    Non-god path: unchanged (existing tests cover this).
+    """
+
+    def _call(self, user, db):
+        from app.deps import require_brand_executive
+        return require_brand_executive(user=user, db=db)
+
+    # A1 — god + valid brand → returns 3-tuple with SimpleNamespace sentinel
+    def test_A1_god_valid_brand_returns_tuple(self):
+        import types as types_mod
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        user = make_user(id="u-god", role="god_admin")
+        user._selected_brand_id = "plat-evosys"
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = platform
+
+        u, sentinel, plat = self._call(user, db)
+        assert u is user
+        assert plat is platform
+        assert isinstance(sentinel, types_mod.SimpleNamespace)
+
+    # A2 — sentinel carries every field the router contract touches
+    def test_A2_god_sentinel_satisfies_router_contract(self):
+        import types as types_mod
+        from app.models.sales_models import ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        user = make_user(id="u-god", role="god_admin")
+        user._selected_brand_id = "plat-evosys"
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = platform
+
+        _, sentinel, _ = self._call(user, db)
+        assert sentinel.role == ROLE_BRAND_EXECUTIVE
+        assert sentinel.scope_type == SCOPE_PLATFORM
+        assert sentinel.scope_id == platform.id
+        assert sentinel.created_at is None
+
+    # A3 — god + _selected_brand_id explicitly None → 403 brand-selection denial
+    def test_A3_god_no_brand_raises_clean_403(self):
+        from fastapi import HTTPException
+        user = make_user(id="u-god", role="god_admin")
+        user._selected_brand_id = None
+        db = MagicMock()
+        with pytest.raises(HTTPException) as exc:
+            self._call(user, db)
+        assert exc.value.status_code == 403
+        detail = exc.value.detail.lower()
+        assert "select" in detail or "brand" in detail, \
+            f"403 detail should mention brand selection, got: {exc.value.detail!r}"
+
+    # A4 — god + brand id that resolves to nothing → 403 not-found denial
+    def test_A4_god_invalid_brand_raises_clean_403(self):
+        from fastapi import HTTPException
+        user = make_user(id="u-god", role="god_admin")
+        user._selected_brand_id = "plat-does-not-exist"
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            self._call(user, db)
+        assert exc.value.status_code == 403
+        detail = exc.value.detail.lower()
+        assert "not found" in detail or "brand" in detail, \
+            f"403 detail should mention brand not found, got: {exc.value.detail!r}"
+
+    # A5 — god sentinel passes /executive/context (all router fields populated)
+    def test_A5_god_sentinel_passes_executive_context_endpoint(self):
+        from app.routers.executive_router import get_executive_context
+        from app.models.sales_models import ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+        import types as types_mod
+
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        user = make_user(id="u-god", role="god_admin")
+        sentinel = types_mod.SimpleNamespace(
+            role=ROLE_BRAND_EXECUTIVE,
+            scope_type=SCOPE_PLATFORM,
+            scope_id=platform.id,
+            created_at=None,
+        )
+        result = get_executive_context(executive=(user, sentinel, platform), db=MagicMock())
+        assert result["platform_id"] == "plat-evosys"
+        assert result["platform_name"] == "EvoSys Pro"
+        assert result["role"] == ROLE_BRAND_EXECUTIVE
+
+    # A6 — god sentinel passes /executive/organizations
+    def test_A6_god_sentinel_passes_organizations_endpoint(self):
+        from app.routers.executive_router import get_executive_organizations
+        from app.models.sales_models import ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+        import types as types_mod
+
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        user = make_user(id="u-god", role="god_admin")
+        sentinel = types_mod.SimpleNamespace(
+            role=ROLE_BRAND_EXECUTIVE,
+            scope_type=SCOPE_PLATFORM,
+            scope_id=platform.id,
+            created_at=None,
+        )
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        result = get_executive_organizations(executive=(user, sentinel, platform), db=db)
+        assert result["platform_id"] == "plat-evosys"
+        assert result["organizations"] == []
+
+    # A7 — god sentinel passes /executive/customer-health
+    def test_A7_god_sentinel_passes_customer_health_endpoint(self):
+        from app.routers.executive_router import get_customer_health
+        from app.models.sales_models import ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+        import types as types_mod
+
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        user = make_user(id="u-god", role="god_admin")
+        sentinel = types_mod.SimpleNamespace(
+            role=ROLE_BRAND_EXECUTIVE,
+            scope_type=SCOPE_PLATFORM,
+            scope_id=platform.id,
+            created_at=None,
+        )
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        result = get_customer_health(executive=(user, sentinel, platform), db=db)
+        assert result["platform_id"] == "plat-evosys"
+        assert result["summary"]["total"] == 0
+
+    # B regression — non-executive user still gets 403 (no regression from god path)
+    def test_B_non_executive_still_403(self):
+        from fastapi import HTTPException
+        user = make_user(id="u-advisor", role="advisor")
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            self._call(user, db)
+        assert exc.value.status_code == 403
+
+    # B regression — inactive grant still blocked
+    def test_B_inactive_grant_still_403(self):
+        from fastapi import HTTPException
+        from app.models.sales_models import SCOPE_PLATFORM, ROLE_BRAND_EXECUTIVE
+        user = make_user(id="u-exec", role="advisor")
+        inactive_mem = make_membership(user.id, SCOPE_PLATFORM, "plat-evosys", ROLE_BRAND_EXECUTIVE)
+        inactive_mem.is_active = False
+        db = MagicMock()
+        # Membership query returns None (inactive filtered out by is_active)
+        db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            self._call(user, db)
+        assert exc.value.status_code == 403
+
+
+class TestGodBrandIsolation:
+    """Brand isolation holds regardless of who enters — including god.
+    God with EvoSys context sees only EvoSys scope.
+    God with BookaBoost context sees only BookaBoost scope.
+    Platform IDs never bleed across selected contexts.
+    """
+
+    def _make_god_executive(self, platform):
+        from app.models.sales_models import ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+        import types as types_mod
+        user = make_user(id="u-god", role="god_admin")
+        sentinel = types_mod.SimpleNamespace(
+            role=ROLE_BRAND_EXECUTIVE,
+            scope_type=SCOPE_PLATFORM,
+            scope_id=platform.id,
+            created_at=None,
+        )
+        return (user, sentinel, platform)
+
+    # C1 — god EvoSys: organizations endpoint scoped to EvoSys
+    def test_C1_god_evosys_organizations_scoped_to_evosys(self):
+        from app.routers.executive_router import get_executive_organizations
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        executive = self._make_god_executive(platform)
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        result = get_executive_organizations(executive=executive, db=db)
+        assert result["platform_id"] == "plat-evosys"
+        assert result["platform_id"] != "plat-bookaboost"
+
+    # C2 — god BookaBoost: platform_id reflects BookaBoost, not EvoSys
+    def test_C2_god_bookaboost_scoped_to_bookaboost(self):
+        from app.routers.executive_router import get_executive_organizations
+        platform = make_platform(id="plat-bookaboost", name="BookaBoost")
+        executive = self._make_god_executive(platform)
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        result = get_executive_organizations(executive=executive, db=db)
+        assert result["platform_id"] == "plat-bookaboost"
+        assert result["platform_id"] != "plat-evosys"
+
+    # C3 — god customer-health scoped to selected brand
+    def test_C3_god_customer_health_platform_id_matches_selection(self):
+        from app.routers.executive_router import get_customer_health
+        platform = make_platform(id="plat-evosys", name="EvoSys Pro")
+        executive = self._make_god_executive(platform)
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        result = get_customer_health(executive=executive, db=db)
+        assert result["platform_id"] == "plat-evosys"
+
+    # C4 — context endpoint scoped to selected brand
+    def test_C4_god_context_platform_id_matches_selection(self):
+        from app.routers.executive_router import get_executive_context
+        platform = make_platform(id="plat-bookaboost", name="BookaBoost")
+        executive = self._make_god_executive(platform)
+        result = get_executive_context(executive=executive, db=MagicMock())
+        assert result["platform_id"] == "plat-bookaboost"
+        assert result["platform_name"] == "BookaBoost"
+
+
+class TestAuthorizedContextsGodBranch:
+    """authorized_contexts() god branch: all platforms appear as executive contexts.
+    Non-god branch: unchanged — only membership-granted platforms appear.
+    """
+
+    def test_god_sees_all_platforms_as_executive_contexts(self):
+        from app.services.workspace_access import authorized_contexts
+        from app.models.models import Platform
+
+        user = make_user(id="u-god", role="god_admin")
+        plat_a = make_platform(id="plat-a", name="Alpha Brand")
+        plat_b = make_platform(id="plat-b", name="Beta Brand")
+
+        db = MagicMock()
+
+        def query_side(model):
+            q = MagicMock()
+            model_name = getattr(model, "__name__", "")
+            if model_name == "Platform":
+                # god path: db.query(Platform).order_by(...).all()
+                q.order_by.return_value.all.return_value = [plat_a, plat_b]
+                q.filter.return_value.first.return_value = None
+            else:
+                # Membership, Organization queries → empty
+                q.filter.return_value.all.return_value = []
+                q.filter.return_value.order_by.return_value.all.return_value = []
+            return q
+
+        db.query.side_effect = query_side
+        result = authorized_contexts(user=user, db=db)
+        exec_contexts = result.get("executive_contexts", [])
+        assert len(exec_contexts) == 2
+        platform_ids = {c["platform_id"] for c in exec_contexts}
+        assert "plat-a" in platform_ids
+        assert "plat-b" in platform_ids
+
+    def test_god_executive_context_fields_are_complete(self):
+        from app.services.workspace_access import authorized_contexts
+        from app.models.models import Platform
+
+        user = make_user(id="u-god", role="god_admin")
+        plat = make_platform(id="plat-evosys", name="EvoSys Pro")
+
+        db = MagicMock()
+
+        def query_side(model):
+            q = MagicMock()
+            model_name = getattr(model, "__name__", "")
+            if model_name == "Platform":
+                q.order_by.return_value.all.return_value = [plat]
+                q.filter.return_value.first.return_value = None
+            else:
+                q.filter.return_value.all.return_value = []
+                q.filter.return_value.order_by.return_value.all.return_value = []
+            return q
+
+        db.query.side_effect = query_side
+        result = authorized_contexts(user=user, db=db)
+        exec_ctx = result["executive_contexts"][0]
+        assert exec_ctx["platform_id"] == "plat-evosys"
+        assert exec_ctx["platform_name"] == "EvoSys Pro"
+        assert exec_ctx["role"] == "brand_executive"
+        assert exec_ctx["path"] == "/executive"
+
+    def test_non_god_with_no_memberships_sees_no_executive_contexts(self):
+        from app.services.workspace_access import authorized_contexts
+
+        user = make_user(id="u-advisor", role="advisor")
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = []
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+        result = authorized_contexts(user=user, db=db)
+        assert result.get("executive_contexts", []) == []
+
+
+class TestContextSwitcherGodBrandContext:
+    """ContextSwitcher.jsx: brand context must be set before executive navigation.
+    This is the client-side half of the god root authority implementation.
+    """
+
+    def test_switcher_imports_set_brand_context(self):
+        path = 'frontend/src/components/ContextSwitcher.jsx'
+        with open(path) as f:
+            src = f.read()
+        assert 'setBrandContext' in src, \
+            "ContextSwitcher must import setBrandContext from api/client"
+
+    def test_enter_executive_calls_set_brand_context_before_navigate(self):
+        """setBrandContext must be invoked BEFORE navigate('/executive')."""
+        path = 'frontend/src/components/ContextSwitcher.jsx'
+        with open(path) as f:
+            src = f.read()
+
+        enter_idx = src.find('function enterExecutive')
+        assert enter_idx != -1, "enterExecutive function must exist"
+
+        set_brand_idx = src.find('setBrandContext', enter_idx)
+        nav_idx = src.find("navigate('/executive')", enter_idx)
+
+        assert set_brand_idx != -1, \
+            "setBrandContext must be called inside enterExecutive"
+        assert nav_idx != -1, \
+            "navigate('/executive') must be called inside enterExecutive"
+        assert set_brand_idx < nav_idx, \
+            "setBrandContext must appear before navigate('/executive') — " \
+            "header must be set before the next request fires"
+
+    def test_executive_button_passes_platform_id_and_name(self):
+        """Both single-button and dropdown callers must pass platform_id and platform_name."""
+        path = 'frontend/src/components/ContextSwitcher.jsx'
+        with open(path) as f:
+            src = f.read()
+        assert 'ex.platform_id' in src, \
+            "executive context callers must pass ex.platform_id to enterExecutive"
+        assert 'ex.platform_name' in src, \
+            "executive context callers must pass ex.platform_name to enterExecutive"
+
+    def test_switcher_reads_executive_contexts_from_server(self):
+        """executive_contexts must come from the server response — never hardcoded."""
+        path = 'frontend/src/components/ContextSwitcher.jsx'
+        with open(path) as f:
+            src = f.read()
+        assert 'executive_contexts' in src, \
+            "ContextSwitcher must read executive_contexts from /auth/my-contexts response"
+        # Must not derive access from a hardcoded role label
+        import re
+        assert re.search(r'["\']god_admin["\']', src) is None, \
+            "ContextSwitcher must not infer executive access from 'god_admin' role label"

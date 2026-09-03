@@ -237,22 +237,58 @@ def require_brand_executive(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Executive Suite guard — caller must hold a brand_executive membership.
+    """Executive Suite guard — caller must hold a brand_executive membership,
+    OR be a god_admin with an explicit brand context selected.
 
     Returns a 3-tuple (user, membership, platform) so routes have the
     brand's Platform object without a second query.
 
     Architecture notes:
-    - Authority comes from the membership row, not from users.role.
-    - scope_type="platform" + scope_id=<platform_id> naturally isolates
-      one brand's executive from every other brand; no extra filter needed.
-    - god_admin is intentionally NOT whitelisted here: the owner uses the
-      owner shell. An executive portal and an owner shell are different tools
-      for different roles.
+    - For normal users, authority comes from the membership row.
+      scope_type="platform" + scope_id=<platform_id> naturally isolates
+      one brand's executive from every other brand.
+    - For god_admin, authority derives from root platform ownership.
+      god does NOT require a lower-level brand_executive membership row.
+      god DOES require explicit brand context selection (X-Brand-Override
+      header → user._selected_brand_id set by get_current_user) so the
+      system knows which brand's data to scope to. No brand selected → 403.
+      This preserves brand isolation and audit trail: every executive query
+      scopes to exactly one platform, same as the membership path.
+    - The returned membership object for god is a lightweight sentinel that
+      satisfies the router contract (role, created_at, scope_id, scope_type)
+      without creating any database row.
     """
+    import types
     from app.models.sales_models import Membership, ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
     from app.models.models import Platform
 
+    # ── GOD ROOT AUTHORITY PATH ──────────────────────────────────────────────
+    # god_admin is AdvisorFlow root authority and does not require a
+    # brand_executive membership. Explicit brand context is still required
+    # so executive queries remain scoped to exactly one brand.
+    if user.role == "god_admin":
+        brand_id = getattr(user, "_selected_brand_id", None)
+        if not brand_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Select a brand context to enter the Executive Suite.",
+            )
+        platform = db.query(Platform).filter(Platform.id == brand_id).first()
+        if not platform:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Selected brand context not found.",
+            )
+        # Sentinel membership: satisfies router contract, creates no DB row.
+        sentinel = types.SimpleNamespace(
+            role=ROLE_BRAND_EXECUTIVE,
+            scope_type=SCOPE_PLATFORM,
+            scope_id=platform.id,
+            created_at=None,
+        )
+        return user, sentinel, platform
+
+    # ── NORMAL MEMBERSHIP PATH ───────────────────────────────────────────────
     mem = (
         db.query(Membership)
         .filter(

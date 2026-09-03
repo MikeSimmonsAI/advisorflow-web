@@ -24,7 +24,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchMyContexts, setWorkspaceContext, clearWorkspaceContext,
-         getWorkspaceContext } from '../api/client'
+         getWorkspaceContext, setBrandContext } from '../api/client'
 
 export default function ContextSwitcher({ current = 'back_office' }) {
   const [contexts, setContexts] = useState(null)
@@ -67,8 +67,17 @@ export default function ContextSwitcher({ current = 'back_office' }) {
     navigate('/workspace/' + ws.organization_id)
   }
 
-  function enterExecutive() {
+  function enterExecutive(platformId, platformName) {
     setOpen(false)
+    // Set brand context BEFORE navigating so the very first executive API
+    // request already carries X-Brand-Override. This is required for god_admin
+    // root authority: god selects an explicit brand context so executive queries
+    // remain scoped to exactly one brand. For normal brand_executive users the
+    // header is still sent but the backend ignores it (membership determines
+    // scope). Never enters /executive without an explicit brand selection.
+    if (platformId) {
+      setBrandContext(platformId, platformName || '')
+    }
     navigate('/executive')
   }
 
@@ -99,9 +108,11 @@ export default function ContextSwitcher({ current = 'back_office' }) {
 
     // If only an executive link and no workspaces, show a single button.
     if (workspaces.length === 0 && hasExecutive) {
+      const ex = executives[0]
       return (
-        <button type="button" className="ctx-switch-btn" onClick={enterExecutive}
-                title="Executive Suite">
+        <button type="button" className="ctx-switch-btn"
+                onClick={function () { enterExecutive(ex.platform_id, ex.platform_name) }}
+                title={ex.platform_name + ' Executive Suite'}>
           Executive Suite
         </button>
       )
@@ -138,7 +149,7 @@ export default function ContextSwitcher({ current = 'back_office' }) {
                     <button key={ex.platform_id} type="button" role="menuitem"
                             className={'ctx-switch-item' +
                                        (current === 'executive' ? ' is-active' : '')}
-                            onClick={enterExecutive}>
+                            onClick={function () { enterExecutive(ex.platform_id, ex.platform_name) }}>
                       <span className="ctx-switch-item-name">{ex.platform_name} — Executive Suite</span>
                     </button>
                   )
