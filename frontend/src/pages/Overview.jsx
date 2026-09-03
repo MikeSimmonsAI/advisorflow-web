@@ -32,6 +32,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser, getBranding, getWorkspaceContext } from '../api/client'
+import { useObservationMode } from '../context/ObservationContext'
 import './Overview.css'
 
 // ── Industry-aware labels ─────────────────────────────────────────────────────
@@ -83,6 +84,7 @@ function num(n) {
 export default function Overview() {
   const user = getCurrentUser()
   const navigate = useNavigate()
+  const observationMode = useObservationMode()
 
   const branding = getBranding()
   const enabledFeatures = branding?.enabled_features ?? null
@@ -300,8 +302,10 @@ export default function Overview() {
           />
         </form>
         <div className="ov-top-actions">
-          <button className="ov-btn" onClick={() => go('/leads?import=1')}>Import leads</button>
-          {isEnabled('campaigns') && isManager && (
+          {!observationMode && (
+            <button className="ov-btn" onClick={() => go('/leads?import=1')}>Import leads</button>
+          )}
+          {!observationMode && isEnabled('campaigns') && isManager && (
             <button className="ov-btn" onClick={() => go('/campaigns')}>New campaign</button>
           )}
           <button className="ov-btn ov-btn--primary" onClick={() => go('/workqueue')}>

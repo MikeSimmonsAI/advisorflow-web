@@ -54,7 +54,7 @@ export default function ExecutiveOrganizations() {
                   </td>
                   <td style={{ ...styles.td, textAlign: 'right' }}>
                     <Link
-                      to={`/executive/organizations/${org.id}`}
+                      to={`/executive/organizations/${org.id}/view/overview`}
                       style={styles.viewLink}
                     >
                       View →

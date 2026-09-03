@@ -71,6 +71,7 @@ import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
 import ExecutiveOrganizations from './pages/executive/ExecutiveOrganizations'
 import ExecutiveCustomerHealth from './pages/executive/ExecutiveCustomerHealth'
 import ExecutiveOrgObservation from './pages/executive/ExecutiveOrgObservation'
+import ExecObserveShell from './pages/executive/ExecObserveShell'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
 import GodSalesOps from './pages/GodSalesOps'
@@ -676,6 +677,11 @@ export default function App() {
         <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/organizations/:orgId" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrgObservation /></ExecutiveSuite></ExecutiveRoute>} />
+        {/* Executive Observation Mode — renders actual customer app in read-only context.
+            No ExecutiveSuite wrapper: ExecObserveShell provides its own shell + banner. */}
+        <Route path="/executive/organizations/:orgId/view" element={<ExecutiveRoute><ExecObserveShell /></ExecutiveRoute>}>
+          <Route path="overview" element={<Overview />} />
+        </Route>
         <Route path="/executive/customer-health" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCustomerHealth /></ExecutiveSuite></ExecutiveRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />

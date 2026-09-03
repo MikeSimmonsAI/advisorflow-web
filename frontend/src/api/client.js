@@ -92,6 +92,10 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // never which one you get.
   const wsId = getWorkspaceContext()
   if (wsId) headers['X-Workspace-Id'] = wsId
+  // Executive Observation Mode: inject org context header so the server can
+  // pass require_tenant_user while still marking the session read-only.
+  // Only sent when observation context is active (ExecObserveShell mounted).
+  if (_observationOrgId) headers['X-Executive-Observe'] = _observationOrgId
   if (!(options.body instanceof FormData) && options.body) {
     headers['Content-Type'] = 'application/json'
   }
@@ -545,6 +549,31 @@ export function clearAllContext() {
   clearOrgContext()
   clearBrandContext()
   clearWorkspaceContext()
+  clearObservationContext()
+}
+
+// ── Executive Observation Context ───────────────────────────────────────────
+//
+// When a brand executive enters a customer org in read-only observation mode,
+// every API request carries X-Executive-Observe: <orgId>. The server uses this
+// to inject the org context in-flight (not persisted) and mark the session as
+// observation-only so all mutation endpoints refuse with 403.
+//
+// This is a module-level variable, NOT localStorage. Observation context is
+// ephemeral: it lives only while ExecObserveShell is mounted. A page reload
+// sends the executive back to the Executive Suite, not into the customer app.
+let _observationOrgId = null
+
+export function setObservationContext(orgId) {
+  _observationOrgId = orgId || null
+}
+
+export function getObservationContext() {
+  return _observationOrgId
+}
+
+export function clearObservationContext() {
+  _observationOrgId = null
 }
 
 

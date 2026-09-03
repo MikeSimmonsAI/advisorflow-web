@@ -149,6 +149,73 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             # before any mutation, so nothing here is written back.
             user.organization_id = None
 
+    # ── EXECUTIVE OBSERVATION CONTEXT ────────────────────────────────────────
+    # A brand_executive (or god with brand context) may send X-Executive-Observe
+    # to enter a customer org's data in strict read-only mode.
+    #
+    # This sets organization_id in-flight (not persisted) so require_tenant_user
+    # passes on customer GET routes, and sets _executive_observation=True so
+    # require_not_observation can block every mutation endpoint.
+    #
+    # Platform isolation is enforced here: org.platform_id must match the
+    # executive's membership scope_id. A cross-brand org_id returns 403.
+    #
+    # God path: god already has X-Org-Override for full operational access.
+    # Observation mode is for brand_executive only at this layer.
+    if user.role != "god_admin":
+        obs_org_id = request.headers.get("X-Executive-Observe")
+        if obs_org_id:
+            from app.models.sales_models import Membership, ROLE_BRAND_EXECUTIVE, SCOPE_PLATFORM
+            mem = (
+                db.query(Membership)
+                .filter(
+                    Membership.user_id == user.id,
+                    Membership.scope_type == SCOPE_PLATFORM,
+                    Membership.role == ROLE_BRAND_EXECUTIVE,
+                    Membership.is_active.is_(True),
+                )
+                .first()
+            )
+            if not mem:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Executive Observation Mode requires a brand executive membership.",
+                )
+            obs_org = db.query(Organization).filter(Organization.id == obs_org_id).first()
+            if not obs_org:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+            if obs_org.platform_id != mem.scope_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Organization is not in your brand's portfolio.",
+                )
+            db.expunge(user)
+            user.organization_id = obs_org_id
+            user._executive_observation = True
+            _log.info(
+                "AUDIT: brand_executive %s (id=%s) entered observation context -> org=%s from IP=%s",
+                user.email, user.id, obs_org_id,
+                request.client.host if request.client else "unknown",
+            )
+
+    return user
+
+
+def require_not_observation(user: User = Depends(get_current_user)) -> User:
+    """Mutation guard for Executive Observation Mode.
+
+    Any endpoint that writes data must declare this dependency alongside
+    require_tenant_user. If the caller entered via X-Executive-Observe
+    (observation context), the mutation is refused with 403 regardless
+    of how the request was constructed.
+
+    Frontend hiding of buttons is UX, not security. This is security.
+    """
+    if getattr(user, "_executive_observation", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is not permitted in Executive Observation Mode.",
+        )
     return user
 
 

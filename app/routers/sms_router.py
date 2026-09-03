@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from app.deps import get_db, get_current_user, require_tenant_user
+from app.deps import get_db, get_current_user, require_tenant_user, require_not_observation
 from app.models.models import User, Lead, Reply, ReplyClassification
 from app.services.sms_service import send_sms, send_batch, send_mms
 from app.routers.compose_router import acting_advisor
