@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { enterCustomer } from './god/enterCustomer'
 import { Panel, Empty, StatusBadge, when, errText } from './god/GodOpsShared'
 import './god/GodOps.css'
 
@@ -20,6 +21,7 @@ export default function GodCustomers() {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
+  const [entering, setEntering] = useState(null) // orgId currently being entered
 
   useEffect(() => {
     api.get('/god/ops/customer-organizations')
@@ -29,6 +31,19 @@ export default function GodCustomers() {
 
   const filtered = (rows || []).filter(o =>
     !q.trim() || (o.name || '').toLowerCase().includes(q.trim().toLowerCase()))
+
+  async function handleEnter(e, orgId, orgName) {
+    e.stopPropagation() // don't trigger the row's implementation navigation
+    setErr('')
+    setEntering(orgId)
+    try {
+      await enterCustomer(orgId, orgName)
+      nav('/god/customer-app')
+    } catch (ex) {
+      setErr(errText(ex))
+      setEntering(null)
+    }
+  }
 
   return (
     <div className="go-scope">
@@ -53,7 +68,7 @@ export default function GodCustomers() {
           <table className="go-table">
             <thead>
               <tr><th>Customer</th><th>Platform</th><th>Package</th><th>Users</th>
-                  <th>Leads</th><th>Implementation</th><th>Source</th></tr>
+                  <th>Leads</th><th>Implementation</th><th>Source</th><th></th></tr>
             </thead>
             <tbody>
               {filtered.map(o => (
@@ -78,6 +93,16 @@ export default function GodCustomers() {
                     {o.provisioned_from_sale
                       ? <span className="go-badge new">from a Won deal</span>
                       : <span className="go-badge">created outside the pipeline</span>}
+                  </td>
+                  <td data-label="Enter" onClick={e => e.stopPropagation()}>
+                    <button
+                      className="go-btn"
+                      style={{ fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap' }}
+                      disabled={entering === o.organization_id}
+                      onClick={e => handleEnter(e, o.organization_id, o.name)}
+                    >
+                      {entering === o.organization_id ? 'Entering…' : 'Enter'}
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -19,7 +19,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { api, fetchMyContexts, setBrandContext } from '../../api/client'
+import { api, fetchMyContexts, setBrandContext, getCurrentUser, clearAllContext, logout } from '../../api/client'
 
 function useExecutiveContext(refreshKey) {
   const [state, setState] = useState({ loading: true, ctx: null, needsBrandSelect: false, error: null })
@@ -164,6 +164,20 @@ export default function ExecutiveSuite({ children }) {
   }
 
   // ── AUTHORISED SHELL ──────────────────────────────────────────────────────
+  // Detect god_admin from the JWT role, not from the executive sentinel, so
+  // the sidebar can show god-specific controls without altering the sentinel.
+  const isGod = getCurrentUser()?.role === 'god_admin'
+
+  async function handleGodReturn() {
+    clearAllContext()
+    navigate('/god/platform')
+  }
+
+  async function handleLogout() {
+    await logout()
+    navigate('/login')
+  }
+
   return (
     <div style={styles.shell}>
       <aside style={styles.sidebar}>
@@ -204,8 +218,26 @@ export default function ExecutiveSuite({ children }) {
             )}
           </div>
         )}
+        {/* God controls — only when the owner is in an Executive Suite via
+            god brand-selection. Preserves Executive Suite + Sales switcher for
+            non-god brand_executive members, who see none of this block. */}
+        {isGod && (
+          <div style={styles.godBlock}>
+            <button style={styles.godReturnBtn} onClick={handleGodReturn}>
+              ← Return to Platform
+            </button>
+            <button style={styles.godLogoutBtn} onClick={handleLogout}>
+              Log Out
+            </button>
+          </div>
+        )}
         <div style={styles.sidebarFooter}>
           <span style={styles.userEmail}>{ctx.email}</span>
+          {!isGod && (
+            <button style={styles.footerLogoutBtn} onClick={handleLogout}>
+              Log Out
+            </button>
+          )}
         </div>
       </aside>
       <main style={styles.main}>
@@ -281,8 +313,30 @@ const styles = {
     background: 'transparent', border: '1px solid #2d3354',
     borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontWeight: 500,
   },
+  godBlock: {
+    padding: '12px 12px 8px',
+    borderTop: '1px solid #2d3354',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  godReturnBtn: {
+    padding: '7px 10px', fontSize: 13, color: '#f59e0b',
+    background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+    borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontWeight: 600,
+  },
+  godLogoutBtn: {
+    padding: '7px 10px', fontSize: 13, color: '#b0b7d4',
+    background: 'transparent', border: '1px solid #2d3354',
+    borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontWeight: 500,
+  },
   sidebarFooter: { padding: '16px 20px', borderTop: '1px solid #2d3354' },
-  userEmail: { fontSize: 11, color: '#7b83a6', wordBreak: 'break-all' },
+  userEmail: { fontSize: 11, color: '#7b83a6', wordBreak: 'break-all', display: 'block', marginBottom: 8 },
+  footerLogoutBtn: {
+    background: 'transparent', border: '1px solid #2d3354', borderRadius: 6,
+    color: '#7b83a6', cursor: 'pointer', fontSize: 12, padding: '5px 10px',
+    width: '100%', textAlign: 'left',
+  },
   main: { flex: 1, overflowX: 'auto' },
   fullPage: {
     minHeight: '100vh', display: 'flex', alignItems: 'center',

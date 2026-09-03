@@ -18,7 +18,7 @@
  * function refuses to continue if they differ, so the centralized-identity rule
  * is checked on every single entry rather than trusted.
  */
-import { api, setOrgContext, clearOrgContext } from '../../api/client'
+import { api, setOrgContext, setBrandContext, clearOrgContext } from '../../api/client'
 
 /**
  * Enter a customer organization's context.
@@ -45,6 +45,14 @@ export async function enterCustomer(orgId, orgName) {
 
   const name = (r && r.context && r.context.customer && r.context.customer.name) || orgName || orgId
   setOrgContext(orgId, name)
+
+  // Establish brand context from the server's resolved platform so that
+  // X-Brand-Override is always current, even when switching between customers
+  // that belong to different brands. Never hardcoded — always from the server.
+  if (r && r.context && r.context.platform) {
+    setBrandContext(r.context.platform.id, r.context.platform.name)
+  }
+
   return r ? r.context : null
 }
 

@@ -67,7 +67,7 @@ export default function CustomerDetail() {
     // command table call. One way into a tenant is one thing to audit.
     try {
       await enterCustomer(orgId, d.customer.name)
-      nav('/')
+      nav('/god/customer-app')
     } catch (e) { setErr(errText(e)) }
   }
 

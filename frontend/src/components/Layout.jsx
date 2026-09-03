@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
@@ -270,16 +271,27 @@ export default function Layout({ children }) {
     return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [orgPickerOpen])
 
-  function handleOrgSelect(org) {
+  async function handleOrgSelect(org) {
     setOrgPickerOpen(false)
     if (!org) {
       clearOrgContext()
+      clearBrandContext()
       setOrgCtx(null)
       window.location.href = '/god'
     } else {
-      setOrgContext(org.id, org.name)
-      setOrgCtx({ orgId: org.id, orgName: org.name })
-      window.location.href = '/'
+      // Use the shared entry helper so brand context is also set from the
+      // server's resolved platform — prevents stale X-Brand-Override when
+      // switching between customers that belong to different brands.
+      try {
+        await enterCustomerContext(org.id, org.name)
+        setOrgCtx({ orgId: org.id, orgName: org.name })
+        window.location.href = '/god/customer-app'
+      } catch (_) {
+        // Fall back to local context only if the server call fails
+        setOrgContext(org.id, org.name)
+        setOrgCtx({ orgId: org.id, orgName: org.name })
+        window.location.href = '/god/customer-app'
+      }
     }
   }
 
