@@ -325,3 +325,87 @@ def test_gate_h_michael_has_no_god_admin_role():
     michael = StubUser(role="brand_executive", organization_id=None, id="user-michael-schlueter")
     assert michael.role != "god_admin"
     assert michael.role == "brand_executive"
+
+
+# -- I -- ContextSwitcher brand-context transition ----------------------------
+
+def _simulate_context_switcher_executive_selection(executives: list, current_brand_platform_id):
+    """
+    Mirror the ContextSwitcher back_office logic for selecting which executive
+    context to enter.
+
+    Returns the platform_id that would be passed to enterExecutive(), or None
+    when the picker is shown (no automatic selection).
+    """
+    if not executives:
+        return None
+
+    # Single executive — unambiguous, always use it.
+    if len(executives) == 1:
+        return executives[0]["platform_id"]
+
+    # Multiple executives — check current brand context first.
+    if current_brand_platform_id:
+        matched = next(
+            (e for e in executives if e["platform_id"] == current_brand_platform_id),
+            None,
+        )
+        if matched:
+            return matched["platform_id"]
+
+    # Multiple executives, no match — picker is shown, no automatic selection.
+    return None
+
+
+_TWO_EXECUTIVES = [
+    {"platform_id": "plt-bookaboost",  "platform_name": "BookaBoost"},
+    {"platform_id": "plt-evosyspro",   "platform_name": "EvoSys Pro"},
+]
+
+
+def test_gate_i_current_brand_context_wins_over_alphabetical_first():
+    """Gate I: when current brand = plt-evosyspro, Executive Suite must enter EvoSys Pro,
+    NOT BookaBoost (which is executives[0] alphabetically)."""
+    selected = _simulate_context_switcher_executive_selection(
+        _TWO_EXECUTIVES, current_brand_platform_id="plt-evosyspro"
+    )
+    assert selected == "plt-evosyspro", (
+        f"Expected plt-evosyspro but got {selected}. "
+        "ContextSwitcher must respect the explicit brand context, not executives[0]."
+    )
+
+
+def test_gate_i_no_brand_context_no_automatic_selection():
+    """Gate I: when multiple executives exist and no brand context is set,
+    no automatic selection must occur — the picker is shown."""
+    selected = _simulate_context_switcher_executive_selection(
+        _TWO_EXECUTIVES, current_brand_platform_id=None
+    )
+    assert selected is None, (
+        f"Expected None (picker shown) but got {selected}. "
+        "With multiple executives and no brand context, selection must be explicit."
+    )
+
+
+def test_gate_i_single_executive_always_selected():
+    """Gate I: when exactly one executive context exists, it is always used
+    regardless of current brand context."""
+    single = [{"platform_id": "plt-evosyspro", "platform_name": "EvoSys Pro"}]
+    # With brand context matching
+    assert _simulate_context_switcher_executive_selection(single, "plt-evosyspro") == "plt-evosyspro"
+    # With brand context that doesn't match (edge case — shouldn't happen, but must be safe)
+    assert _simulate_context_switcher_executive_selection(single, "plt-other") == "plt-evosyspro"
+    # With no brand context
+    assert _simulate_context_switcher_executive_selection(single, None) == "plt-evosyspro"
+
+
+def test_gate_i_bookaboost_brand_context_enters_bookaboost():
+    """Gate I: when current brand = plt-bookaboost, Executive Suite must enter
+    BookaBoost even though EvoSys Pro also exists."""
+    selected = _simulate_context_switcher_executive_selection(
+        _TWO_EXECUTIVES, current_brand_platform_id="plt-bookaboost"
+    )
+    assert selected == "plt-bookaboost", (
+        f"Expected plt-bookaboost but got {selected}. "
+        "Both directions must work: EvoSys→EvoSys and BookaBoost→BookaBoost."
+    )

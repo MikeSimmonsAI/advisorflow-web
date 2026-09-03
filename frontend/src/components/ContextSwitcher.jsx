@@ -24,7 +24,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchMyContexts, setWorkspaceContext, clearWorkspaceContext,
-         getWorkspaceContext, setBrandContext } from '../api/client'
+         getWorkspaceContext, setBrandContext, getBrandContext } from '../api/client'
 
 export default function ContextSwitcher({ current = 'back_office' }) {
   const [contexts, setContexts] = useState(null)
@@ -106,15 +106,73 @@ export default function ContextSwitcher({ current = 'back_office' }) {
   if (current === 'back_office') {
     if (workspaces.length === 0 && !hasExecutive) return null
 
-    // If only an executive link and no workspaces, show a single button.
+    // If only an executive link and no workspaces, resolve which executive to enter.
+    //
+    // BRAND CONTEXT RULE:
+    //   If the user (e.g. god_admin) has already explicitly selected a brand
+    //   context (af_brand_context), that selection is authoritative — we find
+    //   the matching executive and use it. This prevents alphabetical ordering
+    //   from silently overriding an explicit goBrand(EvoSys) selection with
+    //   BookaBoost merely because B < E.
+    //
+    //   When a single executive exists, the button is unambiguous.
+    //
+    //   When multiple executives exist and no brand context is set, we MUST
+    //   show labeled options — never silently default to executives[0].
     if (workspaces.length === 0 && hasExecutive) {
-      const ex = executives[0]
+      const currentBrand = getBrandContext()
+      // Find the executive that matches the already-selected brand context.
+      const matched = currentBrand
+        ? executives.find(function (e) { return e.platform_id === currentBrand.platformId })
+        : null
+
+      // Single unambiguous case: exactly one executive available.
+      if (executives.length === 1) {
+        const ex = executives[0]
+        return (
+          <button type="button" className="ctx-switch-btn"
+                  onClick={function () { enterExecutive(ex.platform_id, ex.platform_name) }}
+                  title={ex.platform_name + ' Executive Suite'}>
+            Executive Suite
+          </button>
+        )
+      }
+
+      // Matched case: current brand context identifies exactly which executive.
+      if (matched) {
+        return (
+          <button type="button" className="ctx-switch-btn"
+                  onClick={function () { enterExecutive(matched.platform_id, matched.platform_name) }}
+                  title={matched.platform_name + ' Executive Suite'}>
+            Executive Suite
+          </button>
+        )
+      }
+
+      // Multiple executives, no brand context match — show labeled picker so
+      // the user makes an explicit, informed choice.  Never silently pick.
       return (
-        <button type="button" className="ctx-switch-btn"
-                onClick={function () { enterExecutive(ex.platform_id, ex.platform_name) }}
-                title={ex.platform_name + ' Executive Suite'}>
-          Executive Suite
-        </button>
+        <div className="ctx-switch-wrap" ref={boxRef}>
+          <button type="button" className="ctx-switch-btn"
+                  aria-haspopup="menu" aria-expanded={open}
+                  onClick={function () { setOpen(!open) }}>
+            Executive Suite <span className="ctx-switch-caret">▾</span>
+          </button>
+          {open && (
+            <div className="ctx-switch-menu" role="menu">
+              <div className="ctx-switch-menu-head">Choose Brand</div>
+              {executives.map(function (ex) {
+                return (
+                  <button key={ex.platform_id} type="button" role="menuitem"
+                          className="ctx-switch-item"
+                          onClick={function () { enterExecutive(ex.platform_id, ex.platform_name) }}>
+                    <span className="ctx-switch-item-name">{ex.platform_name} — Executive Suite</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
       )
     }
 
