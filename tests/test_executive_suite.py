@@ -10,6 +10,11 @@ Proves:
 6. Executive from Brand A cannot see Brand B data (platform_id filter)
 7. god_admin can grant/revoke; idempotent on active grant
 8. /executive/context returns correct brand fields
+
+MODEL CONTRACT GATE (never remove):
+- Opportunity.deal_value is the correct field (NOT Opportunity.value)
+- User.full_name is the correct field (NOT User.name or similar)
+These field regressions have caused production 500/503s and must stay gated.
 """
 
 import pytest
@@ -278,3 +283,47 @@ class TestObservationGates:
         assert result.get("read_only") is True
         assert "org" in result
         assert "lead_summary" in result
+
+
+class TestModelContractGate:
+    """
+    Gate M — Executive model field contract.
+
+    Opportunity.deal_value and User.full_name are the correct fields.
+    Both have caused production 500/503 regressions when referenced incorrectly.
+    These tests fail immediately if the wrong attribute name is used.
+    """
+
+    def test_opportunity_has_deal_value_not_value(self):
+        """Opportunity.deal_value must exist; Opportunity.value must not."""
+        from app.models.sales_models import Opportunity
+        assert hasattr(Opportunity, "deal_value"), (
+            "Opportunity.deal_value is missing — executive command-center will 500"
+        )
+        assert not hasattr(Opportunity, "value"), (
+            "Opportunity.value must not exist — use deal_value"
+        )
+
+    def test_user_has_full_name(self):
+        """User.full_name must exist (executive context endpoint uses it)."""
+        from app.models.models import User
+        assert hasattr(User, "full_name"), (
+            "User.full_name is missing — executive context endpoint will 500"
+        )
+
+    def test_executive_router_references_deal_value(self):
+        """Source-level gate: executive_router.py must not contain 'Opportunity.value'."""
+        import ast, pathlib
+        src = pathlib.Path("app/routers/executive_router.py").read_text()
+        tree = ast.parse(src)
+        bad_refs = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and node.attr == "value"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "Opportunity"
+        ]
+        assert bad_refs == [], (
+            f"executive_router.py references Opportunity.value at lines "
+            f"{[n.lineno for n in bad_refs]} — must be Opportunity.deal_value"
+        )

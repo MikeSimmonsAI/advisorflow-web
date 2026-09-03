@@ -93,9 +93,9 @@ def get_command_center(
             db.query(
                 func.count(Opportunity.id).label("total"),
                 func.sum(sa_case((Opportunity.stage == "won", 1), else_=0)).label("won"),
-                func.coalesce(func.sum(Opportunity.value), 0).label("pipeline_value"),
+                func.coalesce(func.sum(Opportunity.deal_value), 0).label("pipeline_value"),
                 func.coalesce(
-                    func.sum(sa_case((Opportunity.stage == "won", Opportunity.value), else_=0)),
+                    func.sum(sa_case((Opportunity.stage == "won", Opportunity.deal_value), else_=0)),
                     0
                 ).label("won_value"),
             )
