@@ -69,8 +69,6 @@ import GodOrganizations from './pages/GodOrganizations'
 import ExecutiveSuite from './pages/executive/ExecutiveSuite'
 import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
 import ExecutiveOrganizations from './pages/executive/ExecutiveOrganizations'
-import ExecutiveCustomerHealth from './pages/executive/ExecutiveCustomerHealth'
-import ExecutiveOrgObservation from './pages/executive/ExecutiveOrgObservation'
 import ExecObserveShell from './pages/executive/ExecObserveShell'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
@@ -224,10 +222,7 @@ function HomeRedirect() {
     // this is the primary context the person was invited into. The back-office
     // switch lives inside the Executive Suite shell for users who also hold
     // a sales grant.
-    // god_admin is explicitly excluded: God's home is /god regardless of which
-    // executive contexts exist. Executive Suite is entered only by deliberate
-    // brand selection from the God console, never by login routing.
-    if (def.type === 'executive' && user?.role !== 'god_admin') {
+    if (def.type === 'executive') {
       return <Navigate to="/executive" replace />
     }
     if (def.type === 'workspace' && def.organization_id) {
@@ -463,16 +458,6 @@ function WorkspaceSelector() {
   )
 }
 
-// GodCustomerApp — God views a customer tenant app without customer membership.
-// Relies on X-Org-Override (set by enterCustomer) which get_current_user
-// injects into user.organization_id. require_tenant_user exempts god_admin.
-// ContextBanner shows the trail and provides "Return to God Mode".
-function GodCustomerApp() {
-  const ctx = getOrgContext()
-  if (!ctx?.orgId) return <Navigate to="/god/customers" replace />
-  return <ProtectedRoute><Overview /></ProtectedRoute>
-}
-
 function GodRoute({ children }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
@@ -679,13 +664,11 @@ export default function App() {
         <Route path="/executive" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
-        <Route path="/executive/organizations/:orgId" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrgObservation /></ExecutiveSuite></ExecutiveRoute>} />
-        {/* Executive Observation Mode — renders actual customer app in read-only context.
-            No ExecutiveSuite wrapper: ExecObserveShell provides its own shell + banner. */}
-        <Route path="/executive/organizations/:orgId/view" element={<ExecutiveRoute><ExecObserveShell /></ExecutiveRoute>}>
-          <Route path="overview" element={<Overview />} />
-        </Route>
-        <Route path="/executive/customer-health" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCustomerHealth /></ExecutiveSuite></ExecutiveRoute>} />
+        {/* Executive observation: renders a rich read-only dashboard for the target org.
+            org_id comes from the URL path only — never from current_user.organization_id.
+            ExecObserveShell fetches org identity; ExecObservationOverview fetches data.
+            Both endpoints are require_brand_executive + platform-isolated server-side. */}
+        <Route path="/executive/organizations/:orgId/view" element={<ExecutiveRoute><ExecutiveSuite><ExecObserveShell /></ExecutiveSuite></ExecutiveRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />
@@ -712,7 +695,6 @@ export default function App() {
         {/* Both diagnostics, registered BEFORE the /god/* catch-all - a route
             added after it would silently render the Command Center instead. */}
         <Route path="/god/diagnostics/qualification" element={<GodRoute><GodModeLayout><QualificationDiagnostic /></GodModeLayout></GodRoute>} />
-        <Route path="/god/customer-app" element={<GodRoute><GodCustomerApp /></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

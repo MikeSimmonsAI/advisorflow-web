@@ -27,12 +27,18 @@ No response body or frontend label may contain "god", "god_admin",
 platform-owner terminology.
 """
 
+from datetime import datetime, timedelta, time as dt_time
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case as sa_case
+from sqlalchemy import func, case as sa_case, distinct as sa_distinct
 
 from app.deps import get_db, get_current_user, require_god, require_brand_executive
-from app.models.models import User, Organization, Platform
+from app.models.models import (
+    User, Organization, Platform,
+    Lead, Reply, ReplyClassification, Message, EmailMessage,
+    CadenceState, BookingLink,
+)
 from app.models.sales_models import (
     Membership, BrandSalesOrg, Opportunity,
     SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG,
@@ -87,9 +93,9 @@ def get_command_center(
             db.query(
                 func.count(Opportunity.id).label("total"),
                 func.sum(sa_case((Opportunity.stage == "won", 1), else_=0)).label("won"),
-                func.coalesce(func.sum(Opportunity.deal_value), 0).label("pipeline_value"),
+                func.coalesce(func.sum(Opportunity.value), 0).label("pipeline_value"),
                 func.coalesce(
-                    func.sum(sa_case((Opportunity.stage == "won", Opportunity.deal_value), else_=0)),
+                    func.sum(sa_case((Opportunity.stage == "won", Opportunity.value), else_=0)),
                     0
                 ).label("won_value"),
             )
@@ -210,521 +216,290 @@ def get_executive_organizations(
         ],
     }
 
-# ── Customer Health ────────────────────────────────────────────────────────────
-
-def _classify_health(
-    age_days: int,
-    active_users: int,
-    total_leads: int,
-    days_since_op,          # int | None
-):
-    """
-    Classification priority order:
-      HEALTHY     → active_users >= 1, total_leads > 0, days_since_op <= 14
-      ONBOARDING  → org age <= 30 days AND not HEALTHY
-      INACTIVE    → no operational activity ever, or days_since_op > 60
-      AT_RISK     → days_since_op 31–60
-      WATCH       → everything else (15–30 days since op, zero users, zero leads)
-    """
-    has_users  = active_users >= 1
-    has_leads  = total_leads  > 0
-    has_recent = days_since_op is not None and days_since_op <= 14
-
-    if has_users and has_leads and has_recent:
-        reason = (
-            f"Active: {active_users} user{'s' if active_users != 1 else ''}, "
-            f"{total_leads} lead{'s' if total_leads != 1 else ''}, "
-            f"operational activity {days_since_op} day{'s' if days_since_op != 1 else ''} ago."
-        )
-        return "healthy", reason
-
-    if age_days <= 30:
-        parts = []
-        if not has_users:
-            parts.append("no active users yet")
-        if not has_leads:
-            parts.append("no leads imported yet")
-        if not has_recent:
-            parts.append("no operational activity yet" if days_since_op is None
-                         else f"last operational activity {days_since_op} days ago")
-        reason = "New organization (under 30 days old). " + ("; ".join(parts) if parts else "Getting started.")
-        return "onboarding", reason
-
-    if days_since_op is None or days_since_op > 60:
-        parts = []
-        if days_since_op is None:
-            parts.append("no outbound messages, inbound replies, or bookings on record")
-        else:
-            parts.append(f"last operational activity {days_since_op} days ago")
-        if not has_users:
-            parts.append("no active users")
-        if not has_leads:
-            parts.append("no leads imported")
-        reason = "Inactive. " + "; ".join(parts) + "."
-        return "inactive", reason
-
-    if days_since_op > 30:
-        reason = (
-            f"At risk: last operational activity {days_since_op} days ago "
-            f"(outbound message, inbound reply, or booking). "
-            f"{active_users} active user{'s' if active_users != 1 else ''}, "
-            f"{total_leads} lead{'s' if total_leads != 1 else ''}."
-        )
-        return "at_risk", reason
-
-    # 15–30 days
-    parts = []
-    if days_since_op is not None:
-        parts.append(f"last operational activity {days_since_op} days ago")
-    if not has_users:
-        parts.append("no active users")
-    if not has_leads:
-        parts.append("no leads imported")
-    if not parts:
-        parts.append("activity slowing")
-    reason = "Watch: " + "; ".join(parts) + "."
-    return "watch", reason
-
-
-@router.get("/customer-health")
-def get_customer_health(
-    executive=Depends(require_brand_executive),
-    db: Session = Depends(get_db),
-):
-    """
-    Portfolio-level health for every customer organization under this brand.
-
-    NO N+1: six aggregate queries regardless of org count.
-    Security: platform_id filter on every query; no god bypass.
-    NULL stays NULL — login excluded from operational signal.
-    """
-    from datetime import datetime, timedelta
-    from app.models.models import Lead, Message, Reply, BookingLink
-
-    user, mem, platform = executive
-    platform_id = platform.id
-    now = datetime.utcnow()
-
-    # ── 1. All orgs for this platform ─────────────────────────────────────────
-    orgs = (
-        db.query(Organization)
-        .filter(Organization.platform_id == platform_id)
-        .order_by(Organization.name)
-        .all()
-    )
-    if not orgs:
-        return {
-            "platform_id": platform_id,
-            "platform_name": platform.name,
-            "summary": {"total": 0, "healthy": 0, "watch": 0,
-                        "at_risk": 0, "inactive": 0, "onboarding": 0},
-            "organizations": [],
-        }
-
-    org_ids = [o.id for o in orgs]
-
-    # ── 2. Active-user count per org ──────────────────────────────────────────
-    user_rows = (
-        db.query(
-            User.organization_id,
-            func.count(User.id).label("active_users"),
-            func.max(User.last_login_at).label("last_login"),
-        )
-        .filter(
-            User.organization_id.in_(org_ids),
-            User.is_active.is_(True),
-        )
-        .group_by(User.organization_id)
-        .all()
-    )
-    user_map = {r.organization_id: r for r in user_rows}
-
-    # ── 3. Lead stats per org (exclude test leads) ────────────────────────────
-    thirty_days_ago = now - timedelta(days=30)
-    lead_rows = (
-        db.query(
-            Lead.organization_id,
-            func.count(Lead.id).label("total_leads"),
-            func.sum(
-                sa_case((Lead.created_at >= thirty_days_ago, 1), else_=0)
-            ).label("leads_last_30d"),
-            func.sum(
-                sa_case((Lead.status == "hot", 1), else_=0)
-            ).label("hot_leads"),
-            func.max(Lead.created_at).label("last_lead_import"),
-        )
-        .filter(
-            Lead.organization_id.in_(org_ids),
-            Lead.is_test.is_(False),
-        )
-        .group_by(Lead.organization_id)
-        .all()
-    )
-    lead_map = {r.organization_id: r for r in lead_rows}
-
-    # ── 4. Last outbound message per org ──────────────────────────────────────
-    msg_rows = (
-        db.query(
-            Lead.organization_id,
-            func.max(Message.sent_at).label("last_outbound_message"),
-        )
-        .join(Message, Message.lead_id == Lead.id)
-        .filter(Lead.organization_id.in_(org_ids))
-        .group_by(Lead.organization_id)
-        .all()
-    )
-    msg_map = {r.organization_id: r.last_outbound_message for r in msg_rows}
-
-    # ── 5. Last inbound reply per org ─────────────────────────────────────────
-    reply_rows = (
-        db.query(
-            Lead.organization_id,
-            func.max(Reply.received_at).label("last_inbound_reply"),
-        )
-        .join(Reply, Reply.lead_id == Lead.id)
-        .filter(Lead.organization_id.in_(org_ids))
-        .group_by(Lead.organization_id)
-        .all()
-    )
-    reply_map = {r.organization_id: r.last_inbound_reply for r in reply_rows}
-
-    # ── 6. Last booking per org ───────────────────────────────────────────────
-    booking_rows = (
-        db.query(
-            Lead.organization_id,
-            func.count(BookingLink.id).label("booked_count"),
-            func.max(BookingLink.booked_time).label("last_booking"),
-        )
-        .join(BookingLink, BookingLink.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id.in_(org_ids),
-            BookingLink.status == "booked",
-        )
-        .group_by(Lead.organization_id)
-        .all()
-    )
-    booking_map = {r.organization_id: r for r in booking_rows}
-
-    # ── Build per-org records ─────────────────────────────────────────────────
-    summary = {"total": len(orgs), "healthy": 0, "watch": 0,
-               "at_risk": 0, "inactive": 0, "onboarding": 0}
-    result_orgs = []
-
-    for org in orgs:
-        oid = org.id
-        u   = user_map.get(oid)
-        l   = lead_map.get(oid)
-        b   = booking_map.get(oid)
-
-        active_users   = u.active_users if u else 0
-        last_login     = u.last_login if u else None
-        total_leads    = int(l.total_leads or 0) if l else 0
-        leads_30d      = int(l.leads_last_30d or 0) if l else 0
-        hot_leads      = int(l.hot_leads or 0) if l else 0
-        last_import    = l.last_lead_import if l else None
-        booked_count   = int(b.booked_count or 0) if b else 0
-        last_booking   = b.last_booking if b else None
-        last_outbound  = msg_map.get(oid)
-        last_reply     = reply_map.get(oid)
-
-        candidates = [t for t in (last_outbound, last_reply, last_booking) if t is not None]
-        last_op = max(candidates) if candidates else None
-
-        all_activity = [t for t in (last_login, last_op) if t is not None]
-        last_activity = max(all_activity) if all_activity else None
-
-        age_days      = (now - org.created_at).days if org.created_at else 0
-        days_since_op = (now - last_op).days if last_op else None
-
-        health, reason = _classify_health(age_days, active_users, total_leads, days_since_op)
-        summary[health] += 1
-
-        def _iso(dt):
-            return dt.isoformat() if dt else None
-
-        result_orgs.append({
-            "id":                        oid,
-            "name":                      org.name,
-            "health":                    health,
-            "reason":                    reason,
-            "plan":                      getattr(org, "plan", None),
-            "provisioned_at":            _iso(org.created_at),
-            "organization_age_days":     age_days,
-            "active_users":              active_users,
-            "total_leads":               total_leads,
-            "leads_last_30d":            leads_30d,
-            "hot_leads":                 hot_leads,
-            "booked_count":              booked_count,
-            "last_login":                _iso(last_login),
-            "last_lead_import":          _iso(last_import),
-            "last_outbound_message":     _iso(last_outbound),
-            "last_inbound_reply":        _iso(last_reply),
-            "last_booking":              _iso(last_booking),
-            "last_operational_activity": _iso(last_op),
-            "last_activity":             _iso(last_activity),
-        })
-
-    return {
-        "platform_id":   platform_id,
-        "platform_name": platform.name,
-        "summary":       summary,
-        "organizations": result_orgs,
-    }
-
-
-# ── Organization Observation (read-only executive view) ───────────────────────
-
-def _get_org_or_403(db, platform_id, org_id):
-    """Fetch org, assert it belongs to this executive's platform. 404/403 otherwise."""
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found.")
-    if org.platform_id != platform_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Organization is not in your brand's portfolio.",
-        )
-    return org
-
+# ── Per-organization detail and observation (read-only) ───────────────────────
 
 @router.get("/organizations/{org_id}")
-def get_org_observation_detail(
+def get_executive_org_detail(
     org_id: str,
     executive=Depends(require_brand_executive),
     db: Session = Depends(get_db),
 ):
-    """Single-org overview for the Executive Observation Console.
-    Platform-isolation enforced: returns 403 if org does not belong to this executive's brand.
-    No customer credentials, no config, no PII beyond org name.
+    """Return org identity for the executive observation banner.
+
+    SECURITY:
+    - require_brand_executive validates the grant (never modifies user)
+    - org.platform_id == platform.id enforced (cross-brand = 404)
     """
-    from datetime import datetime
-    from app.models.models import Lead, Message, Reply, BookingLink
-
     user, mem, platform = executive
-    org = _get_org_or_403(db, platform.id, org_id)
-
-    now = datetime.utcnow()
-    age_days = (now - org.created_at).days if org.created_at else 0
-
-    active_users = (
-        db.query(func.count(User.id))
-        .filter(User.organization_id == org_id, User.is_active.is_(True))
-        .scalar() or 0
-    )
-    total_leads = (
-        db.query(func.count(Lead.id))
-        .filter(Lead.organization_id == org_id, Lead.is_test.is_(False))
-        .scalar() or 0
-    )
-
-    last_outbound = (
-        db.query(func.max(Message.sent_at))
-        .join(Lead, Lead.id == Message.lead_id)
-        .filter(Lead.organization_id == org_id)
-        .scalar()
-    )
-    last_reply = (
-        db.query(func.max(Reply.received_at))
-        .join(Lead, Lead.id == Reply.lead_id)
-        .filter(Lead.organization_id == org_id)
-        .scalar()
-    )
-    last_booking = (
-        db.query(func.max(BookingLink.booked_time))
-        .join(Lead, Lead.id == BookingLink.lead_id)
-        .filter(Lead.organization_id == org_id, BookingLink.status == "booked")
-        .scalar()
-    )
-
-    candidates = [t for t in (last_outbound, last_reply, last_booking) if t is not None]
-    last_op = max(candidates) if candidates else None
-    days_since_op = (now - last_op).days if last_op else None
-    health, reason = _classify_health(age_days, active_users, total_leads, days_since_op)
-
-    def _iso(dt):
-        return dt.isoformat() if dt else None
-
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org or org.platform_id != platform.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Organization not found.")
     return {
-        "id":                        org.id,
-        "name":                      org.name,
-        "platform_id":               platform.id,
-        "platform_name":             platform.name,
-        "is_active":                 org.is_active,
-        "provisioned_at":            _iso(org.created_at),
-        "organization_age_days":     age_days,
-        "health":                    health,
-        "health_reason":             reason,
-        "active_users":              active_users,
-        "total_leads":               total_leads,
-        "last_outbound_message":     _iso(last_outbound),
-        "last_inbound_reply":        _iso(last_reply),
-        "last_booking":              _iso(last_booking),
-        "last_operational_activity": _iso(last_op),
+        "id": org.id,
+        "name": org.name,
+        "platform_id": org.platform_id,
+        "created_at": org.created_at.isoformat() if org.created_at else None,
     }
 
 
-@router.get("/organizations/{org_id}/leads/summary")
-def get_org_leads_summary(
+@router.get("/organizations/{org_id}/observe/overview")
+def get_org_observation_overview(
     org_id: str,
     executive=Depends(require_brand_executive),
     db: Session = Depends(get_db),
 ):
-    """Lead volume and status breakdown. No lead PII, no message content."""
-    from datetime import datetime, timedelta
-    from app.models.models import Lead
+    """Aggregate read-only dashboard data for a customer organization.
 
+    SECURITY INVARIANTS (never break these):
+    - require_brand_executive validates brand_executive membership.
+      It is never whitelisted for god_admin here — observation is an executive tool.
+    - org.platform_id == platform.id: cross-brand access returns 404.
+    - ALL queries use org_id from the path parameter, NEVER current_user.organization_id.
+    - current_user.organization_id is never read, never mutated. Stays NULL for Michael.
+    - Mutation is never performed. This endpoint is GET-only, read-only throughout.
+    - read_only: True is always returned to inform the frontend.
+    """
     user, mem, platform = executive
-    org = _get_org_or_403(db, platform.id, org_id)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org or org.platform_id != platform.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Organization not found.")
 
     now = datetime.utcnow()
-    thirty_days_ago = now - timedelta(days=30)
+    start_24h = now - timedelta(hours=24)
+    start_7d = now - timedelta(days=7)
+    end_of_today = datetime.combine(now.date(), dt_time.max)
 
-    # METRIC DEFINITION — must match the normal customer Overview totalLeads.
-    # The Overview counts leads where manual_flag IS NULL or == 'bad_email',
-    # which excludes records flagged 'remove_all'. READ-ONLY observation must
-    # use the same definition: read-only changes permissions, not data scope.
-    _active_filter = (
-        (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email")  # noqa: E711
-    )
+    # Active lead filter — same exclusion as normal Overview (Gate E).
+    # Excludes manual_flag='remove_all'; allows None and 'bad_email'.
+    def _active(q):
+        return q.filter(
+            Lead.organization_id == org_id,
+            (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email"),
+        )
 
-    rows = (
-        db.query(Lead.status, func.count(Lead.id).label("count"))
-        .filter(Lead.organization_id == org_id, Lead.is_test.is_(False), _active_filter)
+    # ── Lead counts ──────────────────────────────────────────────────────────
+    total_leads = _active(db.query(func.count(Lead.id))).scalar() or 0
+
+    dnc_count = db.query(func.count(Lead.id)).filter(
+        Lead.organization_id == org_id,
+        Lead.status == "dnc",
+    ).scalar() or 0
+
+    # ── Status funnel ─────────────────────────────────────────────────────────
+    stages = ["new", "sent", "replied", "hot", "booked"]
+    funnel_rows = (
+        _active(db.query(Lead.status, func.count(Lead.id)))
+        .filter(Lead.status.in_(stages))
         .group_by(Lead.status)
         .all()
     )
-    by_status = {r.status: r.count for r in rows}
-    total = sum(by_status.values())
+    stage_counts = {s: 0 for s in stages}
+    for s, c in funnel_rows:
+        if s in stage_counts:
+            stage_counts[s] = int(c or 0)
+    funnel = [
+        {"status": s, "label": s.replace("_", " ").title(), "count": stage_counts[s]}
+        for s in stages
+    ]
+    new_leads = stage_counts["new"]
+    sent_leads = stage_counts["sent"]
+    booked_leads = stage_counts["booked"]
+    hot_reply_funnel = stage_counts["hot"]
 
-    leads_30d = (
-        db.query(func.count(Lead.id))
+    # ── Hot replies (needs_attention: INTERESTED + CALLBACK) ─────────────────
+    reply_rows = (
+        db.query(Reply, Lead.first_name, Lead.last_name)
+        .join(Lead, Reply.lead_id == Lead.id)
         .filter(
             Lead.organization_id == org_id,
-            Lead.is_test.is_(False),
-            _active_filter,
-            Lead.created_at >= thirty_days_ago,
+            Reply.classification.in_([
+                ReplyClassification.INTERESTED,
+                ReplyClassification.CALLBACK,
+            ]),
+        )
+        .order_by(Reply.received_at.desc())
+        .limit(20)
+        .all()
+    )
+    hot_replies = [
+        {
+            "id": r.Reply.id,
+            "lead_id": r.Reply.lead_id,
+            "lead_name": (
+                f"{r.first_name or ''} {r.last_name or ''}".strip() or "Unknown"
+            ),
+            "body": r.Reply.body,
+            "classification": (
+                r.Reply.classification.value if r.Reply.classification else None
+            ),
+            "is_hot": r.Reply.is_hot,
+            "source": r.Reply.source,
+            "reviewed_at": (
+                r.Reply.reviewed_at.isoformat() if r.Reply.reviewed_at else None
+            ),
+            "received_at": (
+                r.Reply.received_at.isoformat() if r.Reply.received_at else None
+            ),
+        }
+        for r in reply_rows
+    ]
+    hot_reply_count = len(hot_replies)
+
+    # ── Briefing metrics ──────────────────────────────────────────────────────
+    cadence_touches = (
+        db.query(func.count(CadenceState.id))
+        .join(Lead, CadenceState.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == org_id,
+            CadenceState.status == "active",
+            CadenceState.next_touch_due_at.isnot(None),
+            CadenceState.next_touch_due_at <= end_of_today,
         )
         .scalar() or 0
     )
 
-    return {
-        "org_id":              org.id,
-        "org_name":            org.name,
-        "total_leads":         total,
-        "leads_last_30_days":  leads_30d,
-        "by_status":           by_status,
-    }
+    leads_last_24h = (
+        db.query(func.count(Lead.id))
+        .filter(Lead.organization_id == org_id, Lead.created_at >= start_24h)
+        .scalar() or 0
+    )
 
+    bookings_7d = (
+        db.query(func.count(sa_distinct(BookingLink.lead_id)))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == org_id,
+            BookingLink.status == "booked",
+            BookingLink.booked_time.isnot(None),
+            BookingLink.booked_time >= start_7d,
+        )
+        .scalar() or 0
+    )
 
-@router.get("/organizations/{org_id}/team")
-def get_org_team(
-    org_id: str,
-    executive=Depends(require_brand_executive),
-    db: Session = Depends(get_db),
-):
-    """Users in this customer org. Email exposed for executive visibility; no credentials."""
-    user, mem, platform = executive
-    org = _get_org_or_403(db, platform.id, org_id)
+    appts_waiting = (
+        db.query(func.count(sa_distinct(BookingLink.lead_id)))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id == org_id,
+            BookingLink.status.in_(["booked", "confirmed"]),
+        )
+        .scalar() or 0
+    )
 
-    users = (
-        db.query(User)
-        .filter(User.organization_id == org_id)
-        .order_by(User.role, User.email)
+    # ── Leads needing action (new, replied, hot — not yet booked or dnc) ──────
+    action_leads_raw = (
+        _active(db.query(Lead))
+        .filter(Lead.status.in_(["new", "replied", "hot"]))
+        .order_by(Lead.last_messaged_at.asc())
+        .limit(8)
         .all()
     )
+    leads_needing_action = [
+        {
+            "id": l.id,
+            "first_name": l.first_name,
+            "last_name": l.last_name,
+            "phone": l.phone,
+            "email": l.email,
+            "status": l.status,
+            "source_file": l.source_file,
+            "import_list_name": l.import_list_name,
+            "assigned_to_id": l.assigned_to_id,
+            "last_messaged_at": (
+                l.last_messaged_at.isoformat() if l.last_messaged_at else None
+            ),
+        }
+        for l in action_leads_raw
+    ]
 
-    active_count  = sum(1 for u in users if u.is_active)
-    advisor_count = sum(1 for u in users if getattr(u, "role", None) == "advisor")
-
-    return {
-        "org_id":        org.id,
-        "org_name":      org.name,
-        "total_users":   len(users),
-        "active_users":  active_count,
-        "advisor_count": advisor_count,
-        "members": [
-            {
-                "name":      u.full_name or u.email.split("@")[0],
-                "email":     u.email,
-                "role":      u.role,
-                "is_active": u.is_active,
-            }
-            for u in users
-        ],
-    }
-
-
-@router.get("/organizations/{org_id}/activity")
-def get_org_activity(
-    org_id: str,
-    executive=Depends(require_brand_executive),
-    db: Session = Depends(get_db),
-):
-    """Last 15 operational events (aggregate). No message content, no lead PII."""
-    from app.models.models import Lead, Message, Reply, BookingLink
-
-    user, mem, platform = executive
-    org = _get_org_or_403(db, platform.id, org_id)
-
-    events = []
-
-    lead_rows = (
-        db.query(Lead.created_at)
-        .filter(Lead.organization_id == org_id, Lead.is_test.is_(False))
-        .order_by(Lead.created_at.desc())
-        .limit(15).all()
-    )
-    for r in lead_rows:
-        if r.created_at:
-            events.append({"ts": r.created_at, "type": "lead_imported", "description": "Lead imported"})
-
-    msg_rows = (
-        db.query(Message.sent_at)
-        .join(Lead, Lead.id == Message.lead_id)
-        .filter(Lead.organization_id == org_id)
+    # ── Recent activity (SMS + email, last 7 days) ────────────────────────────
+    cutoff = start_7d
+    sms_rows = (
+        db.query(Message, Lead)
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(Lead.organization_id == org_id, Message.sent_at >= cutoff)
         .order_by(Message.sent_at.desc())
-        .limit(15).all()
+        .limit(8)
+        .all()
     )
-    for r in msg_rows:
-        if r.sent_at:
-            events.append({"ts": r.sent_at, "type": "message_sent", "description": "Outbound message sent"})
-
-    reply_rows = (
-        db.query(Reply.received_at)
-        .join(Lead, Lead.id == Reply.lead_id)
-        .filter(Lead.organization_id == org_id)
-        .order_by(Reply.received_at.desc())
-        .limit(15).all()
+    sms_items = [
+        {
+            "id": msg.id, "channel": "sms",
+            "lead_id": lead.id,
+            "lead_name": (
+                f"{lead.first_name or ''} {lead.last_name or ''}".strip()
+                or lead.phone or "—"
+            ),
+            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "delivery_status": (
+                msg.delivery_status or msg.twilio_status or "pending"
+            ),
+        }
+        for msg, lead in sms_rows
+    ]
+    email_rows = (
+        db.query(EmailMessage, Lead)
+        .join(Lead, EmailMessage.lead_id == Lead.id)
+        .filter(Lead.organization_id == org_id, EmailMessage.sent_at >= cutoff)
+        .order_by(EmailMessage.sent_at.desc())
+        .limit(8)
+        .all()
     )
-    for r in reply_rows:
-        if r.received_at:
-            events.append({"ts": r.received_at, "type": "reply_received", "description": "Inbound reply received"})
+    email_items = [
+        {
+            "id": msg.id, "channel": "email",
+            "lead_id": lead.id,
+            "lead_name": (
+                f"{lead.first_name or ''} {lead.last_name or ''}".strip()
+                or lead.email or "—"
+            ),
+            "subject": msg.subject,
+            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "delivery_status": msg.status or "sent",
+        }
+        for msg, lead in email_rows
+    ]
+    recent_activity = sorted(
+        sms_items + email_items,
+        key=lambda x: x["sent_at"] or "",
+        reverse=True,
+    )[:8]
 
-    booking_rows = (
-        db.query(BookingLink.booked_time)
-        .join(Lead, Lead.id == BookingLink.lead_id)
-        .filter(Lead.organization_id == org_id, BookingLink.status == "booked")
-        .order_by(BookingLink.booked_time.desc())
-        .limit(15).all()
+    # ── Rate calculations ─────────────────────────────────────────────────────
+    reply_rate = (
+        round((hot_reply_count / sent_leads) * 100) if sent_leads > 0 else None
     )
-    for r in booking_rows:
-        if r.booked_time:
-            events.append({"ts": r.booked_time, "type": "appointment_booked", "description": "Appointment booked"})
-
-    events.sort(key=lambda e: e["ts"], reverse=True)
-    events = events[:15]
+    booking_rate = (
+        round((booked_leads / sent_leads) * 100) if sent_leads > 0 else None
+    )
 
     return {
-        "org_id":   org.id,
-        "org_name": org.name,
-        "events": [
-            {
-                "timestamp":   e["ts"].isoformat(),
-                "type":        e["type"],
-                "description": e["description"],
-            }
-            for e in events
-        ],
+        "read_only": True,
+        "org": {
+            "id": org.id,
+            "name": org.name,
+            "platform_id": org.platform_id,
+        },
+        "lead_summary": {
+            "total": total_leads,
+            "new_unworked": new_leads,
+            "hot_replies": hot_reply_count,
+            "arrangements": booked_leads,
+            "dnc_opted_out": dnc_count,
+            "sent": sent_leads,
+            "reply_rate": reply_rate,
+            "arrangement_rate": booking_rate,
+            "cadence_touches_due_today": cadence_touches,
+            "leads_imported_last_24h": leads_last_24h,
+            "bookings_last_7_days": bookings_7d,
+            "certified_appointments_waiting": appts_waiting,
+        },
+        "funnel": funnel,
+        "hot_replies": hot_replies,
+        "leads_needing_action": leads_needing_action,
+        "recent_activity": recent_activity,
     }
 
 

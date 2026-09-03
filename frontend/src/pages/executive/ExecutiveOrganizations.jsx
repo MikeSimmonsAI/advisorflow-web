@@ -2,7 +2,11 @@
  * ExecutiveOrganizations — portfolio of customer organizations under this brand.
  *
  * Data source: GET /executive/organizations (server-side scoped to executive's platform).
- * Read-only. No enter/workspace links: executives VIEW the portfolio, not operate in it.
+ * Read-only. Each org row has an "Observe" link into executive observation mode —
+ * NOT a workspace link. The observation view is read-only and executive-scoped.
+ *
+ * BUG FIX: api.get() returns the parsed JSON object directly, not {data: ...}.
+ * The original code used r.data which was always undefined → always error state.
  */
 
 import { useState, useEffect } from 'react'
@@ -13,7 +17,7 @@ function useOrgs() {
   const [state, setState] = useState({ loading: true, data: null, error: null })
   useEffect(() => {
     api.get('/executive/organizations')
-      .then(r => setState({ loading: false, data: r, error: null }))
+      .then(r => setState({ loading: false, data: r, error: null }))   // r is the JSON, not r.data
       .catch(() => setState({ loading: false, data: null, error: 'Failed to load organizations.' }))
   }, [])
   return state
@@ -41,23 +45,25 @@ export default function ExecutiveOrganizations() {
             <thead>
               <tr>
                 <th style={styles.th}>Organization</th>
+                <th style={styles.th}>ID</th>
                 <th style={styles.th}>Provisioned</th>
-                <th style={styles.th}></th>
+                <th style={styles.th}>Observe</th>
               </tr>
             </thead>
             <tbody>
               {orgs.map(org => (
                 <tr key={org.id} style={styles.row}>
                   <td style={styles.td}>{org.name}</td>
+                  <td style={{ ...styles.td, ...styles.mono }}>{org.id}</td>
                   <td style={styles.td}>
                     {org.created_at ? new Date(org.created_at).toLocaleDateString() : '—'}
                   </td>
-                  <td style={{ ...styles.td, textAlign: 'right' }}>
+                  <td style={styles.td}>
                     <Link
-                      to={`/executive/organizations/${org.id}/view/overview`}
-                      style={styles.viewLink}
+                      to={`/executive/organizations/${org.id}/view`}
+                      style={styles.observeLink}
                     >
-                      View →
+                      Observe →
                     </Link>
                   </td>
                 </tr>
@@ -73,7 +79,7 @@ export default function ExecutiveOrganizations() {
 function PageWrap({ children }) { return <div style={styles.page}>{children}</div> }
 
 const styles = {
-  page: { padding: '40px', maxWidth: 900 },
+  page: { padding: '40px', maxWidth: 960 },
   heading: { fontSize: 26, fontWeight: 800, color: '#1a1f36', margin: '0 0 4px' },
   sub: { fontSize: 14, color: '#6b7280', margin: '0 0 32px' },
   empty: { color: '#9ca3af', fontSize: 14 },
@@ -89,8 +95,9 @@ const styles = {
   mono: { fontFamily: 'monospace', fontSize: 12, color: '#6b7280' },
   muted: { color: '#9ca3af', fontSize: 14 },
   error: { color: '#ef4444', fontSize: 14 },
-  viewLink: {
-    color: '#2563eb', fontSize: 13, fontWeight: 600, textDecoration: 'none',
-    whiteSpace: 'nowrap',
+  observeLink: {
+    display: 'inline-block', padding: '5px 14px',
+    background: '#2563eb', color: '#fff', borderRadius: 6,
+    textDecoration: 'none', fontSize: 13, fontWeight: 600,
   },
 }
