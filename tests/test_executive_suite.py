@@ -180,3 +180,36 @@ class TestGrantEndpoint:
             user=god, db=db)
         assert result["status"] == "already_active"
         db.add.assert_not_called()
+
+
+# -- Frontend response-contract regression -------------------------------------
+
+class TestFrontendResponseContract:
+    """Neither ExecutiveOrganizations.jsx nor ExecutiveCommandCenter.jsx may
+    use r.data -- api.get() returns JSON directly, not an Axios envelope."""
+
+    def test_organizations_jsx_uses_r_not_r_data(self):
+        import pathlib
+        jsx = pathlib.Path(
+            "frontend/src/pages/executive/ExecutiveOrganizations.jsx"
+        ).read_text()
+        assert "r.data" not in jsx, (
+            "ExecutiveOrganizations.jsx must not read r.data "
+            "-- api.get() returns JSON directly"
+        )
+        assert "data: r," in jsx or "data: r\n" in jsx or "data: r}" in jsx, (
+            "ExecutiveOrganizations.jsx must set state with data: r (not r.data)"
+        )
+
+    def test_command_center_jsx_uses_r_not_r_data(self):
+        import pathlib
+        jsx = pathlib.Path(
+            "frontend/src/pages/executive/ExecutiveCommandCenter.jsx"
+        ).read_text()
+        assert "r.data" not in jsx, (
+            "ExecutiveCommandCenter.jsx must not read r.data "
+            "-- api.get() returns JSON directly"
+        )
+        assert "data: r," in jsx or "data: r\n" in jsx or "data: r}" in jsx, (
+            "ExecutiveCommandCenter.jsx must set state with data: r (not r.data)"
+        )
