@@ -89,3 +89,84 @@ def test_hot_or_replied_status_does_not_block(db_session, sample_org, sample_adv
     for idx, status in enumerate((LeadStatus.SENT, LeadStatus.REPLIED, LeadStatus.HOT, LeadStatus.BOOKED)):
         lead = _lead(db_session, sample_org, sample_advisor, phone=f"1214555990{idx}", status=status)
         check_compliance_preflight(db_session, lead)  # must not raise for any of these
+
+
+# ---------------------------------------------------------------------------
+# Channel semantics. The suppression list is a PHONE list - suppression_entries
+# has one contact column and one uniqueness rule, (organization_id, phone) -
+# so a suppressed number must not silently become an email prohibition.
+# ---------------------------------------------------------------------------
+
+def test_dnc_blocks_the_email_channel_too(db_session, sample_org, sample_advisor):
+    """DNC lives on the lead, not on a phone number: a STOP received by text
+    stops email to the same family."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559920",
+                 email="dnc@example.com", status=LeadStatus.DNC)
+
+    with pytest.raises(ValueError, match="DNC"):
+        check_compliance_preflight(db_session, lead, "email")
+
+
+def test_a_suppressed_phone_does_not_block_email(db_session, sample_org, sample_advisor):
+    """THE CROSS-CHANNEL RULE THAT MUST NOT EXIST. The family asked not to be
+    texted. Nothing about that says they may not be emailed, and there is no
+    email suppression list to consult."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559921",
+                 email="still-emailable@example.com")
+    db_session.add(SuppressionEntry(organization_id=sample_org.id, phone="12145559921",
+                                    reason="Texted STOP"))
+    db_session.commit()
+
+    # Blocked on the channel the suppression is actually about ...
+    with pytest.raises(ValueError, match="suppression"):
+        check_compliance_preflight(db_session, lead, "sms")
+
+    # ... and clear on the one it says nothing about.
+    assert check_compliance_preflight(db_session, lead, "email") is None
+
+
+def test_email_channel_honours_an_explicit_email_opt_out(db_session, sample_org, sample_advisor):
+    """Lead.allow_email is the platform's email permission of record, imported
+    from the source system. Only False is a denial."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559922",
+                 email="optedout@example.com")
+    lead.allow_email = False
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="opted out of email"):
+        check_compliance_preflight(db_session, lead, "email")
+
+
+def test_null_allow_email_is_not_a_denial(db_session, sample_org, sample_advisor):
+    """NULL means the source never said. Most imported rows are NULL, and
+    reading that as an opt-out would stop nearly all email."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559923",
+                 email="unknown-preference@example.com")
+    assert lead.allow_email is None
+
+    assert check_compliance_preflight(db_session, lead, "email") is None
+
+
+def test_email_channel_refuses_an_address_flagged_unusable(db_session, sample_org, sample_advisor):
+    """Mailing a known-bad address costs a hard bounce against the sending
+    domain, which makes the real families' mail less deliverable."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559924",
+                 email="unknow@unknown")
+    lead.manual_flag = "bad_email"
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="unusable email address"):
+        check_compliance_preflight(db_session, lead, "email")
+
+
+def test_sms_channel_is_unchanged_by_email_permissions(db_session, sample_org, sample_advisor):
+    """Existing SMS behaviour is exactly the two checks sms_service already
+    performs. An email opt-out is not one of them and must not start blocking
+    text messages."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559925",
+                 email="optedout@example.com")
+    lead.allow_email = False
+    lead.manual_flag = "bad_email"
+    db_session.commit()
+
+    assert check_compliance_preflight(db_session, lead, "sms") is None

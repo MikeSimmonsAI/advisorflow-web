@@ -26,6 +26,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.models import Base, Organization, User, Lead, LeadTier, LeadStatus, MessageTrack
+# EVERY model module, on the same Base, before any create_all() below.
+#
+# models.py alone is not the schema. `proposals` is declared there but has
+# foreign keys into `opportunities` and `brand_sales_orgs`, which live in
+# sales_models.py - so a metadata built from models.py alone cannot resolve
+# them, and create_all() raised NoReferencedTableError during fixture setup.
+# app/models/registry.py is the same list app/main.py uses; importing it here
+# is what makes the test schema match the application's.
+import app.models.registry  # noqa: F401  (imported for side effects)
 from app.services.auth_service import hash_password
 
 

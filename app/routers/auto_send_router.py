@@ -79,6 +79,75 @@ def _serialize(item: AutoSendItem, lead: Lead) -> dict:
     }
 
 
+# ── Delivery and the compliance gate ─────────────────────────────────────────
+
+def _channel_for(item, lead: Lead) -> str:
+    """Which channel this item will actually go out on.
+
+    An email item for a lead with no address falls back to SMS, which is what
+    the send branch already did - named here so the compliance gate and the
+    sender cannot disagree about which channel is being used."""
+    return "email" if (item.channel == "email" and lead.email) else "sms"
+
+
+def _compliance_block_reason(db: Session, lead: Lead, channel: str):
+    """The reason this send is refused, or None if it is clear to go.
+
+    THE GATE THAT NEVER RAN. Both call sites used to do
+    `from app.routers.compliance_router import compliance_preflight` - a
+    symbol that exists nowhere in this codebase - inside a bare
+    `except Exception: pass`. Every call raised ImportError, every ImportError
+    was swallowed, and execution fell straight through to the send. The
+    comments promised a compliance check; the code performed none.
+
+    ValueError is the documented way check_compliance_preflight refuses, so
+    that alone is caught and turned into a reason. Anything else is a real
+    fault and propagates - a compliance check that cannot run must not be
+    mistaken for a compliance check that passed."""
+    from app.services.compliance_service import check_compliance_preflight
+    try:
+        check_compliance_preflight(db, lead, channel)
+    except ValueError as blocked:
+        return str(blocked)
+    return None
+
+
+def _deliver(db: Session, item, lead: Lead, advisor: User) -> None:
+    """Send one approved item on its own channel. Raises on any failure.
+
+    The email branch used to call
+    `send_email(db=, lead=, advisor=, subject=, body=)`. That is not any
+    signature email_service has ever had, so every approved email item raised
+    TypeError, was caught by the caller's `except Exception`, and was marked
+    'failed' without one message ever being attempted.
+
+    send_email(db, org_id, to_email, to_name, subject, body) is the right
+    function here, and NOT send_email_to_lead: that one renders the lead's
+    message-track template and would throw away the drafted subject and body
+    this queue exists to carry. send_email reports provider failure in its
+    return value rather than raising, so the result is checked and turned
+    into an exception to keep one failure path for the caller."""
+    if _channel_for(item, lead) == "email":
+        from app.services.email_service import send_email
+        to_name = (f"{lead.first_name or ''} {lead.last_name or ''}".strip()
+                   or lead.email)
+        result = send_email(
+            db=db,
+            org_id=advisor.organization_id,
+            to_email=lead.email,
+            to_name=to_name,
+            subject=item.subject or "Following up",
+            body=item.message,
+        )
+        if not (result or {}).get("success"):
+            raise RuntimeError((result or {}).get("error")
+                               or "The email provider rejected the message.")
+    else:
+        from app.services.sms_service import send_sms
+        send_sms(db=db, lead=lead, advisor=advisor, template=item.message,
+                 include_booking_link=False)
+
+
 # ── Existing Endpoints (unchanged) ────────────────────────────────────────────
 
 @router.get("/queue")
@@ -238,14 +307,26 @@ def approve_item(
     # family, so the family is checked as well as the queue row.
     lead = lead_scope.load_lead_in_scope(db, current_user, item.lead_id)
 
-    try:
-        if item.channel == "email" and lead.email:
-            from app.services.email_service import send_email
-            send_email(db=db, lead=lead, advisor=current_user, subject=item.subject or "Following up", body=item.message)
-        else:
-            from app.services.sms_service import send_sms
-            send_sms(db=db, lead=lead, advisor=current_user, template=item.message, include_booking_link=False)
+    # THE COMPLIANCE GATE, deliberately OUTSIDE the send try/except below.
+    # A refusal and a provider error are different facts and must not share
+    # a handler: inside that try, a block would be indistinguishable from a
+    # Twilio outage, and one careless edit to the branch order would let a
+    # blocked message reach the provider anyway. Nothing is swallowed - the
+    # reason is recorded on the row and returned to the caller.
+    blocked = _compliance_block_reason(db, lead, _channel_for(item, lead))
+    if blocked:
+        item.status = "failed"
+        item.ai_reason = f"Blocked by compliance: {blocked}"
+        item.actioned_at = datetime.utcnow()
+        item.actioned_by_id = current_user.id
+        db.commit()
+        log_action(db, current_user.organization_id, current_user.id,
+                   action="auto_send.blocked", target_type="lead", target_id=lead.id)
+        return {"status": item.status, "item_id": item_id,
+                "blocked_reason": item.ai_reason}
 
+    try:
+        _deliver(db, item, lead, current_user)
         item.status = "sent"
         log_action(db, current_user.organization_id, current_user.id, action="auto_send.approved", target_type="lead", target_id=lead.id)
     except Exception as e:
@@ -305,17 +386,24 @@ def approve_all(
         lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
         if not lead:
             continue
+        # Same gate as the single approve. Bulk is exactly where a missing
+        # check does the most damage, so it is checked per item, not once.
+        blocked = _compliance_block_reason(db, lead, _channel_for(item, lead))
+        if blocked:
+            item.status = "failed"
+            item.ai_reason = f"Blocked by compliance: {blocked}"
+            failed += 1
+            item.actioned_at = datetime.utcnow()
+            item.actioned_by_id = current_user.id
+            continue
+
         try:
-            if item.channel == "email" and lead.email:
-                from app.services.email_service import send_email
-                send_email(db=db, lead=lead, advisor=current_user, subject=item.subject or "Following up", body=item.message)
-            else:
-                from app.services.sms_service import send_sms
-                send_sms(db=db, lead=lead, advisor=current_user, template=item.message, include_booking_link=False)
+            _deliver(db, item, lead, current_user)
             item.status = "sent"
             sent += 1
-        except Exception:
+        except Exception as exc:
             item.status = "failed"
+            item.ai_reason = str(exc)
             failed += 1
         item.actioned_at = datetime.utcnow()
         item.actioned_by_id = current_user.id
@@ -395,7 +483,7 @@ def handle_inbound_for_auto_send(
     Called from ai_conversation_router when a new inbound reply arrives
     and the advisor has auto_send_phase != 'off'.
 
-    Generates an AI reply, runs compliance_preflight, then either:
+    Generates an AI reply, runs the compliance preflight, then either:
       - 'candidate' phase: adds to review queue, returns 'queued'
       - 'auto' phase + simple question: sends immediately, returns 'sent'
       - 'auto' phase + complex: adds to review queue, returns 'queued'
@@ -407,14 +495,11 @@ def handle_inbound_for_auto_send(
     if phase == "off":
         return "skipped"
 
-    # Compliance check
-    try:
-        from app.routers.compliance_router import compliance_preflight
-        ok, reason = compliance_preflight(db, lead, "sms")
-        if not ok:
-            return "blocked"
-    except Exception:
-        pass  # if compliance import fails, fall through to queue
+    # Compliance check - see _compliance_block_reason for what used to
+    # happen here. This path drafts an SMS reply, so it is checked on the
+    # sms channel. A block queues nothing and sends nothing.
+    if _compliance_block_reason(db, lead, "sms"):
+        return "blocked"
 
     # Generate AI reply
     try:
@@ -561,13 +646,11 @@ def proactive_scan(
             # `rows` are Lead entities straight out of the authorized query now,
             # so there is nothing to re-fetch and no second chance to widen.
             lead = row
-            try:
-                from app.routers.compliance_router import compliance_preflight
-                ok, _ = compliance_preflight(db, lead, "sms")
-                if not ok:
-                    continue
-            except Exception:
-                pass
+            # Real gate now - see _compliance_block_reason. A re-engagement
+            # draft is an SMS, so it is checked on the sms channel, and a
+            # blocked lead is passed over rather than queued.
+            if _compliance_block_reason(db, lead, "sms"):
+                continue
 
             # AI-draft re-engagement message
             completion = client.chat.completions.create(

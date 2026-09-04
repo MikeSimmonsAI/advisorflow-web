@@ -26,11 +26,11 @@ way the current router actually behaves:
     endpoints put `status == "pending"` inside the lookup filter, so a
     resolved row is simply not found. 404 is also what another advisor's
     row returns, which is deliberate - it refuses to confirm the row exists.
-  * A blocked send is not a 4xx. approve_item catches the ValueError that
-    send_sms raises for a DNC or suppressed lead, records it in ai_reason
-    and marks the item "failed". The guarantee that matters is preserved
-    and asserted below: the carrier is never called and the item is not
-    marked sent.
+  * A blocked send is not a 4xx. approve_item runs the compliance preflight
+    BEFORE the sender, records the refusal in ai_reason, marks the item
+    "failed" and returns a blocked_reason. The guarantee that matters is
+    preserved and asserted below: the provider is never called and the item
+    is not marked sent.
   * Editing no longer sends. PATCH /edit only rewrites the body of a
     pending item; approving is a separate, explicit second action.
 
@@ -48,8 +48,6 @@ an endpoint that exists.
 import uuid
 from datetime import datetime
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from app.models.models import Lead, Organization, SuppressionEntry
 # The queue row lives on the router, not in app.models.models - it is
@@ -258,9 +256,7 @@ def test_approve_404s_for_another_advisors_item_and_sends_nothing(
 
 def test_approve_does_not_send_to_a_dnc_lead(client, db_session, sample_org,
                                              sample_advisor, auth_headers):
-    """The real send path's DNC check is genuinely wired in, not bypassed by
-    this queue. send_sms raises, approve_item records the reason and marks the
-    item failed - the carrier is never called."""
+    """DNC is enforced, and now ahead of the sender rather than by accident."""
     lead = _lead(db_session, sample_org, sample_advisor, phone="12145559809", status="dnc")
     _, item = _queued(db_session, sample_org, sample_advisor, lead=lead)
     twilio = _twilio()
@@ -271,6 +267,7 @@ def test_approve_does_not_send_to_a_dnc_lead(client, db_session, sample_org,
 
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
+    assert "DNC" in response.json()["blocked_reason"]
     twilio.messages.create.assert_not_called()
 
     db_session.refresh(item)
@@ -301,27 +298,125 @@ def test_approve_respects_the_suppression_list(client, db_session, sample_org,
     assert "suppression" in (item.ai_reason or "")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="PRODUCTION DEFECT, not a stale test: approve_item calls "
-           "send_email(db=..., lead=..., advisor=..., subject=..., body=...) but "
-           "email_service.send_email's signature is (db, org_id, to_email, "
-           "to_name, subject, body). The TypeError is caught by approve_item's "
-           "own except, so an approved EMAIL item is silently marked 'failed' "
-           "and never sends. Remove this marker when the call is corrected.",
-)
+# ═════════════════════════════════════════════════════════════════════════════
+# The email channel.
+#
+# This section used to be a single strict xfail. approve_item called
+# send_email(db=, lead=, advisor=, subject=, body=), which is not a signature
+# email_service has ever had, so every approved email item raised TypeError,
+# was swallowed by the endpoint's own except, and was marked "failed" without
+# a single message being attempted. It now calls
+# send_email(db, org_id, to_email, to_name, subject, body) - and NOT
+# send_email_to_lead, which would render the lead's message-track template and
+# discard the drafted subject and body this queue exists to carry.
+# ═════════════════════════════════════════════════════════════════════════════
+
 def test_approve_sends_an_email_channel_item(client, db_session, sample_org,
                                              sample_advisor, auth_headers):
+    lead = _lead(db_session, sample_org, sample_advisor, phone=None,
+                 email="family@example.com")
+    _, item = _queued(db_session, sample_org, sample_advisor, lead=lead,
+                      channel="email", subject="Following up",
+                      message="Just confirming Tuesday at 2pm.")
+
+    with patch("app.services.email_service.send_email_via_provider",
+               return_value={"success": True, "provider_message_id": "em_1",
+                             "error": None}) as provider:
+        response = client.post(f"/auto-send/{item.id}/approve", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "sent", "item_id": item.id}
+
+    provider.assert_called_once()
+    sent = provider.call_args.kwargs
+    assert sent["to_email"] == "family@example.com"
+    assert sent["subject"] == "Following up"
+    # The drafted body is what goes out, not a rendered track template.
+    assert "Just confirming Tuesday at 2pm." in sent["body_html"]
+
+    db_session.refresh(item)
+    assert item.status == "sent"
+    assert item.actioned_by_id == sample_advisor.id
+
+
+def test_approve_marks_failed_when_the_email_provider_rejects(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    """send_email reports provider failure in its return value rather than
+    raising, so the result has to be checked - otherwise a rejected message
+    would be recorded as sent."""
     lead = _lead(db_session, sample_org, sample_advisor, phone=None,
                  email="family@example.com")
     _, item = _queued(db_session, sample_org, sample_advisor, lead=lead,
                       channel="email", subject="Following up")
 
     with patch("app.services.email_service.send_email_via_provider",
-               return_value={"success": True, "provider_message_id": "em_1", "error": None}):
+               return_value={"success": False, "provider_message_id": None,
+                             "error": "domain not verified"}):
+        response = client.post(f"/auto-send/{item.id}/approve", headers=auth_headers)
+
+    assert response.json()["status"] == "failed"
+    db_session.refresh(item)
+    assert item.status == "failed"
+    assert "domain not verified" in (item.ai_reason or "")
+
+
+def test_approve_blocks_a_dnc_lead_on_the_email_channel(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    """DNC is channel-agnostic: a family that said stop is not emailed either."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone=None,
+                 email="dnc@example.com", status="dnc")
+    _, item = _queued(db_session, sample_org, sample_advisor, lead=lead,
+                      channel="email", subject="Following up")
+
+    with patch("app.services.email_service.send_email_via_provider") as provider:
+        response = client.post(f"/auto-send/{item.id}/approve", headers=auth_headers)
+        provider.assert_not_called()
+
+    assert response.json()["status"] == "failed"
+    assert "DNC" in response.json()["blocked_reason"]
+    db_session.refresh(item)
+    assert item.status == "failed"
+
+
+def test_approve_blocks_email_for_an_explicit_email_opt_out(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    lead = _lead(db_session, sample_org, sample_advisor, phone=None,
+                 email="optedout@example.com")
+    lead.allow_email = False
+    db_session.commit()
+    _, item = _queued(db_session, sample_org, sample_advisor, lead=lead,
+                      channel="email", subject="Following up")
+
+    with patch("app.services.email_service.send_email_via_provider") as provider:
+        response = client.post(f"/auto-send/{item.id}/approve", headers=auth_headers)
+        provider.assert_not_called()
+
+    assert "opted out of email" in response.json()["blocked_reason"]
+
+
+def test_approve_still_emails_a_lead_whose_phone_is_suppressed(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    """THE CROSS-CHANNEL RULE THAT MUST NOT EXIST.
+
+    suppression_entries holds phone numbers and nothing else. A family who
+    asked not to be TEXTED has said nothing about email, and inventing that
+    prohibition here would silently stop mail that is permitted today. This
+    test is the guard against exactly that mistake."""
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145559830",
+                 email="still-emailable@example.com")
+    db_session.add(SuppressionEntry(organization_id=sample_org.id,
+                                    phone="12145559830", reason="Texted STOP"))
+    db_session.commit()
+    _, item = _queued(db_session, sample_org, sample_advisor, lead=lead,
+                      channel="email", subject="Following up")
+
+    with patch("app.services.email_service.send_email_via_provider",
+               return_value={"success": True, "provider_message_id": "em_2",
+                             "error": None}) as provider:
         response = client.post(f"/auto-send/{item.id}/approve", headers=auth_headers)
 
     assert response.json()["status"] == "sent"
+    provider.assert_called_once()
 
 
 # ═════════════════════════════════════════════════════════════════════════════

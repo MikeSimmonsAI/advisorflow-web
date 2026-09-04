@@ -35,33 +35,55 @@ def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
     )
 
 
-def check_compliance_preflight(db: Session, lead: Lead) -> None:
+CHANNEL_SMS = "sms"
+CHANNEL_EMAIL = "email"
+
+
+def check_compliance_preflight(db: Session, lead: Lead,
+                               channel: str = CHANNEL_SMS) -> None:
     """
-    Channel-agnostic pre-send compliance gate. Returns None when the lead
-    is clear to contact, and raises ValueError otherwise - the same
-    contract, and the same two checks in the same order, that
-    sms_service.send_sms already performs inline before every text.
+    Pre-send compliance gate. Returns None when the lead is clear to contact
+    on `channel`, and raises ValueError naming the reason otherwise.
 
-    THIS CONSOLIDATES EXISTING LOGIC. IT DOES NOT INVENT A NEW RULE.
+    THIS CONSOLIDATES RULES THAT ALREADY EXIST. IT INVENTS NONE.
 
-      1. Lead.status == DNC blocks EVERY channel. The signal is on the
-         lead, not on a phone number, so a STOP received by text must
-         also stop email to the same family - and an email-only lead
-         with no phone to suppress is still blocked by it.
-      2. The suppression list is an ADDITIONAL, independent guard, never
-         a substitute for check 1: a number can sit in the Compliance
-         Center's list while its matching Lead.status was never updated
-         to DNC. A lead with no phone has nothing to check here and
-         passes this step rather than erroring.
+    ONE rule is channel-agnostic and one is not, and conflating them is the
+    mistake this signature exists to prevent:
 
-    WIRING NOTE, read this before calling it: adding this call to a send
-    path CHANGES what that path blocks, which is a behaviour change and
-    not something to do casually. The SMS paths in sms_service already
-    perform both checks inline and need no change. The email path in
-    email_service.send_email_to_lead currently checks neither, so routing
-    it through here would start blocking DNC'd email leads that go out
-    today - correct, almost certainly wanted, and still a deliberate
-    decision rather than a side effect of this function existing.
+      DNC blocks EVERYTHING. Lead.status == 'dnc' is a person asking not to
+      be contacted. It lives on the lead, not on a phone number, so a STOP
+      received by text stops email to the same family too, and an email-only
+      lead with no phone to suppress is still blocked by it.
+
+      THE SUPPRESSION LIST IS A PHONE LIST. suppression_entries has exactly
+      one contact column - `phone` - and one uniqueness rule,
+      (organization_id, phone). There is no email suppression list to
+      consult, so a suppressed number says nothing whatsoever about whether
+      the family may be emailed. Treating it as an email prohibition would
+      invent a cross-channel rule the business never made, and would
+      silently stop mail that is permitted today.
+
+    Email is therefore checked against the permission fields the platform
+    actually keeps for email, the same three app/services/qualification.py
+    already excludes on:
+
+      * Lead.allow_email is False - an explicit opt-out of record, imported
+        from the source system. Only False blocks; NULL means the source
+        never said, which is the state most rows are in and is not a denial.
+      * manual_flag == 'bad_email' - an address an advisor marked unusable.
+        Mailing it costs a hard bounce against the sending domain.
+      * no address at all.
+
+    SMS keeps exactly the two checks sms_service.send_sms already performs
+    inline before every text - Lead.status and the suppression list - and
+    deliberately adds nothing to them. Calling this before send_sms is a
+    cheap double-check that cannot diverge from it, never a replacement.
+
+    WIRING NOTE: adding this call to a send path changes what that path
+    blocks. app/routers/auto_send_router.py calls it on both send paths.
+    email_service.send_email_to_lead still checks neither DNC nor
+    allow_email; routing it through here is a deliberate decision for a
+    separate batch, not a side effect of this function existing.
     """
     status = getattr(lead, "status", None)
     # LeadStatus is a str enum, so a plain string column value and the enum
@@ -72,6 +94,14 @@ def check_compliance_preflight(db: Session, lead: Lead) -> None:
             f"Lead {lead.id} is marked DNC - blocked from sending on any channel."
         )
 
+    if (channel or CHANNEL_SMS).strip().lower() == CHANNEL_EMAIL:
+        _check_email_permission(lead)
+        return None
+
+    # Phone channels. An independent guard, never a substitute for the DNC
+    # check above: a number can sit in the Compliance Center's list while its
+    # matching Lead.status was never updated. A lead with no phone has nothing
+    # to check here and passes rather than erroring.
     phone = getattr(lead, "phone", None)
     if phone and is_phone_suppressed(db, lead.organization_id, phone):
         raise ValueError(
@@ -80,6 +110,27 @@ def check_compliance_preflight(db: Session, lead: Lead) -> None:
         )
 
     return None
+
+
+def _check_email_permission(lead: Lead) -> None:
+    """The email half of the preflight. Raises ValueError, or returns None."""
+    if not getattr(lead, "email", None):
+        raise ValueError(f"Lead {lead.id} has no email address.")
+
+    # Only an explicit False. NULL means the source system never stated a
+    # preference, which is not the same as a denial and must not be read as
+    # one - most imported rows are NULL.
+    if getattr(lead, "allow_email", None) is False:
+        raise ValueError(
+            f"Lead {lead.id} has opted out of email - blocked from sending."
+        )
+
+    if (getattr(lead, "manual_flag", None) or "") == "bad_email":
+        detail = getattr(lead, "manual_flag_reason", None) or ""
+        raise ValueError(
+            f"Lead {lead.id} is flagged with an unusable email address "
+            f"({lead.email}) - blocked from sending. {detail}".strip()
+        )
 
 
 def add_suppression_entry(
