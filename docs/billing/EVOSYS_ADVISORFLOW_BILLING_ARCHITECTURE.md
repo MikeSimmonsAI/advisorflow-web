@@ -267,8 +267,8 @@ join alone cannot promise that.
 | P1 | merchant / entity / configuration foundation | COMPLETE (8652900) |
 | P2 | BillingAgreement — executable billing relationship | COMPLETE (4d41357) |
 | P3 | tenant billing capabilities / authority cleanup | COMPLETE (4cf170f) |
-| P4 | Stripe customer / invoice / subscription / payment operations | COMPLETE (uncommitted) |
-| P5 | `PLANS` retirement / pricing migration | not started |
+| P4 | Stripe customer / invoice / subscription / payment operations | COMPLETE (264c452) |
+| P5 | `PLANS` retirement / pricing migration | COMPLETE (uncommitted) |
 | P6 | organization billing UI | not started |
 | P7 | platform billing command centre | not started |
 | P8 | reconciliation tooling | not started |
@@ -429,3 +429,129 @@ change, at production activation.
 
 Operational detail, endpoint table, the double-charge matrix and the test
 summary are in `BILLING_IMPLEMENTATION_STATUS.md`.
+
+---
+
+## 18. P5 — `PLANS` retired as an authority — BUILT
+
+**The rule the phase was built around: an existing customer pays what they
+actually agreed to pay.** Not what today's catalogue says that plan costs, not
+what a formula reconstructs, not what a tidy migration would prefer.
+
+`PLANS` was not deleted, and deleting it was never the goal. It survives as a
+self-serve catalogue and as display text. What ended is its role as *authority*:
+new deal-driven billing does not read it, and the reconciliation tooling reads
+it only to put a comparison number in a report.
+
+**Evidence priority when reconstructing a legacy customer** — Stripe (the
+intention already executed) → the approved deal → local columns. The catalogue
+is not on the list. It is the number a repricing bug would come from.
+
+**Reconciliation cannot write.** Not "does not by default" — there is no
+mutation code path in `reconcile_organization` or `reconcile_all`. Conflicting
+evidence is reported with both numbers, because "Stripe says $349 and the deal
+says $499" is a business question and answering it by picking one is how a
+customer silently gets a new bill.
+
+Endpoint list, the `PLANS` usage audit and the checkout guards are in
+`BILLING_IMPLEMENTATION_STATUS.md`.
+
+---
+
+## 19. Billing surfaces and payment flows — APPROVED
+
+Approved by Mike ahead of P6. **Nothing here reopens pricing, MerchantEntity,
+BillingAgreement or tenant architecture** — it constrains the UI surfaces and
+the payment-method layer that P6 and P7 will build.
+
+### 19.1 Two surfaces, two authorities
+
+These are two different application surfaces, not one page with extra buttons
+for privileged users.
+
+| | Customer workspace billing | EvoSys / AdvisorFlow back office |
+|---|---|---|
+| Who | `org_admin` of the active workspace, or a `billing_view` / `billing_manage` grant | platform / god / back-office users only |
+| Scope | **always** the active customer organization | **across** customer organizations, one selected at a time |
+| Phase | P6 | P7 |
+| Built so far | `GET /billing/overview`, `/invoices`, `/payments`, `/agreement`, `/reconciliation` | `GET /billing/all`, `/reconciliation/platform`, `POST /reconcile/{org_id}` |
+
+A user without billing authority must not see the Billing navigation item —
+**and hiding it is not the control.** Backend authorization
+(`require_billing_view` / `require_billing_manage`, P3) remains authoritative;
+the hidden tab is a courtesy.
+
+The customer surface should eventually show: current agreement, plan/package,
+setup charge, recurring amount, subscription status, autopay status, next
+billing date, saved payment method summary, invoice and payment history, hosted
+invoice links and PDFs, receipts, failed and past-due invoices, outstanding
+balance, Billing Portal access, and an update-payment-method workflow.
+
+The back office should eventually offer: all-customer billing status, select an
+organization, create a setup or manual invoice, start and manage subscriptions,
+autopay and payment-method status, failed payments, past-due accounts,
+outstanding balances, resend/open invoices, controlled cancellation workflows,
+full history, the MerchantEntity and brand, and authorized Stripe references.
+
+### 19.2 Three payment flows
+
+**Stripe decides which methods are eligible. EvoSys Pro decides the business
+workflow, the authorization, the agreement and the billing purpose.** The
+application must not promise a method Stripe says is ineligible, and must not
+maintain a brittle hardcoded list to do it.
+
+| Flow | Methods | Notes |
+|---|---|---|
+| `ONE_TIME_SETUP` | broadest eligible set — cards, ACH/bank, Link, Apple Pay, Google Pay, Cash App Pay, Afterpay, Klarna, Affirm, whatever Stripe says is eligible | matters most for large implementation fees |
+| `RECURRING_AUTOPAY` | recurring-capable, off-session methods only — saved card, supported bank debit | **single-use BNPL is not a recurring method.** Afterpay / Cash App Afterpay belong to the one-time flow and must never be presented as the saved autopay method |
+| `MANUAL_INVOICE` | whatever Stripe's invoice payment configuration allows | prefer the hosted invoice experience so Stripe presents eligible methods itself |
+
+**The setup fee and the monthly subscription are separate payments and may use
+different methods.** The application must not assume the method used to pay an
+implementation fee becomes the autopay method.
+
+### 19.3 The configuration seam
+
+Arrays like `["card", "ach", "afterpay"]` must not be scattered through routers
+and components. The flow — one of the three above — is the thing chosen; the
+methods follow from it and from Stripe's eligibility. Where Stripe offers
+account-level payment method configuration identifiers, the implementation
+should stay abstract enough to store and use those non-secret references later.
+**Stripe dashboard settings are not the application's pricing authority.**
+
+A back-office operator chooses a *payment purpose* — setup, recurring, manual
+invoice — not low-level Stripe methods. That is what keeps operator error out
+of the payment path.
+
+### 19.4 Where P4/P5 already stand
+
+**No payment method is named anywhere in the billing code.** Verified by
+grep across `billing_*.py`, `stripe_*.py` and `billing_router.py`: no
+`payment_method_types`, no method list. Each existing flow already defers to
+Stripe:
+
+- setup / one-time: `collection_method="send_invoice"` — Stripe's hosted
+  invoice presents whatever is eligible
+- recurring: `Subscription.create` with no method restriction — account
+  defaults and dynamic methods apply
+- legacy self-serve: `checkout.Session.create` with no `payment_method_types` —
+  Stripe's dynamic payment methods apply
+
+So there is nothing for P6 to undo. What is genuinely missing is *modelling*:
+the three flows are not named in code, autopay state is not represented, and
+the payment mirror reads only the `card` sub-object. Those are recorded in
+`BILLING_FOLLOWUPS.md` as P6 work.
+
+### 19.5 Autopay
+
+The system must represent, without an operator opening Stripe for routine work:
+autopay enabled/disabled, whether a recurring-capable method exists, the
+upcoming billing date, payment failure, "payment method requires update", and
+recovery after an update. The customer surface exposes self-service update and
+Billing Portal access; the back office sees the same state read-only.
+
+### 19.6 Explicitly out of scope
+
+Stripe Connect, KYC and payouts, tenant merchant processing, Stripe Tax
+automation, and live activation. The requirement is extensibility, not feature
+creep: no Stripe product is implemented merely because it exists.

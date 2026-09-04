@@ -32,7 +32,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 # ---------------------------------------------------------------------------
-# Plan catalog
+# Plan catalog — LEGACY. NOT A PRICING AUTHORITY FOR NEW BILLING (P5).
+#
+# This dictionary predates the deal-driven billing system. It is now used in
+# exactly three places and each is deliberate:
+#
+#   GET /plans          DISPLAY ONLY - the catalogue a self-serve customer may
+#                       choose from.
+#   GET /subscription   DISPLAY ONLY - `plan_details` enriches a plan KEY for
+#                       the UI. Nothing is billed from it.
+#   POST /checkout      LEGACY SELF-SERVE BILLING - the only remaining path
+#                       that prices from this dict, and only for an
+#                       organization that has NO BillingAgreement. See the
+#                       guard on that route.
+#
+# New, deal-driven billing does not read this dict at all. It flows
+# Implementation -> BillingAgreement -> app/services/billing_operations.py,
+# and the amount is copied from the agreement.
+#
+# DO NOT price anything new from here, and do not "reconcile" an existing
+# customer against it: a customer on a negotiated or legacy rate would be
+# repriced to list, which is the one outcome P5 exists to prevent. The
+# reconciliation tooling in app/services/billing_migration.py reads it for
+# COMPARISON ONLY and says so at every use.
 # ---------------------------------------------------------------------------
 PLANS = {
     "starter": {
@@ -139,7 +161,10 @@ def get_plans(scope: BillingScope = Depends(require_billing_view)):
 
     Carries no tenant data, but it stays behind billing_view: it is part of
     the billing surface, and a route readable by anyone is a route somebody
-    eventually adds tenant data to."""
+    eventually adds tenant data to.
+
+    DISPLAY ONLY. A customer with a negotiated deal is not on any of these
+    prices, and what they pay comes from their BillingAgreement."""
     return {"plans": PLANS}
 
 
@@ -161,6 +186,9 @@ def get_subscription(
         "stripe_customer_id": getattr(org, "stripe_customer_id", None),
         "stripe_subscription_id": getattr(org, "stripe_subscription_id", None),
         "stripe_plan_interval": getattr(org, "stripe_plan_interval", None) or "month",
+        # DISPLAY ONLY: the catalogue entry for a plan KEY, for the UI. It is
+        # not what this customer is billed - `GET /billing/overview` reports
+        # that, from the agreement and the invoice mirror.
         "plan_details": PLANS.get(org.plan or "trial"),
         "current_period_end": None,
         "cancel_at_period_end": False,
@@ -193,15 +221,66 @@ def create_checkout(
     scope: BillingScope = Depends(require_billing_manage),
     db: Session = Depends(get_db),
 ):
+    """LEGACY SELF-SERVE CHECKOUT. Catalogue-priced, and kept working.
+
+    P5 did not rewrite this route. It added two guards in front of it, because
+    the catalogue price is correct ONLY for a customer who has no negotiated
+    deal and no subscription yet - and it was previously applied to everybody
+    who called.
+    """
     if req.plan not in ("starter", "growth", "professional"):
         raise HTTPException(status_code=400, detail="Invalid plan. Choose starter, growth, or professional.")
     if req.interval not in ("month", "year"):
         raise HTTPException(status_code=400, detail="Interval must be 'month' or 'year'.")
 
-    plan_info = PLANS[req.plan]
+    org = scope.organization
+
+    # ── GUARD 1: A NEGOTIATED DEAL IS NOT PRICED FROM THE CATALOGUE ─────────
+    # An organization with a live BillingAgreement has an approved amount that
+    # somebody negotiated. Letting this route bill them list price would be a
+    # silent repricing, and it is the exact failure P5 exists to prevent, so
+    # the agreement path is preferred by refusing this one rather than by
+    # quietly substituting the agreement's number behind a UI still showing
+    # the catalogue price.
+    from app.services import billing_agreement as _agreements  # noqa: E402
+    live_agreement = _agreements.current_for_organization(db, org.id)
+    if live_agreement is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This organization is billed from an approved agreement, "
+                   "not the self-serve catalogue. Use "
+                   "POST /billing/agreements/{agreement_id}/subscribe to "
+                   "execute it.")
+
     _stripe_client()
 
-    org = scope.organization
+    # ── GUARD 2: NO SECOND SUBSCRIPTION ────────────────────────────────────
+    # Previously absent. An organization already carrying a live Stripe
+    # subscription that called this route got a SECOND one - two recurring
+    # charges for one customer. Stripe is asked rather than trusting the local
+    # column, because a cancelled subscription may still be named there and
+    # must not block a legitimate new signup.
+    existing_sub = getattr(org, "stripe_subscription_id", None)
+    if existing_sub:
+        try:
+            existing = stripe.Subscription.retrieve(existing_sub)
+            existing_status = getattr(existing, "status", None)
+        except Exception as exc:
+            # Cannot prove it is safe, and this route needs Stripe anyway.
+            # Refusing costs a signup nothing that would have worked.
+            logger.warning("checkout blocked: subscription %s unreadable: %s",
+                           existing_sub, exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Existing subscription could not be verified. Please "
+                       "try again shortly.")
+        if existing_status in ("active", "trialing", "past_due", "unpaid"):
+            raise HTTPException(
+                status_code=409,
+                detail="This organization already has an active subscription. "
+                       "Use the billing portal to change plans.")
+
+    plan_info = PLANS[req.plan]
 
     customer_id = _get_or_create_customer(org, db)
     # The customer paying is a funeral home on a white-label brand. Bouncing
@@ -570,3 +649,51 @@ def cancel_agreement_subscription(
         db: Session = Depends(get_db)):
     return _handle(ops.cancel_subscription, db, scope, agreement_id,
                    req.at_period_end)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# P5 — RECONCILIATION. READ ONLY, AND THERE IS NO OTHER MODE.
+#
+# Neither route below can write. The service they call has no mutation path at
+# all - not a disabled one, not one behind a flag - because a reconciliation
+# endpoint that can also "fix" things is one somebody eventually calls with the
+# wrong parameter against production billing.
+#
+# The per-organization report is scoped by BillingScope like every other P4
+# read, so it can only ever describe the active authorized workspace. The
+# platform-wide report requires god_admin AND the platform_billing capability,
+# matching /billing/reconcile/{org_id} above.
+# ═════════════════════════════════════════════════════════════════════════════
+
+from app.services import billing_migration as migration  # noqa: E402
+
+
+@router.get("/reconciliation")
+def billing_reconciliation(scope: BillingScope = Depends(require_billing_view),
+                           db: Session = Depends(get_db)):
+    """This organization's billing records, compared. Writes nothing.
+
+    Shows what the catalogue would charge alongside what this customer is
+    actually charged, so the gap is visible. The gap is information, not a
+    defect to be corrected: a customer on a negotiated rate is meant to differ
+    from list.
+    """
+    return _handle(migration.reconcile_organization, db, scope.organization)
+
+
+@router.get("/reconciliation/platform", include_in_schema=False)
+def platform_billing_reconciliation(
+    limit: int = 500,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _cap: User = Depends(require_capability("platform_billing")),
+):
+    """Every organization, compared. Writes nothing.
+
+    The P5 worklist: which customers are billed with no agreement, where the
+    approved deal and Stripe disagree, and which local Stripe ids no longer
+    resolve.
+    """
+    if current_user.role != "god_admin":
+        raise HTTPException(status_code=403, detail="God admin only.")
+    return _handle(migration.reconcile_all, db, limit)

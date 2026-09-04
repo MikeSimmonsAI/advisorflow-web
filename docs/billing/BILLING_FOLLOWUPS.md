@@ -95,3 +95,61 @@ project.** Recorded here so they are not lost and not argued about mid-phase.
 - **`create_draft_invoice` has no per-line quantity.** Every line is a single
   amount. Enough for the current deals; a per-unit invoice would need Stripe's
   `quantity`/`unit_amount` pair instead of `amount`.
+
+## Found during P5
+
+- **`PLANS` prices are duplicated in the frontend.** `frontend/src/pages/Billing.jsx`
+  carries its own price array and it currently matches the backend dict exactly
+  (497/1500, 997/2500, 1997/5000). Nothing keeps them in step. The picker posts
+  a plan KEY, so a drift cannot mis-bill — but it can show a customer one price
+  and charge another. P6 should serve the catalogue from `GET /billing/plans`
+  instead of hardcoding it.
+- **`organizations.plan` is a plan KEY doing duty as a price.** For any customer
+  on a negotiated rate the key is a label, not a price, and every place that
+  reads it for money is a repricing bug waiting to happen. The
+  `catalogue_drift` finding exists to make that visible.
+- **The `× 11` annual formula lives in the checkout route.** Eleven months
+  billed for twelve. Left exactly as-is because P5 does not redesign pricing,
+  but it is business pricing logic embedded in an HTTP handler.
+- **`propose_legacy_agreement(apply=True)` has no endpoint and no script.** It
+  is deliberately callable only from code, one organization at a time, so that
+  a bulk migration cannot be launched by accident. If a script is wanted later
+  it should read the dry-run report first and refuse anything not `status: ok`.
+- **The legacy checkout guards are new refusals.** Two 409s that did not exist
+  before. Neither fires for an organization with no agreement and no live
+  subscription, which is every customer this route was written for — but they
+  are behaviour changes and should be watched after deploy.
+
+## Payment-method architecture — seams for P6/P7
+
+Recorded per the approved billing UX / payment-method requirement. **No
+payment method is named anywhere in the billing code today** — no
+`payment_method_types`, no method array — so P4/P5 created nothing for P6 to
+undo. What is missing is modelling, and it belongs in P6:
+
+- **The three payment flows are not named in code.** `ONE_TIME_SETUP`,
+  `RECURRING_AUTOPAY` and `MANUAL_INVOICE` exist as an approved concept
+  (architecture §19) and as three call sites that each happen to defer to
+  Stripe. They should become one configuration layer that a caller selects by
+  *purpose*, so a back-office operator picks "setup invoice" rather than a
+  Stripe method list. Keep it abstract enough to hold Stripe payment method
+  configuration ids later — they are non-secret references, not pricing
+  authority.
+- **Autopay is not represented anywhere.** Nothing models autopay
+  enabled/disabled, whether a recurring-capable method exists, or "payment
+  method requires update". `GET /billing/overview` reports past-due from the
+  local mirror but cannot say *why* collection failed or whether it will retry.
+- **The payment mirror is card-shaped.** `stripe_sync.upsert_payment_from_stripe`
+  reads only the `card` sub-object for brand and last4, so an ACH, Link or
+  wallet payment mirrors with no method summary. Display-only and harmless
+  today; it becomes wrong the moment a non-card method is used. Widening it is
+  a P0-mirror change with its own tests, deliberately not done inside P5.
+- **Setup fee and subscription are not separately payable.** `BillingAgreement`
+  carries `setup_fee_cents`, and nothing bills it as its own one-time payment.
+  The one-time flow — where BNPL is eligible and matters most, on a large
+  implementation fee — has no route yet.
+- **`Subscription.create` does not assert a recurring-capable method.** It
+  relies on Stripe refusing a single-use method. That is probably correct, but
+  the refusal should be translated into a sentence naming autopay rather than
+  surfacing as a bare 402.
+

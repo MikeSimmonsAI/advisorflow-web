@@ -5,7 +5,7 @@ activation. Nothing in this plan should be run against a live Stripe account.
 
 ## Nothing here has been executed yet
 
-P0–P4 are covered entirely by unit tests with Stripe faked. No sandbox call
+P0–P5 are covered entirely by unit tests with Stripe faked. No sandbox call
 has been made from this session, and none can be until test-mode credentials
 exist in the environment. Secrets come from environment/deployment secret
 management — never from chat, never from the database, never committed.
@@ -76,7 +76,48 @@ steps close that gap and each names the assumption it is checking.
     active until the period ends. Then confirm the local agreement status is
     still `active` — the webhook, not this call, applies the transition.
 
+## P5 steps — reconciliation and the legacy checkout guards
+
+16. **Reconciliation against real Stripe changes nothing.** Record a test
+    customer's subscription id, amount and status in the dashboard, run
+    `GET /billing/reconciliation`, then compare all three. They must be
+    identical. Repeat with `GET /billing/reconciliation/platform`.
+    *This is the assumption the unit tests can only check against a fake: that
+    `Subscription.retrieve` is genuinely read-only.*
+17. **A negotiated customer is not billed from the catalogue.** Give a sandbox
+    organization a `BillingAgreement` below list price, then call
+    `POST /billing/checkout`. Must be a 409 naming the agreement, and Stripe
+    must show no new Checkout session.
+18. **No second subscription.** With a live sandbox subscription, call
+    `POST /billing/checkout`. Must be a 409, and the dashboard must still show
+    one subscription. Then cancel it in the dashboard and call again — must
+    succeed, proving a returning customer is not locked out.
+19. **The legacy path still works.** For an organization with no agreement and
+    no subscription, `POST /billing/checkout` must produce a working hosted
+    Checkout page priced at the catalogue amount — and at `× 11` for the
+    annual interval.
+20. **A legacy proposal preserves the real amount.** For a sandbox customer
+    billed below list, `propose_legacy_agreement` must report that customer's
+    actual amount, with the catalogue price shown only as
+    `catalogue_reference`.
+
+## Payment-method steps — needed before P6 UI work
+
+21. **Confirm which methods the sandbox account actually offers**, per flow, in
+    the dashboard: one-time/hosted invoice, subscription, and Checkout. Record
+    the eligible set. The application names no method anywhere, so what a
+    customer sees today is entirely this configuration.
+22. **Verify BNPL is offered on a hosted invoice and NOT on a subscription.**
+    Create and send a large setup invoice and confirm Afterpay/Klarna/Affirm
+    appear where eligible; then confirm a subscription offers only
+    recurring-capable methods. This is the assumption §19.2 rests on.
+23. **Pay a hosted invoice with a non-card method (ACH or Link)** and check the
+    mirrored `Payment` row. `payment_method_brand` and `payment_method_last4`
+    are expected to be empty — a known gap recorded in the follow-ups, worth
+    confirming before P6 designs around it.
+
 ## Not yet testable
 
-Refunds, dunning and payment recovery. Nothing in P4 creates a PaymentIntent or
-retries a failed payment; payments are read from the P0 mirror only.
+Refunds, dunning and payment recovery. Nothing in P4 or P5 creates a
+PaymentIntent or retries a failed payment; payments are read from the P0 mirror
+only. Autopay state is not modelled, so there is nothing to exercise for it.

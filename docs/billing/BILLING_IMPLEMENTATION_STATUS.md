@@ -127,7 +127,7 @@ multi-workspace users need the header wired in P6.
 
 ---
 
-## P4 — Stripe operations (uncommitted)
+## P4 — Stripe operations (commit 264c452)
 
 Customers, invoices, subscriptions and payments. **Standard Stripe, test mode
 only. No Connect. No pricing redesign.**
@@ -228,3 +228,119 @@ multiple tests before being reverted.
   cancelled at period end.
 - `next_billing_date` and `term_end_date` are still columns only.
 - No UI. That is P6.
+
+---
+
+## P5 — retiring `PLANS` as a pricing authority (uncommitted)
+
+**Not a pricing redesign, and nobody was repriced.** The goal was narrow: new,
+deal-driven billing must not read the legacy catalogue, and finding out where
+the legacy catalogue still matters must be a report rather than a repair.
+
+### The `PLANS` audit — every usage, classified
+
+| # | Location | Class | Verdict |
+|---|---|---|---|
+| 1 | `billing_router.PLANS` (the dict) | **A + C** legacy compatibility / display | **Stays.** Retiring the dict is not the goal; retiring it as *authority* is. |
+| 2 | `GET /billing/plans` → `{"plans": PLANS}` | **C** display-only | **Stays.** The self-serve catalogue a customer may pick from. Bills nothing. |
+| 3 | `GET /billing/subscription` → `plan_details` | **C** display-only | **Stays.** Enriches a plan KEY for the UI. `GET /billing/overview` is what reports what the customer is actually billed. |
+| 4 | `POST /billing/checkout` → `plan_info = PLANS[req.plan]` | **B** new-customer billing | **Stays, now guarded.** The only remaining path that prices from the dict, and only for an organization with no BillingAgreement and no live subscription. |
+| 5 | `billing_migration.catalogue_reference()` | **C** display-only | **New in P5.** Reads `PLANS` purely to put a comparison number in a report, and says so in its return value. |
+| 6 | `frontend/src/pages/Billing.jsx` `PLANS` array | **C** display-only | **Stays.** The plan-picker UI; posts a plan KEY, never an amount. Duplicated prices — see follow-ups. |
+| 7 | `frontend/src/pages/OrgManager.jsx` `PLANS` array | **C** display-only | **Stays.** Plan-name labels in an admin dropdown. No prices. |
+| 8 | Docstrings in `billing_agreement*.py`, `billing_operations.py` | **D** prose | Comments explaining that the dict is *not* consulted. |
+
+No dead (**D**) or test-only (**E**) usage exists. **No usage was deleted.**
+
+### The new billing path
+
+```
+brand_packages / approved pricing → Opportunity → approved overrides
+   → Implementation → BillingAgreement → app/services/billing_operations.py → Stripe
+```
+
+Every amount that reaches Stripe on this path is
+`BillingAgreement.recurring_amount_cents`, copied from the approved deal.
+Asserted end to end: an organization whose `plan` column says `professional`
+($1997 in the catalogue) with an agreement at $499 causes Stripe to be asked
+for **49900**.
+
+### The two checkout guards
+
+`POST /billing/checkout` is otherwise unchanged — same catalogue price, same
+annual `× 11` formula, same Stripe Checkout session. Two refusals were added in
+front of it:
+
+- **409 when a live `BillingAgreement` exists.** That customer has a negotiated
+  amount; billing them list price here would be a silent repricing. The
+  agreement path is preferred by *refusing* rather than by quietly substituting
+  the agreement's number behind a UI still showing the catalogue price.
+- **409 when Stripe reports a live subscription.** Previously absent, and a
+  real double-charge: an organization already carrying a subscription that
+  called this route got a second one. Stripe is asked rather than the local
+  column trusted, so a cancelled-and-returning customer can still sign up; if
+  Stripe cannot be reached the route refuses with 503, which costs no signup
+  that would have succeeded (the route needs Stripe regardless).
+
+Neither guard fires for the customers this route was written for.
+
+### Reconciliation — read-only, and there is no other mode
+
+`app/services/billing_migration.py`. `reconcile_organization` and
+`reconcile_all` have **no mutation code path at all** — not a disabled one, not
+one behind a flag. A reconciliation tool that can also fix things is one
+somebody eventually runs with the wrong flag against production billing.
+
+Findings reported, never resolved:
+
+| Code | Meaning |
+|---|---|
+| `agreement_vs_stripe` | the agreement and the live subscription name different amounts |
+| `deal_vs_stripe` | the approved deal and the live subscription differ — often a legitimate approved discount |
+| `live_without_agreement` | Stripe is billing this customer and no agreement exists (the P5 worklist) |
+| `subscription_mismatch` | agreement and organization name different subscriptions |
+| `stripe_unreadable` | a local subscription id Stripe does not resolve |
+| `catalogue_drift` | this customer differs from list price — **information, not a defect** |
+
+| Endpoint | Surface | Requires |
+|---|---|---|
+| `GET /billing/reconciliation` | customer workspace | `billing_view`, active workspace only |
+| `GET /billing/reconciliation/platform` | back office | `god_admin` **and** `platform_billing` |
+
+### Legacy agreement reconstruction
+
+`propose_legacy_agreement(db, org, apply=False)` — dry run unless `apply=True`
+is passed explicitly. Evidence priority:
+
+1. **Stripe.** What the customer is actually charged, by the system that
+   actually charges them. Not a record of an intention — the intention already
+   executed.
+2. **The approved deal.** `Implementation.recurring_amount`; a human approved
+   this number for this customer.
+3. **Local billing columns.** Weakest: a plan KEY is not a price.
+
+**The catalogue is not in that list.** It appears in the output as
+`catalogue_reference` so a human can see the gap, and is never consulted for
+the amount. Refuses and writes nothing when there is no price evidence, when
+Stripe and the deal disagree, or when an agreement already exists. Applying
+writes a `source=migration` agreement recording what is already happening —
+and makes **no Stripe call at all**, because creating or modifying a
+subscription here is exactly the repricing this phase forbids.
+
+### Tests: 35 new, 228 across the billing surface, all passing
+
+Includes both repricing tests (edit `PLANS` under a live agreement; edit
+`brand_packages` under a live agreement — the amount does not move), read-only
+proofs asserted against the recorded Stripe call list and a field-by-field
+database snapshot, and legacy-checkout compatibility. Three deliberate
+mutations — a catalogue fallback in the proposal, a quiet local write in
+reconciliation, and the removal of the checkout agreement guard — were each
+caught before being reverted.
+
+### Limitations
+
+- Nothing migrates legacy customers automatically. `apply=True` is per
+  organization, by a human, after reading the proposal.
+- `reconcile_all` reads Stripe once per organization; it is an ops tool, not a
+  page-load.
+- The `× 11` annual formula stays as it is. P5 does not redesign pricing.
