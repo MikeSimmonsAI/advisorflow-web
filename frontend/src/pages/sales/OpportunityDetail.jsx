@@ -16,6 +16,7 @@ import FindTeamTime from './FindTeamTime'
 import ApptSyncPanel from './ApptSyncPanel'
 import RescheduleDialog from './RescheduleDialog'
 import ProposalPanel from './ProposalPanel'
+import DemoSitesPanel from './DemoSitesPanel'
 import ClosingPanel from './ClosingPanel'
 import ReassignControl from './ReassignControl'
 import {
@@ -797,6 +798,12 @@ export default function OpportunityDetail() {
 
           <div className="sw-mt"><Discovery opp={opp} onSave={saveDiscovery} saving={saving} /></div>
           <div className="sw-mt"><DemoBuild opp={opp} team={team} onPatch={patch} saving={saving} /></div>
+          {/* Directly under the demo build panel, because publishing the demo
+              is the step that panel has been tracking. Publishing a platform
+              walkthrough fills in DEMO URL and flips the status to ready on
+              the server, so `load` refreshes the panel above rather than
+              leaving it stale. */}
+          <div className="sw-mt"><DemoSitesPanel opp={opp} onChanged={load} /></div>
           <div className="sw-mt">
             <PackageDeal opp={opp} packages={packages} onPatch={patch} saving={saving} />
           </div>
