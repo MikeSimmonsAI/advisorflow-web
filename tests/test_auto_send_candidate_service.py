@@ -10,7 +10,13 @@ what the reply says.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from app.models.models import Lead, Reply, ReplyClassification, AutoSendCandidate
+from app.models.models import Lead, Reply, ReplyClassification
+# The queue row this service writes is AutoSendItem, defined on the router
+# (table auto_send_queue) - it superseded the old AutoSendCandidate model in
+# app.models.models. Field mapping, unchanged in meaning:
+#     reply_id -> source_ref   eligibility_reasoning -> ai_reason
+#     ai_drafted_body -> message
+from app.routers.auto_send_router import AutoSendItem
 from app.services.auto_send_candidate_service import maybe_create_candidate
 
 
@@ -39,7 +45,7 @@ def test_default_off_phase_creates_no_candidate_and_makes_no_api_call(db_session
 
     assert result is None
     mock_check.assert_not_called()
-    assert db_session.query(AutoSendCandidate).count() == 0
+    assert db_session.query(AutoSendItem).count() == 0
 
 
 def test_explicit_off_phase_also_creates_nothing(db_session, sample_org, sample_advisor):
@@ -83,10 +89,10 @@ def test_candidate_phase_with_eligible_reply_creates_a_real_row(db_session, samp
         result = maybe_create_candidate(db_session, reply, lead)
 
     assert result is not None
-    assert result.reply_id == reply.id
+    assert result.source_ref == reply.id
     assert result.advisor_id == sample_advisor.id
-    assert result.eligibility_reasoning == "Simple scheduling question."
-    assert db_session.query(AutoSendCandidate).count() == 1
+    assert result.ai_reason == "Simple scheduling question."
+    assert db_session.query(AutoSendItem).count() == 1
 
 
 def test_candidate_phase_with_ineligible_reply_creates_nothing(db_session, sample_org, sample_advisor):
@@ -100,7 +106,7 @@ def test_candidate_phase_with_ineligible_reply_creates_nothing(db_session, sampl
         result = maybe_create_candidate(db_session, reply, lead)
 
     assert result is None
-    assert db_session.query(AutoSendCandidate).count() == 0
+    assert db_session.query(AutoSendItem).count() == 0
 
 
 def test_auto_phase_also_runs_the_eligibility_check(db_session, sample_org, sample_advisor):
@@ -163,7 +169,7 @@ def test_eligibility_check_raising_an_exception_creates_no_candidate(db_session,
         result = maybe_create_candidate(db_session, reply, lead)
 
     assert result is None
-    assert db_session.query(AutoSendCandidate).count() == 0
+    assert db_session.query(AutoSendItem).count() == 0
 
 
 def test_reply_with_no_classification_creates_nothing(db_session, sample_org, sample_advisor):
@@ -209,10 +215,10 @@ def test_eligible_candidate_gets_a_real_drafted_reply(db_session, sample_org, sa
     assert result is not None
     # No OPENAI_API_KEY in the test environment, so draft_reply's own
     # internal fallback fires - the real, important thing being
-    # confirmed here is that ai_drafted_body is NOT left empty, not
+    # confirmed here is that the drafted message is NOT left empty, not
     # which exact fallback text it contains.
-    assert result.ai_drafted_body != ""
-    assert isinstance(result.ai_drafted_body, str)
+    assert result.message != ""
+    assert isinstance(result.message, str)
 
 
 def test_drafting_failure_still_creates_candidate_with_empty_draft_not_a_crash(db_session, sample_org, sample_advisor):
@@ -229,4 +235,4 @@ def test_drafting_failure_still_creates_candidate_with_empty_draft_not_a_crash(d
         result = maybe_create_candidate(db_session, reply, lead)
 
     assert result is not None
-    assert result.ai_drafted_body == ""
+    assert result.message == ""

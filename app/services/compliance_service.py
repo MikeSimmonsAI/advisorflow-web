@@ -9,7 +9,7 @@ completely unaware of it.
 """
 
 from sqlalchemy.orm import Session
-from app.models.models import SuppressionEntry, SuppressionSource
+from app.models.models import Lead, SuppressionEntry, SuppressionSource
 from app.routers.compliance_router import normalize_phone
 
 
@@ -33,6 +33,53 @@ def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
         .first()
         is not None
     )
+
+
+def check_compliance_preflight(db: Session, lead: Lead) -> None:
+    """
+    Channel-agnostic pre-send compliance gate. Returns None when the lead
+    is clear to contact, and raises ValueError otherwise - the same
+    contract, and the same two checks in the same order, that
+    sms_service.send_sms already performs inline before every text.
+
+    THIS CONSOLIDATES EXISTING LOGIC. IT DOES NOT INVENT A NEW RULE.
+
+      1. Lead.status == DNC blocks EVERY channel. The signal is on the
+         lead, not on a phone number, so a STOP received by text must
+         also stop email to the same family - and an email-only lead
+         with no phone to suppress is still blocked by it.
+      2. The suppression list is an ADDITIONAL, independent guard, never
+         a substitute for check 1: a number can sit in the Compliance
+         Center's list while its matching Lead.status was never updated
+         to DNC. A lead with no phone has nothing to check here and
+         passes this step rather than erroring.
+
+    WIRING NOTE, read this before calling it: adding this call to a send
+    path CHANGES what that path blocks, which is a behaviour change and
+    not something to do casually. The SMS paths in sms_service already
+    perform both checks inline and need no change. The email path in
+    email_service.send_email_to_lead currently checks neither, so routing
+    it through here would start blocking DNC'd email leads that go out
+    today - correct, almost certainly wanted, and still a deliberate
+    decision rather than a side effect of this function existing.
+    """
+    status = getattr(lead, "status", None)
+    # LeadStatus is a str enum, so a plain string column value and the enum
+    # member compare equal; normalise anyway so neither form slips through.
+    status_value = getattr(status, "value", status)
+    if status_value == "dnc":
+        raise ValueError(
+            f"Lead {lead.id} is marked DNC - blocked from sending on any channel."
+        )
+
+    phone = getattr(lead, "phone", None)
+    if phone and is_phone_suppressed(db, lead.organization_id, phone):
+        raise ValueError(
+            f"Lead {lead.id}'s phone number is on the suppression list - "
+            f"blocked from sending."
+        )
+
+    return None
 
 
 def add_suppression_entry(
