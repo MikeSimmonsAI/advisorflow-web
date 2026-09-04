@@ -5,7 +5,7 @@ activation. Nothing in this plan should be run against a live Stripe account.
 
 ## Nothing here has been executed yet
 
-P0–P7 are covered entirely by unit tests with Stripe faked. No sandbox call
+P0–P8 are covered entirely by unit tests with Stripe faked. No sandbox call
 has been made from this session, and none can be until test-mode credentials
 exist in the environment. Secrets come from environment/deployment secret
 management — never from chat, never from the database, never committed.
@@ -17,6 +17,30 @@ management — never from chat, never from the database, never committed.
 | `STRIPE_SECRET_KEY` | test-mode key (`sk_test_...`) |
 | `STRIPE_WEBHOOK_SECRET` | signing secret for the test webhook endpoint |
 | `STRIPE_PUBLISHABLE_KEY` | if the checkout flow is exercised from the UI |
+
+## Before any step: what only a human can configure
+
+None of the steps below work until these exist, and none can be done from code.
+
+**Keys — test mode only, never committed.** Set in Render's environment:
+`STRIPE_SECRET_KEY` (`sk_test_...`; a live key is refused by the application),
+`STRIPE_WEBHOOK_SECRET` (`whsec_...` for the TEST endpoint), `APP_BASE_URL`,
+and `STRIPE_PUBLISHABLE_KEY` if checkout is exercised from the UI.
+
+**Stripe Dashboard, in test mode:**
+- **Business branding** — legal name, support email, address, logo. These
+  appear on every hosted invoice and in the portal; the invoice says who is
+  billing the customer.
+- **Payment method configuration, per flow.** This is the decision that
+  determines what customers can actually pay with: the application names no
+  method anywhere and defers to this entirely. Enable what you want offered on
+  one-time invoices (including BNPL if wanted) and, separately, what may be
+  saved for recurring collection.
+- **Invoice settings** — default due days, footer, memo.
+- **Billing Portal configuration** — which actions a customer may take
+  (payment method update at minimum) and the return URL.
+- **Webhook endpoint** at `POST /billing/webhook` — see step 2.
+- Record the test account's `acct_...` id for step 1.
 
 ## Steps that need a human and a Stripe dashboard
 
@@ -191,3 +215,31 @@ PaymentIntent or retries a failed payment; payments are read from the P0 mirror
 only, and recovery happens in the Stripe portal and arrives back by webhook.
 There is no route that bills a setup fee, so the one-time flow can only be
 exercised through an invoice created by hand in the dashboard.
+
+## P8 steps — integrity and webhook health
+
+39. **The integrity check changes nothing at Stripe.** Record a test
+    subscription's id, status and amount, and one invoice's status. Run
+    `GET /platform/billing/integrity`. Compare all four — they must be
+    identical, and the Stripe dashboard's event log must show only reads.
+40. **A real discrepancy is detected.** Change an invoice's status in the
+    Stripe dashboard (void an open one), then run the check. It must appear as
+    `stale_invoice_status` with both values.
+41. **A safe repair fixes it.** Preview the repair — it must show the change
+    without making it — then apply it and confirm the local invoice matches
+    Stripe, and that nothing else about the organization moved.
+42. **A business change is refused.** Change a subscription's price in the
+    Stripe dashboard so it disagrees with the agreement. The check must report
+    `amount_disagreement` as critical with both numbers, and the repair
+    endpoint must refuse it with a 400. **Restore the price afterwards.**
+43. **Webhook health reflects reality.** Send a test event from the dashboard
+    and confirm it appears as processed. Then temporarily break the endpoint
+    (a wrong signing secret), send another, and confirm it appears as failed
+    with its type and error — and that no payload or secret is shown.
+    **Restore the secret.**
+44. **A failed webhook replays.** With the secret restored, replay the failed
+    event from the Health tab and confirm it reaches processed and its
+    consequence is applied locally.
+45. **The audit trail records the run.** Confirm `billing_reconciliation_run`
+    and `billing_safe_repair_applied` appear in `/god/audit` with the acting
+    user.

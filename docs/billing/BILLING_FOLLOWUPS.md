@@ -226,3 +226,37 @@ undo. What is missing is modelling, and it belongs in P6:
   component both import, and that test updated deliberately rather than
   deleted.
 
+## Found during P8
+
+- **`stripe_webhook_events` has no `organization_id`.** The ledger records the
+  event, not a tenant, so a failed-webhook queue row carries no organization —
+  attributing one would mean parsing a stored payload, which is customer
+  payment detail. Adding the column at claim time (from the event's customer)
+  would make webhook failures triageable per customer, and is worth doing.
+- **The integrity run reads invoices and payments into memory.** Same shape as
+  the P7 dashboard and the same answer: correct at current volume, wants
+  aggregate SQL before it is thousands of rows.
+- **`missing_local_invoice` is detected only for customers we already know.**
+  The check lists invoices for each local `stripe_customer_id`, so a Stripe
+  customer with no local reference at all is invisible to it. Detecting those
+  needs a full `Customer.list` sweep, which is a different and much more
+  expensive operation — a nightly job rather than an on-demand check.
+- **The safe-repair whitelist is enforced by an import-time assertion.** That
+  is deliberate and it works, but an `assert` is stripped under `python -O`.
+  Production does not run optimised, so this is a note rather than a defect;
+  converting it to a raised exception would remove the caveat entirely.
+- **`organizations.stripe_customer_id` still is not UNIQUE.** P8 now *detects*
+  duplicates as a critical finding, which limits the blast radius, but the
+  constraint remains the real fix and still needs a duplicate sweep first.
+- **Repairs are one at a time, by design.** There is no "repair all" and there
+  should not be one without a reviewed plan step: the dangerous version of this
+  tooling is the one somebody runs across a whole findings list to clear the
+  queue.
+- **Webhook replay depends on `payload_json` being retained.** An event whose
+  body was not stored can only be redelivered from the Stripe dashboard. Worth
+  confirming retention is on for every event type P0 handles.
+- **`stale_org_billing_status` mirrors `apply_invoice_state_to_organization`
+  rather than calling it.** Two implementations of the same narrow rule. They
+  agree today and are tested; folding the detection into the P0 function would
+  keep them from drifting.
+

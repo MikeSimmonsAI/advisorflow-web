@@ -480,7 +480,7 @@ reverted.
 
 ---
 
-## P7 — the back-office Billing Command Center (uncommitted)
+## P7 — the back-office Billing Command Center (commit 5b5c165)
 
 The platform surface. **A different surface from P6, not a wider version of
 it** — different authority, different data, no shared code, asserted by test.
@@ -619,3 +619,125 @@ id, and pointing the command center at a customer endpoint.
   rows.
 - Autopay in the detail view costs one `Subscription.retrieve` per
   organization opened, so it is not shown in the list.
+
+---
+
+## P8 — integrity, health and production readiness (uncommitted)
+
+The phase that asks whether what the other eight phases did is still true.
+
+### Reconciliation — 22 discrepancy types
+
+`app/services/billing_integrity.py`. Every check is a checkable fact, graded so
+a queue of forty findings is read in the order money is at risk.
+
+| Severity | Meaning |
+|---|---|
+| critical | money is wrong or unaccounted for right now |
+| high | a customer is being billed incorrectly, or not at all |
+| medium | a record that disagrees with itself |
+| low | untidy |
+
+**Stale mirror — Stripe is right, we are behind (safe to repair):**
+`stale_invoice_status`, `missing_local_invoice`, `stale_org_billing_status`,
+`unresolved_past_due`, `recovered_but_past_due`, `webhook_failed`,
+`webhook_stuck`.
+
+**Money disagreements — a human decides:** `amount_disagreement`,
+`currency_disagreement`, `deal_amount_disagreement`.
+
+**References that do not resolve — a human decides:**
+`missing_stripe_customer`, `missing_stripe_subscription`,
+`missing_stripe_invoice`, `customer_owned_by_another_organization`,
+`duplicate_customer_mapping`, `duplicate_subscription_mapping`.
+
+**Structural — a human decides:** `agreement_without_subscription`,
+`subscription_without_agreement`, `merchant_mismatch`, `brand_mismatch`,
+`orphan_invoice`, `orphan_payment`.
+
+### The rule: report first, never reprice
+
+`run()` has **no mutation path** — asserted structurally (it has no `apply`,
+`dry_run`, `repair`, `fix` or `write` parameter) and behaviourally (against the
+recorded Stripe call list *and* a field-by-field database snapshot). Stripe is
+read with `retrieve` and `list` only; the test fake raises on every mutating
+verb, so an attempted mutation breaks loudly rather than being counted later.
+
+### Safe repair versus business change
+
+**Safe** means Stripe is the authority, we already know what it says, and our
+row disagrees — copying its answer corrects a record of money that already
+moved. **A business change** is something a human decided or must decide.
+
+`apply_repair` defaults to a dry run, and the refusal is **a whitelist, not a
+policy check**: a code outside `SAFE_REPAIRS` has no implementation behind it.
+The module asserts at import that its safe list and its implementations match,
+so marking a repricing repair "safe" does not fail a test — **it fails to
+load**. Verified by mutation.
+
+The awkward middle is deliberately on the human side: "Stripe charges $349 and
+the agreement says $499" is reported with both numbers and never resolved,
+because either side could be the wrong one and picking one reprices somebody.
+
+### Webhook health
+
+Received, processed, failed, stuck (with the oldest age), redelivered, last
+processed, last failure, repeated failure types, and up to 25 failing events
+with type, attempts and error. **Never a payload** — a stored body carries
+customer payment detail — and never the signing secret, which is not in the
+database at all. Both asserted.
+
+A failed or stuck event is replayed **from its stored body**, through the same
+handler live delivery uses, so a replay cannot take a different path from a
+first delivery and the handler's own idempotency and staleness guards still
+apply.
+
+### Endpoints (platform authority, as P7)
+
+| Endpoint | Writes |
+|---|---|
+| `GET /platform/billing/integrity` | nothing |
+| `GET /platform/billing/webhook-health` | nothing |
+| `POST /platform/billing/integrity/repair` | one safe local repair, `apply` defaults to false |
+
+The reconciliation **run** is audited too: reading every customer's billing
+state is privileged even though it changes nothing, and an audit trail that
+records only writes cannot answer "who looked".
+
+### Frontend
+
+A third **Health** tab on the P7 command center — not a redesign. Severity
+tiles, webhook pipeline facts, and the discrepancy queue. A finding needing a
+human offers nothing to click; the absence of a button is the point.
+
+### The final review, as executable tests
+
+The whole-system audit is assertions rather than assurances, run across every
+billing source file at once:
+
+- no float money arithmetic anywhere in billing
+- `current_user.organization_id` is never a billing authority — checked through
+  the **AST**, so comments explaining its removal do not trip the test and a
+  real use cannot hide inside a string
+- `PLANS` is imported as pricing authority nowhere outside the legacy checkout
+- no payment method is named as a gate; the only method names are a
+  display-label map read with a fallback
+- no secret reaches any frontend file, and no model stores one
+- the live-key refusal still holds
+- every billing model module is in `registry.py`; every billing column on a
+  pre-existing table is in `auto_migrate`; no billing code imports Alembic
+- the two frontend surfaces remain separate
+
+### Tests: 63 new, 396 across the billing surface, all passing
+
+Four mutations reverted: marking an amount disagreement safely repairable
+(fails at import), defaulting the repair to apply, widening the billing-status
+repair to also write `plan`, and leaking the webhook payload.
+
+### Limitations
+
+- No sandbox run has happened. See `BILLING_PRODUCTION_READINESS.md`.
+- The integrity run reads invoices and payments into memory; correct at current
+  volume, wants aggregate SQL at scale.
+- Webhook findings carry no organization — the event ledger records the event,
+  not a tenant, and attributing one would mean parsing a stored payload.

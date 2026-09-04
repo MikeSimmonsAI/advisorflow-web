@@ -812,6 +812,214 @@ function OrgDetail({ orgId, data, onBack, onReload, onNotice, notice, error }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * HEALTH — P8 integrity and webhook status.
+ *
+ * A COMPACT THIRD TAB, not a redesign of the command center. Everything here
+ * is read-only except one button, and that button defaults to showing what it
+ * would do.
+ *
+ * The queue is graded by severity because a list of forty findings is only
+ * useful if it is read in the order money is at risk. Findings that need a
+ * human say so and offer nothing to click: creating a subscription, changing
+ * an amount, reassigning a legal seller are decisions, and this screen must
+ * not be able to make one.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const SEVERITY_TONE = { critical: 'blocked', high: 'warn', medium: 'new',
+                        low: 'ready' }
+
+function Health({ data, webhooks, loading, error, onRepair, onRerun, busy,
+                  repairs, stripeChecked }) {
+  if (loading) return <div className="go-empty">Checking billing integrity…</div>
+  if (error) {
+    return (
+      <div className="go-note err">
+        The integrity check could not run. {error}
+        <div className="go-actions bcc-actions">
+          <button className="go-btn ghost sm" onClick={onRerun}>Try again</button>
+        </div>
+      </div>
+    )
+  }
+  if (!data) return <div className="go-empty">No integrity report yet.</div>
+
+  const findings = data.findings || []
+  const sev = data.by_severity || {}
+
+  return (
+    <>
+      <div className="go-kpis">
+        <div className={`go-kpi ${sev.critical ? 'alert' : ''}`}>
+          <div className="k">Critical</div>
+          <div className="v">{sev.critical || 0}</div>
+          <div className="s">money wrong or unaccounted for</div>
+        </div>
+        <div className={`go-kpi ${sev.high ? 'alert' : ''}`}>
+          <div className="k">High</div>
+          <div className="v">{sev.high || 0}</div>
+          <div className="s">billed incorrectly, or not at all</div>
+        </div>
+        <div className="go-kpi">
+          <div className="k">Needs a human</div>
+          <div className="v">{data.requires_human || 0}</div>
+          <div className="s">business decisions, not repairs</div>
+        </div>
+        <div className="go-kpi good">
+          <div className="k">Safe repairs</div>
+          <div className="v">{data.safe_repairs_available || 0}</div>
+          <div className="s">stale mirror, Stripe is authority</div>
+        </div>
+        <div className={`go-kpi ${webhooks?.failed ? 'alert' : ''}`}>
+          <div className="k">Webhooks failed</div>
+          <div className="v">{webhooks?.failed ?? '—'}</div>
+          <div className="s">
+            {webhooks ? `${webhooks.processed} processed · ${webhooks.stuck} stuck` : ''}
+          </div>
+        </div>
+      </div>
+
+      <section className="go-panel">
+        <h2>Webhook pipeline</h2>
+        <div className="go-body">
+          {!webhooks ? (
+            <p className="go-dimmed bcc-note">Webhook health is unavailable.</p>
+          ) : (
+            <>
+              <div className="go-facts">
+                <Fact k="Received" v={`${webhooks.received} in ${webhooks.window_hours}h`} />
+                <Fact k="Processed" v={webhooks.processed} />
+                <Fact k="Failed" v={webhooks.failed} />
+                <Fact k="Stuck" v={webhooks.stuck
+                  ? `${webhooks.stuck} (oldest ${webhooks.oldest_stuck_minutes}m)`
+                  : 0} />
+                <Fact k="Redelivered" v={webhooks.redelivered} />
+                <Fact k="Last processed" v={formatDate(webhooks.last_processed_at)} />
+                <Fact k="Last failure" v={formatDate(webhooks.last_failed_at)} />
+              </div>
+              {(webhooks.repeated_failure_types || []).length ? (
+                <p className="bcc-note go-dimmed">
+                  Repeated failures:{' '}
+                  {webhooks.repeated_failure_types
+                    .map(t => `${t.event_type} (${t.count})`).join(' · ')}
+                </p>
+              ) : null}
+              {/* NO PAYLOAD, EVER. A stored event body carries customer
+                  payment detail; the type, the age and the error are what an
+                  operator needs to act. */}
+              <p className="bcc-note go-dimmed">
+                Event bodies are never shown here.
+              </p>
+            </>
+          )}
+        </div>
+      </section>
+
+      <section className="go-panel">
+        <h2>
+          Discrepancies<span className={`count ${findings.length ? 'hot' : ''}`}>
+            {findings.length}
+          </span>
+          <button className="go-btn ghost sm bcc-head-btn" onClick={onRerun}
+                  disabled={busy === 'rerun'}>
+            {busy === 'rerun' ? 'Checking…' : 'Re-run check'}
+          </button>
+        </h2>
+        <div className="go-body">
+          <p className="bcc-note go-dimmed">
+            {stripeChecked
+              ? 'Checked against Stripe and against local records.'
+              : `Local records only — ${data.stripe_unavailable_reason || 'Stripe was not read'}.`}
+            {' '}This check writes nothing.
+          </p>
+        </div>
+        {findings.length === 0 ? (
+          <div className="go-empty">
+            No discrepancies. Stripe and the local mirror agree.
+          </div>
+        ) : (
+          <div className="bcc-scroll">
+            <table className="go-table">
+              <thead>
+                <tr>
+                  <th>Severity</th><th>Issue</th><th>Organization</th>
+                  <th>Local</th><th>Stripe</th><th>Detail</th>
+                  <th>Resolution</th><th />
+                </tr>
+              </thead>
+              <tbody>
+                {findings.map((f, i) => {
+                  const key = `${f.code}:${f.target_id}`
+                  const done = repairs[key]
+                  return (
+                    <tr key={`${key}-${i}`}>
+                      <td>
+                        <span className={`go-badge ${SEVERITY_TONE[f.severity] || 'ready'}`}>
+                          {titleize(f.severity)}
+                        </span>
+                      </td>
+                      <td>{titleize(f.code)}</td>
+                      <td>{f.organization_name || <span className="go-dimmed">—</span>}</td>
+                      <td className="go-dimmed bcc-mono">
+                        {f.local_value === null || f.local_value === undefined
+                          ? '—' : String(f.local_value)}
+                      </td>
+                      <td className="go-dimmed bcc-mono">
+                        {f.stripe_value === null || f.stripe_value === undefined
+                          ? '—' : String(f.stripe_value)}
+                      </td>
+                      <td className="go-dimmed bcc-detail" title={f.detail}>
+                        {f.detail || f.what}
+                      </td>
+                      <td className="go-dimmed bcc-detail" title={f.proposed_action}>
+                        {f.requires_human
+                          ? <span className="go-badge warn">Human review</span>
+                          : <span className="go-badge ready">Safe repair</span>}
+                      </td>
+                      <td>
+                        {/* A finding needing a human offers NOTHING to click.
+                            The absence of a button is the point. */}
+                        {f.safe_repair && f.target_id ? (
+                          done ? (
+                            <span className="go-dimmed">{done}</span>
+                          ) : (
+                            <div className="go-actions">
+                              <button className="go-btn ghost sm"
+                                      disabled={busy === key}
+                                      onClick={() => onRepair(f, false)}>
+                                Preview
+                              </button>
+                              <button className="go-btn sm"
+                                      disabled={busy === key}
+                                      onClick={() => onRepair(f, true)}>
+                                Repair
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <span className="go-dimmed">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <p className="bcc-basis go-dimmed">
+        Integrity checks read Stripe and never write to it. Repairs correct the
+        local mirror only, from state Stripe has already confirmed. Anything
+        that would change what a customer pays is reported for human review and
+        has no action here.
+      </p>
+    </>
+  )
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * PAGE
  * ═════════════════════════════════════════════════════════════════════════ */
 
@@ -825,9 +1033,15 @@ export default function BillingCommandCenter() {
   const [detail, setDetail] = useState(null)
   const [detailError, setDetailError] = useState(null)
   const [notice, setNotice] = useState(null)
+  const [busy, setBusy] = useState(null)
   const [loading, setLoading] = useState(true)
   const [listLoading, setListLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [health, setHealth] = useState(null)
+  const [webhooks, setWebhooks] = useState(null)
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [healthError, setHealthError] = useState(null)
+  const [repairs, setRepairs] = useState({})
 
   useEffect(() => {
     let cancelled = false
@@ -852,6 +1066,53 @@ export default function BillingCommandCenter() {
     }, 250)
     return () => { cancelled = true; clearTimeout(t) }
   }, [tab, filter, query])
+
+  const loadHealth = useCallback(async () => {
+    setHealthLoading(true)
+    setHealthError(null)
+    try {
+      const [report, hooks] = await Promise.all([
+        api.get('/platform/billing/integrity'),
+        api.get('/platform/billing/webhook-health'),
+      ])
+      setHealth(report)
+      setWebhooks(hooks)
+    } catch (err) {
+      setHealthError(err?.message || 'It may be temporarily unavailable.')
+    } finally {
+      setHealthLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'health' && health === null && !healthLoading) loadHealth()
+  }, [tab, health, healthLoading, loadHealth])
+
+  /* PREVIEW AND REPAIR ARE THE SAME CALL. The only difference is `apply`,
+   * which defaults to false server-side too - so a mistake here shows a plan
+   * rather than changing something. */
+  const repair = useCallback(async (finding, apply) => {
+    const key = `${finding.code}:${finding.target_id}`
+    setBusy(key)
+    try {
+      const result = await api.post('/platform/billing/integrity/repair',
+        { code: finding.code, target_id: finding.target_id, apply })
+      const plan = result.plan || {}
+      if (result.applied) {
+        setRepairs(r => ({ ...r, [key]: `Repaired: ${plan.from ?? '—'} → ${plan.to ?? '—'}` }))
+        loadHealth()
+      } else if (!plan.actionable) {
+        setRepairs(r => ({ ...r, [key]: plan.reason || 'Nothing to do' }))
+      } else {
+        setNotice({ ok: true,
+          text: `Would change ${plan.from ?? '—'} to ${plan.to ?? '—'}. Nothing was written.` })
+      }
+    } catch (err) {
+      setNotice({ ok: false, text: err?.message || 'That repair was refused.' })
+    } finally {
+      setBusy(null)
+    }
+  }, [loadHealth])
 
   const loadDetail = useCallback((orgId) => {
     setDetail(null)
@@ -909,9 +1170,22 @@ export default function BillingCommandCenter() {
                 onClick={() => setTab('organizations')}>
           Organizations
         </button>
+        <button className={`go-tab ${tab === 'health' ? 'on' : ''}`}
+                onClick={() => { setTab('health'); setSelected(null) }}>
+          Health
+        </button>
       </div>
 
-      {tab === 'dashboard' ? (
+      {notice && tab === 'health' ? (
+        <div className={`go-note ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div>
+      ) : null}
+
+      {tab === 'health' ? (
+        <Health data={health} webhooks={webhooks} loading={healthLoading}
+                error={healthError} onRepair={repair} onRerun={loadHealth}
+                busy={healthLoading ? 'rerun' : busy} repairs={repairs}
+                stripeChecked={!!health?.stripe_checked} />
+      ) : tab === 'dashboard' ? (
         <>
           <Dashboard data={dashboard} onOpen={open} />
           <p className="bcc-basis go-dimmed">{dashboard.basis}</p>

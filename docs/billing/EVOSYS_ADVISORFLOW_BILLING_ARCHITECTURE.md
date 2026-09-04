@@ -270,8 +270,8 @@ join alone cannot promise that.
 | P4 | Stripe customer / invoice / subscription / payment operations | COMPLETE (264c452) |
 | P5 | `PLANS` retirement / pricing migration | COMPLETE (9de5b62) |
 | P6 | organization billing UI | COMPLETE (0208cad) |
-| P7 | platform billing command centre | COMPLETE (uncommitted) |
-| P8 | reconciliation tooling | not started |
+| P7 | platform billing command centre | COMPLETE (5b5c165) |
+| P8 | reconciliation, health and production readiness | COMPLETE (uncommitted) |
 | Later | production activation | not started |
 
 **Do not collapse the phases. Do not move to the next phase automatically.**
@@ -646,3 +646,46 @@ Endpoint list, the metric sources and the audit actions are in
 **P6 is untouched.** The two surfaces share no code and no prefix, and a test
 asserts both: the command center calls only `/platform/billing/*`, and the
 customer page calls none of it.
+
+---
+
+## 22. P8 — integrity, health and production readiness — BUILT
+
+The billing BUILD phase ends here. P8 added no new commercial concept; it added
+the ability to tell whether the previous eight phases are still telling the
+truth.
+
+**Report first, never reprice.** `billing_integrity.run()` detects 22 kinds of
+disagreement between Stripe, the local mirror and the system's own records, and
+has no code path that writes. Repairs are separate, default to a dry run, and
+are restricted to a whitelist of stale-mirror corrections — the module asserts
+at import that its safe list matches its implementations, so a repricing
+"repair" cannot even load.
+
+**The line between a repair and a decision.** Copying Stripe's confirmed answer
+into our row changes no money; it corrects a record of money that already
+moved. Creating or cancelling a subscription, changing an amount, a currency, a
+term, a legal seller or a brand are decisions. Nothing in P8 does the second
+kind, on request or otherwise, and the awkward middle — Stripe and the
+agreement naming different amounts — is on the decision side, because either
+could be the wrong one.
+
+**Failures are visible and recoverable.** A webhook that exhausted its retries
+becomes a queue row and can be replayed from its stored body through the same
+handler live delivery uses. A Stripe object created while the local write
+failed is already logged by P4's orphan logger and now surfaces as a finding.
+A stale status is detected and safely corrected.
+
+**Production readiness is documented honestly** in
+`BILLING_PRODUCTION_READINESS.md`: what is built, what still needs a real
+sandbox, what only a human with the Stripe dashboard can configure, and the one
+real blocker. **Nothing in this system has ever run against a real Stripe
+account.** The unit tests prove what this code does with money and tenancy;
+they cannot prove Stripe behaves as assumed, and that gap is the next step —
+not a defect.
+
+**The final security, money, payment-method and migration review is executable
+rather than asserted** — a set of tests that read every billing source file and
+fail if float money arithmetic, a legacy tenant authority, a hardcoded payment
+method, a stored secret, or an unregistered model ever reappears. Those tests
+are the review, and they run on every future change.

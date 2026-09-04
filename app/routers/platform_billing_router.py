@@ -40,9 +40,11 @@ from app.deps import get_current_user, get_db
 from app.models.models import User
 from app.routers.audit_log_router import log_action
 from app.services import billing_operations as ops
+from app.services import billing_integrity as integrity
 from app.services import platform_billing as pb
 from app.services.billing_operations import BillingOperationRefused
 from app.services.capabilities import require_capability
+from app.services.billing_integrity import RepairRefused
 from app.services.platform_billing import PlatformBillingRefused
 from app.services.stripe_gateway import (LiveModeRefused,
                                          StripeOperationFailed,
@@ -82,7 +84,8 @@ def _handle(fn, *args, **kwargs):
     """
     try:
         return fn(*args, **kwargs)
-    except (PlatformBillingRefused, BillingOperationRefused) as exc:
+    except (PlatformBillingRefused, BillingOperationRefused,
+            RepairRefused) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except LiveModeRefused as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -334,3 +337,94 @@ def open_portal(organization_id: str,
                                    "session for this customer.")
     _audit(db, actor, org.id, "billing_portal_opened", "organization", org.id)
     return {"portal_url": session.url}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# P8 — INTEGRITY, HEALTH AND REPAIR
+#
+# Read endpoints write nothing: `integrity.run` has no mutation path at all.
+# The one write endpoint defaults to a dry run and refuses, structurally, any
+# discrepancy whose resolution is a business decision - creating or cancelling
+# a subscription, changing an amount, a currency, a term, a legal seller. Those
+# are not implemented, which is a stronger guarantee than not being permitted.
+# ═════════════════════════════════════════════════════════════════════════════
+
+@router.get("/integrity")
+def billing_integrity(organization_id: Optional[str] = None,
+                      include_stripe: bool = True, limit: int = 200,
+                      actor: User = Depends(require_platform_billing),
+                      db: Session = Depends(get_db)):
+    """Does the mirror still agree with Stripe, and with itself.
+
+    `include_stripe=false` runs the local-only checks, which is what a
+    dashboard wants and what still works during a Stripe outage.
+
+    THE RUN ITSELF IS AUDITED. Reading every customer's billing state is a
+    privileged action even though it changes nothing, and an audit trail that
+    records only writes cannot answer "who looked".
+    """
+    report = _handle(integrity.run, db, organization_id, include_stripe, limit)
+    _audit(db, actor, organization_id, "billing_reconciliation_run",
+           "organization", organization_id or "all",
+           {"organizations_checked": report["organizations_checked"],
+            "findings": report["total_findings"],
+            "by_severity": report["by_severity"],
+            "stripe_checked": report["stripe_checked"]})
+    return report
+
+
+@router.get("/webhook-health")
+def stripe_webhook_health(window_hours: int = 168,
+                          actor: User = Depends(require_platform_billing),
+                          db: Session = Depends(get_db)):
+    """Is Stripe's side of the conversation being heard.
+
+    A stalled webhook pipeline is invisible from every other screen - nothing
+    errors, the numbers simply stop moving. Counts, types, ages and error text
+    only: never a stored event body, which carries customer payment detail, and
+    never the signing secret, which is not in the database at all.
+    """
+    return _handle(integrity.webhook_health, db, 30, window_hours)
+
+
+class RepairRequest(BaseModel):
+    code: str
+    target_id: str
+    # DRY RUN IS THE DEFAULT AND HAS TO BE TURNED OFF DELIBERATELY. The
+    # dangerous version of this endpoint is the one somebody runs across a
+    # whole findings list to "clear the queue".
+    apply: bool = False
+
+
+@router.post("/integrity/repair")
+def repair_discrepancy(req: RepairRequest,
+                       actor: User = Depends(require_platform_billing),
+                       db: Session = Depends(get_db)):
+    """Apply ONE safe local-mirror repair, or show what it would do.
+
+    Safe means Stripe is the authority, we already know what it says, and our
+    row disagrees - so copying its answer corrects a record of money that
+    already moved. Anything that would decide something is refused with a 400
+    naming why.
+    """
+    result = _handle(integrity.apply_repair, db, req.code, req.target_id,
+                     not req.apply)
+    if result.get("applied"):
+        _audit(db, actor, None, "billing_safe_repair_applied",
+               DISCREPANCY_TARGETS.get(req.code, "billing"), req.target_id,
+               {"code": req.code, "outcome": result.get("outcome")})
+    return result
+
+
+# What each repairable code acts on, for the audit trail's target_type. Kept
+# here rather than in the service because it describes the audit vocabulary,
+# not the repair.
+DISCREPANCY_TARGETS = {
+    "stale_invoice_status": "invoice",
+    "missing_local_invoice": "stripe_invoice",
+    "stale_org_billing_status": "organization",
+    "unresolved_past_due": "organization",
+    "recovered_but_past_due": "organization",
+    "webhook_failed": "webhook_event",
+    "webhook_stuck": "webhook_event",
+}
