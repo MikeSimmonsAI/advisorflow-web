@@ -85,10 +85,23 @@ def _stripe_client():
     return stripe
 
 
-def _require_admin(current_user: User = Depends(get_current_user)):
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
-        raise HTTPException(status_code=403, detail="Billing access requires admin role.")
-    return current_user
+# ── THE LEGACY GUARD IS GONE. See app/services/billing_access.py ──────────
+#
+# `_require_admin` checked users.role and every route then read
+# `current_user.organization_id` to decide WHOSE billing it was acting on.
+# That column is the tenant a person was historically attached to, not the
+# workspace they are standing in, and for anyone holding more than one
+# membership those are different organizations. Billing was using the wrong
+# one, so a dual-workspace user's billing page showed - and could change -
+# whichever organization their column happened to name.
+#
+# require_billing_view / require_billing_manage resolve the ACTIVE
+# authorized workspace and hand the route a BillingScope carrying the
+# organization already resolved, so no endpoint re-derives it and none of
+# them can disagree.
+from app.services.billing_access import (BillingScope,  # noqa: E402
+                                         require_billing_manage,
+                                         require_billing_view)
 
 
 def _get_or_create_customer(org: Organization, db: Session) -> str:
@@ -121,7 +134,12 @@ def _get_or_create_customer(org: Organization, db: Session) -> str:
 # configuration.
 # ---------------------------------------------------------------------------
 @router.get("/plans")
-def get_plans(current_user: User = Depends(_require_admin)):
+def get_plans(scope: BillingScope = Depends(require_billing_view)):
+    """The catalogue a customer may choose from.
+
+    Carries no tenant data, but it stays behind billing_view: it is part of
+    the billing surface, and a route readable by anyone is a route somebody
+    eventually adds tenant data to."""
     return {"plans": PLANS}
 
 
@@ -130,12 +148,12 @@ def get_plans(current_user: User = Depends(_require_admin)):
 # ---------------------------------------------------------------------------
 @router.get("/subscription")
 def get_subscription(
-    current_user: User = Depends(_require_admin),
+    scope: BillingScope = Depends(require_billing_view),
     db: Session = Depends(get_db),
 ):
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    # The organization comes from the resolved scope - never from a column
+    # on the caller, never from anything the caller supplied.
+    org = scope.organization
 
     result = {
         "plan": org.plan or "trial",
@@ -172,7 +190,7 @@ class CheckoutRequest(BaseModel):
 @router.post("/checkout")
 def create_checkout(
     req: CheckoutRequest,
-    current_user: User = Depends(_require_admin),
+    scope: BillingScope = Depends(require_billing_manage),
     db: Session = Depends(get_db),
 ):
     if req.plan not in ("starter", "growth", "professional"):
@@ -183,9 +201,7 @@ def create_checkout(
     plan_info = PLANS[req.plan]
     _stripe_client()
 
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = scope.organization
 
     customer_id = _get_or_create_customer(org, db)
     # The customer paying is a funeral home on a white-label brand. Bouncing
@@ -228,13 +244,11 @@ def create_checkout(
 # ---------------------------------------------------------------------------
 @router.post("/portal")
 def create_portal(
-    current_user: User = Depends(_require_admin),
+    scope: BillingScope = Depends(require_billing_manage),
     db: Session = Depends(get_db),
 ):
     _stripe_client()
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    org = scope.organization
     if not getattr(org, "stripe_customer_id", None):
         raise HTTPException(status_code=400, detail="No billing account. Please select a plan first.")
 
@@ -356,7 +370,7 @@ def get_all_billing(
 # on is an explicit path parameter checked against the database, not inferred
 # from the caller's legacy column.
 #
-# The pre-existing `_require_admin` helper in this file still resolves the org
+# FIXED IN P3: the `_require_admin` helper described below is gone and the
 # from current_user.organization_id, which is the legacy authority path the
 # platform moved away from. That defect is REAL and is documented in
 # claude/BILLING_PHASE0_ARCHITECTURE.md §8; fixing it means re-gating the

@@ -33,6 +33,21 @@ project.** Recorded here so they are not lost and not argued about mid-phase.
   re-charge implementation. If a renewal ever should carry a fee, it must be
   passed explicitly in `new_terms`.
 
+## Found during P3
+
+- **The frontend does not send `X-Workspace-Id` on billing calls.** Billing now
+  resolves the active workspace, but a multi-workspace user's browser never
+  names one, so they fall through to the legacy column - the same organization
+  they got before. Not a hole (the fallback is still a workspace they hold),
+  but the switcher is not yet real for billing. Wire it in P6.
+- **`caps.resolve` gates on admin role before grants.** Billing bypasses that
+  wrapper deliberately (see the status document). If other non-administrative
+  capabilities appear later, the framework may want a role-optional variant
+  rather than each caller re-deriving the two gates.
+- **`billing_router.py` contains 42 bare-LF blank lines** from P0 in an
+  otherwise CRLF file. Left exactly as found - normalising them would be a
+  mass line-ending change. Worth one deliberate pass someday.
+
 ## Deferred to their own phases
 
 - **P3:** `billing_view` / `billing_manage` capabilities, and removing

@@ -8,7 +8,7 @@ Architecture: `docs/billing/EVOSYS_ADVISORFLOW_BILLING_ARCHITECTURE.md`
 | P0 | webhook / payment reliability | **complete** | `90d3bdb` |
 | P1 | merchant entity + brand configuration | **complete** | `8652900` |
 | P2 | BillingAgreement — executable relationship | **complete, uncommitted** | — |
-| P3 | billing security / tenant authority | not started | — |
+| P3 | billing security / tenant authority | **complete, uncommitted** | — |
 | P4 | billing backend operations | not started | — |
 | P5 | legacy `PLANS` migration | not started | — |
 | P6 | customer organization billing UI | not started | — |
@@ -82,3 +82,45 @@ backfill).
 - `activate()` does not verify a Stripe subscription exists. Deliberate: P2 has
   no Stripe client.
 - No router or endpoint yet — service layer only.
+
+---
+
+## P3 — billing authority (uncommitted)
+
+**Created**
+- `app/services/billing_access.py` — `BillingScope`, `resolve_billing_scope`,
+  `require_billing_view` / `require_billing_manage`, `assert_owns_stripe_customer`
+- `tests/test_billing_access.py`
+
+**Modified**
+- `app/services/capabilities.py` — registered `billing_view`, `billing_manage`
+  (both delegable)
+- `app/routers/billing_router.py` — `_require_admin` removed; `/plans`,
+  `/subscription`, `/checkout`, `/portal` re-gated
+
+**Authorization model**
+
+| Caller | Access |
+|---|---|
+| god / platform | per the existing platform model; the SUBJECT organization still comes from the active workspace |
+| org_admin of the ACTIVE workspace | baseline `billing_view` + `billing_manage`, that organization only |
+| anyone else | explicit two-gate capability grant only |
+
+Tenant authority is `lead_scope.active_workspace_org_id`; the org_admin test is
+`lead_scope.effective_role` (the membership role), not `users.role`.
+`current_user.organization_id` no longer appears in any billing route.
+No route accepts an organization id from the caller, so URL editing and UUID
+guessing have nothing to act on.
+
+**Deliberate deviation:** `_has_grant` calls `caps.org_may_self_manage` +
+`caps.user_has_grant` directly rather than `caps.resolve`, because `resolve`
+refuses non-admin roles before it reads grants — which would make a
+bookkeeper grant impossible, the exact case these capabilities exist for.
+Both gates still apply. The framework itself is unchanged.
+
+**Tests:** 16, mostly negative. Combined P0+P1+P2+P3: **105 passed**.
+
+**Limitations:** `assert_owns_stripe_customer` is a guard for the operations
+P4 adds — no current route accepts a customer id. Frontend still sends no
+`X-Workspace-Id` on billing calls, so single-workspace users are unaffected and
+multi-workspace users need the header wired in P6.

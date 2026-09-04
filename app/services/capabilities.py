@@ -112,6 +112,28 @@ CAPABILITIES: Dict[str, Capability] = dict([
          why="An A2P brand is bound permanently to the Twilio account that "
              "created it. Registering against the wrong account is the one "
              "messaging mistake that is genuinely painful to unwind."),
+    # ── Billing. Delegable so a bookkeeper who is NOT an org_admin can be
+    #    given billing access, which is the whole reason these are
+    #    capabilities rather than a role check.
+    #
+    #    THEY ARE NOT THE ONLY WAY IN, and that is deliberate. An org_admin
+    #    of the ACTIVE workspace holds both as a baseline - see
+    #    app/services/billing_access.py. Requiring a delegation plus a grant
+    #    before an existing customer could open their own billing page would
+    #    take away access they have today, on a payments screen, the moment
+    #    this deployed. A grant EXTENDS the baseline; it does not gate it.
+    _cap("billing_view",
+         "View billing: agreement, subscription, invoices and payments",
+         requires_feature=None, delegable=True,
+         why="Reading a customer's own billing history. Separated from "
+             "managing it so somebody can reconcile the books without being "
+             "able to move money."),
+    _cap("billing_manage",
+         "Manage billing: subscriptions, checkout and invoice operations",
+         requires_feature=None, delegable=True,
+         why="Everything that changes what a customer is charged or opens a "
+             "payment flow. Implies billing_view - anyone trusted to change "
+             "billing can necessarily read it."),
     _cap("platform_health",
          "Platform and system health",
          requires_feature=None, delegable=True,
