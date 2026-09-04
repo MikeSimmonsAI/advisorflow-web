@@ -666,6 +666,56 @@ def cancel_agreement_subscription(
 # ═════════════════════════════════════════════════════════════════════════════
 
 from app.services import billing_migration as migration  # noqa: E402
+from app.services.billing_access import \
+    resolve_billing_scope as _resolve_scope  # noqa: E402
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# P6 — CAN THIS PERSON SEE BILLING AT ALL?
+#
+# The sidebar needs an answer it can render a nav item from, and there was no
+# honest source for it. `GET /settings/my-capabilities` looks like the right
+# one and is not, for two reasons that both matter:
+#
+#   1. IT RESOLVES AGAINST `users.organization_id`. That is the legacy tenant
+#      column P3 removed from billing precisely because it names the wrong
+#      organization for anyone holding more than one membership. A sidebar
+#      built on it would offer - or hide - Billing based on a workspace the
+#      person is not standing in.
+#   2. `capabilities.resolve` refuses a non-admin role BEFORE it reads grants,
+#      so a bookkeeper holding `billing_view` resolves to "no". P3 documented
+#      that deviation and worked around it; the sidebar cannot.
+#
+# So this asks the SAME function the billing routes ask, against the ACTIVE
+# workspace, and reports rather than refuses - which is what
+# `resolve_billing_scope` was built for.
+#
+# THIS IS NOT ACCESS CONTROL. Hiding a nav item never is: every billing route
+# enforces its own dependency, and the security tests call them directly with
+# the nav item hidden. It exists so the sidebar stops offering a door that
+# opens onto a 403.
+# ═════════════════════════════════════════════════════════════════════════════
+
+@router.get("/access")
+def billing_access(request: Request,
+                   db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_user)):
+    """What this caller may do with billing, in the workspace they are in.
+
+    Answers 200 for everyone, including "nothing" - a person with no billing
+    authority is not an error, and a 403 here would leave the sidebar unable
+    to tell "denied" from "the request failed".
+    """
+    scope = _resolve_scope(db, current_user, request)
+    return {
+        "can_view": scope.can_view,
+        "can_manage": scope.can_manage,
+        "organization_id": scope.organization_id,
+        "organization_name": (scope.organization.name
+                              if scope.organization is not None else None),
+    }
+
+
 
 
 @router.get("/reconciliation")

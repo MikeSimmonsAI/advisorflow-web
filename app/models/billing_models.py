@@ -301,6 +301,14 @@ class Payment(Base):
     # DISPLAY ONLY, and all we are ever permitted to hold. No PAN, no CVC, no
     # raw payment method - that is what keeps this application out of PCI scope
     # beyond SAQ-A, and Stripe does not send them in any case.
+    # STRIPE'S OWN METHOD TYPE - "card", "us_bank_account", "link",
+    # "cashapp", "afterpay_clearpay", and whatever Stripe adds next. Stored
+    # verbatim rather than mapped to an application enum, so a method this
+    # code has never heard of still records WHAT IT WAS instead of arriving as
+    # a blank row. P6 renders a label from it; nothing branches on it.
+    payment_method_type = Column(String, nullable=True)
+    # Brand is card-specific ("visa"). last4 is not - a bank account has one
+    # too, and so does a wallet backed by a card.
     payment_method_brand = Column(String, nullable=True)
     payment_method_last4 = Column(String, nullable=True)
 

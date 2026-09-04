@@ -231,7 +231,7 @@ multiple tests before being reverted.
 
 ---
 
-## P5 — retiring `PLANS` as a pricing authority (uncommitted)
+## P5 — retiring `PLANS` as a pricing authority (commit 9de5b62)
 
 **Not a pricing redesign, and nobody was repriced.** The goal was narrow: new,
 deal-driven billing must not read the legacy catalogue, and finding out where
@@ -344,3 +344,136 @@ caught before being reverted.
 - `reconcile_all` reads Stripe once per organization; it is an ops tool, not a
   page-load.
 - The `× 11` annual formula stays as it is. P5 does not redesign pricing.
+
+---
+
+## P6 — the customer workspace billing screen (uncommitted)
+
+The first user-visible billing phase. **The customer workspace surface only** —
+cross-organization back-office billing is P7 and shares nothing with this.
+
+### Where it lives and who sees it
+
+`/billing`, in the workspace navigation under Administration.
+
+The nav item previously sat behind `capability: 'platform_billing'` — a
+**platform** capability — while opening the customer's own billing. Two things
+were wrong with that and both mattered:
+
+1. `GET /settings/my-capabilities` resolves against `users.organization_id`,
+   the legacy tenant column P3 removed from billing precisely because it names
+   the wrong organization for anyone holding more than one membership. The
+   sidebar was answering for a workspace the person may not be standing in.
+2. `capabilities.resolve` refuses a non-admin role **before** it reads grants,
+   so a bookkeeper holding `billing_view` — the exact case those capabilities
+   were created for — never saw the item.
+
+So P6 added `GET /billing/access`, which runs the same `resolve_billing_scope`
+the billing routes run, against the **active workspace**, and reports rather
+than refuses. It answers 200 for everyone, including "nothing", because the
+sidebar has to tell "denied" from "the request failed".
+
+| Caller | Sees Billing | Can act |
+|---|---|---|
+| `org_admin` of the active workspace | yes | yes |
+| holder of `billing_view` in the active workspace | yes | read only |
+| holder of `billing_manage` | yes | yes |
+| anyone else | no | no |
+
+**Hiding is not the control.** `/billing` no longer carries `requireAdmin`
+either — that locked out the bookkeeper — and every billing route enforces its
+own dependency. The security tests call the routes directly with the nav item
+hidden.
+
+### Sections on the screen
+
+| Section | Source |
+|---|---|
+| Past-due / no-payment-method alerts | `past_due`, `subscription.requires_payment_method` |
+| Account status strip — status, outstanding balance, next billing date, autopay | `subscription`, `past_due` |
+| Your agreement — amount, interval, package, legal seller, brand, term, dates, units | `agreement` |
+| **Setup / implementation — its own section** | `setup` |
+| Subscription & autopay | `subscription` |
+| Invoices — number, issued, due, amount, balance, status, hosted link, PDF | `invoices` |
+| Payments — date, amount, method, status, refunded, failure reason | `payments` |
+
+Loading renders skeletons; permission-denied, backend-unavailable and every
+empty case render a sentence rather than a broken table.
+
+### Payment methods and autopay
+
+**No payment method is named anywhere in the application** — not in the page,
+not in the router, not in the services. Verified by test. Which methods are
+eligible is Stripe's answer per flow, and the UI expresses the **purpose**:
+
+- **setup / one-time** — its own section, its own hosted invoice, where Stripe
+  presents whatever is eligible including BNPL. Never shown as the recurring
+  method.
+- **recurring autopay** — reported as a state, updated through the Stripe
+  Billing Portal, which is where Stripe decides what may be saved for
+  off-session collection.
+- **manual invoice** — hosted invoice links, Stripe's own payment surface.
+
+`autopay_active` is three facts, all read from the retrieve `get_subscription`
+was already doing (**no new Stripe call**): a live subscription, set to charge
+automatically, with a method saved. `null` means **not answered** and renders
+as "Unknown" — rendering a Stripe outage as "autopay is off" tells a paying
+customer their service is about to stop.
+
+### Backend additions (smallest that would do)
+
+| Change | Why |
+|---|---|
+| `GET /billing/access` | the only honest source for nav visibility (above) |
+| `billing_overview` gains `setup` | the setup fee is a separate payment at a separate time and may use methods a subscription cannot |
+| `get_subscription` gains autopay fields | derived from the existing retrieve |
+| `describe_payment` gains `payment_method_label` / `payment_method_type` | one safe string, built server-side, so no frontend learns Stripe's method taxonomy |
+| `Payment.payment_method_type` column + `auto_migrate` entry | `payments` is an existing table; `create_all()` would never add it |
+| `stripe_sync.upsert_payment_from_stripe` widened | **the P5 defect**: it read only the `card` sub-object, so ACH, Link and wallet payments mirrored blank |
+
+No P4 endpoint was redesigned and no billing endpoint was duplicated.
+
+**The mirror still holds only a type, a brand and four digits.** A payload
+carrying a full account and routing number is asserted not to leak either into
+the mirror or into the response.
+
+### Money
+
+Every amount rendered is a backend-formatted string. Asserted by test: no
+division, no `toFixed`, no `Intl.NumberFormat`, no arithmetic on any value
+named amount/cents/total/balance/price/fee/outstanding/refunded, and no `_cents`
+integer rendered as a whole expression. Integers travel alongside for anything
+that must compute.
+
+### Workspace context
+
+Already correct at the transport layer: `api/client.js` sends `X-Workspace-Id`
+on **every** request, and the server re-derives the workspace against an active
+`customer_org` membership and ignores an id the caller does not hold. P6 added
+the tests that prove billing follows it — one person, two workspaces, admin in
+one, and the answer moves when only the header changes.
+
+### Tests: 40 new, 268 across the billing surface, all passing
+
+The project has no frontend test runner, so `test_billing_p6.py` covers the
+frontend two ways: a **contract test** asserting every key the page renders is
+present in `GET /billing/overview` (the drift that actually breaks this
+screen), and narrow source assertions for the rules that are invisible at
+runtime until they are already wrong in production. Five deliberate mutations —
+gating the nav on the platform capability, answering `/access` from the legacy
+column, reporting autopay as off during an outage, reverting the mirror to
+card-only, and rendering a raw cents integer — were each caught before being
+reverted.
+
+### Limitations
+
+- **`frontend/dist` was not rebuilt.** The Linux mount cannot delete files, so
+  a vite build cannot run against the repo tree. P6 changes frontend source, so
+  `npm run build` in `frontend/` is required before deploy. The build itself
+  was verified clean against a scratch copy (224 modules, no errors).
+- No invoice creation from the customer workspace. Deliberate: the customer
+  surface is for viewing and managing **their** account, and full invoice
+  administration is P7's back office. The API supports it; authority was not
+  expanded because it exists.
+- Payment history is read-only. Nothing here retries a failed payment; recovery
+  happens through the Stripe portal and arrives back via the P0 webhook.

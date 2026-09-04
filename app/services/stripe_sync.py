@@ -285,13 +285,42 @@ def upsert_payment_from_stripe(db: Session, obj: Any,
     row.refunded_cents = _get(obj, "amount_refunded") or 0
     row.status = _payment_status(obj, row.refunded_cents or 0, row.amount_cents)
 
-    # Display fields only. Stripe never sends a PAN and this never stores one.
+    # ── PAYMENT METHOD SUMMARY — NOT CARD-ONLY (widened in P6) ─────────────
+    #
+    # This read only the `card` sub-object, so an ACH debit, a Link payment or
+    # a wallet mirrored with brand and last4 both null and rendered on the
+    # billing screen as if the method were unknown. The method was never
+    # unknown; this code only knew how to read one kind.
+    #
+    # Stripe's own `type` names which sub-object carries the detail, so the
+    # type is recorded verbatim and the detail is read from whatever it names.
+    # A method neither Stripe nor this code has seen before still records what
+    # it was rather than arriving blank.
+    #
+    # DISPLAY FIELDS ONLY, and the set is unchanged: a type, a brand, and the
+    # last four digits. Stripe does not send a PAN or a full account number and
+    # this stores neither - which is what keeps this application out of PCI
+    # scope beyond SAQ-A.
     method = (_get(obj, "payment_method_details")
               or _get(obj, "charges") or {})
-    card = _get(method, "card") or {}
-    if card:
-        row.payment_method_brand = _get(card, "brand")
-        row.payment_method_last4 = _get(card, "last4")
+    method_type = _get(method, "type")
+    detail = _get(method, method_type) if method_type else None
+    if detail is None:
+        # Older payloads, and any shape without a `type`, still carry `card`.
+        detail = _get(method, "card")
+        if detail is not None:
+            method_type = method_type or "card"
+    if method_type:
+        row.payment_method_type = method_type
+    if detail:
+        # `brand` is card-specific; a bank account has `bank_name` instead and
+        # a wallet may have neither. last4 is common to more of them than
+        # brand is, which is why they are read independently.
+        row.payment_method_brand = (_get(detail, "brand")
+                                    or _get(detail, "bank_name")
+                                    or row.payment_method_brand)
+        row.payment_method_last4 = (_get(detail, "last4")
+                                    or row.payment_method_last4)
 
     err = _get(obj, "last_payment_error") or _get(obj, "failure_message") or {}
     if isinstance(err, dict):

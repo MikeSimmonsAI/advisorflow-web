@@ -670,7 +670,15 @@ export default function App() {
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
-        <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
+        {/* NO `requireAdmin`. Billing authority is not a role: an org_admin
+            holds it by role, and a non-admin can hold it by an explicit
+            billing_view / billing_manage grant — which is the whole reason
+            those capabilities exist. `requireAdmin` here locked out exactly
+            the bookkeeper case.
+            The page asks GET /billing/access and renders a plain refusal for
+            anyone without authority; every billing route enforces its own
+            dependency server-side regardless of what renders. */}
+        <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
         <Route path="/scraper" element={<ProtectedRoute requireGodAdmin><LeadScraper /></ProtectedRoute>} />
         {/* ── Executive Suite routes ── brand-scoped, read-only.
                ExecutiveSuite wraps every child in the executive shell and

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, getWorkspaceContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -110,7 +110,27 @@ const NAV_GROUPS = [
       // open onto a 403.
       { to: '/10dlc', label: 'A2P 10DLC', icon: 'shield-check', capability: 'a2p_10dlc' },
       { to: '/system-health', label: 'System Health', icon: 'activity', capability: 'platform_health' },
-      { to: '/billing', label: 'Billing', icon: 'credit-card', capability: 'platform_billing' },
+
+      // ── BILLING IS NOT A `capability` ITEM, AND THAT IS THE FIX ───────────
+      //
+      // It sat behind `capability: 'platform_billing'` — a PLATFORM
+      // capability — while the page it opens is the customer's own billing.
+      // Two things were wrong with that and both are load-bearing:
+      //
+      //   1. `my-capabilities` resolves against `users.organization_id`, the
+      //      legacy tenant column P3 removed from billing precisely because it
+      //      names the wrong organization for anyone holding more than one
+      //      membership. The sidebar was answering for a workspace the person
+      //      may not be standing in.
+      //   2. `capabilities.resolve` refuses a non-admin role before it reads
+      //      grants, so a bookkeeper holding `billing_view` — the exact case
+      //      those capabilities were created for — never saw the item.
+      //
+      // `billingAuthority` asks GET /billing/access instead, which runs the
+      // SAME `resolve_billing_scope` the billing routes run, against the
+      // ACTIVE workspace. Still not access control: /billing re-checks
+      // server-side and renders a refusal of its own.
+      { to: '/billing', label: 'Billing', icon: 'credit-card', billingAuthority: true },
     ],
   },
 ]
@@ -250,6 +270,33 @@ export default function Layout({ children }) {
     return () => { cancelled = true }
   }, [orgContext])
   const hasCapability = (key) => !key || (myCaps !== null && myCaps.includes(key))
+
+  // MAY THIS PERSON SEE BILLING, IN THE WORKSPACE THEY ARE STANDING IN.
+  //
+  // Its own question with its own endpoint, because billing authority is not
+  // the capability model: an org_admin holds it by role with no grant, and a
+  // non-admin can hold it by grant alone. `my-capabilities` answers neither
+  // correctly, and it answers for the wrong organization.
+  //
+  // null means NOT ANSWERED YET and renders as hidden. A Billing item that
+  // flashes into view before the answer arrives has already told a plain
+  // advisor the door is there.
+  //
+  // Re-asked when the selected workspace changes, since the answer is
+  // per-workspace: the same person may administer billing in one and not the
+  // other. `af_workspace_id` is read rather than subscribed to because the
+  // switcher navigates, which remounts this.
+  const [billingAccess, setBillingAccess] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    api.get('/billing/access')
+      .then(d => { if (!cancelled) setBillingAccess(d || {}) })
+      // A failed call is "not entitled" for rendering. It cannot grant
+      // anything, and /billing refuses independently either way.
+      .catch(() => { if (!cancelled) setBillingAccess({}) })
+    return () => { cancelled = true }
+  }, [orgContext, getWorkspaceContext()])
+  const hasBillingAuthority = () => billingAccess !== null && !!billingAccess.can_view
 
   function handleExitOrg() {
     clearOrgContext()
@@ -485,6 +532,9 @@ export default function Layout({ children }) {
               // That is the whole difference: `adminOnly` asks who you are,
               // `capability` asks what the server says you may administer.
               if (item.capability) return hasCapability(item.capability)
+              // Billing asks the billing authority, not the capability list
+              // and not a role. See the nav item's own note.
+              if (item.billingAuthority) return hasBillingAuthority()
               if (item.adminOnly && !isOrgAdmin) return false
               if (item.featureKey !== undefined && !isFeatureEnabled(item.featureKey)) return false
               return true

@@ -268,8 +268,8 @@ join alone cannot promise that.
 | P2 | BillingAgreement — executable billing relationship | COMPLETE (4d41357) |
 | P3 | tenant billing capabilities / authority cleanup | COMPLETE (4cf170f) |
 | P4 | Stripe customer / invoice / subscription / payment operations | COMPLETE (264c452) |
-| P5 | `PLANS` retirement / pricing migration | COMPLETE (uncommitted) |
-| P6 | organization billing UI | not started |
+| P5 | `PLANS` retirement / pricing migration | COMPLETE (9de5b62) |
+| P6 | organization billing UI | COMPLETE (uncommitted) |
 | P7 | platform billing command centre | not started |
 | P8 | reconciliation tooling | not started |
 | Later | production activation | not started |
@@ -473,7 +473,7 @@ for privileged users.
 |---|---|---|
 | Who | `org_admin` of the active workspace, or a `billing_view` / `billing_manage` grant | platform / god / back-office users only |
 | Scope | **always** the active customer organization | **across** customer organizations, one selected at a time |
-| Phase | P6 | P7 |
+| Phase | P6 — BUILT | P7 |
 | Built so far | `GET /billing/overview`, `/invoices`, `/payments`, `/agreement`, `/reconciliation` | `GET /billing/all`, `/reconciliation/platform`, `POST /reconcile/{org_id}` |
 
 A user without billing authority must not see the Billing navigation item —
@@ -555,3 +555,47 @@ Billing Portal access; the back office sees the same state read-only.
 Stripe Connect, KYC and payouts, tenant merchant processing, Stripe Tax
 automation, and live activation. The requirement is extensibility, not feature
 creep: no Stripe product is implemented merely because it exists.
+
+---
+
+## 20. P6 — the customer workspace billing screen — BUILT
+
+Section 19.1's customer surface, implemented. `/billing` inside the workspace,
+visible only to a caller with billing authority **in the workspace they are
+standing in**.
+
+**The correction that mattered.** Billing visibility had no honest source. The
+nav item sat behind `platform_billing` — a platform capability — resolved
+against `users.organization_id`, the legacy column P3 removed from billing.
+`GET /billing/access` replaces it: same `resolve_billing_scope` the routes use,
+same active workspace, reporting instead of refusing. Hiding a nav item is
+still not access control and the tests say so — every authorization test calls
+the route, not the gate.
+
+**19.2's three flows, as the screen expresses them.** Setup is its own section
+with its own hosted invoice; recurring autopay is a reported state updated
+through the Billing Portal; manual invoices are hosted links. **No payment
+method is named anywhere in the application**, asserted by test — Stripe
+decides eligibility per flow, and a screen that lists methods promises
+something Stripe may refuse. Afterpay and the other single-use methods can only
+ever appear where they belong: on a one-time hosted invoice, and in payment
+history as what a payment actually was.
+
+**19.5's autopay, represented.** `autopay_active`, `payment_method_on_file`,
+`requires_payment_method`, `cancel_at_period_end` and the next billing date,
+all derived from the subscription retrieve that was already happening. `null`
+means not answered: a Stripe outage renders as "Unknown", never as "off".
+
+**The card-shaped mirror from 19.4 is fixed.** `upsert_payment_from_stripe`
+read only the `card` sub-object, so an ACH, Link or wallet payment mirrored
+with no method summary. It now records Stripe's own `type` verbatim and reads
+the detail from whatever that names, and an unmapped method still renders from
+its own name rather than as a blank cell. The stored set is unchanged — a type,
+a brand, four digits — which is what keeps this out of PCI scope beyond SAQ-A.
+
+Endpoint list, the section inventory and the test summary are in
+`BILLING_IMPLEMENTATION_STATUS.md`.
+
+**P7 remains untouched by this.** The back-office Billing Command Center is a
+separate surface with separate authority, and nothing in P6 is shared with it
+or reusable as it.

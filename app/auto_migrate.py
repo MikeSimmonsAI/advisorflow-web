@@ -52,6 +52,10 @@ COLUMNS_TO_ADD = [
     # EXISTING table does. Nullable with no default: every platform row that
     # already exists keeps working and resolves to the default entity.
     ("platforms", "merchant_entity_id", "VARCHAR"),
+    # P6: the payment mirror understood only cards, so an ACH, Link or wallet
+    # payment arrived with no method summary at all and rendered blank.
+    # `payments` is an EXISTING table, so create_all() will never add this.
+    ("payments", "payment_method_type", "VARCHAR"),
     # ── Two-rate package pricing ───────────────────────────────────────────
     # brand_packages.price stays the MONTH-TO-MONTH rate. contract_price is the
     # lower rate earned by signing a term agreement, and is NULL for any package

@@ -241,6 +241,20 @@ def get_subscription(db: Session, scope: BillingScope) -> Dict[str, Any]:
                                    if agreement else None),
         "stripe_state": None,
         "current_period_end": None,
+        # ── AUTOPAY ──────────────────────────────────────────────────────────
+        # Autopay is not a Stripe field. It is the answer to "will the next
+        # invoice collect itself", and that is three facts: a live
+        # subscription, set to charge automatically, with a method saved to
+        # charge. All three are read from the SAME retrieve that was already
+        # happening - this adds no Stripe call.
+        #
+        # `None` means NOT ANSWERED, never "no". A Stripe outage must not
+        # render as "autopay is off" on a customer's billing screen.
+        "autopay_active": None,
+        "collection_method": None,
+        "payment_method_on_file": None,
+        "requires_payment_method": None,
+        "cancel_at_period_end": None,
     }
     if not out["stripe_subscription_id"]:
         return out
@@ -249,6 +263,27 @@ def get_subscription(db: Session, scope: BillingScope) -> Dict[str, Any]:
         sub = gw.call(s.Subscription.retrieve, out["stripe_subscription_id"])
         out["stripe_state"] = _get(sub, "status")
         out["current_period_end"] = _get(sub, "current_period_end")
+        out["cancel_at_period_end"] = bool(_get(sub, "cancel_at_period_end"))
+        collection = _get(sub, "collection_method") or "charge_automatically"
+        out["collection_method"] = collection
+        # A saved method may sit on the subscription or on the customer.
+        # Either one collects, so either one counts.
+        has_method = bool(_get(sub, "default_payment_method")
+                          or _get(sub, "default_source"))
+        if not has_method:
+            customer = _get(sub, "customer")
+            settings = _get(customer, "invoice_settings") if not isinstance(
+                customer, str) else None
+            has_method = bool(_get(settings or {}, "default_payment_method"))
+        out["payment_method_on_file"] = has_method
+        out["autopay_active"] = bool(
+            collection == "charge_automatically"
+            and has_method
+            and out["stripe_state"] in ("active", "trialing"))
+        # The state the customer has to DO something about: Stripe intends to
+        # charge automatically and has nothing to charge.
+        out["requires_payment_method"] = bool(
+            collection == "charge_automatically" and not has_method)
     except gw.StripeUnavailable:
         logger.info("subscription state unavailable from Stripe for org=%s",
                     getattr(org, "id", None))
@@ -526,7 +561,58 @@ def describe_invoice(invoice: Invoice) -> Dict[str, Any]:
     }
 
 
+# How Stripe's method types are said out loud. NOT a list of what is allowed -
+# eligibility is Stripe's to decide, and a type missing from this map still
+# renders, from its own name. This map exists so "us_bank_account" reaches a
+# customer as "Bank account" rather than as a Stripe identifier.
+_METHOD_LABELS = {
+    "card": "Card",
+    "us_bank_account": "Bank account",
+    "sepa_debit": "Bank account (SEPA)",
+    "acss_debit": "Bank account (Canada)",
+    "bacs_debit": "Bank account (BACS)",
+    "link": "Link",
+    "cashapp": "Cash App Pay",
+    "afterpay_clearpay": "Afterpay",
+    "klarna": "Klarna",
+    "affirm": "Affirm",
+    "amazon_pay": "Amazon Pay",
+    "paypal": "PayPal",
+    "customer_balance": "Bank transfer",
+}
+
+
+def payment_method_label(method_type: Optional[str], brand: Optional[str],
+                         last4: Optional[str]) -> Optional[str]:
+    """One safe sentence describing how a payment was made.
+
+    NEVER AN ACCOUNT NUMBER. The most this can ever say is a method name, a
+    brand and four digits, because that is the most the mirror is allowed to
+    hold.
+
+    An UNRECOGNISED type is titled from its own name rather than dropped: the
+    payment methods Stripe offers change without this code changing, and a
+    customer seeing "Revolut Pay" for a method this map has never heard of is
+    right, while seeing a blank cell is wrong. That blank cell is the defect
+    P5 recorded and this replaces.
+    """
+    if not method_type and not brand and not last4:
+        return None
+    label = _METHOD_LABELS.get(method_type or "")
+    if label is None and method_type:
+        label = method_type.replace("_", " ").title()
+    if brand:
+        pretty = brand.replace("_", " ").title()
+        # "Card · Visa" reads worse than "Visa"; the brand already says card.
+        label = pretty if (method_type == "card" or not label) else \
+            "%s · %s" % (label, pretty)
+    if last4:
+        label = "%s ····%s" % (label, last4) if label else "····%s" % last4
+    return label
+
+
 def describe_payment(payment: Payment) -> Dict[str, Any]:
+    method_type = getattr(payment, "payment_method_type", None)
     return {
         "id": payment.id,
         "invoice_id": payment.invoice_id,
@@ -534,6 +620,13 @@ def describe_payment(payment: Payment) -> Dict[str, Any]:
         "currency": payment.currency,
         "amount_cents": payment.amount_cents,
         "amount": _decimal_str(payment.amount_cents, payment.currency),
+        # WHAT THE SCREEN RENDERS. One safe string, built here rather than in
+        # the browser, so no frontend has to know Stripe's method taxonomy and
+        # every surface says it the same way.
+        "payment_method_label": payment_method_label(
+            method_type, payment.payment_method_brand,
+            payment.payment_method_last4),
+        "payment_method_type": method_type,
         # The column is refunded_cents. Invoice uses amount_refunded_cents;
         # they are different models and the names do not match.
         "refunded_cents": payment.refunded_cents,
@@ -597,6 +690,8 @@ def billing_overview(db: Session, scope: BillingScope) -> Dict[str, Any]:
                    if i["status"] == "open" and (i["amount_due_cents"] or 0) > 0]
     outstanding_cents = sum(i["amount_due_cents"] or 0 for i in outstanding)
     failed = [p for p in payments if p["status"] == "failed"]
+    subscription = get_subscription(db, scope)
+    setup = _describe_setup(agreement, invoices)
 
     return {
         "organization": {
@@ -610,7 +705,12 @@ def billing_overview(db: Session, scope: BillingScope) -> Dict[str, Any]:
             "brand_name": agreement.brand_name if agreement else None,
         },
         "agreement": _describe_agreement(agreement),
-        "subscription": get_subscription(db, scope),
+        "subscription": subscription,
+        # The setup charge is a SEPARATE payment from the subscription and the
+        # screen shows it separately. They are paid at different times, and
+        # may be paid by different methods - a one-time flow can use options a
+        # recurring one cannot.
+        "setup": setup,
         "invoices": invoices,
         "payments": payments,
         "past_due": {
@@ -625,6 +725,59 @@ def billing_overview(db: Session, scope: BillingScope) -> Dict[str, Any]:
         },
         "permissions": {"can_view": scope.can_view,
                         "can_manage": scope.can_manage},
+    }
+
+
+def _describe_setup(agreement: Optional[BillingAgreement],
+                    invoices: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The one-time implementation charge, and whether it has been paid.
+
+    ITS OWN SECTION, not a line in the subscription. The setup fee is a
+    separate payment at a separate time and, under the approved payment-flow
+    model, may be paid by methods a recurring subscription cannot use - a
+    large implementation fee is exactly where a one-time option matters. A
+    screen that folds it into the monthly amount hides both facts.
+
+    The AMOUNT comes from the agreement, which copied it from the approved
+    deal. The STATUS comes from the invoice mirror. Neither is computed here,
+    and no invoice is created: if the setup fee has never been invoiced, that
+    is what this says.
+    """
+    amount_cents = agreement.setup_fee_cents if agreement else None
+    currency = (agreement.currency if agreement else None) or "USD"
+    matches = [i for i in invoices if i.get("kind") == "implementation"]
+    invoice = matches[0] if matches else None
+
+    if amount_cents in (None, 0):
+        status = "none"
+    elif invoice is None:
+        # Owed under the agreement and never billed. A real state, and one an
+        # operator needs to see rather than an empty section.
+        status = "not_invoiced"
+    elif invoice["status"] == "paid":
+        status = "paid"
+    elif invoice["status"] == "void":
+        status = "void"
+    elif (invoice.get("amount_due_cents") or 0) > 0 \
+            and invoice["status"] == "open":
+        status = "unpaid"
+    else:
+        status = invoice["status"]
+
+    return {
+        "amount_cents": amount_cents,
+        "amount": _decimal_str(amount_cents, currency),
+        "currency": currency,
+        "status": status,
+        "invoice_id": invoice["id"] if invoice else None,
+        "invoice_number": invoice["number"] if invoice else None,
+        "hosted_invoice_url": invoice["hosted_invoice_url"] if invoice else None,
+        "invoice_pdf": invoice["invoice_pdf"] if invoice else None,
+        "due_date": invoice["due_date"] if invoice else None,
+        # The customer pays a hosted invoice, where STRIPE decides which
+        # methods are eligible. Naming a method here - or anywhere in this
+        # application - would promise something Stripe may refuse.
+        "payment_flow": "one_time_setup",
     }
 
 

@@ -5,7 +5,7 @@ activation. Nothing in this plan should be run against a live Stripe account.
 
 ## Nothing here has been executed yet
 
-P0–P5 are covered entirely by unit tests with Stripe faked. No sandbox call
+P0–P6 are covered entirely by unit tests with Stripe faked. No sandbox call
 has been made from this session, and none can be until test-mode credentials
 exist in the environment. Secrets come from environment/deployment secret
 management — never from chat, never from the database, never committed.
@@ -116,8 +116,42 @@ steps close that gap and each names the assumption it is checking.
     are expected to be empty — a known gap recorded in the follow-ups, worth
     confirming before P6 designs around it.
 
+## P6 steps — the customer billing screen against a real sandbox
+
+Steps 21–23 above became more urgent with P6: the screen now renders whatever
+those flows produce. Then:
+
+24. **Autopay reads true against a real subscription.** With a sandbox
+    subscription set to charge automatically and a saved method, the Billing
+    screen must show Autopay: Active and a next billing date. Remove the
+    default payment method in the dashboard and reload — it must show the
+    "No payment method on file" alert, not a silent Inactive.
+25. **A Stripe outage shows Unknown, never Off.** Point `STRIPE_SECRET_KEY` at
+    an invalid value and reload. Autopay must read "Unknown" and the agreement
+    section must still render from local state.
+26. **A non-card payment renders.** Pay a hosted invoice with ACH or Link (per
+    step 23) and confirm the Payments table shows a readable method — "Bank
+    account · <bank> ····1234" — rather than a dash. **This is the P5 defect;
+    step 23 checks the mirror, this checks the screen.**
+27. **Past due is impossible to miss.** Fail a payment with
+    `4000 0000 0000 0341`, confirm the red alert, the outstanding amount and
+    the invoice link. Then pay it and confirm the alert clears on reload
+    without any other action.
+28. **Setup and subscription are visually separate.** With an agreement
+    carrying a setup fee, confirm the setup section shows its own amount and
+    status, and that the recurring amount is not the setup amount.
+29. **Workspace switching moves the screen.** As a user holding two workspace
+    memberships, switch workspaces and confirm the Billing screen changes
+    organization — and that the nav item disappears entirely in a workspace
+    where the user has no billing authority.
+30. **A direct URL is still refused.** As a user with no billing authority,
+    navigate to `/billing` by typing it. The page must render a permission
+    sentence, and the network tab must show the billing reads returning 403.
+
 ## Not yet testable
 
-Refunds, dunning and payment recovery. Nothing in P4 or P5 creates a
+Refunds, dunning and payment recovery. Nothing in P4, P5 or P6 creates a
 PaymentIntent or retries a failed payment; payments are read from the P0 mirror
-only. Autopay state is not modelled, so there is nothing to exercise for it.
+only, and recovery happens in the Stripe portal and arrives back by webhook.
+There is no route that bills a setup fee, so the one-time flow can only be
+exercised through an invoice created by hand in the dashboard.
