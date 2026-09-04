@@ -96,3 +96,6 @@ import app.models.billing_models  # noqa: F401  (imported for side effects)
 # P1 billing entity layer - merchant_entities. Same Base, same reason: the
 # table is only created by create_all() if this module has been imported.
 import app.models.billing_entity_models  # noqa: F401  (imported for side effects)
+# P2 executable billing relationship - billing_agreements. New table, so
+# create_all() builds it; nothing goes in auto_migrate for it.
+import app.models.billing_agreement_models  # noqa: F401  (imported for side effects)
