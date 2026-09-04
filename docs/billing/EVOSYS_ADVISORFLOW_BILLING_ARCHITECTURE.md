@@ -269,8 +269,8 @@ join alone cannot promise that.
 | P3 | tenant billing capabilities / authority cleanup | COMPLETE (4cf170f) |
 | P4 | Stripe customer / invoice / subscription / payment operations | COMPLETE (264c452) |
 | P5 | `PLANS` retirement / pricing migration | COMPLETE (9de5b62) |
-| P6 | organization billing UI | COMPLETE (uncommitted) |
-| P7 | platform billing command centre | not started |
+| P6 | organization billing UI | COMPLETE (0208cad) |
+| P7 | platform billing command centre | COMPLETE (uncommitted) |
 | P8 | reconciliation tooling | not started |
 | Later | production activation | not started |
 
@@ -473,7 +473,7 @@ for privileged users.
 |---|---|---|
 | Who | `org_admin` of the active workspace, or a `billing_view` / `billing_manage` grant | platform / god / back-office users only |
 | Scope | **always** the active customer organization | **across** customer organizations, one selected at a time |
-| Phase | P6 — BUILT | P7 |
+| Phase | P6 — BUILT | P7 — BUILT |
 | Built so far | `GET /billing/overview`, `/invoices`, `/payments`, `/agreement`, `/reconciliation` | `GET /billing/all`, `/reconciliation/platform`, `POST /reconcile/{org_id}` |
 
 A user without billing authority must not see the Billing navigation item —
@@ -599,3 +599,50 @@ Endpoint list, the section inventory and the test summary are in
 **P7 remains untouched by this.** The back-office Billing Command Center is a
 separate surface with separate authority, and nothing in P6 is shared with it
 or reusable as it.
+
+---
+
+## 21. P7 — the back-office Billing Command Center — BUILT
+
+Section 19.1's platform surface, implemented at `/god/billing`. **The wall
+between the two surfaces is the point of this phase**, and it is the thing the
+tests spend most of their effort on.
+
+**Customer billing authority is not a lesser form of platform billing
+authority.** A customer's org_admin manages their own company's money; that
+says nothing about whether they may read another company's invoices. So a
+tenant user holding `billing_manage` — the strongest customer billing
+permission there is — is refused every read and every one of the seven
+mutations here, while their own billing screen keeps working untouched.
+
+**Two refusals, and the capability is the load-bearing one.** Both god_admin
+and the non-delegable `platform_billing` are required. Mutation testing showed
+that removing the role check alone changes nothing, because `delegable=False`
+makes gate 1 fail for every customer regardless of role or grant. That is
+recorded in a test so nobody later removes the capability believing the role
+check is what protects this.
+
+**The scope factory.** P4 deliberately made it impossible for a caller to name
+another tenant. P7 needs exactly that, so `platform_scope()` is the one place
+the guarantee is set aside — by authority, from a loaded row, behind two
+platform checks. Downstream it is an ordinary scope, so a guessed invoice or
+agreement id still cannot cross out of the selected organization. Platform
+authority selects an organization; it does not dissolve ownership.
+
+**No fake money.** Sums come from the local mirror, in integer minor units,
+per currency, never added across currencies. There is no MRR and no ARR — the
+tests assert their absence, not their value. Contracted recurring value is
+reported per interval and per currency, which is the honest form of the same
+question, and every response carries a `basis` line saying what it is computed
+from.
+
+**19.2's three flows.** The operator chooses a purpose — setup or manual
+invoice — and Stripe decides eligibility on the hosted invoice that results.
+No payment method is named anywhere in P7, as on the customer surface.
+
+Endpoint list, the metric sources and the audit actions are in
+`BILLING_IMPLEMENTATION_STATUS.md`.
+
+**P6 is untouched.** The two surfaces share no code and no prefix, and a test
+asserts both: the command center calls only `/platform/billing/*`, and the
+customer page calls none of it.

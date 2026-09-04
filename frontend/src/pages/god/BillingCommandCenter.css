@@ -1,0 +1,82 @@
+/* P7 — Billing Command Center.
+ *
+ * The `go-` system in GodOps.css already carries this screen: panels, KPI
+ * tiles, tables, badges, buttons, fields, facts and notes are all reused
+ * unchanged. What is here is only what billing genuinely added, and every
+ * colour is a `--go-*` token from that sheet so the God palette stays
+ * retunable from one place.
+ *
+ * Scoped under .go-scope like the rest, so nothing here can reach a tenant
+ * screen — the customer billing page and this one must not share styling any
+ * more than they share authority.
+ */
+
+/* A financial table is wide by nature. It scrolls inside its own container so
+   it is never what makes the page scroll sideways. */
+.go-scope .bcc-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.go-scope .bcc-scroll > .go-table { min-width: 720px; }
+
+.go-scope .bcc-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+@media (max-width: 1000px) {
+  .go-scope .bcc-two { grid-template-columns: minmax(0, 1fr); }
+}
+
+.go-scope .go-dimmed { color: var(--go-dim); }
+
+/* Per-currency totals sit on one line and wrap as units, so a two-currency
+   figure never splits across a line break mid-amount. */
+.go-scope .bcc-money { white-space: nowrap; }
+.go-scope .bcc-money small { color: var(--go-dim); font-size: 0.75em; margin-left: 2px; }
+
+/* A KPI holding money is narrower than one holding a count. */
+.go-scope .bcc-kpi-money { font-size: 19px; line-height: 1.25; }
+
+.go-scope .bcc-mono {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.go-scope .bcc-detail {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.go-scope .bcc-note { font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
+.go-scope .bcc-basis {
+  font-size: 11px;
+  margin: 4px 0 22px;
+  line-height: 1.5;
+  max-width: 78ch;
+}
+
+.go-scope .bcc-link { color: var(--go-blue); text-decoration: none; }
+.go-scope .bcc-link:hover { text-decoration: underline; }
+
+.go-scope .bcc-actions { margin-top: 14px; }
+.go-scope .bcc-head-btn { margin-left: auto; }
+
+.go-scope .bcc-line {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px dashed var(--go-line);
+}
+
+.go-scope .bcc-history { margin-top: 14px; }
+.go-scope .bcc-history > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--go-dim);
+  padding: 6px 0;
+}
+.go-scope .bcc-history > summary:hover { color: var(--go-text); }
+
+@media (max-width: 700px) {
+  .go-scope .bcc-detail { max-width: 200px; }
+  .go-scope .bcc-head-btn { margin-left: 0; }
+}

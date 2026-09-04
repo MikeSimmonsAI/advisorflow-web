@@ -347,7 +347,7 @@ caught before being reverted.
 
 ---
 
-## P6 — the customer workspace billing screen (uncommitted)
+## P6 — the customer workspace billing screen (commit 0208cad)
 
 The first user-visible billing phase. **The customer workspace surface only** —
 cross-organization back-office billing is P7 and shares nothing with this.
@@ -477,3 +477,145 @@ reverted.
   expanded because it exists.
 - Payment history is read-only. Nothing here retries a failed payment; recovery
   happens through the Stripe portal and arrives back via the P0 webhook.
+
+---
+
+## P7 — the back-office Billing Command Center (uncommitted)
+
+The platform surface. **A different surface from P6, not a wider version of
+it** — different authority, different data, no shared code, asserted by test.
+
+### Where it lives and who gets in
+
+`/god/billing`, in the God rail under OPERATIONS. Route guarded by `GodRoute`,
+which answers NOT FOUND rather than naming the level required — this surface is
+advertised to nobody.
+
+Every endpoint requires **god_admin AND the non-delegable `platform_billing`
+capability**. Two independent refusals, matching what `/billing/all` already
+does.
+
+**Which one carries the weight, established by mutation:** removing the inline
+role check alone changes nothing, because `platform_billing` is
+`delegable=False`, so gate 1 (`org_may_self_manage`) fails for every customer
+regardless of role or grant. The capability is load-bearing; the role check is
+defence in depth. A test says so out loud so nobody later removes the
+capability believing the role check protects this.
+
+| Caller | Own billing (P6) | Command Center (P7) |
+|---|---|---|
+| god_admin | — | **yes** |
+| customer `org_admin` | yes | **no** |
+| customer `billing_view` | read | **no** |
+| customer `billing_manage` | read + act | **no** |
+| `super_admin` | yes | **no** |
+
+Tested against the reads *and* all seven mutations, with the tenant user
+holding the strongest customer billing permission there is. Removing both
+refusals fails six tests.
+
+### Backend
+
+`app/services/platform_billing.py` and `app/routers/platform_billing_router.py`
+— a separate router on `/platform/billing/*`. The separation is not tidiness:
+two surfaces in one file is how a route gets the wrong dependency by being
+copied from the one above it.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /platform/billing/command-center` | the whole book in one request |
+| `GET /platform/billing/organizations` | search + operational filters |
+| `GET /platform/billing/organizations/{id}` | one organization in full |
+| `POST .../invoices` | create a draft, by purpose |
+| `POST .../invoices/{id}/finalize` `/send` `/void` | walk it forward |
+| `POST .../agreements/{id}/subscribe` `/cancel` | subscription lifecycle |
+| `POST .../portal` | a Billing Portal link to hand the customer |
+
+**The scope factory is the dangerous part, and it is deliberate.** P4's
+operations take a `BillingScope` so no caller can name another tenant. P7
+genuinely needs to act on an arbitrary organization, so `platform_scope()`
+exists — the single place that guarantee is set aside, and it is set aside by
+authority: it takes a loaded `Organization` object, never an id or a header,
+and is called only from routes already past both platform checks. Downstream it
+is an ordinary scope, so **a guessed invoice or agreement id still cannot cross
+out of the organization the operator selected** — asserted, including a raw
+Stripe customer id used as a selector.
+
+**No Stripe logic is re-implemented.** Every mutation hands a platform scope to
+the same `billing_operations` function the customer surface uses, so the
+double-charge guard, the integer-minor-unit rule and the ownership filters all
+still apply and there is no second copy to keep in step. The one direct Stripe
+call is the Billing Portal session, which P4 never wrapped — and it goes
+through `gw.client()` first, so the live-key refusal applies.
+
+### Financial metrics — what is implemented, and what is deliberately absent
+
+Every figure is summed **server-side, from the local mirror, in integer minor
+units, grouped by currency**. Nothing is projected.
+
+| Metric | Source |
+|---|---|
+| organizations, with-live-agreement, active subscriptions | `Organization`, `BillingAgreement` |
+| open / overdue invoice counts and values | `Invoice.amount_due_cents` where status open |
+| payments recorded | `Payment.amount_cents` where succeeded |
+| failed payment count and value | `Payment` where failed |
+| accounts past due | `Organization.billing_status` |
+| contracted recurring | live `BillingAgreement`, **per interval and per currency** |
+
+**There is no MRR and no ARR**, and a test asserts their absence rather than
+their value. Normalising a mixed-interval, mixed-currency book into one monthly
+number needs an FX rate and an annualisation rule this system has no authority
+to set. The narrower question answered exactly is worth more than the familiar
+one answered approximately. Currencies are never added together — 100 USD plus
+100 CAD is not a number, and a dashboard that adds them looks right until
+somebody acts on it.
+
+Every response carries a `basis` string saying it is the mirror as of the last
+processed webhook, so a figure lifted off this screen travels with its own
+caveat. **The dashboard makes no Stripe call at all** — it must load during an
+outage, and it is about money that already moved.
+
+### Needs-attention queue
+
+Every row is a checkable fact, never a heuristic: `payment_failed`,
+`invoice_overdue`, `org_past_due`, `agreement_not_executed`,
+`subscription_without_agreement`, `billing_not_configured`. Ordered worst
+first, because it is read top-down by somebody with limited time. Each row
+carries organization, brand, legal seller, amount, date and detail — enough to
+act without opening anything else, and nothing sensitive.
+
+### Operations
+
+The operator chooses a **payment purpose** — setup/implementation, or manual
+invoice — never a Stripe payment method. **No payment method is named anywhere
+in P7**, asserted by test; eligibility comes from the Stripe account's own
+configuration on the resulting hosted invoice. Invoice creation is explicitly a
+manual line item and cannot read or change the organization's BillingAgreement.
+Subscription creation is disabled in the UI when one already exists, and
+refused by P4 underneath either way — clicking twice costs nothing.
+
+### Audit
+
+Through the platform's existing `log_action` table, with actor and target:
+`billing_invoice_created` / `_finalized` / `_sent` / `_voided`,
+`billing_subscription_started` / `_cancelled`, `billing_portal_opened`. Billing
+grew no audit framework of its own. A retried subscribe is **not** logged as a
+second start, and an audit failure never undoes a Stripe operation that already
+happened — both tested.
+
+### Tests: 65 new, 333 across the billing surface, all passing
+
+Four deliberate mutations reverted: opening the surface to a tenant admin,
+summing currencies into one number, loosening the scope factory to accept an
+id, and pointing the command center at a customer endpoint.
+
+### Limitations
+
+- **`frontend/dist` was not rebuilt** — same mount limitation as P6. `npm run
+  build` in `frontend/` is required before deploy. The build was verified clean
+  against a scratch copy (226 modules).
+- `command_center` loads all invoices and payments into memory. Correct and
+  fast at current volume; it wants aggregate SQL before it is thousands of
+  rows.
+- Autopay in the detail view costs one `Subscription.retrieve` per
+  organization opened, so it is not shown in the list.

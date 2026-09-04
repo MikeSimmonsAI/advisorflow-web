@@ -191,3 +191,38 @@ undo. What is missing is modelling, and it belongs in P6:
   rule violations but not rendering bugs. Adding vitest + testing-library is a
   dependency decision worth making deliberately, not inside a billing phase.
 
+## Found during P7
+
+- **`command_center` reads every invoice and payment into memory.** Correct and
+  fast at current volume, and deliberately simple while the shape of the
+  dashboard is still settling. It wants aggregate SQL — `SUM ... GROUP BY
+  currency` — before the tables are in the thousands.
+- **Autopay is not in the organization list.** It costs one
+  `Subscription.retrieve` per organization, so showing it for fifty customers
+  would be fifty Stripe calls on a page load. It appears in the detail view
+  only. Mirroring autopay state from webhooks (already noted in the P6
+  follow-ups) would let the list carry it.
+- **The Billing Portal session is the one direct Stripe call in P7.** P4 never
+  wrapped `billing_portal.Session.create`, so both the customer router and this
+  one call it directly. It goes through `gw.client()` first, so the live-key
+  refusal applies, but it is the last billing Stripe call not behind the
+  gateway and should move there.
+- **No line-item editing on a draft.** The command center creates a draft with
+  its lines and then finalizes, sends or voids. Editing lines while still draft
+  means deleting and recreating Stripe InvoiceItems, which is a real workflow
+  worth having but is its own piece of work.
+- **Invoice creation has no `request_id` from the UI.** P5 added opt-in
+  duplicate protection to `create_draft_invoice`; the command center does not
+  pass one, so a double-submit creates two drafts. Neither charges anything and
+  either can be voided, but generating a request id per form open would be one
+  line and would remove the possibility.
+- **`needs_attention` has no dismissal or snooze.** Every row reappears until
+  the underlying fact changes. That is honest, and it will get noisy for a
+  known-bad legacy account nobody intends to fix this quarter.
+- **The two surfaces are asserted separate by source inspection, not by
+  architecture.** A test checks the command center imports nothing from the
+  customer page. If a genuinely shared component ever appears — an invoice
+  table is the obvious candidate — it should be extracted to a neutral
+  component both import, and that test updated deliberately rather than
+  deleted.
+

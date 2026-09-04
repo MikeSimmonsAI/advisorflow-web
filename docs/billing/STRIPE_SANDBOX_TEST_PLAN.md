@@ -5,7 +5,7 @@ activation. Nothing in this plan should be run against a live Stripe account.
 
 ## Nothing here has been executed yet
 
-P0–P6 are covered entirely by unit tests with Stripe faked. No sandbox call
+P0–P7 are covered entirely by unit tests with Stripe faked. No sandbox call
 has been made from this session, and none can be until test-mode credentials
 exist in the environment. Secrets come from environment/deployment secret
 management — never from chat, never from the database, never committed.
@@ -147,6 +147,42 @@ those flows produce. Then:
 30. **A direct URL is still refused.** As a user with no billing authority,
     navigate to `/billing` by typing it. The page must render a permission
     sentence, and the network tab must show the billing reads returning 403.
+
+## P7 steps — the back-office command center against a real sandbox
+
+31. **Create and send a setup invoice end to end.** From `/god/billing`, open
+    an organization, create a draft with purpose "Setup / implementation",
+    confirm in the dashboard it is a draft collecting nothing, then finalize
+    and send. Confirm the customer receives it and the hosted page offers the
+    eligible one-time methods from step 21's recorded set — **including BNPL if
+    the account has it enabled**, which is the whole reason the setup flow is
+    separate.
+32. **A manual invoice offers the invoice-eligible methods.** Repeat with
+    purpose "Manual invoice" and compare the hosted page's options. Any
+    difference is Stripe's configuration talking, which is correct — the
+    application named nothing.
+33. **Start a subscription from an agreement and try to start it twice.** The
+    second attempt must return `created: false` and the dashboard must show one
+    subscription. Then confirm the Price Stripe created carries the
+    agreement's exact `unit_amount`.
+34. **Cancel at period end from the back office.** Confirm the dashboard shows
+    it ending at period end and still active until then, and that the local
+    agreement status is unchanged — the webhook applies that transition.
+35. **The dashboard survives a Stripe outage.** Point `STRIPE_SECRET_KEY` at an
+    invalid value and load `/god/billing`. Every count and total must still
+    render from the mirror; only the per-organization autopay state should
+    read Unknown.
+36. **The numbers match Stripe.** Pick one organization and compare open
+    invoice value, payments recorded and failed payment count against the
+    Stripe dashboard. A difference is a missed webhook, not a calculation bug —
+    and finding one is exactly what P8's reconciliation is for.
+37. **A tenant admin cannot reach it.** Sign in as a customer org_admin with
+    `billing_manage` and request `/god/billing` and
+    `/platform/billing/command-center` directly. Both must refuse, and their
+    own `/billing` must still work in the same session.
+38. **The audit trail records what happened.** After steps 31–34, open
+    `/god/audit` and confirm the invoice and subscription actions appear with
+    the acting user and the right organization.
 
 ## Not yet testable
 

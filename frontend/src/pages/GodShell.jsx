@@ -115,6 +115,11 @@ const NAV = [
 
   { group: 'OPERATIONS' },
   { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending' },
+  // P7's cross-organization billing. NOT the customer /billing screen: that
+  // one is scoped to whichever workspace the caller is standing in, this one
+  // is the whole book, and only a god_admin holding `platform_billing` can
+  // load anything behind it.
+  { label: 'Billing',          path: '/god/billing',          icon: 'dollar'   },
   { label: 'Implementations',  path: '/god/implementations',  icon: 'branch'   },
   { label: 'Lead Scraper',     path: '/scraper',              icon: 'grid'     },
 

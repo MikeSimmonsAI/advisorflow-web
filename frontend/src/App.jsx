@@ -112,6 +112,11 @@ import GodUsers from './pages/god/GodUsers'
 import Workspaces from './pages/god/Workspaces'
 import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
 import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
+// P7. A SEPARATE SCREEN FROM pages/Billing.jsx, and separate on purpose: that
+// one is a customer looking at their own account inside their workspace, this
+// one is EvoSys personnel looking across every organization. Different
+// authority, different data, no shared code.
+import BillingCommandCenter from './pages/god/BillingCommandCenter'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -709,6 +714,12 @@ export default function App() {
         <Route path="/god/customers/new" element={<GodRoute><GodModeLayout><CustomerCreate /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers/:orgId" element={<GodRoute><GodModeLayout><CustomerDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
+        {/* Registered BEFORE the /god/* catch-all. `GodRoute` requires
+            god_admin and answers NOT FOUND rather than naming the level
+            required — this surface is advertised to nobody. Every endpoint
+            behind it independently requires god_admin AND the non-delegable
+            `platform_billing` capability, which is what actually refuses. */}
+        <Route path="/god/billing" element={<GodRoute><GodModeLayout><BillingCommandCenter /></GodModeLayout></GodRoute>} />
         {/* Users & Identity. One row per human, every context on that row —
             see the header of GodUsers.jsx. */}
         <Route path="/god/workspaces" element={<GodRoute><GodModeLayout><Workspaces /></GodModeLayout></GodRoute>} />

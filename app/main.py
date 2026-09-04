@@ -85,6 +85,11 @@ from app.routers.platform_context_router import router as platform_context_route
 from app.routers.customers_router import router as customers_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
+# P7's back-office command center. A SEPARATE ROUTER ON A SEPARATE PREFIX,
+# because it answers to platform authority rather than to a customer's
+# workspace - and two surfaces sharing a file is how a route ends up with the
+# wrong dependency by being copied from the one above it.
+from app.routers.platform_billing_router import router as platform_billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
 from app.routers.sales_router import router as sales_router
 from app.routers.sales_scheduling_router import router as sales_scheduling_router
@@ -542,6 +547,7 @@ app.include_router(email_tracking_router)
 # Stripe billing: /billing/plans is public; subscription/checkout/portal are
 # org_admin+ (each org manages its own card); /billing/all is god_admin only.
 app.include_router(billing_router)
+app.include_router(platform_billing_router)
 # Lead Scraper: god_admin only, enforced server-side inside the router.
 app.include_router(lead_scraper_router)
 # Sales Workspace: brand-sales members only. Guarded SERVER-SIDE by
