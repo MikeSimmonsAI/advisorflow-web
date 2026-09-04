@@ -87,3 +87,9 @@ import app.models.source_records  # noqa: F401  (imported for side effects)
 # defined no rules" rather than as an error. A quiet wrong answer instead of a
 # loud one, which is the worst shape a missing migration can take.
 import app.models.qualification_models  # noqa: F401  (imported for side effects)
+# Billing mirror (invoices / invoice_line_items / payments /
+# stripe_webhook_events). Same Base, same reason. Without this import the
+# webhook has nowhere to record that it has already seen an event, and the
+# idempotency guarantee - the thing that stops a redelivered refund being
+# applied twice - silently does not exist.
+import app.models.billing_models  # noqa: F401  (imported for side effects)

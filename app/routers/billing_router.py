@@ -273,47 +273,37 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         logger.error("Stripe webhook error: %s", e)
         raise HTTPException(status_code=400, detail="Webhook error")
 
-    etype = event["type"]
-    data = event["data"]["object"]
+    # ── DISPATCH ────────────────────────────────────────────────────────────
+    #
+    # The three inline handlers that used to live here (checkout.session.
+    # completed, customer.subscription.updated, customer.subscription.deleted)
+    # moved to app/services/billing_webhooks.py WITH THEIR BEHAVIOUR UNCHANGED,
+    # and the invoice, payment and refund events that were never handled at all
+    # were added beside them.
+    #
+    # What is new is not the handling, it is the guarantees around it:
+    #
+    #   * the event id is claimed in `stripe_webhook_events` BEFORE any
+    #     financial state is touched, so a redelivery - which Stripe documents
+    #     and does - cannot apply the same transition twice;
+    #   * an event older than the last one applied to a row is skipped, because
+    #     Stripe does not guarantee delivery order;
+    #   * a transient failure raises, so this endpoint answers 500 and Stripe
+    #     retries. The previous version returned {"received": True} whatever
+    #     happened, which meant a failed `invoice.payment_failed` was lost and
+    #     the customer stayed 'active' with a declined card.
+    from app.services import billing_webhooks
 
-    if etype == "checkout.session.completed":
-        org_id = data.get("metadata", {}).get("org_id")
-        plan = data.get("metadata", {}).get("plan")
-        interval = data.get("metadata", {}).get("interval", "month")
-        sub_id = data.get("subscription")
-        customer_id = data.get("customer")
-        if org_id and plan:
-            org = db.query(Organization).filter(Organization.id == org_id).first()
-            if org:
-                org.plan = plan
-                org.stripe_subscription_id = sub_id
-                org.stripe_customer_id = customer_id
-                org.stripe_plan_interval = interval
-                org.billing_status = "active"
-                db.commit()
-                logger.info("Billing activated: org=%s plan=%s", org_id, plan)
+    try:
+        result, was_duplicate = billing_webhooks.handle(db, event)
+    except Exception:
+        # Deliberately a 500. Stripe will retry, and the event is recorded as
+        # failed in the ledger rather than silently dropped.
+        logger.exception("Stripe webhook processing failed: %s", event.get("id"))
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
 
-    elif etype == "customer.subscription.updated":
-        sub_id = data.get("id")
-        org = db.query(Organization).filter(Organization.stripe_subscription_id == sub_id).first()
-        if org:
-            org.billing_status = data.get("status")
-            meta_plan = data.get("metadata", {}).get("plan")
-            if meta_plan:
-                org.plan = meta_plan
-            db.commit()
-
-    elif etype == "customer.subscription.deleted":
-        sub_id = data.get("id")
-        org = db.query(Organization).filter(Organization.stripe_subscription_id == sub_id).first()
-        if org:
-            org.billing_status = "canceled"
-            org.plan = "trial"
-            org.stripe_subscription_id = None
-            db.commit()
-            logger.info("Subscription canceled: org=%s", org.id)
-
-    return {"received": True}
+    return {"received": True, "duplicate": was_duplicate,
+            "result": {k: v for k, v in result.items() if k != "payload"}}
 
 
 # ---------------------------------------------------------------------------
@@ -354,3 +344,45 @@ def get_all_billing(
             for o in orgs
         ]
     }
+
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/reconcile/{org_id}   (god admin — re-pull state from Stripe)
+#
+# TENANT AUTHORITY NOTE. This route deliberately uses the SAME guard as
+# /billing/all above - god_admin plus the non-delegable `platform_billing`
+# capability - and does NOT read current_user.organization_id. The org it acts
+# on is an explicit path parameter checked against the database, not inferred
+# from the caller's legacy column.
+#
+# The pre-existing `_require_admin` helper in this file still resolves the org
+# from current_user.organization_id, which is the legacy authority path the
+# platform moved away from. That defect is REAL and is documented in
+# claude/BILLING_PHASE0_ARCHITECTURE.md §8; fixing it means re-gating the
+# customer-facing routes through lead_scope and adding billing capabilities,
+# which is Phase 3. P0 does not expand its use: nothing added here calls it.
+# ---------------------------------------------------------------------------
+@router.post("/reconcile/{org_id}", include_in_schema=False)
+def reconcile_billing(
+    org_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _cap: User = Depends(require_capability("platform_billing")),
+):
+    """Re-pull invoices and payments for one organization from Stripe.
+
+    Webhooks fail; without a reconciliation path a mirror diverges silently.
+    Read-only against Stripe - it lists and retrieves, and creates nothing
+    there.
+    """
+    if current_user.role != "god_admin":
+        raise HTTPException(status_code=403, detail="God admin only.")
+
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    _stripe_client()
+    from app.services.billing_reconcile import reconcile_organization
+    return reconcile_organization(db, org_id)
