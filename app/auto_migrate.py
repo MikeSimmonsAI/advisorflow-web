@@ -563,6 +563,32 @@ COLUMNS_TO_ADD = [
     ("import_staged_rows", "mobile_phone_raw",        "VARCHAR"),
     ("import_staged_rows", "mobile_phone_normalized", "VARCHAR"),
     ("import_staged_rows", "phone_type",              "VARCHAR"),
+
+    # ── Organization Stripe billing columns ────────────────────────────────
+    #
+    # DECLARED ON THE MODEL SINCE THE ORIGINAL billing_router, NEVER DECLARED
+    # HERE. That is the whole defect. `models.Organization` has carried
+    # stripe_customer_id / stripe_subscription_id / stripe_plan_interval /
+    # billing_status for as long as billing has existed, so a database created
+    # AFTER they were added got them free from `create_all()` and looked fine.
+    # A database created BEFORE them never did, and `create_all()` does not add
+    # a column to a table that already exists - which is the entire reason this
+    # module exists. Every ORM query against Organization emits all four column
+    # names, so on such a database `SELECT organizations...` fails with
+    # UndefinedColumn on EVERY boot and every request, forever.
+    #
+    # It surfaced first as a warning from the workspace membership backfill,
+    # because that is simply the first Organization query after startup - not
+    # because the backfill is early. Ordering is correct: run_auto_migrations()
+    # already runs before it. The columns were just never in this list to add.
+    #
+    # Nullable, no default, exactly as the model declares them. Adding them
+    # grants nothing and bills nobody: NULL billing_status is the same
+    # "unknown" every pre-Stripe row already had.
+    ("organizations", "stripe_customer_id",     "VARCHAR"),
+    ("organizations", "stripe_subscription_id", "VARCHAR"),
+    ("organizations", "stripe_plan_interval",   "VARCHAR"),
+    ("organizations", "billing_status",         "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -774,6 +800,60 @@ POSTGRES_ONLY_DDL = [
 ]
 
 
+def _apply_column_adds(conn, columns, is_sqlite: bool) -> None:
+    """Add every missing column, one INDEPENDENTLY COMMITTED statement each.
+
+    THE PER-STATEMENT COMMIT AND THE ROLLBACK ARE BOTH LOAD-BEARING ON POSTGRES.
+
+    The previous version ran the whole list inside ONE transaction, caught each
+    failure, printed it, and committed once at the end - with no rollback in the
+    handler. On Postgres that is not "each statement is independent", which is
+    what the comment claimed. The FIRST failing statement aborts the
+    transaction, and from that point Postgres refuses every following statement
+    with
+
+        current transaction is aborted, commands ignored until end of
+        transaction block
+
+    so each remaining column printed its own plausible-looking "Skipped" line,
+    and the closing COMMIT on an aborted transaction is executed as a ROLLBACK -
+    discarding even the columns that HAD succeeded before the failure. One
+    stale entry anywhere in the list therefore silently discarded the entire
+    batch, on every boot, while the log looked like a handful of harmless notes.
+
+    That is why appending the four Organization billing columns to the end of
+    COLUMNS_TO_ADD is not on its own enough to satisfy "an existing database
+    must self-upgrade": on a database with any pre-existing drift earlier in the
+    list - which is exactly the kind of database that needs the upgrade - the
+    new entries would be discarded along with everything else.
+
+    Committing per statement and rolling back on failure makes the loop behave
+    the way it always documented itself as behaving. It is the same pattern the
+    TABLES_TO_CREATE and INDEXES_TO_CREATE loops in this file already use.
+    """
+    for table, column, definition in columns:
+        try:
+            if is_sqlite:
+                # SQLite doesn't support "IF NOT EXISTS" on ADD COLUMN -
+                # check first, then add only if genuinely missing.
+                existing_cols = {row[1] for row in
+                                 conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+                if column in existing_cols:
+                    continue
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+            else:
+                conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition};"))
+            conn.commit()
+        except (OperationalError, ProgrammingError) as e:
+            # Logged, not raised - a single failed column-add (e.g. the table
+            # itself does not exist on this database) must never crash the app
+            # on startup. The rollback is what actually keeps the NEXT column
+            # independent of this one.
+            conn.rollback()
+            print(f"[auto_migrate] Skipped {table}.{column}: {e}")
+
+
 def run_auto_migrations(engine) -> None:
     """
     Called once from main.py's startup handler, right after
@@ -793,24 +873,7 @@ def run_auto_migrations(engine) -> None:
                 conn.rollback()
                 print(f"[auto_migrate] Table create skipped: {e}")
 
-        for table, column, definition in COLUMNS_TO_ADD:
-            try:
-                if is_sqlite:
-                    # SQLite doesn't support "IF NOT EXISTS" on ADD COLUMN -
-                    # check first, then add only if genuinely missing.
-                    existing_cols = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
-                    if column not in existing_cols:
-                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
-                else:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition};"))
-            except (OperationalError, ProgrammingError) as e:
-                # Logged, not raised - a single failed column-add (e.g.
-                # the table itself doesn't exist yet on a brand-new
-                # database, where create_all() just created it fresh
-                # with this column already included) should never crash
-                # the whole app on startup. Each statement is independent.
-                print(f"[auto_migrate] Skipped {table}.{column}: {e}")
-        conn.commit()
+        _apply_column_adds(conn, COLUMNS_TO_ADD, is_sqlite)
 
         if not is_sqlite:
             # Relax NOT NULL where the data model no longer requires it.
