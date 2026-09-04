@@ -45,6 +45,15 @@ import SystemHealth from './pages/SystemHealth'
 import LeadCleanup from './pages/LeadCleanup'
 import Settings from './pages/Settings'
 import Templates from './pages/Templates'
+// Client Proposal Portal — the TENANT proposal surface. Proposals.jsx and
+// ProposalEditor.jsx were built and shipped but never routed, so /proposals
+// and /proposals/:proposalId fell through to the catch-all. Both pages call
+// the existing /proposals/* admin API in app/routers/proposal_router.py.
+// That family is deliberately NOT the same as /sales/proposals/* in
+// sales_proposal_router.py, which is opportunity-scoped, versioned and
+// priced, and keeps its own page (TeamProposals) in the Sales Workspace.
+import Proposals from './pages/Proposals'
+import ProposalEditor from './pages/ProposalEditor'
 import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
 import AIHub from './pages/AIHub'
@@ -638,6 +647,12 @@ export default function App() {
         <Route path="/lead-cleanup" element={<ProtectedRoute requireAdmin><LeadCleanup /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute requireAdmin><Templates /></ProtectedRoute>} />
+        {/* requireAdmin mirrors the server exactly: every admin endpoint in
+            proposal_router.py depends on require_admin, and each one scopes
+            the query to the caller's organization_id. This guard is not the
+            authorization — it only stops the UI opening a door onto a 403. */}
+        <Route path="/proposals" element={<ProtectedRoute requireAdmin><Proposals /></ProtectedRoute>} />
+        <Route path="/proposals/:proposalId" element={<ProtectedRoute requireAdmin><ProposalEditor /></ProtectedRoute>} />
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />

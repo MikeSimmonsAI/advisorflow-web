@@ -60,6 +60,11 @@ const NAV_GROUPS = [
       { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
       { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
       { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
+      // NO featureKey. `proposals` is not a key in app/services/entitlements.py,
+      // and asking isFeatureEnabled() for a key the server has never heard of is
+      // precisely the mistake documented in that file. `adminOnly` is the honest
+      // test here because require_admin is what /proposals/* actually enforces.
+      { to: '/proposals', label: 'Proposals', icon: 'file-text', adminOnly: true },
       { to: '/cadence', label: 'Cadence', icon: 'repeat', adminOnly: true },
       { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
       { to: '/compliance', label: 'DNC List', icon: 'shield-check' },

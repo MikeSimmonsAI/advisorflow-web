@@ -184,7 +184,7 @@ export default function Onboarding() {
             <p className="onboarding-next-steps">
               Next: import your leads, set up your Twilio number in Settings, and start your first cadence.
             </p>
-            <button className="btn btn--primary onboarding-next-btn" onClick={() => navigate('/overview')}>
+            <button className="btn btn--primary onboarding-next-btn" onClick={() => navigate('/')}>
               Go to dashboard →
             </button>
           </div>

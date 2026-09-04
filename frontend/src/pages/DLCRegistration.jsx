@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, getCurrentUser } from '../api/client'
+import { api, getCurrentUser, API_BASE } from '../api/client'
 import '../styles/shared.css'
 
 const STEPS = [
@@ -221,7 +221,7 @@ export default function DLCRegistration() {
           ].map(({ label, url }) => (
             <a
               key={url}
-              href={`https://advisorflow-backend.onrender.com${url}`}
+              href={`${API_BASE}${url}`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
