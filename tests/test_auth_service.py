@@ -29,8 +29,8 @@ def test_authenticate_user_fails_for_unknown_email(db_session, sample_org):
     assert user is None
 
 
-def test_access_token_round_trip(sample_advisor):
-    token = create_access_token(sample_advisor)
+def test_access_token_round_trip(sample_advisor, db_session):
+    token = create_access_token(sample_advisor, db_session)
     decoded = decode_access_token(token)
     assert decoded["sub"] == sample_advisor.id
     assert decoded["org_id"] == sample_advisor.organization_id

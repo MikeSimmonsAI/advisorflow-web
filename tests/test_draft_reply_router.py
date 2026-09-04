@@ -64,6 +64,7 @@ def test_draft_reply_is_org_scoped(client, db_session, sample_org, auth_headers)
         password_hash=hash_password("TestPass123!"),
         full_name="Other Advisor",
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(other_user)
     db_session.commit()

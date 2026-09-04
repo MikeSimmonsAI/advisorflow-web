@@ -272,12 +272,31 @@ async def inbound_webhook(
     # it a compliance failure and not merely a missing feature. A shared sender
     # is the normal configuration for a funeral home whose advisors do not each
     # carry their own number.
-    advisor = db.query(User).filter(User.twilio_phone_number == twilio_to).first()
+    # ONE NUMBER, THREE SPELLINGS.
+    #
+    # `twilio_to` is normalize_phone(To), which is DIGITS ONLY - it strips the
+    # leading "+". Both columns searched below store what an admin or the A2P
+    # flow saved, which is E.164 with the plus. So a single equality test on
+    # the normalized value could not match a stored number, every inbound
+    # reply fell through to the "unrecognized number" branch, and STOP
+    # processing never ran. That is a compliance failure, not a missing
+    # feature, which is why the lookup now tries the spellings rather than
+    # assuming one.
+    #
+    # This only WIDENS matching to the same number written differently. It
+    # cannot match a different number, and the organization scoping below is
+    # unchanged. twilio_webhook_guard.guard_inbound already resolves its own
+    # owner lookup the same way.
+    _to_forms = [f for f in (twilio_to, To, ("+" + twilio_to) if twilio_to else None)
+                 if f]
+    advisor = (db.query(User)
+               .filter(User.twilio_phone_number.in_(_to_forms))
+               .first())
     org_id = advisor.organization_id if advisor else None
     if org_id is None:
         from app.models.models import Organization
         _org = (db.query(Organization)
-                .filter(Organization.org_twilio_phone_number == twilio_to)
+                .filter(Organization.org_twilio_phone_number.in_(_to_forms))
                 .first())
         org_id = _org.id if _org else None
 

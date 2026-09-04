@@ -20,6 +20,7 @@ def _make_foreign_reply(db_session):
         password_hash=hash_password("TestPass123!"),
         full_name="Other Advisor",
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(other_advisor)
     db_session.commit()

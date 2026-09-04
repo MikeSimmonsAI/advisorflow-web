@@ -254,24 +254,30 @@ def send_email(
 
 
 def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
-    """Sends one email to a lead and logs it. Raises ValueError if the lead has no email."""
-    if not lead.email:
-        raise ValueError(f"Lead {lead.id} has no email address.")
-
-    # A FLAGGED ADDRESS IS AS GOOD AS NO ADDRESS.
+    """Sends one email to a lead and logs it. Raises ValueError if the lead
+    may not be emailed."""
+    # THE COMPLIANCE GATE, and it is the SAME one the auto-send queue runs.
     #
-    # The batch queue already refuses manually flagged leads; the single send
-    # did not, so the one path an advisor uses by hand was the one that would
-    # cheerfully mail "unknow@unknown". Sending there costs a hard bounce
-    # against the domain's sending reputation, and every bounce makes the
-    # deliverability of the REAL families' mail worse.
-    if (getattr(lead, "manual_flag", None) or "") == "bad_email":
-        raise ValueError(
-            f"{lead.first_name or 'This lead'} is flagged with an unusable "
-            f"email address ({lead.email}). Correct the address before "
-            f"emailing - sending to it would bounce and damage the "
-            f"organization's sending reputation."
-        )
+    # This function used to check two things itself - a missing address and a
+    # "bad_email" flag - and nothing else. So a family that replied STOP to a
+    # text, or whose source system recorded an email opt-out, could still be
+    # emailed by hand from Lead Detail. Both facts were already stored on the
+    # lead and consulted by qualification.py; the send path simply never asked.
+    #
+    # check_compliance_preflight is the one place those rules live now:
+    #   * Lead.status == DNC blocks EVERY channel
+    #   * allow_email is False - an explicit opt-out of record. Only False;
+    #     NULL means the source never said and is not a denial.
+    #   * manual_flag == "bad_email"
+    #   * no address at all
+    # A suppressed PHONE deliberately does not block email - suppression_entries
+    # is a phone list, and inventing a cross-channel rule here would silently
+    # stop mail that is permitted today.
+    #
+    # It raises before the provider is reached, so a blocked lead costs no
+    # provider call and writes no EmailMessage row.
+    from app.services.compliance_service import check_compliance_preflight
+    check_compliance_preflight(db, lead, channel="email")
 
     from app.services.sms_service import create_booking_link
     from app.models.models import Organization

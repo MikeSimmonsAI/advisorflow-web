@@ -67,6 +67,7 @@ def _advisor(db_session, org, *, email, name="Advisor"):
         password_hash=hash_password("TestPass123!"),
         full_name=name,
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(advisor)
     db_session.commit()

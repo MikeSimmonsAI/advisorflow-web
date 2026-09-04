@@ -100,6 +100,7 @@ def test_email_queue_search_stays_scoped_to_logged_in_advisor_org(client, db_ses
         password_hash=hash_password("TestPass123!"),
         full_name="Other Advisor",
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(other_user)
     db_session.commit()

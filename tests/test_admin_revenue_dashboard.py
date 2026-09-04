@@ -173,7 +173,9 @@ def test_revenue_dashboard_org_isolation(client, db_session, sample_org, sample_
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other-revenue@example.com",
-                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,

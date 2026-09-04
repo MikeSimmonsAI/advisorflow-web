@@ -70,6 +70,7 @@ def _other_org_with_admin(db_session):
         password_hash=hash_password("OtherPass123!"),
         full_name="Other Cleanup Admin",
         role="org_admin",
+        must_change_password=False,
     )
     db_session.add(other_admin)
     db_session.flush()

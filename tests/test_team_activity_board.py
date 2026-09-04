@@ -89,7 +89,9 @@ def test_team_activity_org_isolated(client, db_session, sample_org, sample_advis
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other-activity@example.com",
-                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
 

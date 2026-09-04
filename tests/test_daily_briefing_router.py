@@ -44,14 +44,15 @@ def _advisor(db_session, org, *, email, name="Other Advisor"):
         password_hash=hash_password("TestPass123!"),
         full_name=name,
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(advisor)
     db_session.commit()
     return advisor
 
 
-def _headers_for(user):
-    token = create_access_token(user)
+def _headers_for(user, db_session):
+    token = create_access_token(user, db_session)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -95,7 +96,7 @@ def test_daily_briefing_counts_are_exact_for_current_advisor(client, db_session,
     ])
     db_session.commit()
 
-    response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor))
+    response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     assert response.json() == {
@@ -130,7 +131,7 @@ def test_daily_briefing_is_scoped_to_current_advisor_and_org(client, db_session,
     ])
     db_session.commit()
 
-    response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor))
+    response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     assert response.json() == {

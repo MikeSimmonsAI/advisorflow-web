@@ -98,6 +98,7 @@ def test_campaign_apply_updates_only_matching_org_leads_and_skips_dnc(
         password_hash=hash_password("OtherPass123!"),
         full_name="Other Campaign Admin",
         role="org_admin",
+        must_change_password=False,
     )
     db_session.add(other_admin)
     db_session.flush()

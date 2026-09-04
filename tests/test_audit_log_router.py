@@ -33,6 +33,7 @@ def test_audit_log_org_isolation_and_action_filter(client, admin_auth_headers, d
         password_hash=hash_password("AdminPass123!"),
         full_name="Other Audit Admin",
         role="org_admin",
+        must_change_password=False,
     )
     db_session.add(other_admin)
     db_session.commit()

@@ -57,7 +57,9 @@ def test_one_organizations_failure_does_not_block_another(db_session):
     db_session.commit()
 
     advisor_b = User(organization_id=org_b.id, email="b@test.com", password_hash=hash_password("x"),
-                      full_name="Advisor B", role="advisor", twilio_phone_number="+12145551111")
+                      full_name="Advisor B", role="advisor", twilio_phone_number="+12145551111",
+                      must_change_password=False,
+                  )
     db_session.add(advisor_b)
     db_session.commit()
 

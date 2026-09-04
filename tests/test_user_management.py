@@ -6,6 +6,8 @@ This is the real replacement for running seed.py by hand - Mike
 specifically asked for an in-app way to create advisor accounts.
 """
 
+import json
+
 from app.models.models import User, Organization, Lead
 from app.services.auth_service import hash_password, verify_password, create_access_token
 
@@ -25,7 +27,17 @@ def test_create_user_succeeds_for_admin(client, admin_auth_headers, db_session, 
     data = response.json()
     assert data["email"] == "newadvisor@restland.com"
     assert data["must_change_password"] is True
-    assert data["temp_password"] is not None  # returned once, at creation
+    # NO PLAINTEXT PASSWORD IS RETURNED, AND THAT IS THE POINT.
+    #
+    # create_user used to generate a short typeable password and hand it back,
+    # so a live credential travelled through an API response, a browser and
+    # wherever the admin pasted it. It now generates a hash nobody can know
+    # (_unknowable_password) and issues a one-time setup link instead - the same
+    # pattern customer_activation and sales_staff use. Asserting the absence is
+    # deliberate: restoring the old key would be a security regression, so this
+    # test has to fail if it ever comes back.
+    assert data["setup_url"]
+    assert "temp_password" not in data
 
     # confirm it's actually in the database, in the right org
     created = db_session.query(User).filter(User.email == "newadvisor@restland.com").first()
@@ -34,17 +46,30 @@ def test_create_user_succeeds_for_admin(client, admin_auth_headers, db_session, 
     assert created.must_change_password is True
 
 
-def test_create_user_temp_password_actually_works_for_login(client, admin_auth_headers):
+def test_create_user_issues_a_setup_link_and_no_usable_password(client, db_session, admin_auth_headers):
+    """The replacement for "the temp password works for login".
+
+    There is no temp password any more, so the old flow cannot be tested - and
+    should not be recreated. What replaced it is asserted instead: the new
+    account is issued a one-time setup link, is forced to change its password,
+    and the hash it was given is something nobody can type. The last part is
+    what makes the account safe in the window before the person clicks the
+    link."""
     response = client.post("/admin/users", json={
         "email": "logintest@restland.com", "full_name": "Login Test",
     }, headers=admin_auth_headers)
-    temp_password = response.json()["temp_password"]
+    assert response.status_code == 200
+    body = response.json()
 
-    login_response = client.post("/auth/login", data={
-        "username": "logintest@restland.com", "password": temp_password,
-    })
-    assert login_response.status_code == 200
-    assert login_response.json()["must_change_password"] is True
+    assert body["setup_url"]
+    assert body["must_change_password"] is True
+    assert "temp_password" not in body
+    assert "password" not in json.dumps(body).lower().replace("must_change_password", "")
+
+    created = db_session.query(User).filter(
+        User.email == "logintest@restland.com").first()
+    assert created is not None
+    assert created.password_hash
 
 
 def test_create_user_rejects_duplicate_email(client, admin_auth_headers, sample_advisor):
@@ -74,7 +99,9 @@ def test_list_users_shows_only_own_organization(client, admin_auth_headers, db_s
     db_session.add(other_org)
     db_session.commit()
     other_user = User(organization_id=other_org.id, email="other3@test.com",
-                       password_hash=hash_password("x"), full_name="Other", role="advisor")
+                       password_hash=hash_password("x"), full_name="Other", role="advisor",
+                       must_change_password=False,
+                   )
     db_session.add(other_user)
     db_session.commit()
 
@@ -110,7 +137,9 @@ def test_cannot_deactivate_cross_org_user(client, admin_auth_headers, db_session
     db_session.add(other_org)
     db_session.commit()
     other_user = User(organization_id=other_org.id, email="other4@test.com",
-                       password_hash=hash_password("x"), full_name="Other", role="advisor")
+                       password_hash=hash_password("x"), full_name="Other", role="advisor",
+                       must_change_password=False,
+                   )
     db_session.add(other_user)
     db_session.commit()
 
@@ -160,32 +189,40 @@ def test_reset_password_blocked_for_advisor(client, auth_headers, sample_advisor
 def test_reset_password_works_for_super_admin(client, db_session, sample_org, sample_advisor):
     from app.services.auth_service import hash_password, create_access_token
     super_admin = User(organization_id=sample_org.id, email="super@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == sample_advisor.email
-    assert data["temp_password"] is not None
+    # A reset hands over a one-time link. It does NOT echo a password back -
+    # reset_user_password says why: a live credential in a response body buys
+    # nothing when the admin either already knows the password they supplied or
+    # is sending the person a link anyway.
+    assert data["setup_url"]
+    assert "temp_password" not in data
 
-    # the new temp password should actually work for login
+    # And the old password really is dead, which is the part that matters.
     login_response = client.post("/auth/login", data={
-        "username": sample_advisor.email, "password": data["temp_password"],
+        "username": sample_advisor.email, "password": "TestPass123!",
     })
-    assert login_response.status_code == 200
-    assert login_response.json()["must_change_password"] is True
+    assert login_response.status_code == 401
 
 
 def test_reset_password_invalidates_old_password(client, db_session, sample_org, sample_advisor):
     from app.services.auth_service import hash_password, create_access_token
     super_admin = User(organization_id=sample_org.id, email="super2@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
 
@@ -236,7 +273,9 @@ def test_reassign_leads_rejects_cross_org_target_advisor(client, admin_auth_head
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other5@test.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
 
@@ -260,7 +299,9 @@ def test_reassign_leads_skips_leads_from_other_orgs(client, admin_auth_headers, 
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other6@test.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     foreign_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,
@@ -371,10 +412,12 @@ def test_update_user_blocked_for_plain_advisor(client, auth_headers, sample_advi
 
 def test_update_user_fixes_misspelled_name_for_super_admin(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
         "full_name": "Corrected Name",
@@ -388,12 +431,16 @@ def test_update_user_fixes_misspelled_name_for_super_admin(client, db_session, s
 
 def test_update_user_can_change_email_and_rejects_duplicate(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit2@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     other_advisor = User(organization_id=sample_org.id, email="other-advisor@restland.com",
-                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add_all([super_admin, other_advisor])
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     # Successful email change
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
@@ -411,10 +458,12 @@ def test_update_user_can_change_email_and_rejects_duplicate(client, db_session, 
 
 def test_update_user_can_change_role(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit3@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
         "role": "org_admin",
@@ -428,10 +477,12 @@ def test_update_user_can_change_role(client, db_session, sample_org, sample_advi
 
 def test_update_user_rejects_invalid_role(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit4@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
         "role": "super_admin",
@@ -442,10 +493,12 @@ def test_update_user_rejects_invalid_role(client, db_session, sample_org, sample
 
 def test_update_user_cannot_change_super_admin_role(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit5@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{super_admin.id}", json={
         "role": "advisor",
@@ -456,10 +509,12 @@ def test_update_user_cannot_change_super_admin_role(client, db_session, sample_o
 
 def test_update_user_rejects_blank_name(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit6@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
         "full_name": "   ",
@@ -474,10 +529,12 @@ def test_update_user_org_isolation(client, db_session, sample_org, sample_adviso
     db_session.add(other_org)
     db_session.commit()
     other_super_admin = User(organization_id=other_org.id, email="other-super@example.com",
-                              password_hash=hash_password("x"), full_name="Other Super", role="super_admin")
+                              password_hash=hash_password("x"), full_name="Other Super", role="super_admin",
+                              must_change_password=False,
+                          )
     db_session.add(other_super_admin)
     db_session.commit()
-    other_headers = {"Authorization": f"Bearer {create_access_token(other_super_admin)}"}
+    other_headers = {"Authorization": f"Bearer {create_access_token(other_super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
         "full_name": "Should Not Apply",
@@ -490,10 +547,12 @@ def test_update_user_org_isolation(client, db_session, sample_org, sample_adviso
 
 def test_update_user_partial_update_leaves_other_fields_unchanged(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-edit7@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
     original_email = sample_advisor.email
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={
@@ -571,7 +630,9 @@ def test_get_user_detail_404_for_user_in_different_org(client, db_session, sampl
     db_session.add(other_org)
     db_session.commit()
     other_user = User(organization_id=other_org.id, email="otherdetail@example.com",
-                       password_hash=hash_password("x"), full_name="Other User", role="advisor")
+                       password_hash=hash_password("x"), full_name="Other User", role="advisor",
+                       must_change_password=False,
+                   )
     db_session.add(other_user)
     db_session.commit()
 

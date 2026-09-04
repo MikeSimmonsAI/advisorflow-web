@@ -80,7 +80,9 @@ def test_reply_counts_org_isolated(client, auth_headers, db_session, sample_org)
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other-counts@example.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,

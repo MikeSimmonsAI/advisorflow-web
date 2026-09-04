@@ -78,7 +78,9 @@ def test_permanent_dnc_updates_matching_lead_in_same_org_only(client, admin_auth
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="othercompliance@test.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
 

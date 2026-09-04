@@ -55,7 +55,9 @@ def test_record_outcome_rejects_lead_from_other_org(client, auth_headers, db_ses
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="otheroutcome@test.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     from app.models.models import Lead

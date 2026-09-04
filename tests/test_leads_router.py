@@ -22,10 +22,12 @@ def test_get_lead_blocks_cross_org_access(client, db_session, sample_lead):
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other2@test.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
-    other_token = create_access_token(other_advisor)
+    other_token = create_access_token(other_advisor, db_session)
 
     response = client.get(f"/leads/{sample_lead.id}", headers={"Authorization": f"Bearer {other_token}"})
     assert response.status_code == 404
@@ -132,7 +134,9 @@ def test_set_lead_tier_404_for_lead_in_different_org(client, db_session, sample_
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other-tier-advisor@example.com",
-                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other Advisor", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id, first_name="Other", last_name="Org", phone="12145550952")
@@ -153,7 +157,9 @@ def test_set_lead_tier_allows_any_advisor_in_org_not_just_assignee(client, db_se
     """
     from app.models.models import LeadStatus
     other_advisor = User(organization_id=sample_org.id, email="other-tier-owner@example.com",
-                          password_hash=hash_password("x"), full_name="Other Owner", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other Owner", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     lead = Lead(organization_id=sample_org.id, assigned_to_id=other_advisor.id, first_name="NotMine", last_name="Lead",

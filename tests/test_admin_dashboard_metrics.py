@@ -190,6 +190,7 @@ def test_dashboard_metrics_org_isolation(
         password_hash=hash_password("OtherPass123!"),
         full_name="Other Advisor",
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(other_advisor)
     db_session.flush()

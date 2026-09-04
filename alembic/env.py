@@ -8,6 +8,19 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models.models import Base
+# EVERY model module, on that same Base, BEFORE target_metadata is read.
+#
+# autogenerate diffs the live database against Base.metadata, and metadata
+# only contains tables whose module has been imported. Importing models.py
+# alone gave a PARTIAL picture, so autogenerate saw tables and columns that
+# exist in the database but not in its idea of the schema - and proposed
+# DROPPING them. alembic/versions/02907fcdb80c_initial_schema.py contains
+# exactly that shape of damage (op.drop_column on leads, lead_outcomes and
+# others), which is what a partial metadata produces.
+#
+# app/models/registry.py is the same single registry app/main.py and
+# tests/conftest.py import. There is no second list to keep in step.
+import app.models.registry  # noqa: F401,E402  (imported for side effects)
 
 config = context.config
 

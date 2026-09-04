@@ -127,9 +127,13 @@ def _check_email_permission(lead: Lead) -> None:
 
     if (getattr(lead, "manual_flag", None) or "") == "bad_email":
         detail = getattr(lead, "manual_flag_reason", None) or ""
+        # A FLAGGED ADDRESS IS AS GOOD AS NO ADDRESS. Sending there costs a
+        # hard bounce against the domain's sending reputation, and every
+        # bounce makes the deliverability of the REAL families' mail worse.
         raise ValueError(
-            f"Lead {lead.id} is flagged with an unusable email address "
-            f"({lead.email}) - blocked from sending. {detail}".strip()
+            f"{lead.first_name or 'This lead'} is flagged with an unusable "
+            f"email address ({lead.email}) - blocked from sending. Correct "
+            f"the address before emailing. {detail}".strip()
         )
 
 

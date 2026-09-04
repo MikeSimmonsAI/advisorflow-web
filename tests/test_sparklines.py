@@ -88,7 +88,9 @@ def test_sparklines_scoped_to_logged_in_advisor_and_org(client, db_session, samp
     db_session.add(other_org)
     db_session.commit()
     other_advisor = User(organization_id=other_org.id, email="other-sparkline@example.com",
-                          password_hash=hash_password("x"), full_name="Other", role="advisor")
+                          password_hash=hash_password("x"), full_name="Other", role="advisor",
+                          must_change_password=False,
+                      )
     db_session.add(other_advisor)
     db_session.commit()
     other_lead = Lead(organization_id=other_org.id, assigned_to_id=other_advisor.id,

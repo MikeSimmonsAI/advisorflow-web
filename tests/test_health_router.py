@@ -16,7 +16,39 @@ from app.deps import get_current_user, get_db
 from app.routers.health_router import router as health_router
 
 
+def _grant_platform_health(db_session, user):
+    """Make `user` someone who may actually open this page.
+
+    /health/advisor-status is guarded by require_capability("platform_health")
+    and is God-only BY DEFAULT. As health_router itself puts it, that closed
+    the advisor's own "why is my Twilio not connected" page: an advisor is not
+    an eligible administrator, so the route answers 403 and the body has no
+    `integrations` key at all - which is the KeyError these tests were hitting.
+
+    Rather than stub the guard away, this walks the real two-gate model, which
+    is what an organization that has been given its own health view looks like:
+
+      role   - only org_admin / super_admin may hold infrastructure at all
+      GATE 1 - Organization.delegated_capabilities: may this ORG self-manage it
+      GATE 2 - user_capability_grants: is THIS person one of its administrators
+
+    The endpoint still returns only the CALLER's own integration flags, so the
+    per-integration assertions below are unchanged in meaning."""
+    import json
+    from app.models.models import Organization, UserCapabilityGrant
+
+    user.role = "org_admin"
+    org = (db_session.query(Organization)
+           .filter(Organization.id == user.organization_id).first())
+    org.delegated_capabilities = json.dumps(["platform_health"])
+    db_session.add(UserCapabilityGrant(
+        user_id=user.id, organization_id=org.id,
+        capability="platform_health", is_active=True))
+    db_session.commit()
+
+
 def _make_test_client(db_session, user):
+    _grant_platform_health(db_session, user)
     app = FastAPI()
     app.include_router(health_router)
 

@@ -867,6 +867,17 @@ class BookingLink(Base):
     reminder_24hr_sent  = Column(Boolean, default=False)  # 24-hour reminder to lead
     reminder_1hr_sent   = Column(Boolean, default=False)  # 1-hour reminder to lead
 
+    # DECLARED HERE BECAUSE THE COLUMN ALREADY EXISTS IN THE DATABASE.
+    #
+    # app/auto_migrate.py adds ("booking_links", "confirmed_at", "TIMESTAMP") to
+    # every deployment at startup, and certification_service reads and writes it,
+    # but the model never mapped it - so SQLAlchemy raised AttributeError on a
+    # column that was sitting in Postgres the whole time. A model missing a column
+    # auto_migrate creates is the same class of drift as a migration that drops
+    # one: the schema and its mapping disagree, and only one of them is what the
+    # code actually talks to.
+    confirmed_at        = Column(DateTime, nullable=True)  # appointment confirmed by the family
+
 
 # ---------------------------------------------------------------------------
 # LeadOutcome - the "what does this family actually have/not have" tracker
@@ -1142,6 +1153,17 @@ class EmailMessage(Base):
     status = Column(String, default="queued")  # queued, sent, delivered, bounced, failed
 
     sent_at = Column(DateTime, server_default=func.now())
+
+    # OPEN / CLICK TRACKING. Same story as BookingLink.confirmed_at above:
+    # auto_migrate creates all three columns on every deployment and
+    # app/routers/email_tracking_router.py reads and writes them on its two
+    # public endpoints - the open pixel and the click redirect - but the model
+    # declared none of them. Every tracked open and every tracked click was
+    # therefore an unhandled AttributeError in production, which is what the
+    # "unhandled error on GET /email-tracking/open/..." log lines are.
+    opened_at = Column(DateTime, nullable=True)     # first open only; never overwritten
+    click_count = Column(Integer, default=0)        # repeat clicks DO count, unlike opens
+    last_clicked_at = Column(DateTime, nullable=True)
 
     lead = relationship("Lead", back_populates="email_messages")
 

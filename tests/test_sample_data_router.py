@@ -28,10 +28,12 @@ def _make_super_admin_headers(db_session, org, email_suffix=""):
     import uuid
     unique_email = f"superadmin-sampledata-{email_suffix or uuid.uuid4().hex[:8]}@test.com"
     super_admin = User(organization_id=org.id, email=unique_email,
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
-    return {"Authorization": f"Bearer {create_access_token(super_admin)}"}, super_admin
+    return {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}, super_admin
 
 
 def test_generate_creates_leads_with_sample_tag(client, db_session, sample_org):

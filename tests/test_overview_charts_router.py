@@ -19,8 +19,8 @@ def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _headers_for(user):
-    return {"Authorization": f"Bearer {create_access_token(user)}"}
+def _headers_for(user, db_session):
+    return {"Authorization": f"Bearer {create_access_token(user, db_session)}"}
 
 
 def _advisor(db_session, org, *, email, name="Chart Advisor"):
@@ -30,6 +30,7 @@ def _advisor(db_session, org, *, email, name="Chart Advisor"):
         password_hash=hash_password("TestPass123!"),
         full_name=name,
         role="advisor",
+        must_change_password=False,
     )
     db_session.add(advisor)
     db_session.commit()
@@ -85,7 +86,7 @@ def test_reply_activity_by_day_counts_exactly_and_scopes_to_current_advisor(clie
     ])
     db_session.commit()
 
-    response = client.get("/sms/replies/activity-by-day?days=3", headers=_headers_for(sample_advisor))
+    response = client.get("/sms/replies/activity-by-day?days=3", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     assert response.json() == [
@@ -103,7 +104,7 @@ def test_engagement_breakdown_counts_exactly_and_scopes_to_current_advisor(clien
     _lead(db_session, sample_org, sample_advisor, first_name="Unknown", phone="12145556105", temperature=EngagementTemperature.UNKNOWN)
     _lead(db_session, sample_org, second_advisor, first_name="OtherAdvisorHot", phone="12145556106", temperature=EngagementTemperature.HOT)
 
-    response = client.get("/leads/engagement-breakdown", headers=_headers_for(sample_advisor))
+    response = client.get("/leads/engagement-breakdown", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     assert response.json() == {
@@ -131,7 +132,7 @@ def test_cadence_health_summary_counts_and_formula_are_exact_and_scoped(client, 
     ])
     db_session.commit()
 
-    response = client.get("/cadence/health-summary", headers=_headers_for(sample_advisor))
+    response = client.get("/cadence/health-summary", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     body = response.json()
@@ -155,7 +156,7 @@ def test_cadence_health_summary_treats_unset_next_touch_due_at_as_healthy_not_ov
     db_session.add(CadenceState(lead_id=unset_due_active.id, status=CadenceStatus.ACTIVE, next_touch_due_at=None))
     db_session.commit()
 
-    response = client.get("/cadence/health-summary", headers=_headers_for(sample_advisor))
+    response = client.get("/cadence/health-summary", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     body = response.json()
@@ -176,7 +177,7 @@ def test_status_funnel_counts_exactly_and_scopes_to_current_advisor(client, db_s
     _lead(db_session, sample_org, sample_advisor, first_name="DncExcluded", phone="12145556504", status=LeadStatus.DNC)
     _lead(db_session, sample_org, second_advisor, first_name="OtherAdvisorNew", phone="12145556505", status=LeadStatus.NEW)
 
-    response = client.get("/leads/status-funnel", headers=_headers_for(sample_advisor))
+    response = client.get("/leads/status-funnel", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
     assert response.json() == [

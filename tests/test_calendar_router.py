@@ -37,10 +37,12 @@ def test_cancel_booking_blocks_cross_org_access(client, db_session, sample_lead,
     db_session.commit()
 
     attacker = User(organization_id=other_org.id, email="attacker@evil.com",
-                     password_hash=hash_password("x"), full_name="Attacker", role="advisor")
+                     password_hash=hash_password("x"), full_name="Attacker", role="advisor",
+                     must_change_password=False,
+                 )
     db_session.add(attacker)
     db_session.commit()
-    attacker_token = create_access_token(attacker)
+    attacker_token = create_access_token(attacker, db_session)
     attacker_headers = {"Authorization": f"Bearer {attacker_token}"}
 
     response = client.post(f"/calendar/cancel-booking/{booking.id}", headers=attacker_headers)

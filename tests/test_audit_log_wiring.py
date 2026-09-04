@@ -62,11 +62,13 @@ def test_reactivate_user_logs_action(client, db_session, sample_org, sample_advi
 
 def test_reset_password_logs_action_without_leaking_temp_password(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-audit@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
     from app.services.auth_service import create_access_token
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
     assert response.status_code == 200
@@ -80,11 +82,13 @@ def test_reset_password_logs_action_without_leaking_temp_password(client, db_ses
 
 def test_update_user_logs_only_changed_fields(client, db_session, sample_org, sample_advisor):
     super_admin = User(organization_id=sample_org.id, email="super-audit2@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
     from app.services.auth_service import create_access_token
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={"full_name": "Corrected Name"}, headers=super_headers)
     assert response.status_code == 200
@@ -100,11 +104,13 @@ def test_update_user_logs_only_changed_fields(client, db_session, sample_org, sa
 def test_update_user_with_no_actual_changes_does_not_log(client, db_session, sample_org, sample_advisor):
     """Sending the same value back shouldn't create a noisy no-op log entry."""
     super_admin = User(organization_id=sample_org.id, email="super-audit3@restland.com",
-                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin")
+                        password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
+                        must_change_password=False,
+                    )
     db_session.add(super_admin)
     db_session.commit()
     from app.services.auth_service import create_access_token
-    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin)}"}
+    super_headers = {"Authorization": f"Bearer {create_access_token(super_admin, db_session)}"}
 
     response = client.patch(f"/admin/users/{sample_advisor.id}", json={"full_name": sample_advisor.full_name}, headers=super_headers)
     assert response.status_code == 200
