@@ -69,6 +69,7 @@ import GodOrganizations from './pages/GodOrganizations'
 import ExecutiveSuite from './pages/executive/ExecutiveSuite'
 import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
 import ExecutiveOrganizations from './pages/executive/ExecutiveOrganizations'
+import ExecutiveCustomerHealth from './pages/executive/ExecutiveCustomerHealth'
 import ExecObserveShell from './pages/executive/ExecObserveShell'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
@@ -664,6 +665,7 @@ export default function App() {
         <Route path="/executive" element={<ExecutiveRoute><Navigate to="/executive/command-center" replace /></ExecutiveRoute>} />
         <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
         <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/customer-health" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCustomerHealth /></ExecutiveSuite></ExecutiveRoute>} />
         {/* Executive observation: renders a rich read-only dashboard for the target org.
             org_id comes from the URL path only — never from current_user.organization_id.
             ExecObserveShell fetches org identity; ExecObservationOverview fetches data.

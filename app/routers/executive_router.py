@@ -503,6 +503,193 @@ def get_org_observation_overview(
     }
 
 
+# ── Customer health portfolio ──────────────────────────────────────────────────
+
+@router.get("/customer-health")
+def get_customer_health(
+    executive=Depends(require_brand_executive),
+    db: Session = Depends(get_db),
+):
+    """Portfolio-level health for every customer organization in this brand.
+
+    Health classifications (based on last operational activity):
+      healthy    — operational activity within 14 days
+      watch      — activity slowing, 15–30 days
+      at_risk    — no activity 31–60 days
+      inactive   — no activity >60 days, or no activity ever (org >30 days old)
+      onboarding — org provisioned within 30 days and not yet healthy
+
+    Operational activity = outbound SMS, inbound reply, or booking.
+
+    SECURITY:
+    - require_brand_executive validates the grant before any query runs.
+    - All org queries are filtered by platform_id — cross-brand access is
+      structurally impossible; there is no org_id parameter to forge.
+    - current_user.organization_id is never read or used.
+    """
+    user, mem, platform = executive
+    platform_id = platform.id
+
+    now = datetime.utcnow()
+
+    # All customer organizations provisioned from this platform
+    orgs = (
+        db.query(Organization)
+        .filter(Organization.platform_id == platform_id)
+        .order_by(Organization.name)
+        .all()
+    )
+
+    if not orgs:
+        return {
+            "platform_name": platform.name,
+            "summary": {
+                "total": 0, "healthy": 0, "watch": 0,
+                "at_risk": 0, "inactive": 0, "onboarding": 0,
+            },
+            "organizations": [],
+        }
+
+    org_ids = [o.id for o in orgs]
+
+    # ── Bulk: active user count per org ───────────────────────────────────────
+    user_counts = dict(
+        db.query(User.organization_id, func.count(User.id))
+        .filter(
+            User.organization_id.in_(org_ids),
+            User.is_active.is_(True),
+        )
+        .group_by(User.organization_id)
+        .all()
+    )
+
+    # ── Bulk: active lead count per org (same exclusion as Overview) ──────────
+    total_lead_counts = dict(
+        db.query(Lead.organization_id, func.count(Lead.id))
+        .filter(
+            Lead.organization_id.in_(org_ids),
+            (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email"),  # noqa: E711
+        )
+        .group_by(Lead.organization_id)
+        .all()
+    )
+
+    # ── Bulk: hot lead count per org ──────────────────────────────────────────
+    hot_lead_counts = dict(
+        db.query(Lead.organization_id, func.count(Lead.id))
+        .filter(
+            Lead.organization_id.in_(org_ids),
+            Lead.status == "hot",
+        )
+        .group_by(Lead.organization_id)
+        .all()
+    )
+
+    # ── Bulk: booked lead count per org ───────────────────────────────────────
+    booked_counts = dict(
+        db.query(Lead.organization_id, func.count(Lead.id))
+        .filter(
+            Lead.organization_id.in_(org_ids),
+            Lead.status == "booked",
+        )
+        .group_by(Lead.organization_id)
+        .all()
+    )
+
+    # ── Bulk: last outbound SMS per org ───────────────────────────────────────
+    last_sms = dict(
+        db.query(Lead.organization_id, func.max(Message.sent_at))
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(Lead.organization_id.in_(org_ids))
+        .group_by(Lead.organization_id)
+        .all()
+    )
+
+    # ── Bulk: last inbound reply per org ──────────────────────────────────────
+    last_reply = dict(
+        db.query(Lead.organization_id, func.max(Reply.received_at))
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(Lead.organization_id.in_(org_ids))
+        .group_by(Lead.organization_id)
+        .all()
+    )
+
+    # ── Bulk: last confirmed booking per org ──────────────────────────────────
+    last_booking = dict(
+        db.query(Lead.organization_id, func.max(BookingLink.booked_time))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            Lead.organization_id.in_(org_ids),
+            BookingLink.booked_time.isnot(None),
+        )
+        .group_by(Lead.organization_id)
+        .all()
+    )
+
+    def _last_op(org_id):
+        """Latest timestamp across SMS sent, reply received, booking confirmed."""
+        candidates = [
+            last_sms.get(org_id),
+            last_reply.get(org_id),
+            last_booking.get(org_id),
+        ]
+        valid = [c for c in candidates if c is not None]
+        return max(valid) if valid else None
+
+    def _classify(org):
+        """Deterministic health classification from real activity timestamps."""
+        loa = _last_op(org.id)
+        age_days = (now - org.created_at).days if org.created_at else 9999
+
+        if loa is None:
+            if age_days <= 30:
+                return "onboarding", "New organization — no operational activity yet."
+            return "inactive", "No outbound messages, replies, or bookings on record."
+
+        days_ago = (now - loa).days
+
+        if days_ago <= 14:
+            return "healthy", f"Last activity {days_ago}d ago — cadence on track."
+        if days_ago <= 30:
+            if age_days <= 30:
+                return "onboarding", f"New organization — last activity {days_ago}d ago."
+            return "watch", f"Activity slowing — last op. activity {days_ago}d ago."
+        if days_ago <= 60:
+            return "at_risk", f"No activity for {days_ago} days — follow-up recommended."
+        return "inactive", f"No operational activity for {days_ago} days."
+
+    org_rows = []
+    summary = {
+        "total": 0, "healthy": 0, "watch": 0,
+        "at_risk": 0, "inactive": 0, "onboarding": 0,
+    }
+
+    for org in orgs:
+        health, reason = _classify(org)
+        loa = _last_op(org.id)
+        org_rows.append({
+            "id":                       org.id,
+            "name":                     org.name,
+            "health":                   health,
+            "reason":                   reason,
+            "active_users":             user_counts.get(org.id, 0),
+            "total_leads":              total_lead_counts.get(org.id, 0),
+            "hot_leads":               hot_lead_counts.get(org.id, 0),
+            "booked_count":             booked_counts.get(org.id, 0),
+            "last_operational_activity": loa.isoformat() if loa else None,
+            "provisioned_at":           org.created_at.isoformat() if org.created_at else None,
+            "plan":                     org.plan,
+        })
+        summary["total"] += 1
+        summary[health] += 1
+
+    return {
+        "platform_name":  platform.name,
+        "summary":        summary,
+        "organizations":  org_rows,
+    }
+
+
 # ── Admin: grant executive membership (god_admin only) ────────────────────────
 
 @router.post("/admin/grant", status_code=201)
