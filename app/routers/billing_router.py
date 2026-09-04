@@ -17,7 +17,7 @@ Endpoints:
 
 import os
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -400,3 +400,173 @@ def reconcile_billing(
     _stripe_client()
     from app.services.billing_reconcile import reconcile_organization
     return reconcile_organization(db, org_id)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# P4 — BILLING OPERATIONS
+#
+# THIN BY DESIGN. Every handler below does three things and nothing else:
+# take the BillingScope P3 resolved, hand it to a service, and translate a
+# refusal into an HTTP status. There is no Stripe call, no tenant check and no
+# money arithmetic in this file - all three live in app/services/.
+#
+# No handler accepts an organization id. The subject is always the active
+# authorized workspace, so a caller who knows another tenant's UUID, invoice id
+# or Stripe id has nothing to put it in. Invoice and agreement ids ARE accepted
+# and are matched inside an organization-scoped query by the services, which is
+# why guessing one returns the same "no such invoice" as inventing one.
+#
+# READS require billing_view. MUTATIONS require billing_manage.
+# ═════════════════════════════════════════════════════════════════════════════
+
+from app.services import billing_operations as ops  # noqa: E402
+from app.services.billing_operations import BillingOperationRefused  # noqa: E402
+from app.services.stripe_gateway import (LiveModeRefused,  # noqa: E402
+                                         StripeOperationFailed,
+                                         StripeUnavailable)
+
+
+def _handle(fn, *args, **kwargs):
+    """Run a billing service call and translate its failure modes.
+
+    One translator rather than a try/except in every handler, so the mapping
+    from failure to status code is decided once:
+
+        refused         400  the request is not valid for this data
+        unavailable     503  Stripe could not be reached - retryable
+        live key        503  refused on purpose; this build is sandbox-only
+        Stripe refusal  402  Stripe declined the operation itself
+    """
+    try:
+        return fn(*args, **kwargs)
+    except BillingOperationRefused as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LiveModeRefused as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except StripeUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Billing is temporarily unavailable. %s" % exc)
+    except StripeOperationFailed as exc:
+        raise HTTPException(status_code=402, detail=str(exc))
+
+
+# ── Reads ────────────────────────────────────────────────────────────────────
+
+@router.get("/overview")
+def billing_overview(scope: BillingScope = Depends(require_billing_view),
+                     db: Session = Depends(get_db)):
+    """Everything the organization Billing screen needs, in one request.
+
+    Built this way so P6's UI never calls Stripe and never learns a raw Stripe
+    object shape.
+    """
+    return _handle(ops.billing_overview, db, scope)
+
+
+@router.get("/invoices")
+def list_invoices(scope: BillingScope = Depends(require_billing_view),
+                  db: Session = Depends(get_db)):
+    return {"invoices": _handle(ops.list_invoices, db, scope)}
+
+
+@router.get("/invoices/{invoice_id}")
+def get_invoice(invoice_id: str,
+                scope: BillingScope = Depends(require_billing_view),
+                db: Session = Depends(get_db)):
+    invoice = _handle(ops._invoice_in_scope, db, scope, invoice_id)
+    return ops.describe_invoice(invoice)
+
+
+@router.get("/payments")
+def list_payments(scope: BillingScope = Depends(require_billing_view),
+                  db: Session = Depends(get_db)):
+    return {"payments": _handle(ops.list_payments, db, scope)}
+
+
+@router.get("/agreement")
+def get_agreement(scope: BillingScope = Depends(require_billing_view),
+                  db: Session = Depends(get_db)):
+    agreement = _handle(ops.current_agreement, db, scope)
+    return ops._describe_agreement(agreement)
+
+
+# ── Mutations ────────────────────────────────────────────────────────────────
+
+class InvoiceLineItemRequest(BaseModel):
+    # INTEGER MINOR UNITS, and the type is the guard. A float here is how a
+    # rounding error becomes a customer's invoice.
+    amount_cents: int
+    description: Optional[str] = None
+    currency: Optional[str] = None
+
+
+class CreateInvoiceRequest(BaseModel):
+    line_items: List[InvoiceLineItemRequest]
+    description: Optional[str] = None
+    days_until_due: int = 30
+    # OPT-IN DUPLICATE PROTECTION. One id per submission, reused on retry, and
+    # the retry returns the first invoice instead of making a second. Omitted,
+    # two submissions are two invoices - which is right, because billing the
+    # same amount twice is a normal thing to want.
+    request_id: Optional[str] = None
+
+
+@router.post("/invoices")
+def create_invoice(req: CreateInvoiceRequest,
+                   scope: BillingScope = Depends(require_billing_manage),
+                   db: Session = Depends(get_db)):
+    """Create a DRAFT invoice. Nothing is charged until it is finalized."""
+    items = [{"amount_cents": i.amount_cents,
+              "description": i.description,
+              "currency": i.currency} for i in req.line_items]
+    return _handle(ops.create_draft_invoice, db, scope, items,
+                   req.description, req.days_until_due, req.request_id)
+
+
+@router.post("/invoices/{invoice_id}/finalize")
+def finalize_invoice(invoice_id: str,
+                     scope: BillingScope = Depends(require_billing_manage),
+                     db: Session = Depends(get_db)):
+    return _handle(ops.finalize_invoice, db, scope, invoice_id)
+
+
+@router.post("/invoices/{invoice_id}/send")
+def send_invoice(invoice_id: str,
+                 scope: BillingScope = Depends(require_billing_manage),
+                 db: Session = Depends(get_db)):
+    return _handle(ops.send_invoice, db, scope, invoice_id)
+
+
+@router.post("/invoices/{invoice_id}/void")
+def void_invoice(invoice_id: str,
+                 scope: BillingScope = Depends(require_billing_manage),
+                 db: Session = Depends(get_db)):
+    return _handle(ops.void_invoice, db, scope, invoice_id)
+
+
+@router.post("/agreements/{agreement_id}/subscribe")
+def subscribe_agreement(agreement_id: str,
+                        scope: BillingScope = Depends(require_billing_manage),
+                        db: Session = Depends(get_db)):
+    """Execute a BillingAgreement as a Stripe subscription.
+
+    Retry-safe: an agreement that already has one returns it with
+    created=false rather than making a second.
+    """
+    return _handle(ops.create_subscription, db, scope, agreement_id)
+
+
+class CancelSubscriptionRequest(BaseModel):
+    # Defaults to end-of-period: the customer paid for the period they are in.
+    at_period_end: bool = True
+
+
+@router.post("/agreements/{agreement_id}/cancel")
+def cancel_agreement_subscription(
+        agreement_id: str,
+        req: CancelSubscriptionRequest = CancelSubscriptionRequest(),
+        scope: BillingScope = Depends(require_billing_manage),
+        db: Session = Depends(get_db)):
+    return _handle(ops.cancel_subscription, db, scope, agreement_id,
+                   req.at_period_end)

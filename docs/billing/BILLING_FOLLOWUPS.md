@@ -67,3 +67,31 @@ project.** Recorded here so they are not lost and not argued about mid-phase.
 - Stripe Tax / global tax compliance.
 - Merchant payouts, KYC onboarding.
 - Radar beyond Stripe defaults.
+
+## Found during P4
+
+- **`upsert_invoice_from_stripe` returns `(row, ignored_reason)` and flushes
+  without committing.** Both are easy to get wrong from a non-webhook caller,
+  and both were got wrong in the first draft of `billing_operations._mirror`.
+  The signature is fine; a docstring line saying "the caller commits" would
+  stop the next caller repeating it.
+- **A mirror that declines Stripe's answer is reported as an orphan.** If an
+  organization's `stripe_customer_id` does not match the invoice's customer,
+  `organization_for_customer` returns None and the finalize or void is
+  Stripe-side-only. Correct behaviour, but it means customer-id drift shows up
+  as orphan log lines rather than an obvious error. P8's reconciliation should
+  treat `operation=Invoice.mirror` as a data-integrity signal, not a retry
+  queue.
+- **`Payment.refunded_cents` vs `Invoice.amount_refunded_cents`.** The two
+  models name the same concept differently. Not worth a migration on its own,
+  but a live trap for anyone writing a describe function — it was one here.
+- **Stripe Product and Price objects accumulate.** One of each per agreement
+  executed, keyed idempotently, and nothing ever archives them. Fine in
+  sandbox; worth a housekeeping pass before there are thousands.
+- **`gw.call` classifies failures by exception class NAME.** That keeps the
+  gateway importable and testable without the stripe library, but a future SDK
+  renaming `APIConnectionError` would silently reclassify an outage as a
+  refusal. Worth a pinned test if the SDK is upgraded.
+- **`create_draft_invoice` has no per-line quantity.** Every line is a single
+  amount. Enough for the current deals; a per-unit invoice would need Stripe's
+  `quantity`/`unit_amount` pair instead of `amount`.

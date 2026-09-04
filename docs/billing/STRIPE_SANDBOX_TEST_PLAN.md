@@ -5,7 +5,7 @@ activation. Nothing in this plan should be run against a live Stripe account.
 
 ## Nothing here has been executed yet
 
-P0–P2 are covered entirely by unit tests with Stripe mocked. No sandbox call
+P0–P4 are covered entirely by unit tests with Stripe faked. No sandbox call
 has been made from this session, and none can be until test-mode credentials
 exist in the environment. Secrets come from environment/deployment secret
 management — never from chat, never from the database, never committed.
@@ -37,8 +37,46 @@ management — never from chat, never from the database, never committed.
    invoice mirrors as failed and `billing_status` becomes `past_due`.
 7. **Recovery path** — pay the failed invoice; confirm status returns to active.
 
+## P4 steps — now testable, and only by a human with a sandbox
+
+The unit tests fake Stripe, which pins down what THIS code does with money and
+with tenancy. What they cannot prove is that Stripe behaves as assumed. These
+steps close that gap and each names the assumption it is checking.
+
+8. **Customer creation is idempotent across processes.** Call
+   `POST /billing/invoices` twice for an organization with no
+   `stripe_customer_id`, concurrently if possible. Stripe must show **one**
+   customer. *Assumption: `idempotency_key` on `Customer.create` deduplicates.*
+9. **The subscription charges the agreed amount, to the cent.** Execute a real
+   `BillingAgreement` via `POST /billing/agreements/{id}/subscribe`, then read
+   the Price in the dashboard. `unit_amount` must equal the agreement's
+   `recurring_amount_cents` exactly, and the currency must match.
+10. **A retried subscribe does not make a second subscription.** Call subscribe
+    twice. The second must return `created: false` and the same id, and the
+    dashboard must show one subscription. Then clear the local
+    `stripe_subscription_id` and call again — Stripe's own key must return the
+    SAME subscription rather than creating a second. *This is the one that
+    proves the backstop works, not just the local guard.*
+11. **Draft, finalize, send.** Create a draft invoice, confirm in the dashboard
+    that it is a draft and nothing is being collected, then finalize and send.
+    Confirm the hosted URL and the PDF both resolve, and that the email
+    arrives.
+12. **Void refuses a paid invoice.** Pay a finalized invoice with
+    `4242 4242 4242 4242`, then attempt `POST /billing/invoices/{id}/void`.
+    Must be refused with a 400 naming refund as the alternative.
+13. **`request_id` collapses a retried invoice submission.** Post the same
+    invoice twice with the same `request_id`; Stripe must show one invoice.
+    Post twice without one; Stripe must show two.
+14. **A live key is refused.** Temporarily set `STRIPE_SECRET_KEY` to any
+    `sk_live_...` value and call any billing mutation. Must be a 503 naming
+    sandbox, and Stripe must show no attempted call. **Restore the test key
+    immediately afterwards.**
+15. **Cancel at period end does not cut off service.** Cancel a live
+    subscription with the default, and confirm in the dashboard that it remains
+    active until the period ends. Then confirm the local agreement status is
+    still `active` — the webhook, not this call, applies the transition.
+
 ## Not yet testable
 
-Subscription creation from a `BillingAgreement`, invoice creation/finalise/send,
-and refunds are P4 — the code does not exist, so there is nothing to exercise
-in sandbox for them yet.
+Refunds, dunning and payment recovery. Nothing in P4 creates a PaymentIntent or
+retries a failed payment; payments are read from the P0 mirror only.

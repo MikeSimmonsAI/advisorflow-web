@@ -264,10 +264,15 @@ join alone cannot promise that.
 | Phase | Scope | Status |
 |---|---|---|
 | P0 | webhook / payment reliability | COMPLETE (90d3bdb) |
-| P1 | merchant / entity / configuration foundation | this phase |
-| P2 | BillingAgreement — executable billing relationship | not started |
-| P3 | tenant billing capabilities / authority cleanup | not started |
-| Later | invoice operations, org billing UI, platform billing command centre, `PLANS` retirement, production activation | not started |
+| P1 | merchant / entity / configuration foundation | COMPLETE (8652900) |
+| P2 | BillingAgreement — executable billing relationship | COMPLETE (4d41357) |
+| P3 | tenant billing capabilities / authority cleanup | COMPLETE (4cf170f) |
+| P4 | Stripe customer / invoice / subscription / payment operations | COMPLETE (uncommitted) |
+| P5 | `PLANS` retirement / pricing migration | not started |
+| P6 | organization billing UI | not started |
+| P7 | platform billing command centre | not started |
+| P8 | reconciliation tooling | not started |
+| Later | production activation | not started |
 
 **Do not collapse the phases. Do not move to the next phase automatically.**
 
@@ -370,3 +375,57 @@ are deliberately **not** decided in code:
   `merchant_legal_name` from Stripe's `account_name`. Switching it to
   `merchant_entity.issuer_snapshot()` is a small, deliberate change that belongs
   with P2's invoice work, not with P1's schema.
+
+---
+
+## 17. P4 — Stripe operations — BUILT
+
+**Scope executed:** standard Stripe, test mode only. Customers, subscriptions
+from a `BillingAgreement`, draft/finalize/send/void invoices, invoice and
+payment history, and one overview read for the P6 UI. No Connect, no tax, no
+pricing redesign, no production activation.
+
+**Two modules, and the split is the design:**
+
+`app/services/stripe_gateway.py` is the ONE place this application talks to
+Stripe. Three things have to be true of every financial call and none survives
+being re-implemented per call site: an idempotency key on every create, errors
+that mean something locally, and a Stripe-succeeded-we-failed path that records
+the orphaned id instead of losing it. It has no opinion about who may call it
+and it does not read the database.
+
+`app/services/billing_operations.py` is the business layer. Every function
+takes a `BillingScope` rather than an organization id — that is the tenant
+safety design and not a style choice, because a function that accepts an org id
+can be called with somebody else's and then the check has to exist at every
+call site instead of once.
+
+`app/routers/billing_router.py` gained eleven thin handlers. No Stripe call, no
+tenant check and no money arithmetic lives in the router.
+
+**The three rules the operations layer is built around**
+
+1. **Money is copied, never derived.** Subscription amount and currency come
+   from the `BillingAgreement`, which copied them from the approved deal. A
+   Stripe Price is created to carry exactly those values rather than being
+   selected from a catalogue that might have moved. No price list is consulted
+   — not `package_pricing`, and emphatically not the legacy `PLANS` dict.
+2. **A retry is not a second charge.** The local guard runs BEFORE any Stripe
+   call: an agreement that already names a subscription returns it with
+   `created: false`. Stripe's idempotency key is the backstop, not the plan.
+3. **Stripe succeeded and we failed is a reported event.** Every place a local
+   write follows a Stripe create logs the id to the dedicated `billing.orphan`
+   logger at ERROR.
+
+**Stripe Product and Price objects are an implementation detail** of executing
+an agreement. They are not a pricing source of truth, and nothing reads a price
+back out of Stripe to decide what to charge.
+
+**Sandbox enforcement is structural, not procedural.** `assert_test_mode()`
+refuses `sk_live_` and `rk_live_` inside the one function that configures the
+client. Every phase has been told not to touch live Stripe; this is the line
+that makes it true if somebody forgets. Removing it should be its own reviewed
+change, at production activation.
+
+Operational detail, endpoint table, the double-charge matrix and the test
+summary are in `BILLING_IMPLEMENTATION_STATUS.md`.

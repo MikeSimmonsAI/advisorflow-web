@@ -85,7 +85,7 @@ backfill).
 
 ---
 
-## P3 — billing authority (uncommitted)
+## P3 — billing authority (commit 4cf170f)
 
 **Created**
 - `app/services/billing_access.py` — `BillingScope`, `resolve_billing_scope`,
@@ -124,3 +124,107 @@ Both gates still apply. The framework itself is unchanged.
 P4 adds — no current route accepts a customer id. Frontend still sends no
 `X-Workspace-Id` on billing calls, so single-workspace users are unaffected and
 multi-workspace users need the header wired in P6.
+
+---
+
+## P4 — Stripe operations (uncommitted)
+
+Customers, invoices, subscriptions and payments. **Standard Stripe, test mode
+only. No Connect. No pricing redesign.**
+
+**Created**
+- `app/services/stripe_gateway.py` — the one place this application talks to
+  Stripe: `client()`, `call()`, `idempotency_key()`, `log_orphan()`,
+  `assert_test_mode()`, and the typed failures `StripeUnavailable`,
+  `StripeOperationFailed`, `LiveModeRefused`
+- `app/services/billing_operations.py` — customers, subscriptions, invoices,
+  history, and the billing overview
+- `tests/test_billing_operations.py` (68) and `tests/test_billing_router_p4.py`
+  (20)
+
+**Modified**
+- `app/routers/billing_router.py` — eleven P4 routes appended; `_handle()`
+  translates service failures into status codes
+
+**Endpoints** (no organization id anywhere — the subject is the active
+authorized workspace)
+
+| Method | Path | Requires |
+|---|---|---|
+| GET | `/billing/overview` | `billing_view` |
+| GET | `/billing/invoices` | `billing_view` |
+| GET | `/billing/invoices/{invoice_id}` | `billing_view` |
+| GET | `/billing/payments` | `billing_view` |
+| GET | `/billing/agreement` | `billing_view` |
+| POST | `/billing/invoices` | `billing_manage` |
+| POST | `/billing/invoices/{id}/finalize` | `billing_manage` |
+| POST | `/billing/invoices/{id}/send` | `billing_manage` |
+| POST | `/billing/invoices/{id}/void` | `billing_manage` |
+| POST | `/billing/agreements/{id}/subscribe` | `billing_manage` |
+| POST | `/billing/agreements/{id}/cancel` | `billing_manage` |
+
+**Failure translation:** 400 refused for this data · 402 Stripe declined ·
+503 Stripe unreachable or a live key refused. Never a 500.
+
+**Money**
+- Subscription amount and currency are **copied from the `BillingAgreement`**.
+  A Stripe Price is created to carry exactly those values; no catalogue, no
+  `package_pricing`, and never the legacy `PLANS` dict.
+- Invoice line amounts are integer minor units and the type is enforced at the
+  request schema and again in the service. `bool` is rejected explicitly
+  (it is a subclass of `int`, and `True` would bill one cent).
+- No float arithmetic on any billing path. Display strings go through
+  `money.from_cents`, and the integer is returned alongside.
+- One invoice cannot mix currencies — refused before any Stripe call, so no
+  half-built invoice is left behind.
+
+**Double-charge protection**
+
+| Stripe create | Local guard | Idempotency key |
+|---|---|---|
+| `Customer.create` | existing `stripe_customer_id` short-circuits | `customer:{org_id}` |
+| `Product.create` | — | `product:{agreement_id}` |
+| `Price.create` | — | `price:{agreement_id}` |
+| `Subscription.create` | agreement already naming a subscription returns it, `created=false`, before any Stripe call | `subscription:{agreement_id}` |
+| `Invoice.create` | — | opt-in `invoice:{org_id}:{request_id}` |
+| `InvoiceItem.create` | attached to one invoice created in the same call | — |
+
+Invoice creation is deliberately opt-in: billing the same organization the same
+amount twice is normal, so a content-derived key would silently return the
+FIRST invoice and look like it worked. A caller that wants retry collapse sends
+`request_id`. Nothing is charged either way — the result is a draft, and
+finalizing is a separate explicit call.
+
+**Orphan handling.** Where a local write follows a Stripe create, failure logs
+the Stripe id to the dedicated `billing.orphan` logger at ERROR rather than
+losing it: customer creation, subscription attachment, partial invoice line
+items, and a mirror that refuses Stripe's answer.
+
+**Tenant safety.** Every operation takes a `BillingScope`, never an
+organization id, so there is no parameter another tenant's id could go in.
+Invoice and agreement ids ARE accepted and are matched **inside** the
+organization-scoped query — not fetched and checked afterwards. A real id
+belonging to another organization and an invented one produce the identical
+400 and the identical body, so the endpoints are not an enumeration oracle.
+
+**Sandbox enforcement is structural.** `assert_test_mode()` refuses `sk_live_`
+and `rk_live_` in the one function that configures the client, and the refusal
+is asserted end to end through HTTP.
+
+**Tests:** 88 new, 155 across P1–P4, all passing. The suite includes negative
+tenant tests for every id-accepting operation at both the service and HTTP
+layers. Two deliberate mutations (weakening `finalize` to `billing_view`, and
+dropping the organization filter from the invoice lookup) were each caught by
+multiple tests before being reverted.
+
+**Limitations**
+- Stripe is faked in these tests. Behaviour against the real sandbox is
+  `docs/billing/STRIPE_SANDBOX_TEST_PLAN.md`, which a human runs.
+- Payments are read from the P0 mirror only. Nothing here creates a
+  PaymentIntent or retries a failed payment; dunning and recovery are not
+  implemented.
+- `cancel_subscription` does not write local status — the P0 webhook owns that
+  transition, and writing it here would contradict Stripe for anything
+  cancelled at period end.
+- `next_billing_date` and `term_end_date` are still columns only.
+- No UI. That is P6.
