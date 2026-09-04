@@ -21,7 +21,7 @@ Applies three major upgrades:
 import os
 import re
 
-BASE = r"C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web"
+BASE = r"C:\Dev\advisorflow-web"
 
 def path(rel):
     return os.path.join(BASE, rel)

@@ -1,4 +1,4 @@
-p = r'C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web\frontend\src\pages\ProvisionClient.jsx'
+p = r'C:\Dev\advisorflow-web\frontend\src\pages\ProvisionClient.jsx'
 with open(p, 'r', encoding='utf-8') as f:
     c = f.read()
 

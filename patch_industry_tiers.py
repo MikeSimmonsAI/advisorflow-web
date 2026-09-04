@@ -3,7 +3,7 @@ Patch: industry-specific tier seeding, OrgSettings industry list, TierDefinition
 """
 import os
 
-BASE = r"C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web"
+BASE = r"C:\Dev\advisorflow-web"
 
 # ── 1. tier_config_service.py ─────────────────────────────────────────────────
 

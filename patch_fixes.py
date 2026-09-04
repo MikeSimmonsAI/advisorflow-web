@@ -3,7 +3,7 @@ patch_fixes.py — fixes the 3 warning cases from patch_feature_flags.py
 """
 import os
 
-BASE = r"C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web"
+BASE = r"C:\Dev\advisorflow-web"
 
 def path(rel):
     return os.path.join(BASE, rel)

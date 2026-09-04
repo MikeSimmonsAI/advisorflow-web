@@ -5,7 +5,7 @@ REM  Run from the folder where you extracted the zip.
 REM  Then run deploy.bat to push to GitHub / Render.
 REM ============================================================
 
-SET REPO=C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web
+SET REPO=C:\Dev\advisorflow-web
 
 echo.
 echo ===================================

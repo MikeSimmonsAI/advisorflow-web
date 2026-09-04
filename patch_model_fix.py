@@ -1,7 +1,7 @@
 """patch_model_fix.py — add enabled_features column to Organization model"""
 import os
 
-BASE = r"C:\Users\simmo\OneDrive\Desktop\Web AvdvisorFlow Package\files\advisorflow-web"
+BASE = r"C:\Dev\advisorflow-web"
 
 def path(rel):
     return os.path.join(BASE, rel)
