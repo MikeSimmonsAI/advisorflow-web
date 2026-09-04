@@ -93,3 +93,6 @@ import app.models.qualification_models  # noqa: F401  (imported for side effects
 # idempotency guarantee - the thing that stops a redelivered refund being
 # applied twice - silently does not exist.
 import app.models.billing_models  # noqa: F401  (imported for side effects)
+# P1 billing entity layer - merchant_entities. Same Base, same reason: the
+# table is only created by create_all() if this module has been imported.
+import app.models.billing_entity_models  # noqa: F401  (imported for side effects)

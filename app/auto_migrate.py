@@ -47,6 +47,11 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # P1 billing entity layer. merchant_entities is a NEW table and is created
+    # by create_all(), so it does not belong here - only this one column on an
+    # EXISTING table does. Nullable with no default: every platform row that
+    # already exists keeps working and resolves to the default entity.
+    ("platforms", "merchant_entity_id", "VARCHAR"),
     # ── Two-rate package pricing ───────────────────────────────────────────
     # brand_packages.price stays the MONTH-TO-MONTH rate. contract_price is the
     # lower rate earned by signing a term agreement, and is NULL for any package

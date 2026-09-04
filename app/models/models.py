@@ -172,6 +172,25 @@ class Platform(Base):
     website_url         = Column(String, nullable=True)   # marketing site
     app_base_url        = Column(String, nullable=True)   # customer-facing app host
 
+    # WHICH LEGAL ENTITY SELLS THIS BRAND.
+    #
+    # The brand is what the customer recognises; the entity is who is on the
+    # invoice and in the Stripe merchant relationship. One entity can stand
+    # behind several brands - EvoSys Pro, BookaBoost and Harmony & Hustle are
+    # three platforms and one LLC today - so the link lives here rather than
+    # on Organization, and an organization derives its issuer through its
+    # platform instead of carrying a second copy that can go stale.
+    #
+    # NULLABLE, and no backfill in P1: every existing platform row keeps
+    # working and resolves to the default entity, which is exactly the
+    # behaviour in place before this column existed. No ForeignKey() is
+    # declared, for the same reason billing_models.py declares none on its
+    # own merchant_entity_id: the deployment path is create_all +
+    # auto_migrate, and auto_migrate adds a plain column - it does not add
+    # constraints to an existing table. app/services/merchant_entity.py is
+    # the only writer.
+    merchant_entity_id = Column(String, nullable=True, index=True)
+
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
