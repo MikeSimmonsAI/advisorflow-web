@@ -81,6 +81,15 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8)
 
+    # THE CONFIRMATION IS CHECKED ON THE SERVER, NOT ONLY IN THE BROWSER.
+    # The form has always compared these two fields, but a check only the form
+    # performs is not one this endpoint can rely on - anything calling the API
+    # directly skips it, and a mistyped new password locks somebody out of
+    # their own account with nothing to compare against afterwards.
+    # Optional so every caller written before this field keeps working;
+    # enforced whenever it is sent.
+    confirm_password: str | None = None
+
 
 def _detect_platform_slug(request: Request) -> str | None:
     """
@@ -302,15 +311,47 @@ def change_password(
     if not real_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    # IDENTITY IS RE-PROVEN BEFORE ANYTHING IS WRITTEN. The JWT says who is
+    # calling; it does not say the person holding the laptop is them. An
+    # unlocked browser is enough to take an account permanently if this check
+    # is not here, which is also why the administrative reset on /admin is a
+    # separate endpoint and is never pointed at your own account.
     if not verify_password(req.current_password, real_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if req.confirm_password is not None and req.confirm_password != req.new_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="New password and confirmation do not match")
     if len(req.new_password) < 8:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 8 characters")
 
+    # hash_password is the application's single bcrypt entry point. No literal,
+    # no hash computed anywhere else, no direct UPDATE.
     real_user.password_hash = hash_password(req.new_password)
     real_user.must_change_password = False
+
+    # EVERY SESSION FOR THIS ACCOUNT DIES HERE, INCLUDING THE CALLER'S.
+    #
+    # Changing the password used to leave every existing JWT working, because
+    # get_current_user validates a token's `jti` against users.session_token and
+    # neither was touched. So the one action a person takes when they believe
+    # their password is known to somebody else did not remove that somebody
+    # else - the intruder stayed signed in until the token expired on its own.
+    #
+    # Clearing session_token rather than rotating it is the deliberate choice.
+    # Rotating would hand the caller a replacement and keep them signed in,
+    # which is smoother; it also means the person cannot tell whether the
+    # change actually took effect anywhere, and it leaves the browser holding a
+    # credential minted from a session that began under the OLD password. A
+    # fresh sign-in with the new password is the unambiguous end state: every
+    # token in existence for this account is now refused, and the only way back
+    # in is the password just set. Nobody else's account is touched.
+    real_user.session_token = None
     db.commit()
-    return {"success": True}
+
+    # No token is returned on purpose - see above. `success` is kept so callers
+    # written before this change keep working; `reauthenticate` is what tells a
+    # client to drop its stored token and send the person to sign in again.
+    return {"success": True, "reauthenticate": True}
 
 
 # ══ customer activation (Checkpoint 6 §9 / §10) ═════════════════════════════

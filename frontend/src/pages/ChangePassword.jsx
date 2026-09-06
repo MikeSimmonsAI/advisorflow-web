@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, setMustChangePassword } from '../api/client'
+import { api, clearToken, setMustChangePassword } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import './Login.css'
 
@@ -31,10 +31,22 @@ export default function ChangePassword({ forced = false }) {
       await api.post('/auth/change-password', {
         current_password: currentPassword,
         new_password: newPassword,
+        // Sent so the SERVER can enforce the match too. The check above is for
+        // the person's benefit; this one is the guarantee.
+        confirm_password: confirmPassword,
       })
+      // The server clears this account's session on success, so every token
+      // ever issued for it — including the one sitting in this browser — is
+      // now refused. Keeping it would only produce a confusing 401 on the next
+      // click, so it is dropped here and the person signs in again with the
+      // password they just set. That fresh sign-in IS the confirmation the
+      // change took effect.
       setMustChangePassword(false)
+      clearToken()
+      // Neither password is left in component state after this point.
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
       setSuccess(true)
-      setTimeout(() => navigate('/'), 1200)
+      setTimeout(() => navigate('/login', { replace: true }), 1400)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -55,7 +67,8 @@ export default function ChangePassword({ forced = false }) {
 
         {success ? (
           <div style={{ textAlign: 'center', color: 'var(--signal-green)', fontSize: 14, padding: '20px 0' }}>
-            Password updated. Taking you in…
+            Password updated. Every session for this account has been signed
+            out — sign in again with your new password.
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="login-form">

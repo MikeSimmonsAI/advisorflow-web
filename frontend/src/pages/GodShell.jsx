@@ -387,6 +387,28 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               </div>
             </>
           )}
+          {/* CHANGE MY OWN PASSWORD.
+              The owner's account is the one account the reset action on
+              /god/users-all deliberately will NOT act on - that screen refuses
+              every self-action, and an administrative reset is the wrong tool
+              for your own credential anyway: it does not ask for the current
+              password, so a borrowed unlocked browser would be enough. This
+              goes to the ordinary self-service change, which requires the
+              current password first. Without this link the page existed but
+              nothing in God Mode led to it, so the owner had to know the URL.
+              A successful change signs every session for the account out, so
+              there is deliberately nowhere to come back to - the destination
+              afterwards is the sign-in screen. */}
+          <button
+            onClick={() => navigate('/change-password')}
+            title="Change your own password — asks for your current one first"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none',
+              border: 'none', color: '#3a5270', cursor: 'pointer', fontSize: '12px', padding: 0,
+              justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
+          >
+            <Ico d={ICONS.settings} size={13} />
+            {!collapsed && 'Change password'}
+          </button>
           <button onClick={handleLogout} title="Sign out"
             style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none',
               border: 'none', color: '#3a5270', cursor: 'pointer', fontSize: '12px', padding: 0,
