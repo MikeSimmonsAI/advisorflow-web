@@ -28,6 +28,7 @@ import {
   Card, Chip, Empty, ErrorBar, Info, Metric,
   money, dateTime, wallTime, dueLabel, initials,
 } from './parts'
+import PipelineProjection from './PipelineProjection'
 
 const KIND_LABEL = {
   proposal_declined: 'Declined',
@@ -148,6 +149,13 @@ export default function ManagerCommand() {
         <Metric label="In closing" value={closing.count}
                 sub={closing.total_value ? money(closing.total_value) : '—'} />
       </div>
+
+      {/* ── PIPELINE FINANCIAL PROJECTION ──
+          Collapsed by default. A manager opening Team Command is answering
+          "who needs me today", and a payroll forecast above the approvals queue
+          would push the blocked person below the fold. It is one click away for
+          when the question is the money instead. */}
+      <PipelineProjection brandSalesOrgId={data.brand_sales_org_id} />
 
       {/* ── APPROVALS — first when someone is blocked on you ── */}
       {appr.pending_count > 0 ? (

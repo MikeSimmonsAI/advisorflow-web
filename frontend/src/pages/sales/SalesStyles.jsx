@@ -415,6 +415,16 @@ const CSS = `
   color:#16324f}
 .sw-billing-row.is-primary b{font-size:18px}
 
+/* STANDARD PACKAGE vs CUSTOM DEAL — the mode badge on the pricing card.
+   Two visibly different states, because a salesperson should never have to
+   infer which one they are selling from whether a field happens to be filled
+   in. Custom is warmer and heavier: it is the exception, and the exception is
+   the one worth noticing. */
+.sw-pill{display:inline-block;padding:3px 9px;border-radius:999px;
+  font-size:9.5px;font-weight:800;letter-spacing:.1em;
+  background:#eef3f8;color:#4a6684;border:1px solid #d8e3ee}
+.sw-pill.is-custom{background:#fff4e2;color:#8a5510;border-color:#f0d5aa}
+
 `
 
 let injected = false

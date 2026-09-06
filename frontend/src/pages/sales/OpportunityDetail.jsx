@@ -24,6 +24,7 @@ import {
   money, dateTime, dueLabel, wallDateTime,
 } from './parts'
 import { BillingOptions } from './BillingOptions.jsx'
+import CustomizeDealDialog from './CustomizeDealDialog'
 
 const CONF_TONE = {
   confirmed: 'green', declined: 'red', no_show: 'red',
@@ -401,6 +402,7 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
   }, [opp.id, opp.selected_package_id, opp.package_interest_id, opp.deal_value,
       opp.implementation_fee])
 
+  const [customizing, setCustomizing] = useState(false)
   const selected = packages.find(p => p.id === pkgId)
   // Prefer the deal's own pricing block: it carries the per-deal implementation
   // fee, which the catalogue's copy cannot know about.
@@ -416,9 +418,45 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
   const isOverride = value !== '' && derived != null && Math.abs(Number(value) - derived) > 0.005
   const needsReason = (isOverride || (value !== '' && derived == null)) && !opp.deal_value_override
 
+  const isCustom = opp.custom_unit_price != null
+  const pending = opp.pending_pricing_approval
+
   return (
-    <Card title="PACKAGE &amp; DEAL VALUE"
-          sub="Value derives from the package; an override is recorded and audited">
+    <Card title={isCustom ? 'CUSTOM DEAL' : 'STANDARD PACKAGE'}
+          sub={isCustom
+            ? 'Negotiated pricing for this deal only — the catalogue is unchanged'
+            : 'Approved catalogue pricing and terms'}>
+
+      {/* WHICH MODE THIS DEAL IS IN, said once and plainly. A salesperson
+          should never have to infer from a populated field whether they are
+          selling the package or something they negotiated. */}
+      <div className="sw-flex" style={{ justifyContent: 'space-between',
+                                        alignItems: 'center', marginBottom: 12 }}>
+        <span className={'sw-pill' + (isCustom ? ' is-custom' : '')}>
+          {isCustom ? 'CUSTOM DEAL' : 'STANDARD PACKAGE'}
+        </span>
+        <button className="sw-btn" disabled={saving || !selected}
+                onClick={() => setCustomizing(true)}
+                title={selected ? 'Negotiate pricing for this deal'
+                                : 'Choose a package first'}>
+          CUSTOMIZE DEAL
+        </button>
+      </div>
+
+      {/* An unapproved deal is NOT the deal. Until a manager agrees, the deal
+          still says what it actually is, and this says what was asked for. */}
+      {pending && (
+        <div className="sw-notbuilt" style={{ borderColor: 'rgba(255,170,60,.45)' }}>
+          <b>PRICING AWAITING APPROVAL</b>
+          <p>
+            {pending.requested_by_name || 'Someone'} asked for pricing below the
+            approved floor{pending.reason ? ' — ' + pending.reason : ''}. The deal
+            below still shows the current agreed terms; nothing changes until a
+            manager decides.
+          </p>
+        </div>
+      )}
+
       <div className="sw-grid-even">
         <div className="sw-field">
           <label>PACKAGE INTEREST</label>
@@ -484,13 +522,29 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
         </div>
       )}
 
-      <div className="sw-field">
-        <label>DEAL VALUE {derived != null && (
-          <span style={{ fontWeight: 400 }}>(derived {money(derived)} — one-time)</span>
-        )}</label>
-        <input className="sw-input" type="number" step="0.01" value={value}
-               onChange={e => setValue(e.target.value)} />
-      </div>
+      {/* DEMOTED, DELIBERATELY, AND RELABELLED FOR WHAT IT ACTUALLY IS.
+          `deal_value` has always been the ONE-TIME implementation figure and
+          nothing else. Leading a pricing card with it — under a heading that
+          reads like the whole deal — is how a $1,497 setup fee gets reported as
+          the value of a $7,997 contract. The commercial summary above is the
+          headline now; this stays because pipeline reporting still reads the
+          column, and it says what it means. */}
+      <details style={{ marginTop: 14 }}>
+        <summary className="sw-subtle" style={{ cursor: 'pointer' }}>
+          Legacy deal value (one-time figure used by pipeline reporting)
+        </summary>
+        <div className="sw-field" style={{ marginTop: 10 }}>
+          <label>ONE-TIME DEAL VALUE {derived != null && (
+            <span style={{ fontWeight: 400 }}>(derived {money(derived)})</span>
+          )}</label>
+          <input className="sw-input" type="number" step="0.01" value={value}
+                 onChange={e => setValue(e.target.value)} />
+          <div className="sw-subtle" style={{ marginTop: 5 }}>
+            This is the implementation fee, not the contract value. Total
+            contract value is in the summary above.
+          </div>
+        </div>
+      </details>
 
       {needsReason && (
         <div className="sw-field">
@@ -525,7 +579,72 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
           {saving ? 'Saving…' : 'Save value'}
         </button>
       </div>
+
+      {/* Projected compensation on this deal. Absent — not zero — for anyone
+          not permitted to see it; the server sends null and this renders
+          nothing rather than implying the deal pays nobody. */}
+      {opp.compensation && <DealCompensation comp={opp.compensation} />}
+
+      {customizing && (
+        <CustomizeDealDialog
+          opp={opp} pkg={selected} saving={saving}
+          onCancel={() => setCustomizing(false)}
+          onSave={patch => { setCustomizing(false); onPatch(patch) }}
+        />
+      )}
     </Card>
+  )
+}
+
+
+/* PROJECTED COMPENSATION — on an open deal this is a forecast, and it says so.
+ * Never rendered as money owed: `earned` is a different state that only exists
+ * once funds are collected, and this component cannot display that state at
+ * all because the projection endpoint cannot produce it. */
+function DealCompensation({ comp }) {
+  if (comp.status === 'unconfigured') {
+    return (
+      <div className="sw-subtle sw-mt">
+        No compensation plan is configured for this sales organization, so no
+        commission can be projected.
+      </div>
+    )
+  }
+  const pending = comp.status === 'pending_approval'
+  return (
+    <div className="sw-billing-summary sw-mt">
+      <div className="sw-field" style={{ marginBottom: 6 }}>
+        <label style={{ margin: 0 }}>
+          PROJECTED COMPENSATION
+          {pending && <span className="sw-pill" style={{ marginLeft: 8 }}>PENDING APPROVAL</span>}
+        </label>
+      </div>
+      <Row label="Salesperson" value={money(comp.seller_total)} />
+      {Number(comp.override_total) > 0 && (
+        <Row label="Manager / upline overrides" value={money(comp.override_total)} />
+      )}
+      <Row label="Total projected" value={money(comp.total)} primary />
+      {comp.capped && (
+        <div className="sw-subtle" style={{ marginTop: 6 }}>
+          Reduced to the {money(comp.cap_amount)} payout cap on this package.
+        </div>
+      )}
+      <div className="sw-subtle" style={{ marginTop: 6 }}>
+        {pending
+          ? 'This deal is priced below the approved floor. Nothing is owed, and '
+            + 'these figures change if a manager alters the terms.'
+          : 'Projected on current terms. Not earned and not payable — commission '
+            + 'is earned when the deal is won and the first payment is collected.'}
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, value, primary }) {
+  return (
+    <div className={'sw-billing-row' + (primary ? ' is-primary' : '')}>
+      <span>{label}</span><b>{value ?? '—'}</b>
+    </div>
   )
 }
 
