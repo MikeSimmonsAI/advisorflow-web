@@ -40,6 +40,10 @@ const NAV = [
   { to: '/sales/prospects',    label: 'Prospects',         icon: '◇' },
   { to: '/sales/availability', label: 'My Availability',   icon: '◷' },
   { to: '/sales/onboarding',   label: 'Sold / Onboarding', icon: '✓' },
+  // A rep's OWN compensation, scoped by their token server-side. It belongs in
+  // My Work rather than under the manager group: what you have earned is your
+  // own business, and needing a manager's nav to see it would be absurd.
+  { to: '/sales/my-compensation', label: 'My Compensation', icon: '＄' },
 ]
 
 // Team Availability is the one item that belongs to BOTH groups by right: a rep
@@ -67,6 +71,12 @@ const MANAGER_NAV = [
   { to: '/sales/proposals',     label: 'Demos / Proposals', icon: '◈',
     permission: 'view_team_pipeline' },
   { to: '/sales/salespeople',   label: 'Salespeople',       icon: '⚇',
+    permission: 'view_team_pipeline' },
+  // What the compensation rules PRODUCED — earned, on hold, payable, paid —
+  // and the settlement of it. Not the configuration screen: rates and plans
+  // live in God Mode → Pricing & Comp. Gated server-side by manager scope;
+  // settling payments needs platform finance authority on top.
+  { to: '/sales/compensation',  label: 'Compensation',      icon: '＄',
     permission: 'view_team_pipeline' },
   // Reports is genuinely not built, and its PURPOSE has not been decided yet.
   // Team Command was built on the principle that a manager screen measuring

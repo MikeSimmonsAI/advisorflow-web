@@ -283,6 +283,25 @@ class CompensationEntry(Base):
     paid_at              = Column(DateTime, nullable=True)
     payment_reference    = Column(String, nullable=True)
 
+    # ── EVIDENCE THAT MONEY MOVED ───────────────────────────────────────────
+    # `payment_reference` alone answers "which transfer", and nothing else. Six
+    # months later the questions asked of a paid commission are WHO authorised
+    # it, HOW it was sent and WHY the amount was what it was, and a reference
+    # string answers none of them.
+    #
+    # No bank detail belongs here. A reference identifies a payment that
+    # happened somewhere else; an account number would make this table a
+    # credentials store, which it must never become.
+    paid_by        = Column(String, ForeignKey("users.id"), nullable=True)
+    payment_method = Column(String, nullable=True)   # e.g. "ach", "check"
+    payment_note   = Column(Text, nullable=True)
+    # A LIGHTWEIGHT BATCH, deliberately a string rather than a table. Weekly
+    # payables need entries grouped under one run so a bank transfer can be
+    # reconciled to the commissions it settled; they do not need a batch
+    # lifecycle, approvals and reversals — that is an accounting product. When
+    # a real batch object is needed this column is what it will be built from.
+    payment_batch_reference = Column(String, nullable=True, index=True)
+
     note       = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

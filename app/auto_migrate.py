@@ -47,6 +47,15 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Compensation payment evidence (Command Center, 2026-09-06) ─────────
+    # `compensation_entries` predates these, so create_all will never add them.
+    # All nullable: a row paid before they existed keeps its reference and
+    # simply has no method or authoriser recorded, which is honest.
+    ("compensation_entries", "paid_by", "VARCHAR"),
+    ("compensation_entries", "payment_method", "VARCHAR"),
+    ("compensation_entries", "payment_note", "TEXT"),
+    ("compensation_entries", "payment_batch_reference", "VARCHAR"),
+
     # ── Customer lifecycle (Customer 360, 2026-09-06) ──────────────────────
     # `organizations` has been in production since the beginning, so create_all
     # will never add these to it. Every one is nullable with no default, and a

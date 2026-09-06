@@ -491,9 +491,28 @@ def promote_due_to_payable(db: Session, now: Optional[datetime] = None,
 
 
 def mark_paid(db: Session, entry: CompensationEntry, *, payment_reference: str,
-              paid_at: Optional[datetime] = None, commit: bool = True) -> CompensationEntry:
-    """Only a PAYABLE entry can be paid. Paying an EARNED one would skip the
-    holdback the business runs on."""
+              paid_at: Optional[datetime] = None, paid_by: Optional[str] = None,
+              payment_method: Optional[str] = None,
+              payment_note: Optional[str] = None,
+              payment_batch_reference: Optional[str] = None,
+              commit: bool = True) -> CompensationEntry:
+    """Only a PAYABLE entry can be paid, and only once.
+
+    Paying an EARNED row would skip the holdback the business runs on, and
+    paying a PAID one would pay somebody twice — so both are refused here
+    rather than by whatever screen happened to call this. An already-paid entry
+    raises instead of quietly succeeding: a double-click, a retried request and
+    a second operator all arrive as the same call, and "no-op on success" is
+    how one of them ends up believing a second payment went out.
+
+    Everything after the reference is EVIDENCE, recorded because six months
+    later the question is who authorised this and how it was sent. None of it
+    is a bank credential and none of it may become one.
+    """
+    if entry.state == COMP_PAID:
+        raise NotEarnable(
+            "This entry was already paid on %s under reference %r. It cannot be "
+            "paid again." % (entry.paid_at, entry.payment_reference))
     if entry.state != COMP_PAYABLE:
         raise NotEarnable("Only a payable entry can be paid; this one is %r."
                           % entry.state)
@@ -503,6 +522,10 @@ def mark_paid(db: Session, entry: CompensationEntry, *, payment_reference: str,
     entry.state = COMP_PAID
     entry.payment_reference = ref
     entry.paid_at = paid_at or datetime.utcnow()
+    entry.paid_by = paid_by
+    entry.payment_method = (payment_method or "").strip() or None
+    entry.payment_note = (payment_note or "").strip() or None
+    entry.payment_batch_reference = (payment_batch_reference or "").strip() or None
     if commit:
         db.commit()
     return entry

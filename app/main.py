@@ -83,6 +83,10 @@ from app.routers.god_ops_router import router as god_ops_router
 # able to find, review and reason about in one file.
 from app.routers.god_pricing_router import router as god_pricing_router
 from app.routers.customer_lifecycle_router import router as customer_360_router
+# Compensation Command Center — what the pricing/comp rules PRODUCED, and the
+# settlement of it. Deliberately a separate module from god_pricing_router:
+# that one defines the rules, this one reads the ledger they filled and pays it.
+from app.routers.compensation_router import router as compensation_router
 # Platform overview + brand/customer context selection for the platform owner.
 # Separate from god_router because it is about WHERE the owner is operating,
 # not what they are operating on.
@@ -544,6 +548,7 @@ app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
 app.include_router(customer_360_router)  # Customer 360 + customer lifecycle — god_admin only
+app.include_router(compensation_router)  # Compensation Command Center + ledger + settlement
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
 app.include_router(customers_router)          # Customer provisioning engine
 app.include_router(email_tracking_router)
