@@ -119,6 +119,11 @@ const NAV = [
   { label: 'Lead Scraper',     path: '/scraper',              icon: 'grid'     },
 
   { group: 'PLATFORM' },
+  // Discount floors and commission plans. These are the numbers that decide
+  // what a deal may be sold for and what the team earns for selling it, so they
+  // sit in PLATFORM with the other owner-only surfaces rather than under
+  // OPERATIONS where a sales manager would expect to find them.
+  { label: 'Pricing & Comp',   path: '/god/pricing',          icon: 'dollar'   },
   // Control-plane diagnostics. Owner-only by the endpoint behind it, not by
   // the absence of this link.
   { label: 'Access Diagnostic', path: '/god/diagnostics/user-access', icon: 'shield' },

@@ -579,6 +579,18 @@ COLUMNS_TO_ADD = [
     ("pricing_approval_requests", "requested_term_months",        "INTEGER"),
     ("pricing_approval_requests", "requested_billing_option",     "VARCHAR"),
     ("pricing_approval_requests", "floor_breach_detail",          "TEXT"),
+
+    # ── Pricing policies gain dates and a below-floor mode ──────────────────
+    # `pricing_policies` is created whole by create_all() on a fresh database,
+    # but any database that already ran the previous deploy has the table
+    # WITHOUT these three, and create_all() never adds a column to an existing
+    # table. NOT NULL with a default on the boolean so existing rows keep the
+    # routing behaviour they were written under rather than silently becoming
+    # hard floors.
+    ("pricing_policies", "below_floor_requires_approval",
+     "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("pricing_policies", "effective_from", "DATE"),
+    ("pricing_policies", "effective_to",   "DATE"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

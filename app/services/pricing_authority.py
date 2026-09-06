@@ -28,6 +28,7 @@ the manager as the actor and get a consistent answer.
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
@@ -86,11 +87,22 @@ def _is_elevated(role: str) -> bool:
 # ── Resolving the policy ─────────────────────────────────────────────────────
 
 def resolve_policy(db: Session, brand_sales_org_id: Optional[str],
-                   role: str) -> Optional[PricingPolicy]:
-    """Most specific match wins. See PricingPolicy's docstring for the order."""
-    rows = (db.query(PricingPolicy)
-            .filter(PricingPolicy.is_active.is_(True))
-            .all())
+                   role: str, on_date=None) -> Optional[PricingPolicy]:
+    """Most specific scope wins; among equals, the latest policy that has
+    started. See PricingPolicy's docstring for the scope order.
+
+    THE DATE FILTER IS APPLIED BEFORE SPECIFICITY, not after. A narrowly scoped
+    policy that has not started yet, or has ended, must not beat a broader one
+    that is actually in force - otherwise scheduling next quarter's ceiling
+    would silently remove this quarter's.
+    """
+    on_date = on_date or date.today()
+    rows = [
+        p for p in db.query(PricingPolicy)
+        .filter(PricingPolicy.is_active.is_(True)).all()
+        if (p.effective_from is None or p.effective_from <= on_date)
+        and (p.effective_to is None or p.effective_to >= on_date)
+    ]
     if not rows:
         return None
 
@@ -111,7 +123,10 @@ def resolve_policy(db: Session, brand_sales_org_id: Optional[str],
     scored = [(r, p) for r, p in scored if r > 0]
     if not scored:
         return None
-    scored.sort(key=lambda t: t[0], reverse=True)
+    # Specificity first, then the most recently started policy. `date.min` for
+    # an undated row so an explicitly dated policy supersedes an open-ended one
+    # rather than losing to it on a null comparison.
+    scored.sort(key=lambda t: (t[0], t[1].effective_from or date.min), reverse=True)
     return scored[0][1]
 
 
@@ -130,6 +145,8 @@ def ceilings_for(db: Session, brand_sales_org_id: Optional[str],
             "max_discount_pct_setup": _dec(policy.max_discount_pct_setup),
             "max_discount_pct_monthly": _dec(policy.max_discount_pct_monthly),
             "min_term_months": policy.min_term_months,
+            "below_floor_requires_approval": bool(
+                policy.below_floor_requires_approval),
         }
     # No policy configured. Fall back to the behaviour that existed before this
     # system: a rep discounts nothing, an elevated role is unbounded. Installing
@@ -144,6 +161,9 @@ def ceilings_for(db: Session, brand_sales_org_id: Optional[str],
         "max_discount_pct_setup": pct,
         "max_discount_pct_monthly": pct,
         "min_term_months": None,
+        # Unconfigured routes rather than blocks: losing a negotiated figure is
+        # a worse default than asking somebody about it.
+        "below_floor_requires_approval": True,
     }
 
 
@@ -245,12 +265,23 @@ def evaluate(db: Session, user, pkg, *,
         breaches.append(row)
         components.append(row)
 
+    # A breach is NEEDS_APPROVAL by default. A policy may instead make its floor
+    # a hard stop — REFUSED — for a brand that wants a genuine floor rather than
+    # a speed bump. There is deliberately no third setting that lets a rep past
+    # the floor unrecorded; that would make the floor decorative.
+    outcome = ALLOWED
+    if breaches:
+        outcome = (NEEDS_APPROVAL if caps.get("below_floor_requires_approval", True)
+                   else REFUSED)
+
     return {
-        "outcome": NEEDS_APPROVAL if breaches else ALLOWED,
+        "outcome": outcome,
         "role": role,
         "ceilings": {
             "source": caps["source"],
             "policy_id": caps["policy_id"],
+            "below_floor_requires_approval": caps.get(
+                "below_floor_requires_approval", True),
             "max_discount_pct_setup": (float(caps["max_discount_pct_setup"])
                                        if caps["max_discount_pct_setup"] is not None else None),
             "max_discount_pct_monthly": (float(caps["max_discount_pct_monthly"])

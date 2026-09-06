@@ -1220,6 +1220,18 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
             proposed_monthly=_proposed_monthly,
             proposed_term_months=_proposed_term)
 
+        if verdict["outcome"] == _authority.REFUSED:
+            # A policy configured as a HARD floor. No request is created,
+            # because there is nothing to ask: this brand has said the floor is
+            # the floor. 403 rather than 409 — the difference matters to the
+            # screen, which offers "send for approval" on one and not the other.
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "pricing_below_floor",
+                        "message": verdict["summary"],
+                        "breaches": verdict["breaches"],
+                        "ceilings": verdict["ceilings"]})
+
         if verdict["outcome"] == _authority.NEEDS_APPROVAL:
             # NOTHING IS WRITTEN TO THE DEAL. The proposed economics live on the
             # request until a manager decides, so the pipeline, the proposal and

@@ -41,8 +41,8 @@ deal wearing a better number.
 
 from datetime import datetime
 
-from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Index, Integer,
-                        Numeric, String, Text, UniqueConstraint)
+from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Index,
+                        Integer, Numeric, String, Text)
 
 from app.models.models import Base, gen_uuid
 
@@ -93,6 +93,28 @@ class PricingPolicy(Base):
     # discount wearing a term, so it belongs behind the same gate.
     min_term_months = Column(Integer, nullable=True)
 
+    # WHAT HAPPENS BELOW THE FLOOR.
+    #
+    # True (the default) routes the negotiated figure to a manager as a request:
+    # the rep has not done something forbidden, they have done something someone
+    # else has to agree to.
+    #
+    # False is a HARD STOP, not permission - the price is refused outright and
+    # no request is created. It exists for a brand that wants a genuine floor
+    # rather than a speed bump. It is deliberately not "allow it anyway": a
+    # setting that let a rep past the floor unrecorded would make the floor
+    # decorative.
+    below_floor_requires_approval = Column(Boolean, default=True, nullable=False)
+
+    # WHEN THIS POLICY APPLIES. Both NULL means "always", which is what every
+    # policy written before these columns existed meant.
+    #
+    # Dated rather than edited in place for the same reason compensation plans
+    # are: a discount ceiling that changed in March should explain a February
+    # approval, not silently claim February was judged by March's rule.
+    effective_from = Column(Date, nullable=True)
+    effective_to   = Column(Date, nullable=True)
+
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Why this policy exists, for the person who finds it in six months.
@@ -102,8 +124,18 @@ class PricingPolicy(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
-        # One policy per (scope, role). Two rows answering the same question is
-        # how a guardrail starts depending on row order.
-        UniqueConstraint("brand_sales_org_id", "role", name="uq_pricing_policy_scope_role"),
+        # DELIBERATELY NOT UNIQUE ON (scope, role) ANY MORE.
+        #
+        # It was, and that was right while a policy had no dates: two live rows
+        # answering the same question is how a guardrail starts depending on row
+        # order. Dating them changes the question — "reps, 10%, from January"
+        # and "reps, 15%, from June" are both legitimate and must coexist, or a
+        # rate change means destroying the record of the previous one.
+        #
+        # Uniqueness moves into resolution instead: most specific scope wins,
+        # then the latest effective_from that has started. See
+        # pricing_authority.resolve_policy, which is the single place that
+        # decides, so "which policy applies" has one answer rather than one per
+        # caller.
         Index("ix_pricing_policies_lookup", "brand_sales_org_id", "is_active"),
     )

@@ -93,6 +93,10 @@ import GodImplementations from './pages/GodImplementations'
 import GodImplementationDetail from './pages/GodImplementationDetail'
 import GodCustomers from './pages/GodCustomers'
 import GodControlAudit from './pages/GodControlAudit'
+// PRICING & COMPENSATION. Discount floors and commission plans, editable by the
+// owner. Registered BEFORE the /god/* catch-all below or it would silently
+// render the Command Center instead.
+import GodPricingCompensation from './pages/god/GodPricingCompensation'
 import SalesImplementations from './pages/SalesImplementations'
 import Activate from './pages/Activate'
 import LeadScraper from './pages/LeadScraper'
@@ -701,6 +705,10 @@ export default function App() {
         <Route path="/god/customers/new" element={<GodRoute><GodModeLayout><CustomerCreate /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers/:orgId" element={<GodRoute><GodModeLayout><CustomerDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
+        {/* Pricing floors and compensation plans. GodRoute here is convenience
+            only — every endpoint behind it is require_god, so a typed URL is
+            refused by the server rather than by the absence of a link. */}
+        <Route path="/god/pricing" element={<GodRoute><GodModeLayout><GodPricingCompensation /></GodModeLayout></GodRoute>} />
         {/* Users & Identity. One row per human, every context on that row —
             see the header of GodUsers.jsx. */}
         <Route path="/god/workspaces" element={<GodRoute><GodModeLayout><Workspaces /></GodModeLayout></GodRoute>} />
