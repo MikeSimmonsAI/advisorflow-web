@@ -47,6 +47,23 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Customer lifecycle (Customer 360, 2026-09-06) ──────────────────────
+    # `organizations` has been in production since the beginning, so create_all
+    # will never add these to it. Every one is nullable with no default, and a
+    # NULL `lifecycle_status` reads as `active` — the alternative would
+    # retroactively cancel every existing customer on the first boot after
+    # deploy. See app/models/customer_lifecycle_models.py.
+    ("organizations", "lifecycle_status", "VARCHAR"),
+    ("organizations", "cancellation_requested_at", "TIMESTAMP"),
+    ("organizations", "cancellation_requested_by", "VARCHAR"),
+    ("organizations", "cancellation_effective_at", "TIMESTAMP"),
+    ("organizations", "cancellation_reason", "VARCHAR"),
+    ("organizations", "cancellation_note", "TEXT"),
+    ("organizations", "cancelled_at", "TIMESTAMP"),
+    ("organizations", "archived_at", "TIMESTAMP"),
+    ("organizations", "archived_by", "VARCHAR"),
+    ("organizations", "reactivated_at", "TIMESTAMP"),
+
     # ── Two-rate package pricing ───────────────────────────────────────────
     # brand_packages.price stays the MONTH-TO-MONTH rate. contract_price is the
     # lower rate earned by signing a term agreement, and is NULL for any package

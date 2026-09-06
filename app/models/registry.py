@@ -99,3 +99,9 @@ import app.models.pricing_policy_models  # noqa: F401  (imported for side effect
 # payment, and a missing plans table reads as "no plan configured" - the same
 # quiet wrong answer the qualification_rules line above records.
 import app.models.compensation_models  # noqa: F401  (imported for side effects)
+# Customer lifecycle history (customer_lifecycle_events). Same Base, same
+# reason. Without this import the table is never created and a cancellation has
+# nowhere to record WHY a customer left — the current-state columns on
+# `organizations` would still write, so the loss would be silent and would look
+# like a customer who cancelled for no reason.
+import app.models.customer_lifecycle_models  # noqa: F401  (imported for side effects)

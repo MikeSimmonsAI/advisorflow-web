@@ -82,6 +82,7 @@ from app.routers.god_ops_router import router as god_ops_router
 # than operating on records, and because payroll configuration is worth being
 # able to find, review and reason about in one file.
 from app.routers.god_pricing_router import router as god_pricing_router
+from app.routers.customer_lifecycle_router import router as customer_360_router
 # Platform overview + brand/customer context selection for the platform owner.
 # Separate from god_router because it is about WHERE the owner is operating,
 # not what they are operating on.
@@ -542,6 +543,7 @@ app.include_router(god_sms_trace_router)      # read-only provider forensics, se
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
+app.include_router(customer_360_router)  # Customer 360 + customer lifecycle — god_admin only
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
 app.include_router(customers_router)          # Customer provisioning engine
 app.include_router(email_tracking_router)

@@ -97,6 +97,10 @@ import GodControlAudit from './pages/GodControlAudit'
 // owner. Registered BEFORE the /god/* catch-all below or it would silently
 // render the Command Center instead.
 import GodPricingCompensation from './pages/god/GodPricingCompensation'
+// Customer 360 — one customer's whole commercial and lifecycle picture. Its
+// route is registered as /god/customers/:orgId/360, three segments, so it
+// cannot be shadowed by the two-segment CustomerDetail route above it.
+import Customer360 from './pages/god/Customer360'
 import SalesImplementations from './pages/SalesImplementations'
 import Activate from './pages/Activate'
 import LeadScraper from './pages/LeadScraper'
@@ -703,6 +707,9 @@ export default function App() {
             "new" is a static segment so React Router ranks it above :orgId. */}
         <Route path="/god/platform" element={<GodRoute><GodModeLayout><PlatformOverview /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers/new" element={<GodRoute><GodModeLayout><CustomerCreate /></GodModeLayout></GodRoute>} />
+        {/* Customer 360 first: React Router ranks a static final segment above
+            a bare param, but registering it here keeps the intent obvious. */}
+        <Route path="/god/customers/:orgId/360" element={<GodRoute><GodModeLayout><Customer360 /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers/:orgId" element={<GodRoute><GodModeLayout><CustomerDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
         {/* Pricing floors and compensation plans. GodRoute here is convenience

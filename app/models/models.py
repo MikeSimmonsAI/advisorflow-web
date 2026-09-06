@@ -222,7 +222,43 @@ class Organization(Base):
     # Platform this org belongs to (BookaBoost, EvoSys Pro, etc.)
     # Nullable for backward compat — existing orgs get assigned on migration.
     platform_id = Column(String, ForeignKey("platforms.id", ondelete="SET NULL"), nullable=True)
+
+    # THE OPERATIONAL SWITCH. Can anybody walk into this workspace right now.
+    # Unchanged in meaning: workspace_access filters a suspended org out of the
+    # context switcher and integration credentials fail closed, while
+    # memberships are deliberately preserved so a customer coming back does not
+    # find their staff locked out.
     is_active = Column(Boolean, default=True)
+
+    # THE COMMERCIAL FACT, which is a different question from the line above.
+    # `is_active` cannot distinguish "paused this week" from "left us in March",
+    # and before this column nothing could. A cancelled customer whose workspace
+    # stays open through a notice period is an ordinary state that needs both
+    # fields to express. See app/models/customer_lifecycle_models.py.
+    #
+    # NULL means `active`: every organization that existed before this column
+    # was a live customer, and reading NULL as anything else would retroactively
+    # cancel the entire book.
+    lifecycle_status = Column(String, nullable=True, index=True)
+
+    # The current chapter. History — including a customer who left, came back
+    # and left again — lives in customer_lifecycle_events; these columns are the
+    # latest values so the customer list can filter and sort without a join.
+    cancellation_requested_at = Column(DateTime, nullable=True)
+    cancellation_requested_by = Column(String, ForeignKey("users.id"), nullable=True)
+    # WHEN SERVICE ACTUALLY ENDS, which is not when somebody clicked Cancel.
+    # Notice periods and paid-through dates are real; collapsing the two is how
+    # a customer gets cut off early or billed after they left.
+    cancellation_effective_at = Column(DateTime, nullable=True)
+    cancellation_reason = Column(String, nullable=True)
+    cancellation_note = Column(Text, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    archived_at = Column(DateTime, nullable=True)
+    archived_by = Column(String, ForeignKey("users.id"), nullable=True)
+    # Set when a customer comes back, and never cleared. "They left once" is
+    # something an account manager needs to know.
+    reactivated_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     # White label / branding
@@ -400,7 +436,16 @@ class Organization(Base):
     billing_status          = Column(String, nullable=True)  # 'active' | 'past_due' | 'canceled' | 'trialing'
 
     platform = relationship("Platform", back_populates="organizations")
-    users = relationship("User", back_populates="organization")
+    # `foreign_keys` IS REQUIRED HERE, NOT DECORATIVE. There are now three
+    # foreign keys between `organizations` and `users`: this one
+    # (users.organization_id, "who belongs to this customer") and two on the
+    # organization itself recording WHO ACTED — cancellation_requested_by and
+    # archived_by. With more than one path between the tables SQLAlchemy cannot
+    # guess which defines membership, and refuses to configure the mapper at
+    # all, which takes down every model in the process rather than just this
+    # relationship. Naming the column keeps "who belongs here" unambiguous.
+    users = relationship("User", back_populates="organization",
+                         foreign_keys="User.organization_id")
     leads = relationship("Lead", back_populates="organization")
     contact_registry_entries = relationship("ContactRegistry", back_populates="organization")
 
@@ -527,7 +572,9 @@ class User(Base):
     created_at = Column(DateTime, server_default=func.now())
     last_login_at = Column(DateTime, nullable=True)
 
-    organization = relationship("Organization", back_populates="users")
+    # The other half of the pair above — same reason, same column named.
+    organization = relationship("Organization", back_populates="users",
+                                foreign_keys="User.organization_id")
     leads_owned = relationship("Lead", back_populates="assigned_to")
     messages_sent = relationship("Message", back_populates="sender")
 

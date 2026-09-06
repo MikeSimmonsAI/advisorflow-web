@@ -261,6 +261,24 @@ def normalize_option(value: Optional[str], pkg=None,
     return v
 
 
+def contract_values(setup: Optional[Decimal], mrr: Optional[Decimal],
+                    term_months: Optional[int]):
+    """(recurring contract value, total contract value) for these three numbers.
+
+    THE ONE STATEMENT OF THE RULE, so that a live quote and a customer record
+    priced from a snapshot taken two years ago cannot answer it differently.
+
+    A committed term is REQUIRED for either total to exist. Month-to-month has
+    no agreed number of months, so it gets (None, None) — never a plausible
+    twelve-month figure, which is how a forecast quietly books revenue nobody
+    promised. `None` here means "there is no such total", not zero.
+    """
+    if mrr is None or not term_months:
+        return None, None
+    rcv = mrr * Decimal(int(term_months))
+    return rcv, rcv + (setup or Decimal("0"))
+
+
 def savings_per_month(pkg) -> Optional[Decimal]:
     """Regular monthly rate minus contracted monthly rate. Computed, never stored."""
     if not has_term_option(pkg):
@@ -302,12 +320,11 @@ def quote(pkg, option: Optional[str] = None, opp=None,
 
     # Only a term agreement has a committed recurring total. Month-to-month has
     # no end date, so any total invented for it would be a guess presented as a
-    # commitment.
-    rcv = rate * Decimal(term) if (rate is not None and term) else None
-    tcv = None
-    if rcv is not None:
-        tcv = rcv + (setup or Decimal("0"))
-    elif opt == BILLING_MONTH_TO_MONTH and setup is not None and rate is None:
+    # commitment. The rule itself lives in `contract_values` so that a customer
+    # record priced from a stored snapshot cannot state it differently.
+    rcv, tcv = contract_values(setup, rate, term)
+    if rcv is None and opt == BILLING_MONTH_TO_MONTH and setup is not None \
+            and rate is None:
         # A package with no recurring rate at all: the implementation fee is
         # the whole of it, and saying so is honest rather than returning None.
         tcv = setup
