@@ -44,6 +44,7 @@ from app.models.sales_models import (
     APPROVAL_PENDING, SCOPE_BRAND_SALES_ORG, BrandPackage, Membership,
     Opportunity, PricingApprovalRequest,
 )
+from app.services import deal_pricing as _deal_pricing
 from app.services import package_pricing as pp
 
 log = logging.getLogger(__name__)
@@ -168,22 +169,32 @@ def upline(db: Session, user_id: Optional[str], brand_sales_org_id: str,
 
 def deal_economics(db: Session, opp: Opportunity) -> Dict[str, Any]:
     """The numbers compensation multiplies, from the same quote everything else
-    reads. Never a second derivation."""
-    pkg = None
-    if opp.selected_package_id:
-        pkg = (db.query(BrandPackage)
-               .filter(BrandPackage.id == opp.selected_package_id).first())
-    custom = pp.custom_rate(opp)
-    q = pp.quote(pkg, opp.billing_option, opp=opp,
-                 term_months=opp.contract_term_months, custom=custom)
+    reads. Never a second derivation.
+
+    RESOLUTION MOVED OUT, ARITHMETIC DID NOT. Which inputs describe this deal —
+    the sent proposal's snapshot, the per-deal custom rate, the catalogue — is
+    now decided once in `deal_pricing.resolve()` and shared with the pipeline
+    projection, so a forecast and a commission can no longer disagree about
+    what a deal is. The figures still come from `package_pricing.quote()`, and
+    for a deal with a package and no proposal this returns exactly what it
+    returned before.
+
+    ONE THING IS DELIBERATELY WITHHELD. A legacy `deal_value` is not an
+    implementation fee, so it is not surfaced here at all — a percent-of-setup
+    rule must never start paying against a figure whose composition nobody
+    knows. The pipeline reports it, flagged incomplete; payroll does not see it.
+    """
+    res = _deal_pricing.resolve(db, opp)
+    q = res["quote"] or {}
     return {
-        "package": pkg,
+        "package": res["package"],
         "quote": q,
-        "deal_kind": DEAL_CUSTOM if custom else DEAL_STANDARD,
-        "implementation_fee": _dec(q.get("implementation_fee")),
-        "mrr": _dec(q.get("mrr")),
-        "term_months": q.get("term_months"),
-        "tcv": _dec(q.get("total_contract_value")),
+        "pricing": res,
+        "deal_kind": DEAL_CUSTOM if res["is_custom_rate"] else DEAL_STANDARD,
+        "implementation_fee": res["implementation_fee"],
+        "mrr": res["mrr"],
+        "term_months": res["term_months"],
+        "tcv": res["total_contract_value"],
         "currency": q.get("currency") or "USD",
     }
 

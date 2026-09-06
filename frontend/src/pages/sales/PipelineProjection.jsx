@@ -32,7 +32,11 @@ export default function PipelineProjection({ brandSalesOrgId }) {
   const load = useCallback(async () => {
     setLoading(true); setErr('')
     try {
-      const qs = brandSalesOrgId ? '?brand_sales_org_id=' + brandSalesOrgId : ''
+      // ALWAYS WITH THE DEAL ROWS. Every total on this card is the sum of a
+      // column in that table, and a headline nobody can reconcile to the deals
+      // behind it is exactly how $0 of recurring revenue went unquestioned.
+      const qs = '?include_deals=true' +
+                 (brandSalesOrgId ? '&brand_sales_org_id=' + brandSalesOrgId : '')
       setData(await api.get('/sales/manager/pipeline-projection' + qs))
     } catch (e) {
       setErr(e?.message || 'Could not load the projection.')
@@ -76,13 +80,26 @@ export default function PipelineProjection({ brandSalesOrgId }) {
 
           {data && (
             <>
+              {/* FOUR FIGURES, NOT ONE. A one-time fee, a committed recurring
+                  total and an open-ended monthly rate are three different
+                  promises, and the single "pipeline value" that used to lead
+                  this card was in practice just the sum of the setup fees —
+                  which is how it came to read $75,800 of implementation
+                  against $0 of recurring. */}
               <div className="sw-billing-summary">
-                <Row label="Pipeline value"
-                     value={usd(data.pipeline_value)} primary />
-                <Row label="Implementation / setup in pipeline"
+                <Row label="One-time implementation / setup"
                      value={usd(data.pipeline_implementation)} />
-                <Row label="Recurring contract value in pipeline"
+                <Row label="Fixed-term recurring contract value"
                      value={usd(data.pipeline_recurring_contract_value)} />
+                <Row
+                  label="Month-to-month MRR"
+                  value={data.pipeline_monthly_recurring
+                    ? usd(data.pipeline_monthly_recurring) + '/month'
+                    : '—'}
+                />
+                <Row label="Total fixed contract value"
+                     value={usd(data.pipeline_total_fixed_contract_value
+                                ?? data.pipeline_value)} primary />
                 <Row
                   label="Weighted / expected revenue"
                   value={data.weighted_available
@@ -91,6 +108,34 @@ export default function PipelineProjection({ brandSalesOrgId }) {
                   muted={!data.weighted_available}
                 />
               </div>
+
+              {data.pipeline_monthly_recurring > 0 && (
+                <div className="sw-subtle" style={{ marginTop: 6 }}>
+                  {data.month_to_month_deal_count}{' '}
+                  {data.month_to_month_deal_count === 1 ? 'deal is' : 'deals are'}
+                  {' '}month-to-month. Their monthly rate is real revenue but no
+                  number of months has been agreed, so it is shown per month and
+                  deliberately not multiplied into a contract total.
+                </div>
+              )}
+
+              {/* NOT COUNTED AS ZERO RECURRING. Saying "$0 recurring" about a
+                  deal nobody has priced is a claim; saying the pricing is
+                  incomplete is the truth. */}
+              {data.pricing_incomplete_count > 0 && (
+                <div className="sw-notbuilt sw-mt"
+                     style={{ borderColor: 'rgba(255,170,60,.45)' }}>
+                  <b>PRICING INCOMPLETE — {data.pricing_incomplete_count}{' '}
+                    {data.pricing_incomplete_count === 1 ? 'OPPORTUNITY' : 'OPPORTUNITIES'}</b>
+                  <p>
+                    Their recurring terms cannot be established from a package, a
+                    custom rate or a sent proposal. Any one-time value they carry
+                    is counted above; their recurring value is excluded rather
+                    than assumed to be nothing, so the recurring figure is a
+                    floor. Open the deals below to see which.
+                  </p>
+                </div>
+              )}
 
               {!data.weighted_available && (
                 <div className="sw-subtle" style={{ marginTop: 6 }}>
@@ -138,6 +183,74 @@ export default function PipelineProjection({ brandSalesOrgId }) {
                     figures above until then.
                   </p>
                 </div>
+              )}
+
+              {data.deals && data.deals.length > 0 && (
+                <details className="sw-mt">
+                  <summary style={{ cursor: 'pointer', fontSize: 11,
+                                    fontWeight: 800, letterSpacing: '.08em',
+                                    color: '#16324f' }}>
+                    DEAL-BY-DEAL BREAKDOWN ({data.deals.length})
+                  </summary>
+                  <div style={{ overflowX: 'auto', marginTop: 10 }}>
+                    <table className="sw-table" style={{ fontSize: 12,
+                                                         minWidth: 760 }}>
+                      <thead>
+                        <tr>
+                          <th>Deal</th><th>Package</th><th>Stage</th>
+                          <th style={{ textAlign: 'right' }}>Setup</th>
+                          <th style={{ textAlign: 'right' }}>MRR</th>
+                          <th style={{ textAlign: 'right' }}>Term</th>
+                          <th style={{ textAlign: 'right' }}>RCV</th>
+                          <th style={{ textAlign: 'right' }}>Fixed TCV</th>
+                          <th>Priced from</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.deals.map(d => (
+                          <tr key={d.opportunity_id}>
+                            <td>
+                              {d.company_name}
+                              {!d.pricing_complete && (
+                                <div style={{ fontSize: 10, fontWeight: 700,
+                                              color: '#b26a00', marginTop: 2 }}
+                                     title={d.incomplete_reason || ''}>
+                                  PRICING INCOMPLETE
+                                </div>
+                              )}
+                            </td>
+                            <td>{d.package_name || '—'}</td>
+                            <td>{(d.stage || '').replace(/_/g, ' ')}</td>
+                            <td style={{ textAlign: 'right' }}>{usd(d.one_time_value) ?? '—'}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              {d.mrr != null ? usd(d.mrr) + '/mo' : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {d.term_months ? d.term_months + ' mo'
+                                : d.structure === 'month_to_month' ? 'M2M' : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {d.recurring_contract_value != null
+                                ? usd(d.recurring_contract_value) : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {usd(d.fixed_contract_value) ?? '—'}
+                            </td>
+                            <td style={{ fontSize: 11 }}>
+                              {d.pricing_source_label}
+                              {d.proposal_number ? ' ' + d.proposal_number : ''}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="sw-subtle" style={{ marginTop: 8 }}>
+                    Setup and RCV in this table add up to the totals above. A
+                    month-to-month row shows an MRR and no RCV on purpose — its
+                    setup fee is committed, its monthly rate has no end date.
+                  </div>
+                </details>
               )}
 
               <div className="sw-subtle" style={{ marginTop: 10 }}>
