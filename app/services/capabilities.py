@@ -154,6 +154,24 @@ CAPABILITIES: Dict[str, Capability] = dict([
          requires_feature=None, delegable=True,
          why="Separate from review so a manager can review without having the "
              "power to write to the live database."),
+    # ── Sales compensation visibility ───────────────────────────────────────
+    _cap("sales_comp_view",
+         "See projected and earned sales compensation",
+         requires_feature=None, delegable=True,
+         why="What the company pays its salespeople is not pipeline data. A rep "
+             "reading their own deal does not need the override layers above "
+             "them, and a whole team's projected payroll is a management "
+             "figure. Sales managers auto-qualify by role; anyone else needs an "
+             "explicit grant, so this can be given to a finance or ops person "
+             "without also making them a manager."),
+    _cap("sales_comp_manage",
+         "Configure compensation plans, rates, caps and holdbacks",
+         requires_feature=None, delegable=False,
+         why="Setting a commission rate is setting payroll. Separate from "
+             "sales_comp_view so somebody can be shown the numbers without "
+             "being able to change what anybody earns, and non-delegable "
+             "because a plan spans a brand's whole team."),
+
     _cap("lead_import_manage",
          "Archive and manage import batches",
          requires_feature=None, delegable=True,

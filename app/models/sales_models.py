@@ -330,6 +330,23 @@ class Opportunity(Base):
     custom_min_units     = Column(Integer, nullable=True)  # contracted minimum
     custom_term_months   = Column(Integer, nullable=True)  # NULL = no commitment
 
+    # WHAT WAS NEGOTIATED, AND WHAT THE CUSTOMER IS TOLD. Two fields because
+    # they are two different documents. `pricing_notes_internal` is the deal
+    # desk's record - why the discount was given, who pushed for it, what was
+    # traded away - and follows the same rule as `demo_notes`: it has no code
+    # path into a proposal, an email or the portal. `pricing_description_customer`
+    # is the sentence that MAY appear beside the figures on the customer's
+    # document. Keeping one field for both is how an internal note about a
+    # competitor's price ends up in front of that customer.
+    pricing_notes_internal      = Column(Text, nullable=True)
+    pricing_description_customer = Column(Text, nullable=True)
+
+    # A signed adjustment against the resolved implementation fee, mirroring
+    # Proposal.adjustment exactly - negative is a discount. Kept separate from
+    # `implementation_fee` so "what did we give away" stays answerable after the
+    # catalogue moves, rather than being buried in a single overridden figure.
+    setup_discount      = Column(Numeric(12, 2), nullable=True)
+
     deal_value          = Column(Numeric(12, 2), nullable=True)
     deal_value_override = Column(Boolean, default=False, nullable=False)
     deal_value_override_by     = Column(String, ForeignKey("users.id"), nullable=True)
@@ -512,8 +529,16 @@ class PricingApprovalRequest(Base):
                                 nullable=False, index=True)
     opportunity_id     = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
                                 nullable=False, index=True)
+    # NULLABLE as of the custom-deal work. Pricing is negotiated on the DEAL,
+    # often before any proposal document exists - a rep agrees a rate on a call
+    # and the paperwork follows. Requiring a proposal here would have forced a
+    # placeholder document into existence just to ask a question about a price,
+    # and a proposal that exists only to satisfy a foreign key is a proposal
+    # somebody eventually sends by accident. Relaxed in auto_migrate via
+    # NULLABILITY_TO_RELAX; `opportunity_id` stays NOT NULL and remains the
+    # thing every request is actually about.
     proposal_id        = Column(String, ForeignKey("proposals.id", ondelete="CASCADE"),
-                                nullable=False, index=True)
+                                nullable=True, index=True)
 
     requested_by       = Column(String, ForeignKey("users.id"), nullable=False)
     requested_at       = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -522,9 +547,36 @@ class PricingApprovalRequest(Base):
     # correctly even if the proposal is edited afterwards.
     base_amount          = Column(Numeric(12, 2), nullable=True)
     current_adjustment   = Column(Numeric(12, 2), nullable=True)
-    requested_adjustment = Column(Numeric(12, 2), nullable=False)
+    # NULLABLE for the same reason: a custom-deal request is three negotiated
+    # figures, not one signed adjustment, and forcing a zero in here would put a
+    # meaningless "$0 adjustment" on the manager's queue beside the real ask.
+    requested_adjustment = Column(Numeric(12, 2), nullable=True)
     currency             = Column(String, default="USD", nullable=True)
     reason               = Column(Text, nullable=False)
+
+    # ── What KIND of thing is being asked for ───────────────────────────────
+    #
+    # ADDED, NOT FORKED. A second approval table would mean a manager with two
+    # queues and two ways to be blocked on somebody. Existing rows carry NULL
+    # here and are read as the original proposal-adjustment request, so nothing
+    # already in flight changes meaning.
+    #
+    # `custom_deal` requests carry the proposed per-deal economics below instead
+    # of a single signed adjustment, because a negotiated deal is three numbers
+    # that have to be approved together - approving a monthly rate without the
+    # term it was agreed against approves a different deal.
+    request_kind   = Column(String, nullable=True)   # NULL | "custom_deal"
+
+    requested_implementation_fee = Column(Numeric(12, 2), nullable=True)
+    requested_unit_price         = Column(Numeric(12, 2), nullable=True)
+    requested_unit_label         = Column(String, nullable=True)
+    requested_min_units          = Column(Integer, nullable=True)
+    requested_term_months        = Column(Integer, nullable=True)
+    requested_billing_option     = Column(String, nullable=True)
+    # Which ceilings this breached and by how much, captured at request time.
+    # A manager needs to see what the rep was refused for; recomputing it at
+    # decision time would answer against whatever the catalogue says TODAY.
+    floor_breach_detail          = Column(Text, nullable=True)   # JSON string
 
     status         = Column(String, default=APPROVAL_PENDING, nullable=False)
     decided_by     = Column(String, ForeignKey("users.id"), nullable=True)

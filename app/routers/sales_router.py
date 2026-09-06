@@ -20,7 +20,7 @@ WHAT THIS MODULE MUST NEVER DO
   yet rather than returning a plausible empty list that reads as "no meetings".
 """
 from datetime import datetime, timedelta, date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -53,8 +53,48 @@ from app.services import availability as _av
 from app.services import appointment_meetings as _apmeet
 from app.services import proposal_workqueue as _pwq
 from app.services import package_pricing as _pp
+# The single answer to "may this person quote this price?", and the queue a
+# below-floor negotiation is routed into. Imported here rather than reimplemented
+# so the PATCH endpoint and the approval endpoint judge the same deal the same way.
+from app.services import pricing_authority as _authority
+from app.services import pricing_approvals as _pricing_approvals
+from app.services import compensation as _comp
+from app.services import pipeline_projection as _projection
 
 router = APIRouter(prefix="/sales", tags=["sales"])
+
+
+def _may_see_compensation(user, db, brand_sales_org_id) -> bool:
+    """WHO MAY READ WHAT THE COMPANY PAYS ITS SALESPEOPLE.
+
+    A sales manager qualifies by role - they already run the team's numbers.
+    Everybody else needs the `sales_comp_view` capability explicitly granted,
+    which is what lets a finance or ops person be shown compensation without
+    also being made a manager of a sales team.
+
+    An ordinary rep therefore sees NOTHING here by default. That is deliberate:
+    the payload carries the override layers above them, and "what does my
+    manager earn on my deal" is not a question the pipeline screen should answer
+    by accident.
+
+    WHY THE `sales_comp_view` CAPABILITY IS NOT CONSULTED HERE YET, AND WHY
+    THAT IS NOT AN OVERSIGHT.
+
+    `UserCapabilityGrant` is scoped by (user, customer ORGANIZATION). Every
+    brand-sales identity has `organization_id = NULL` by positive assertion, so
+    `grants_for()` returns [] for exactly the people this gate is about, and a
+    capability check here would be a branch that can never be true. Shipping a
+    permission that silently never fires is worse than not having it: it reads
+    as configurable and is not.
+
+    So the capability is REGISTERED (see capabilities.py) and the gate is
+    role-based until the grant table can express a brand-sales scope. Widening
+    it is one change in one function, and the registry entry is what makes that
+    change obvious rather than archaeological.
+    """
+    if is_god(user):
+        return True
+    return bool(is_sales_manager(user, db, brand_sales_org_id))
 
 # Scheduling SHIPPED in Checkpoint 2. Everything that used to report
 # {available:false} now returns real appointment data, and an empty result now
@@ -572,6 +612,11 @@ class OpportunityPatch(BaseModel):
     custom_unit_label: Optional[str] = None
     custom_min_units: Optional[int] = None
     custom_term_months: Optional[int] = None
+    # Why the price was agreed (deal desk only, never customer-facing) and what
+    # the customer may be told about it. Two fields because they are two
+    # different documents — see the Opportunity model.
+    pricing_notes_internal: Optional[str] = None
+    pricing_description_customer: Optional[str] = None
     deal_value: Optional[float] = None
     deal_value_override_reason: Optional[str] = None
     loss_reason: Optional[str] = None
@@ -1011,6 +1056,30 @@ def get_opportunity(opp_id: str,
         # Everything downstream - proposal, contract, checkout - reads this
         # rather than re-deriving it and risking a different answer.
         "billing": _opportunity_billing(db, opp),
+        # ── Pricing authority, so the screen knows what it may offer ────────
+        # Sent as a resolved verdict rather than as raw ceilings the browser
+        # would have to apply itself. A UI that computes its own floor is a
+        # second implementation of the rule, and the two drift.
+        "pricing_authority": _authority.ceilings_for(
+            db, opp.brand_sales_org_id,
+            _authority.actor_role(user, db, opp.brand_sales_org_id)),
+        "pricing_notes_internal": opp.pricing_notes_internal,
+        "pricing_description_customer": opp.pricing_description_customer,
+        "pending_pricing_approval": (
+            lambda r: {"id": r.id, "requested_at": r.requested_at,
+                       "reason": r.reason,
+                       "requested_by_name": _user_name(db, r.requested_by)}
+            if r else None)(_pricing_approvals.open_request_for_opportunity(db, opp.id)),
+
+        # ── Projected compensation on THIS deal ─────────────────────────────
+        # Gated: a rep sees nothing here unless they hold sales_comp_view, and
+        # what the company pays the layers above them is not theirs to read.
+        # None means "not permitted to see", which the screen renders as absent
+        # rather than as zero.
+        "compensation": (_comp.compute_public(db, opp)
+                         if _may_see_compensation(user, db, opp.brand_sales_org_id)
+                         else None),
+
         "deal_value_override_reason": opp.deal_value_override_reason,
         "deal_value_override_by_name": _user_name(db, opp.deal_value_override_by),
         "deal_value_override_at": opp.deal_value_override_at,
@@ -1108,17 +1177,77 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
     # the term are resolved against it: a custom agreement carries its own term,
     # and resolving the option first would refuse the very commitment being set.
     #
-    # Manager-only and audited, on the same authority as the deal-value override
-    # and the proposal adjustment. A recurring price is a larger commitment than
-    # a one-time discount, so it is not the one number a rep may set alone.
+    # WAS MANAGER-ONLY. IT IS NOW FLOOR-BOUNDED, WHICH IS A DIFFERENT RULE
+    # RATHER THAN A LOOSER ONE.
+    #
+    # A rep may negotiate inside the discount ceiling their brand's pricing
+    # policy grants them; past it the deal is not refused and is not silently
+    # written either - it is captured as a request a manager decides on. The
+    # old rule sent the rep to Slack and lost the negotiated figure; this keeps
+    # the figure and routes the question.
+    #
+    # With no policy configured `pricing_authority` falls back to "a rep
+    # discounts nothing", so on a brand nobody has configured this behaves
+    # exactly as the manager-only rule did.
     _CUSTOM = ("custom_unit_price", "custom_unit_label",
                "custom_min_units", "custom_term_months")
+    _PRICING_TEXT = ("pricing_notes_internal", "pricing_description_customer")
     if any(f in data for f in _CUSTOM):
-        if not (is_god(user) or is_sales_manager(user, db, opp.brand_sales_org_id)):
-            raise HTTPException(
-                status_code=403,
-                detail="Only a sales manager can set a custom rate on this deal.")
         before = _pp.custom_rate(opp)
+
+        # What the caller is proposing, resolved the same way the engine would
+        # resolve it once written - so the judgement is made against the deal
+        # that would exist, not against the fields in isolation.
+        _unit = data.get("custom_unit_price", opp.custom_unit_price)
+        _units = data.get("custom_min_units", opp.custom_min_units) or 1
+        _proposed_monthly = None
+        if _unit is not None:
+            try:
+                _proposed_monthly = Decimal(str(_unit)) * Decimal(int(_units))
+            except (InvalidOperation, ValueError, TypeError):
+                raise HTTPException(status_code=400,
+                                    detail="Custom unit price is not a number.")
+        _proposed_term = data.get("custom_term_months", opp.custom_term_months)
+        _pkg_for_floor = (db.query(BrandPackage)
+                          .filter(BrandPackage.id == opp.selected_package_id).first()
+                          if opp.selected_package_id else None)
+        _option = data.get("billing_option", opp.billing_option)
+
+        verdict = _authority.evaluate(
+            db, user, _pkg_for_floor,
+            brand_sales_org_id=opp.brand_sales_org_id,
+            billing_option=_option,
+            proposed_monthly=_proposed_monthly,
+            proposed_term_months=_proposed_term)
+
+        if verdict["outcome"] == _authority.NEEDS_APPROVAL:
+            # NOTHING IS WRITTEN TO THE DEAL. The proposed economics live on the
+            # request until a manager decides, so the pipeline, the proposal and
+            # the compensation projection all keep describing the deal as it
+            # actually stands rather than as somebody hopes it will.
+            req = _pricing_approvals.request_custom_deal(
+                db, opp, user,
+                proposed_unit_price=_unit,
+                proposed_unit_label=data.get("custom_unit_label",
+                                             opp.custom_unit_label),
+                proposed_min_units=_units,
+                proposed_term_months=_proposed_term,
+                proposed_billing_option=_option,
+                proposed_implementation_fee=data.get("implementation_fee",
+                                                     opp.implementation_fee),
+                reason=(data.get("pricing_notes_internal") or "").strip()
+                       or "Negotiated pricing below the approved floor.",
+                verdict=verdict)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "pricing_approval_required",
+                    "message": verdict["summary"],
+                    "request_id": req["id"],
+                    "breaches": verdict["breaches"],
+                    "ceilings": verdict["ceilings"],
+                })
+
         for f in _CUSTOM:
             if f in data:
                 v = data[f]
@@ -1130,6 +1259,14 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
             _event(db, opp, user, "custom_rate_set",
                    "Custom rate set" if after else "Custom rate cleared",
                    _custom_note(after, before))
+
+    # The two pricing narratives. `pricing_notes_internal` is deal-desk only and
+    # follows `demo_notes`: it has no code path into a proposal, an email or the
+    # portal. `pricing_description_customer` is the sentence that MAY be shown.
+    for f in _PRICING_TEXT:
+        if f in data:
+            v = data[f]
+            setattr(opp, f, (v.strip() or None) if isinstance(v, str) else v)
 
     # ── packages and deal value ─────────────────────────────────────────────
     platform_id = org.platform_id if org else None

@@ -554,6 +554,31 @@ COLUMNS_TO_ADD = [
     ("import_staged_rows", "mobile_phone_raw",        "VARCHAR"),
     ("import_staged_rows", "mobile_phone_normalized", "VARCHAR"),
     ("import_staged_rows", "phone_type",              "VARCHAR"),
+
+    # ── Custom-deal pricing on the opportunity ──────────────────────────────
+    # The custom RATE fields (custom_unit_price and friends) already exist and
+    # are unchanged. These three are what the deal desk was missing: why the
+    # price was agreed, what the customer may be told about it, and the setup
+    # discount kept as a signed figure rather than buried inside an overridden
+    # fee. All nullable - every existing deal keeps exactly the pricing it has,
+    # and NULL means "nothing was negotiated", not "a discount of zero".
+    ("opportunities", "pricing_notes_internal",       "TEXT"),
+    ("opportunities", "pricing_description_customer", "TEXT"),
+    ("opportunities", "setup_discount",               "NUMERIC(12,2)"),
+
+    # ── Custom-deal pricing approval requests ───────────────────────────────
+    # ONE QUEUE, NOT TWO. A separate table for custom-deal approvals would mean
+    # a manager with two inboxes and two ways to be the bottleneck. `request_kind`
+    # is NULL on every existing row and reads as "the proposal-adjustment request
+    # this table was built for", so nothing already pending changes meaning.
+    ("pricing_approval_requests", "request_kind",                 "VARCHAR"),
+    ("pricing_approval_requests", "requested_implementation_fee", "NUMERIC(12,2)"),
+    ("pricing_approval_requests", "requested_unit_price",         "NUMERIC(12,2)"),
+    ("pricing_approval_requests", "requested_unit_label",         "VARCHAR"),
+    ("pricing_approval_requests", "requested_min_units",          "INTEGER"),
+    ("pricing_approval_requests", "requested_term_months",        "INTEGER"),
+    ("pricing_approval_requests", "requested_billing_option",     "VARCHAR"),
+    ("pricing_approval_requests", "floor_breach_detail",          "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -692,6 +717,19 @@ NULLABILITY_TO_RELAX = [
     # Brand-sales staff and some global/god users have no customer tenant at all.
     # See User.organization_id and claude/SALES_WORKSPACE_ARCHITECTURE.md.
     ("users", "organization_id"),
+    # Custom-deal pricing. Pricing is negotiated on the DEAL, frequently before
+    # any proposal document exists - a rep agrees a rate on a call and the
+    # paperwork follows. Requiring a proposal to ask a question about a price
+    # would have forced a placeholder document into existence, and a proposal
+    # that exists only to satisfy a foreign key is one somebody eventually sends
+    # by accident. `opportunity_id` stays NOT NULL and remains what every
+    # request is actually about.
+    ("pricing_approval_requests", "proposal_id"),
+    # Same change, same reason: a custom-deal request is three negotiated
+    # figures approved together, not one signed adjustment. Forcing a zero here
+    # would put a meaningless "$0 adjustment" on the manager's queue next to
+    # the real ask.
+    ("pricing_approval_requests", "requested_adjustment"),
     # Checkpoint 4. A SALES proposal belongs to a brand_sales_org and an
     # opportunity, not to a customer tenant — the customer organization does not
     # exist until the deal is Won. Existing customer-portal proposals keep their

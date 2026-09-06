@@ -122,3 +122,51 @@ def decide_approval(request_id: str, body: dict,
     db.commit()
     return {"ok": True, "applied": res.get("applied", False),
             "request": _appr.request_out(db, req)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PIPELINE FINANCIAL PROJECTION
+#
+# A MANAGER SCREEN, GATED TWICE. `require_sales_manager` proves the caller runs
+# a team; `is_sales_manager(brand)` proves it is THIS team. Compensation spans a
+# whole brand's payroll, so the brand check is not optional here even though the
+# manager guard already passed - that pair is the same one the rest of this
+# router uses, and a request for another brand returns 403 rather than an empty
+# projection that reads as "your team has no pipeline".
+#
+# Everything returned is PROJECTED. Nothing here is earned, payable or owed, and
+# the payload says so in a field rather than relying on the screen to remember.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/pipeline-projection")
+def pipeline_projection(brand_sales_org_id: str = Query(None),
+                        owner_user_id: str = Query(None),
+                        stage: str = Query(None),
+                        include_deals: bool = Query(False),
+                        db: Session = Depends(get_db),
+                        user: User = Depends(require_sales_manager)):
+    """What the open pipeline is worth, and what it would cost in sales comp."""
+    from app.models.sales_models import Opportunity as _Opp
+    from app.services import pipeline_projection as _proj
+
+    org = _resolve_context(user, db, brand_sales_org_id)
+    if not is_sales_manager(user, db, org.id):
+        raise HTTPException(status_code=403,
+                            detail="Sales manager access required for this brand.")
+
+    # OPEN deals only. A won or lost deal is not a forecast, and including won
+    # ones is how a projection quietly starts double-counting revenue that has
+    # already been recognised.
+    q = (db.query(_Opp)
+         .filter(_Opp.brand_sales_org_id == org.id,
+                 _Opp.status == "open"))
+    if owner_user_id:
+        q = q.filter(_Opp.owner_user_id == owner_user_id)
+    if stage:
+        q = q.filter(_Opp.stage == stage)
+
+    result = _proj.project(db, q.all(), brand_sales_org_id=org.id,
+                           include_deals=include_deals)
+    result["brand_sales_org_id"] = org.id
+    result["filters"] = {"owner_user_id": owner_user_id, "stage": stage}
+    return result

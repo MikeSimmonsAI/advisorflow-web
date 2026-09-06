@@ -189,6 +189,21 @@ def decide(db: Session, req: PricingApprovalRequest, manager, approve: bool,
         return {"ok": False, "error": "That request has already been decided.",
                 "applied": False}
 
+    # ONE QUEUE, ONE DECIDE BUTTON. A custom-deal request is answered by the
+    # same manager action on the same screen; only what gets written differs,
+    # because a negotiated rate lands on the DEAL and an adjustment lands on a
+    # DOCUMENT. Branching here rather than at the endpoint keeps a manager from
+    # ever having to know which kind they are looking at.
+    if req.request_kind == "custom_deal":
+        if approve:
+            res = approve_custom_deal(db, req, manager, decision_note=note or "",
+                                      now=now)
+        else:
+            res = deny_custom_deal(db, req, manager, decision_note=note or "",
+                                   now=now)
+        res["applied"] = bool(approve and res.get("ok"))
+        return res
+
     prop = (db.query(Proposal)
             .filter(Proposal.id == req.proposal_id,
                     Proposal.deleted_at.is_(None)).first())
@@ -297,3 +312,164 @@ def recent_decided_for_brand(db: Session, brand_sales_org_id: str,
                         (APPROVAL_APPROVED, APPROVAL_DENIED)))
             .order_by(PricingApprovalRequest.decided_at.desc())
             .limit(limit).all())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CUSTOM-DEAL REQUESTS
+#
+# The same queue, a different question. A proposal-adjustment request asks
+# "may I take X off this document?"; a custom-deal request asks "may I sell it
+# on these terms?" - a rate, a minimum and a term that were negotiated together
+# and only mean anything approved together.
+#
+# THE PROPOSED PRICING LIVES ON THE REQUEST, NOT ON THE DEAL. Writing it to the
+# opportunity and flagging it "pending" would mean the pipeline, the proposal
+# and the compensation projection all describe a deal nobody has agreed to. The
+# opportunity keeps saying what is actually true until a manager decides.
+# ═══════════════════════════════════════════════════════════════════════════
+
+import json as _json
+
+from app.models.sales_models import Opportunity as _Opportunity
+
+
+def open_request_for_opportunity(db: Session, opportunity_id: str):
+    """The single live request on a deal, whatever kind it is."""
+    return (db.query(PricingApprovalRequest)
+            .filter(PricingApprovalRequest.opportunity_id == opportunity_id,
+                    PricingApprovalRequest.status == APPROVAL_PENDING)
+            .order_by(PricingApprovalRequest.requested_at.desc())
+            .first())
+
+
+def request_custom_deal(db: Session, opp: _Opportunity, user, *,
+                        proposed_unit_price=None, proposed_unit_label=None,
+                        proposed_min_units=None, proposed_term_months=None,
+                        proposed_billing_option=None,
+                        proposed_implementation_fee=None,
+                        reason: str = "", verdict: Optional[dict] = None,
+                        now=None) -> dict:
+    """Capture a below-floor negotiation as a question for a manager.
+
+    Returns a serialisable dict rather than the row, because the caller raises
+    it straight back to the browser inside a 409.
+
+    Replaces any existing open request on the deal rather than stacking:
+    approving one of two live asks silently contradicts the other.
+    """
+    now = now or datetime.utcnow()
+
+    existing = open_request_for_opportunity(db, opp.id)
+    if existing is not None:
+        existing.status = APPROVAL_WITHDRAWN
+        existing.decided_at = now
+        existing.decision_note = "Replaced by a newer request from the same person."
+
+    req = PricingApprovalRequest(
+        brand_sales_org_id=opp.brand_sales_org_id,
+        opportunity_id=opp.id,
+        proposal_id=None,
+        requested_by=user.id,
+        requested_at=now,
+        currency="USD",
+        reason=(reason or "").strip() or "Negotiated pricing below the approved floor.",
+        status=APPROVAL_PENDING,
+        request_kind="custom_deal",
+        requested_implementation_fee=_dec(proposed_implementation_fee),
+        requested_unit_price=_dec(proposed_unit_price),
+        requested_unit_label=(proposed_unit_label or None),
+        requested_min_units=proposed_min_units,
+        requested_term_months=proposed_term_months,
+        requested_billing_option=proposed_billing_option,
+        # Frozen at request time. Recomputing the breach when the manager opens
+        # it would answer against whatever the catalogue says THEN, so a
+        # catalogue edit in between would change what the rep appears to have
+        # asked for.
+        floor_breach_detail=_json.dumps(verdict or {}, default=str),
+        created_at=now,
+    )
+    db.add(req)
+    db.flush()
+
+    ps._event(db, opp.id, "pricing_approval_requested",
+              "Custom pricing approval requested",
+              (verdict or {}).get("summary") or req.reason,
+              user.id, now)
+    db.commit()
+    return {
+        "id": req.id,
+        "status": req.status,
+        "requested_unit_price": _f(req.requested_unit_price),
+        "requested_min_units": req.requested_min_units,
+        "requested_term_months": req.requested_term_months,
+        "reason": req.reason,
+    }
+
+
+def approve_custom_deal(db: Session, req: PricingApprovalRequest, manager,
+                        decision_note: str = "", now=None) -> dict:
+    """A manager agrees, and the agreed economics are written to the deal.
+
+    THE MANAGER IS THE ACTOR. The write happens here with the manager's
+    authority, not the rep's, which is what makes an approved below-floor price
+    legitimate rather than a rep's write that somebody waved through afterwards.
+    """
+    now = now or datetime.utcnow()
+    if req.status != APPROVAL_PENDING:
+        return {"ok": False, "error": "That request has already been decided."}
+    if req.request_kind != "custom_deal":
+        return {"ok": False, "error": "That is not a custom-deal request."}
+
+    opp = (db.query(_Opportunity)
+           .filter(_Opportunity.id == req.opportunity_id).first())
+    if opp is None:
+        req.status = APPROVAL_STALE
+        req.decided_at = now
+        req.decision_note = "The deal no longer exists."
+        db.commit()
+        return {"ok": False, "error": "That deal no longer exists."}
+
+    # Captured BEFORE the write, so the timeline row can say what it was.
+    before_note = "%s x %s, %s months" % (
+        opp.custom_unit_price, opp.custom_min_units, opp.custom_term_months)
+
+    opp.custom_unit_price = req.requested_unit_price
+    opp.custom_unit_label = req.requested_unit_label
+    opp.custom_min_units = req.requested_min_units
+    opp.custom_term_months = req.requested_term_months
+    if req.requested_billing_option:
+        opp.billing_option = req.requested_billing_option
+    if req.requested_implementation_fee is not None:
+        opp.implementation_fee = req.requested_implementation_fee
+
+    req.status = APPROVAL_APPROVED
+    req.decided_by = manager.id
+    req.decided_at = now
+    req.decision_note = (decision_note or "").strip() or None
+
+    ps._event(db, opp.id, "pricing_approved",
+              "Custom pricing approved",
+              "Approved by manager. Was: %s. Now: %s x %s, %s months.%s" % (
+                  before_note, req.requested_unit_price, req.requested_min_units,
+                  req.requested_term_months,
+                  (" Note: " + req.decision_note) if req.decision_note else ""),
+              manager.id, now)
+    db.commit()
+    return {"ok": True, "error": None, "request": req}
+
+
+def deny_custom_deal(db: Session, req: PricingApprovalRequest, manager,
+                     decision_note: str = "", now=None) -> dict:
+    """A manager refuses. NOTHING is written to the deal - it never was."""
+    now = now or datetime.utcnow()
+    if req.status != APPROVAL_PENDING:
+        return {"ok": False, "error": "That request has already been decided."}
+    req.status = APPROVAL_DENIED
+    req.decided_by = manager.id
+    req.decided_at = now
+    req.decision_note = (decision_note or "").strip() or None
+    ps._event(db, req.opportunity_id, "pricing_denied",
+              "Custom pricing denied",
+              req.decision_note or "No note given.", manager.id, now)
+    db.commit()
+    return {"ok": True, "error": None, "request": req}

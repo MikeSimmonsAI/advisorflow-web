@@ -87,3 +87,15 @@ import app.models.source_records  # noqa: F401  (imported for side effects)
 # defined no rules" rather than as an error. A quiet wrong answer instead of a
 # loud one, which is the worst shape a missing migration can take.
 import app.models.qualification_models  # noqa: F401  (imported for side effects)
+
+# Per-deal pricing authority (pricing_policies). Same Base, same reason. Without
+# this import the table is never created, `resolve_policy` finds no rows, and
+# the engine falls back to "a rep may discount nothing" - which is safe but is
+# also silently NOT the policy anybody configured.
+import app.models.pricing_policy_models  # noqa: F401  (imported for side effects)
+# Sales compensation (compensation_plans / _rules / _package_caps /
+# compensation_entries / stage_probabilities). Same Base, same reason. A missing
+# compensation_entries table would make `earn()` raise on a real collected
+# payment, and a missing plans table reads as "no plan configured" - the same
+# quiet wrong answer the qualification_rules line above records.
+import app.models.compensation_models  # noqa: F401  (imported for side effects)
