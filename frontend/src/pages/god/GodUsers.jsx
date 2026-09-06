@@ -16,6 +16,16 @@
  *
  * Actions are the ones that already exist and nothing else:
  *   POST /god/users/{id}/deactivate · /activate
+ *   POST /admin/users/{id}/reset-password  — see ResetPasswordDialog
+ *
+ * The reset lives on /admin rather than /god because that is where the hardened
+ * implementation already is: require_super_admin plus load_user_in_scope, which
+ * is the pair that closed the August takeover where a platform operator could
+ * set the owner's password. A second reset route under /god would be a second
+ * place for that guard to be got wrong. A god_admin passes require_super_admin
+ * and load_user_in_scope returns any target to them, so the owner reaches every
+ * account from here without any rule being widened for anybody else.
+ *
  * Role changes deliberately are NOT here. PATCH /god/users/{id}/role exists,
  * but promoting somebody to god_admin from a list row is a one-click change to
  * the platform's most privileged set, and the platform-owner count is a health
@@ -29,6 +39,7 @@ import GodStyles from './GodStyles'
 import { T } from './godTheme'
 import { StatusBadge, SectionLabel, NoSource } from './StatusBadge'
 import ConfirmDialog from './ConfirmDialog'
+import ResetPasswordDialog from './ResetPasswordDialog'
 
 const SCOPES = [
   { key: 'all',      label: 'EVERYONE' },
@@ -59,6 +70,8 @@ export default function GodUsers() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
   const [confirm, setConfirm] = useState(null)
+  const [resetting, setResetting] = useState(null)
+  const [notice, setNotice] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
@@ -120,6 +133,19 @@ export default function GodUsers() {
     } finally { setBusy('') }
   }
 
+  async function onResetDone(forced) {
+    const who = resetting.full_name || resetting.email
+    setResetting(null)
+    // States what actually happened, in the two ways it can differ. Never the
+    // password, and never a claim the operator cannot check.
+    setNotice(forced
+      ? `Password reset for ${who}. They must choose their own at next sign-in, `
+        + 'and any session they had open has been ended.'
+      : `Password reset for ${who}. It is permanent until changed, and any `
+        + 'session they had open has been ended.')
+    await load()
+  }
+
   return (
     <div className="gm-scope" style={{ minHeight: '100%' }}>
       <GodStyles />
@@ -144,6 +170,13 @@ export default function GodUsers() {
           <div className="gm-card" style={{ padding: '12px 14px', marginBottom: 16,
                                             borderColor: 'rgba(255,93,125,.35)', color: '#ff8299', fontSize: 11 }}>
             {err}
+          </div>
+        )}
+
+        {notice && (
+          <div className="gm-card" style={{ padding: '12px 14px', marginBottom: 16,
+                                            borderColor: 'rgba(35,239,178,.3)', color: '#8fb6cf', fontSize: 11 }}>
+            {notice}
           </div>
         )}
 
@@ -266,13 +299,25 @@ export default function GodUsers() {
                             your own account
                           </span>
                         ) : (
-                          <button
-                            className={'gm-act ' + (u.is_active ? 'gm-danger' : '')}
-                            disabled={busy === u.id}
-                            onClick={() => askToggle(u)}
-                          >
-                            {busy === u.id ? '…' : (u.is_active ? 'DEACTIVATE' : 'REACTIVATE')}
-                          </button>
+                          <>
+                            <button
+                              className={'gm-act ' + (u.is_active ? 'gm-danger' : '')}
+                              disabled={busy === u.id}
+                              onClick={() => askToggle(u)}
+                            >
+                              {busy === u.id ? '…' : (u.is_active ? 'DEACTIVATE' : 'REACTIVATE')}
+                            </button>
+                            {/* Offered only on accounts that can currently sign
+                                in. Setting a password on a deactivated account
+                                would read as restoring access when it restores
+                                nothing — reactivate first, deliberately. */}
+                            {u.is_active && (
+                              <button className="gm-act" disabled={busy === u.id}
+                                      onClick={() => { setNotice(''); setResetting(u) }}>
+                                RESET PASSWORD
+                              </button>
+                            )}
+                          </>
                         )}
                         {u.organization_id ? (
                           <button className="gm-act"
@@ -304,6 +349,14 @@ export default function GodUsers() {
           tone={confirm.tone} eyebrow={confirm.eyebrow} title={confirm.title}
           body={confirm.body} confirmLabel={confirm.confirmLabel}
           busy={!!busy} onConfirm={runConfirm} onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      {resetting && (
+        <ResetPasswordDialog
+          user={resetting}
+          onCancel={() => setResetting(null)}
+          onDone={onResetDone}
         />
       )}
     </div>

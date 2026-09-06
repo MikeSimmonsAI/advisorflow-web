@@ -989,6 +989,9 @@ class ResetPasswordResponse(BaseModel):
     # Null when the admin supplied an explicit password (it is not echoed back),
     # set when access was handed over as a one-time link instead.
     setup_url: str | None = None
+    # What the account was actually left in. The caller asked for a state; this
+    # is the state, read back off the row rather than echoed from the request.
+    must_change_password: bool = False
 
 
 # require_super_admin is imported from app.deps — platform-scoped, shared across routers
@@ -996,6 +999,21 @@ class ResetPasswordResponse(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     new_password: str | None = Field(default=None, min_length=8)  # if provided, must be 8+ chars; otherwise auto-generate
+
+    # THE CONFIRMATION IS CHECKED ON THE SERVER, NOT ONLY IN THE BROWSER.
+    # A confirm field that only the form validates is a UI courtesy, not a
+    # guarantee: anything calling this endpoint directly bypasses it entirely,
+    # and a mistyped password on an administrative reset locks a real person
+    # out of a live account with no way to discover what was actually set.
+    # Optional so every existing caller keeps working; enforced when sent.
+    confirm_password: str | None = None
+
+    # Whether the person must choose their own password at next sign-in.
+    # None means "the caller did not say", which resolves to False — exactly
+    # what this endpoint did before the field existed, so no existing caller
+    # changes behaviour. It is only meaningful alongside an explicit
+    # new_password; the one-time-link path always forces a change and ignores it.
+    must_change_password: bool | None = None
 
 
 @router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
@@ -1026,6 +1044,15 @@ def reset_user_password(
     Otherwise the account is given a hash nobody can know and the person is
     reached by a one-time link, the same mechanism the brand-sales flow uses.
     That replaced generating a short password and handing it to the caller.
+
+    `must_change_password` is the caller's choice on the explicit-password path.
+    It used to be hard-forced to False there, so an administrator handing
+    somebody a temporary password had no way to require them to replace it -
+    the temporary password simply became their permanent one. Omitted still
+    means False, so nothing that called this before changes behaviour.
+
+    `confirm_password`, when sent, must match. The browser checks it too, but a
+    check that only the browser performs is not one this endpoint can rely on.
     """
     from fastapi import HTTPException
     target = load_user_in_scope(db, current_user, user_id)
@@ -1034,12 +1061,35 @@ def reset_user_password(
     if req.new_password:
         if len(req.new_password) < 8:
             raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+        if req.confirm_password is not None and req.confirm_password != req.new_password:
+            raise HTTPException(
+                status_code=400,
+                detail="New password and confirmation do not match.")
         secret = req.new_password
-        target.must_change_password = False
+        target.must_change_password = bool(req.must_change_password)
     else:
         secret = _unknowable_password()
         target.must_change_password = True
+
+    # The ONLY way a password is ever set on this account. Never a literal, never
+    # a hash computed anywhere else, never a direct UPDATE - hash_password is the
+    # application's single bcrypt entry point and this goes through it like every
+    # other password in the system.
     target.password_hash = hash_password(secret)
+
+    # A RESET THAT LEAVES THE OLD SESSION SIGNED IN IS NOT A RESET.
+    #
+    # Changing password_hash does nothing to a JWT already in someone's browser:
+    # get_current_user validates the token's `jti` against users.session_token,
+    # and neither was touched here before. So an account reset because it was
+    # compromised stayed compromised for the life of the existing token, and an
+    # account reset with must_change_password stayed usable without ever meeting
+    # the change screen. Clearing session_token makes single-session enforcement
+    # reject the old token on the next request; the person signs in again with
+    # the new password, which mints a fresh one. Nobody else's session is
+    # touched, and the login flow itself is unchanged.
+    target.session_token = None
+
     if not req.new_password:
         row, raw = _activation.issue(db, target, current_user,
                                     purpose=_PURPOSE_RESET)
@@ -1049,13 +1099,26 @@ def reset_user_password(
     # CRITICAL: never include temp_password in the audit details - the
     # audit log is the one thing that should outlive this response, and a
     # password (even temporary) has no business living in a log table.
+    #
+    # WHO did it (actor_user_id), TO WHOM (target_id + email), WHEN
+    # (AuditLogEntry.created_at), and WHAT KIND of reset. Not the password, not
+    # its length, not a hint, not a hash.
     log_action(
         db, current_user.organization_id, current_user.id,
         action="user.reset_password", target_type="user", target_id=target.id,
-        details={"email": target.email},
+        details={
+            "email": target.email,
+            "method": "admin_set_password" if req.new_password else "one_time_link",
+            "must_change_password": bool(target.must_change_password),
+            "actor_role": current_user.role,
+        },
     )
 
-    return ResetPasswordResponse(email=target.email, setup_url=issued_url)
+    return ResetPasswordResponse(
+        email=target.email,
+        setup_url=issued_url,
+        must_change_password=bool(target.must_change_password),
+    )
 
 
 # ---------------------------------------------------------------------------
