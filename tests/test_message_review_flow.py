@@ -90,11 +90,34 @@ def test_preview_messages_silently_skips_leads_from_other_orgs(client, auth_head
     assert response.json() == []
 
 
-@patch("app.services.sms_service.get_twilio_client")
-def test_confirm_send_batch_sends_edited_message_text(mock_get_client, client, auth_headers, db_session, sample_lead):
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(sid="SM_confirm_test", status="queued")
-    mock_get_client.return_value = mock_client
+def _mock_twilio_creds(sid="SM_test", status="queued"):
+    """Build the (client, from_phone, _) triple _resolve_twilio_creds returns.
+
+    PATCH TARGET NOTE: these tests used to patch
+    app.services.sms_service.get_twilio_client. send_sms/send_mms stopped
+    calling that in commit ee051e7 (org-shared-number resolution) and now call
+    _resolve_twilio_creds instead. The old patch therefore intercepted
+    nothing and the tests made REAL requests to api.twilio.com, got a 401, and
+    reported it as a skipped send - which is why they were failing. There is
+    now an autouse guard in conftest.py that refuses to construct a real
+    Twilio client, so this cannot silently regress into a live call again.
+
+    error_code and error_message are set to None explicitly: send_sms reads
+    both off the returned message, and a bare MagicMock would hand it truthy
+    Mock objects and be recorded as a failed send.
+    """
+    message = MagicMock(sid=sid, status=status)
+    message.error_code = None
+    message.error_message = None
+    client = MagicMock()
+    client.messages.create.return_value = message
+    return client, message
+
+
+@patch("app.services.sms_service._resolve_twilio_creds")
+def test_confirm_send_batch_sends_edited_message_text(mock_resolve, client, auth_headers, db_session, sample_lead):
+    mock_client, _ = _mock_twilio_creds(sid="SM_confirm_test")
+    mock_resolve.return_value = (mock_client, "+19998887777", None)
     sample_lead.phone = "12145559999"
     db_session.commit()
 
@@ -110,16 +133,20 @@ def test_confirm_send_batch_sends_edited_message_text(mock_get_client, client, a
     assert "Custom edited message" in sent_message.body
 
 
-@patch("app.services.sms_service.get_twilio_client")
-def test_confirm_send_batch_starts_cadence_after_sending(mock_get_client, client, auth_headers, db_session, sample_lead):
+@patch("app.services.sms_service._resolve_twilio_creds")
+def test_confirm_send_batch_starts_cadence_after_sending(mock_resolve, client, auth_headers, db_session, sample_lead):
     """
     Confirms the real gap fix: leads that go through the new
     preview-then-confirm flow must actually enter the 9-touch cadence
     afterward, not sit at status=NEW with no follow-up scheduled.
+
+    Note that confirm_send_batch calls start_cadence AFTER send_sms inside the
+    same try block, so a broken send silently takes the cadence with it. That
+    is exactly what the stale patch target was doing before this fix: the send
+    raised on a real Twilio 401 and no CadenceState was ever created.
     """
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(sid="SM_cadence_test", status="queued")
-    mock_get_client.return_value = mock_client
+    mock_client, _ = _mock_twilio_creds(sid="SM_cadence_test")
+    mock_resolve.return_value = (mock_client, "+19998887777", None)
     sample_lead.phone = "12145559999"
     db_session.commit()
 

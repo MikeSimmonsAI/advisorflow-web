@@ -509,10 +509,134 @@ def reply_activity_by_day(
     ]
 
 
+@router.get("/replies/certification-batch")
+def replies_certification_batch(
+    lead_ids: str = Query(..., description="Comma-separated lead IDs to look up"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """
+    Batch certification status lookup for the Replies action center.
+
+    The Replies page shows up to 200 replies which may reference only a few
+    dozen distinct leads. This takes the deduplicated list of lead_ids
+    actually on screen and returns certification status for all of them in a
+    small, fixed number of queries, instead of the frontend calling the
+    single-lead endpoint once per reply - which would be up to 200 API calls
+    to render one page.
+
+    A lead_id the caller cannot see is silently excluded rather than raising.
+    The endpoint is called with whatever ids are already on the caller's own
+    screen, so a stray id should return no certification result, not fail the
+    whole batch mid-flight. Exclusion is enforced by the query below, not by
+    trusting the caller's list.
+
+    RESTORED - deleted by the bulk overwrite 76c608b / f3358ea, not by a
+    decision. Scope now runs through lead_scope like every other route here.
+    Registered above GET /replies/{...}-shaped routes and above /replies
+    itself for the same path-precedence reason.
+    """
+    from app.services.certification_service import get_certification_status_batch
+
+    requested_ids = [lid.strip() for lid in lead_ids.split(",") if lid.strip()]
+    if not requested_ids:
+        return {}
+
+    is_manager = lead_scope.is_manager_here(current_user, db)
+    owned_q = (
+        db.query(Lead.id)
+        .filter(
+            Lead.id.in_(requested_ids),
+            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
+        )
+    )
+    if not is_manager:
+        owned_q = owned_q.filter(Lead.assigned_to_id == current_user.id)
+
+    owned_lead_ids = [row[0] for row in owned_q.all()]
+    if not owned_lead_ids:
+        return {}
+
+    return get_certification_status_batch(db, owned_lead_ids)
+
+
+@router.get("/replies/counts")
+def reply_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """
+    Real bucket counts for the Replies action center.
+
+    Deliberately a SEPARATE endpoint from list_replies, not derived from its
+    result: list_replies caps at 200 rows, and these counts have to reflect
+    TRUE totals regardless of how many replies exist, not just whatever
+    landed in the first page.
+
+    The buckets are the ones backed by real, already-tracked data. Two
+    categories from the original notes - "Appointment interest" and
+    "Objections" - are not ReplyClassification values, and are deliberately
+    NOT invented here; a count with nothing behind it is worse than no count.
+
+    needs_follow_up is Interested-or-Callback that has not been reviewed yet,
+    which is the same definition list_replies' needs_attention filter uses.
+    Stated once, so the cards and the list they link to can never disagree.
+
+    RESTORED - deleted by the bulk overwrite 76c608b / f3358ea, not by a
+    decision. Scope now runs through lead_scope.
+    """
+    is_manager = lead_scope.is_manager_here(current_user, db)
+    base_query = (
+        db.query(Reply)
+        .join(Lead, Reply.lead_id == Lead.id)
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
+    )
+    if not is_manager:
+        base_query = base_query.filter(Lead.assigned_to_id == current_user.id)
+
+    def _count(*criteria):
+        return base_query.filter(*criteria).count() if criteria else base_query.count()
+
+    needs_follow_up = _count(
+        Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
+        Reply.reviewed_at.is_(None),
+    )
+
+    return {
+        "hot": _count(Reply.classification == ReplyClassification.INTERESTED),
+        "callback": _count(Reply.classification == ReplyClassification.CALLBACK),
+        "question": _count(Reply.classification == ReplyClassification.QUESTION),
+        "not_interested": _count(Reply.classification == ReplyClassification.NOT_INTERESTED),
+        "wrong_number": _count(Reply.classification == ReplyClassification.WRONG_NUMBER),
+        "dnc": _count(Reply.classification == ReplyClassification.DNC),
+        "neutral": _count(Reply.classification == ReplyClassification.NEUTRAL),
+        "needs_follow_up": needs_follow_up,
+        "reviewed": _count(Reply.reviewed_at.isnot(None)),
+        "total": _count(),
+    }
+
+
+# The bucket vocabulary is declared ONCE, here, and used by both
+# reply_counts above and list_replies below. That is the whole point: a card
+# on the action center shows a number from one and links to the other, so if
+# the two ever derived their buckets separately the count and the list it
+# opens could silently disagree.
+REPLY_BUCKET_TO_CLASSIFICATION = {
+    "hot": ReplyClassification.INTERESTED,
+    "callback": ReplyClassification.CALLBACK,
+    "question": ReplyClassification.QUESTION,
+    "not_interested": ReplyClassification.NOT_INTERESTED,
+    "wrong_number": ReplyClassification.WRONG_NUMBER,
+    "dnc": ReplyClassification.DNC,
+    "neutral": ReplyClassification.NEUTRAL,
+}
+
+
 @router.get("/replies")
 def list_replies(
     hot_only: bool = False,
     needs_attention: bool = False,
+    bucket: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_or_observer),
 ):
@@ -543,6 +667,25 @@ def list_replies(
         query = query.filter(Reply.is_hot == True)
     if needs_attention:
         query = query.filter(Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]))
+
+    # bucket is the action-center scorecard filter: clicking a card passes its
+    # bucket name here. It is kept SEPARATE from needs_attention / hot_only
+    # rather than replacing them, because the notification bell and the
+    # Overview page still call those two directly. An unrecognised bucket is a
+    # 400, not a silent unfiltered list - returning everything for a typo'd
+    # bucket would show an advisor a full inbox while they believe they are
+    # looking at one filtered card.
+    if bucket in REPLY_BUCKET_TO_CLASSIFICATION:
+        query = query.filter(Reply.classification == REPLY_BUCKET_TO_CLASSIFICATION[bucket])
+    elif bucket == "needs_follow_up":
+        query = query.filter(
+            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
+            Reply.reviewed_at.is_(None),
+        )
+    elif bucket == "reviewed":
+        query = query.filter(Reply.reviewed_at.isnot(None))
+    elif bucket is not None:
+        raise HTTPException(status_code=400, detail="Unknown bucket: %s" % bucket)
 
     results = (
         query

@@ -24,14 +24,78 @@ def _fake_response(payload):
 # Rule 1 - hard classification gate, checked BEFORE any AI call at all.
 # ---------------------------------------------------------------------------
 
-def test_non_question_classifications_are_hard_excluded_with_no_api_call():
-    """interested/hot, callback, dnc, not_interested, wrong_number, neutral must ALL be excluded with zero API calls made."""
-    for classification in ("interested", "callback", "dnc", "not_interested", "wrong_number", "neutral"):
+def test_hard_excluded_classifications_are_refused_with_no_api_call():
+    """
+    dnc / not_interested / wrong_number / neutral are refused in Python,
+    before any model call - so a hard exclusion costs nothing and cannot be
+    talked out of by the classifier.
+
+    Phase 2 widened the eligible set to include interested and callback (see
+    the next test), so this covers only the classifications that are still
+    genuinely hard-excluded. Membership is asserted in BOTH directions: the
+    loop runs over the module's own set so a newly-added exclusion is
+    covered automatically, and the four safety-critical ones are asserted to
+    still be in it so none can quietly be dropped.
+    """
+    from app.services.auto_send_eligibility_service import (
+        ELIGIBLE_CLASSIFICATIONS, HARD_EXCLUDED_CLASSIFICATIONS,
+    )
+
+    assert {"dnc", "not_interested", "wrong_number", "neutral"} <= HARD_EXCLUDED_CLASSIFICATIONS
+    # Nothing may be both sendable and hard-excluded.
+    assert ELIGIBLE_CLASSIFICATIONS & HARD_EXCLUDED_CLASSIFICATIONS == set()
+
+    for classification in sorted(HARD_EXCLUDED_CLASSIFICATIONS):
         with patch("app.services.auto_send_eligibility_service._get_client") as mock_get_client:
             result = check_auto_send_eligibility("anything", classification, is_first_reply=False)
 
-            assert result["eligible"] is False
+            assert result["eligible"] is False, classification
+            assert classification in result["reasoning"]
             mock_get_client.assert_not_called()
+
+
+def test_interested_and_callback_now_proceed_to_the_real_check():
+    """
+    Phase 2 expanded ELIGIBLE_CLASSIFICATIONS beyond "question": a lead who
+    is clearly interested, or who asks to be called back at a specific time,
+    can now qualify.
+
+    "Can qualify" is not "is auto-sent": these still go to the dedicated
+    classifier, and every other gate (high confidence, not a first reply,
+    the model's own judgement) still applies. What this asserts is only that
+    they are no longer refused before the check runs.
+    """
+    from app.services.auto_send_eligibility_service import ELIGIBLE_CLASSIFICATIONS
+
+    assert {"interested", "callback"} <= ELIGIBLE_CLASSIFICATIONS
+
+    for classification in sorted(ELIGIBLE_CLASSIFICATIONS - {"question"}):
+        with patch("app.services.auto_send_eligibility_service._get_client") as mock_get_client:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = _fake_response(
+                {"eligible": True, "confidence": "high", "reasoning": "Clear, low-stakes next step."}
+            )
+            mock_get_client.return_value = mock_client
+
+            result = check_auto_send_eligibility(
+                "Sounds good, how do we get started?", classification, is_first_reply=False
+            )
+
+            mock_get_client.assert_called_once()
+            assert result["eligible"] is True, classification
+            # The classification really is the one the model was asked about.
+            sent_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+            assert classification in sent_prompt
+
+
+def test_a_classification_outside_both_sets_is_refused_with_no_api_call():
+    """Deny by default: an unrecognised classification is not eligible, and
+    never reaches the model to argue its case."""
+    with patch("app.services.auto_send_eligibility_service._get_client") as mock_get_client:
+        result = check_auto_send_eligibility("anything", "some_future_label", is_first_reply=False)
+
+        assert result["eligible"] is False
+        mock_get_client.assert_not_called()
 
 
 def test_question_classification_does_proceed_to_the_real_check():

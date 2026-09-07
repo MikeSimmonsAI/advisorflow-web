@@ -37,9 +37,65 @@ def test_access_token_round_trip(sample_advisor, db_session):
     assert decoded["role"] == "advisor"
 
 
-def test_new_accounts_default_to_must_change_password(sample_advisor):
-    """Every seeded account should force a password change on first login."""
-    assert sample_advisor.must_change_password is True
+def test_new_accounts_default_to_must_change_password(db_session, sample_org):
+    """A new account must force a password change on first login.
+
+    This deliberately does NOT use the sample_advisor fixture. That fixture
+    passes must_change_password=False on purpose - the model default is True,
+    and every router test built on it was hitting the password-change guard in
+    deps.py and getting 403 before the route under test ever ran (see commit
+    fd98232). So the fixture overrides the very default this test exists to
+    assert, and asserting through it could only ever fail.
+
+    A security control has to be checked where it actually applies: on a User
+    constructed WITHOUT the flag, which is what any code path that forgets to
+    set it produces.
+    """
+    from app.models.models import User
+
+    fresh = User(
+        organization_id=sample_org.id,
+        email="brand-new-hire@restland.com",
+        password_hash=hash_password("TempPass123!"),
+        full_name="Brand New Hire",
+        role="advisor",
+    )
+    db_session.add(fresh)
+    db_session.commit()
+    db_session.refresh(fresh)
+
+    assert fresh.must_change_password is True, (
+        "A User created without an explicit must_change_password must default "
+        "to True. If this fails, an account can be provisioned that never "
+        "forces the temporary password to be replaced."
+    )
+
+
+def test_admin_created_accounts_force_a_password_change(client, admin_auth_headers, db_session):
+    """The real provisioning path, end to end.
+
+    The model default above is the backstop; this is the route an
+    administrator actually uses. Both are asserted because either one alone
+    can regress without the other noticing - a route that stops passing the
+    flag would still pass the test above, and a model whose default flipped
+    would still pass this one.
+    """
+    from app.models.models import User
+
+    response = client.post(
+        "/admin/users",
+        headers=admin_auth_headers,
+        json={
+            "email": "provisioned@restland.com",
+            "full_name": "Provisioned Advisor",
+            "role": "advisor",
+        },
+    )
+    assert response.status_code in (200, 201), response.text
+
+    created = db_session.query(User).filter(User.email == "provisioned@restland.com").first()
+    assert created is not None
+    assert created.must_change_password is True
 
 
 def test_password_change_invalidates_old_password(db_session, sample_advisor):

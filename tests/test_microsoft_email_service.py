@@ -25,14 +25,28 @@ def test_get_authorization_url_is_correctly_encoded():
     to the exact original parameter values via standard URL parsing.
     """
     from urllib.parse import urlparse, parse_qs
+    from app.services import microsoft_email_service
+
     with patch("app.services.microsoft_email_service.MICROSOFT_CLIENT_ID", "test-client"):
         url = get_microsoft_authorization_url("advisor-123")
 
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
     assert qs["state"] == ["advisor-123"]
-    assert qs["scope"] == ["offline_access Mail.Send User.Read"]
+    # Asserted against the module constant, not a literal: the scope list is
+    # allowed to grow (Calendars.ReadWrite was added for the scheduling sync)
+    # and this test is about ENCODING, not about which scopes are requested.
+    assert qs["scope"] == [microsoft_email_service.SCOPES]
     assert "offline_access" in qs["scope"][0]  # required or no refresh token gets issued
+
+    # The actual encoding assertions. SCOPES is a space-separated list and the
+    # redirect URI contains characters that MUST be escaped; the earlier manual
+    # encoding left both raw in the query string, which is what broke the flow.
+    assert " " in qs["scope"][0]        # spaces survive the round trip...
+    assert " " not in parsed.query      # ...because they were escaped on the way out
+    assert qs["redirect_uri"] == [microsoft_email_service.MICROSOFT_REDIRECT_URI]
+    for raw_char in (" ", "<", ">"):
+        assert raw_char not in parsed.query
 
 
 def test_get_authorization_url_raises_without_client_id():

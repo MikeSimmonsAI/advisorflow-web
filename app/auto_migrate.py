@@ -47,6 +47,20 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Import batch options (2026-09-07) ──────────────────────────────────
+    # POST /leads/upload/confirm accepted all four of these as multipart form
+    # fields and then handed none of them to the pipeline, so a "Source year"
+    # the user typed was parsed correctly and thrown away on every import.
+    # They live on the batch because they are batch-level choices, and
+    # import_batches predates them, so create_all will never add them to a
+    # live database. force_new_inquiry is NOT NULL DEFAULT false: every batch
+    # that already exists was imported without the override, which is exactly
+    # what false means, so the backfill cannot change the meaning of history.
+    ("import_batches", "source_year", "INTEGER"),
+    ("import_batches", "force_new_inquiry", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("import_batches", "relationship_type", "VARCHAR"),
+    ("import_batches", "import_list_name", "VARCHAR"),
+
     # ── Capability grant scope (brand-scoped compensation authority) ───────
     # NOT NULL DEFAULT 'customer_org' is doing real work: every row already in
     # this table IS a customer-org grant, so the ALTER backfills them correctly

@@ -77,13 +77,26 @@ def _other_org_with_admin(db_session):
     return other_org, other_admin
 
 
-def test_potential_duplicates_groups_uncaught_same_phone_or_last_name_and_is_org_isolated(
+def test_potential_duplicates_groups_uncaught_same_phone_or_email_and_is_org_isolated(
     client, admin_auth_headers, db_session, sample_org, sample_advisor
 ):
+    """
+    Grouping is phone (Tier 1) then email (Tier 2).
+
+    Last-name grouping was deliberately removed: a shared surname is not a
+    duplicate signal - Acosta, Jones and Smith would each become one enormous
+    false-positive group - so a contact identifier (phone OR email) is now
+    required. The pair that used to prove name grouping is now a shared-EMAIL
+    pair with two DIFFERENT phone numbers, so it exercises Tier 2 and would
+    fail if email grouping regressed.
+    """
     phone_a = _lead(db_session, sample_org, sample_advisor, first_name="PhoneA", last_name="Alpha", phone="(214) 555-0101")
     phone_b = _lead(db_session, sample_org, sample_advisor, first_name="PhoneB", last_name="Beta", phone="1-214-555-0101")
-    last_a = _lead(db_session, sample_org, sample_advisor, first_name="LastA", last_name="O'Neil", phone="12145550102")
-    last_b = _lead(db_session, sample_org, sample_advisor, first_name="LastB", last_name="ONeil", phone="12145550103")
+    # Different phones, same email in different casing - Tier 2 only.
+    email_a = _lead(db_session, sample_org, sample_advisor, first_name="EmailA", last_name="Gamma",
+                    phone="12145550102", email="Shared.Person@Example.com")
+    email_b = _lead(db_session, sample_org, sample_advisor, first_name="EmailB", last_name="Delta",
+                    phone="12145550103", email="shared.person@example.com")
     caught_duplicate = _lead(
         db_session,
         sample_org,
@@ -104,14 +117,24 @@ def test_potential_duplicates_groups_uncaught_same_phone_or_last_name_and_is_org
     all_group_ids = {lead["id"] for group in groups for lead in group["leads"]}
     assert phone_a.id in all_group_ids
     assert phone_b.id in all_group_ids
-    assert last_a.id in all_group_ids
-    assert last_b.id in all_group_ids
-    assert caught_duplicate.id not in all_group_ids
-    assert other_lead.id not in all_group_ids
+    assert email_a.id in all_group_ids
+    assert email_b.id in all_group_ids
+    assert caught_duplicate.id not in all_group_ids  # already flagged at import
+    assert other_lead.id not in all_group_ids        # different org
 
     phone_groups = [group for group in groups if group["match_type"] == "phone" and group["match_key"] == "12145550101"]
     assert len(phone_groups) == 1
     assert {lead["id"] for lead in phone_groups[0]["leads"]} == {phone_a.id, phone_b.id}
+
+    email_groups = [group for group in groups
+                    if group["match_type"] == "email" and group["match_key"] == "shared.person@example.com"]
+    assert len(email_groups) == 1
+    assert {lead["id"] for lead in email_groups[0]["leads"]} == {email_a.id, email_b.id}
+
+    # And no group is formed on a name alone: Alpha/Beta/Gamma/Delta are all
+    # distinct surnames here, and the only surname repeated in the org
+    # ("Alpha", on caught_duplicate and other_lead) produces nothing.
+    assert all(group["match_type"] in ("phone", "email") for group in groups)
 
 
 def test_merge_moves_message_reply_cadence_and_outcome_history_then_deletes_merged_lead(

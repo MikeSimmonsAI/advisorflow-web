@@ -466,6 +466,83 @@ def _advisor_row(advisor: User, leads_owned, messages_sent, replies, hot_replies
     }
 
 
+@router.get("/dashboard/team-activity")
+def team_activity(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    One-screen activity board: every advisor's last login and last real
+    action, so a manager can scan the whole team at a glance for who has gone
+    quiet instead of clicking into each person's detail page.
+
+    "Last action" is deliberately the most recent of two reliably ATTRIBUTED
+    signals - Message.sent_at (via sender_id) and LeadOutcome.created_at (via
+    recorded_by_id). It is NOT Lead.updated_at, which auto-updates on
+    system-driven changes (cadence status, engagement recompute) that say
+    nothing about whether the advisor did anything. Reply.reviewed_at was
+    considered and rejected: there is no reviewed_by_id column, so a reply
+    review cannot be attributed to a specific advisor without inventing one.
+    Two honest signals beat three where the third is a guess.
+
+    An advisor with no activity gets nulls, not zeros or an error - "we have
+    no record of this person acting" and "this person acted zero times" are
+    different statements and the board should not conflate them.
+
+    Returned sorted by name; the frontend sorts by recency so the
+    most/least-recently-active toggle needs no re-fetch.
+
+    RESTORED - deleted by the bulk overwrite 76c608b / f3358ea, not by a
+    decision. Org scope now goes through _get_org_ids, so a god_admin sees
+    the platform and everyone else sees strictly their own organization,
+    matching every other route on this dashboard.
+    """
+    org_ids = _get_org_ids(db, current_user)
+
+    advisors = (
+        db.query(User)
+        .filter(User.organization_id.in_(org_ids), User.role.in_(["advisor", "org_admin"]))
+        .order_by(User.full_name.asc())
+        .all()
+    )
+
+    rows = []
+    for advisor in advisors:
+        last_message_at = (
+            db.query(func.max(Message.sent_at))
+            .join(Lead, Message.lead_id == Lead.id)
+            .filter(Lead.organization_id.in_(org_ids), Message.sender_id == advisor.id)
+            .scalar()
+        )
+        last_outcome_at = (
+            db.query(func.max(LeadOutcome.created_at))
+            .join(Lead, LeadOutcome.lead_id == Lead.id)
+            .filter(Lead.organization_id.in_(org_ids), LeadOutcome.recorded_by_id == advisor.id)
+            .scalar()
+        )
+
+        candidates = [t for t in (last_message_at, last_outcome_at) if t is not None]
+        last_action_at = max(candidates) if candidates else None
+        last_action_type = None
+        if last_action_at is not None:
+            # Ties go to the outcome: recording an outcome is the more
+            # deliberate act, and a message auto-logged in the same second
+            # should not be what the board reports the advisor as doing.
+            if last_outcome_at is not None and last_action_at == last_outcome_at:
+                last_action_type = "recorded_outcome"
+            elif last_message_at is not None and last_action_at == last_message_at:
+                last_action_type = "sent_message"
+
+        rows.append({
+            "advisor_id": advisor.id,
+            "advisor_name": advisor.full_name,
+            "role": advisor.role,
+            "is_active": advisor.is_active,
+            "last_login_at": advisor.last_login_at,
+            "last_action_at": last_action_at,
+            "last_action_type": last_action_type,
+        })
+
+    return {"advisors": rows}
+
+
 @router.get("/dashboard/metrics")
 def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Advisor quality metrics. god_admin sees all orgs aggregated; others see their own org."""

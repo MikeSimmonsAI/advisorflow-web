@@ -40,12 +40,16 @@ def test_generate_creates_leads_with_sample_tag(client, db_session, sample_org):
     headers, _ = _make_super_admin_headers(db_session, sample_org)
     response = client.post("/sample-data/generate", headers=headers)
     assert response.status_code == 200
-    assert response.json()["created_count"] > 0
+    # The generator became multi-entity, so the count is per entity under "created".
+    # `total_records` sums leads, CRM contacts, bookings, emails and campaigns, so it
+    # is deliberately NOT what a Lead row count is compared against.
+    created_leads = response.json()["created"]["leads"]
+    assert created_leads > 0
 
     sample_leads = db_session.query(Lead).filter(
         Lead.organization_id == sample_org.id, Lead.source_file == "SAMPLE_DATA"
     ).all()
-    assert len(sample_leads) == response.json()["created_count"]
+    assert len(sample_leads) == created_leads
 
 
 def test_generate_creates_variety_of_tiers_and_statuses(client, db_session, sample_org):
@@ -104,7 +108,9 @@ def test_clear_removes_only_sample_tagged_leads_never_real_ones(client, db_sessi
 
     response = client.delete("/sample-data/clear", headers=headers)
     assert response.status_code == 200
-    assert response.json()["deleted_leads"] == sample_count_before
+    # Per-entity delete counts under "deleted"; "leads" is the one that must match
+    # the Lead rows that were tagged SAMPLE_DATA.
+    assert response.json()["deleted"]["leads"] == sample_count_before
 
     # The real lead must still exist, completely untouched
     still_real = db_session.query(Lead).filter(Lead.id == real_lead_id).first()
@@ -142,7 +148,7 @@ def test_clear_with_no_sample_data_returns_zero_gracefully(client, db_session, s
     headers, _ = _make_super_admin_headers(db_session, sample_org)
     response = client.delete("/sample-data/clear", headers=headers)
     assert response.status_code == 200
-    assert response.json()["deleted_leads"] == 0
+    assert response.json()["deleted"]["leads"] == 0
 
 
 def test_clear_does_not_affect_other_organizations_sample_data(client, db_session, sample_org):

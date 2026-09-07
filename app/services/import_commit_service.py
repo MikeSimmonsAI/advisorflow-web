@@ -137,6 +137,12 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                     db.flush()
             else:
                 tier = row.tier or "pre_need"
+                # The uploader's batch-level choice beats what was inferred
+                # from the file. force_new_inquiry exists precisely for the
+                # case where the operator knows the whole list is inbound
+                # enquiries and the file's own columns say otherwise.
+                if batch.force_new_inquiry:
+                    tier = "new_inquiry"
                 lead = Lead(
                     id=gen_uuid(), organization_id=org_id,
                     first_name=row.first_name, last_name=row.last_name,
@@ -147,12 +153,35 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                     source_category=row.source_category or "import",
                     tier=tier, message_track=TIER_TO_TRACK.get(tier, "needs_review"),
                     status="new",
+                    # Batch-level provenance, carried from the upload form.
+                    # These were being accepted by the endpoint and silently
+                    # dropped here; a lead whose source_year is None because
+                    # nobody threaded the value through is indistinguishable
+                    # from one whose source year is genuinely unknown, which
+                    # is exactly the kind of quiet data loss that only shows
+                    # up months later when someone filters a campaign by year
+                    # and gets nothing.
+                    source_year=batch.source_year,
+                    source_file=batch.source_filename,
+                    import_list_name=batch.import_list_name,
+                    relationship_type=(row.relationship_type
+                                       or batch.relationship_type),
                 )
                 db.add(lead)
                 db.flush()
             row.review_status = ImportRowReviewStatus.COMMITTED
             row.committed_at = datetime.now(timezone.utc)
             row.committed_by_id = committer_id
+            # Record WHICH lead this staged row became.
+            #
+            # The column existed and was documented as post-commit provenance,
+            # but nothing ever wrote it, so after a commit there was no link
+            # from an imported row back to the live lead it produced - the
+            # audit trail stopped at "committed". Both branches set it: the
+            # merge branch points at the lead that absorbed the row, the
+            # create branch at the lead it made.
+            if lead is not None:
+                row.committed_lead_id = lead.id
             db.commit()
             ok_count += 1
         except Exception as exc:

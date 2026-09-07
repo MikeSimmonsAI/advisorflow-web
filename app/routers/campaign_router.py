@@ -93,8 +93,24 @@ CAMPAIGN_PURPOSES = CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"]
 
 # ── Rich filter helper ────────────────────────────────────────────────────────
 
-def _apply_filters(query, organization_id: str, criteria: dict):
-    """Apply all filter criteria to a Lead query. All comparisons use plain strings."""
+# Lead.status is a plain VARCHAR in this codebase (see the module docstring),
+# so DNC is compared as the stored string. Named once, above every user, so
+# the filter helper, the preview and the apply path cannot drift apart on the
+# one condition that must never be got wrong.
+_DNC_STATUS = "dnc"
+
+
+def _apply_filters(query, organization_id: str, criteria: dict, include_dnc: bool = False):
+    """Apply all filter criteria to a Lead query. All comparisons use plain strings.
+
+    include_dnc defaults to False, which is the SEND path's behaviour and must
+    stay the default: a caller that forgets the argument gets the safe answer.
+    Only the read-only reporting paths (campaign preview, and apply's skipped
+    count) pass True, and they do it so they can TELL the manager a DNC lead
+    matched their filter - never so they can act on one. Both of those callers
+    re-check the status per lead before doing anything, so opting in here
+    widens what is COUNTED, never what is contacted.
+    """
     query = query.filter(Lead.organization_id == organization_id, Lead.is_duplicate == False)
 
     if criteria.get("tier"):
@@ -147,8 +163,9 @@ def _apply_filters(query, organization_id: str, criteria: dict):
         has_reply_ids = query.session.query(Reply.lead_id).distinct()
         query = query.filter(Lead.id.in_(has_reply_ids), Lead.status != "booked")
 
-    # Always exclude DNC
-    query = query.filter(Lead.status != "dnc")
+    # Exclude DNC unless a read-only reporting caller explicitly opted in.
+    if not include_dnc:
+        query = query.filter(Lead.status != _DNC_STATUS)
 
     # Always exclude manually flagged leads from campaign targeting
     # bad_email leads are excluded from email campaigns but allowed for SMS
@@ -517,6 +534,162 @@ def list_campaigns(
         }
         for c in campaigns
     ]
+
+
+class CampaignApplyRequest(BaseModel):
+    start_cadence: bool = False
+
+
+def _campaign_or_404(db: Session, campaign_id: str, organization_id: str) -> Campaign:
+    """Load a campaign inside the caller's organization or 404.
+
+    The organization filter is part of the LOOKUP, not a check after it, so a
+    campaign id from another tenant is indistinguishable from one that does
+    not exist. That is deliberate: a 403 here would confirm the id is real.
+    """
+    campaign = (
+        db.query(Campaign)
+        .filter(Campaign.id == campaign_id, Campaign.organization_id == organization_id)
+        .first()
+    )
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+def _campaign_matching_leads(db: Session, campaign: Campaign, organization_id: str):
+    """The leads a saved campaign matches, via the SAME _apply_filters the
+    send path uses. Preview, apply and send must never disagree about who is
+    in a campaign, so there is exactly one filter implementation."""
+    criteria = json.loads(campaign.filter_criteria) if campaign.filter_criteria else {}
+    # include_dnc=True so the caller can REPORT that a DNC lead matched.
+    # Both callers below re-check status per lead and skip them; nothing here
+    # is ever contacted.
+    return _apply_filters(db.query(Lead), organization_id, criteria, include_dnc=True).all()
+
+
+@router.post("/{campaign_id}/preview")
+def preview_campaign(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Read-only dry run of a saved campaign: who it matches, how many are
+    actually eligible, and how many are skipped for DNC. WRITES NOTHING.
+
+    DNC leads are counted in matching_count and shown in the sample even
+    though they will never be touched. Hiding them would make the preview
+    quietly disagree with the filter the manager just wrote, and "why did
+    this say 3 and do 2" is a question the preview should answer up front
+    rather than leave to be discovered after the fact.
+
+    RESTORED - deleted by the bulk overwrite 76c608b / f3358ea, not by a
+    decision. Rebuilt on the CURRENT _apply_filters rather than the old
+    private query helper, so it cannot drift from /send.
+    """
+    campaign = _campaign_or_404(db, campaign_id, current_user.organization_id)
+    matching_leads = _campaign_matching_leads(db, campaign, current_user.organization_id)
+
+    skipped_dnc = [lead for lead in matching_leads if lead.status == _DNC_STATUS]
+    eligible = [lead for lead in matching_leads if lead.status != _DNC_STATUS]
+
+    return {
+        "campaign_id": campaign.id,
+        "campaign_name": campaign.name,
+        "matching_count": len(matching_leads),
+        "eligible_count": len(eligible),
+        "skipped_dnc_count": len(skipped_dnc),
+        "sample": [
+            {
+                "id": lead.id,
+                "first_name": lead.first_name,
+                "last_name": lead.last_name,
+                "tier": lead.tier,
+                "status": lead.status,
+                "source_year": lead.source_year,
+                "message_track": lead.message_track,
+                "skipped_dnc": lead.status == _DNC_STATUS,
+            }
+            for lead in matching_leads[:50]
+        ],
+    }
+
+
+@router.post("/{campaign_id}/apply")
+def apply_campaign(
+    campaign_id: str,
+    payload: CampaignApplyRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Apply a saved campaign to its matching leads: set the campaign's message
+    track on each, and optionally start a cadence.
+
+    THIS DOES NOT SEND ANYTHING. It is deliberately a separate operation from
+    POST /{campaign_id}/send, which puts real SMS in front of real families.
+    Assigning a track is reversible and cheap; sending is neither, so they do
+    not share an endpoint and applying can never be one typo away from a
+    blast.
+
+    DNC leads are skipped and counted, never updated - a lead who asked not
+    to be contacted does not get quietly re-tracked into a campaign.
+
+    RESTORED - deleted by the bulk overwrite 76c608b / f3358ea, not by a
+    decision. Rebuilt on the CURRENT _apply_filters.
+    """
+    # Imported here, not at module scope, matching send_campaign below:
+    # cadence_service imports back into this package and a top-level import
+    # reintroduces the cycle.
+    from app.services.cadence_service import start_cadence
+
+    payload = payload or CampaignApplyRequest()
+    campaign = _campaign_or_404(db, campaign_id, current_user.organization_id)
+    matching_leads = _campaign_matching_leads(db, campaign, current_user.organization_id)
+
+    matched_count = len(matching_leads)
+    updated_count = 0
+    skipped_dnc_count = 0
+    cadence_started_count = 0
+
+    for lead in matching_leads:
+        if lead.status == _DNC_STATUS:
+            skipped_dnc_count += 1
+            continue
+
+        if campaign.message_track:
+            lead.message_track = campaign.message_track
+        updated_count += 1
+
+        if payload.start_cadence:
+            before_state = lead.cadence_state
+            state = start_cadence(db, lead)
+            if state is not None and before_state is None:
+                cadence_started_count += 1
+
+    db.commit()
+
+    log_action(
+        db, current_user.organization_id, current_user.id,
+        action="campaign.apply", target_type="campaign", target_id=campaign.id,
+        details={
+            "campaign_name": campaign.name,
+            "matched_count": matched_count,
+            "updated_count": updated_count,
+            "skipped_dnc_count": skipped_dnc_count,
+            "cadence_started_count": cadence_started_count,
+            "start_cadence": payload.start_cadence,
+        },
+    )
+
+    return {
+        "campaign_id": campaign.id,
+        "matched_count": matched_count,
+        "updated_count": updated_count,
+        "skipped_dnc_count": skipped_dnc_count,
+        "cadence_started_count": cadence_started_count,
+    }
 
 
 @router.post("/{campaign_id}/send")

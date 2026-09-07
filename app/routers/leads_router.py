@@ -188,6 +188,19 @@ def confirm_upload(
             status=ImportBatchStatus.UPLOADING,
             created_by_id=current_user.id,
             created_at=datetime.now(timezone.utc),
+            # The upload form's own choices, recorded on the batch so the
+            # commit step can apply them. They are stored HERE rather than
+            # passed down the call chain because stage_batch and commit_batch
+            # both already load this row - the batch is the one thing every
+            # stage of the pipeline can see, and a value on it cannot go
+            # missing between two function signatures the way these four just
+            # did. Every one of them was declared as a Form field on this
+            # endpoint and then never handed to the pipeline at all, so a
+            # "Source year" the user typed was parsed correctly and discarded.
+            source_year=source_year,
+            force_new_inquiry=force_new_inquiry,
+            relationship_type=relationship_type,
+            import_list_name=import_list_name,
         )
         db.add(batch)
         db.commit()
@@ -267,12 +280,38 @@ def confirm_upload(
         ImportBatch.id == batch_id
     ).first()
 
+    # tier_breakdown, counted from the LEADS THAT WERE ACTUALLY WRITTEN.
+    #
+    # Deliberately not recomputed from the staged rows' inferred tier: a
+    # batch-level force_new_inquiry overrides that at commit time, so counting
+    # the staged rows would report what the file said rather than what the
+    # import did. Counting the committed rows is the only version that cannot
+    # lie about the outcome.
+    committed_row_ids = [
+        r.committed_lead_id for r in
+        db.query(ImportStagedRow).filter(
+            ImportStagedRow.batch_id == batch_id,
+            ImportStagedRow.review_status == ImportRowReviewStatus.COMMITTED,
+        ).all()
+        if getattr(r, "committed_lead_id", None)
+    ]
+    tier_breakdown = {}
+    if committed_row_ids:
+        for (tier_value, count) in (
+            db.query(Lead.tier, func.count(Lead.id))
+            .filter(Lead.id.in_(committed_row_ids))
+            .group_by(Lead.tier)
+            .all()
+        ):
+            tier_breakdown[tier_value or "unknown"] = count
+
     return {
         "review_required": False,
         "import_batch_id": batch_id,
         "batch_status": committed_batch_refreshed.status if committed_batch_refreshed else "committed",
         "committed_count": committed_batch_refreshed.committed_rows if committed_batch_refreshed else ready_count,
         "excluded_count": excluded_count,
+        "tier_breakdown": tier_breakdown,
         # Backward-compatible fields the old UI may have checked
         "created": committed_batch_refreshed.committed_rows if committed_batch_refreshed else ready_count,
         "updated": 0,
@@ -687,6 +726,79 @@ def set_lead_tier(
 
     return lead
 
+
+
+@router.get("/sparklines")
+def overview_sparklines(
+    days: int = Query(7, ge=2, le=30),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """
+    Real, recent daily counts for the Overview page's KPI card sparklines,
+    built from genuine history and never fabricated. Empty days come back as
+    0 from the server rather than being invented client-side, which is the
+    same rule sms_router.reply_activity_by_day follows.
+
+    Returns {"leads_imported": [int, ...], "bookings": [int, ...]}, each a
+    list of `days` daily counts oldest to newest. The frontend renders these
+    directly with zero further computation, so there is no seam where a
+    fabricated number could enter on either side.
+
+    RESTORED. This endpoint, and the four others recovered alongside it, were
+    deleted by the bulk overwrite commits 76c608b / f3358ea ("force update Thu
+    07/09/2026") - not by a decision. tests/test_sparklines.py was not part of
+    that overwrite, so it kept specifying the behaviour and kept failing, and
+    the failure was carried as "baseline" rather than read. The body below is
+    the recovered implementation with ONE deliberate change: scope now goes
+    through lead_scope.active_workspace_org_id / is_manager_here, matching
+    every other route in this file, so restoring the feature cannot also
+    restore a pre-isolation visibility boundary.
+
+    MUST stay registered above GET /{lead_id}: otherwise "sparklines" is
+    captured as a lead id and this route 404s through the lead lookup, which
+    is exactly how it presented while it was missing.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_date = now.date() - timedelta(days=days - 1)
+    start_at = datetime.combine(start_date, time.min)
+
+    is_manager = lead_scope.is_manager_here(current_user, db)
+    base_lead_filters = [Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)]
+    if not is_manager:
+        base_lead_filters.append(Lead.assigned_to_id == current_user.id)
+
+    imported_rows = (
+        db.query(Lead.created_at)
+        .filter(*base_lead_filters, Lead.created_at >= start_at)
+        .all()
+    )
+    booking_rows = (
+        db.query(BookingLink.booked_time)
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(
+            *base_lead_filters,
+            BookingLink.status == "booked",
+            BookingLink.booked_time.isnot(None),
+            BookingLink.booked_time >= start_at,
+        )
+        .all()
+    )
+
+    def _counts_by_day(rows):
+        counts = {(start_date + timedelta(days=offset)).isoformat(): 0 for offset in range(days)}
+        for (ts,) in rows:
+            if ts is None:
+                continue
+            key = ts.date().isoformat()
+            if key in counts:
+                counts[key] += 1
+        return [counts[date_key] for date_key in sorted(counts.keys())]
+
+    return {
+        "leads_imported": _counts_by_day(imported_rows),
+        "bookings": _counts_by_day(booking_rows),
+    }
 
 
 @router.get("/daily-briefing")

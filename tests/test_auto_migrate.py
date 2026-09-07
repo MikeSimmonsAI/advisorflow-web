@@ -84,23 +84,117 @@ def test_run_auto_migrations_skips_enum_step_entirely_on_sqlite(tmp_path):
     run_auto_migrations(engine)
 
 
+# Columns COLUMNS_TO_ADD still creates that the models no longer declare.
+#
+# These are not typos - each was a real column whose model attribute was later
+# removed (users.can_import_leads went in commit f187461, "one name per import
+# permission"). auto_migrate's own docstring says a stale no-op entry is
+# harmless to leave in place, and removing entries has its own risk: a
+# production database may still carry the column, and other tests pin some of
+# them (test_run_auto_migrations_adds_missing_column_to_existing_table asserts
+# can_import_leads and notification_phone are created).
+#
+# So they are ALLOWED, but named, dated and counted - not silently tolerated.
+# Anything that drifts out of the models from here on is a new entry and fails
+# the test below, which is the behaviour this test was always meant to have.
+KNOWN_RETIRED_COLUMNS = {
+    # retired 2026-09-02, commit f187461 - import permission renaming
+    ("users", "can_import_leads"),
+    ("users", "notification_phone"),
+    ("users", "notify_via_sms"),
+    ("users", "feature_flags"),
+    ("leads", "google_contact_resource_name"),
+    ("leads", "service_address"),
+    ("leads", "extra_data"),
+    ("notifications", "send_failure_reason"),
+    ("lead_outcomes", "has_preneed_planning"),
+    ("lead_outcomes", "has_insurance_funding"),
+    ("lead_outcomes", "is_veteran"),
+    ("lead_outcomes", "next_step"),
+    ("campaigns", "purpose"),
+    ("campaigns", "tone"),
+    ("campaigns", "sent_count"),
+    ("campaigns", "skipped_count"),
+    ("campaigns", "error_count"),
+    ("campaigns", "status"),
+    ("campaigns", "ai_direction"),
+    ("campaigns", "sent_at"),
+    ("crm_contacts", "pipeline_stage"),
+    ("crm_contacts", "company"),
+    ("crm_contacts", "last_contact_at"),
+}
+
+
 def test_columns_to_add_list_matches_real_model_fields():
     """
-    Sanity check that the hardcoded list actually corresponds to real
-    columns on the real models - catches a typo'd table/column name
-    before it ships, rather than discovering it live.
-    """
-    from app.models.models import User, Lead, Reply, Notification, LeadOutcome, BookingLink, EmailMessage
+    Every (table, column) in COLUMNS_TO_ADD must name a real table and a real
+    column on the real models - catching a typo before it ships rather than
+    discovering it live.
 
-    model_by_table = {
-        "users": User, "leads": Lead, "replies": Reply, "notifications": Notification,
-        "lead_outcomes": LeadOutcome, "booking_links": BookingLink, "email_messages": EmailMessage,
-    }
+    THIS TEST USED TO CHECK ALMOST NOTHING. It carried a hand-written map of
+    seven model classes and asserted table membership FIRST, so the moment
+    COLUMNS_TO_ADD grew an eighth table the very first entry raised and the
+    per-column hasattr check below it never ran at all. COLUMNS_TO_ADD is now
+    332 entries across 34 tables; the whitelist had not been touched, so the
+    only assertion that ever executed was "is this one of seven names", and
+    23 genuinely drifted columns sat behind it unreported.
+
+    The table map is now derived from Base.metadata, the same way conftest
+    builds the test schema, so it can never go stale again - a new model is
+    picked up automatically instead of being mistaken for a typo.
+    """
+    import app.models.registry  # noqa: F401  (imports every model module)
+    from app.models.models import Base
+
+    known_tables = set(Base.metadata.tables.keys())
+    assert len(known_tables) > 20, (
+        "Model registry looks incomplete - refusing to run a check that would "
+        "report real tables as typos."
+    )
+
+    unknown_tables = []
+    drifted_columns = []
 
     for table, column, _definition in COLUMNS_TO_ADD:
-        assert table in model_by_table, f"Unknown table '{table}' in COLUMNS_TO_ADD"
-        model = model_by_table[table]
-        assert hasattr(model, column), f"{model.__name__} has no attribute '{column}' - check for a typo in COLUMNS_TO_ADD"
+        if table not in known_tables:
+            unknown_tables.append((table, column))
+            continue
+        if column not in Base.metadata.tables[table].columns:
+            if (table, column) not in KNOWN_RETIRED_COLUMNS:
+                drifted_columns.append((table, column))
+
+    assert not unknown_tables, (
+        "COLUMNS_TO_ADD names tables that do not exist in the model registry: "
+        "%s" % sorted(unknown_tables)
+    )
+    assert not drifted_columns, (
+        "COLUMNS_TO_ADD creates columns the models no longer declare: %s. "
+        "Either the model lost the column (add it to KNOWN_RETIRED_COLUMNS "
+        "with the commit and date) or the migration entry is a typo."
+        % sorted(drifted_columns)
+    )
+
+
+def test_known_retired_columns_are_actually_retired():
+    """KNOWN_RETIRED_COLUMNS must not accumulate entries that came back.
+
+    An allow-list nobody prunes stops being an allow-list and becomes a
+    blindfold. If a column is re-added to its model, it must drop out of the
+    exemption set rather than sit there permanently excusing a check.
+    """
+    import app.models.registry  # noqa: F401
+    from app.models.models import Base
+
+    resurrected = [
+        (table, column)
+        for (table, column) in KNOWN_RETIRED_COLUMNS
+        if table in Base.metadata.tables
+        and column in Base.metadata.tables[table].columns
+    ]
+    assert not resurrected, (
+        "These columns are listed as retired but the models declare them "
+        "again - remove them from KNOWN_RETIRED_COLUMNS: %s" % sorted(resurrected)
+    )
 
 
 def test_enum_values_to_add_use_uppercase_member_names_not_lowercase_values():

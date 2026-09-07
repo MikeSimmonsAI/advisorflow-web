@@ -99,11 +99,17 @@ def test_daily_briefing_counts_are_exact_for_current_advisor(client, db_session,
     response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
+    # Strict equality on purpose: an added or renamed key is drift the Overview
+    # page would silently render wrong, so it should break this test.
+    # certified_appointments_waiting counts DISTINCT leads with a booked/confirmed
+    # BookingLink and no time window at all - all three booked links here count,
+    # including the 8-day-old one that bookings_last_7_days excludes.
     assert response.json() == {
         "replies_needing_attention": 2,
         "cadence_touches_due_today": 2,
         "leads_imported_last_24h": 5,
         "bookings_last_7_days": 2,
+        "certified_appointments_waiting": 3,
     }
 
 
@@ -134,9 +140,14 @@ def test_daily_briefing_is_scoped_to_current_advisor_and_org(client, db_session,
     response = client.get("/leads/daily-briefing", headers=_headers_for(sample_advisor, db_session))
 
     assert response.status_code == 200
+    # Every count is 1: one row of each kind belongs to this advisor, one to a
+    # teammate in the same org, and one to another org entirely. The new
+    # certified_appointments_waiting key is scoped by the same filters, so it
+    # must be 1 as well rather than 2 or 3.
     assert response.json() == {
         "replies_needing_attention": 1,
         "cadence_touches_due_today": 1,
         "leads_imported_last_24h": 1,
         "bookings_last_7_days": 1,
+        "certified_appointments_waiting": 1,
     }

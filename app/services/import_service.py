@@ -81,6 +81,20 @@ HEADER_MAP = {
     "source_id":         ["contact guid", "contactid", "contact id", "contactguid",
                           "crm id", "external id", "external_id", "dynamics id",
                           "dynamics contact guid"],
+    # ── Lead SOURCE (where the person came from) ───────────────────────────
+    # Distinct from `source_id`, which is the CRM's row identifier. This is the
+    # marketing/origin channel, and it is the only column that can tell an
+    # import a contact is a brand-new inbound inquiry rather than a name from
+    # an existing book of business - see _is_new_inquiry_source.
+    #
+    # Without this entry a "Source" column is not a mapped column, so it was
+    # swept into custom_fields, where no tiering code looks. The value was
+    # present in the file and present in the database and still could not
+    # affect a single routing decision.
+    "source":            ["source", "lead source", "leadsource", "source name",
+                          "lead origin", "originating source", "origin",
+                          "referral source", "marketing source", "source type",
+                          "campaign source", "how did you hear about us"],
     # ── Mobile phone provenance ────────────────────────────────────────────
     # Distinct from primary phone; only mapped when a dedicated column exists.
     "mobile_phone":      ["mobile phone", "mobile number"],
@@ -201,6 +215,9 @@ TIER_TO_TRACK = {
     "imminent": "imminent_support",
     "contract_sold": "upsell_existing",
     "email_only": "email_only_nurture",
+    # A stranger who just raised their hand gets an introduction, not a pitch
+    # written for someone we already have a relationship with.
+    "new_inquiry": "new_inquiry_intro",
     "partial": "needs_review",
     "addr_only": "needs_review",
 }
@@ -319,21 +336,91 @@ def _build_column_lookup(columns) -> dict:
     return lookup
 
 
-def _infer_tier(raw_value: str, status_reason: str) -> LeadTier:
+# Source values that mean "this person raised their hand online and we have
+# never spoken to them" - as opposed to a name pulled from an existing book of
+# business.
+#
+# Matched as SUBSTRINGS of the lowercased cell, because a real export writes
+# "Web", "Web Form", "web-lead" and "Facebook Lead Gen - March" for the same
+# thing, and an exact-match table would need a row per vendor per month.
+#
+# The markers are deliberately narrow: each one is a word that cannot
+# plausibly appear in a source describing an EXISTING relationship. "Referral",
+# "Walk-in", "Repeat Customer", "Cemetery Visit" and "Phone Call" match none of
+# them. Anything not named here is NOT a new inquiry, so an unrecognised or
+# absent source leaves tiering exactly as it was before this existed - that
+# one-directional default is what keeps this from silently re-tiering the
+# imports that already ran.
+_NEW_INQUIRY_SOURCE_MARKERS = (
+    "web",          # Web, Web Form, web-lead, Website
+    "online",       # Online, Online Inquiry
+    "internet",     # Internet Lead
+    "digital",      # Digital Campaign
+    "google",       # Google Ads
+    "facebook",     # Facebook Lead Gen
+    "lead gen",     # Facebook Lead Gen, Lead Gen Vendor
+    "leadgen",
+    "generator",    # Final Expense Generator
+)
+
+
+def _is_new_inquiry_source(source_raw) -> bool:
+    """True when a lead's Source column says this is a brand-new inbound lead.
+
+    Deliberately tolerant about the argument's type. This reads a free-text
+    spreadsheet column nobody validates, and it is reached from paths that
+    build their rows programmatically, so the value arrives as a str, as None,
+    as a pandas NaN float, occasionally as a number. Anything that is not a
+    non-empty string means "no source stated", which is not a new inquiry -
+    never an error.
     """
-    Determines lead tier. Status Reason "Contract Sold" takes priority over
-    Lead Type, since a sold contract is the more important signal for
-    which message track applies (upsell vs. acquisition pitch).
+    if not isinstance(source_raw, str):
+        return False
+    val = source_raw.strip().lower()
+    if not val:
+        return False
+    return any(marker in val for marker in _NEW_INQUIRY_SOURCE_MARKERS)
+
+
+def _infer_tier(raw_value: str, status_reason: str, source_raw: str = "") -> LeadTier:
+    """
+    Determines lead tier. Priority, highest first:
+
+      1. Status Reason "Contract Sold". A sold contract is the more important
+         signal for which message track applies (upsell vs. acquisition
+         pitch), and it outranks a web source too: someone who already bought
+         and later filled in a web form is a re-engaged customer, not a
+         stranger.
+      2. A new-inquiry Source (web / online / paid lead-gen vendor). This beats
+         the Lead Type column because the two answer different questions and
+         only one of them is a fact. Lead Type on an inbound web lead is
+         whatever the CRM defaulted to or an advisor guessed; the source is
+         where the person actually came from. Getting this backwards means
+         opening with copy that assumes a relationship that does not exist.
+      3. The Lead Type column text.
+
     Blank/unrecognized Lead Type -> PARTIAL (needs manual review), never
     silently assumed to be Pre-Need.
+
+    `source_raw` is new, optional and last on purpose: the two-argument callers
+    that already exist (import_staging_service) keep their exact previous
+    behaviour, because an absent or blank source cannot change any tier this
+    function used to return.
     """
     if status_reason and status_reason.strip().lower() == "contract sold":
         return "contract_sold"
+
+    if _is_new_inquiry_source(source_raw):
+        return "new_inquiry"
 
     if not raw_value:
         return "partial"
 
     val = str(raw_value).strip().lower()
+    # A file can also just say it outright in the Lead Type column, in which
+    # case there is nothing to infer.
+    if "new inquiry" in val or "cold lead" in val:
+        return "new_inquiry"
     if "imminent" in val:
         return "imminent"
     if "at" in val and "need" in val:
@@ -507,6 +594,7 @@ def parse_excel_file(file_path: str) -> list[dict]:
             "email": row.get(lookup.get("email", ""), "").strip(),
             "tier_raw": row.get(lookup.get("tier", ""), "").strip(),
             "status_reason_raw": row.get(lookup.get("status_reason", ""), "").strip(),
+            "source_raw": row.get(lookup.get("source", ""), "").strip(),
             "allow_calls_raw": row.get(lookup.get("allow_calls", ""), "").strip(),
             "last_action_raw": row.get(lookup.get("last_action", ""), "").strip(),
             "last_contact_date_raw": row.get(lookup.get("last_contact_date", ""), "").strip(),
@@ -583,7 +671,21 @@ def import_leads_from_excel(
             skipped_internal_records += 1
             continue
 
-        tier = _infer_tier(row["tier_raw"], row["status_reason_raw"])
+        # `.get` and not `[...]`, because rows can also arrive pre-parsed from
+        # callers that never saw a spreadsheet (import_leads_from_rows, Google
+        # Contacts). A row with no source key is a row with no source stated.
+        tier = _infer_tier(row["tier_raw"], row["status_reason_raw"],
+                           row.get("source_raw", ""))
+
+        # THE MANUAL OVERRIDE, APPLIED LAST AND UNCONDITIONALLY.
+        #
+        # This is the escape hatch for a file whose Source column is missing,
+        # useless, or says "Import". The operator ticking the box is asserting
+        # something about the whole batch that the spreadsheet's own columns do
+        # not know, so nothing in the spreadsheet may out-vote it - including
+        # Contract Sold, which otherwise outranks everything here.
+        if force_new_inquiry:
+            tier = "new_inquiry"
 
         # CHANNEL PERMISSION, ALL FOUR, FROM THE CANONICAL TABLE.
         #
@@ -608,7 +710,19 @@ def import_leads_from_excel(
             contact_channel = "sms"
         else:
             contact_channel = "email_only"
-            tier = "email_only"  # channel overrides tier classification for routing purposes
+            # NEW_INQUIRY SURVIVES THE CHANNEL OVERRIDE; EVERY OTHER TIER DOES NOT.
+            #
+            # Collapsing the tier here is a routing decision wearing a
+            # classification's clothes, and for the existing tiers it is
+            # harmless - email_only_nurture copy fits a phoneless person we
+            # already know. For a brand-new inbound inquiry it is not: that
+            # copy assumes a relationship, so a stranger who filled in a web
+            # form and left the phone field blank would be answered as though
+            # we had spoken before. Only the tier and its track are preserved;
+            # the channel is still email_only, so the SMS cadence still skips
+            # this lead (start_cadence gates on contact_channel, not tier).
+            if tier != "new_inquiry":
+                tier = "email_only"
             email_only_count += 1
 
         message_track = TIER_TO_TRACK.get(tier, "needs_review")

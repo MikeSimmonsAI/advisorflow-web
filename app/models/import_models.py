@@ -106,6 +106,29 @@ class ImportBatch(Base):
     source_type       = Column(String, nullable=False)   # csv | xlsx | google_contacts
     source_filename   = Column(String, nullable=True)    # original uploaded filename
 
+    # ── Batch-level import options ────────────────────────────────────────────
+    #
+    # What the person doing the upload chose ON THE UPLOAD FORM, as opposed to
+    # anything read out of the file. They live on the BATCH, not on each staged
+    # row, because that is what they are: one choice made once, applied to
+    # every row in this upload. Copying them onto 5,000 rows would invite the
+    # rows to disagree with each other.
+    #
+    # These exist because the upload endpoint had been ACCEPTING all four as
+    # multipart form fields and then dropping every one of them on the floor:
+    # confirm_upload declared source_year/force_new_inquiry/relationship_type/
+    # import_list_name, called stage_batch(), and stage_batch's signature had
+    # nowhere to put them. So the UI showed a "Source year" box that looked
+    # like it worked, the value parsed correctly, and the lead was still
+    # written with source_year=None - the second time that same field has been
+    # silently discarded by this endpoint, the first being the Form(...) bug
+    # test_upload_endpoints.py was written to catch.
+    source_year        = Column(Integer, nullable=True)
+    force_new_inquiry  = Column(Boolean, default=False, nullable=False,
+                                server_default="false")
+    relationship_type  = Column(String, nullable=True)
+    import_list_name   = Column(String, nullable=True)
+
     status = Column(String, default=ImportBatchStatus.UPLOADING, nullable=False)
 
     # Row-level counters (refreshed by recount())

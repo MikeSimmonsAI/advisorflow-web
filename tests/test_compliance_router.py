@@ -15,9 +15,47 @@ from app.models.models import SuppressionEntry, SuppressionSource, Lead, Organiz
 from app.services.auth_service import hash_password
 
 
-def test_list_suppression_requires_admin(client, auth_headers):
+def test_list_suppression_allows_any_tenant_user_but_delete_requires_admin(
+    client, auth_headers, db_session, sample_org
+):
+    """
+    READING the DNC list is deliberately open to every user in the tenant
+    (compliance_router.list_suppression_entries, `# ALL users can view`).
+    An advisor who cannot see the suppression list cannot tell that the
+    person they are about to text has asked never to be contacted, which
+    is the failure this feature exists to prevent - so the read is
+    org-scoped rather than admin-gated.
+
+    REMOVING an entry is the opposite: it makes a number contactable
+    again, and that stays admin-only. This test asserts both halves, so
+    the file still carries a real authorization boundary for this router
+    rather than just an open read.
+    """
+    other_org = Organization(name="Other Org", slug="other-org-suppression-read", plan="trial")
+    db_session.add(other_org)
+    db_session.commit()
+
+    own_entry = SuppressionEntry(organization_id=sample_org.id, phone="12145550111",
+                                  reason="Manual DNC", source=SuppressionSource.MANUAL)
+    other_entry = SuppressionEntry(organization_id=other_org.id, phone="19725550111",
+                                    reason="Other org DNC", source=SuppressionSource.MANUAL)
+    db_session.add_all([own_entry, other_entry])
+    db_session.commit()
+    own_entry_id = own_entry.id
+
+    # auth_headers is a plain advisor in sample_org.
     response = client.get("/compliance/suppression-list", headers=auth_headers)
-    assert response.status_code == 403
+    assert response.status_code == 200
+    body = response.json()
+    phones = [row["phone"] for row in body["entries"]]
+    assert "12145550111" in phones
+    assert "19725550111" not in phones  # still org-scoped, open != global
+    assert body["stats"]["total"] == 1
+
+    # ...but the same advisor may not un-suppress anything, not even in their own org.
+    delete_response = client.delete(f"/compliance/suppression-list/{own_entry_id}", headers=auth_headers)
+    assert delete_response.status_code == 403
+    assert db_session.query(SuppressionEntry).filter(SuppressionEntry.id == own_entry_id).first() is not None
 
 
 def test_org_isolation_for_list_and_delete(client, admin_auth_headers, db_session, sample_org):
@@ -163,7 +201,9 @@ def test_preview_messages_flags_suppressed_lead_even_when_status_not_dnc(client,
                 first_name="Suppressed", last_name="ButNotDNC", phone="12145557777", status="new")
     db_session.add(lead)
     db_session.commit()
-    assert lead.status.value != "dnc"  # confirms the setup matches the exact bug scenario
+    # Lead.status is a plain String column, so this is a string, not an enum member.
+    # (SuppressionEntry.source below IS still a real SAEnum - only the Lead columns changed.)
+    assert lead.status != "dnc"  # confirms the setup matches the exact bug scenario
 
     suppression = SuppressionEntry(organization_id=sample_org.id, phone="12145557777", reason="Manually suppressed")
     db_session.add(suppression)

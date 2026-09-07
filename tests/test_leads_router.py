@@ -114,7 +114,10 @@ def test_set_lead_tier_updates_tier_track_and_status(client, db_session, sample_
 
     assert response.status_code == 200
     db_session.refresh(lead)
-    assert lead.tier.value == "pre_need"
+    # Lead.tier / .status / .message_track are plain String columns, so what comes
+    # back off the row is a string, not an enum member. LeadTier/LeadStatus/
+    # MessageTrack subclass str, so comparing against them still works.
+    assert lead.tier == "pre_need"
     assert lead.message_track == MessageTrack.PRE_NEED_LOCK_PRICE
     assert lead.status == LeadStatus.NEW
 
@@ -148,12 +151,20 @@ def test_set_lead_tier_404_for_lead_in_different_org(client, db_session, sample_
     assert response.status_code == 404
 
 
-def test_set_lead_tier_allows_any_advisor_in_org_not_just_assignee(client, db_session, sample_org, sample_advisor, auth_headers):
+def test_set_lead_tier_refuses_an_advisor_who_is_not_the_assignee(client, db_session, sample_org, sample_advisor, auth_headers):
     """
-    Deliberate scope: an advisor can retier a lead assigned to a DIFFERENT
-    advisor in the same org. This is intentional (a reversible
-    data-correction action, not restricted to the owning advisor), unlike
-    GET /needs-review which only lists the calling advisor's own leads.
+    Advisor isolation: an advisor may NOT retier a lead assigned to a
+    different advisor, even inside their own organization.
+
+    This endpoint used to be deliberately org-wide, on the reasoning that
+    re-tiering is a reversible data correction. That was withdrawn - see
+    app/services/lead_scope.py: every lead-touching route now goes through
+    one authorized scope, and a plain advisor's scope is their own book.
+
+    The refusal is 404 and NOT 403 on purpose. A 403 confirms the lead
+    exists, which turns this route into an enumeration oracle for another
+    advisor's leads; 404 says the same thing to a caller who is entitled to
+    nothing here as it does to one asking about an id that never existed.
     """
     from app.models.models import LeadStatus
     other_advisor = User(organization_id=sample_org.id, email="other-tier-owner@example.com",
@@ -163,16 +174,53 @@ def test_set_lead_tier_allows_any_advisor_in_org_not_just_assignee(client, db_se
     db_session.add(other_advisor)
     db_session.commit()
     lead = Lead(organization_id=sample_org.id, assigned_to_id=other_advisor.id, first_name="NotMine", last_name="Lead",
-                phone="12145550953", status=LeadStatus.NEEDS_TIER_REVIEW)
+                phone="12145550953", status=LeadStatus.NEEDS_TIER_REVIEW, tier=None)
     db_session.add(lead)
     db_session.commit()
 
     # auth_headers belongs to sample_advisor, NOT other_advisor (the lead's owner)
     response = client.patch(f"/leads/{lead.id}/tier?new_tier=at_need", headers=auth_headers)
 
+    assert response.status_code == 404
+    # The refusal is real, not cosmetic: the lead is untouched.
+    db_session.refresh(lead)
+    assert lead.tier is None
+    assert lead.status == LeadStatus.NEEDS_TIER_REVIEW
+
+
+def test_set_lead_tier_allows_a_manager_in_the_org_who_is_not_the_assignee(
+    client, db_session, sample_org, sample_advisor, admin_auth_headers
+):
+    """
+    The capability the org-wide version was reaching for still exists - it
+    just belongs to a manager rather than to any advisor who happens to
+    notice a mistagged lead.
+
+    lead_scope decides this by role: MANAGER_ROLES ("org_admin",
+    "super_admin", plus god_admin) see the whole organization's leads, while
+    OWNER_SCOPED_ROLES ("advisor") see only their own. admin_auth_headers is
+    an org_admin in sample_org, so it can retier a lead it does not own.
+    """
+    from app.models.models import LeadStatus
+    other_advisor = User(organization_id=sample_org.id, email="manager-case-owner@example.com",
+                          password_hash=hash_password("x"), full_name="Owning Advisor", role="advisor",
+                          must_change_password=False,
+                      )
+    db_session.add(other_advisor)
+    db_session.commit()
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=other_advisor.id, first_name="NotMine", last_name="Lead",
+                phone="12145550955", status=LeadStatus.NEEDS_TIER_REVIEW, tier=None)
+    db_session.add(lead)
+    db_session.commit()
+
+    # admin_auth_headers is an org_admin, and the lead belongs to other_advisor.
+    response = client.patch(f"/leads/{lead.id}/tier?new_tier=at_need", headers=admin_auth_headers)
+
     assert response.status_code == 200
     db_session.refresh(lead)
-    assert lead.tier.value == "at_need"
+    assert lead.tier == "at_need"
+    assert lead.status == LeadStatus.NEW
+    assert lead.assigned_to_id == other_advisor.id  # retiering never reassigns
 
 
 def test_set_lead_tier_logs_audit_action_with_before_and_after(client, db_session, sample_org, sample_advisor, auth_headers):

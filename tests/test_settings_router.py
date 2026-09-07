@@ -1,6 +1,8 @@
 """
 Tests for app/routers/settings_router.py - GET /settings/profile,
-PUT /settings/twilio, PUT /settings/notifications.
+PUT /settings/twilio (now retired, 410 Gone),
+PUT /settings/admin/twilio/{user_id} (its replacement),
+PUT /settings/notifications.
 
 This router had ZERO test coverage before. That gap is exactly how two
 real bugs shipped unnoticed: (1) microsoft_365_connected and
@@ -58,7 +60,25 @@ def test_get_profile_twilio_configured_requires_both_sid_and_token(client, db_se
     assert response.json()["twilio_configured"] is False
 
 
-def test_update_twilio_config_persists_all_fields(client, db_session, sample_advisor, auth_headers):
+def test_self_service_twilio_write_is_retired_and_changes_nothing(client, db_session, sample_advisor, auth_headers):
+    """
+    PUT /settings/twilio is gone, not merely gated.
+
+    It carried no role check at all, so any advisor could write their own
+    Twilio account SID and auth token and point their sends at an account
+    of their choosing - off the organization's registered A2P campaign and
+    its carrier reputation, and billed wherever they liked. Credentials now
+    belong to the organization, so the route answers 410 Gone: this is not
+    a permission that could be granted, it is a capability that no longer
+    exists.
+
+    The important half of the assertion is the second one - a 410 that
+    still quietly persisted the credentials would be worse than the
+    original bug.
+    """
+    before_sid = sample_advisor.twilio_account_sid
+    before_token = sample_advisor.twilio_auth_token_encrypted
+
     response = client.put("/settings/twilio", json={
         "twilio_account_sid": "ACnewsid",
         "twilio_auth_token": "newtoken",
@@ -66,14 +86,54 @@ def test_update_twilio_config_persists_all_fields(client, db_session, sample_adv
         "twilio_caller_id_name": "Restland Test",
     }, headers=auth_headers)
 
+    assert response.status_code == 410
+    detail = response.json()["detail"]
+    assert "organization" in detail.lower()  # explains where credentials do live
+
+    db_session.refresh(sample_advisor)
+    assert sample_advisor.twilio_account_sid == before_sid
+    assert sample_advisor.twilio_auth_token_encrypted == before_token
+    assert sample_advisor.twilio_phone_number != "+12145559999"
+
+
+def test_admin_assign_twilio_persists_all_fields(client, db_session, sample_advisor, admin_auth_headers):
+    """
+    The replacement route, and the persistence behaviour the retired test
+    was actually there to cover: an org admin assigning a sending number
+    (and, optionally, credentials) to an advisor in their own organization.
+    """
+    response = client.put(f"/settings/admin/twilio/{sample_advisor.id}", json={
+        "twilio_account_sid": "ACnewsid",
+        "twilio_auth_token": "newtoken",
+        "twilio_phone_number": "+12145559999",
+        "twilio_caller_id_name": "Restland Test",
+    }, headers=admin_auth_headers)
+
     assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["twilio_phone_number"] == "+12145559999"
+    assert body["twilio_configured"] is True
+
     db_session.refresh(sample_advisor)
     assert sample_advisor.twilio_account_sid == "ACnewsid"
     assert sample_advisor.twilio_phone_number == "+12145559999"
     assert sample_advisor.twilio_caller_id_name == "Restland Test"
     assert sample_advisor.twilio_auth_token_encrypted is not None
-    # Never returns the raw token back
-    assert "twilio_auth_token" not in response.json() or response.json().get("twilio_auth_token") != "newtoken"
+    # Stored encrypted at rest, never as the plaintext token...
+    assert sample_advisor.twilio_auth_token_encrypted != "newtoken"
+    # ...and never handed back in the response.
+    assert "twilio_auth_token" not in body
+
+
+def test_admin_assign_twilio_rejects_a_plain_advisor(client, sample_advisor, auth_headers):
+    """The replacement route is admin-only - retiring the self-service write
+    would mean nothing if any advisor could just call this one instead."""
+    response = client.put(f"/settings/admin/twilio/{sample_advisor.id}", json={
+        "twilio_phone_number": "+12145559999",
+    }, headers=auth_headers)
+
+    assert response.status_code == 403
 
 
 def test_update_notifications_persists_fields(client, db_session, sample_advisor, auth_headers):

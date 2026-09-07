@@ -28,12 +28,40 @@ def _excel_upload_file(rows: list[dict], filename: str = "test.xlsx"):
     return {"file": (filename, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
 
 
-def test_confirm_upload_persists_source_year_from_form_field(client, db_session, auth_headers):
+def test_confirm_upload_refuses_an_advisor_without_the_import_capability(client, auth_headers):
+    """The import gate is real and stays real.
+
+    The three tests below use import_auth_headers, an advisor who has been
+    GRANTED lead_import_stage and lead_import_commit. This one pins the other
+    side of that: a plain advisor is refused. Without it, swapping the
+    fixture would look like it had quietly removed an authorization check.
     """
-    Regression test for the source_year bug: previously this value was
-    silently discarded no matter what the frontend sent, because the
-    endpoint expected it as a query param while the frontend sent it as
-    multipart form data.
+    files = _excel_upload_file([
+        {"First Name": "Ungranted", "Last Name": "Test", "Phone": "2145550900", "Email": ""},
+    ])
+
+    response = client.post("/leads/upload/confirm", files=files, headers=auth_headers)
+    assert response.status_code == 403
+
+
+def test_confirm_upload_persists_source_year_from_form_field(client, db_session, import_auth_headers):
+    """
+    Regression test for the source_year bug - which has now happened TWICE,
+    by two different mechanisms, which is why this test is worth its weight.
+
+    First time: the endpoint declared source_year as a bare `Optional[int]`
+    rather than `Form(...)`, so FastAPI read it as a query parameter when
+    mixed with a File(...) upload and it arrived as None on every import.
+
+    Second time: the parameter was correctly declared as Form(...) and parsed
+    fine - and then the endpoint simply never passed it to the import
+    pipeline. stage_batch()'s signature had nowhere to put it. Same visible
+    symptom, completely different cause, and the UI showed a working
+    "Source year" box throughout both.
+
+    So this test asserts the OUTCOME - the value reaches the persisted lead -
+    rather than any particular mechanism, because the mechanism is exactly the
+    part that keeps changing underneath it.
     """
     files = _excel_upload_file([
         {"First Name": "Year", "Last Name": "Test", "Phone": "2145550901", "Email": ""},
@@ -43,7 +71,7 @@ def test_confirm_upload_persists_source_year_from_form_field(client, db_session,
         "/leads/upload/confirm",
         files=files,
         data={"source_year": "2019"},
-        headers=auth_headers,
+        headers=import_auth_headers,
     )
 
     assert response.status_code == 200
@@ -71,7 +99,7 @@ def test_preview_upload_does_not_persist_but_still_reads_source_year(client, db_
     assert lead is None  # dry run - nothing persisted
 
 
-def test_confirm_upload_force_new_inquiry_form_field_tags_every_lead(client, db_session, auth_headers):
+def test_confirm_upload_force_new_inquiry_form_field_tags_every_lead(client, db_session, import_auth_headers):
     """force_new_inquiry must work as an actual multipart form field, matching how the frontend sends it."""
     files = _excel_upload_file([
         {"First Name": "ForceOne", "Last Name": "Inquiry", "Phone": "2145550903", "Email": "", "Lead Type": "Pre-Need"},
@@ -82,7 +110,7 @@ def test_confirm_upload_force_new_inquiry_form_field_tags_every_lead(client, db_
         "/leads/upload/confirm",
         files=files,
         data={"force_new_inquiry": "true"},
-        headers=auth_headers,
+        headers=import_auth_headers,
     )
 
     assert response.status_code == 200
@@ -92,7 +120,7 @@ def test_confirm_upload_force_new_inquiry_form_field_tags_every_lead(client, db_
     assert all(lead.tier == LeadTier.NEW_INQUIRY for lead in leads)
 
 
-def test_confirm_upload_without_force_new_inquiry_uses_normal_tier_rules(client, db_session, auth_headers):
+def test_confirm_upload_without_force_new_inquiry_uses_normal_tier_rules(client, db_session, import_auth_headers):
     """Confirms force_new_inquiry defaults to False/off when omitted, not silently always-on."""
     files = _excel_upload_file([
         {"First Name": "NormalRules", "Last Name": "Test", "Phone": "2145550905", "Email": "", "Lead Type": "Pre-Need"},
@@ -101,7 +129,7 @@ def test_confirm_upload_without_force_new_inquiry_uses_normal_tier_rules(client,
     response = client.post(
         "/leads/upload/confirm",
         files=files,
-        headers=auth_headers,
+        headers=import_auth_headers,
     )
 
     assert response.status_code == 200

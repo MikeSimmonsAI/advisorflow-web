@@ -66,16 +66,25 @@ def _sale(db_session, lead, advisor):
 
 def _seed_exact_ten_leads(db_session, sample_org, sample_advisor, second_advisor):
     """
-    Exactly 10 leads in sample_org.
+    Exactly 10 lead ROWS in sample_org, 8 of which are real.
 
-    Advisor One owns 6:
+    Advisor One owns 5 real + 1 duplicate:
     - 4 messages, 3 replies, 2 hot/interested replies, 2 booked, 1 dnc, 1 duplicate.
 
-    Advisor Two owns 4:
+    Advisor Two owns 3 real + 1 duplicate:
     - 2 messages, 1 reply, 1 hot/interested reply, 1 booked, 1 dnc, 1 duplicate.
 
-    Org totals:
-    - 10 leads, 6 sent, 4 replied, 3 hot/interested, 3 booked, 2 sold.
+    The two duplicate rows are deliberately NOT part of leads_owned: every count
+    query behind /admin/dashboard/metrics filters `Lead.is_duplicate == False`, and
+    duplicates are reported separately as duplicate_leads_prevented. Rate
+    denominators therefore use the real 5 / 3 / 8, not the raw row counts.
+
+    /admin/dashboard/funnel is a different report and deliberately does NOT
+    exclude duplicates, so its total_leads is still 10.
+
+    Org totals (metrics):
+    - 8 real leads owned (+2 duplicates prevented), 6 sent, 4 replied,
+      3 hot/interested, 3 booked, 2 sold.
     """
     a1 = _lead(db_session, sample_org, sample_advisor, 1, status=LeadStatus.BOOKED)
     a2 = _lead(db_session, sample_org, sample_advisor, 2, status=LeadStatus.BOOKED)
@@ -119,43 +128,47 @@ def test_dashboard_metrics_exact_rates_with_ten_leads(
     data = response.json()
 
     one = _row_by_name(data["advisors"], "Advisor One")
-    assert one["leads_owned"] == 6
+    assert one["leads_owned"] == 5  # 6 rows, 1 of them a duplicate
     assert one["messages_sent"] == 4
     assert one["replies"] == 3
     assert one["hot_replies"] == 2
     assert one["booked_leads"] == 2
     assert one["dnc_leads"] == 1
     assert one["duplicate_leads_prevented"] == 1
-    assert one["reply_rate"] == 75.0
-    assert one["hot_reply_rate"] == 50.0
-    assert one["booking_rate"] == 33.33
-    assert one["dnc_rate"] == 16.67
+    assert one["reply_rate"] == 75.0        # 3 / 4
+    assert one["hot_reply_rate"] == 50.0    # 2 / 4
+    assert one["booking_rate"] == 40.0      # 2 / 5
+    assert one["dnc_rate"] == 20.0          # 1 / 5
 
     two = _row_by_name(data["advisors"], "Advisor Two")
-    assert two["leads_owned"] == 4
+    assert two["leads_owned"] == 3  # 4 rows, 1 of them a duplicate
     assert two["messages_sent"] == 2
     assert two["replies"] == 1
     assert two["hot_replies"] == 1
     assert two["booked_leads"] == 1
     assert two["dnc_leads"] == 1
     assert two["duplicate_leads_prevented"] == 1
-    assert two["reply_rate"] == 50.0
-    assert two["hot_reply_rate"] == 50.0
-    assert two["booking_rate"] == 25.0
-    assert two["dnc_rate"] == 25.0
+    assert two["reply_rate"] == 50.0        # 1 / 2
+    assert two["hot_reply_rate"] == 50.0    # 1 / 2
+    assert two["booking_rate"] == 33.33     # 1 / 3, rounded to 2dp
+    assert two["dnc_rate"] == 33.33         # 1 / 3, rounded to 2dp
 
     totals = data["totals"]
-    assert totals["leads_owned"] == 10
+    assert totals["leads_owned"] == 8       # 10 rows, 2 of them duplicates
     assert totals["messages_sent"] == 6
     assert totals["replies"] == 4
     assert totals["hot_replies"] == 3
     assert totals["booked_leads"] == 3
     assert totals["dnc_leads"] == 2
     assert totals["duplicate_leads_prevented"] == 2
-    assert totals["reply_rate"] == 66.67
-    assert totals["hot_reply_rate"] == 50.0
-    assert totals["booking_rate"] == 30.0
-    assert totals["dnc_rate"] == 20.0
+    assert totals["reply_rate"] == 66.67    # 4 / 6, rounded to 2dp
+    assert totals["hot_reply_rate"] == 50.0  # 3 / 6
+    assert totals["booking_rate"] == 37.5   # 3 / 8
+    assert totals["dnc_rate"] == 25.0       # 2 / 8
+
+    # The duplicates are excluded from leads_owned, not lost: every row is still
+    # accounted for across the two buckets.
+    assert totals["leads_owned"] + totals["duplicate_leads_prevented"] == 10
 
 
 def test_dashboard_funnel_exact_counts_with_ten_leads(
@@ -200,11 +213,19 @@ def test_dashboard_metrics_org_isolation(
     _sale(db_session, other_lead, other_advisor)
     db_session.commit()
 
+    # The other org contributed 1 booked lead, 1 message, 1 interested reply and
+    # 1 sale. None of it may appear in these numbers, and none of its people may
+    # appear in the advisor list.
     metrics = client.get("/admin/dashboard/metrics", headers=admin_auth_headers).json()
     assert metrics["organization_id"] == sample_org.id
-    assert metrics["totals"]["leads_owned"] == 10
+    assert metrics["totals"]["leads_owned"] == 8  # sample_org's 10 rows less its 2 duplicates
+    assert metrics["totals"]["duplicate_leads_prevented"] == 2  # not 3 - other org's row is real
+    assert metrics["totals"]["messages_sent"] == 6
+    assert metrics["totals"]["booked_leads"] == 3
     assert "Other Advisor" not in [row["advisor_name"] for row in metrics["advisors"]]
 
+    # The funnel deliberately does NOT exclude duplicates, so 10 here is
+    # sample_org's own row count - still with nothing from the other org.
     funnel = client.get("/admin/dashboard/funnel", headers=admin_auth_headers).json()
     assert funnel["organization_id"] == sample_org.id
     assert funnel["total_leads"] == 10

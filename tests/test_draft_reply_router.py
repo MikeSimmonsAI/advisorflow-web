@@ -22,7 +22,32 @@ def test_draft_reply_never_raises_without_openai_key_and_creates_booking_link(
     body = response.json()
     assert body["suggested_reply"]
     assert body["source"] == "fallback"
-    assert body["booking_url"] in body["suggested_reply"]
+
+    # The draft deliberately does NOT contain the booking URL.
+    #
+    # This assertion used to be `booking_url in suggested_reply`, and it
+    # passed for the wrong reason: conftest set BOOKING_BASE_URL to a Vercel
+    # host, public_identity refuses infrastructure hosts, booking_url came
+    # back as "", and `"" in anything` is True. With a branded host in
+    # conftest the assertion became falsifiable and revealed that the two
+    # sides genuinely disagree - so the question is which one is right.
+    #
+    # The application is. draft_reply_service._fallback_reply carries an
+    # explicit comment that the URL is left out because the composer's
+    # "Include booking link" checkbox appends it at send time, and embedding
+    # it here would send the family the same link twice. The service returns
+    # booking_url and booking_link_id as SEPARATE fields precisely so the
+    # composer owns that decision.
+    assert body["booking_url"] not in body["suggested_reply"], (
+        "The draft must not embed the booking URL - the composer appends it "
+        "at send time, and embedding it here double-links the message."
+    )
+
+    # What this test actually guards: no OPENAI_API_KEY must still produce a
+    # usable draft AND a real, resolvable booking link on a branded host.
+    assert body["booking_url"].startswith("https://")
+    assert ".vercel.app" not in body["booking_url"]
+    assert ".onrender.com" not in body["booking_url"]
 
     links = db_session.query(BookingLink).filter(BookingLink.lead_id == sample_lead.id).all()
     assert len(links) == 1

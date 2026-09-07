@@ -60,7 +60,18 @@ def test_reactivate_user_logs_action(client, db_session, sample_org, sample_advi
     assert entry is not None
 
 
-def test_reset_password_logs_action_without_leaking_temp_password(client, db_session, sample_org, sample_advisor):
+def test_reset_password_logs_action_without_leaking_any_secret(client, db_session, sample_org, sample_advisor):
+    """No secret may reach the audit log - and the reset no longer produces one to hand back.
+
+    The endpoint used to answer with a plaintext `temp_password`, and this test's
+    whole point was that the password did not also end up in the audit trail. The
+    activation-link flow replaced that: the reset now returns a one-time setup URL
+    and forces a password change, so there are two secrets to keep out of the log
+    rather than one - a password (which no longer exists) and the activation token
+    inside `setup_url`, which IS a live credential. A token written into a log table
+    outlives the request that created it, which is exactly the failure mode the
+    original assertion existed to prevent.
+    """
     super_admin = User(organization_id=sample_org.id, email="super-audit@restland.com",
                         password_hash=hash_password("x"), full_name="Super Admin", role="super_admin",
                         must_change_password=False,
@@ -72,12 +83,31 @@ def test_reset_password_logs_action_without_leaking_temp_password(client, db_ses
 
     response = client.post(f"/admin/users/{sample_advisor.id}/reset-password", headers=super_headers)
     assert response.status_code == 200
-    temp_password = response.json()["temp_password"]
+    body = response.json()
+
+    # The activation-link flow: access is handed over as a one-time link, and the
+    # account is left having to choose its own password.
+    assert body["setup_url"]
+    assert body["must_change_password"] is True
+    # No password is returned at all. `must_change_password` is a flag about state,
+    # not a credential, so it is the one "password"-named key allowed here.
+    leaked_keys = [k for k in body if "password" in k.lower() and k != "must_change_password"]
+    assert leaked_keys == []
+
+    activation_token = body["setup_url"].split("token=", 1)[1]
+    assert activation_token  # the link really does carry a usable secret
 
     entry = _latest_entry(db_session, sample_org.id, "user.reset_password")
     assert entry is not None
-    # CRITICAL: the temp password must never appear in the audit log
-    assert temp_password not in entry.details
+    details = json.loads(entry.details)
+    # WHO/TO WHOM/WHAT KIND is recorded...
+    assert details["email"] == sample_advisor.email
+    assert details["method"] == "one_time_link"
+    # ...and nothing that could be used to sign in as them.
+    assert "temp_password" not in details
+    assert "password" not in details
+    assert "temp_password" not in entry.details
+    assert activation_token not in entry.details
 
 
 def test_update_user_logs_only_changed_fields(client, db_session, sample_org, sample_advisor):
@@ -196,7 +226,9 @@ def test_add_permanent_dnc_logs_action_and_matched_lead(client, db_session, samp
     entry = _latest_entry(db_session, sample_org.id, "compliance.permanent_dnc")
     assert entry is not None
     details = json.loads(entry.details)
-    assert details["matched_lead_id"] == lead.id
+    # A single phone number can match SEVERAL leads in the org, so the log records
+    # every lead the DNC actually flipped, not just one of them.
+    assert lead.id in details["matched_lead_ids"]
 
 
 def test_delete_suppression_entry_logs_action_with_details_before_deletion(client, db_session, sample_org, admin_auth_headers):

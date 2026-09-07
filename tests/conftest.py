@@ -15,7 +15,18 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod-32chars!!")
-os.environ.setdefault("BOOKING_BASE_URL", "https://advisorflow-booking.vercel.app")
+# A BRANDED host, deliberately.
+#
+# public_identity.booking_url() refuses infrastructure hosts - *.vercel.app,
+# *.onrender.com and friends - because a booking link is the one URL a family
+# actually sees, and it must carry the funeral home's name, not the platform's
+# hosting provider. This used to be "https://advisorflow-booking.vercel.app",
+# which is precisely a host that guard rejects, so booking_url() returned ""
+# and every test that built a booking link was asserting against an empty
+# string. Two of them failed on it outright; the rest passed VACUOUSLY, since
+# `"" in anything` is True. A branded host here means the tests exercise the
+# real URL-building path instead of the refusal path.
+os.environ.setdefault("BOOKING_BASE_URL", "https://book.restland.com")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-google-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
 if "ENCRYPTION_KEY" not in os.environ:
@@ -84,6 +95,42 @@ TEST_TWILIO_AUTH_TOKEN = "test-auth-token-not-a-real-secret"
 # funeral home whose advisors do not each carry a number actually runs, and
 # it is the one the inbound webhook has to be able to resolve.
 TEST_ORG_TWILIO_NUMBER = "+19998887777"
+
+
+@pytest.fixture(autouse=True)
+def no_real_twilio_calls(monkeypatch):
+    """THE TEST SUITE MUST NEVER REACH api.twilio.com.
+
+    This is not hypothetical. sms_service.send_sms used to resolve its client
+    through get_twilio_client(); commit ee051e7 moved it to
+    _resolve_twilio_creds() for the org-shared-number work, and two tests in
+    test_message_review_flow.py went on patching the old name. Nothing failed
+    loudly - the patch simply stopped intercepting anything, and every run of
+    those tests made a real outbound HTTPS request to Twilio with the fake
+    credentials above, got a 401, and reported it as a skipped send. A stale
+    mock that silently becomes a live network call is the worst failure mode
+    available here: on a real account it would be real messages to real
+    families, and the only symptom was an assertion about a count.
+
+    So the construction of a Twilio REST client is refused at the source. A
+    test that needs to exercise sending patches the resolver (or send_sms
+    itself) deliberately; a test that reaches this has an out-of-date patch
+    target and gets told so by name instead of quietly going to the network.
+    """
+    def _refuse(*args, **kwargs):
+        raise RuntimeError(
+            "A test tried to construct a real Twilio REST client. Nothing in "
+            "this suite may talk to Twilio. Patch "
+            "app.services.sms_service._resolve_twilio_creds (which is what "
+            "send_sms/send_mms actually call) rather than an older helper."
+        )
+
+    try:
+        import twilio.rest
+        monkeypatch.setattr(twilio.rest, "Client", _refuse)
+    except ImportError:
+        # Twilio not installed in this environment - nothing to guard.
+        pass
 
 
 @pytest.fixture()
@@ -194,6 +241,44 @@ def client(db_session):
 def auth_headers(db_session, sample_advisor):
     """Authorization header for sample_advisor, for hitting protected routes."""
     from app.services.auth_service import create_access_token
+    token = create_access_token(sample_advisor, db_session)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture()
+def import_auth_headers(db_session, sample_org, sample_advisor):
+    """An advisor who actually HOLDS the two lead-import capabilities.
+
+    POST /leads/upload/confirm requires both lead_import_stage and
+    lead_import_commit (the legacy adapter performs both operations on the
+    caller's behalf). A plain advisor holds neither and correctly gets 403 -
+    that gate is deliberate and must not be weakened to make a test pass, so
+    the test grants the capability instead of the route dropping it.
+
+    Grants rather than promotion to org_admin, deliberately: role escalation
+    would also hand the fixture every other admin power and quietly stop these
+    tests from proving anything about import authorization specifically.
+    """
+    from app.services.auth_service import create_access_token
+    from app.models.models import UserCapabilityGrant
+
+    # scope_type/scope_id are set explicitly rather than left to the column
+    # default. capabilities.grants_for() filters on scope_type == customer_org
+    # and NULL never means global here, so a grant written without its scope
+    # is not a permissive grant - it is an inert one, and a fixture that
+    # silently produced inert grants would make these tests pass or fail for
+    # reasons unrelated to what they check.
+    for key in ("lead_import_stage", "lead_import_commit"):
+        db_session.add(UserCapabilityGrant(
+            user_id=sample_advisor.id,
+            organization_id=sample_org.id,
+            scope_type="customer_org",
+            scope_id=sample_org.id,
+            capability=key,
+            is_active=True,
+        ))
+    db_session.commit()
+
     token = create_access_token(sample_advisor, db_session)
     return {"Authorization": f"Bearer {token}"}
 

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin, require_tenant_user
-from app.models.models import User, Lead, CadenceState
+from app.models.models import User, Lead, CadenceState, CadenceStatus
 from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
 )
@@ -108,8 +108,23 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
         .all()
     )
 
-    # CadenceState.status is plain VARCHAR — never call .value on it
-    counts = {s: 0 for s in ("active", "paused", "completed", "cancelled")}
+    # CadenceState.status is plain VARCHAR - never call .value on it. The KEY
+    # SET, though, has to come from the enum, not from a hand-written tuple.
+    #
+    # REAL BUG FIXED HERE: this used to be a literal
+    # ("active", "paused", "completed", "cancelled"). That tuple was the
+    # /control endpoint's ACTION vocabulary, not CadenceStatus's value set, and
+    # substituting one for the other did two wrong things at once. It omitted
+    # stopped_replied, stopped_booked and stopped_dnc - the three ways a cadence
+    # actually ENDS WELL - so a lead who replied, booked, or went DNC was
+    # counted nowhere and the health summary under-reported its own totals. And
+    # it invented "cancelled", which is not a CadenceStatus member at all, so
+    # the response advertised a state the model cannot produce. Deriving the
+    # keys from CadenceStatus means a new status can never again go silently
+    # uncounted; "cancelled" is kept only because /control writes that literal
+    # and existing callers read the key.
+    counts = {status.value: 0 for status in CadenceStatus}
+    counts.setdefault("cancelled", 0)
     active_count = 0
     healthy_active_count = 0
     overdue_active_count = 0
