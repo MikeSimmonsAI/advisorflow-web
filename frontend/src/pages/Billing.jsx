@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { detectTheme, BRAND_CONFIG } from '../theme.js';
@@ -13,88 +13,195 @@ import { detectTheme, BRAND_CONFIG } from '../theme.js';
 const BRAND = BRAND_CONFIG[detectTheme()] || {};
 const SUPPORT_EMAIL = BRAND.supportEmail || 'support@evosyspro.live';
 
-const PLANS = [
-  {
-    key: 'starter',
-    name: 'Starter',
-    price: 497,
-    onboarding: 1500,
-    features: ['AI email cadence (8 emails / 14 days)', 'Up to 2 users', 'Up to 2,500 leads'],
-    color: '#2fb6ff',
-  },
-  {
-    key: 'growth',
-    name: 'Growth',
-    price: 997,
-    onboarding: 2500,
-    features: ['AI email + SMS 1,000/mo', 'AI voice 300 min/mo', 'Up to 3 users', 'Up to 5,000 leads'],
-    color: '#1ef0a8',
-    popular: true,
-  },
-  {
-    key: 'professional',
-    name: 'Professional',
-    price: 1997,
-    onboarding: 5000,
-    features: ['AI email + SMS 3,000/mo', 'AI voice 750 min/mo', 'Up to 5 users / 3 locations', 'Priority support + 24-mo price lock'],
-    color: '#f59e0b',
-  },
-];
+// ═══════════════════════════════════════════════════════════════════════════
+// THE HARDCODED `PLANS` ARRAY THAT LIVED HERE IS GONE.
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// It was a second, hand-maintained copy of the price list, and the browser
+// rendered THAT — `GET /billing/plans` was never called at all. Three things
+// were wrong with it and only deletion fixes any of them:
+//
+//   IT MEANT THE BROWSER BELIEVED IT KNEW THE PRICE. A price on the client is
+//   a price a customer can edit. Every amount on this screen is now display
+//   only, computed from what the server sent, and no request below carries an
+//   amount or a Stripe price id — checkout and change-plan take a plan KEY and
+//   an interval, and the server resolves the money from the brand's own
+//   catalogue.
+//
+//   IT HAD ALREADY DRIFTED. This file rendered annual as `price * 11 / 12`
+//   and labelled it "Month 13 free", while the server's copy did something
+//   else again. Nothing here derives an annual price any more: a plan is shown
+//   as annual only when the catalogue carries a real `annual_cents`.
+//
+//   IT WAS THE SAME FOR EVERY BRAND. `brand_billing_plans` is scoped per
+//   brand, so a white-label customer now sees their own brand's tiers and
+//   names rather than EvoSys Pro's.
+// ═══════════════════════════════════════════════════════════════════════════
 
 const STATUS_COLORS = {
   active: '#1ef0a8',
   trialing: '#2fb6ff',
   past_due: '#f59e0b',
+  unpaid: '#f59e0b',
+  paused: '#f59e0b',
+  incomplete: '#f59e0b',
   canceled: '#ef4444',
+  incomplete_expired: '#ef4444',
+};
+
+// THE STATUSES IN WHICH A SUBSCRIPTION ALREADY EXISTS — mirrored exactly from
+// SubscriptionStatus.OCCUPIED on the server, which is what /billing/checkout
+// refuses a second checkout on. The list is duplicated here ONLY to decide
+// which button to draw; the server refuses regardless, so a stale copy costs a
+// clearer message and never a double charge.
+const OCCUPIED_STATUSES = [
+  'trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused',
+];
+
+function money(cents, currency) {
+  if (cents === null || cents === undefined) return null;
+  const amount = cents / 100;
+  const symbol = (currency || 'usd').toLowerCase() === 'usd' ? '$' : '';
+  return symbol + amount.toLocaleString(undefined, {
+    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }) + (symbol ? '' : ` ${(currency || '').toUpperCase()}`);
+}
+
+// The API sends real datetimes (ISO strings). The previous version multiplied
+// them by 1000 as though they were unix seconds, which rendered every date as
+// "Invalid Date" — so a period end and a trial end were never actually shown.
+function when(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const d = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
+
+const CARD = {
+  background: '#1a1a2e', border: '1px solid #2a2a4a',
+  borderRadius: '12px', padding: '24px',
 };
 
 export default function Billing() {
   const [sub, setSub] = useState(null);
+  const [catalog, setCatalog] = useState(null);   // GET /billing/plans
   const [interval, setInterval] = useState('month');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [err, setErr] = useState('');
+  const [errStatus, setErrStatus] = useState(null);
+  const [notice, setNotice] = useState('');
   const [searchParams] = useSearchParams();
 
   const success = searchParams.get('success') === '1';
   const canceled = searchParams.get('canceled') === '1';
 
-  useEffect(() => {
-    api.get('/billing/subscription')
-      .then(r => setSub(r))
-      .catch(() => setSub(null))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    // Both reads, both allowed to fail independently. A subscription that will
+    // not load must not hide the catalogue, and vice versa — a page that shows
+    // nothing because one of two calls failed is a page nobody can act on.
+    const [subRes, planRes] = await Promise.allSettled([
+      api.get('/billing/subscription'),
+      api.get('/billing/plans'),
+    ]);
+    setSub(subRes.status === 'fulfilled' ? subRes.value : null);
+    if (planRes.status === 'fulfilled') {
+      setCatalog(planRes.value);
+    } else {
+      setCatalog({ plans: [], configured: false, unreachable: true,
+                   detail: planRes.reason?.message || 'Plans could not be loaded.' });
+    }
   }, []);
 
+  useEffect(() => {
+    load().finally(() => setLoading(false));
+  }, [load]);
+
+  function fail(e) {
+    // The server's own words. `detail` is where "no policy is configured for
+    // this brand" and "this organization already has a subscription" arrive,
+    // and both are things the customer needs to read verbatim rather than
+    // behind a generic failure message.
+    setErrStatus(e?.status ?? null);
+    setErr(e?.message || 'The request could not be completed.');
+    setActionLoading(null);
+  }
+
+  // A NEW SUBSCRIPTION. Only ever offered when there is not one already.
   async function handleCheckout(planKey) {
-    setErr('');
+    setErr(''); setErrStatus(null); setNotice('');
     setActionLoading(planKey);
     try {
+      // PLAN KEY AND INTERVAL. NOTHING ELSE. No price, no Stripe price id.
       const result = await api.post('/billing/checkout', { plan: planKey, interval });
       window.location.href = result.checkout_url;
-    } catch (e) {
-      setErr(e?.message || 'Plan selection failed. Contact your platform administrator to activate this plan.');
+    } catch (e) { fail(e); }
+  }
+
+  // AN EXISTING SUBSCRIPTION, MOVED IN PLACE.
+  //
+  // This is the half that was missing, and its absence is the defect: every
+  // plan card used to be a live "Select Plan" that called checkout, which
+  // created a SECOND Stripe subscription without cancelling the first. A
+  // customer on Starter who clicked Growth was billed for both, every month.
+  async function handleChangePlan(planKey, planName) {
+    setErr(''); setErrStatus(null); setNotice('');
+    const label = interval === 'year' ? 'annual' : 'monthly';
+    if (!window.confirm(
+      `Change your subscription to ${planName} (${label})?\n\n` +
+      'An upgrade takes effect immediately and is charged pro rata. A downgrade ' +
+      'takes effect at the end of the period you have already paid for.')) return;
+    setActionLoading(planKey);
+    try {
+      const r = await api.post('/billing/change-plan', { plan: planKey, interval });
+      setNotice(
+        r.pending_plan
+          ? `Change accepted. You keep your current plan until the end of this billing period, then move to ${planName}.`
+          : `Change applied ${r.effective || 'immediately'}.`);
+      await load();
       setActionLoading(null);
-    }
+    } catch (e) { fail(e); }
   }
 
   async function handlePortal() {
-    setErr('');
+    setErr(''); setErrStatus(null); setNotice('');
     setActionLoading('portal');
     try {
       const result = await api.post('/billing/portal');
       window.location.href = result.portal_url;
-    } catch (e) {
-      setErr(e?.message || 'Could not open billing portal. Contact your platform administrator.');
-      setActionLoading(null);
-    }
+    } catch (e) { fail(e); }
   }
 
-  const currentPlan = sub?.plan || 'trial';
-  const billingStatus = sub?.billing_status || 'trialing';
-  const periodEnd = sub?.current_period_end
-    ? new Date(sub.current_period_end * 1000).toLocaleDateString()
-    : null;
+  // ── Everything below is DERIVED FROM THE SERVER'S ANSWER ────────────────
+  const plans = catalog?.plans || [];
+  const configured = Boolean(catalog?.configured) && plans.length > 0;
+  const currentKey = sub?.plan || catalog?.current_plan || 'trial';
+  const billingStatus = (sub?.billing_status || 'trialing').toLowerCase();
+  const currentInterval = sub?.stripe_plan_interval || catalog?.current_interval || 'month';
+
+  // WHETHER A SUBSCRIPTION ALREADY EXISTS DECIDES WHICH ENDPOINT THIS PAGE MAY
+  // CALL. Same test the server applies, so the button drawn is the operation
+  // that will actually be permitted.
+  const hasSubscription = Boolean(sub?.stripe_subscription_id)
+    && OCCUPIED_STATUSES.includes(billingStatus);
+
+  const planFor = (key) => plans.find(p => p.key === key) || null;
+  const nameFor = (key) => planFor(key)?.name || key;
+  const periodEnd = when(sub?.current_period_end);
+  const trialEnd = when(sub?.trial_end);
+  const pendingPlan = sub?.pending_plan || null;
+  const annualOffered = plans.some(p => p.annual_cents !== null && p.annual_cents !== undefined);
+  const invoices = sub?.invoices || [];
+  const statusColor = STATUS_COLORS[billingStatus] || '#888';
+
+  // Start on the interval the customer is actually billed on, so the prices
+  // shown are the ones they are paying.
+  useEffect(() => {
+    if (sub?.stripe_plan_interval) setInterval(sub.stripe_plan_interval);
+  }, [sub?.stripe_plan_interval]);
 
   if (loading) return (
     <div style={{ padding: '40px', color: '#aaa', textAlign: 'center' }}>Loading billing info…</div>
@@ -103,7 +210,7 @@ export default function Billing() {
   return (
     <div style={{ padding: '32px', maxWidth: '960px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '8px' }}>Billing & Plan</h1>
-      <p style={{ color: '#aaa', marginBottom: '32px' }}>Manage your subscription and upgrade your plan.</p>
+      <p style={{ color: '#aaa', marginBottom: '32px' }}>Manage your subscription and see what you have been charged.</p>
 
       {success && (
         <div style={{ background: '#1ef0a820', border: '1px solid #1ef0a8', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#1ef0a8', fontWeight: '600' }}>
@@ -115,94 +222,223 @@ export default function Billing() {
           Checkout canceled. No changes were made.
         </div>
       )}
+      {notice && (
+        <div style={{ background: '#2fb6ff20', border: '1px solid #2fb6ff', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#2fb6ff' }}>
+          {notice}
+        </div>
+      )}
       {err && (
         <div style={{ background: '#ef444420', border: '1px solid #ef4444', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#ef4444', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
           <span>⚠️</span>
           <div>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Action required</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              {errStatus === 409 ? 'This change was not applied' : 'Action required'}
+            </div>
+            {/* THE SERVER'S OWN detail, VERBATIM. A 409 here is either "you
+                already have a subscription" or "no plan-change policy is
+                configured for this brand", and paraphrasing either one leaves
+                the customer with no idea what to do next. */}
             <div style={{ fontSize: 14 }}>{err}</div>
             <div style={{ fontSize: 13, marginTop: 8, color: '#aaa' }}>
-              To activate or change your plan, contact your platform administrator at{' '}
+              Need help? Contact your platform administrator at{' '}
               <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#ef4444' }}>{SUPPORT_EMAIL}</a>.
             </div>
           </div>
         </div>
       )}
 
-      {/* Current plan summary */}
-      <div style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: '12px', padding: '24px', marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+      {/* ── Current plan summary ─────────────────────────────────────────── */}
+      <div style={{ ...CARD, marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <div style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>Current plan</div>
-          <div style={{ fontSize: '22px', fontWeight: '700', textTransform: 'capitalize' }}>{currentPlan}</div>
+          <div style={{ fontSize: '22px', fontWeight: '700' }}>{nameFor(currentKey)}</div>
+          <div style={{ fontSize: '13px', color: '#888', marginTop: '4px' }}>
+            Billed {currentInterval === 'year' ? 'annually' : 'monthly'}
+          </div>
           {periodEnd && (
             <div style={{ fontSize: '13px', color: '#888', marginTop: '4px' }}>
               {sub?.cancel_at_period_end ? 'Cancels' : 'Renews'} {periodEnd}
             </div>
           )}
+          {trialEnd && (
+            <div style={{ fontSize: '13px', color: '#2fb6ff', marginTop: '4px' }}>
+              Trial ends {trialEnd}
+            </div>
+          )}
+          {/* A DOWNGRADE THAT HAS NOT HAPPENED YET. Both answers are true at
+              once — the tier paid for until the period ends, and the tier it
+              drops to afterwards — so the screen says both, in words. */}
+          {pendingPlan && (
+            <div style={{ fontSize: '13px', color: '#f59e0b', marginTop: '8px', maxWidth: 420 }}>
+              {periodEnd
+                ? `${nameFor(currentKey)} until ${periodEnd}, then ${nameFor(pendingPlan)}.`
+                : `${nameFor(currentKey)} until the end of your current billing period, then ${nameFor(pendingPlan)}.`}
+              {' '}You keep the plan you have already paid for until then.
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <span style={{ background: `${STATUS_COLORS[billingStatus]}22`, color: STATUS_COLORS[billingStatus], border: `1px solid ${STATUS_COLORS[billingStatus]}55`, borderRadius: '20px', padding: '4px 14px', fontSize: '13px', fontWeight: '600', textTransform: 'capitalize' }}>
-            {billingStatus}
+          <span style={{ background: `${statusColor}22`, color: statusColor, border: `1px solid ${statusColor}55`, borderRadius: '20px', padding: '4px 14px', fontSize: '13px', fontWeight: '600', textTransform: 'capitalize' }}>
+            {billingStatus.replace(/_/g, ' ')}
           </span>
           {sub?.stripe_customer_id && (
             <button onClick={handlePortal} disabled={actionLoading === 'portal'} style={{ background: '#2a2a4a', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' }}>
-              {actionLoading === 'portal' ? 'Opening…' : 'Manage Billing →'}
+              {actionLoading === 'portal' ? 'Opening…' : 'Payment method & invoices →'}
             </button>
           )}
         </div>
       </div>
 
-      {/* Admin contact notice */}
-      <div style={{ background: 'rgba(47,182,255,0.06)', border: '1px solid rgba(47,182,255,0.2)', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', fontSize: '13px', color: '#6aa8cc', display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span>ℹ️</span>
-        <span>Plan changes are processed by your platform administrator. Click <strong style={{ color: '#2fb6ff' }}>Select Plan</strong> below to request a plan, or email <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#2fb6ff' }}>{SUPPORT_EMAIL}</a>.</span>
-      </div>
-
-      {/* Billing interval toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
-        <span style={{ fontSize: '14px', color: interval === 'month' ? '#fff' : '#888' }}>Monthly</span>
-        <div onClick={() => setInterval(i => i === 'month' ? 'year' : 'month')}
-          style={{ width: '44px', height: '24px', background: interval === 'year' ? '#2fb6ff' : '#2a2a4a', borderRadius: '12px', cursor: 'pointer', position: 'relative', transition: 'background 0.2s' }}>
-          <div style={{ position: 'absolute', top: '3px', left: interval === 'year' ? '23px' : '3px', width: '18px', height: '18px', background: '#fff', borderRadius: '50%', transition: 'left 0.2s' }} />
+      {/* ── The catalogue, or an honest empty state ──────────────────────── */}
+      {!configured ? (
+        // NOT A SPINNER FOREVER. A brand with no plan catalogue configured is a
+        // real, reachable state, and it is the administrator's problem rather
+        // than the customer's — so it says so instead of pretending to load.
+        <div style={{ ...CARD, marginBottom: '32px' }}>
+          <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '6px' }}>
+            No plans are available on this account yet
+          </div>
+          <div style={{ color: '#aaa', fontSize: '14px', marginBottom: '10px' }}>
+            {catalog?.detail
+              || 'Your brand has no subscription plans configured, so there is nothing to choose from here yet.'}
+          </div>
+          <div style={{ color: '#888', fontSize: '13px' }}>
+            Contact your platform administrator at{' '}
+            <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#2fb6ff' }}>{SUPPORT_EMAIL}</a>.
+          </div>
         </div>
-        <span style={{ fontSize: '14px', color: interval === 'year' ? '#fff' : '#888' }}>Annual <span style={{ color: '#1ef0a8', fontSize: '12px' }}>Month 13 free</span></span>
-      </div>
-
-      {/* Plan cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-        {PLANS.map(plan => {
-          const isCurrent = currentPlan === plan.key;
-          const price = interval === 'year' ? Math.round(plan.price * 11 / 12) : plan.price;
-          return (
-            <div key={plan.key} style={{ background: '#1a1a2e', border: `1px solid ${isCurrent ? plan.color : '#2a2a4a'}`, borderRadius: '12px', padding: '24px', position: 'relative', boxShadow: isCurrent ? `0 0 0 2px ${plan.color}` : 'none' }}>
-              {plan.popular && !isCurrent && (
-                <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: '#1ef0a8', color: '#000', fontSize: '11px', fontWeight: '700', padding: '3px 12px', borderRadius: '20px' }}>MOST POPULAR</div>
-              )}
-              {isCurrent && (
-                <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#000', fontSize: '11px', fontWeight: '700', padding: '3px 12px', borderRadius: '20px' }}>CURRENT PLAN</div>
-              )}
-              <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '8px' }}>{plan.name}</div>
-              <div style={{ fontSize: '32px', fontWeight: '800', marginBottom: '4px' }}>${price.toLocaleString()}<span style={{ fontSize: '14px', fontWeight: '400', color: '#888' }}>/mo</span></div>
-              {interval === 'year' && <div style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>Billed ${(plan.price * 11).toLocaleString()}/yr · save ${plan.price.toLocaleString()}</div>}
-              <div style={{ marginBottom: '20px' }}>
-                {plan.features.map(f => <div key={f} style={{ fontSize: '13px', color: '#ccc', marginBottom: '6px' }}>✓ {f}</div>)}
-              </div>
-              <button onClick={() => handleCheckout(plan.key)} disabled={isCurrent || actionLoading === plan.key}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: isCurrent ? '#2a2a4a' : plan.color, color: isCurrent ? '#888' : '#000', fontWeight: '700', fontSize: '14px', cursor: isCurrent ? 'not-allowed' : 'pointer' }}>
-                {actionLoading === plan.key ? 'Processing…' : isCurrent ? 'Current Plan' : 'Select Plan'}
-              </button>
+      ) : (
+        <>
+          {hasSubscription && (
+            <div style={{ background: 'rgba(47,182,255,0.06)', border: '1px solid rgba(47,182,255,0.2)', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', fontSize: '13px', color: '#6aa8cc', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span>ℹ️</span>
+              <span>You already have a subscription, so these are <strong style={{ color: '#2fb6ff' }}>plan changes</strong> — your existing subscription is moved rather than a second one started. Upgrades apply immediately and are charged pro rata; downgrades apply at the end of the period you have already paid for.</span>
             </div>
-          );
-        })}
-      </div>
+          )}
 
-      {/* Enterprise CTA */}
-      <div style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: '12px', padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <div style={{ fontWeight: '700', fontSize: '16px', marginBottom: '4px' }}>Enterprise</div>
-          <div style={{ color: '#888', fontSize: '14px' }}>Unlimited leads, users, and locations. White-label available. Custom pricing.</div>
-        </div>
-        <a href={`mailto:${SUPPORT_EMAIL}?subject=Enterprise Plan Inquiry`} style={{ background: '#2a2a4a', color: '#fff', padding: '12px 24px', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>Contact Us →</a>
+          {/* Interval toggle — shown ONLY when the catalogue actually carries an
+              annual price. The previous version offered "Annual · Month 13
+              free" against a price it computed itself, describing a discount
+              no server agreed with. */}
+          {annualOffered && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+              <span style={{ fontSize: '14px', color: interval === 'month' ? '#fff' : '#888' }}>Monthly</span>
+              <div onClick={() => setInterval(i => (i === 'month' ? 'year' : 'month'))}
+                style={{ width: '44px', height: '24px', background: interval === 'year' ? '#2fb6ff' : '#2a2a4a', borderRadius: '12px', cursor: 'pointer' }}>
+                <div style={{ position: 'relative', top: '3px', left: interval === 'year' ? '23px' : '3px', width: '18px', height: '18px', background: '#fff', borderRadius: '50%' }} />
+              </div>
+              <span style={{ fontSize: '14px', color: interval === 'year' ? '#fff' : '#888' }}>Annual</span>
+            </div>
+          )}
+
+          {/* ── Plan cards ─────────────────────────────────────────────── */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px', marginBottom: '40px' }}>
+            {plans.map(plan => {
+              const isCurrent = plan.key === currentKey;
+              const isCurrentExactly = isCurrent && currentInterval === interval;
+              // DISPLAY ONLY, AND NEVER DERIVED. The annual figure is whatever
+              // the catalogue holds; this page no longer invents one from the
+              // monthly price.
+              const cents = interval === 'year' ? plan.annual_cents : plan.monthly_cents;
+              const priced = cents !== null && cents !== undefined;
+              const accent = isCurrent ? '#1ef0a8' : '#2fb6ff';
+              const busy = actionLoading === plan.key;
+
+              let label = hasSubscription ? 'Change plan' : 'Select plan';
+              let disabled = busy;
+              if (isCurrentExactly) { label = 'Current plan'; disabled = true; }
+              else if (!plan.is_purchasable) { label = 'Contact us'; }
+              else if (!priced) { label = `No ${interval === 'year' ? 'annual' : 'monthly'} price`; disabled = true; }
+              if (busy) label = 'Working…';
+
+              return (
+                <div key={plan.key} style={{ ...CARD, border: `1px solid ${isCurrent ? accent : '#2a2a4a'}`, position: 'relative' }}>
+                  {isCurrent && (
+                    <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: accent, color: '#000', fontSize: '11px', fontWeight: '700', padding: '3px 12px', borderRadius: '20px', whiteSpace: 'nowrap' }}>CURRENT PLAN</div>
+                  )}
+                  <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '8px' }}>{plan.name}</div>
+                  <div style={{ fontSize: '32px', fontWeight: '800', marginBottom: '4px' }}>
+                    {priced
+                      ? <>{money(cents, plan.currency)}<span style={{ fontSize: '14px', fontWeight: '400', color: '#888' }}>{interval === 'year' ? '/yr' : '/mo'}</span></>
+                      : <span style={{ fontSize: '18px', fontWeight: '600', color: '#888' }}>
+                          {plan.is_purchasable ? 'No price set' : 'Custom pricing'}
+                        </span>}
+                  </div>
+                  {plan.description && (
+                    <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>{plan.description}</div>
+                  )}
+                  <div style={{ marginBottom: '20px', marginTop: '12px' }}>
+                    {(plan.features || []).map(f => (
+                      <div key={f} style={{ fontSize: '13px', color: '#ccc', marginBottom: '6px' }}>✓ {f}</div>
+                    ))}
+                  </div>
+
+                  {/* A tier that is listed but not self-serve (Enterprise) gets
+                      a contact link, never a checkout button — the server
+                      refuses it, and a button that always fails is worse than
+                      no button. */}
+                  {!plan.is_purchasable ? (
+                    <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(plan.name + ' plan enquiry')}`}
+                       style={{ display: 'block', textAlign: 'center', width: '100%', padding: '12px', borderRadius: '8px', background: '#2a2a4a', color: '#fff', fontWeight: '700', fontSize: '14px', textDecoration: 'none', boxSizing: 'border-box' }}>
+                      Contact us →
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => (hasSubscription
+                        ? handleChangePlan(plan.key, plan.name)
+                        : handleCheckout(plan.key))}
+                      disabled={disabled}
+                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: disabled ? '#2a2a4a' : accent, color: disabled ? '#888' : '#000', fontWeight: '700', fontSize: '14px', cursor: disabled ? 'not-allowed' : 'pointer' }}>
+                      {label}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ── Invoice history ──────────────────────────────────────────────── */}
+      <div style={{ ...CARD }}>
+        <div style={{ fontWeight: '700', fontSize: '16px', marginBottom: '12px' }}>Invoices</div>
+        {invoices.length === 0 ? (
+          // No invoice yet is a fact, not a failure — and it is not a $0 row.
+          <div style={{ color: '#888', fontSize: '13px' }}>
+            No invoices have been issued on this account yet.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ color: '#888', textAlign: 'left' }}>
+                  <th style={{ padding: '8px 10px 8px 0' }}>Period</th>
+                  <th style={{ padding: '8px 10px' }}>Status</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount</th>
+                  <th style={{ padding: '8px 0 8px 10px', textAlign: 'right' }}>Receipt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map(inv => (
+                  <tr key={inv.id} style={{ borderTop: '1px solid #2a2a4a', color: '#ccc' }}>
+                    <td style={{ padding: '10px 10px 10px 0' }}>
+                      {when(inv.period_start) || when(inv.paid_at) || '—'}
+                    </td>
+                    <td style={{ padding: '10px', textTransform: 'capitalize' }}>{inv.status || '—'}</td>
+                    <td style={{ padding: '10px', textAlign: 'right' }}>
+                      {money(inv.amount_paid_cents ?? inv.amount_due_cents, inv.currency) || '—'}
+                    </td>
+                    <td style={{ padding: '10px 0 10px 10px', textAlign: 'right' }}>
+                      {inv.hosted_invoice_url
+                        ? <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" style={{ color: '#2fb6ff' }}>View →</a>
+                        : <span style={{ color: '#666' }}>—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

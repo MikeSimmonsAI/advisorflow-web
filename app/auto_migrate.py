@@ -47,6 +47,41 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Stripe billing on organizations (2026-09-07) ───────────────────────
+    #
+    # THESE WERE NEVER IN THIS LIST AND SHOULD HAVE BEEN SINCE THE DAY THEY
+    # WERE ADDED TO THE MODEL. billing_router.py writes all four - on checkout,
+    # and on three webhook events - so they are live, load-bearing columns, not
+    # aspirational ones. But `organizations` long predates them, and
+    # create_all() only ever creates missing TABLES, never missing columns on a
+    # table that already exists. That is stated a few entries below for
+    # compensation_entries and it is just as true here.
+    #
+    # Any database whose `organizations` table was created before these landed
+    # in models.py therefore did not get them, and because SQLAlchemy emits
+    # every mapped column in its SELECT, `db.query(Organization)` there would
+    # fail with UndefinedColumn - taking down far more than billing. The live
+    # service is up, so production evidently has them. The point of adding them
+    # now is that the migration authority must COVER them: the next Stripe
+    # column added to Organization has to land somewhere real, and "it happened
+    # to work last time" is not a migration strategy.
+    #
+    # ADD IF NOT EXISTS makes each of these a no-op where the column is already
+    # present, which is every environment we know of.
+    ("organizations", "stripe_customer_id", "VARCHAR"),
+    ("organizations", "stripe_subscription_id", "VARCHAR"),
+    ("organizations", "stripe_plan_interval", "VARCHAR"),
+    ("organizations", "billing_status", "VARCHAR"),
+
+    # New billing state that the mirrored Stripe subscription needs a home for.
+    # All nullable: an organization that has never subscribed has no period and
+    # no plan, and NULL says that honestly where 0 or "" would not.
+    ("organizations", "billing_plan_key", "VARCHAR"),
+    ("organizations", "billing_current_period_end", "TIMESTAMP"),
+    ("organizations", "billing_cancel_at_period_end", "BOOLEAN DEFAULT FALSE"),
+    ("organizations", "billing_pending_plan_key", "VARCHAR"),
+    ("organizations", "billing_trial_end", "TIMESTAMP"),
+
     # ── Import batch options (2026-09-07) ──────────────────────────────────
     # POST /leads/upload/confirm accepted all four of these as multipart form
     # fields and then handed none of them to the pipeline, so a "Source year"

@@ -429,11 +429,40 @@ class Organization(Base):
     twilio_a2p_campaign_use_case  = Column(String, nullable=True)   # e.g. "MIXED"
     twilio_a2p_registered_at      = Column(DateTime, nullable=True)
 
-    # Stripe billing — populated by billing_router.py on checkout/webhook
+    # ── Stripe billing ────────────────────────────────────────────────────
+    #
+    # Mirrored from Stripe by the webhook. STRIPE IS THE PROCESSOR; THESE ARE A
+    # CACHE OF WHAT IT TOLD US, not an independent source of truth. A webhook
+    # is the only thing that writes them, because a browser redirect back from
+    # Checkout is not proof of payment - the customer can close the tab, and
+    # anyone can visit a success URL.
+    #
+    # `plan` (further up, original schema) remains the coarse tier string the
+    # rest of the app reads. `billing_plan_key` is the SAME value resolved
+    # against this brand's billing catalogue, kept separate so the legacy
+    # column can keep its existing meaning while brand-scoped plans land.
     stripe_customer_id      = Column(String, nullable=True)
     stripe_subscription_id  = Column(String, nullable=True)
     stripe_plan_interval    = Column(String, nullable=True)  # 'month' | 'year'
     billing_status          = Column(String, nullable=True)  # 'active' | 'past_due' | 'canceled' | 'trialing'
+
+    billing_plan_key            = Column(String, nullable=True)
+    billing_current_period_end  = Column(DateTime, nullable=True)
+    billing_cancel_at_period_end = Column(Boolean, default=False, nullable=True)
+
+    # A DOWNGRADE THAT HAS NOT HAPPENED YET.
+    #
+    # The decided policy is that a downgrade takes effect at the END of the
+    # period the customer already paid for, with no credit or refund - they
+    # keep the tier they bought until it runs out. So between the request and
+    # the period boundary there are two true answers to "what plan is this
+    # organization on": the one they are entitled to now, and the one they will
+    # drop to. Entitlements read `billing_plan_key`; the Billing screen shows
+    # both. Collapsing them into one column would either take away access
+    # somebody paid for, or hide a change they already made.
+    billing_pending_plan_key    = Column(String, nullable=True)
+
+    billing_trial_end           = Column(DateTime, nullable=True)
 
     platform = relationship("Platform", back_populates="organizations")
     # `foreign_keys` IS REQUIRED HERE, NOT DECORATIVE. There are now three

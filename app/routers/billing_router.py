@@ -26,52 +26,130 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Organization
+from app.models.billing_models import (BillingInterval, BillingInvoice,
+                                       BillingPayment, ChangeTiming,
+                                       ProrationBehavior, SubscriptionStatus)
 from app.services.capabilities import require_capability
+from app.services import billing_catalog, billing_policy, billing_webhook
+from app.routers.audit_log_router import log_action
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["billing"])
 
+
+def _brand_base_url(db: Session, org: Organization) -> str:
+    """Return the customer to THEIR brand's domain, never a platform hostname."""
+    from app.services.public_identity import public_base_url as _public_base
+    return (_public_base(db, org.id)
+            or os.environ.get("APP_BASE_URL", "").strip()
+            or "https://advisorflow-frontend.onrender.com")
+
+
+def _audit(db: Session, org: Organization, user: User, action: str, details: dict) -> None:
+    """Money-adjacent state changes go in the audit log, not just a log line.
+
+    Billing was the least-audited control-plane surface in this codebase: plan
+    activation, interval change and cancellation were `logger.info` only, while
+    a full audited log_action engine was already in use by the neighbouring God
+    billing route. A log line rotates away; "who moved this customer to Growth,
+    and when" is a question somebody asks months later.
+
+    NEVER carries a secret. Plan keys, intervals and public Stripe object ids
+    only - no API key, no webhook secret, no card detail.
+    """
+    try:
+        log_action(db, org.id, getattr(user, "id", None), action=action,
+                   target_type="organization", target_id=org.id, details=details)
+    except Exception:
+        # An audit failure must not take a payment path down with it.
+        logger.exception("billing: audit write failed for %s", action)
+
+
+def _price_payload_for(plan, interval: str, db: Session, org: Organization) -> dict:
+    """The Stripe price for this plan, PREFERRING A REAL PRICE OBJECT.
+
+    When the brand's catalogue carries a Stripe price id, that id is used. The
+    previous implementation built an inline `price_data` block on every call,
+    which created a brand-new anonymous Price in Stripe for every checkout -
+    thousands of one-off Prices, no Product, and nothing in the dashboard that
+    could be reported on or reconciled.
+
+    The inline fallback remains for a brand whose Stripe Products have not been
+    created yet, so a new brand is not blocked on that setup step. It is a
+    fallback, not the design.
+    """
+    price_id = billing_catalog.stripe_price_id_for(plan, interval)
+    if price_id:
+        return {"price": price_id}
+
+    cents = billing_catalog.price_cents_for(plan, interval)
+    if cents is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Plan %r has no %s price configured." % (plan.key, interval))
+
+    # The product NAME comes from the brand, not from a hardcoded string. It is
+    # what appears on the customer's card statement and receipt, and it was
+    # previously hardcoded to "BookaBoost {plan}" - so an EvoSys Pro customer's
+    # invoice read BookaBoost. That is the same defect already fixed twice
+    # elsewhere (support email, redirect host); this is the third instance.
+    brand_name = _brand_display_name(db, org)
+    return {
+        "price_data": {
+            "currency": plan.currency or "usd",
+            "unit_amount": cents,
+            "recurring": {"interval": interval},
+            "product_data": {"name": "%s %s" % (brand_name, plan.name)},
+        }
+    }
+
+
+def _line_item_for(plan, interval: str, db: Session, org: Organization) -> dict:
+    payload = _price_payload_for(plan, interval, db, org)
+    return {**payload, "quantity": 1}
+
+
+def _brand_display_name(db: Session, org: Organization) -> str:
+    """The brand's own name for receipts. Falls back to the org's platform row."""
+    try:
+        from app.models.models import Platform
+        pid = getattr(org, "platform_id", None)
+        if pid:
+            platform = db.query(Platform).filter(Platform.id == pid).first()
+            if platform is not None:
+                for attr in ("display_name", "name", "brand_name"):
+                    value = getattr(platform, attr, None)
+                    if value:
+                        return str(value)
+    except Exception:
+        logger.exception("billing: could not resolve brand display name")
+    return "Subscription"
+
 # ---------------------------------------------------------------------------
 # Plan catalog
+#
+# THE HARDCODED `PLANS` DICT THAT LIVED HERE IS GONE. It is now
+# `brand_billing_plans`, scoped per brand, read through billing_catalog.
+#
+# It had to go rather than be tidied, for three reasons that a dict cannot fix:
+#
+#   IT COULD NOT BE BRAND-SCOPED. A module global is the same for every brand,
+#   so a second white-label brand's customers would have been shown - and
+#   charged - EvoSys Pro's prices, offered EvoSys Pro's three tier names, and
+#   sent a receipt reading "BookaBoost".
+#
+#   IT WAS NOT THE ONLY COPY. frontend/src/pages/Billing.jsx carried its own
+#   literal array of the same prices and rendered THAT; this endpoint was never
+#   called. Two hand-maintained copies of a price list is one copy too many,
+#   and they had already drifted on the annual discount.
+#
+#   IT MADE PRICE A CONSTANT RATHER THAN A DECISION. Changing what a customer
+#   pays required a deploy.
+#
+# The one thing to keep hold of: `brand_packages` is a DIFFERENT catalogue for
+# a different purpose (what the sales team sells, and what compensation is
+# computed from) and it keys on the same three strings. Nothing here reads it.
 # ---------------------------------------------------------------------------
-PLANS = {
-    "starter": {
-        "name": "Starter",
-        "monthly_usd": 497,
-        "monthly_cents": 49700,
-        "onboarding_usd": 1500,
-        "max_leads": 2500,
-        "max_users": 2,
-        "features": ["AI email cadence (8 emails / 14 days)", "Up to 2 users", "Up to 2,500 leads"],
-    },
-    "growth": {
-        "name": "Growth",
-        "monthly_usd": 997,
-        "monthly_cents": 99700,
-        "onboarding_usd": 2500,
-        "max_leads": 5000,
-        "max_users": 3,
-        "features": ["AI email + SMS 1,000/mo", "AI voice 300 min/mo", "Up to 3 users", "Up to 5,000 leads"],
-    },
-    "professional": {
-        "name": "Professional",
-        "monthly_usd": 1997,
-        "monthly_cents": 199700,
-        "onboarding_usd": 5000,
-        "max_leads": 7500,
-        "max_users": 5,
-        "features": ["AI email + SMS 3,000/mo", "AI voice 750 min/mo", "Up to 5 users / 3 locations", "Priority support + 24-month price lock"],
-    },
-    "enterprise": {
-        "name": "Enterprise",
-        "monthly_usd": None,
-        "monthly_cents": None,
-        "onboarding_usd": None,
-        "max_leads": None,
-        "max_users": None,
-        "features": ["Everything in Professional", "Unlimited leads, users, and locations", "White-label available"],
-    },
-}
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +199,33 @@ def _get_or_create_customer(org: Organization, db: Session) -> str:
 # configuration.
 # ---------------------------------------------------------------------------
 @router.get("/plans")
-def get_plans(current_user: User = Depends(_require_admin)):
-    return {"plans": PLANS}
+def get_plans(current_user: User = Depends(_require_admin),
+              db: Session = Depends(get_db)):
+    """THIS BRAND'S plans, from the database, scoped to the caller's own brand.
+
+    Previously returned a module-global dict identical for every brand. The
+    Billing screen did not even call it - it rendered its own hardcoded copy of
+    the same prices, which had already drifted from this one on the annual
+    discount. Now there is one source, it is per-brand, and the screen reads it.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+    if not platform_id:
+        return {"plans": [], "configured": False,
+                "detail": "This organization is not attached to a brand, so no "
+                          "plan catalogue applies."}
+
+    plans = billing_catalog.plans_for(db, platform_id)
+    return {
+        "plans": [_plan_public(p) for p in plans],
+        "configured": bool(plans),
+        "current_plan": getattr(org, "billing_plan_key", None) or org.plan,
+        "current_interval": getattr(org, "stripe_plan_interval", None) or "month",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -137,28 +240,69 @@ def get_subscription(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+    current_key = getattr(org, "billing_plan_key", None) or org.plan
+    current_plan = billing_catalog.resolve_plan(db, platform_id, current_key)
+
     result = {
-        "plan": org.plan or "trial",
+        "plan": current_key or "trial",
         "billing_status": getattr(org, "billing_status", None) or "trialing",
         "stripe_customer_id": getattr(org, "stripe_customer_id", None),
         "stripe_subscription_id": getattr(org, "stripe_subscription_id", None),
         "stripe_plan_interval": getattr(org, "stripe_plan_interval", None) or "month",
-        "plan_details": PLANS.get(org.plan or "trial"),
-        "current_period_end": None,
-        "cancel_at_period_end": False,
+        "plan_details": _plan_public(current_plan) if current_plan else None,
+        # Read from the LOCAL MIRROR, which the webhook keeps current.
+        #
+        # This used to be a synchronous, uncached Stripe API call on every load
+        # of the Billing screen, which made the page exactly as fast and as
+        # available as Stripe's API on its worst day - for two values the
+        # webhook already tells us.
+        "current_period_end": getattr(org, "billing_current_period_end", None),
+        "cancel_at_period_end": bool(getattr(org, "billing_cancel_at_period_end", False)),
+        "trial_end": getattr(org, "billing_trial_end", None),
+        # A downgrade that has been requested and has not taken effect yet. The
+        # customer keeps the tier they paid for until the period ends, so both
+        # answers are true at once and the screen shows both rather than
+        # pretending the change already happened.
+        "pending_plan": getattr(org, "billing_pending_plan_key", None),
     }
 
-    sub_id = getattr(org, "stripe_subscription_id", None)
-    if sub_id:
-        try:
-            _stripe_client()
-            sub = stripe.Subscription.retrieve(sub_id)
-            result["current_period_end"] = sub.current_period_end
-            result["cancel_at_period_end"] = sub.cancel_at_period_end
-        except Exception as e:
-            logger.warning("Could not fetch Stripe sub %s: %s", sub_id, e)
+    # Recent invoices, from the local mirror. The customer can see what they
+    # were charged without a round trip, and the hosted receipt URL is Stripe's
+    # own public link.
+    invoices = (db.query(BillingInvoice)
+                .filter(BillingInvoice.organization_id == org.id)
+                .order_by(BillingInvoice.period_start.desc().nullslast())
+                .limit(12).all())
+    result["invoices"] = [{
+        "id": i.stripe_invoice_id,
+        "status": i.status,
+        "amount_paid_cents": i.amount_paid_cents,
+        "amount_due_cents": i.amount_due_cents,
+        "currency": i.currency,
+        "period_start": i.period_start,
+        "period_end": i.period_end,
+        "paid_at": i.paid_at,
+        "hosted_invoice_url": i.hosted_invoice_url,
+    } for i in invoices]
 
     return result
+
+
+def _plan_public(plan) -> dict:
+    """What a customer may see about a plan. No Stripe ids, no internals."""
+    return {
+        "key": plan.key,
+        "name": plan.name,
+        "description": plan.description,
+        "monthly_cents": plan.monthly_cents,
+        "annual_cents": plan.annual_cents,
+        "currency": plan.currency,
+        "max_leads": plan.max_leads,
+        "max_users": plan.max_users,
+        "features": billing_catalog.features_for(plan),
+        "is_purchasable": bool(plan.is_purchasable),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -175,52 +319,208 @@ def create_checkout(
     current_user: User = Depends(_require_admin),
     db: Session = Depends(get_db),
 ):
-    if req.plan not in ("starter", "growth", "professional"):
-        raise HTTPException(status_code=400, detail="Invalid plan. Choose starter, growth, or professional.")
-    if req.interval not in ("month", "year"):
-        raise HTTPException(status_code=400, detail="Interval must be 'month' or 'year'.")
+    """Start a NEW subscription. Refuses if one already exists.
 
-    plan_info = PLANS[req.plan]
-    _stripe_client()
+    ═══════════════════════════════════════════════════════════════════════
+    THIS REFUSAL IS THE FIX FOR A LIVE DOUBLE-BILLING DEFECT.
+    ═══════════════════════════════════════════════════════════════════════
 
+    Every plan card on the Billing screen was a live "Select Plan" button, and
+    each one called this endpoint, which created a SECOND Stripe subscription
+    without cancelling the first. A customer on Starter who clicked Growth was
+    billed for both, every month, until somebody noticed.
+
+    A checkout session is for acquiring a subscription. Changing one is a
+    different operation with different money consequences, and it now lives at
+    POST /billing/change-plan, which modifies the existing subscription in
+    place. Splitting them means the duplicate-subscription path is not one
+    mis-click away - it does not exist.
+    """
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    # ── The price is resolved SERVER-SIDE, from this org's own brand ──────
+    #
+    # The request names a plan and an interval. It does not carry an amount and
+    # it does not carry a Stripe price id, because both are things a customer
+    # would enjoy choosing. A plan key belonging to a different brand resolves
+    # to nothing here, so one brand's customer cannot buy - or discover -
+    # another brand's tier.
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+    if not platform_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This organization is not attached to a brand, so no plan "
+                   "catalogue applies. Contact support.")
+    try:
+        plan = billing_catalog.require_purchasable(db, platform_id, req.plan, req.interval)
+    except billing_catalog.PlanNotAvailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # ── Refuse a second primary subscription ─────────────────────────────
+    existing_status = (getattr(org, "billing_status", None) or "").lower()
+    if getattr(org, "stripe_subscription_id", None) and existing_status in SubscriptionStatus.OCCUPIED:
+        raise HTTPException(
+            status_code=409,
+            detail="This organization already has a subscription. Use "
+                   "'change plan' to move between plans - starting a second "
+                   "checkout would bill you twice.")
+
+    _stripe_client()
     customer_id = _get_or_create_customer(org, db)
+
     # The customer paying is a funeral home on a white-label brand. Bouncing
     # them to an AdvisorFlow Render hostname after checkout tells them who
     # their software really belongs to. Their own brand's domain first.
-    from app.services.public_identity import public_base_url as _public_base
-    base_url = (_public_base(db, org.id)
-                or os.environ.get("APP_BASE_URL", "").strip()
-                or "https://advisorflow-frontend.onrender.com")
+    base_url = _brand_base_url(db, org)
 
-    # Annual: 11 months billed (month 13 free = ~8% discount)
-    monthly_cents = plan_info["monthly_cents"]
-    unit_amount = (monthly_cents * 11) if req.interval == "year" else monthly_cents
+    line_item = _line_item_for(plan, req.interval, db, org)
+
+    trial_days = billing_policy.trial_days(db, platform_id)
+    subscription_data = {"metadata": {"org_id": org.id, "plan": plan.key}}
+    if trial_days:
+        subscription_data["trial_period_days"] = trial_days
 
     session = stripe.checkout.Session.create(
         customer=customer_id,
         mode="subscription",
-        line_items=[{
-            "price_data": {
-                "currency": "usd",
-                "unit_amount": unit_amount,
-                "recurring": {"interval": req.interval},
-                "product_data": {
-                    "name": f"BookaBoost {plan_info['name']}",
-                    "description": " · ".join(plan_info["features"][:2]),
-                },
-            },
-            "quantity": 1,
-        }],
-        metadata={"org_id": org.id, "plan": req.plan, "interval": req.interval},
-        subscription_data={"metadata": {"org_id": org.id, "plan": req.plan}},
+        line_items=[line_item],
+        metadata={"org_id": org.id, "plan": plan.key, "interval": req.interval},
+        subscription_data=subscription_data,
         success_url=f"{base_url}/billing?success=1",
         cancel_url=f"{base_url}/billing?canceled=1",
     )
+    _audit(db, org, current_user, "billing.checkout_started",
+           {"plan": plan.key, "interval": req.interval})
     return {"checkout_url": session.url}
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/change-plan
+# ---------------------------------------------------------------------------
+class ChangePlanRequest(BaseModel):
+    plan: str
+    interval: str = "month"
+
+
+@router.post("/change-plan")
+def change_plan(
+    req: ChangePlanRequest,
+    current_user: User = Depends(_require_admin),
+    db: Session = Depends(get_db),
+):
+    """Move an EXISTING subscription to a different plan, in place.
+
+    Modifies the subscription rather than creating a second one - see the note
+    on /checkout for what the previous behaviour cost.
+
+    TIMING AND PRORATION COME FROM BRAND CONFIGURATION, NOT FROM THIS CODE.
+    The decided EvoSys policy is: an upgrade applies immediately with
+    proration; a downgrade applies at the end of the period already paid for,
+    with no credit or refund. Both are stored on the brand's billing config so
+    a second brand can choose differently without a code change. If a brand has
+    not configured the direction being requested, this endpoint REFUSES rather
+    than picking a timing - applying a plan change on a guessed schedule either
+    bills someone early or gives away a tier.
+    """
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    sub_id = getattr(org, "stripe_subscription_id", None)
+    if not sub_id:
+        raise HTTPException(
+            status_code=409,
+            detail="No active subscription to change. Choose a plan to get "
+                   "started.")
+
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+    try:
+        target = billing_catalog.require_purchasable(db, platform_id, req.plan, req.interval)
+    except billing_catalog.PlanNotAvailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    current = billing_catalog.resolve_plan(
+        db, platform_id, getattr(org, "billing_plan_key", None) or org.plan)
+    current_interval = getattr(org, "stripe_plan_interval", None)
+
+    direction = billing_catalog.classify_change(
+        db, current, current_interval, target, req.interval)
+
+    if direction == billing_catalog.LATERAL:
+        raise HTTPException(
+            status_code=400,
+            detail="That is the plan and billing period you are already on.")
+
+    behavior = billing_policy.change_behavior(db, platform_id, direction)
+    if not behavior["configured"]:
+        # POLICY REQUIRED. Refusing is the honest answer: the alternative is
+        # to invent a timing, and the two options differ by real money.
+        raise HTTPException(
+            status_code=409,
+            detail="No %s policy is configured for this brand, so the change "
+                   "cannot be applied. An administrator must set the plan "
+                   "change timing and proration behaviour first."
+                   % direction)
+
+    _stripe_client()
+    try:
+        sub = stripe.Subscription.retrieve(sub_id)
+        item_id = sub["items"]["data"][0]["id"]
+    except Exception as exc:
+        logger.warning("change_plan: could not read subscription %s: %s", sub_id, exc)
+        raise HTTPException(status_code=502,
+                            detail="Could not read the current subscription "
+                                   "from the payment processor.")
+
+    new_item = _price_payload_for(target, req.interval, db, org)
+
+    modify_kwargs = {
+        "items": [{"id": item_id, **new_item}],
+        "proration_behavior": behavior["proration"],
+        "metadata": {"org_id": org.id, "plan": target.key},
+    }
+    if behavior["timing"] == ChangeTiming.PERIOD_END:
+        # The customer keeps what they paid for until it runs out. Stripe bills
+        # the new price at the next renewal and issues no credit now.
+        modify_kwargs["proration_behavior"] = ProrationBehavior.NONE
+        modify_kwargs["billing_cycle_anchor"] = "unchanged"
+
+    try:
+        stripe.Subscription.modify(sub_id, **modify_kwargs)
+    except Exception as exc:
+        logger.warning("change_plan: modify failed for %s: %s", sub_id, exc)
+        raise HTTPException(status_code=502,
+                            detail="The payment processor rejected the plan "
+                                   "change.")
+
+    # LOCAL STATE IS NOT WRITTEN HERE, on purpose - except the pending marker.
+    # The subscription.updated webhook is the authoritative record of what
+    # Stripe actually did, and writing the outcome optimistically from this
+    # side is how a UI ends up showing a plan the customer is not on.
+    if behavior["timing"] == ChangeTiming.PERIOD_END:
+        org.billing_pending_plan_key = target.key
+    _audit(db, org, current_user, "billing.plan_change_requested", {
+        "from": getattr(org, "billing_plan_key", None) or org.plan,
+        "to": target.key,
+        "interval": req.interval,
+        "direction": direction,
+        "timing": behavior["timing"],
+        "proration": modify_kwargs["proration_behavior"],
+    })
+    db.commit()
+
+    return {
+        "ok": True,
+        "direction": direction,
+        "timing": behavior["timing"],
+        "proration": modify_kwargs["proration_behavior"],
+        "effective": ("immediately" if behavior["timing"] == ChangeTiming.IMMEDIATE
+                      else "at the end of your current billing period"),
+        "pending_plan": (target.key if behavior["timing"] == ChangeTiming.PERIOD_END
+                         else None),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -273,47 +573,27 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         logger.error("Stripe webhook error: %s", e)
         raise HTTPException(status_code=400, detail="Webhook error")
 
-    etype = event["type"]
-    data = event["data"]["object"]
-
-    if etype == "checkout.session.completed":
-        org_id = data.get("metadata", {}).get("org_id")
-        plan = data.get("metadata", {}).get("plan")
-        interval = data.get("metadata", {}).get("interval", "month")
-        sub_id = data.get("subscription")
-        customer_id = data.get("customer")
-        if org_id and plan:
-            org = db.query(Organization).filter(Organization.id == org_id).first()
-            if org:
-                org.plan = plan
-                org.stripe_subscription_id = sub_id
-                org.stripe_customer_id = customer_id
-                org.stripe_plan_interval = interval
-                org.billing_status = "active"
-                db.commit()
-                logger.info("Billing activated: org=%s plan=%s", org_id, plan)
-
-    elif etype == "customer.subscription.updated":
-        sub_id = data.get("id")
-        org = db.query(Organization).filter(Organization.stripe_subscription_id == sub_id).first()
-        if org:
-            org.billing_status = data.get("status")
-            meta_plan = data.get("metadata", {}).get("plan")
-            if meta_plan:
-                org.plan = meta_plan
-            db.commit()
-
-    elif etype == "customer.subscription.deleted":
-        sub_id = data.get("id")
-        org = db.query(Organization).filter(Organization.stripe_subscription_id == sub_id).first()
-        if org:
-            org.billing_status = "canceled"
-            org.plan = "trial"
-            org.stripe_subscription_id = None
-            db.commit()
-            logger.info("Subscription canceled: org=%s", org.id)
-
-    return {"received": True}
+    # ── Everything past the signature check lives in billing_webhook ──────
+    #
+    # The handling used to be inline here and had three problems that only a
+    # dedicated module fixes properly:
+    #
+    #   NO IDEMPOTENCY. Stripe retries on timeout, on any non-2xx, and on its
+    #   own schedule for up to three days. Every retry re-ran every write.
+    #
+    #   NO PAYMENT RECORD. invoice.paid was not handled at all, so no invoice
+    #   or payment row existed, God Mode's revenue panels had nothing to read,
+    #   and no payment could ever reach the compensation engine.
+    #
+    #   UNVALIDATED PLAN FROM METADATA. `org.plan = metadata["plan"]` with no
+    #   membership check against any catalogue, so anyone able to edit a
+    #   subscription in the Stripe dashboard could write an arbitrary string
+    #   into a field several screens read.
+    #
+    # A duplicate event returns 200. It has been handled; a non-2xx would have
+    # Stripe redeliver it every few hours for three days.
+    result = billing_webhook.handle_event(db, event)
+    return {"received": True, **result}
 
 
 # ---------------------------------------------------------------------------

@@ -205,6 +205,86 @@ def require_feature(key: str):
                 detail="This organization is not enabled for '%s' (%s). An operator can "
                        "enable it in the customer's Features settings."
                        % (key, FEATURES[key]))
+
+        # ── Billing standing ──────────────────────────────────────────────
+        # Checked AFTER the feature allow-list, so the message a customer gets
+        # names the real reason. Returns None unless a brand has explicitly
+        # configured a failed-payment policy - see billing_suspension_reason.
+        suspended = billing_suspension_reason(db, org)
+        if suspended:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=suspended)
         return user
 
     return _dep
+
+
+def billing_suspension_reason(db: Session, org: Optional[Organization]) -> Optional[str]:
+    """Should this organization's access be withdrawn over billing? Almost always None.
+
+    ═══════════════════════════════════════════════════════════════════════
+    THIS FUNCTION IS SHIPPED SWITCHED OFF, AND THAT IS THE POINT.
+    ═══════════════════════════════════════════════════════════════════════
+
+    Entitlements used to have no idea whether a customer was paying. A
+    cancelled organization kept full access until a human remembered to edit
+    its feature allow-list by hand. That gap is now closed in the sense that
+    the wiring exists - but nothing is withdrawn from anybody until a brand
+    explicitly configures a failed-payment policy.
+
+    That restraint is deliberate. The obvious "fix" - suspend on past_due, with
+    a sensible-looking grace period - would cut off a paying customer because a
+    card expired on a Friday, on a schedule nobody chose. A default here is not
+    a neutral technical decision; it is a business decision made by whoever
+    typed the number.
+
+    So: `billing_policy.past_due_behavior` returns configured=False for every
+    brand that has not decided, and this function returns None for all of them.
+    Turning it on is a configuration change in God Mode, not a code change.
+
+    WHAT IT WILL NEVER DO, even once configured:
+      - suspend an organization that has never had a subscription. A customer
+        who was onboarded manually, migrated, or is mid-implementation has no
+        billing status to be past due on, and reading "no subscription" as
+        "not paying" would lock out exactly the customers being set up.
+      - suspend on `canceled`. Cancellation is handled by customer lifecycle,
+        deliberately and by a person; a subscription ending must not
+        retroactively become an access decision made by a webhook.
+    """
+    if org is None:
+        return None
+
+    status_value = (getattr(org, "billing_status", None) or "").lower()
+    if status_value not in ("past_due", "unpaid"):
+        return None
+
+    # Never suspend something that was never subscribed. A NULL customer id
+    # means this organization has no billing relationship at all.
+    if not getattr(org, "stripe_customer_id", None):
+        return None
+
+    from app.services import billing_policy
+    behavior = billing_policy.past_due_behavior(
+        db, getattr(org, "platform_id", None))
+
+    if not behavior["configured"] or not behavior["suspends"]:
+        # POLICY REQUIRED, or the brand decided not to suspend. Either way,
+        # nothing is withdrawn.
+        return None
+
+    grace_days = behavior.get("grace_days")
+    if grace_days:
+        from datetime import datetime, timedelta
+        # The grace window runs from the end of the period they last paid for,
+        # not from "now" - otherwise every request would restart the clock and
+        # the grace period would never expire.
+        anchor = getattr(org, "billing_current_period_end", None)
+        if anchor is None:
+            # No period end recorded means we cannot say the grace has elapsed,
+            # and "we are not sure" must not withdraw access.
+            return None
+        if datetime.utcnow() < anchor + timedelta(days=int(grace_days)):
+            return None
+
+    return ("This organization's subscription is past due. Access is limited "
+            "until payment is updated in Billing & Plan.")

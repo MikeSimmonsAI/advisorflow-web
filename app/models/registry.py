@@ -105,3 +105,12 @@ import app.models.compensation_models  # noqa: F401  (imported for side effects)
 # `organizations` would still write, so the loss would be silent and would look
 # like a customer who cancelled for no reason.
 import app.models.customer_lifecycle_models  # noqa: F401  (imported for side effects)
+# Customer SaaS billing (brand_billing_plans / brand_billing_configs /
+# billing_events / billing_invoices / billing_payments). Same Base, same
+# reason. Two of these carry consequences worse than a missing screen if the
+# import is ever dropped: billing_events is the webhook idempotency ledger, so
+# without it every Stripe retry re-runs its writes and one payment can earn
+# commission twice; and billing_payments is the only local record that money
+# moved, so a missing table would make revenue reporting quietly read zero
+# rather than fail. Do not remove this line.
+import app.models.billing_models  # noqa: F401  (imported for side effects)
