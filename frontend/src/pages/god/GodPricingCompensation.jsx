@@ -1038,6 +1038,7 @@ function BrandAccessPanel({ data }) {
   const brands = data.brands || []
   const [brand, setBrand] = useState(data.selected_brand_sales_org_id || '')
   const [d, setD] = useState(null)
+  const [health, setHealth] = useState(null)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
 
@@ -1048,6 +1049,15 @@ function BrandAccessPanel({ data }) {
       setErr('')
     } catch (e) { setErr(errText(e)) }
   }, [brand])
+
+  // THE MIGRATION CHECK, ON THE SCREEN RATHER THAN IN A CONSOLE. Adding scope
+  // columns to the grant table could have stripped every existing customer-org
+  // administrator's capabilities without anything visibly breaking. This says
+  // whether it did, in one line, where somebody will actually see it.
+  useEffect(() => {
+    api.get('/god/pricing/capability-scope-health')
+      .then(setHealth).catch(() => setHealth(null))
+  }, [])
 
   useEffect(() => { load() }, [load])
 
@@ -1080,6 +1090,28 @@ function BrandAccessPanel({ data }) {
           get settlement authority just by running a team. The platform owner
           always has both.
         </p>
+
+        {health ? (
+          <div className={'go-note ' + (health.healthy ? 'ok' : 'err')}
+               style={{ marginBottom: 14 }}>
+            <b>
+              {health.healthy
+                ? 'EXISTING CAPABILITY GRANTS SURVIVED THE SCOPE MIGRATION'
+                : 'CAPABILITY GRANTS NEED ATTENTION'}
+            </b>
+            <p style={{ margin: '6px 0 0' }}>{health.explanation}</p>
+            <p style={{ margin: '6px 0 0', fontSize: 12 }}>
+              {Object.entries(health.grants_by_scope)
+                .map(([k, v]) => v + ' ' + k.replace(/_/g, ' '))
+                .join(' · ') || 'no capability grants exist yet'}
+              {health.active_customer_grants_sampled > 0
+                ? ' · ' + health.active_customer_grants_still_resolving + ' of ' +
+                  health.active_customer_grants_sampled +
+                  ' sampled customer grants re-resolved through the live permission gate'
+                : ''}
+            </p>
+          </div>
+        ) : null}
 
         <div className="go-fields">
           <div className="go-field">

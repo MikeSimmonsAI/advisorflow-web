@@ -32,8 +32,26 @@ import SalesStyles from './SalesStyles'
  * So this page carries its own chrome. A sales manager still reaches it from
  * the workspace nav; a finance user reaches the same URL and simply sees it.
  */
-function CompShell({ children }) {
+function CompShell({ children, embedded }) {
   const nav = useNavigate()
+
+  // EMBEDDED means God Mode already drew the page frame and the rail. Drawing a
+  // second header and a Back button inside it would give the owner two titles
+  // and a button that leaves a shell they can already navigate out of.
+  //
+  // The `sw-scope` wrapper stays either way: this screen is built from the
+  // sales workspace's `sw-*` classes, which are scoped under it. Dropping it
+  // inside God Mode would render an unstyled table; keeping it cannot leak,
+  // because every one of those rules is prefixed by the scope.
+  if (embedded) {
+    return (
+      <div className="sw-scope">
+        <SalesStyles />
+        {children}
+      </div>
+    )
+  }
+
   return (
     <div className="sw-scope">
       <SalesStyles />
@@ -196,7 +214,7 @@ function PayDialog({ lines, onClose, onDone }) {
 
 /* ── the screen ───────────────────────────────────────────────────────────── */
 
-export default function CompensationCommand() {
+export default function CompensationCommand({ embedded = false }) {
   const [d, setD] = useState(null)
   const [payables, setPayables] = useState(null)
   const [rows, setRows] = useState(null)
@@ -247,7 +265,7 @@ export default function CompensationCommand() {
   const p = d?.projected
 
   return (
-    <CompShell>
+    <CompShell embedded={embedded}>
       {err ? <div className="sw-notbuilt"><b>PROBLEM</b><p>{err}</p></div> : null}
       {!d && !err ? <div className="sw-subtle">Loading…</div> : null}
 

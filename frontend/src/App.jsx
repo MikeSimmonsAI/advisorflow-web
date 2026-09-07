@@ -727,6 +727,17 @@ export default function App() {
             only — every endpoint behind it is require_god, so a typed URL is
             refused by the server rather than by the absence of a link. */}
         <Route path="/god/pricing" element={<GodRoute><GodModeLayout><GodPricingCompensation /></GodModeLayout></GodRoute>} />
+        {/* SALES COMPENSATION — the SAME Compensation Command Center the sales
+            workspace serves at /sales/compensation, rendered inside the God
+            shell so the owner reaches operational compensation from the God
+            rail rather than by guessing it lives under Sales Operations.
+            One component, one set of endpoints: a second copy would be a
+            second place for a total to be computed differently.
+
+            /sales/compensation STAYS. It is how a brand finance user who holds
+            sales_comp_view but is not a god_admin reaches the same screen —
+            GodRoute would refuse them here, and that is correct. */}
+        <Route path="/god/compensation" element={<GodRoute><GodModeLayout><CompensationCommand embedded /></GodModeLayout></GodRoute>} />
         {/* Users & Identity. One row per human, every context on that row —
             see the header of GodUsers.jsx. */}
         <Route path="/god/workspaces" element={<GodRoute><GodModeLayout><Workspaces /></GodModeLayout></GodRoute>} />

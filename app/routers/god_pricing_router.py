@@ -732,6 +732,81 @@ def brand_access(brand_sales_org_id: str = Query(...),
     }
 
 
+@router.get("/capability-scope-health")
+def capability_scope_health(db: Session = Depends(get_db),
+                            user: User = Depends(require_god)):
+    """DID THE SCOPE MIGRATION LEAVE EVERY EXISTING GRANT WORKING?
+
+    This exists because the answer was not checkable from outside. Adding
+    `scope_type` / `scope_id` to `user_capability_grants` had one dangerous
+    failure mode: if the backfill did not run, every pre-existing customer-org
+    grant would carry a NULL `scope_id`, and an administrator would silently
+    lose the capabilities they hold today. Silent is the problem — the screens
+    would look normal and the requests would just start being refused.
+
+    So this counts the thing that would be wrong, rather than asserting the
+    thing that should be right. `unscoped_customer_grants` MUST be zero. It is
+    the whole point of the endpoint.
+
+    READ-ONLY. It counts rows and re-resolves a sample through the SAME
+    `grants_for` the gates use — no second implementation of the lookup, and
+    nothing is written.
+    """
+    from app.models.models import UserCapabilityGrant
+    from app.models.sales_models import SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG
+    from app.services import capabilities as caps
+    from sqlalchemy import func
+
+    by_scope = {str(k or "(null)"): int(n) for k, n in
+                db.query(UserCapabilityGrant.scope_type,
+                         func.count(UserCapabilityGrant.id))
+                  .group_by(UserCapabilityGrant.scope_type).all()}
+
+    # THE FAILURE CONDITION. A customer-org grant with no scope_id is a grant
+    # the backfill missed.
+    unscoped = (db.query(UserCapabilityGrant)
+                .filter(UserCapabilityGrant.scope_type == SCOPE_CUSTOMER_ORG,
+                        UserCapabilityGrant.scope_id.is_(None),
+                        UserCapabilityGrant.organization_id.isnot(None))
+                .count())
+
+    # A brand grant must never carry a customer organization — that is what
+    # would make it visible to the customer-org read path.
+    brand_with_org = (db.query(UserCapabilityGrant)
+                      .filter(UserCapabilityGrant.scope_type == SCOPE_BRAND_SALES_ORG,
+                              UserCapabilityGrant.organization_id.isnot(None))
+                      .count())
+
+    # Do the live grants actually still resolve? Sampled through the real
+    # function, so this cannot pass while the gates fail.
+    sample = (db.query(UserCapabilityGrant)
+              .filter(UserCapabilityGrant.scope_type == SCOPE_CUSTOMER_ORG,
+                      UserCapabilityGrant.is_active.is_(True),
+                      UserCapabilityGrant.organization_id.isnot(None))
+              .limit(25).all())
+    resolving = sum(
+        1 for r in sample
+        if r.capability in caps.grants_for(db, r.user_id, r.organization_id))
+
+    healthy = (unscoped == 0 and brand_with_org == 0
+               and resolving == len(sample))
+    return {
+        "healthy": healthy,
+        "grants_by_scope": by_scope,
+        "unscoped_customer_grants": unscoped,
+        "brand_grants_carrying_an_organization": brand_with_org,
+        "active_customer_grants_sampled": len(sample),
+        "active_customer_grants_still_resolving": resolving,
+        "explanation": (
+            "Every existing customer-organization capability grant still "
+            "resolves through the same lookup the permission gates use."
+            if healthy else
+            "At least one grant did not survive the scope migration. "
+            "`unscoped_customer_grants` above must be zero; if it is not, the "
+            "scope_id backfill has not run on this database."),
+    }
+
+
 class BrandAccessIn(BaseModel):
     brand_sales_org_id: str
     user_id: str

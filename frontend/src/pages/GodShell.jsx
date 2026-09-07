@@ -124,6 +124,14 @@ const NAV = [
   // sit in PLATFORM with the other owner-only surfaces rather than under
   // OPERATIONS where a sales manager would expect to find them.
   { label: 'Pricing & Comp',   path: '/god/pricing',          icon: 'dollar'   },
+  // TWO ENTRIES BECAUSE THEY ARE TWO JOBS, and one rail item made the second
+  // one invisible. Pricing & Comp DEFINES the rules — plans, rates, caps,
+  // holdbacks, and who may see or settle them. Sales Compensation is the money
+  // those rules produced: the ledger, what is on hold, what is payable now,
+  // what has been paid. Merging them to save a line would put a payment run
+  // behind a screen called "Pricing", which is where an owner would never
+  // think to look for it.
+  { label: 'Sales Compensation', path: '/god/compensation',   icon: 'briefcase' },
   // Control-plane diagnostics. Owner-only by the endpoint behind it, not by
   // the absence of this link.
   { label: 'Access Diagnostic', path: '/god/diagnostics/user-access', icon: 'shield' },
