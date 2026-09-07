@@ -12,3 +12,179 @@
   font-weight: 700;
 }
 
+
+/* ── Summary strip above the review list ─────────────────────────────────── */
+.email-review-summary {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.email-review-summary-item strong { color: var(--text-primary); }
+.email-review-summary-item--flagged strong { color: var(--signal-amber); }
+.email-review-summary-item--blocked strong { color: var(--signal-red); }
+
+/* ── Per-card state ──────────────────────────────────────────────────────── */
+.email-review-card--flagged {
+  border-color: rgba(255, 200, 0, 0.35);
+}
+
+.email-review-card--blocked {
+  border-color: rgba(231, 76, 60, 0.35);
+}
+
+.email-review-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.email-review-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.email-review-badge--flagged {
+  background: rgba(255, 200, 0, 0.14);
+  color: var(--signal-amber);
+  border: 1px solid rgba(255, 200, 0, 0.35);
+}
+
+.email-review-badge--blocked {
+  background: rgba(231, 76, 60, 0.14);
+  color: var(--signal-red);
+  border: 1px solid rgba(231, 76, 60, 0.35);
+}
+
+.email-review-flags {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.email-review-flags-text {
+  font-size: 12px;
+  color: var(--signal-amber);
+  line-height: 1.45;
+}
+
+.email-review-blocked-reason {
+  margin: 0;
+  font-size: 12px;
+  color: var(--signal-red);
+  line-height: 1.45;
+}
+
+.email-review-send-error {
+  font-size: 12px;
+  color: var(--signal-red);
+  margin-right: 12px;
+}
+
+/* ── Result view ─────────────────────────────────────────────────────────── */
+.email-review-result {
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.email-review-result { flex: 1; min-height: 0; }
+
+.email-review-result-headline {
+  margin: 0 0 12px;
+  color: var(--signal-green);
+}
+
+.email-review-tallies {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.email-review-tally {
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 3px 9px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.email-review-tally--sent {
+  background: rgba(30, 240, 168, 0.12);
+  border-color: rgba(30, 240, 168, 0.3);
+  color: var(--signal-green);
+}
+
+.email-review-tally--failed,
+.email-review-tally--blocked {
+  background: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.3);
+  color: var(--signal-red);
+}
+
+.email-review-tally--skipped {
+  background: rgba(255, 200, 0, 0.12);
+  border-color: rgba(255, 200, 0, 0.3);
+  color: var(--signal-amber);
+}
+
+.email-review-result-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 10px;
+}
+
+.email-review-result-note--failed { color: var(--signal-red); }
+
+.email-review-result-group {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.email-review-result-group-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.email-review-result-group-title--blocked { color: var(--signal-red); }
+.email-review-result-group-title--skipped { color: var(--signal-amber); }
+
+.email-review-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.email-review-result-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.email-review-result-reason {
+  color: var(--text-secondary);
+}

@@ -18,6 +18,61 @@ from app.services.platform_utils import get_brand_name
 NOTIFICATION_FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@restland-advisorflow.com")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# REPLY NOTIFICATION POLICY — hot-only today, configurable later
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# WHY THERE IS NO `notify_reply` IN THIS FILE.
+#
+# There used to be two functions here: `notify_reply`, which alerted an advisor
+# on EVERY inbound reply, and `notify_hot_reply`, which alerts only on the ones
+# that need a decision. `notify_reply` was removed during the 2026-07-06..09
+# bulk-overwrite window, along with a number of other things - so for a while
+# it was not clear whether its loss was a decision or an accident.
+#
+# IT IS NOW A DECISION, CONFIRMED. Hot-only is the intended operating model:
+# surface actionable replies to advisors rather than flooding them with every
+# neutral "ok". That matches the same reasoning the Replies screen is built on
+# ("only hand me a hot lead when I'm ready to book") and the `needs_attention`
+# filter that implements it. Classified as superseded behaviour, not a bug, and
+# `notify_reply` is deliberately NOT restored.
+#
+# ── THE EXTENSION POINT ──────────────────────────────────────────────────────
+#
+# That decision is right for now and should not be welded shut. The modes a
+# brand or organization may eventually want:
+#
+#     HOT_ONLY           interested / callback only            ← today
+#     HOT_AND_QUESTIONS  the above, plus question replies
+#     ALL_REPLIES        every inbound reply
+#
+# WHERE IT PLUGS IN. There is exactly one caller — sms_router.py, in the
+# inbound webhook handler, which today reads:
+#
+#     from app.services.notification_service import notify_hot_reply
+#     notify_hot_reply(db, lead.assigned_to, lead, reply)
+#
+# The change is to ask a policy resolver whether THIS reply's classification is
+# notifiable for THIS organization's brand, and to keep `notify_hot_reply` as
+# the delivery mechanism it already is. Sketched:
+#
+#     if reply_notification_policy(db, org).notifies(reply.classification):
+#         notify_hot_reply(db, lead.assigned_to, lead, reply)
+#
+# WHERE THE SETTING BELONGS. Brand or organization configuration, alongside the
+# other per-brand policy this platform already keeps in the database - the same
+# shape as `brand_billing_configs` and `compensation_plans`, where a brand's own
+# row beats a platform default. It does NOT belong as a constant in this module,
+# and it does not belong in the webhook handler: a notification policy hardcoded
+# in core business logic is exactly what makes the next brand impossible.
+#
+# NOT BUILT YET, AND DELIBERATELY SO. No column, no resolver, no configuration
+# UI - because an unset policy would need a default, and a default here is a
+# decision about how much noise every advisor receives. Today's behaviour is
+# hot-only, stated in one place, easy to find, and easy to widen when somebody
+# decides to.
+
+
 def notify_hot_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> Notification:
     """
     Sends an email to the advisor's notification_email (falls back to

@@ -253,6 +253,335 @@ def email_only_queue(
     return query.order_by(Lead.created_at.desc(), Lead.last_name.asc(), Lead.first_name.asc()).limit(1000).all()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# REVIEW BEFORE SEND — the email half of the pair
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# RESTORED. POST /email/preview-batch and POST /email/confirm-send-batch were
+# deleted by the 2026-07-06..09 bulk-overwrite window (37 commits titled only
+# "Update AdvisorFlow" / "force update"). The SMS half of the same
+# deliberately-symmetric pair - /leads/preview-messages and
+# /leads/confirm-send-batch - survived untouched, and the deleted code's own
+# docstring said "Mirrors /leads/confirm-send-batch for SMS."
+#
+# That asymmetry is what proves it was an accident. Nobody decides that
+# advisors may review and edit an SMS before it goes to a grieving family but
+# must send email unreviewed.
+#
+# THIS IS NOT THE OLD CODE PASTED BACK. The old implementation used
+# Depends(get_current_user) with a hardcoded
+# `Lead.organization_id == current_user.organization_id`, which would have
+# reintroduced three defects silently: no workspace resolution (an owner
+# working inside a tenant would have previewed their OWN organization's
+# leads), no manager visibility, and no qualification engine. What follows is
+# built on the same primitives every other send path in this router uses.
+#
+# WHY THE TWO ENDPOINTS APPLY DIFFERENT QUALIFICATION RULES, which is the one
+# genuinely load-bearing decision here:
+#
+#   /send-batch          READY_TO_SEND only, all-or-nothing. Nobody has looked
+#                        at these individually, so REVIEW_REQUIRED must not
+#                        become sendable because someone selected 5,000 rows.
+#
+#   /confirm-send-batch  EXCLUDED refused, REVIEW_REQUIRED allowed through.
+#                        A human has just read and possibly edited every one of
+#                        these messages. That IS the review the bucket exists to
+#                        ask for - the same reasoning this router already
+#                        applies to a single send, stated in _assert_not_excluded
+#                        above. What a human may never do, at any scale, is mail
+#                        somebody on the DNC list.
+#
+# Applying the bulk rule here would make the review flow strictly less useful
+# than sending one at a time, which would push advisors back to the unreviewed
+# path. Applying no rule would be worse than what it replaced.
+
+
+def _reason_text(reasons) -> str:
+    """Qualification reasons rendered for a human.
+
+    The engine returns each reason as {"code", "label"} - a stable code for
+    machines and a readable sentence for people. Joining the raw dicts would
+    put "{'code': 'dnc'...}" in front of an advisor, so the label is what gets
+    shown and the code stays available to the caller in `review_reasons`.
+    """
+    out = []
+    for r in reasons or []:
+        if isinstance(r, dict):
+            out.append(r.get("label") or r.get("code") or "")
+        else:
+            out.append(str(r))
+    return "; ".join(x for x in out if x)
+
+
+class EmailPreviewItem(BaseModel):
+    lead_id: str
+    lead_name: str
+    email: Optional[str] = None
+    tier: Optional[str] = None
+    message_track: Optional[str] = None
+    draft_subject: str = ""
+    draft_body_html: str = ""
+    skip_reason: Optional[str] = None
+    # The engine's own {"code","label"} shape, passed through unflattened so
+    # the UI can show the sentence and a caller can branch on the code.
+    review_reasons: list[dict] = []
+
+
+class EmailPreviewRequest(BaseModel):
+    lead_ids: list[str]
+
+
+@router.post("/preview-batch", response_model=list[EmailPreviewItem])
+def preview_email_batch(
+    req: EmailPreviewRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Draft the real subject and body for each lead WITHOUT sending anything.
+
+    The review step. The advisor sees exactly what would go out, per lead, and
+    can edit or drop individual ones before calling /email/confirm-send-batch.
+
+    WRITES NOTHING. No EmailMessage row, no booking link, no status change. A
+    booking link minted at preview time would leave a dead link behind every
+    time somebody edited or skipped a draft, so the preview renders a
+    placeholder and the real link is created at send.
+
+    A lead the caller cannot see is silently omitted rather than reported as
+    missing - the same pattern /leads/preview-messages uses. The caller passes
+    ids from a screen that was already scoped to them; an id that is not theirs
+    should return nothing, not confirm that it exists.
+    """
+    from app.services.email_service import render_email
+    from app.services.public_identity import booking_url as public_booking_url
+    from app.routers.compose_router import acting_advisor
+
+    # THE AUTHORIZED SCOPE, not a hardcoded organization filter. This resolves
+    # the active workspace and the caller's manager status, so an owner working
+    # inside a tenant previews THAT tenant's leads.
+    leads = authorized_lead_query(db, current_user, request=request).filter(
+        Lead.id.in_(req.lead_ids)).all()
+    found_by_id = {l.id: l for l in leads}
+
+    org_id = lead_scope.active_workspace_org_id(current_user, db, request)
+    ctx = qualification.QualificationContext(
+        db, list(found_by_id.values()), org_id, qualification.org_rules(db, org_id))
+
+    results = []
+    for lead_id in req.lead_ids:
+        lead = found_by_id.get(lead_id)
+        if not lead:
+            continue
+
+        lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "(no name)"
+        skip_reason = None
+        review_reasons: list[dict] = []
+        subject, body_html = "", ""
+
+        if not lead.email:
+            skip_reason = "No email address on file"
+        else:
+            # THE SAME ENGINE THE SEND PATHS ASK. Asking it here means the
+            # advisor sees who will be refused BEFORE they spend time editing
+            # a message that can never go out.
+            decision = qualification.qualify_one(
+                lead, qualification.CHANNEL_EMAIL, ctx)
+            if decision["bucket"] == qualification.EXCLUDED:
+                skip_reason = _reason_text(decision["reasons"]) or "Excluded from email"
+            else:
+                if decision["bucket"] == qualification.REVIEW:
+                    # Not a skip. Surfaced so the advisor reviews with the
+                    # reasons in front of them - which is the whole point of
+                    # this bucket, and why confirm-send-batch lets it through.
+                    review_reasons = list(decision["reasons"])
+                placeholder_booking_url = public_booking_url(db, lead.organization_id, "preview")
+                track = lead.message_track or "email_only_nurture"
+                # RENDERED AS THE LEAD'S ADVISOR, NOT AS WHOEVER IS PREVIEWING.
+                #
+                # This said `current_user` in its first draft, which is the
+                # third occurrence of a defect this file already records being
+                # fixed twice: a template rendered as the caller is signed
+                # "Best, <the manager>" - or, for a platform owner working
+                # inside a tenant, signed by the platform owner - and carries
+                # that person's phone number in {advisor_cell}.
+                #
+                # It matters more here than anywhere else in this router,
+                # because confirm-send-batch sends the reviewed text VERBATIM.
+                # A reviewer who does not retype the signature mails a family a
+                # message signed by the wrong person, while the EmailMessage row
+                # correctly records the assigned advisor as sender - so the
+                # evidence and the message disagree, and only the family sees it.
+                rendered = render_email(db, track, lead,
+                                        acting_advisor(db, lead, current_user),
+                                        placeholder_booking_url)
+                subject = rendered["subject"]
+                body_html = rendered["body_html"]
+
+        results.append(EmailPreviewItem(
+            lead_id=lead.id, lead_name=lead_name, email=lead.email,
+            tier=lead.tier, message_track=lead.message_track,
+            draft_subject=subject, draft_body_html=body_html,
+            skip_reason=skip_reason, review_reasons=review_reasons,
+        ))
+
+    return results
+
+
+class ConfirmEmailItem(BaseModel):
+    lead_id: str
+    subject: str      # the (possibly edited) final subject for this lead
+    body_html: str    # the (possibly edited) final body for this lead
+
+
+class ConfirmEmailBatchRequest(BaseModel):
+    items: list[ConfirmEmailItem]
+
+
+@router.post("/confirm-send-batch")
+def confirm_email_send_batch(
+    req: ConfirmEmailBatchRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Send what the advisor reviewed. Each item carries its own final text.
+
+    Per-lead outcomes are reported separately and deliberately:
+
+        sent      it went
+        blocked   qualification refused it (DNC, suppression, unusable address)
+        skipped   the lead is not visible to this caller, or has no address
+        failed    the provider rejected it
+
+    "Blocked" and "skipped" are different events and an advisor reviewing the
+    result deserves to know which happened. A single count of "not sent" would
+    hide a compliance refusal behind a missing email address.
+
+    NOT all-or-nothing, unlike /send-batch. These messages were reviewed one at
+    a time, so one refusal must not discard the other forty-nine a human just
+    read. /send-batch refuses the whole batch precisely because nobody looked
+    at them individually.
+    """
+    from app.services.email_service import send_email_via_provider
+    from app.services.email_tracking_service import inject_tracking
+    from app.services.public_identity import (booking_url as public_booking_url,
+                                              sending_identity_for_org)
+    from app.services.sms_service import create_booking_link
+    from app.routers.compose_router import acting_advisor
+    from app.routers.audit_log_router import log_action
+
+    sent_ids, failed_ids, skipped, blocked = [], [], [], []
+
+    lead_ids = [i.lead_id for i in req.items]
+    visible = {l.id: l for l in authorized_lead_query(
+        db, current_user, request=request).filter(Lead.id.in_(lead_ids)).all()}
+
+    org_id = lead_scope.active_workspace_org_id(current_user, db, request)
+    ctx = qualification.QualificationContext(
+        db, list(visible.values()), org_id, qualification.org_rules(db, org_id))
+
+    for item in req.items:
+        lead = visible.get(item.lead_id)
+        if not lead:
+            skipped.append({"lead_id": item.lead_id, "reason": "not_found"})
+            continue
+        if not lead.email:
+            skipped.append({"lead_id": item.lead_id, "reason": "no_email_address"})
+            continue
+
+        # EXCLUDED is refused even here. A human reviewing a message is the
+        # review REVIEW_REQUIRED asks for; it is not permission to mail
+        # somebody who asked not to be contacted.
+        decision = qualification.qualify_one(lead, qualification.CHANNEL_EMAIL, ctx)
+        if decision["bucket"] == qualification.EXCLUDED:
+            blocked.append({"lead_id": item.lead_id,
+                            "reasons": list(decision["reasons"])})
+            continue
+
+        # THE LINK NAMES A CALENDAR, so it names the LEAD'S ADVISOR - not
+        # whoever pressed send. The same defect was fixed in the composer and
+        # in send_single_email above; this path must not reintroduce it.
+        advisor = acting_advisor(db, lead, current_user)
+        booking = create_booking_link(db, lead, advisor)
+        booking_url = public_booking_url(db, lead.organization_id, booking.token)
+        placeholder = public_booking_url(db, lead.organization_id, "preview")
+
+        # The advisor may have left the preview's placeholder link untouched in
+        # the text they edited. Swap it for the real one at send time, the same
+        # way the SMS confirm path resolves {booking_link}.
+        final_subject = (item.subject or "").replace(placeholder, booking_url)
+        final_body = (item.body_html or "").replace(placeholder, booking_url)
+
+        # Row first, so tracking can reference a real id; store the ORIGINAL
+        # edited body and inject tracking only into the copy handed to the
+        # provider - see email_tracking_service.py for the full reasoning.
+        email_msg = EmailMessage(
+            lead_id=lead.id,
+            sender_id=advisor.id,
+            subject=final_subject,
+            body_html=final_body,
+            status="queued",
+        )
+        db.add(email_msg)
+        db.commit()
+        db.refresh(email_msg)
+
+        tracked_body = inject_tracking(final_body, email_msg.id)
+
+        # THE RESOLVED SENDING IDENTITY, not the bare organization row. A
+        # Restland family once received mail From noreply@bookaboost.live
+        # because this fell through to the deployment-wide address.
+        if getattr(advisor, "microsoft_365_connected", False):
+            from app.services.microsoft_email_service import send_email_via_microsoft_graph
+            result = send_email_via_microsoft_graph(
+                advisor, lead.email, final_subject, tracked_body)
+        else:
+            result = send_email_via_provider(
+                lead.email, final_subject, tracked_body,
+                org=sending_identity_for_org(db, lead.organization_id))
+
+        email_msg.provider_message_id = result.get("provider_message_id")
+        email_msg.status = "sent" if result.get("success") else "failed"
+
+        if result.get("success"):
+            email_msg.sent_at = datetime.utcnow()
+            lead.status = "sent"
+            lead.last_messaged_at = datetime.utcnow()
+            sent_ids.append(lead.id)
+        else:
+            failed_ids.append(lead.id)
+
+    db.commit()
+
+    # AUDITED. Bulk outreach to real families is exactly the kind of act that
+    # should be answerable months later. Ids and counts only - no message
+    # bodies, no addresses.
+    try:
+        log_action(
+            db, org_id, current_user.id,
+            action="email.confirm_send_batch",
+            target_type="organization", target_id=org_id,
+            details={"reviewed": len(req.items), "sent": len(sent_ids),
+                     "failed": len(failed_ids), "skipped": len(skipped),
+                     "blocked": len(blocked),
+                     "blocked_lead_ids": [b["lead_id"] for b in blocked]},
+        )
+    except Exception:
+        # An audit failure must never lose the send result.
+        pass
+
+    return {
+        "sent_count": len(sent_ids),
+        "failed_count": len(failed_ids),
+        "skipped_count": len(skipped),
+        "blocked_count": len(blocked),
+        "sent_ids": sent_ids,
+        "skipped": skipped,
+        "blocked": blocked,
+    }
+
+
 # ── Email with flyer/attachment ───────────────────────────────────────────────
 
 class EmailWithAttachmentRequest(BaseModel):

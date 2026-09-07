@@ -1,6 +1,7 @@
 import { useEffect, useState, Fragment, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import EmailReview from '../components/EmailReview'
 import '../styles/shared.css'
 import './EmailQueue.css'
 
@@ -170,6 +171,32 @@ export default function EmailQueue() {
       alert(`Flag failed: ${err.message}`)
     } finally {
       setFlagging(null)
+    }
+  }
+
+  // ── Review before send (the primary bulk path) ────────────────────────────
+  //
+  // A SNAPSHOT of the selected ids, not `Array.from(selected)` inline. The
+  // review modal keys its preview fetch off this array; handing it a fresh
+  // array identity on every render would refetch /email/preview-batch in a
+  // loop. It also means the batch the advisor is reviewing cannot change
+  // underneath them if the queue refreshes while the modal is open.
+  const [reviewIds, setReviewIds] = useState(null)
+
+  function openReview() {
+    if (!selected.size) return
+    setComposeOpen(false)
+    setReviewIds(Array.from(selected))
+  }
+
+  function handleReviewSent(res) {
+    // Only clear the selection once something actually went out, so a batch
+    // that was entirely blocked can be dealt with rather than silently lost.
+    if (res?.sent_count > 0) {
+      setSelected(new Set())
+      load()
+      loadSentLog()
+      setSentLogVisible(true)
     }
   }
 
@@ -410,7 +437,9 @@ export default function EmailQueue() {
             )}
           </div>
           <p className="page-subtitle" style={{ marginTop: 6 }}>
-            Check the boxes to select leads, then hit <span className="eq-inline-chip">✉️ Compose &amp; Send</span> to write and send your campaign.
+            Check the boxes to select leads, then hit <span className="eq-inline-chip">📋 Review &amp; Send</span> to see the exact
+            message each person would receive, edit it, and send. Use <span className="eq-inline-chip">✍️ Compose custom</span> to
+            send one message you write yourself to everyone selected — that one has no per-lead preview.
             For a single lead, use <span className="eq-inline-chip">✨ Draft</span> to get AI-personalized options.
           </p>
         </div>
@@ -1057,12 +1086,26 @@ export default function EmailQueue() {
               >
                 Deselect all
               </button>
+              {/* THE DIRECT PATH, KEPT BUT DEMOTED. This writes one custom
+                  message and sends it to everyone selected without a per-lead
+                  preview. It is the only way to send campaign copy the advisor
+                  wrote themselves, so it stays — but it is no longer the
+                  primary button, and its label says what it skips. */}
+              <button
+                className="btn btn--secondary"
+                style={{ fontSize: 13 }}
+                onClick={() => setComposeOpen((v) => !v)}
+                title="Write one custom message and send it to every selected lead. No per-lead preview."
+              >
+                {composeOpen ? '✕ Close compose' : `✍️ Compose custom (${selected.size})`}
+              </button>
               <button
                 className="btn btn--primary"
                 style={{ fontSize: 14, fontWeight: 700 }}
-                onClick={() => setComposeOpen((v) => !v)}
+                onClick={openReview}
+                title="See the exact subject and message for every selected lead, edit them, then send."
               >
-                {composeOpen ? '✕ Close compose' : `✉️ Compose & Send (${selected.size})`}
+                {`📋 Review & Send (${selected.size})`}
               </button>
             </div>
           </div>
@@ -1072,7 +1115,7 @@ export default function EmailQueue() {
             <div className="eq-compose-drawer">
               <div className="eq-compose-drawer-header">
                 <div>
-                  <span className="eq-compose-drawer-title">Compose email campaign</span>
+                  <span className="eq-compose-drawer-title">Compose custom campaign</span>
                   <span className="eq-compose-drawer-sub">
                     Will send to {selected.size} selected lead{selected.size !== 1 ? 's' : ''}
                     {selectedMismatches.length > 0 && (
@@ -1080,6 +1123,10 @@ export default function EmailQueue() {
                         · ⚠️ {selectedMismatches.length} name/email mismatch{selectedMismatches.length !== 1 ? 'es' : ''}
                       </span>
                     )}
+                  </span>
+                  <span className="eq-compose-drawer-sub" style={{ display: 'block', marginTop: 4, color: 'var(--signal-amber)' }}>
+                    ⚠️ This sends the same message to everyone selected with no per-lead preview.
+                    To read and edit each message first, close this and use 📋 Review &amp; Send.
                   </span>
                 </div>
               </div>
@@ -1172,6 +1219,15 @@ export default function EmailQueue() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Review before send ────────────────────────────────────────────── */}
+      {reviewIds && (
+        <EmailReview
+          leadIds={reviewIds}
+          onClose={() => setReviewIds(null)}
+          onSent={handleReviewSent}
+        />
       )}
     </div>
   )
