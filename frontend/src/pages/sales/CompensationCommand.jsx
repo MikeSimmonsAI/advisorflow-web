@@ -16,8 +16,45 @@
  * ledger that only exist because money was collected.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import SalesShell from './SalesShell'
+import SalesStyles from './SalesStyles'
+
+/* DELIBERATELY NOT INSIDE SalesShell.
+ *
+ * That shell loads `/sales/me` and, when the server refuses, renders "Sales
+ * workspace unavailable" instead of its children. A finance administrator
+ * holding `sales_comp_view` over a brand has NO sales membership — that is the
+ * entire point of the capability — so wrapping this screen in that shell would
+ * have made the Command Center unreachable for exactly the person it was built
+ * for, while the API served them perfectly well.
+ *
+ * So this page carries its own chrome. A sales manager still reaches it from
+ * the workspace nav; a finance user reaches the same URL and simply sees it.
+ */
+function CompShell({ children }) {
+  const nav = useNavigate()
+  return (
+    <div className="sw-scope">
+      <SalesStyles />
+      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 21, fontWeight: 700, color: '#0f2338' }}>
+              Compensation Command Center
+            </div>
+            <div className="sw-subtle" style={{ marginTop: 3 }}>
+              What the compensation rules produced — and what can be settled.
+            </div>
+          </div>
+          <button className="sw-btn" onClick={() => nav(-1)}>Back</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 function usd(n) {
   if (n === null || n === undefined) return '—'
@@ -210,8 +247,7 @@ export default function CompensationCommand() {
   const p = d?.projected
 
   return (
-    <SalesShell title="Compensation Command Center"
-                subtitle="What the compensation rules produced — and what can be settled.">
+    <CompShell>
       {err ? <div className="sw-notbuilt"><b>PROBLEM</b><p>{err}</p></div> : null}
       {!d && !err ? <div className="sw-subtle">Loading…</div> : null}
 
@@ -434,6 +470,6 @@ export default function CompensationCommand() {
                    onClose={() => setPaying(false)}
                    onDone={() => { setPaying(false); load(); loadLedger() }} />
       ) : null}
-    </SalesShell>
+    </CompShell>
   )
 }

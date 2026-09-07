@@ -663,6 +663,105 @@ class SeedIn(BaseModel):
     confirm: bool = False
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# WHO MAY SEE AND SETTLE THIS BRAND'S COMPENSATION
+#
+# WHY IT LIVES HERE. Brand-scoped capabilities are, today, exactly the two
+# compensation ones, and the person deciding who runs a commission run is
+# already on this screen deciding what a commission IS. Users & Identity
+# administers PEOPLE across the platform; this administers one commercial
+# authority over one brand. If brand-scoped capabilities ever grow beyond
+# compensation, this belongs in a general capability surface instead.
+#
+# ROLES ARE NOT INVENTED HERE. There is no "Finance Manager" to assign — a
+# named role would be a second permission model beside the capability one, and
+# the first time they disagreed nobody would know which was authoritative.
+# Roles may bundle capabilities later; authorization stays capability + scope.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/brand-access")
+def brand_access(brand_sales_org_id: str = Query(...),
+                 db: Session = Depends(get_db),
+                 user: User = Depends(require_god)):
+    """Everyone who holds a compensation capability over this brand.
+
+    Candidates are the brand's own sales people plus anybody already granted —
+    a finance user with no membership must remain visible here, or revoking
+    their access would mean finding them by memory.
+    """
+    from app.models.models import UserCapabilityGrant
+    from app.models.sales_models import SCOPE_BRAND_SALES_ORG, Membership
+    from app.services import capabilities as caps
+
+    brand = (db.query(BrandSalesOrg)
+             .filter(BrandSalesOrg.id == brand_sales_org_id).first())
+    if brand is None:
+        raise HTTPException(status_code=404, detail="Sales organization not found.")
+
+    granted_ids = {r.user_id for r in db.query(UserCapabilityGrant).filter(
+        UserCapabilityGrant.scope_type == SCOPE_BRAND_SALES_ORG,
+        UserCapabilityGrant.scope_id == brand.id,
+        UserCapabilityGrant.is_active.is_(True)).all()}
+    member_ids = {m.user_id for m in db.query(Membership).filter(
+        Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+        Membership.scope_id == brand.id,
+        Membership.is_active.is_(True)).all()}
+
+    ids = sorted(granted_ids | member_ids)
+    people = []
+    if ids:
+        for u in db.query(User).filter(User.id.in_(ids)).all():
+            held = caps.brand_grants_for(db, u.id, brand.id)
+            people.append({
+                "user_id": u.id,
+                "name": u.full_name or u.email,
+                "email": u.email,
+                "is_brand_member": u.id in member_ids,
+                "capabilities": held,
+            })
+    people.sort(key=lambda p: p["name"].lower())
+
+    return {
+        "brand": {"id": brand.id, "name": brand.name},
+        "people": people,
+        "available_capabilities": [
+            {"key": k, "label": caps.CAPABILITIES[k].label,
+             "why": caps.CAPABILITIES[k].why}
+            for k in caps.BRAND_SCOPED_CAPABILITIES if k in caps.CAPABILITIES
+        ],
+    }
+
+
+class BrandAccessIn(BaseModel):
+    brand_sales_org_id: str
+    user_id: str
+    # The COMPLETE set this person should hold over this brand. An empty list
+    # revokes everything, which is why it is a replace rather than an add: a
+    # grant screen that can only add is a screen nobody can undo a mistake on.
+    capabilities: List[str] = []
+
+
+@router.put("/brand-access")
+def set_brand_access(body: BrandAccessIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_god)):
+    """Grant or revoke compensation capabilities over one brand, for one person."""
+    from app.services import capabilities as caps
+
+    brand = (db.query(BrandSalesOrg)
+             .filter(BrandSalesOrg.id == body.brand_sales_org_id).first())
+    if brand is None:
+        raise HTTPException(status_code=404, detail="Sales organization not found.")
+    target = db.query(User).filter(User.id == body.user_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    after = caps.set_brand_grants(db, target, brand.id, brand.name, user,
+                                  body.capabilities)
+    db.commit()
+    return {"user_id": target.id, "brand_sales_org_id": brand.id,
+            "capabilities": after}
+
+
 @router.post("/seed/evosys")
 def seed_evosys(body: SeedIn, db: Session = Depends(get_db),
                 user: User = Depends(require_god)):

@@ -47,6 +47,15 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Capability grant scope (brand-scoped compensation authority) ───────
+    # NOT NULL DEFAULT 'customer_org' is doing real work: every row already in
+    # this table IS a customer-org grant, so the ALTER backfills them correctly
+    # on the way in and no existing grant changes meaning. `scope_id` is
+    # backfilled from organization_id by the idempotent block further down.
+    ("user_capability_grants", "scope_type",
+     "VARCHAR NOT NULL DEFAULT 'customer_org'"),
+    ("user_capability_grants", "scope_id", "VARCHAR"),
+
     # ── Compensation payment evidence (Command Center, 2026-09-06) ─────────
     # `compensation_entries` predates these, so create_all will never add them.
     # All nullable: a row paid before they existed keeps its reference and
@@ -778,6 +787,15 @@ NULLABILITY_TO_RELAX = [
     # tenant either. Missing this relax means every upload fails on production
     # Postgres with a NOT NULL violation while passing on a fresh SQLite.
     ("proposal_files", "organization_id"),
+    # BRAND-SCOPED CAPABILITY GRANTS. A grant over a brand sales organization
+    # has no customer tenant to point at — the same shape as the sales proposal
+    # above, and the same shape as the AuditLogEntry relax that made
+    # control-plane actions auditable at all.
+    #
+    # THE NULL MEANS "NOT A CUSTOMER-ORG GRANT", NOT "EVERY ORGANIZATION".
+    # Authority is the (scope_type, scope_id) pair; nothing anywhere reads a
+    # NULL organization_id as permission over anything.
+    ("user_capability_grants", "organization_id"),
     # Tenant-side Retell bridge. This column shipped NOT NULL, when a
     # credential could only ever be brand-scoped. A tenant key sets
     # `organization_id` instead and leaves this NULL; without the relax, every
@@ -1264,6 +1282,34 @@ def run_auto_migrations(engine) -> None:
                 print(f"[auto_migrate] import capability grants renamed: {renamed}")
     except Exception as e:
         print(f"[auto_migrate] import capability key rename note: {e}")
+
+    # ── Capability grant scope backfill (idempotent) ──────────────────────────
+    #
+    # `scope_type` backfills itself on the ALTER via its DEFAULT, because every
+    # pre-existing row IS a customer-org grant. `scope_id` cannot: its value is
+    # per-row, so it is copied from `organization_id` here.
+    #
+    # WHY THE COPY MATTERS. Without it a legacy grant has scope_type
+    # 'customer_org' and scope_id NULL, and any check written against the PAIR
+    # would match nothing — an administrator silently losing the capabilities
+    # they hold today. Exactly the failure the capability-key rename above
+    # records, in a different column.
+    #
+    # Idempotent by the WHERE: a row that already has a scope_id is untouched.
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(text("""
+                UPDATE user_capability_grants
+                   SET scope_id = organization_id
+                 WHERE scope_id IS NULL
+                   AND organization_id IS NOT NULL
+            """))
+            conn.commit()
+            if res.rowcount:
+                print("[auto_migrate] capability grant scope_id backfilled: %d"
+                      % res.rowcount)
+    except Exception as e:
+        print(f"[auto_migrate] capability grant scope backfill note: {e}")
 
     # ONE-TIME ORG RENAME: Restland → Greenland (idempotent — no-op if already done)
     try:

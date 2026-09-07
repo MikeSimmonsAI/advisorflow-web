@@ -102,12 +102,37 @@ def compensation_type(entry: CompensationEntry) -> str:
 def visible_brand_ids(db: Session, user: User) -> List[str]:
     """Which brands' compensation this caller may see. Empty means none.
 
-    Delegates to the existing sales-access model rather than inventing a second
-    answer: a god_admin sees every brand (narrowed by a selected brand, never
-    widened), and everybody else sees only brands they hold a membership in.
+    TWO INDEPENDENT ROUTES TO THE SAME ANSWER, deliberately unioned:
+
+      SALES MEMBERSHIP   a manager runs a team and sees its compensation as
+                         part of running it.
+      BRAND CAPABILITY   `sales_comp_view` granted over a brand — how a finance
+                         or ops person sees compensation WITHOUT being made a
+                         sales manager. Before this existed, the only way to
+                         give somebody the numbers was to give them a team.
+
+    A god_admin sees every brand, narrowed by a selected brand and never
+    widened, exactly as `sales_org_ids` already decides.
+
+    The union is over NAMED brands on both sides. Nothing here can return a
+    brand that neither a membership nor a grant row points at.
     """
+    from app.services.capabilities import brands_with_capability, is_god
     from app.services.sales_access import sales_org_ids
-    return sales_org_ids(user, db)
+
+    ids = list(sales_org_ids(user, db))
+    if is_god(user):
+        return ids
+    for brand_id in brands_with_capability(db, user, "sales_comp_view"):
+        if brand_id not in ids:
+            ids.append(brand_id)
+    # `sales_comp_manage` without `sales_comp_view` would be somebody who can
+    # settle a payment they cannot see, which is not a coherent authority — so
+    # manage implies visibility OF THAT BRAND, and of nothing else.
+    for brand_id in brands_with_capability(db, user, "sales_comp_manage"):
+        if brand_id not in ids:
+            ids.append(brand_id)
+    return sorted(ids)
 
 
 def _scoped_query(db: Session, *, brand_ids: Iterable[str],

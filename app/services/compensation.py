@@ -475,14 +475,28 @@ def earn(db: Session, opp: Opportunity, *, collection_reference: str,
 
 
 def promote_due_to_payable(db: Session, now: Optional[datetime] = None,
-                           commit: bool = True) -> int:
-    """EARNED rows whose holdback has elapsed become PAYABLE. Nothing else."""
+                           commit: bool = True,
+                           brand_sales_org_ids: Optional[List[str]] = None) -> int:
+    """EARNED rows whose holdback has elapsed become PAYABLE. Nothing else.
+
+    `brand_sales_org_ids` NARROWS AND NEVER WIDENS. Passing None keeps the
+    original whole-estate behaviour for a scheduled sweep; a caller acting on
+    behalf of one brand's finance user passes that brand, so releasing a
+    holdback cannot reach across a brand boundary just because the operation is
+    a bulk one. An EMPTY list means no brands and promotes nothing — a scoping
+    bug must move nothing, not everything.
+    """
     now = now or datetime.utcnow()
-    rows = (db.query(CompensationEntry)
-            .filter(CompensationEntry.state == COMP_EARNED,
-                    CompensationEntry.payable_at.isnot(None),
-                    CompensationEntry.payable_at <= now)
-            .all())
+    q = (db.query(CompensationEntry)
+         .filter(CompensationEntry.state == COMP_EARNED,
+                 CompensationEntry.payable_at.isnot(None),
+                 CompensationEntry.payable_at <= now))
+    if brand_sales_org_ids is not None:
+        if not brand_sales_org_ids:
+            return 0
+        q = q.filter(
+            CompensationEntry.brand_sales_org_id.in_(list(brand_sales_org_ids)))
+    rows = q.all()
     for r in rows:
         r.state = COMP_PAYABLE
     if commit and rows:

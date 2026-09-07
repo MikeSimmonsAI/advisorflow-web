@@ -1045,12 +1045,40 @@ class UserCapabilityGrant(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"),
                      nullable=False)
-    # Scoped to the ORGANIZATION as well as the user. The same person can
-    # administer one customer and not another, and a grant made for one is not
-    # a statement about any other.
+
+    # ── WHERE THIS GRANT APPLIES ────────────────────────────────────────────
+    #
+    # THE SAME SCOPE VOCABULARY `Membership` ALREADY USES — platform,
+    # brand_sales_org, customer_org — because a second scope model would be a
+    # second answer to "where does this authority apply", and the two would
+    # eventually disagree.
+    #
+    # NULL NEVER MEANS GLOBAL HERE. That is the whole point of adding these
+    # columns rather than simply relaxing `organization_id` to nullable: a NULL
+    # that means "everywhere" is one forgotten filter away from handing a
+    # finance clerk every brand's payroll. Authority is always the PAIR
+    # (scope_type, scope_id), and a row whose scope does not match the thing
+    # being guarded grants nothing.
+    #
+    # Existing rows are customer-org grants, which is why the column defaults
+    # to that: the column is added to a live table where every row already IS
+    # one, and the default backfills them correctly on the ALTER itself.
+    scope_type = Column(String, nullable=False, default="customer_org",
+                        server_default="customer_org", index=True)
+    # The id WITHIN that scope: a customer organization id, a brand sales org
+    # id, or a platform id. For customer-org grants it mirrors
+    # `organization_id`, which stays the column the original code reads — see
+    # the note there.
+    scope_id = Column(String, nullable=True, index=True)
+
+    # NOW NULLABLE, AND ONLY FOR NON-CUSTOMER SCOPES. A brand-scoped grant has
+    # no customer organization to point at; it is not a grant over "all"
+    # organizations, and nothing reads a NULL here as permission. Customer-org
+    # grants still populate it, still carry the FK, and the original
+    # customer-org read path is unchanged.
     organization_id = Column(String, ForeignKey("organizations.id",
                                                 ondelete="CASCADE"),
-                             nullable=False)
+                             nullable=True)
     capability = Column(String, nullable=False)   # a key in CAPABILITIES
 
     # Revocation DEACTIVATES rather than deletes. "Who held the Twilio account

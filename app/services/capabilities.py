@@ -59,6 +59,10 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
 from app.models.models import Organization, User, UserCapabilityGrant
+# THE SCOPE VOCABULARY IS DEFINED ONCE, on Membership, and imported here rather
+# than restated. Two lists of scope names is two things to keep in step.
+from app.models.sales_models import (SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG,
+                                     SCOPE_PLATFORM)
 from app.services import entitlements
 
 _log = logging.getLogger(__name__)
@@ -330,15 +334,187 @@ def grants_for(db: Session, user_id: str, org_id: str) -> List[str]:
     Scoped by organization as well as by user because the same person can be an
     admin in more than one customer over time, and a grant made for one is not a
     statement about another.
+
+    `scope_type` IS FILTERED EXPLICITLY, not left implied by organization_id.
+    Since brand-scoped grants arrived, this table holds rows of more than one
+    kind; matching on organization_id alone would work only for as long as
+    nothing else ever set it. Naming the scope means a brand grant can never
+    satisfy a customer-org question even by accident.
     """
     if not user_id or not org_id:
         return []
     rows = (db.query(UserCapabilityGrant)
             .filter(UserCapabilityGrant.user_id == user_id,
                     UserCapabilityGrant.organization_id == org_id,
+                    UserCapabilityGrant.scope_type == SCOPE_CUSTOMER_ORG,
                     UserCapabilityGrant.is_active.is_(True))
             .all())
     return sorted({r.capability for r in rows if r.capability in CAPABILITIES})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BRAND-SCOPED CAPABILITIES
+#
+# WHY THIS EXISTS. `sales_comp_view` and `sales_comp_manage` were registered
+# and unreachable. Every grant in this table was scoped to a CUSTOMER
+# organization, and the people who need compensation authority — a finance or
+# ops person working for the brand — have `users.organization_id = NULL` and
+# belong to a BrandSalesOrg, not to a customer. There was literally no row that
+# could be written to give them the capability, so compensation authority
+# collapsed onto role names: you had to be made a sales manager or a god_admin
+# to process a commission run.
+#
+# THE FIX IS THE ONE THIS CODEBASE ALREADY LEARNED. `AuditLogEntry` had the
+# same shape — NOT NULL organization_id on a table that control-plane actors
+# needed to write — and was fixed by admitting the other scope rather than by
+# inventing a parallel system. Same lesson here, with one addition: the scope
+# is NAMED, so nothing has to infer authority from a NULL.
+#
+# A GRANT THAT CANNOT TAKE EFFECT IS REFUSED. Only capabilities that something
+# actually reads at brand scope may be granted at brand scope — see
+# `set_brand_grants`. A row nobody consults would show an administrator as
+# authorised while every request they made was denied, which is the exact
+# failure `set_user_grants` already refuses for ineligible targets.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# The capabilities that MEAN something at brand scope. Deliberately short: this
+# list is the promise that a grant written here is a grant something enforces.
+BRAND_SCOPED_CAPABILITIES = ("sales_comp_view", "sales_comp_manage")
+
+
+def brand_grants_for(db: Session, user_id: str,
+                     brand_sales_org_id: str) -> List[str]:
+    """Capability keys actively granted to this user OVER THIS BRAND.
+
+    Matches on the (scope_type, scope_id) pair. A grant for another brand, or a
+    customer-org grant, matches nothing here — which is the entire security
+    property, so it is expressed as a filter rather than as a convention.
+    """
+    if not user_id or not brand_sales_org_id:
+        return []
+    rows = (db.query(UserCapabilityGrant)
+            .filter(UserCapabilityGrant.user_id == user_id,
+                    UserCapabilityGrant.scope_type == SCOPE_BRAND_SALES_ORG,
+                    UserCapabilityGrant.scope_id == brand_sales_org_id,
+                    UserCapabilityGrant.is_active.is_(True))
+            .all())
+    return sorted({r.capability for r in rows if r.capability in CAPABILITIES})
+
+
+def has_brand_capability(db: Session, user: User, brand_sales_org_id: str,
+                         key: str) -> bool:
+    """Does this user hold this capability over this brand?
+
+    god_admin is true everywhere, as it is at every other gate in this system —
+    the owner does not hold grants, they precede them. Everybody else must have
+    the matching row for the matching brand.
+
+    NOTE WHAT THIS DOES NOT DO. It does not consult sales role, membership, or
+    any customer-org grant. Holding `sales_comp_manage` over EvoSys Pro makes
+    somebody able to settle EvoSys Pro commissions and nothing else: not a
+    sales manager, not able to enter a customer workspace, not able to see
+    another brand.
+    """
+    if user is None:
+        return False
+    if is_god(user):
+        return True
+    if not brand_sales_org_id:
+        return False
+    return key in brand_grants_for(db, user.id, brand_sales_org_id)
+
+
+def brands_with_capability(db: Session, user: User, key: str) -> List[str]:
+    """Every brand over which this user holds this capability.
+
+    Returns ONLY brands named by a real grant row. There is no wildcard: a
+    god_admin is handled by the caller, because a function that returned "all
+    brands" from here would put a global answer inside a per-brand lookup.
+    """
+    if user is None or is_god(user):
+        return []
+    rows = (db.query(UserCapabilityGrant)
+            .filter(UserCapabilityGrant.user_id == user.id,
+                    UserCapabilityGrant.scope_type == SCOPE_BRAND_SALES_ORG,
+                    UserCapabilityGrant.capability == key,
+                    UserCapabilityGrant.scope_id.isnot(None),
+                    UserCapabilityGrant.is_active.is_(True))
+            .all())
+    return sorted({r.scope_id for r in rows})
+
+
+def set_brand_grants(db: Session, target: User, brand_sales_org_id: str,
+                     brand_name: str, actor: User,
+                     keys: Optional[List[str]]) -> List[str]:
+    """Replace one person's capability grants over one brand.
+
+    Refuses a capability that nothing reads at brand scope, for the reason in
+    the block comment above. Revocation deactivates rather than deletes, the
+    same as the customer-org path, so "who could settle commissions in June"
+    stays answerable.
+    """
+    from app.routers.audit_log_router import log_action
+
+    if is_god(target):
+        raise HTTPException(
+            status_code=400,
+            detail="The platform owner already holds every capability and is "
+                   "not granted them per-brand.")
+
+    wanted = normalize_capability_keys(keys)
+    bad = [k for k in wanted if k not in BRAND_SCOPED_CAPABILITIES]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail="%s cannot be granted over a brand — nothing enforces it at "
+                   "that scope. Brand-scoped capabilities are: %s."
+                   % (", ".join(bad), ", ".join(BRAND_SCOPED_CAPABILITIES)))
+
+    before = brand_grants_for(db, target.id, brand_sales_org_id)
+
+    existing = (db.query(UserCapabilityGrant)
+                .filter(UserCapabilityGrant.user_id == target.id,
+                        UserCapabilityGrant.scope_type == SCOPE_BRAND_SALES_ORG,
+                        UserCapabilityGrant.scope_id == brand_sales_org_id)
+                .all())
+    by_key = {r.capability: r for r in existing}
+
+    for key in wanted:
+        row = by_key.get(key)
+        if row is None:
+            db.add(UserCapabilityGrant(
+                user_id=target.id,
+                scope_type=SCOPE_BRAND_SALES_ORG,
+                scope_id=brand_sales_org_id,
+                # DELIBERATELY NULL. A brand grant has no customer tenant, and
+                # writing one here would make it visible to the customer-org
+                # read path — which is the cross-scope leak this whole change
+                # exists to prevent.
+                organization_id=None,
+                capability=key, is_active=True, granted_by=actor.id))
+        else:
+            row.is_active = True
+            row.granted_by = actor.id
+    for key, row in by_key.items():
+        if key not in wanted:
+            row.is_active = False
+
+    db.flush()
+    log_action(
+        db, None, actor.id,
+        action="brand.capabilities_set", target_type="user",
+        target_id=target.id,
+        before={"capabilities": before,
+                "scope_type": SCOPE_BRAND_SALES_ORG,
+                "scope_id": brand_sales_org_id},
+        after={"capabilities": wanted,
+               "scope_type": SCOPE_BRAND_SALES_ORG,
+               "scope_id": brand_sales_org_id,
+               "brand_name": brand_name},
+        note="Brand-scoped capability grant.",
+        commit=False,
+    )
+    return wanted
 
 
 def user_has_grant(db: Session, user_id: str, org_id: str, key: str) -> bool:

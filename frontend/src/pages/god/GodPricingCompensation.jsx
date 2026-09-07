@@ -1022,6 +1022,138 @@ function SeedPanel({ data, onSaved }) {
   )
 }
 
+/* ── who may see and settle this brand's compensation ─────────────────────── */
+
+/* WHY THIS PANEL IS ON THE PRICING & COMP SCREEN. The person deciding who runs
+ * a commission run is already here deciding what a commission IS. Users &
+ * Identity administers PEOPLE across the platform; this administers one
+ * commercial authority over one brand.
+ *
+ * THERE IS NO "FINANCE MANAGER" ROLE TO PICK. A named role beside the
+ * capability model would be a second permission system, and the first time the
+ * two disagreed nobody would know which was authoritative. Capabilities and a
+ * scope are the whole answer.
+ */
+function BrandAccessPanel({ data }) {
+  const brands = data.brands || []
+  const [brand, setBrand] = useState(data.selected_brand_sales_org_id || '')
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+
+  const load = useCallback(async () => {
+    if (!brand) { setD(null); return }
+    try {
+      setD(await api.get('/god/pricing/brand-access?brand_sales_org_id=' + brand))
+      setErr('')
+    } catch (e) { setErr(errText(e)) }
+  }, [brand])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!brand && brands.length === 1) setBrand(brands[0].id)
+  }, [brands, brand])
+
+  async function toggle(person, key) {
+    const next = person.capabilities.includes(key)
+      ? person.capabilities.filter(k => k !== key)
+      : [...person.capabilities, key]
+    setBusy(person.user_id + key); setErr('')
+    try {
+      await api.put('/god/pricing/brand-access', {
+        brand_sales_org_id: brand, user_id: person.user_id,
+        capabilities: next,
+      })
+      await load()
+    } catch (e) { setErr(errText(e)) } finally { setBusy('') }
+  }
+
+  return (
+    <Panel title="Who may see and settle compensation">
+      <div className="go-body">
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--go-dim)',
+                    maxWidth: '72ch' }}>
+          These are granted <strong>per brand</strong>. Seeing compensation and
+          settling it are separate: a finance administrator can be given either
+          or both without becoming a sales manager, and a sales manager does not
+          get settlement authority just by running a team. The platform owner
+          always has both.
+        </p>
+
+        <div className="go-fields">
+          <div className="go-field">
+            <label>Sales organization</label>
+            <select value={brand} onChange={e => setBrand(e.target.value)}>
+              <option value="">Choose a sales organization…</option>
+              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {err ? <div className="go-note err" style={{ marginTop: 12 }}>{err}</div> : null}
+      </div>
+
+      {d ? (
+        !d.people.length ? (
+          <Empty>Nobody is a member of this sales organization yet.</Empty>
+        ) : (
+          <table className="go-table">
+            <thead>
+              <tr>
+                <th>Person</th><th>In this brand</th>
+                {d.available_capabilities.map(c => (
+                  <th key={c.key} style={{ textAlign: 'center' }}>{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {d.people.map(p => (
+                <tr key={p.user_id}>
+                  <td data-label="Person">
+                    {p.name}
+                    <div style={{ fontSize: 11, color: 'var(--go-dim)' }}>{p.email}</div>
+                  </td>
+                  <td data-label="In this brand">
+                    {p.is_brand_member
+                      ? <span className="go-badge">sales member</span>
+                      : <span className="go-badge new">not a sales member</span>}
+                  </td>
+                  {d.available_capabilities.map(c => (
+                    <td key={c.key} data-label={c.label} style={{ textAlign: 'center' }}>
+                      <input type="checkbox"
+                             checked={p.capabilities.includes(c.key)}
+                             disabled={busy === p.user_id + c.key}
+                             onChange={() => toggle(p, c.key)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      ) : null}
+
+      {d ? (
+        <div className="go-body" style={{ borderTop: '1px solid var(--go-line)' }}>
+          {d.available_capabilities.map(c => (
+            <p key={c.key} style={{ margin: '0 0 8px', fontSize: 12,
+                                    color: 'var(--go-dim)' }}>
+              <strong>{c.label}</strong> — {c.why}
+            </p>
+          ))}
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--go-dim)' }}>
+            A grant applies to this brand only, and grants nothing else — not a
+            sales team, not another brand, and not access to any customer
+            workspace. Every change is audited.
+          </p>
+        </div>
+      ) : null}
+    </Panel>
+  )
+}
+
+
 /* ── audit ───────────────────────────────────────────────────────────────── */
 
 function AuditPanel() {
@@ -1168,6 +1300,8 @@ export default function GodPricingCompensation() {
       )}
 
       <SeedPanel data={data} onSaved={load} />
+
+      <BrandAccessPanel data={data} />
 
       <AuditPanel />
 
