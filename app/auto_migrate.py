@@ -81,6 +81,11 @@ COLUMNS_TO_ADD = [
     ("organizations", "billing_cancel_at_period_end", "BOOLEAN DEFAULT FALSE"),
     ("organizations", "billing_pending_plan_key", "VARCHAR"),
     ("organizations", "billing_trial_end", "TIMESTAMP"),
+    # A scheduled downgrade: when it lands, and the Stripe Subscription
+    # Schedule performing it. Kept so a repeated request updates one schedule
+    # instead of creating a second contradictory one.
+    ("organizations", "billing_pending_effective_at", "TIMESTAMP"),
+    ("organizations", "stripe_schedule_id", "VARCHAR"),
 
     # ── Import batch options (2026-09-07) ──────────────────────────────────
     # POST /leads/upload/confirm accepted all four of these as multipart form

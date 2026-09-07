@@ -83,6 +83,39 @@ def resolve_plan(db: Session, platform_id: Optional[str], key: Optional[str]
             .first())
 
 
+def resolve_plan_by_price_id(db: Session, platform_id: Optional[str],
+                             price_id: Optional[str]) -> Optional[BrandBillingPlan]:
+    """Which plan is this Stripe Price? THE DURABLE LOOKUP.
+
+    A Stripe price id is created by us, mapped in the brand's own catalogue,
+    and is what the customer is actually charged against. Unlike a metadata
+    string it cannot be edited into something else from the Stripe dashboard,
+    and unlike a plan key it is unambiguous across brands.
+
+    STILL SCOPED TO THE BRAND. The platform_id filter is not decorative: two
+    brands could in principle map the same Stripe price, and a webhook must
+    resolve it to the plan belonging to the organization being updated, not to
+    whichever row happened to be found first.
+    """
+    if not price_id:
+        return None
+    q = db.query(BrandBillingPlan).filter(
+        (BrandBillingPlan.stripe_price_id_monthly == price_id)
+        | (BrandBillingPlan.stripe_price_id_annual == price_id))
+    if platform_id:
+        q = q.filter(BrandBillingPlan.platform_id == platform_id)
+    return q.first()
+
+
+def interval_for_price_id(plan: BrandBillingPlan, price_id: str) -> Optional[str]:
+    """Which interval that price represents on this plan."""
+    if price_id and plan.stripe_price_id_annual == price_id:
+        return BillingInterval.YEAR
+    if price_id and plan.stripe_price_id_monthly == price_id:
+        return BillingInterval.MONTH
+    return None
+
+
 def require_purchasable(db: Session, platform_id: Optional[str],
                         key: Optional[str], interval: str) -> BrandBillingPlan:
     """The checkout gate. Raises PlanNotAvailable unless this exact

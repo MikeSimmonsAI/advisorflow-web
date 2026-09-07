@@ -264,34 +264,72 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
     org.billing_trial_end = trial_end
 
     items = ((sub.get("items") or {}).get("data") or [])
+    price_id = None
     if items:
         price = (items[0] or {}).get("price") or {}
         recurring = price.get("recurring") or {}
         interval = recurring.get("interval")
         if interval:
             org.stripe_plan_interval = interval
+        price_id = price.get("id") if isinstance(price, dict) else None
 
-    # THE PLAN KEY COMES FROM OUR METADATA, NOT FROM STRIPE'S PRICE NICKNAME.
+    # ══════════════════════════════════════════════════════════════════════
+    # THE PLAN IS RESOLVED FROM THE STRIPE PRICE ID FIRST. METADATA IS A
+    # FALLBACK, NOT THE SOURCE.
+    # ══════════════════════════════════════════════════════════════════════
     #
-    # It is validated against this brand's catalogue before being written. The
-    # previous handler copied `metadata["plan"]` onto org.plan with NO
-    # membership check at all, so anyone able to edit a subscription in the
-    # Stripe dashboard could set an organization's plan to an arbitrary string
-    # that several screens then read.
-    meta_plan = (sub.get("metadata") or {}).get("plan")
-    if meta_plan:
-        from app.services import billing_catalog
-        resolved = billing_catalog.resolve_plan(
-            db, getattr(org, "platform_id", None), meta_plan)
-        if resolved is not None:
-            org.billing_plan_key = resolved.key
-            org.plan = resolved.key
-        else:
-            log.warning(
-                "billing_webhook: subscription %s carries plan metadata %r that "
-                "is not in platform %s's catalogue - ignoring it rather than "
-                "writing an unrecognised plan onto org %s",
-                sub.get("id"), meta_plan, getattr(org, "platform_id", None), org.id)
+    # THE PRICE IS THE DURABLE IDENTIFIER. It is what the customer is actually
+    # being charged against, it is created by us and mapped in the brand's own
+    # catalogue, and it cannot be edited into something else from the Stripe
+    # dashboard the way a metadata string can.
+    #
+    # This used to read metadata ONLY, which broke in a specific and important
+    # case: when a SUBSCRIPTION SCHEDULE advances to its second phase - the
+    # mechanism a deferred downgrade uses - the resulting subscription.updated
+    # event is not guaranteed to carry our `plan` metadata. The price on the
+    # item always changes. So a scheduled downgrade would have taken effect at
+    # Stripe and silently failed to sync here, leaving the customer paying the
+    # lower price while every screen still showed the higher plan.
+    #
+    # Either way the answer is validated against THIS BRAND's catalogue before
+    # anything is written, so an unrecognised value is ignored rather than
+    # stored.
+    resolved = None
+    from app.services import billing_catalog
+    platform_id = getattr(org, "platform_id", None)
+
+    if price_id:
+        resolved = billing_catalog.resolve_plan_by_price_id(db, platform_id, price_id)
+
+    if resolved is None:
+        meta_plan = (sub.get("metadata") or {}).get("plan")
+        if meta_plan:
+            resolved = billing_catalog.resolve_plan(db, platform_id, meta_plan)
+            if resolved is None:
+                log.warning(
+                    "billing_webhook: subscription %s carries plan metadata %r "
+                    "that is not in platform %s's catalogue - ignoring it "
+                    "rather than writing an unrecognised plan onto org %s",
+                    sub.get("id"), meta_plan, platform_id, org.id)
+
+    if resolved is not None:
+        previous = org.billing_plan_key
+        org.billing_plan_key = resolved.key
+        org.plan = resolved.key
+
+        # A PENDING CHANGE THAT HAS NOW LANDED IS NO LONGER PENDING.
+        #
+        # When the schedule's second phase starts, the subscription arrives on
+        # the target price and this is where that becomes true locally. Clearing
+        # the markers here - rather than on a timer, or on the customer next
+        # loading the page - is what keeps "what plan am I on" answerable from
+        # one place.
+        if org.billing_pending_plan_key and org.billing_pending_plan_key == resolved.key:
+            log.info("billing_webhook: scheduled change to %s is now in effect "
+                     "for org %s (was %s)", resolved.key, org.id, previous)
+            org.billing_pending_plan_key = None
+            org.billing_pending_effective_at = None
+            org.stripe_schedule_id = None
 
 
 def handle_event(db: Session, event: dict) -> dict:

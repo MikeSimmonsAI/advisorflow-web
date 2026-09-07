@@ -30,7 +30,8 @@ from app.models.billing_models import (BillingInterval, BillingInvoice,
                                        BillingPayment, ChangeTiming,
                                        ProrationBehavior, SubscriptionStatus)
 from app.services.capabilities import require_capability
-from app.services import billing_catalog, billing_policy, billing_webhook
+from app.services import (billing_catalog, billing_policy, billing_schedule,
+                          billing_webhook)
 from app.routers.audit_log_router import log_action
 
 logger = logging.getLogger(__name__)
@@ -265,7 +266,14 @@ def get_subscription(
         # answers are true at once and the screen shows both rather than
         # pretending the change already happened.
         "pending_plan": getattr(org, "billing_pending_plan_key", None),
+        "pending_effective_at": getattr(org, "billing_pending_effective_at", None),
     }
+
+    # WHAT THE PLAN ACTUALLY ENFORCES, with usage. Shown so a customer can see
+    # they are near a ceiling before an action starts failing, and - where a
+    # downgrade is scheduled - what they will drop to before it happens.
+    from app.services import plan_limits
+    result["limits"] = plan_limits.report(db, org)
 
     # Recent invoices, from the local mirror. The customer can see what they
     # were charged without a round trip, and the hosted receipt URL is Stripe's
@@ -474,40 +482,85 @@ def change_plan(
                             detail="Could not read the current subscription "
                                    "from the payment processor.")
 
-    new_item = _price_payload_for(target, req.interval, db, org)
-
-    modify_kwargs = {
-        "items": [{"id": item_id, **new_item}],
-        "proration_behavior": behavior["proration"],
-        "metadata": {"org_id": org.id, "plan": target.key},
-    }
+    # ══════════════════════════════════════════════════════════════════════
+    # DEFERRED (downgrade) and IMMEDIATE (upgrade) are genuinely different
+    # Stripe operations, not one call with a different flag.
+    # ══════════════════════════════════════════════════════════════════════
     if behavior["timing"] == ChangeTiming.PERIOD_END:
-        # The customer keeps what they paid for until it runs out. Stripe bills
-        # the new price at the next renewal and issues no credit now.
-        modify_kwargs["proration_behavior"] = ProrationBehavior.NONE
-        modify_kwargs["billing_cycle_anchor"] = "unchanged"
+        # A SUBSCRIPTION SCHEDULE, not a modify.
+        #
+        # This previously called Subscription.modify with
+        # proration_behavior="none" and billing_cycle_anchor="unchanged",
+        # believing that deferred the change. It does not - the item swap takes
+        # effect IMMEDIATELY, so the customer lost the tier they had already
+        # paid for and received no credit for the difference. Less product,
+        # same money. See billing_schedule.py for the full account.
+        target_price_id = billing_catalog.stripe_price_id_for(target, req.interval)
+        try:
+            outcome = billing_schedule.schedule_change_at_period_end(
+                sub_id,
+                existing_schedule_id=getattr(org, "stripe_schedule_id", None),
+                target_price_id=target_price_id,
+                target_plan_key=target.key,
+                org_id=org.id,
+            )
+        except billing_schedule.ScheduleError as exc:
+            # 409 rather than 502: for the common cause - no Stripe Price
+            # mapped for this plan - the processor is not at fault and an
+            # administrator can fix it. The message says which.
+            raise HTTPException(status_code=409, detail=str(exc))
 
-    try:
-        stripe.Subscription.modify(sub_id, **modify_kwargs)
-    except Exception as exc:
-        logger.warning("change_plan: modify failed for %s: %s", sub_id, exc)
-        raise HTTPException(status_code=502,
-                            detail="The payment processor rejected the plan "
-                                   "change.")
-
-    # LOCAL STATE IS NOT WRITTEN HERE, on purpose - except the pending marker.
-    # The subscription.updated webhook is the authoritative record of what
-    # Stripe actually did, and writing the outcome optimistically from this
-    # side is how a UI ends up showing a plan the customer is not on.
-    if behavior["timing"] == ChangeTiming.PERIOD_END:
+        # THE PENDING CHANGE IS RECORDED; THE CURRENT PLAN IS NOT TOUCHED.
+        # `billing_plan_key` still says what they are entitled to today, which
+        # is what entitlements read. Only when Stripe's schedule actually
+        # advances does the webhook move it.
+        org.stripe_schedule_id = outcome["schedule_id"]
         org.billing_pending_plan_key = target.key
+        org.billing_pending_effective_at = (
+            outcome["effective_at"] or getattr(org, "billing_current_period_end", None))
+        effective_text = "at the end of your current billing period"
+        proration_applied = ProrationBehavior.NONE
+
+    else:
+        # UPGRADE - immediate, prorated. The customer asked for more and gets
+        # it now; Stripe charges the difference for the remainder of the period.
+        new_item = _price_payload_for(target, req.interval, db, org)
+        try:
+            stripe.Subscription.modify(
+                sub_id,
+                items=[{"id": item_id, **new_item}],
+                proration_behavior=behavior["proration"],
+                metadata={"org_id": org.id, "plan": target.key},
+            )
+        except Exception as exc:
+            logger.warning("change_plan: modify failed for %s: %s", sub_id, exc)
+            raise HTTPException(status_code=502,
+                                detail="The payment processor rejected the plan "
+                                       "change.")
+
+        # AN UPGRADE SUPERSEDES ANY PENDING DOWNGRADE. Somebody who downgrades
+        # on Monday and upgrades on Tuesday must not still drop a tier at month
+        # end because a schedule nobody cancelled was still sitting there.
+        if getattr(org, "stripe_schedule_id", None):
+            billing_schedule.release(org.stripe_schedule_id)
+            org.stripe_schedule_id = None
+        org.billing_pending_plan_key = None
+        org.billing_pending_effective_at = None
+        effective_text = "immediately"
+        proration_applied = behavior["proration"]
+
+    # THE CURRENT PLAN IS NOT WRITTEN HERE, on purpose. The
+    # subscription.updated webhook is the authoritative record of what Stripe
+    # actually did, and writing the outcome optimistically from this side is
+    # how a UI ends up showing a plan the customer is not on.
     _audit(db, org, current_user, "billing.plan_change_requested", {
         "from": getattr(org, "billing_plan_key", None) or org.plan,
         "to": target.key,
         "interval": req.interval,
         "direction": direction,
         "timing": behavior["timing"],
-        "proration": modify_kwargs["proration_behavior"],
+        "proration": proration_applied,
+        "schedule_id": getattr(org, "stripe_schedule_id", None),
     })
     db.commit()
 
@@ -515,12 +568,50 @@ def change_plan(
         "ok": True,
         "direction": direction,
         "timing": behavior["timing"],
-        "proration": modify_kwargs["proration_behavior"],
-        "effective": ("immediately" if behavior["timing"] == ChangeTiming.IMMEDIATE
-                      else "at the end of your current billing period"),
-        "pending_plan": (target.key if behavior["timing"] == ChangeTiming.PERIOD_END
-                         else None),
+        "proration": proration_applied,
+        "effective": effective_text,
+        "effective_at": getattr(org, "billing_pending_effective_at", None),
+        "pending_plan": getattr(org, "billing_pending_plan_key", None),
+        # What they keep until then. Stated explicitly so the screen does not
+        # have to infer that a downgrade is not yet in force.
+        "current_plan": getattr(org, "billing_plan_key", None) or org.plan,
     }
+
+
+@router.post("/cancel-pending-change")
+def cancel_pending_change(
+    current_user: User = Depends(_require_admin),
+    db: Session = Depends(get_db),
+):
+    """Drop a scheduled downgrade before it lands.
+
+    A customer who scheduled a downgrade and changed their mind should not have
+    to upgrade-and-re-downgrade to undo it, and should not have to wait for a
+    change they no longer want. Releasing the schedule returns the subscription
+    to ordinary billing on the plan they are already on - it charges nothing
+    and refunds nothing, because nothing has happened yet.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    if not getattr(org, "billing_pending_plan_key", None):
+        raise HTTPException(status_code=409,
+                            detail="There is no pending plan change to cancel.")
+
+    _stripe_client()
+    released = billing_schedule.release(getattr(org, "stripe_schedule_id", None))
+
+    was = org.billing_pending_plan_key
+    org.stripe_schedule_id = None
+    org.billing_pending_plan_key = None
+    org.billing_pending_effective_at = None
+    _audit(db, org, current_user, "billing.pending_change_cancelled",
+           {"cancelled_pending_plan": was, "released_at_processor": released})
+    db.commit()
+    return {"ok": True, "cancelled_pending_plan": was,
+            "current_plan": getattr(org, "billing_plan_key", None) or org.plan}
 
 
 # ---------------------------------------------------------------------------

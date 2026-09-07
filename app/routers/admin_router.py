@@ -873,6 +873,25 @@ def create_user(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Role must be 'advisor' or 'org_admin'.")
 
+    # ── THE PLAN'S SEAT LIMIT, ENFORCED ON THE SERVER ────────────────────
+    #
+    # `max_users` has been on the billing catalogue since it was built, shown
+    # on the plan cards, and enforced by nothing - a Starter organization
+    # advertising "up to 2 users" could add fifty. This is the one place a
+    # customer user is created, so it is the one place the ceiling belongs.
+    #
+    # It reads the CURRENT plan, never a pending downgrade: a customer who
+    # scheduled a downgrade has already paid for the higher tier through the
+    # period and keeps its seats until the change actually lands.
+    #
+    # Nothing is pruned or disabled for an organization already over its limit
+    # - the ceiling stops the NEXT addition, it does not delete people.
+    from app.services import plan_limits
+    _target_org_id = _tenant_write_org_id(current_user)
+    _target_org = db.query(Organization).filter(
+        Organization.id == _target_org_id).first()
+    plan_limits.require_capacity(db, _target_org, plan_limits.LIMIT_USERS, adding=1)
+
     # No plaintext password is created or returned. See _unknowable_password.
     secret = _unknowable_password()
     new_user = User(

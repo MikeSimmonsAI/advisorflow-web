@@ -462,6 +462,21 @@ class Organization(Base):
     # somebody paid for, or hide a change they already made.
     billing_pending_plan_key    = Column(String, nullable=True)
 
+    # WHEN the pending change actually takes effect, and the Stripe object that
+    # will perform it.
+    #
+    # A downgrade is scheduled, not applied. Stripe performs it with a
+    # Subscription Schedule whose second phase begins at the current period
+    # end; `stripe_schedule_id` is that schedule, kept so a repeated downgrade
+    # request UPDATES the existing one instead of creating a second contradictory
+    # schedule, and so an upgrade can release it.
+    #
+    # `billing_pending_effective_at` is what the Billing screen shows the
+    # customer ("Growth until 14 March, then Starter") and what entitlements
+    # use to know the higher tier is still theirs.
+    billing_pending_effective_at = Column(DateTime, nullable=True)
+    stripe_schedule_id           = Column(String, nullable=True)
+
     billing_trial_end           = Column(DateTime, nullable=True)
 
     platform = relationship("Platform", back_populates="organizations")
