@@ -46,6 +46,42 @@ is not a billing decision anyone would sanction.
 
 NO LIMIT WHERE NONE IS CONFIGURED. NULL means unlimited, and a brand that has
 not set a number gets no ceiling rather than a guessed one.
+
+═══════════════════════════════════════════════════════════════════════════
+ONE GUARD, CALLED EVERYWHERE - AND EVERY EXCEPTION NAMED OUT LOUD
+═══════════════════════════════════════════════════════════════════════════
+
+`require_capacity()` is the ONLY place a limit is enforced. Every path that
+can add a user to a customer organization, or create a lead in one, calls it.
+Not the frontend, not each router's own arithmetic - here.
+
+The paths that legitimately do NOT count against a customer's plan still call
+it, passing an explicit `bypass=` reason from `BYPASS_REASONS`. That is the
+difference between a considered exception and an oversight: a bypass has a
+name, is refused unless the caller is privileged enough to use it, writes an
+audit row, and is covered by a test. A path that simply never called the guard
+would look identical from the outside and mean something entirely different.
+
+`test_plan_limits_coverage.py` walks the source tree and fails if a new
+`User(` or `Lead(` construction site appears in a customer path without
+reaching this module, so the next such path cannot be added silently.
+
+═══════════════════════════════════════════════════════════════════════════
+WHY THE ORGANIZATION ROW IS LOCKED
+═══════════════════════════════════════════════════════════════════════════
+
+Count-then-insert is a race. Two requests to add the second user of a 2-user
+plan both COUNT 1, both conclude there is room, and both INSERT: three users
+on a two-user plan, with neither request having done anything wrong.
+
+So the check takes a row lock on the organization first (`SELECT ... FOR
+UPDATE`). Concurrent additions for the SAME organization serialize behind it;
+different organizations never contend. The lock is held to the end of the
+caller's transaction, which is what makes the count still true at INSERT time.
+
+On SQLite - tests only - `FOR UPDATE` is not supported and is skipped. That is
+safe there and nowhere else: SQLite serializes writers itself, and the test
+suite uses a single connection.
 """
 
 from __future__ import annotations
@@ -54,6 +90,7 @@ import logging
 from typing import Optional
 
 from fastapi import HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.models import Organization, User
@@ -63,6 +100,71 @@ log = logging.getLogger(__name__)
 
 LIMIT_USERS = "max_users"
 LIMIT_LEADS = "max_leads"
+
+
+# ── The named exceptions ────────────────────────────────────────────────────
+#
+# A bypass is not "skip the check". It is a DECLARED, PRIVILEGED, AUDITED
+# reason that this particular addition is not a customer consuming their plan.
+# Each value maps to who is allowed to invoke it.
+
+BYPASS_PLATFORM_PROVISIONING = "platform_provisioning"
+BYPASS_DEMO_SEED = "demo_seed"
+BYPASS_SYSTEM_MIGRATION = "system_migration"
+
+BYPASS_REASONS = {
+    # God/platform staff standing up or repairing a customer. The platform
+    # operator is not a customer buying seats; refusing them would mean a
+    # customer who has outgrown their plan can never be helped.
+    BYPASS_PLATFORM_PROVISIONING: {
+        "roles": ("god_admin",),
+        "why": "platform operator provisioning or repairing a customer org",
+    },
+    # Demo and sample fixtures. These rows are disposable and exist to show
+    # the product, not because a customer generated business.
+    BYPASS_DEMO_SEED: {
+        "roles": ("god_admin", "super_admin"),
+        "why": "demo/sample fixture data, not customer-generated records",
+    },
+    # Backfills and data migrations run by the platform. Never reachable from
+    # a customer-facing request.
+    BYPASS_SYSTEM_MIGRATION: {
+        "roles": ("god_admin",),
+        "why": "platform data migration or backfill",
+    },
+}
+
+
+class LimitBypassDenied(HTTPException):
+    """Someone asked for a bypass they are not entitled to use."""
+
+    def __init__(self, detail: str):
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+def _lock_org(db: Session, org: Optional[Organization]) -> None:
+    """Serialize concurrent capacity checks for this one organization.
+
+    Held until the caller's transaction ends, which is the point: the count
+    taken after this line is still true when the caller INSERTs.
+    """
+    if org is None:
+        return
+    try:
+        dialect = db.bind.dialect.name if db.bind is not None else ""
+    except Exception:
+        dialect = ""
+    if dialect != "postgresql":
+        # SQLite (tests) has no row-level FOR UPDATE and serializes writers
+        # itself. Any other dialect: fail open on the LOCK, never on the CHECK
+        # - the count below still runs.
+        return
+    try:
+        db.execute(text("SELECT 1 FROM organizations WHERE id = :oid FOR UPDATE"),
+                   {"oid": org.id})
+    except Exception:                                    # pragma: no cover
+        log.warning("plan_limits: could not lock organization %s for capacity "
+                    "check; proceeding with an unlocked count", org.id)
 
 
 def effective_plan(db: Session, org: Optional[Organization]):
@@ -100,13 +202,38 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
 def usage_for(db: Session, org: Organization, key: str) -> int:
     """How many they are using today. Counts only what the limit is about."""
     if key == LIMIT_USERS:
-        # ACTIVE users. A deactivated account is not consuming a seat, and
-        # counting it would mean an organization could never recover from
-        # hitting the ceiling except by deleting people.
-        return (db.query(User)
-                .filter(User.organization_id == org.id,
-                        User.is_active == True)      # noqa: E712
-                .count())
+        # A SEAT IS A PERSON WITH ACCESS, NOT A ROW IN `users`.
+        #
+        # Counting `User.organization_id` alone missed an entire second door.
+        # `workspace_access.grant_workspace_membership` gives somebody a live
+        # SCOPE_CUSTOMER_ORG membership in a customer's workspace while their
+        # `User.organization_id` still points somewhere else - a brand-sales
+        # person working inside a customer, most obviously. They log in, they
+        # work the customer's leads, and under the old count they were free.
+        #
+        # So both are counted, DISTINCT: a person homed in the org who also
+        # holds a membership to it is one seat, not two.
+        #
+        # ACTIVE only, on both sides. A deactivated account or a revoked
+        # membership is not consuming a seat, and counting them would mean an
+        # organization could never recover from its ceiling except by deleting
+        # people.
+        from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+
+        homed = {r[0] for r in db.query(User.id)
+                 .filter(User.organization_id == org.id,
+                         User.is_active == True)             # noqa: E712
+                 .all()}
+
+        seconded = {r[0] for r in db.query(Membership.user_id)
+                    .join(User, User.id == Membership.user_id)
+                    .filter(Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                            Membership.scope_id == org.id,
+                            Membership.is_active == True,    # noqa: E712
+                            User.is_active == True)          # noqa: E712
+                    .all()}
+
+        return len(homed | seconded)
     if key == LIMIT_LEADS:
         from app.models.models import Lead
         return (db.query(Lead)
@@ -137,16 +264,79 @@ def check(db: Session, org: Optional[Organization], key: str,
     }
 
 
+def _authorize_bypass(db: Session, org: Optional[Organization], key: str,
+                      adding: int, bypass: str, actor) -> None:
+    """A bypass is a privilege, not a keyword. Check it, then record it.
+
+    Refusing an unknown reason matters as much as refusing an unprivileged
+    caller: a typo'd bypass string that silently disabled the limit would be
+    exactly the accidental hole this design exists to prevent.
+    """
+    spec = BYPASS_REASONS.get(bypass)
+    if spec is None:
+        raise LimitBypassDenied(
+            "Unknown plan-limit bypass reason %r. Bypasses must be one of: %s."
+            % (bypass, ", ".join(sorted(BYPASS_REASONS))))
+
+    role = getattr(actor, "role", None)
+    if role not in spec["roles"]:
+        raise LimitBypassDenied(
+            "Bypassing the plan limit for %r requires one of: %s."
+            % (bypass, ", ".join(spec["roles"])))
+
+    # AUDITED. A bypass that left no trace would be indistinguishable from a
+    # path that never enforced anything, which is the whole point of naming it.
+    try:
+        from app.routers.audit_log_router import log_action
+        log_action(
+            db,
+            organization_id=getattr(org, "id", None),
+            actor_user_id=getattr(actor, "id", None),
+            action="plan_limit.bypass",
+            target_type="organization",
+            target_id=getattr(org, "id", None),
+            details={"limit": key, "adding": adding, "reason": bypass,
+                     "why": spec["why"], "actor_role": role,
+                     "plan": getattr(effective_plan(db, org), "key", None)},
+            platform_id=getattr(org, "platform_id", None),
+            # NOT commit=True. This runs inside the caller's transaction, which
+            # is still holding the organization row lock and has not yet
+            # written the thing being audited. Committing here would publish a
+            # half-finished provision and drop the lock early.
+            commit=False,
+        )
+    except Exception:                                    # pragma: no cover
+        # An audit failure must not become a data-loss failure mid-provision,
+        # but it must be loud.
+        log.exception("plan_limits: FAILED TO AUDIT bypass %r on org %s",
+                      bypass, getattr(org, "id", None))
+
+
 def require_capacity(db: Session, org: Optional[Organization], key: str,
-                     adding: int = 1) -> None:
-    """Refuse the addition if it would exceed the plan. 402, not 403.
+                     adding: int = 1, *, bypass: Optional[str] = None,
+                     actor=None) -> None:
+    """THE enforcement point. Refuse the addition if it exceeds the plan.
 
     402 Payment Required rather than 403 Forbidden, matching the entitlement
     gate this sits beside: the caller is not unauthorized, their PLAN does not
     include this. The two are different problems with different fixes, and
     telling somebody they lack permission when they actually need a bigger plan
     sends them to the wrong person.
+
+    `bypass` names a declared exception from BYPASS_REASONS and requires
+    `actor` to hold one of that reason's roles. It is checked and audited
+    BEFORE the limit is consulted, so an unprivileged caller cannot learn
+    anything by passing one, and a legitimate bypass is recorded whether or not
+    the organization was actually near its ceiling.
     """
+    if bypass is not None:
+        _authorize_bypass(db, org, key, adding, bypass, actor)
+        return
+
+    # Lock FIRST. A count taken before the lock is a count that can go stale
+    # between the check and the caller's INSERT.
+    _lock_org(db, org)
+
     result = check(db, org, key, adding=adding)
     if result["allowed"]:
         return
@@ -157,6 +347,83 @@ def require_capacity(db: Session, org: Optional[Organization], key: str,
         detail=("This plan includes up to %d %s and %d are already in use. "
                 "Upgrade the plan to add more."
                 % (result["limit"], noun, result["used"])))
+
+
+class CapacityCounter:
+    """Exact per-row enforcement for a batch, at the cost of ONE count.
+
+    Imports are the awkward case. Calling `require_capacity` per row would
+    re-COUNT the whole lead table for every line of a ten-thousand-row
+    spreadsheet. Calling it once with the row count would refuse imports that
+    are mostly duplicates and create nothing.
+
+    So the count is taken once, up front, under the same organization row lock,
+    and then decremented as rows are actually created. The result is the same
+    number the per-row check would have produced, and the partial import that
+    precedes the refusal is real work the caller keeps - consistent with the
+    "no retroactive enforcement" rule: the limit stops the NEXT addition, it
+    does not roll back what fit.
+    """
+
+    def __init__(self, db: Session, org: Optional[Organization], key: str):
+        self.db = db
+        self.org = org
+        self.key = key
+        _lock_org(db, org)
+        self.limit = limit_for(db, org, key)
+        self.used = usage_for(db, org, key) if (self.limit is not None and org) else 0
+
+    @property
+    def unlimited(self) -> bool:
+        return self.limit is None
+
+    @property
+    def remaining(self) -> Optional[int]:
+        if self.unlimited:
+            return None
+        return max(0, self.limit - self.used)
+
+    def has_room(self, n: int = 1) -> bool:
+        return self.unlimited or (self.used + n) <= self.limit
+
+    def take(self, n: int = 1) -> None:
+        """Claim capacity for `n` rows about to be created, or raise 402."""
+        if self.unlimited:
+            return
+        if (self.used + n) > self.limit:
+            noun = "users" if self.key == LIMIT_USERS else "leads"
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=("This plan includes up to %d %s and %d are in use. "
+                        "The remaining records were not imported. Upgrade the "
+                        "plan to add more."
+                        % (self.limit, noun, self.used)))
+        self.used += n
+
+
+def counter_for_org_id(db: Session, org_id: Optional[str], key: str) -> CapacityCounter:
+    """A CapacityCounter for the many batch paths that hold an id, not the row."""
+    org = None
+    if org_id:
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+    return CapacityCounter(db, org, key)
+
+
+def require_capacity_for_org_id(db: Session, org_id: Optional[str], key: str,
+                                adding: int = 1, *, bypass: Optional[str] = None,
+                                actor=None) -> None:
+    """Same guard, for the many service paths that hold an id, not the row.
+
+    Exists so those paths do not each write their own `db.query(Organization)`
+    lookup - and, more importantly, so none of them decide that a missing
+    organization means "no limit, carry on" by accident. A NULL org_id is a
+    platform-scoped record and genuinely has no customer plan; that is the one
+    case this returns quietly.
+    """
+    if not org_id:
+        return
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    require_capacity(db, org, key, adding=adding, bypass=bypass, actor=actor)
 
 
 def report(db: Session, org: Optional[Organization]) -> dict:

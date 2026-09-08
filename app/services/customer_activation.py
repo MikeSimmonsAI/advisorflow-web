@@ -116,6 +116,12 @@ def create_customer_admin(
                             detail="A user with that email already exists. "
                                    "Use 'add existing user' if this is genuinely the same person.")
 
+    # PLAN LIMIT. A customer admin created here occupies a seat exactly like
+    # one added from the Users screen; the limit is not about which door the
+    # person walked through.
+    from app.services import plan_limits
+    plan_limits.require_capacity(db, org, plan_limits.LIMIT_USERS, adding=1)
+
     user = User(
         organization_id=org.id,
         email=email,

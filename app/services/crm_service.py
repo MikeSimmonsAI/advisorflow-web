@@ -279,6 +279,12 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
 
     created = 0
     skipped = 0
+    # PLAN LIMIT. Inbound CRM push is an INTEGRATION path - exactly the kind
+    # that gets forgotten, because no human clicks anything. One count for the
+    # payload, then claimed per record that actually creates.
+    from app.services import plan_limits
+    capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
+    over_limit = 0
 
     for rec in records:
         phone = (rec.get("phone") or rec.get("mobile") or "").strip()
@@ -293,6 +299,11 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
         if existing:
             skipped += 1
             continue
+
+        if not capacity.has_room(1):
+            over_limit += 1
+            continue
+        capacity.take(1)
 
         lead = Lead(
             id=str(uuid.uuid4()),
@@ -319,4 +330,14 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
         ), {"count": created, "org_id": org_id})
         db.commit()
 
-    return {"created": created, "skipped": skipped, "total": len(records)}
+    if over_limit:
+        logger.warning(
+            "crm inbound: org %s rejected %d lead(s) - plan lead limit %s reached",
+            org_id, over_limit, capacity.limit)
+
+    # `over_limit` reported separately from `skipped`. A skipped record was a
+    # duplicate the integration correctly ignored; an over-limit record is real
+    # inbound business the plan would not hold, and the two must not look the
+    # same to whoever reads this response.
+    return {"created": created, "skipped": skipped, "total": len(records),
+            "over_plan_limit": over_limit, "plan_lead_limit": capacity.limit}

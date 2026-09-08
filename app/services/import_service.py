@@ -659,6 +659,15 @@ def import_leads_from_excel(
     permission_review_count = 0    # rows carrying a permission cell nobody can read
     permission_denials = {p: 0 for p in pv.PERMISSIONS}
 
+    # PLAN LIMIT. One count for the whole file, then exact per-row claiming.
+    # A dry run counts nothing: it creates no leads, and refusing a preview
+    # because the plan is full would hide from the customer the very number
+    # they need to see before deciding to upgrade.
+    from app.services import plan_limits
+    capacity = plan_limits.counter_for_org_id(
+        db, organization_id, plan_limits.LIMIT_LEADS)
+    skipped_over_plan_limit = 0
+
     for row in rows:
         phone_norm = normalize_phone(row["phone"])
         has_email = bool(row["email"])
@@ -744,6 +753,17 @@ def import_leads_from_excel(
                 last_contact_dt = pd.to_datetime(row["last_contact_date_raw"])
             except Exception:
                 last_contact_dt = None
+
+        # PLAN LIMIT, claimed at the moment of creation and not before, so
+        # rows the dedup and validation above discarded never consume a slot.
+        # Skipped rather than raised: an exception here would abandon the rows
+        # already imported and report the whole file as failed, when in fact
+        # most of it succeeded and only the tail did not fit.
+        if not dry_run:
+            if not capacity.has_room(1):
+                skipped_over_plan_limit += 1
+                continue
+            capacity.take(1)
 
         lead = Lead(
             organization_id=organization_id,
@@ -959,6 +979,12 @@ def import_leads_from_excel(
         "usable_email": usable_email_count,
         "skipped_no_contact_info": skipped_no_contact_info,
         "skipped_internal_records": skipped_internal_records,
+        # Rows that were valid and would have imported, but did not fit the
+        # plan's lead limit. Reported separately from every other skip reason
+        # because it is the only one the customer can fix by upgrading, and
+        # folding it into "skipped" would read as a data problem.
+        "skipped_over_plan_limit": skipped_over_plan_limit,
+        "plan_lead_limit": capacity.limit,
         "tier_breakdown": tier_counts,
         # IDs of every lead actually created in this batch - needed so a
         # caller can immediately build the "review AI-drafted messages

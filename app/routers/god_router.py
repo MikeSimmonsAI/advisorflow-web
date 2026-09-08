@@ -273,6 +273,19 @@ def god_create_user(body: UserCreate, god: User = Depends(require_god), db: Sess
     # `staff_activation` machinery the brand-sales flow uses. The link is shown
     # exactly once and is not recoverable; a lost one is replaced by issuing
     # another, which revokes the first.
+    # PLAN LIMIT - DECLARED BYPASS, NOT AN OMISSION.
+    #
+    # A god_admin standing up or repairing a customer is not that customer
+    # buying a seat, and a customer who has outgrown their plan must still be
+    # reachable by the platform operator. The bypass is named, role-checked
+    # and written to the audit log, so this shows up as a deliberate act
+    # rather than as a path that quietly never enforced anything.
+    from app.services import plan_limits
+    _org_row = (db.query(Organization).filter(Organization.id == org_id).first()
+                if org_id else None)
+    plan_limits.require_capacity(
+        db, _org_row, plan_limits.LIMIT_USERS, adding=1,
+        bypass=plan_limits.BYPASS_PLATFORM_PROVISIONING, actor=god)
     user = User(organization_id=org_id, email=body.email.strip().lower(),
                 full_name=body.full_name.strip(),
                 password_hash=hash_password(_unknowable_password()),

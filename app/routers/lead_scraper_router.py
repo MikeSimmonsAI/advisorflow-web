@@ -344,6 +344,18 @@ def scrape_import(
     imported = 0
     skipped = 0
 
+    # PLAN LIMIT - ENFORCED, NOT BYPASSED.
+    #
+    # This is god-only, but that is about who may run it, not about whose
+    # leads these are. Scraped businesses become the CUSTOMER's leads and
+    # count against the CUSTOMER's plan; letting the operator's privilege
+    # waive the ceiling would make the ceiling meaningless the moment an
+    # import is done on a customer's behalf, which is how these imports
+    # normally happen.
+    from app.services import plan_limits
+    capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
+    over_limit = 0
+
     for biz in req.leads:
         if biz.get("phone") if isinstance(biz, dict) else biz.phone:
             phone = biz["phone"] if isinstance(biz, dict) else biz.phone
@@ -383,6 +395,11 @@ def scrape_import(
         if phone_type:
             notes_parts.append(f"Phone type: {phone_type}")
 
+        if not capacity.has_room(1):
+            over_limit += 1
+            continue
+        capacity.take(1)
+
         lead = Lead(
             id=str(uuid.uuid4()),
             organization_id=org_id,
@@ -403,7 +420,14 @@ def scrape_import(
 
     db.commit()
     logger.info(
-        "scraper_import: org=%s list='%s' imported=%d skipped=%d",
-        org_id, list_name, imported, skipped,
+        "scraper_import: org=%s list='%s' imported=%d skipped=%d over_plan_limit=%d",
+        org_id, list_name, imported, skipped, over_limit,
     )
-    return {"success": True, "imported": imported, "skipped": skipped, "list_name": list_name}
+    return {"success": True, "imported": imported, "skipped": skipped,
+            "list_name": list_name,
+            # Reported apart from `skipped`, which means "already had this
+            # phone". An over-limit row is not a duplicate; it is a row the
+            # plan would not hold, and the operator must be able to tell the
+            # customer which of the two happened.
+            "over_plan_limit": over_limit,
+            "plan_lead_limit": capacity.limit}

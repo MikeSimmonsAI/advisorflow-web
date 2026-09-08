@@ -542,6 +542,21 @@ def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
             db.refresh(existing)
         return existing
 
+    # PLAN LIMIT - THE SECOND SEAT DOOR.
+    #
+    # Only on this branch. The reactivate/re-role path above returns before
+    # here, and it adds nobody: that person already had a membership in this
+    # workspace, so charging them again would mean a role change could be
+    # refused for want of capacity that they themselves are occupying.
+    #
+    # A new membership, though, is a new person with access to this customer's
+    # workspace, and `plan_limits.usage_for` counts them for exactly that
+    # reason. Guarding only `POST /admin/users` would have left this door -
+    # the one a brand-sales operator actually walks through - wide open.
+    from app.services import plan_limits
+    plan_limits.require_capacity_for_org_id(
+        db, organization_id, plan_limits.LIMIT_USERS, adding=1)
+
     m = Membership(
         user_id=user_id,
         scope_type=SCOPE_CUSTOMER_ORG,

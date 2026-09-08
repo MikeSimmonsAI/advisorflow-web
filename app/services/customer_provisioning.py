@@ -329,6 +329,12 @@ def add_customer_user(db: Session, org: Organization, actor: User, *, email: str
         if not (full_name or "").strip():
             raise HTTPException(status_code=400,
                                 detail="Full name is required for a new person.")
+        # PLAN LIMIT. Only on the CREATE branch: reactivating or re-roling an
+        # identity that already belongs to this org adds no seat, and refusing
+        # it would strand a customer at their ceiling with a deactivated
+        # colleague they cannot restore.
+        from app.services import plan_limits
+        plan_limits.require_capacity(db, org, plan_limits.LIMIT_USERS, adding=1)
         user = User(
             id=str(uuid.uuid4()),
             organization_id=org.id,

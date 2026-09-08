@@ -105,6 +105,12 @@ def _upsert_social_lead(
     ).fetchone()
     assigned_user_id = row[0] if row else None
 
+    # PLAN LIMIT. A social lead-gen webhook is an ingestion path with no human
+    # in the loop, which is precisely why it must go through the same guard as
+    # the Leads screen rather than being trusted to stay small.
+    from app.services import plan_limits
+    plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
+
     lead = Lead(
         id=str(uuid.uuid4()),
         organization_id=org.id,

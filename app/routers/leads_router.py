@@ -1762,6 +1762,14 @@ def create_demo_request(
         db.commit()
         return {"status": "updated", "message": "Demo request received."}
 
+    # PLAN LIMIT. This lands in whichever org the marketing site is filed
+    # under, so it is checked like any other. In practice that org has no
+    # configured plan and the guard resolves to unlimited - but if one is ever
+    # configured, the ceiling applies here too rather than this being the one
+    # unauthenticated door that ignores it.
+    from app.services import plan_limits
+    plan_limits.require_capacity(db, bookaboost_org, plan_limits.LIMIT_LEADS, adding=1)
+
     lead = Lead(
         id=str(uuid.uuid4()),
         organization_id=bookaboost_org.id,
@@ -1833,6 +1841,13 @@ def create_lead_manually(
                 is_dup = True
                 dup_of = existing.id
                 break
+
+    # PLAN LIMIT. The ordinary single-create path from the Leads screen -
+    # charged to the org the row lands in, which this endpoint sets to the
+    # user's own organization.
+    from app.services import plan_limits
+    plan_limits.require_capacity_for_org_id(
+        db, current_user.organization_id, plan_limits.LIMIT_LEADS, adding=1)
 
     lead = Lead(
         id=str(uuid.uuid4()),
@@ -2146,6 +2161,11 @@ def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
     # Store in first active org as a web_lead
     org = db.query(Organization).filter(Organization.is_active == True).first()
     if org:
+        # PLAN LIMIT. Same reasoning as the other public demo-request door:
+        # whichever org this lands in, its ceiling applies here too.
+        from app.services import plan_limits
+        plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
+
         lead = Lead(
             id=str(_uuid.uuid4()),
             organization_id=org.id,
@@ -2290,6 +2310,11 @@ def sms_optin(
         existing.notes = (existing.notes or "") + note_entry
         db.commit()
         return {"success": True, "lead_id": existing.id, "action": "updated"}
+
+    # PLAN LIMIT. An SMS opt-in that is not already on file creates a lead in
+    # this org, so it goes through the same guard as every other door.
+    from app.services import plan_limits
+    plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
 
     lead = Lead(
         id=str(uuid.uuid4()),

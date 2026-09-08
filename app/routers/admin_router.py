@@ -2026,6 +2026,14 @@ def provision_client(
     _issued_link = not req.supervisor_password
     raw_password = req.supervisor_password or _unknowable_password()
 
+    # PLAN LIMIT. No bypass here, deliberately: this is the FIRST seat of an
+    # organization created two statements ago, which has no plan yet, so the
+    # guard resolves to "unlimited" on its own. Routing it through the guard
+    # anyway means the day this endpoint learns to provision INTO an existing
+    # org, the limit is already being asked - rather than this being the one
+    # path that silently never checked.
+    plan_limits.require_capacity(db, new_org, plan_limits.LIMIT_USERS, adding=1)
+
     new_supervisor = User(
         organization_id=new_org.id,
         email=req.supervisor_email,
@@ -2234,6 +2242,21 @@ def seed_demo_data(
 
     if body is None:
         body = DemoSeedRequest()
+
+    # PLAN LIMIT - DECLARED BYPASS, NOT AN OMISSION.
+    #
+    # Demo rows are fixtures: disposable, generated to show the product, and
+    # not business a customer created. Charging them against the customer's
+    # ceiling would mean seeding a demo could exhaust a real plan. The bypass
+    # is role-checked (super_admin or god_admin) and audited, so a demo seed
+    # is visible afterwards as a deliberate act on that organization.
+    plan_limits.require_capacity(
+        db, target_org, plan_limits.LIMIT_LEADS, adding=body.num_leads,
+        bypass=plan_limits.BYPASS_DEMO_SEED, actor=current_user)
+    plan_limits.require_capacity(
+        db, target_org, plan_limits.LIMIT_USERS, adding=1,
+        bypass=plan_limits.BYPASS_DEMO_SEED, actor=current_user)
+
     num_leads = body.num_leads
     days_span = body.days_span
     now = datetime.utcnow()

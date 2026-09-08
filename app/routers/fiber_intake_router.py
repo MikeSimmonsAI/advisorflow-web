@@ -370,6 +370,12 @@ def fiber_intake_submit(
             }.items() if v
         }
 
+        # PLAN LIMIT. Public intake is still lead creation in a customer's
+        # organization, and a limit only the authenticated screens honour is
+        # not a limit.
+        from app.services import plan_limits
+        plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
+
         lead = Lead(
             id=str(uuid.uuid4()),
             organization_id=org.id,

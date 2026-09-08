@@ -92,19 +92,33 @@ def resolve_plan_by_price_id(db: Session, platform_id: Optional[str],
     string it cannot be edited into something else from the Stripe dashboard,
     and unlike a plan key it is unambiguous across brands.
 
-    STILL SCOPED TO THE BRAND. The platform_id filter is not decorative: two
-    brands could in principle map the same Stripe price, and a webhook must
-    resolve it to the plan belonging to the organization being updated, not to
-    whichever row happened to be found first.
+    ══════════════════════════════════════════════════════════════════════
+    A PRICE IS NEVER RESOLVED WITHOUT A BRAND. NO SCOPE MEANS NO ANSWER.
+    ══════════════════════════════════════════════════════════════════════
+
+    This function's first version filtered on platform_id only `if platform_id`
+    - so an organization with no platform (one created before brands existed,
+    or whose platform row was removed) searched the WHOLE catalogue and got
+    back whichever brand's plan happened to match first. A Stripe Price
+    belonging to Brand A would have resolved as a valid plan for a Brand B
+    organization, and the webhook would have written Brand A's plan key onto
+    it. Cross-brand contamination through a convenience `if`.
+
+    A missing platform is not a wildcard. It is a missing answer, and the
+    caller handles that by leaving the plan alone rather than by guessing.
     """
-    if not price_id:
+    if not price_id or not platform_id:
+        if price_id and not platform_id:
+            log.warning(
+                "billing_catalog: refusing to resolve Stripe price %s with no "
+                "brand scope - a price must resolve within one brand's "
+                "catalogue or not at all", price_id)
         return None
-    q = db.query(BrandBillingPlan).filter(
-        (BrandBillingPlan.stripe_price_id_monthly == price_id)
-        | (BrandBillingPlan.stripe_price_id_annual == price_id))
-    if platform_id:
-        q = q.filter(BrandBillingPlan.platform_id == platform_id)
-    return q.first()
+    return (db.query(BrandBillingPlan)
+            .filter(BrandBillingPlan.platform_id == platform_id)
+            .filter((BrandBillingPlan.stripe_price_id_monthly == price_id)
+                    | (BrandBillingPlan.stripe_price_id_annual == price_id))
+            .first())
 
 
 def interval_for_price_id(plan: BrandBillingPlan, price_id: str) -> Optional[str]:

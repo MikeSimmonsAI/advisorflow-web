@@ -807,6 +807,11 @@ def resolve_lead(db: Session, cred: IntegrationCredential, org: Organization,
         first = parts[0]
         last = " ".join(parts[1:])
 
+    # PLAN LIMIT. A booking that arrives for someone not yet on file creates a
+    # lead, so this is a lead-creation path like any other.
+    from app.services import plan_limits
+    plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
+
     lead = Lead(
         organization_id=org.id,
         assigned_to_id=advisor.id,

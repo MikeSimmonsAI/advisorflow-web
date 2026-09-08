@@ -89,6 +89,18 @@ def create_fiber_lead(
     if payload.notes:
         extra["notes"] = payload.notes
 
+    # PLAN LIMIT, charged to the org the row ACTUALLY lands in.
+    #
+    # Deliberately `current_user.organization_id` and not the workspace org,
+    # because that is what the Lead() below sets. Note that this endpoint
+    # already dedups against `active_workspace_org_id` while creating against
+    # `current_user.organization_id` - a pre-existing mismatch, untouched here.
+    # The limit follows the row, not the dedup query, so the guard cannot be
+    # made to charge one customer for a lead filed under another.
+    from app.services import plan_limits
+    plan_limits.require_capacity_for_org_id(
+        db, current_user.organization_id, plan_limits.LIMIT_LEADS, adding=1)
+
     lead = Lead(
         id=gen_uuid(),
         first_name=payload.first_name.strip(),

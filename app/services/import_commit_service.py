@@ -120,10 +120,39 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
     ok_count = 0
     fail_count = 0
 
+    # PLAN LIMIT. One count for the whole batch, then exact per-row claiming -
+    # see plan_limits.CapacityCounter. Claimed only on the branch that CREATES
+    # a lead: merging into an existing matched lead consumes nothing, and
+    # counting merges would make a de-duplicating import look larger than the
+    # business it actually added.
+    from app.services import plan_limits
+    capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
+
+    limit_stopped = 0
+
     for row in rows:
         if row.review_status == ImportRowReviewStatus.COMMITTED:
             ok_count += 1
             continue
+
+        # Will this row CREATE a lead, or merge into one that already exists?
+        # Decided here, before the try, for two reasons: a merge consumes no
+        # capacity, and the plan check must not happen inside a block whose
+        # `except Exception` would turn "your plan is full" into a per-row
+        # "Commit error" and mark clean data REJECTED.
+        _is_merge = bool(
+            row.duplicate_status in (ImportDuplicateStatus.MATCHED_EXISTING,
+                                     ImportDuplicateStatus.POSSIBLE_DUPLICATE)
+            and row.matched_lead_id
+            and row.review_status == ImportRowReviewStatus.MERGED)
+
+        if not _is_merge and not capacity.has_room(1):
+            # Out of plan capacity. Stop, leaving the remaining rows in their
+            # current reviewed state so the import can be resumed after an
+            # upgrade. They are NOT rejected - there is nothing wrong with them.
+            limit_stopped += 1
+            continue
+
         try:
             if (row.duplicate_status in (
                     ImportDuplicateStatus.MATCHED_EXISTING,
@@ -143,6 +172,7 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                 # enquiries and the file's own columns say otherwise.
                 if batch.force_new_inquiry:
                     tier = "new_inquiry"
+                capacity.take(1)
                 lead = Lead(
                     id=gen_uuid(), organization_id=org_id,
                     first_name=row.first_name, last_name=row.last_name,
@@ -193,10 +223,23 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
             log.exception("Commit failed row %s batch %s", row.id, batch_id)
 
     batch.recount(db)
-    if ok_count > 0 and fail_count == 0:
+    _limit_note = ""
+    if limit_stopped:
+        # Say WHY, in the batch itself. An import that silently stops short is
+        # how somebody concludes the importer lost their data.
+        _limit_note = (
+            f"{limit_stopped} row(s) were not imported because the plan's lead "
+            f"limit ({capacity.limit}) was reached. They remain reviewed and "
+            f"can be committed after an upgrade.")
+
+    if ok_count > 0 and fail_count == 0 and not limit_stopped:
         batch.status = ImportBatchStatus.COMMITTED
     elif ok_count > 0:
         batch.status = ImportBatchStatus.PARTIALLY_COMMITTED
+        batch.error_message = _limit_note or batch.error_message
+    elif limit_stopped:
+        batch.status = ImportBatchStatus.FAILED
+        batch.error_message = _limit_note
     else:
         batch.status = ImportBatchStatus.FAILED
         batch.error_message = f"All {fail_count} rows failed to commit"

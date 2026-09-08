@@ -471,6 +471,17 @@ def generate_sample_data(
     leads_for_pipeline = []  # leads to attach PipelineConversation to
     leads_for_booking = []   # leads to attach BookingLink to
 
+    # PLAN LIMIT - DECLARED BYPASS, NOT AN OMISSION.
+    #
+    # Everything this endpoint writes is tagged SAMPLE_DATA and exists to fill
+    # empty screens. It is not customer-generated business, so it does not
+    # consume the customer's ceiling - but the exception is named, role-checked
+    # and audited rather than being a path that simply never asked.
+    from app.services import plan_limits
+    plan_limits.require_capacity(
+        db, org, plan_limits.LIMIT_LEADS, adding=len(lead_scenarios),
+        bypass=plan_limits.BYPASS_DEMO_SEED, actor=current_user)
+
     for i, (status, tier_idx, has_reply, reply_class, in_cadence, days_old, days_since_contact) in enumerate(lead_scenarios):
         first = _pick(FIRST_NAMES)
         last = _pick(LAST_NAMES)
