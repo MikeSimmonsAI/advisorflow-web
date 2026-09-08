@@ -1,0 +1,12 @@
+== SERVICE IMPORT REACHABILITY (ast-based) ==
+   services (modules + packages): 110
+
+-- IMPORTED BY NOTHING AT ALL (not even a test)
+   source_ingest                                  490 lines
+   tenancy                                        104 lines
+
+-- IMPORTED ONLY BY TESTS (no production caller)
+   auto_send_candidate_service                    160 lines   tests: tests\test_auto_send_candidate_service.py
+   feature_flags_service                           81 lines   tests: tests\test_feature_flags_service.py
+
+-- SANITY: billing_webhook importers -> ['app\\routers\\billing_router.py']

@@ -1,0 +1,145 @@
+==============================================================================
+P0 SWEEP
+==============================================================================
+
+------------------------------------------------------------------------------
+1. ROUTES WITH NO AUTH DEPENDENCY
+   public surfaces excluded by path; each remaining line is read by hand
+------------------------------------------------------------------------------
+   calendar_connections_router.py             :112   GET    /connections
+   calendar_connections_router.py             :152   POST   /connections/{provider}/test
+   calendar_connections_router.py             :191   POST   /connections/{provider}/disconnect
+   calendar_router.py                         :39    GET    /calendar/oauth/callback
+   calendar_router.py                         :830   POST   /calendar/confirm-booking
+   calendar_router.py                         :1085  GET    /calendar/slots
+   concierge_router.py                        :117   POST   /concierge/chat
+   crm_router.py                              :306   POST   /crm/inbound/{org_id}
+   email_tracking_router.py                   :41    GET    /email-tracking/open/{email_message_id}
+   email_tracking_router.py                   :62    GET    /email-tracking/click/{email_message_id}
+   leads_router.py                            :2262  POST   /leads/sms-optin
+   microsoft_router.py                        :34    GET    /microsoft/oauth/callback
+   org_settings_router.py                     :200   GET    /org-settings/default-tiers
+   proposal_router.py                         :646   GET    /proposals/files/{file_id}
+   proposal_router.py                         :667   GET    /proposals/portal/resolve/{token}
+   proposal_router.py                         :790   POST   /proposals/portal/view/{view_id}/close
+   proposal_router.py                         :808   POST   /proposals/portal/view/{view_id}/download
+   qualification_router.py                    :104   GET    /qualification/vocabulary
+   sales_scheduling_router.py                 :855   GET    /sales/appointments/confirm/{token}
+   sales_scheduling_router.py                 :901   POST   /sales/appointments/confirm/{token}
+   sales_scheduling_router.py                 :971   GET    /sales/appointments/confirm/{token}/context
+   sales_scheduling_router.py                 :997   POST   /sales/appointments/confirm/{token}/respond
+   voice_router.py                            :191   POST   /voice/twiml/{lead_id}
+   voice_router.py                            :377   POST   /voice/status
+   voice_router.py                            :439   POST   /voice/recording
+   voice_router.py                            :539   POST   /voice/inbound
+   TOTAL: 26
+
+------------------------------------------------------------------------------
+2. DESTRUCTIVE OPERATIONS  (delete / purge / execute / wipe)
+   flag = does the handler audit, and does it require confirmation
+------------------------------------------------------------------------------
+   admin_router.py                          DELETE /admin/demo/wipe/{org_id}                      audit=False confirm=False god=False
+   availability_router.py                   DELETE /availability/block/{block_id}                 audit=False confirm=False god=False
+   cadence_template_router.py               DELETE /cadence-templates/{template_id}               audit=False confirm=False god=False
+   compliance_router.py                     DELETE /compliance/suppression-list/{entry_id}        audit=True  confirm=False god=False
+   contacts_router.py                       DELETE /crm/contacts/{contact_id}                     audit=False confirm=False god=False
+   crm_native_router.py                     DELETE /crm-native/stages/reset                       audit=False confirm=False god=False
+   crm_native_router.py                     DELETE /crm-native/contacts/{contact_id}              audit=False confirm=False god=False
+   crm_router.py                            DELETE /crm/connections/{conn_id}                     audit=False confirm=False god=False
+   customer_lifecycle_router.py             POST   /god/customer-360/customers/{org_id}/permanent-delete audit=True  confirm=True  god=True
+   customers_router.py                      POST   /god/customers/cleanup/execute                 audit=False confirm=True  god=True
+   god_pricing_router.py                    DELETE /god/pricing/rules/{rule_id}                   audit=True  confirm=False god=True
+   import_batch_router.py                   DELETE /import-batches/{batch_id}                     audit=False confirm=False god=False
+   leads_router.py                          DELETE /leads/import-batches                          audit=True  confirm=False god=False
+   leads_router.py                          DELETE /leads/duplicates/bulk-delete                  audit=True  confirm=False god=False
+   leads_router.py                          DELETE /leads/{lead_id}                               audit=True  confirm=False god=False
+   proposal_router.py                       DELETE /proposals/{proposal_id}                       audit=False confirm=False god=False
+   proposal_router.py                       DELETE /proposals/{proposal_id}/blocks/{block_id}     audit=False confirm=False god=False
+   qualification_router.py                  DELETE /qualification/rules/{rule_id}                 audit=True  confirm=False god=False
+   sales_proposal_router.py                 DELETE /sales/proposals/{proposal_id}/blocks/{block_id} audit=False confirm=False god=False
+   sales_scheduling_router.py               DELETE /sales/availability/time-off/{block_id}        audit=False confirm=False god=False
+   sample_data_router.py                    DELETE /sample-data/clear                             audit=True  confirm=False god=False
+   settings_router.py                       DELETE /settings/profile-photo                        audit=False confirm=True  god=False
+   settings_router.py                       DELETE /settings/appointment-types                    audit=False confirm=False god=False
+   templates_router.py                      DELETE /templates/{message_track}/{channel}           audit=True  confirm=False god=False
+   tier_definitions_router.py               DELETE /tier-definitions/{tier_id}                    audit=True  confirm=False god=False
+   TOTAL: 25
+
+------------------------------------------------------------------------------
+3. CREDENTIAL VALUES REACHING A RESPONSE BODY
+------------------------------------------------------------------------------
+   app/routers/admin_router.py:831  "is_active": u.is_active, "must_change_password": u.must_change_password,
+   app/routers/admin_router.py:1383  "must_change_password": target.must_change_password,
+   app/routers/auth_router.py:269  return {"access_token": token, "token_type": "bearer"}
+   app/routers/crm_router.py:194  "webhook_secret": payload.webhook_secret,
+   app/routers/crm_router.py:195  "api_key": payload.api_key,
+   app/routers/god_router.py:302  "is_active": user.is_active, "must_change_password": True,
+   app/routers/social_webhooks_router.py:244  params={"access_token": meta_token, "fields": "field_data"},
+   app/services/calendar_service.py:53  "client_secret": GOOGLE_CLIENT_SECRET,
+   app/services/email_poller_service.py:37  "client_secret": client_secret,
+   app/services/email_poller_service.py:358  "client_secret": client_secret,
+   app/services/google_contacts_service.py:35  "client_secret": client_secret,
+   app/services/microsoft_email_service.py:104  "client_secret": MICROSOFT_CLIENT_SECRET,
+   app/services/microsoft_email_service.py:155  "client_secret": MICROSOFT_CLIENT_SECRET,
+   TOTAL: 13
+
+------------------------------------------------------------------------------
+4. HANDLERS TAKING AN ORGANIZATION ID FROM THE PATH
+   flag = is there any authorization on it
+------------------------------------------------------------------------------
+   crm_router.py                            POST   /crm/inbound/{org_id}                         NO VISIBLE SCOPE CHECK
+   executive_router.py                      GET    /executive/organizations/{org_id}/performance  NO VISIBLE SCOPE CHECK
+   TOTAL UNCHECKED: 2
+
+------------------------------------------------------------------------------
+5. ROLE AND GRANT WRITES
+------------------------------------------------------------------------------
+   admin_router.py                          GET    /dashboard                               require_god=False
+   admin_router.py                          GET    /dashboard/metrics                       require_god=False
+   admin_router.py                          GET    /dashboard/funnel                        require_god=False
+   admin_router.py                          GET    /users                                   require_god=False
+   admin_router.py                          POST   /users                                   require_god=False
+   admin_router.py                          PATCH  /users/{user_id}                         require_god=False
+   admin_router.py                          POST   /provision-client                        require_god=False
+   admin_router.py                          POST   /demo/seed/{org_id}                      require_god=False
+   admin_router.py                          DELETE /demo/wipe/{org_id}                      require_god=False
+   availability_router.py                   GET    /upcoming                                require_god=False
+   calendar_router.py                       GET    /events                                  require_god=False
+   executive_router.py                      POST   /admin/grant                             require_god=True
+   executive_router.py                      POST   /admin/revoke                            require_god=True
+   executive_router.py                      GET    /admin/portfolio/{user_id}               require_god=True
+   executive_router.py                      GET    /admin/executives                        require_god=True
+   god_ops_router.py                        POST   /activations/{activation_id}/revoke      require_god=True
+   god_pricing_router.py                    PATCH  /policies/{policy_id}                    require_god=True
+   god_router.py                            GET    /platform-health                         require_god=True
+   god_router.py                            GET    /users                                   require_god=True
+   god_router.py                            PATCH  /users/{user_id}/role                    require_god=True
+   pipeline_router.py                       GET    /stats                                   require_god=False
+   reports_router.py                        GET    /engagement-vs-conversion                require_god=False
+   reports_router.py                        GET    /by-client-list                          require_god=False
+   reports_router.py                        GET    /revenue-by-period                       require_god=False
+   reports_router.py                        GET    /crm-summary                             require_god=False
+   sales_router.py                          GET    /team                                    require_god=False
+   settings_router.py                       PATCH  /admin/profile/{user_id}                 require_god=False
+   settings_router.py                       GET    /admin/profile/{user_id}                 require_god=False
+   setup_router.py                          POST   /admin/setup-link/{user_id}              require_god=False
+   TOTAL: 29
+
+------------------------------------------------------------------------------
+6. PAYMENT INTEGRITY
+------------------------------------------------------------------------------
+   billing_router.py
+      signature verification       present
+      webhook secret required      present
+      event idempotency key        ABSENT
+      collection idempotency       ABSENT
+      fail-closed when unconfigured present
+   god_billing_router.py
+      signature verification       ABSENT
+      webhook secret required      present
+      event idempotency key        present
+      collection idempotency       ABSENT
+      fail-closed when unconfigured ABSENT
+   billing_webhook.py
+      signature verification       ABSENT
+      event idempotency key        present

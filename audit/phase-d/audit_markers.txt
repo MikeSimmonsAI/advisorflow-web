@@ -1,0 +1,90 @@
+== DELIBERATE INCOMPLETENESS MARKERS ==
+  app\models\billing_models.py:241  # POLICY REQUIRED — deliberately UNSET. Today a failed payment changes
+  app\models\billing_models.py:253  # POLICY REQUIRED — deliberately UNSET. Note this is SUBSCRIPTION
+  app\models\billing_models.py:266  # POLICY REQUIRED and NOT IMPLEMENTED. A refund is RECORDED (see
+  app\models\meeting_models.py:45  PROVIDER_TEAMS = "teams"          # not implemented — reserved so the vocabulary
+  app\routers\billing_router.py:500  # POLICY REQUIRED. Refusing is the honest answer: the alternative is
+  app\routers\concierge_router.py:37  COMING SOON:
+  app\routers\god_billing_router.py:44  `billing_policy` returns POLICY REQUIRED for a decision nobody has made, and
+  app\routers\god_billing_router.py:502  POLICY REQUIRED columns mean "nobody has decided", so a partial save that
+  app\routers\god_billing_router.py:555  SETTING A POLICY REQUIRED FIELD IS AN EXPLICIT ACT, AND ONLY EVER THAT.
+  app\routers\god_billing_router.py:663  # Idempotent, and it never writes a Stripe id or a POLICY REQUIRED field. See
+  app\routers\leads_router.py:1927  # the field is simply not implemented yet rather than forbidden.
+  app\routers\proposal_router.py:707  raise HTTPException(status_code=403, detail="This proposal is not yet available.")
+  app\services\appointment_sync.py:102  """One participant's event. Attendees deliberately empty — see module docs."""
+  app\services\billing_policy.py:27  OPEN     failed payment consequence        POLICY REQUIRED
+  app\services\billing_policy.py:28  OPEN     subscription cancellation timing  POLICY REQUIRED
+  app\services\billing_policy.py:29  OPEN     trial length                      POLICY REQUIRED
+  app\services\billing_policy.py:30  OPEN     refund / chargeback clawback      POLICY REQUIRED
+  app\services\billing_policy.py:176  # Clawback — OPEN, AND NOT IMPLEMENTED
+  app\services\calendar_providers\base.py:104  return False, "Provider not implemented"
+  app\services\calendar_providers\base.py:107  return SyncResult.failure("unimplemented", "create_event not implemented")
+  app\services\calendar_providers\base.py:110  return SyncResult.failure("unimplemented", "update_event not implemented")
+  app\services\calendar_providers\base.py:119  return SyncResult.failure("unimplemented", "cancel_event not implemented")
+  app\services\calendar_providers\base.py:125  return [], SyncResult.failure("unimplemented", "get_busy not implemented")
+  app\services\comms\base.py:171  raise NotImplementedError
+  app\services\comms\base.py:174  raise NotImplementedError
+  app\services\comms\base.py:190  raise NotImplementedError
+  app\services\comms\base.py:193  raise NotImplementedError
+  app\services\comms\base.py:203  raise NotImplementedError
+  app\services\comms\base.py:208  raise NotImplementedError
+  app\services\demo_scenarios\base.py:110  raise NotImplementedError
+  app\services\demo_scenarios\base.py:115  raise NotImplementedError
+  app\services\entitlements.py:271  # POLICY REQUIRED, or the brand decided not to suspend. Either way,
+  app\services\evosys_billing_seed.py:16  NOT SEEDED  failed-payment consequence      POLICY REQUIRED
+  app\services\evosys_billing_seed.py:17  NOT SEEDED  subscription cancellation timing POLICY REQUIRED
+  app\services\evosys_billing_seed.py:18  NOT SEEDED  trial length                     POLICY REQUIRED
+  app\services\evosys_billing_seed.py:19  NOT SEEDED  refund / chargeback clawback     POLICY REQUIRED
+  app\services\evosys_billing_seed.py:22  The four POLICY REQUIRED rows are left NULL on purpose. An unset policy means
+  app\services\evosys_billing_seed.py:147  A POLICY REQUIRED field that is already set is likewise never overwritten:
+  app\services\evosys_billing_seed.py:224  "past_due_grace_days": "POLICY REQUIRED",
+  app\services\evosys_billing_seed.py:225  "suspend_on_past_due": "POLICY REQUIRED",
+  app\services\evosys_billing_seed.py:226  "cancel_timing": "POLICY REQUIRED",
+  app\services\evosys_billing_seed.py:227  "trial_days": "POLICY REQUIRED",
+  app\services\evosys_billing_seed.py:228  "clawback_policy": "POLICY REQUIRED",
+  app\services\meeting_providers\base.py:79  return False, "Provider not implemented"
+  app\services\meeting_providers\base.py:82  return MeetingResult.failure("unimplemented", "create_meeting not implemented")
+  app\services\meeting_providers\base.py:85  return MeetingResult.failure("unimplemented", "update_meeting not implemented")
+  app\services\meeting_providers\base.py:88  return MeetingResult.failure("unimplemented", "cancel_meeting not implemented")
+  app\services\meeting_providers\base.py:94  return MeetingResult.failure("unimplemented", "verify not implemented")
+  frontend\src\pages\god\PlatformOverview.jsx:4  * The default state is deliberately empty of customer data. Before this screen
+
+== WHO REFERENCES THE 5 ORPHANED SERVICES (whole repo, incl. tests/main) ==
+-- billing_webhook
+    app\routers\billing_router.py:34  billing_webhook)
+    app\routers\billing_router.py:701  # ── Everything past the signature check lives in billing_webhook ──────
+    app\routers\billing_router.py:720  result = billing_webhook.handle_event(db, event)
+    tests\test_billing_acceptance.py:48  from app.services import billing_catalog, billing_webhook, plan_limits
+    tests\test_billing_acceptance.py:338  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:419  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:446  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:465  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:487  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:497  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:511  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:526  billing_webhook.apply_subscription(db_session, org, {
+    tests\test_billing_acceptance.py:545  billing_webhook.apply_subscription(db_session, org, {
+    ... (truncated)
+-- auto_send_candidate_service
+    tests\test_auto_send_candidate_service.py:2  Tests for app/services/auto_send_candidate_service.py - the gate
+    tests\test_auto_send_candidate_service.py:20  from app.services.auto_send_candidate_service import maybe_create_candidate
+-- feature_flags_service
+    tests\test_feature_flags_service.py:2  Tests for app/services/feature_flags_service.py - the generic per-advisor
+    tests\test_feature_flags_service.py:14  from app.services import feature_flags_service as ffs
+-- source_ingest
+    NO REFERENCE ANYWHERE
+-- tenancy
+    app\deps.py:313  "NULL organization_id means brand sales" was true while customer tenancy WAS
+    app\main.py:737  #     Customer tenancy was `users.organization_id` and nothing else, so
+    app\models\integration_models.py:40  # Two kinds, because there are two tenancy trees and a credential must belong to
+    app\models\models.py:532  # person has no customer tenancy. Never backfill it to make a query simpler,
+    app\models\models.py:534  # app/services/tenancy.py; see claude/SALES_WORKSPACE_ARCHITECTURE.md.
+    app\models\sales_models.py:2  Sales Workspace models — brand sales tenancy, memberships, packages, opportunities.
+    app\models\sales_models.py:10  These are separate tenancy and permission domains."   — Mike
+    app\models\staff_models.py:14  point at, which is exactly the "automatic tenancy inference" the architecture
+    app\models\staff_models.py:69  # Context and audit only. NOT tenancy, and NOT the source of access.
+    app\routers\auth_router.py:72  # OPTIONAL as of Aug 25 2026. A brand-sales user has no customer tenancy,
+    app\routers\auth_router.py:151  # Which platforms is this person entitled to? Customer tenancy AND
+    app\routers\auth_router.py:168  # Customer tenancy used to be the single column `users.organization_id`.
+    app\routers\god_ops_router.py:626  Never by email match. Matching on an address is the tenancy inference §1
+    ... (truncated)

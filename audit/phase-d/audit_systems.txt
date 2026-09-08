@@ -1,0 +1,1106 @@
+### activity_router.py  routes=1  lines=102
+  services: lead_scope
+  models:   EmailMessage, Lead, Message, User
+  routes_without_auth_dependency: 0
+    GET    /sent                                                get_current_user           sent_activity
+  frontend_callers: frontend\src\pages\Activity.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\Overview.jsx
+  tests: NONE
+
+### admin_router.py  routes=30  lines=2887
+  services: auth_service, data_cleanup, dedup_service, lead_scope, plan_limits, platform_owner, staff_activation
+  models:   BookingLink, CadenceState, ContactRegistry, Lead, LeadOutcome, Message, Organization, PURPOSE_RESET as _PURPOSE_RESET, PURPOSE_SETUP as _PURPOSE_SETUP, Platform, Platform as PlatformModel, Platform as _Plat, Reply, ReplyClassification, TierDefinition, User
+  routes_without_auth_dependency: 0
+    GET    /dashboard                                           require_admin              master_dashboard
+    GET    /leads                                               require_admin              all_org_leads
+    GET    /dashboard/team-activity                             require_admin              team_activity
+    GET    /dashboard/metrics                                   require_admin              dashboard_quality_metrics
+    GET    /dashboard/funnel                                    require_admin              dashboard_funnel
+    GET    /dashboard/revenue                                   require_admin              dashboard_revenue
+    GET    /users                                               require_admin              list_users
+    POST   /users                                               require_admin              create_user
+    PATCH  /users/{user_id}/deactivate                          require_admin              deactivate_user
+    PATCH  /users/{user_id}/reactivate                          require_admin              reactivate_user
+    POST   /users/{user_id}/force-logout                        require_admin              force_logout_user
+    PATCH  /users/{user_id}/clear-setup                         require_admin              clear_setup_flag
+    POST   /users/{user_id}/reset-password                      require_super_admin        reset_user_password
+    PATCH  /users/{user_id}                                     require_super_admin        update_user
+    GET    /users/{user_id}/detail                              require_admin              get_user_detail
+    POST   /leads/reassign                                      require_admin              reassign_leads
+    GET    /leads/unassigned                                    require_admin              list_unassigned_leads
+    GET    /leads/potential-duplicates                          require_admin              potential_duplicate_leads
+    GET    /leads/flagged-duplicates                            require_admin              flagged_duplicate_leads
+    POST   /leads/merge                                         require_admin              merge_leads
+    PATCH  /leads/{lead_id}/fix-contact-info                    require_admin              fix_lead_contact_info
+    POST   /provision-client                                    require_super_admin        provision_client
+    POST   /orgs/{org_id}/seed-industry-tiers                   require_super_admin        seed_industry_tiers_for_org
+    GET    /organizations                                       require_super_admin        list_organizations
+    PUT    /organizations/{org_id}                              require_super_admin        update_organization
+    POST   /demo/seed/{org_id}                                  require_super_admin        seed_demo_data
+    DELETE /demo/wipe/{org_id}                                  require_super_admin        wipe_demo_data
+    GET    /orgs                                                require_super_admin        list_all_orgs
+    GET    /platforms                                           require_super_admin        list_platforms
+    PATCH  /orgs/{org_id}/platform                              require_god                set_org_platform
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\api\demo.js, frontend\src\auth\routeAuthority.js, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\components\NotificationBell.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\Activity.jsx, frontend\src\pages\Admin.jsx
+  tests: tests\conftest.py, tests\test_admin_dashboard_metrics.py, tests\test_admin_revenue_dashboard.py, tests\test_admin_router.py, tests\test_audit_log_wiring.py, tests\test_auth_service.py, tests\test_compliance_router.py, tests\test_context_boundaries.py, tests\test_daily_briefing_router.py, tests\test_email_review_batch.py
+
+### ai_conversation_router.py  routes=9  lines=263
+  services: ai_conversation_service, lead_scope, sms_service
+  models:   Lead, User
+  routes_without_auth_dependency: 0
+    POST   /start                                               get_current_user           start_conversation
+    POST   /bulk-start                                          get_current_user           bulk_start_conversations
+    POST   /pause                                               get_current_user           pause_conversation
+    POST   /resume                                              get_current_user           resume_conversation
+    GET    /status/{lead_id}                                    get_current_user           conversation_status
+    POST   /process-scheduled                                   get_current_user           process_scheduled
+    POST   /preview                                             get_current_user           preview_auto_reply
+    POST   /generate-batch                                      get_current_user           generate_batch_replies
+    POST   /send-approved                                       get_current_user           send_approved_reply
+  frontend_callers: frontend\src\components\EmailReview.jsx, frontend\src\components\MessageReview.jsx, frontend\src\pages\Cadence.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\DLCRegistration.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Leads.jsx
+  tests: tests\test_billing_authorization.py, tests\test_billing_catalog.py, tests\test_campaign_router.py, tests\test_compliance_router.py, tests\test_customer_360_authorization.py, tests\test_email_review_batch.py, tests\test_import_intelligence.py, tests\test_message_review_flow.py, tests\test_overview_charts_router.py, tests\test_upload_endpoints.py
+
+### ai_router.py  routes=3  lines=58
+  services: ai_analysis_service, lead_scope
+  models:   Lead, User
+  routes_without_auth_dependency: 0
+    POST   /analyze/{lead_id}                                   get_current_user           analyze_single_lead
+    POST   /analyze-batch                                       get_current_user           analyze_lead_batch
+    GET    /quality/{lead_id}                                   get_current_user           get_lead_quality
+  frontend_callers: frontend\src\pages\LeadDetail.jsx
+  tests: NONE
+
+### audit_log_router.py  routes=2  lines=215
+  services: -
+  models:   AuditLogEntry, User
+  routes_without_auth_dependency: 0
+    GET    /actions                                             require_admin              list_audit_actions
+    GET                                                         require_admin              list_audit_log
+  frontend_callers: frontend\src\pages\AuditLog.jsx
+  tests: tests\test_audit_log_router.py, tests\test_audit_log_wiring.py
+
+### auth_router.py  routes=11  lines=455
+  services: auth_service, customer_activation, staff_activation, workspace_access
+  models:   BrandSalesOrg, Membership, Organization, Organization as _Org, Platform, SCOPE_BRAND_SALES_ORG, User
+  routes_without_auth_dependency: 6
+    POST   /login                                               NO-GATE                    login
+    GET    /my-contexts                                         get_current_user           my_contexts
+    GET    /workspace/{organization_id}                         get_current_user           enter_workspace
+    POST   /verify                                              NO-GATE                    verify
+    POST   /refresh                                             get_current_user           refresh_token
+    POST   /logout                                              get_current_user           logout
+    POST   /change-password                                     get_current_user           change_password
+    GET    /staff-activation                                    NO-GATE                    staff_activation_preview
+    POST   /staff-activation/accept                             NO-GATE                    staff_activation_accept
+    GET    /activation                                          NO-GATE                    activation_preview
+    POST   /activation/accept                                   NO-GATE                    activation_accept
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\auth\workspaceGuard.js, frontend\src\components\ContextBanner.jsx, frontend\src\components\ContextSwitcher.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\Activate.jsx, frontend\src\pages\ChangePassword.jsx, frontend\src\pages\DLCRegistration.jsx, frontend\src\pages\GodBrandDetail.jsx
+  tests: tests\test_auto_send_candidate_service.py, tests\test_executive_suite.py, tests\test_god_navigation.py, tests\test_god_password_reset.py, tests\test_self_password_change.py, tests\test_user_management.py
+
+### auto_send_router.py  routes=10  lines=708
+  services: compliance_service, email_service, lead_capacity, lead_scope, sms_service
+  models:   Base, Lead, Message as _Msg, User
+  routes_without_auth_dependency: 0
+    GET    /queue                                               get_current_user           get_queue
+    GET    /history                                             get_current_user           get_history
+    GET    /settings                                            get_current_user           get_settings
+    POST   /settings                                            get_current_user           update_settings
+    PATCH  /{item_id}/edit                                      get_current_user           edit_item
+    POST   /{item_id}/approve                                   get_current_user           approve_item
+    POST   /{item_id}/skip                                      get_current_user           skip_item
+    POST   /approve-all                                         get_current_user           approve_all
+    POST   /enqueue                                             get_current_user           enqueue_item
+    POST   /proactive-scan                                      get_current_user           proactive_scan
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\components\Layout.jsx, frontend\src\components\ProfileOnboarding.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\AutoSendQueue.jsx, frontend\src\pages\Availability.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\LeadDetail.jsx
+  tests: tests\test_auto_send_candidate_service.py, tests\test_auto_send_router.py, tests\test_email_router.py, tests\test_google_contacts_service.py, tests\test_health_router.py, tests\test_message_review_flow.py, tests\test_plan_limits_coverage.py, tests\test_settings_router.py
+
+### availability_router.py  routes=7  lines=517
+  services: lead_scope, microsoft_email_service, sms_service
+  models:   AdvisorAvailabilityBlock, BlockType, BookingLink, Lead, User
+  routes_without_auth_dependency: 0
+    GET    /slots/{advisor_id}                                  get_current_user           get_available_slots
+    POST   /block/date-range                                    get_current_user           block_date_range
+    POST   /block/slot                                          get_current_user           block_slot
+    POST   /block/recurring                                     get_current_user           block_recurring
+    GET    /blocks                                              get_current_user           list_blocks
+    DELETE /block/{block_id}                                    get_current_user           delete_block
+    GET    /upcoming                                            get_current_user           get_upcoming_appointments
+  frontend_callers: frontend\src\pages\Availability.jsx, frontend\src\pages\ProposalEditor.jsx, frontend\src\pages\public\BookingPage.jsx, frontend\src\pages\sales\ManagerCommand.jsx, frontend\src\pages\sales\ProposalPanel.jsx
+  tests: NONE
+
+### billing_router.py  routes=8  lines=762
+  services: capabilities, plan_limits, public_identity
+  models:   BillingInterval, BillingInvoice, Organization, Platform, User
+  routes_without_auth_dependency: 1
+    GET    /plans                                               _require_admin             get_plans
+    GET    /subscription                                        _require_admin             get_subscription
+    POST   /checkout                                            _require_admin             create_checkout
+    POST   /change-plan                                         _require_admin             change_plan
+    POST   /cancel-pending-change                               _require_admin             cancel_pending_change
+    POST   /portal                                              _require_admin             create_portal
+    POST   /webhook                                             NO-GATE                    stripe_webhook
+    GET    /all                                                 get_current_user,require_capability get_all_billing
+  frontend_callers: frontend\src\App.jsx, frontend\src\pages\Billing.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodOrganizations.jsx, frontend\src\pages\god\ExceptionQueue.jsx, frontend\src\pages\god\ExecutiveSummary.jsx, frontend\src\pages\god\GodPricingCompensation.jsx, frontend\src\pages\god\GodTools.jsx, frontend\src\pages\god\OrgCommandTable.jsx, frontend\src\pages\god\RevenueMetrics.jsx
+  tests: tests\test_billing_acceptance.py, tests\test_billing_authorization.py, tests\test_billing_operations.py, tests\test_billing_plan_change.py, tests\test_billing_webhook.py, tests\test_god_pricing_console.py, tests\test_sms_router.py
+
+### branding_router.py  routes=3  lines=92
+  services: brand_config
+  models:   Organization, User
+  routes_without_auth_dependency: 2
+    GET                                                         NO-GATE                    get_branding
+    GET    /                                                    NO-GATE                    get_branding
+    GET    /org                                                 get_current_user           get_org_branding
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\auth\routeAuthority.js, frontend\src\components\Layout.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\GodOrganizations.jsx, frontend\src\pages\GodProvision.jsx, frontend\src\pages\GodShell.jsx
+  tests: NONE
+
+### cadence_router.py  routes=8  lines=212
+  services: cadence_service, lead_scope
+  models:   CadenceState, CadenceStatus, Lead, User
+  routes_without_auth_dependency: 0
+    POST   /start/{lead_id}                                     require_tenant_user        start_lead_cadence
+    POST   /start-batch                                         require_tenant_user        start_batch_cadence
+    POST   /run-due                                             require_admin              run_due
+    POST   /{cadence_state_id}/control                          require_tenant_user        control_cadence
+    GET    /summary                                             require_tenant_user        cadence_summary
+    GET    /health-summary                                      require_tenant_user        cadence_health_summary
+    POST   /start-all-eligible                                  require_admin              start_all_eligible
+    GET    /active                                              require_tenant_user        list_active_cadences
+  frontend_callers: frontend\src\pages\Cadence.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\Reports.jsx, frontend\src\pages\god\QualificationDiagnostic.jsx, frontend\src\pages\god\UserAccessDiagnostic.jsx, frontend\src\pages\sales\OpportunityDetail.jsx, frontend\src\pages\sales\PipelineProjection.jsx
+  tests: tests\test_billing_authorization.py, tests\test_billing_catalog.py, tests\test_cadence_router.py, tests\test_customer_360_authorization.py, tests\test_overview_charts_router.py
+
+### cadence_template_router.py  routes=6  lines=410
+  services: -
+  models:   CadenceTemplate, CadenceTemplateTouch, Organization as _Org, User
+  routes_without_auth_dependency: 0
+    GET    /                                                    require_tenant_user        list_templates
+    GET    /{template_id}                                       require_tenant_user        get_template
+    POST   /seed-defaults                                       require_admin              seed_default_templates
+    POST   /                                                    require_admin              create_template
+    PATCH  /{template_id}                                       require_admin              update_template
+    DELETE /{template_id}                                       require_admin              delete_template
+  frontend_callers: frontend\src\pages\CadenceTemplates.jsx, frontend\src\pages\TierDefinitions.jsx
+  tests: NONE
+
+### calendar_connections_router.py  routes=3  lines=267
+  services: calendar_providers, external_busy
+  models:   User
+  routes_without_auth_dependency: 3
+    GET    /connections                                         NO-GATE                    list_my_connections
+    POST   /connections/{provider}/test                         NO-GATE                    test_my_connection
+    POST   /connections/{provider}/disconnect                   NO-GATE                    disconnect_my_calendar
+  frontend_callers: frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\sales\CalendarConnections.jsx
+  tests: NONE
+
+### calendar_router.py  routes=9  lines=1249
+  services: appointment_flow_service, calendar_providers, calendar_service, lead_scope, microsoft_email_service, platform_utils, public_identity, sms_service, tenant_scheduling
+  models:   BookingLink, Lead, Lead as LeadModel, Organization, User
+  routes_without_auth_dependency: 5
+    GET    /connect                                             get_current_user           connect_google_calendar
+    GET    /oauth/callback                                      NO-GATE                    oauth_callback
+    GET    /booking/{token}                                     NO-GATE                    get_booking_by_token
+    POST   /booking-confirmed                                   NO-GATE                    booking_confirmed_webhook
+    POST   /confirm-booking                                     NO-GATE                    confirm_booking
+    POST   /cancel-booking/{booking_id}                         get_current_user           cancel_booking
+    GET    /events                                              get_current_user           list_calendar_events
+    GET    /slots                                               NO-GATE                    get_available_slots
+    POST   /send-reminders                                      get_current_user           send_reminders
+  frontend_callers: frontend\src\pages\Availability.jsx, frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\god\GodBillingOps.jsx, frontend\src\pages\public\BookingPage.jsx, frontend\src\pages\sales\CalendarConnections.jsx
+  tests: tests\test_billing_authorization.py, tests\test_calendar_router.py, tests\test_email_service.py, tests\test_sms_service.py
+
+### campaign_router.py  routes=11  lines=1019
+  services: cadence_service, email_service, lead_scope, microsoft_email_service, platform_owner, sms_service
+  models:   Campaign, EmailMessage, Lead, Message, Organization, Reply, User
+  routes_without_auth_dependency: 0
+    GET    /purposes                                            require_tenant_user        get_purposes
+    POST   /generate-message                                    require_tenant_user        generate_message
+    POST   /preview                                             require_tenant_user        preview_campaign_leads
+    GET    /history                                             require_tenant_user        get_campaign_history
+    POST                                                        require_admin              create_campaign
+    GET                                                         require_tenant_user        list_campaigns
+    POST   /{campaign_id}/preview                               require_admin              preview_campaign
+    POST   /{campaign_id}/apply                                 require_admin              apply_campaign
+    POST   /{campaign_id}/send                                  require_admin              send_campaign
+    GET    /builder/preview                                     require_tenant_user        builder_preview
+    POST   /builder/send                                        require_tenant_context     builder_send
+  frontend_callers: frontend\src\components\EmailReview.jsx, frontend\src\components\MessageReview.jsx, frontend\src\pages\AutoSendQueue.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Leads.jsx, frontend\src\pages\ProposalEditor.jsx, frontend\src\pages\sales\ProposalPanel.jsx
+  tests: tests\conftest.py, tests\test_audit_log_wiring.py, tests\test_auto_send_router.py, tests\test_campaign_router.py, tests\test_compliance_router.py, tests\test_email_review_batch.py, tests\test_import_intelligence.py, tests\test_message_review_flow.py, tests\test_upload_endpoints.py
+
+### case_file_router.py  routes=8  lines=516
+  services: lead_scope
+  models:   Lead, User
+  routes_without_auth_dependency: 0
+    GET    /lead/{lead_id}                                      require_tenant_user        list_case_files
+    POST   /lead/{lead_id}                                      require_tenant_user        create_case_file
+    GET    /summary/org                                         require_tenant_user        org_pipeline_summary
+    GET    /{case_file_id}                                      require_tenant_user        get_case_file
+    PATCH  /{case_file_id}                                      require_tenant_user        update_case_file
+    POST   /{case_file_id}/close                                require_tenant_user        close_case
+    POST   /{case_file_id}/crm-push                             require_tenant_user        crm_push
+    GET    /constants/all                                       require_tenant_user        get_constants
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\auth\routeAuthority.js, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\components\NotificationBell.jsx, frontend\src\components\OutcomeTracker.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\Activity.jsx, frontend\src\pages\Admin.jsx
+  tests: tests\conftest.py, tests\test_admin_router.py, tests\test_audit_log_wiring.py, tests\test_compliance_router.py, tests\test_context_boundaries.py, tests\test_daily_briefing_router.py, tests\test_email_review_batch.py, tests\test_import_intelligence.py, tests\test_lead_capacity.py, tests\test_lead_cleanup_router.py
+
+### compensation_router.py  routes=7  lines=489
+  services: capabilities, compensation, compensation_ledger, sales_access, severity
+  models:   BrandSalesOrg, COMP_PAID, Opportunity, PAYEE_OVERRIDE, User
+  routes_without_auth_dependency: 0
+    GET    /me                                                  require_sales_member       my_compensation
+    GET    /overview                                            get_current_user           overview
+    GET    /ledger                                              get_current_user           compensation_ledger
+    POST   /opportunities/{opportunity_id}/record-collection    get_current_user           record_collection
+    POST   /promote-due                                         get_current_user           promote_due
+    POST   /pay                                                 get_current_user           pay
+    GET    /payables                                            get_current_user           payables
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\Admin.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\LeadCleanup.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\Reports.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\god\CustomerCreate.jsx
+  tests: tests\test_brand_capability_scope.py, tests\test_compensation_command_center.py, tests\test_executive_command_experience.py, tests\test_executive_portfolio_boundary.py, tests\test_executive_suite.py, tests\test_experience_severity.py, tests\test_god_compensation_navigation.py, tests\test_god_navigation.py, tests\test_god_pricing_console.py
+
+### compliance_router.py  routes=6  lines=326
+  services: dedup_service, lead_scope, platform_owner
+  models:   Lead, Organization, SuppressionEntry, SuppressionSource, User
+  routes_without_auth_dependency: 0
+    GET    /suppression-list                                    require_tenant_user        list_suppression_entries
+    POST   /suppression-list                                    require_tenant_context     add_suppression_entry
+    POST   /permanent-dnc                                       require_admin              add_permanent_dnc
+    DELETE /suppression-list/{entry_id}                         require_admin              delete_suppression_entry
+    GET    /master-suppression-list                             require_tenant_user        master_suppression_list
+    POST   /master-suppress                                     require_tenant_user        master_suppress_all_orgs
+  frontend_callers: frontend\src\App.jsx, frontend\src\pages\Compliance.jsx
+  tests: tests\test_audit_log_wiring.py, tests\test_compliance_router.py, tests\test_sms_service.py
+
+### compose_router.py  routes=2  lines=279
+  services: email_service, lead_scope, public_identity, sms_content_policy, sms_service, voice_orchestrator
+  models:   Lead, User
+  routes_without_auth_dependency: 0
+    GET    /{lead_id}/context                                   require_tenant_user        compose_context
+    POST   /{lead_id}/preview                                   require_tenant_user        compose_preview
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\ContextBanner.jsx, frontend\src\components\EmailReview.jsx, frontend\src\components\MessageReview.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Leads.jsx
+  tests: tests\test_campaign_router.py, tests\test_compliance_router.py, tests\test_email_review_batch.py, tests\test_executive_suite.py, tests\test_god_navigation.py, tests\test_import_intelligence.py, tests\test_message_review_flow.py, tests\test_upload_endpoints.py
+
+### concierge_router.py  routes=1  lines=149
+  services: -
+  models:   -
+  routes_without_auth_dependency: 1
+    POST   /chat                                                NO-GATE                    concierge_chat
+  frontend_callers: NONE
+  tests: NONE
+
+### contacts_router.py  routes=6  lines=185
+  services: -
+  models:   User
+  routes_without_auth_dependency: 0
+    GET    /contacts                                            require_tenant_user        list_contacts
+    POST   /contacts                                            require_tenant_user        create_contact
+    PATCH  /contacts/{contact_id}                               require_tenant_user        update_contact
+    DELETE /contacts/{contact_id}                               require_tenant_user        delete_contact
+    GET    /contacts/{contact_id}/notes                         require_tenant_user        list_notes
+    POST   /contacts/{contact_id}/notes                         require_tenant_user        add_note
+  frontend_callers: frontend\src\pages\CRM.jsx
+  tests: tests\test_google_contacts_service.py
+
+### crm_native_router.py  routes=14  lines=604
+  services: lead_scope, platform_owner
+  models:   CRMContact, CRMNote, Lead, Organization, User
+  routes_without_auth_dependency: 0
+    GET    /stages                                              require_tenant_user        get_stages
+    PUT    /stages                                              require_tenant_user        update_stages
+    DELETE /stages/reset                                        require_tenant_user        reset_stages
+    GET    /custom-fields                                       require_tenant_user        get_custom_fields
+    PUT    /custom-fields                                       require_tenant_user        update_custom_fields
+    GET    /contacts                                            require_tenant_user        list_contacts
+    GET    /contacts/{contact_id}                               require_tenant_user        get_contact
+    POST   /contacts                                            require_tenant_context     create_contact
+    PATCH  /contacts/{contact_id}                               require_tenant_user        update_contact
+    DELETE /contacts/{contact_id}                               require_tenant_user        archive_contact
+    GET    /contacts/{contact_id}/notes                         require_tenant_user        get_notes
+    POST   /contacts/{contact_id}/notes                         require_tenant_user        add_note
+    POST   /contacts/from-lead/{lead_id}                        require_tenant_context     create_from_lead
+    POST   /sync-from-leads                                     require_tenant_context     sync_leads_to_crm
+  frontend_callers: frontend\src\pages\CRM.jsx, frontend\src\pages\OrgSettings.jsx
+  tests: NONE
+
+### crm_router.py  routes=6  lines=336
+  services: crm_service
+  models:   Organization, User
+  routes_without_auth_dependency: 1
+    GET    /connections                                         require_tenant_user        list_connections
+    POST   /connections                                         require_tenant_user        create_connection
+    PUT    /connections/{conn_id}                               require_tenant_user        update_connection
+    DELETE /connections/{conn_id}                               require_tenant_user        delete_connection
+    POST   /connections/{conn_id}/test                          require_tenant_user        test_connection
+    POST   /inbound/{org_id}                                    NO-GATE                    inbound_leads
+  frontend_callers: frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\sales\CalendarConnections.jsx
+  tests: tests\test_sms_router.py
+
+### customer_lifecycle_router.py  routes=10  lines=336
+  services: customer_360, customer_lifecycle
+  models:   CompensationEntry, Implementation, Lead, Opportunity, Organization, Platform, Proposal, User
+  routes_without_auth_dependency: 0
+    GET    /customers                                           require_god                list_customers
+    GET    /customers/{org_id}                                  require_god                customer_detail
+    GET    /customers/{org_id}/offboarding-preview              require_god                offboarding_preview
+    POST   /customers/{org_id}/request-cancellation             require_god                request_cancellation
+    POST   /customers/{org_id}/start-offboarding                require_god                start_offboarding
+    POST   /customers/{org_id}/complete-cancellation            require_god                complete_cancellation
+    POST   /customers/{org_id}/archive                          require_god                archive
+    POST   /customers/{org_id}/reactivate                       require_god                reactivate
+    GET    /customers/{org_id}/deletion-impact                  require_god                deletion_impact
+    POST   /customers/{org_id}/permanent-delete                 require_god                permanent_delete
+  frontend_callers: frontend\src\App.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodCustomers.jsx, frontend\src\pages\GodOrganizations.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\OrgManager.jsx, frontend\src\pages\god\Customer360.jsx, frontend\src\pages\god\CustomerCreate.jsx, frontend\src\pages\god\CustomerDetail.jsx, frontend\src\pages\god\ExceptionQueue.jsx
+  tests: tests\test_billing_operations.py, tests\test_customer_360_authorization.py, tests\test_customer_360_lifecycle.py, tests\test_god_navigation.py
+
+### customers_router.py  routes=22  lines=577
+  services: capabilities, customer_provisioning, customer_readiness, data_cleanup, entitlements, platform_owner, staff_activation
+  models:   CleanupExecution, Location, Organization, PURPOSE_SETUP as _PURPOSE_SETUP, Platform, User
+  routes_without_auth_dependency: 0
+    GET                                                         require_god                list_customers
+    POST                                                        require_god                create_customer
+    GET    /{org_id}                                            require_god                customer_detail
+    GET    /{org_id}/locations                                  require_god                get_locations
+    POST   /{org_id}/locations                                  require_god                add_location
+    PATCH  /{org_id}/locations/{location_id}                    require_god                update_location
+    GET    /{org_id}/identity-lookup                            require_god                identity_lookup
+    POST   /{org_id}/users                                      require_god                add_user
+    PUT    /{org_id}/users/{user_id}/locations                  require_god                set_user_locations
+    GET    /{org_id}/features                                   require_god                get_features
+    PUT    /{org_id}/features                                   require_god                put_features
+    GET    /{org_id}/administration                             require_god                get_administration
+    PUT    /{org_id}/self-management                            require_god                put_self_management
+    PUT    /{org_id}/users/{user_id}/capabilities               require_god                put_admin_capabilities
+    GET    /{org_id}/readiness                                  require_god                get_readiness
+    POST   /{org_id}/activate                                   require_god                activate
+    POST   /cleanup/preview                                     require_god                cleanup_preview
+    GET    /cleanup/rules                                       require_god                cleanup_rules
+    POST   /cleanup/execute                                     require_god                cleanup_execute
+    GET    /cleanup/history                                     require_god                cleanup_history
+    GET    /cleanup/history/{execution_id}                      require_god                cleanup_receipt
+    POST   /{org_id}/deactivate                                 require_god                deactivate
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\Availability.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\GodProvision.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\LeadCleanup.jsx, frontend\src\pages\LeadDetail.jsx
+  tests: tests\test_audit_log_wiring.py, tests\test_auth_service.py, tests\test_god_password_reset.py, tests\test_plan_limits.py, tests\test_plan_limits_coverage.py, tests\test_plan_limits_enforcement.py, tests\test_self_password_change.py, tests\test_user_management.py
+
+### demo_router.py  routes=6  lines=143
+  services: demo_runner, demo_scenarios, environment
+  models:   User
+  routes_without_auth_dependency: 1
+    GET    /environment                                         NO-GATE                    demo_environment
+    GET    /scenarios                                           require_demo_env           list_scenarios
+    GET    /state                                               require_demo_operator      demo_state
+    POST   /seed                                                require_demo_operator      demo_seed
+    POST   /advance                                             require_demo_operator      demo_advance
+    POST   /reset                                               require_demo_operator      demo_reset
+  frontend_callers: frontend\src\api\demo.js, frontend\src\components\DemoBanner.jsx, frontend\src\pages\CadenceTemplates.jsx, frontend\src\pages\OrgSettings.jsx, frontend\src\pages\TierDefinitions.jsx, frontend\src\pages\Users.jsx, frontend\src\pages\god\GodPricingCompensation.jsx, frontend\src\pages\god\GodUsers.jsx, frontend\src\pages\god\ResetPasswordDialog.jsx
+  tests: tests\test_audit_log_wiring.py, tests\test_billing_authorization.py, tests\test_dedup_service.py, tests\test_god_password_reset.py, tests\test_god_pricing_console.py, tests\test_plan_limits_coverage.py, tests\test_self_password_change.py, tests\test_user_management.py
+
+### dlc_router.py  routes=7  lines=530
+  services: -
+  models:   Organization, User
+  routes_without_auth_dependency: 0
+    GET    /status                                              require_tenant_user        get_status
+    POST   /create-messaging-service                            require_tenant_user        create_messaging_service
+    POST   /register-brand                                      require_tenant_user        register_brand
+    POST   /register-campaign                                   require_tenant_user        register_campaign
+    POST   /add-phone-number                                    require_tenant_user        add_phone_number
+    POST   /patch-sids                                          require_tenant_user        patch_sids
+    POST   /refresh-status                                      require_tenant_user        refresh_status
+  frontend_callers: frontend\src\pages\DLCRegistration.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\OrgSettings.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\sales\VideoStatus.jsx
+  tests: tests\test_overview_charts_router.py
+
+### email_router.py  routes=11  lines=883
+  services: draft_reply_service, email_poller_service, email_service, email_tracking_service, lead_scope, microsoft_email_service, platform_utils, public_identity, sms_service
+  models:   EmailMessage, Lead, User
+  routes_without_auth_dependency: 0
+    POST   /send/{lead_id}                                      require_tenant_user        send_single_email
+    POST   /send-batch                                          require_tenant_user        send_email_batch_endpoint
+    GET    /queue                                               require_tenant_user        email_only_queue
+    POST   /preview-batch                                       require_tenant_user        preview_email_batch
+    POST   /confirm-send-batch                                  require_tenant_user        confirm_email_send_batch
+    POST   /send-with-attachment/{lead_id}                      require_tenant_user        send_email_with_attachment
+    POST   /draft/{lead_id}                                     require_tenant_user        draft_email
+    GET    /sent-log                                            require_tenant_user        email_sent_log
+    POST   /system-check                                        require_tenant_user        email_system_check
+    POST   /poll-inbox                                          require_tenant_user        poll_inbox
+    POST   /poll-inbox/all                                      require_tenant_user        poll_inbox_all
+  frontend_callers: frontend\src\components\EmailReview.jsx, frontend\src\components\MessageReview.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\AutoSendQueue.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Leads.jsx, frontend\src\pages\ProposalEditor.jsx
+  tests: tests\conftest.py, tests\test_auto_send_router.py, tests\test_compliance_router.py, tests\test_draft_reply_router.py, tests\test_email_review_batch.py, tests\test_email_router.py, tests\test_message_review_flow.py
+
+### email_tracking_router.py  routes=2  lines=97
+  services: -
+  models:   EmailMessage
+  routes_without_auth_dependency: 2
+    GET    /open/{email_message_id}                             NO-GATE                    open_tracking_pixel
+    GET    /click/{email_message_id}                            NO-GATE                    click_tracking_redirect
+  frontend_callers: NONE
+  tests: tests\test_email_tracking_router.py, tests\test_email_tracking_service.py
+
+### executive_router.py  routes=16  lines=1214
+  services: executive_authority, executive_portfolio
+  models:   -
+  routes_without_auth_dependency: 0
+    GET    /context                                             require_brand_executive    get_executive_context
+    GET    /command-center                                      require_brand_executive    get_command_center
+    GET    /team                                                require_brand_executive    get_executive_team
+    GET    /organizations                                       require_brand_executive    get_executive_organizations
+    GET    /organizations/{org_id}                              require_brand_executive    get_executive_org_detail
+    GET    /organizations/{org_id}/observe/overview             require_brand_executive    get_org_observation_overview
+    GET    /customer-health                                     require_brand_executive    get_customer_health
+    GET    /portfolio                                           require_brand_executive    get_portfolio
+    GET    /portfolio/health                                    require_brand_executive    get_portfolio_health
+    GET    /organizations/{org_id}/performance                  require_brand_executive    get_org_performance
+    POST   /admin/grant                                         require_god                grant_executive_membership
+    POST   /admin/revoke                                        require_god                revoke_executive_membership
+    GET    /admin/portfolio/{user_id}                           require_god                get_executive_portfolio_admin
+    POST   /admin/portfolio/assign                              require_god                assign_executive_organization
+    POST   /admin/portfolio/unassign                            require_god                unassign_executive_organization
+    GET    /admin/executives                                    require_god                list_executives
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\ContextBanner.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\OrgManager.jsx, frontend\src\pages\OrgSettings.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\ProvisionClient.jsx, frontend\src\pages\executive\ExecutiveCommandCenter.jsx
+  tests: tests\test_executive_command_center.py, tests\test_executive_command_experience.py, tests\test_executive_customer_health.py, tests\test_executive_portfolio_boundary.py, tests\test_executive_suite.py, tests\test_god_navigation.py, tests\test_team_activity_board.py
+
+### fiber_intake_router.py  routes=2  lines=409
+  services: -
+  models:   Lead, Organization
+  routes_without_auth_dependency: 2
+    GET    /fiber/{org_token}                                   NO-GATE                    fiber_intake_form
+    POST   /fiber/{org_token}                                   NO-GATE                    fiber_intake_submit
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\FiberLeadCapture.jsx
+  tests: tests\test_lead_source_column.py, tests\test_plan_limits_coverage.py
+
+### fiber_leads_router.py  routes=2  lines=174
+  services: lead_capacity, lead_scope, platform_owner
+  models:   Lead, Organization, gen_uuid
+  routes_without_auth_dependency: 0
+    POST                                                        require_tenant_context     create_fiber_lead
+    GET                                                         require_tenant_user        list_fiber_leads
+  frontend_callers: NONE
+  tests: tests\test_lead_source_column.py, tests\test_plan_limits_coverage.py
+
+### god_billing_router.py  routes=8  lines=1161
+  services: billing_catalog, evosys_billing_seed, lead_capacity
+  models:   BillingEvent, BillingInterval, Implementation, Opportunity, Organization, Platform, User
+  routes_without_auth_dependency: 0
+    GET    /brands                                              require_god                list_brands
+    GET    /brands/{platform_id}                                require_god                brand_detail
+    PUT    /brands/{platform_id}/plans/{key}                    require_god                upsert_plan
+    PUT    /brands/{platform_id}/config                         require_god                set_config
+    POST   /brands/{platform_id}/seed                           require_god                seed_brand
+    GET    /revenue                                             require_god                revenue
+    GET    /customers                                           require_god                billing_customers
+    GET    /events                                              require_god                billing_events
+  frontend_callers: frontend\src\App.jsx, frontend\src\pages\Admin.jsx, frontend\src\pages\Availability.jsx, frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\GodBrandDetail.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodCustomers.jsx, frontend\src\pages\GodImplementations.jsx, frontend\src\pages\GodOrganizations.jsx, frontend\src\pages\GodSalesOps.jsx
+  tests: tests\test_admin_revenue_dashboard.py, tests\test_billing_authorization.py, tests\test_billing_operations.py, tests\test_customer_360_authorization.py, tests\test_god_navigation.py, tests\test_reports_router.py
+
+### god_diagnostics_calendar.py  routes=4  lines=456
+  services: calendar_providers, calendar_service, public_identity
+  models:   CalendarConnection, Organization, User
+  routes_without_auth_dependency: 0
+    GET    /calendar-diagnostics                                require_god                god_calendar_diagnostics
+    POST   /calendar-probe                                      require_god                god_calendar_probe
+    POST   /calendar-write-test                                 require_god                god_calendar_write_test
+    GET    /email-diagnostics                                   require_god                god_email_diagnostics
+  frontend_callers: NONE
+  tests: NONE
+
+### god_maintenance_router.py  routes=2  lines=344
+  services: calendar_providers, calendar_service
+  models:   BookingLink, Lead, Message, User, VoiceCall
+  routes_without_auth_dependency: 0
+    POST   /booking-cleanup                                     require_god                booking_cleanup
+    POST   /phone-audit                                         require_god                phone_audit
+  frontend_callers: NONE
+  tests: NONE
+
+### god_ops_router.py  routes=31  lines=1194
+  services: access_diagnostic, customer_activation, god_operations, implementation_service, package_pricing, provisioning, qualification, qualification_diagnostic, sales_access, sales_staff, staff_activation
+  models:   AuditLogEntry, BrandPackage, BrandSalesOrg, Opportunity, Organization, PURPOSE_RESET, PURPOSE_SETUP, Platform, StaffActivation, User
+  routes_without_auth_dependency: 0
+    GET    /sales-operations                                    require_god                sales_operations
+    GET    /brands                                              require_god                brands
+    GET    /brands/{brand_sales_org_id}                         require_god                brand_detail
+    GET    /queues                                              require_god                queues
+    GET    /won-queue                                           require_sales_member       won_queue
+    GET    /opportunities/{opportunity_id}/provisioning-review  require_sales_member       provisioning_review
+    POST   /opportunities/{opportunity_id}/provision            require_sales_member       provision
+    GET    /staff                                               require_god                staff
+    GET    /implementations                                     require_god                list_implementations
+    GET    /implementations/{implementation_id}                 require_god                implementation_detail
+    POST   /implementations/{implementation_id}/owner           require_god                set_owner
+    POST   /implementations/{implementation_id}/status          require_god                set_status
+    POST   /implementations/{implementation_id}/milestones/{key} require_god                set_milestone
+    POST   /implementations/{implementation_id}/milestones      require_god                add_milestone
+    POST   /implementations/{implementation_id}/launch          require_god                launch
+    PATCH  /packages/{package_id}/pricing                       require_god                set_package_pricing
+    POST   /implementations/{implementation_id}/billing         require_god                set_billing
+    POST   /implementations/{implementation_id}/customer-admin  require_god                create_customer_admin
+    POST   /implementations/{implementation_id}/customer-user   require_god                add_existing_customer_user
+    POST   /activations/{activation_id}/resend                  require_god                resend_invite
+    POST   /activations/{activation_id}/revoke                  require_god                revoke_invite
+    GET    /brands/{brand_sales_org_id}/sales-team              require_sales_member       sales_team
+    GET    /brands/{brand_sales_org_id}/identity-lookup         require_god                identity_lookup
+    POST   /brands/{brand_sales_org_id}/sales-team              require_god                add_sales_user
+    PATCH  /sales-memberships/{membership_id}                   require_god                patch_sales_membership
+    POST   /sales-users/{user_id}/setup-link                    require_sales_member       sales_setup_link
+    POST   /staff-activations/{activation_id}/revoke            require_sales_member       revoke_sales_link
+    GET    /customer-organizations                              require_god                customer_organizations
+    GET    /audit                                               require_god                control_plane_audit
+    GET    /diagnostics/user-access                             require_god                user_access_diagnostic
+    GET    /diagnostics/qualification                           require_god                qualification_diagnostic_report
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\Activate.jsx, frontend\src\pages\AuditLog.jsx, frontend\src\pages\GodBrandDetail.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodControlAudit.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\GodImplementations.jsx, frontend\src\pages\GodOrganizations.jsx
+  tests: tests\test_audit_log_router.py, tests\test_audit_log_wiring.py, tests\test_billing_authorization.py, tests\test_god_pricing_console.py, tests\test_leads_router.py
+
+### god_pricing_router.py  routes=14  lines=863
+  services: capabilities, evosys_comp_seed
+  models:   AuditLogEntry, BASES, BASIS_LABELS, DEAL_KINDS, Membership, PricingPolicy, ROLE_SALES_MANAGER, ROLE_SALES_REP, SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG, User, UserCapabilityGrant
+  routes_without_auth_dependency: 0
+    GET    /overview                                            require_god                overview
+    POST   /policies                                            require_god                create_policy
+    PATCH  /policies/{policy_id}                                require_god                update_policy
+    POST   /plans                                               require_god                create_plan
+    PATCH  /plans/{plan_id}                                     require_god                update_plan
+    POST   /plans/{plan_id}/rules                               require_god                create_rule
+    PATCH  /rules/{rule_id}                                     require_god                update_rule
+    DELETE /rules/{rule_id}                                     require_god                deactivate_rule
+    POST   /plans/{plan_id}/caps                                require_god                upsert_cap
+    GET    /audit                                               require_god                pricing_audit
+    GET    /brand-access                                        require_god                brand_access
+    GET    /capability-scope-health                             require_god                capability_scope_health
+    PUT    /brand-access                                        require_god                set_brand_access
+    POST   /seed/evosys                                         require_god                seed_evosys
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\AuditLog.jsx, frontend\src\pages\Billing.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodControlAudit.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\god\CustomerCreate.jsx, frontend\src\pages\god\GodPricingCompensation.jsx, frontend\src\pages\god\GodTools.jsx
+  tests: tests\test_audit_log_router.py, tests\test_audit_log_wiring.py, tests\test_billing_authorization.py, tests\test_brand_capability_scope.py, tests\test_compensation_command_center.py, tests\test_executive_command_experience.py, tests\test_executive_portfolio_boundary.py, tests\test_executive_suite.py, tests\test_experience_severity.py, tests\test_god_compensation_navigation.py
+
+### god_router.py  routes=25  lines=1474
+  services: auth_service, comms, plan_limits, severity, staff_activation, twilio_callbacks, voice_attempt_policy, voice_orchestrator
+  models:   BrandSalesOrg, Lead, Membership, Message, Organization, PURPOSE_SETUP, Platform, User, VoiceAgentConfig, VoiceCall
+  routes_without_auth_dependency: 0
+    POST   /platforms                                           require_god                god_create_platform
+    POST   /orgs                                                require_god                god_create_org
+    POST   /users                                               require_god                god_create_user
+    GET    /stats                                               require_god                god_stats
+    GET    /platform-health                                     require_god                god_platform_health
+    GET    /twilio-diagnostics                                  require_god                god_twilio_diagnostics
+    GET    /platforms                                           require_god                god_platforms
+    GET    /orgs                                                require_god                god_orgs
+    GET    /orgs/{org_id}/detail                                require_god                god_org_detail
+    POST   /orgs/{org_id}/suspend                               require_god                god_suspend_org
+    POST   /orgs/{org_id}/reactivate                            require_god                god_reactivate_org
+    GET    /leads                                               require_god                god_leads
+    GET    /users                                               require_god                god_users
+    PATCH  /users/{user_id}/role                                require_god                god_set_role
+    POST   /users/{user_id}/deactivate                          require_god                god_deactivate_user
+    POST   /users/{user_id}/activate                            require_god                god_activate_user
+    POST   /orgs/{org_id}/impersonate                           require_god                god_impersonate_org
+    POST   /orgs/{org_id}/exit-session                          require_god                god_exit_org_session
+    GET    /voice/agents                                        require_god                god_list_voice_agents
+    POST   /voice/agents                                        require_god                god_create_voice_agent
+    PATCH  /orgs/{org_id}/attempt-policy                        require_god                god_set_org_attempt_policy
+    PATCH  /voice/agents/{config_id}/attempt-policy             require_god                god_set_use_case_attempt_policy
+    PATCH  /voice/agents/{config_id}/version                    require_god                god_set_voice_agent_version
+    POST   /voice/test-call                                     require_god                god_place_voice_call
+    GET    /voice/calls/{call_id}                               require_god                god_get_voice_call
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\auth\routeAuthority.js, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\components\NotificationBell.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\Activity.jsx, frontend\src\pages\Admin.jsx, frontend\src\pages\AutoSendQueue.jsx
+  tests: tests\conftest.py, tests\test_admin_router.py, tests\test_audit_log_wiring.py, tests\test_auth_service.py, tests\test_compliance_router.py, tests\test_context_boundaries.py, tests\test_daily_briefing_router.py, tests\test_email_review_batch.py, tests\test_executive_command_experience.py, tests\test_experience_severity.py
+
+### god_sms_trace_router.py  routes=4  lines=624
+  services: message_state, sms_service, twilio_callbacks
+  models:   Lead, Message, Organization, User
+  routes_without_auth_dependency: 0
+    GET    /{lead_id}                                           require_god                trace_lead_sms
+    GET    /campaign/{organization_id}                          require_god                read_registered_campaign
+    GET    /inbound/{organization_id}                           require_god                trace_inbound
+    GET    /alerts/{organization_id}                            require_god                trace_webhook_alerts
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\components\VoiceCampaign.jsx, frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\Overview.jsx
+  tests: tests\test_audit_log_wiring.py, tests\test_campaign_router.py, tests\test_sms_router.py
+
+### google_contacts_router.py  routes=2  lines=71
+  services: google_contacts_service, import_service, lead_scope
+  models:   Lead, User
+  routes_without_auth_dependency: 0
+    POST   /push/{lead_id}                                      get_current_user           push_lead_to_google
+    POST   /import                                              get_current_user           import_from_google_contacts
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\ImportBatchReview.jsx, frontend\src\pages\ImportBatches.jsx, frontend\src\pages\LeadScraper.jsx, frontend\src\pages\Leads.jsx
+  tests: tests\test_context_boundaries.py, tests\test_google_contacts_service.py, tests\test_import_intelligence.py, tests\test_import_service.py, tests\test_merge_readiness.py, tests\test_new_inquiry_lead_tier.py
+
+### health_router.py  routes=2  lines=296
+  services: capabilities, lead_scope
+  models:   Organization, User
+  routes_without_auth_dependency: 0
+    GET    /my-setup                                            require_tenant_user        my_setup
+    GET    /advisor-status                                      get_current_user,require_capability advisor_status
+  frontend_callers: frontend\src\pages\SystemHealth.jsx
+  tests: tests\test_health_router.py
+
+### import_batch_router.py  routes=10  lines=271
+  services: import_commit_service, import_permissions, import_staging_service
+  models:   gen_uuid
+  routes_without_auth_dependency: 0
+    GET                                                         require_import_leads       list_batches
+    POST                                                        require_import_leads       upload_batch
+    GET    /{batch_id}                                          require_import_review      get_batch
+    GET    /{batch_id}/rows                                     require_import_review      list_rows
+    PATCH  /{batch_id}/rows/{row_id}                            require_import_review      update_row
+    POST   /{batch_id}/rows/bulk-review                         require_import_review      bulk_review
+    POST   /{batch_id}/ready                                    require_import_review      mark_ready
+    POST   /{batch_id}/commit                                   require_import_commit      commit_batch_route
+    POST   /{batch_id}/archive                                  require_import_admin       archive_batch
+    DELETE /{batch_id}                                          require_import_admin       delete_batch
+  frontend_callers: frontend\src\pages\ImportBatchReview.jsx, frontend\src\pages\ImportBatches.jsx
+  tests: tests\test_customer_360_authorization.py, tests\test_import_intelligence.py, tests\test_merge_readiness.py
+
+### integrations_router.py  routes=6  lines=380
+  services: calendar_providers, integration_auth, retell_bridge, tenant_scheduling
+  models:   -
+  routes_without_auth_dependency: 0
+    GET    /retell/ping                                         require_retell             retell_ping
+    POST   /retell/availability                                 require_retell             retell_availability
+    POST   /retell/book                                         require_retell             retell_book
+    GET    /retell/tenant/ping                                  require_retell_tenant      retell_tenant_ping
+    POST   /retell/tenant/availability                          require_retell_tenant      retell_tenant_availability
+    POST   /retell/tenant/book                                  require_retell_tenant      retell_tenant_book
+  frontend_callers: NONE
+  tests: NONE
+
+### lead_scraper_router.py  routes=4  lines=445
+  services: lead_capacity
+  models:   Lead, Organization, User
+  routes_without_auth_dependency: 0
+    POST   /search                                              require_god                scrape_search
+    POST   /validate                                            require_god                scrape_validate
+    POST   /exists                                              require_god                scrape_exists
+    POST   /import                                              require_god                scrape_import
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\ImportBatchReview.jsx, frontend\src\pages\ImportBatches.jsx, frontend\src\pages\LeadScraper.jsx, frontend\src\pages\Leads.jsx
+  tests: tests\test_context_boundaries.py, tests\test_import_intelligence.py, tests\test_import_service.py, tests\test_lead_source_column.py, tests\test_merge_readiness.py, tests\test_new_inquiry_lead_tier.py, tests\test_plan_limits_coverage.py
+
+### leads_router.py  routes=31  lines=2460
+  services: ai_conversation_service, cadence_service, compliance_service, dedup_service, email_service, import_commit_service, import_permissions, import_service, import_staging_service, lead_capacity, lead_scope, message_state, platform_owner, public_identity, sms_service
+  models:   BookingLink, CRMContact, CadenceState, ContactRegistry, EmailMessage, EngagementTemperature, Lead, LeadTier, Message, Organization, Reply, ReplyClassification, User, VoiceCall, VoiceCall as _VoiceCall, gen_uuid
+  routes_without_auth_dependency: 3
+    POST   /upload/preview                                      require_tenant_context     preview_upload
+    POST   /upload/confirm                                      require_import_commit,require_import_stage confirm_upload
+    GET    /import-batches                                      require_tenant_user        list_import_batches
+    DELETE /import-batches                                      require_tenant_user        delete_import_batch
+    GET    /                                                    require_tenant_or_observer list_leads
+    GET    /flagged                                             require_tenant_user        list_flagged_leads
+    GET    /needs-review                                        require_tenant_user        leads_needing_tier_review
+    PATCH  /{lead_id}/tier                                      require_tenant_user        set_lead_tier
+    GET    /sparklines                                          require_tenant_or_observer overview_sparklines
+    GET    /daily-briefing                                      require_tenant_or_observer daily_briefing
+    GET    /engagement-breakdown                                require_tenant_user        engagement_breakdown
+    GET    /status-funnel                                       require_tenant_or_observer status_funnel
+    GET    /{lead_id}                                           require_tenant_user        get_lead
+    GET    /{lead_id}/timeline                                  require_tenant_user        get_lead_timeline
+    POST   /preview-messages                                    require_tenant_user        preview_messages_for_leads
+    POST   /confirm-send-batch                                  require_tenant_user        confirm_send_batch
+    POST   /{lead_id}/not-duplicate                             require_tenant_context     keep_lead_separate
+    GET    /{lead_id}/duplicate-explain                         require_tenant_context     explain_duplicate
+    POST   /maintenance/duplicate-dnc-repair                    require_tenant_context     repair_duplicate_dnc
+    POST   /maintenance/tier-status-repair                      require_tenant_context     repair_stale_tier_review
+    DELETE /duplicates/bulk-delete                              require_tenant_context     bulk_delete_duplicate_leads
+    POST   /deduplicate-email-leads                             require_tenant_user        deduplicate_email_leads
+    POST   /demo-request                                        NO-GATE                    create_demo_request
+    POST   /create                                              require_tenant_context     create_lead_manually
+    PATCH  /{lead_id}                                           require_tenant_user        update_lead_fields
+    DELETE /{lead_id}                                           require_tenant_user        delete_lead
+    PATCH  /{lead_id}/lead-type                                 require_tenant_user        update_lead_type
+    PATCH  /{lead_id}/flag                                      require_tenant_user        flag_lead
+    POST   /demo-request                                        NO-GATE                    demo_request
+    POST   /sms-optin                                           NO-GATE                    sms_optin
+    POST   /{lead_id}/resend-booking-link                       require_tenant_user        resend_booking_link
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\components\EmailReview.jsx, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\DLCRegistration.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\ImportBatchReview.jsx
+  tests: tests\conftest.py, tests\test_compliance_router.py, tests\test_daily_briefing_router.py, tests\test_email_review_batch.py, tests\test_import_intelligence.py, tests\test_lead_capacity.py, tests\test_lead_source_column.py, tests\test_leads_router.py, tests\test_merge_readiness.py, tests\test_message_review_flow.py
+
+### microsoft_router.py  routes=2  lines=71
+  services: microsoft_email_service
+  models:   User
+  routes_without_auth_dependency: 1
+    GET    /connect                                             get_current_user           connect_microsoft_365
+    GET    /oauth/callback                                      NO-GATE                    microsoft_oauth_callback
+  frontend_callers: frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\sales\CalendarConnections.jsx
+  tests: tests\test_calendar_router.py
+
+### notification_router.py  routes=2  lines=22
+  services: notification_service
+  models:   User
+  routes_without_auth_dependency: 0
+    GET    /                                                    get_current_user           list_notifications
+    POST   /{notification_id}/read                              get_current_user           mark_read
+  frontend_callers: frontend\src\components\NotificationBell.jsx, frontend\src\pages\LeadDetail.jsx
+  tests: tests\test_import_intelligence.py
+
+### objection_router.py  routes=1  lines=187
+  services: lead_scope
+  models:   Lead, Reply, User
+  routes_without_auth_dependency: 0
+    POST   /objection-reply/{reply_id}                          get_current_user           get_objection_reply
+  frontend_callers: frontend\src\pages\Replies.jsx
+  tests: NONE
+
+### onboarding_router.py  routes=2  lines=177
+  services: auth_service
+  models:   Organization, User
+  routes_without_auth_dependency: 2
+    GET    /check-slug                                          NO-GATE                    check_slug
+    POST   /register                                            NO-GATE                    register_org
+  frontend_callers: frontend\src\pages\DLCRegistration.jsx, frontend\src\pages\Onboarding.jsx
+  tests: tests\test_plan_limits_coverage.py
+
+### org_settings_router.py  routes=15  lines=733
+  services: capabilities, entitlements, sms_service
+  models:   Organization, User
+  routes_without_auth_dependency: 1
+    GET    /                                                    get_current_user           get_org_settings
+    GET    /default-tiers                                       NO-GATE                    get_default_tiers
+    PATCH  /branding                                            require_admin              update_branding
+    PATCH  /contact                                             require_admin              update_contact_info
+    PATCH  /industry                                            require_admin              update_industry
+    PATCH  /tiers                                               require_admin              update_tier_config
+    PATCH  /social-links                                        require_admin              update_social_links
+    PATCH  /email-sender                                        require_admin              update_email_sender
+    PATCH  /calendar-provider                                   require_admin              update_calendar_provider
+    PATCH  /features                                            get_current_user           update_enabled_features
+    GET    /twilio                                              require_admin,require_capability get_org_twilio
+    PUT    /twilio                                              require_admin,require_capability update_org_twilio
+    PATCH  /twilio/phone                                        require_admin,require_capability update_org_twilio_phone
+    GET    /twilio/numbers                                      require_admin,require_capability list_org_sending_numbers
+    PUT    /twilio/numbers/{user_id}                            require_admin,require_capability assign_org_sending_number
+  frontend_callers: frontend\src\api\client.js, frontend\src\pages\CRM.jsx, frontend\src\pages\OrgManager.jsx, frontend\src\pages\OrgSettings.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\god\CustomerDetail.jsx, frontend\src\theme.js
+  tests: tests\conftest.py, tests\test_settings_router.py
+
+### outcomes_router.py  routes=4  lines=222
+  services: lead_scope
+  models:   Lead, LeadOutcome, User
+  routes_without_auth_dependency: 0
+    POST   /                                                    get_current_user           record_outcome
+    GET    /lead/{lead_id}                                      get_current_user           list_outcomes_for_lead
+    GET    /lead/{lead_id}/latest-gaps                          get_current_user           get_latest_gaps
+    GET    /summary                                             get_current_user           get_outcomes_summary
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\auth\routeAuthority.js, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\components\NotificationBell.jsx, frontend\src\components\OutcomeTracker.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\Activity.jsx, frontend\src\pages\Admin.jsx
+  tests: tests\conftest.py, tests\test_admin_router.py, tests\test_audit_log_wiring.py, tests\test_cadence_router.py, tests\test_compliance_router.py, tests\test_context_boundaries.py, tests\test_daily_briefing_router.py, tests\test_email_review_batch.py, tests\test_import_intelligence.py, tests\test_lead_capacity.py
+
+### pipeline_router.py  routes=7  lines=283
+  services: lead_scope, pipeline_service, sms_service
+  models:   Lead, Organization, PipelineConversation, User
+  routes_without_auth_dependency: 0
+    POST   /launch                                              require_tenant_user        launch
+    GET    /stats                                               require_tenant_user        pipeline_stats
+    GET    /forecast                                            require_tenant_or_observer forecast
+    GET    /flagged                                             require_tenant_user        get_flagged
+    POST   /approve/{pipeline_id}                               require_tenant_user        approve_flagged
+    POST   /dismiss/{pipeline_id}                               require_tenant_user        dismiss_flagged
+    GET    /conversations                                       require_tenant_user        get_conversations
+  frontend_callers: frontend\src\pages\AIHub.jsx, frontend\src\pages\AutoSendQueue.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\LeadCleanup.jsx, frontend\src\pages\Leads.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\Pipeline.jsx, frontend\src\pages\Reports.jsx
+  tests: tests\test_auto_send_router.py, tests\test_executive_command_experience.py
+
+### platform_context_router.py  routes=9  lines=597
+  services: platform_owner
+  models:   BrandSalesOrg, Lead, Membership, Organization, Platform, User
+  routes_without_auth_dependency: 0
+    GET    /context                                             require_god                current_context
+    GET    /overview                                            require_god                platform_overview
+    GET    /brands/{platform_id}/customers                      require_god                brand_customers
+    POST   /brands/{platform_id}/sales-org                      require_god                create_brand_sales_org
+    POST   /context/customer/{org_id}                           require_god                enter_customer
+    POST   /context/brand/{platform_id}                         require_god                enter_brand
+    POST   /context/exit                                        require_god                exit_context
+    GET    /owner-state                                         require_god                owner_state
+    POST   /owner-neutralize                                    require_god                owner_neutralize
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\ContextBanner.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\executive\ExecutiveSuite.jsx, frontend\src\pages\god\CustomerCreate.jsx, frontend\src\pages\god\GodPricingCompensation.jsx, frontend\src\pages\god\GodTools.jsx
+  tests: tests\test_brand_capability_scope.py, tests\test_compensation_command_center.py, tests\test_executive_command_experience.py, tests\test_executive_portfolio_boundary.py, tests\test_executive_suite.py, tests\test_experience_severity.py, tests\test_god_compensation_navigation.py, tests\test_god_navigation.py, tests\test_god_pricing_console.py
+
+### proposal_router.py  routes=20  lines=820
+  services: appointment_invites, email_service, platform_owner
+  models:   -
+  routes_without_auth_dependency: 5
+    POST   /                                                    require_admin              create_proposal
+    GET    /                                                    require_admin              list_proposals
+    GET    /{proposal_id}                                       require_admin              get_proposal
+    PATCH  /{proposal_id}                                       require_admin              update_proposal
+    DELETE /{proposal_id}                                       require_admin              delete_proposal
+    POST   /{proposal_id}/publish                               require_admin              publish_proposal
+    POST   /{proposal_id}/unpublish                             require_admin              unpublish_proposal
+    POST   /{proposal_id}/blocks                                require_admin              add_block
+    PATCH  /{proposal_id}/blocks/{block_id}                     require_admin              update_block
+    DELETE /{proposal_id}/blocks/{block_id}                     require_admin              delete_block
+    POST   /{proposal_id}/blocks/reorder                        require_admin              reorder_blocks
+    POST   /{proposal_id}/send                                  require_admin              send_proposal_invite
+    POST   /{proposal_id}/tokens/{token_id}/revoke              require_admin              revoke_token
+    GET    /{proposal_id}/analytics                             require_admin              get_analytics
+    POST   /{proposal_id}/upload                                require_admin              upload_proposal_file
+    GET    /files/{file_id}                                     NO-GATE                    serve_proposal_file
+    GET    /portal/resolve/{token}                              NO-GATE                    resolve_portal_token
+    POST   /portal/view/{view_id}/ping                          NO-GATE                    ping_view
+    POST   /portal/view/{view_id}/close                         NO-GATE                    close_view
+    POST   /portal/view/{view_id}/download                      NO-GATE                    record_download
+  frontend_callers: frontend\src\api\client.js, frontend\src\components\MessageReview.jsx, frontend\src\pages\Availability.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Leads.jsx, frontend\src\pages\ProposalEditor.jsx, frontend\src\pages\portal\PortalAccess.jsx
+  tests: tests\conftest.py, tests\test_compliance_router.py, tests\test_email_review_batch.py, tests\test_import_intelligence.py, tests\test_merge_readiness.py, tests\test_message_review_flow.py, tests\test_upload_endpoints.py
+
+### qualification_router.py  routes=8  lines=293
+  services: lead_scope
+  models:   User
+  routes_without_auth_dependency: 1
+    POST   /preview                                             require_tenant_user        preview
+    GET    /preview                                             require_tenant_user        preview_get
+    GET    /lead/{lead_id}                                      require_tenant_user        qualify_single_lead
+    GET    /vocabulary                                          NO-GATE                    vocabulary
+    GET    /rules                                               require_tenant_user        list_rules
+    POST   /rules                                               require_admin              create_rule
+    PUT    /rules/{rule_id}                                     require_admin              update_rule
+    DELETE /rules/{rule_id}                                     require_admin              deactivate_rule
+  frontend_callers: frontend\src\App.jsx, frontend\src\api\client.js, frontend\src\auth\routeAuthority.js, frontend\src\components\EmailReview.jsx, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\components\NotificationBell.jsx, frontend\src\components\OutcomeTracker.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\Activity.jsx
+  tests: tests\conftest.py, tests\test_admin_router.py, tests\test_audit_log_wiring.py, tests\test_campaign_router.py, tests\test_compliance_router.py, tests\test_context_boundaries.py, tests\test_daily_briefing_router.py, tests\test_email_review_batch.py, tests\test_god_pricing_console.py, tests\test_import_intelligence.py
+
+### reports_router.py  routes=5  lines=576
+  services: -
+  models:   -
+  routes_without_auth_dependency: 0
+    GET    /conversion-trend                                    require_admin              conversion_trend
+    GET    /engagement-vs-conversion                            require_admin              engagement_vs_conversion
+    GET    /by-client-list                                      require_admin              by_client_list
+    GET    /revenue-by-period                                   require_admin              revenue_by_period
+    GET    /crm-summary                                         require_admin              crm_summary
+  frontend_callers: frontend\src\pages\Reports.jsx
+  tests: tests\test_reports_router.py
+
+### sales_manager_router.py  routes=5  lines=173
+  services: manager_workspace, pipeline_projection, pricing_approvals, sales_access
+  models:   Opportunity as _Opp, PricingApprovalRequest, User
+  routes_without_auth_dependency: 0
+    GET    /overview                                            require_sales_manager      manager_overview
+    GET    /reps/{user_id}                                      require_sales_manager      manager_rep_detail
+    GET    /approvals                                           require_sales_manager      manager_approvals
+    POST   /approvals/{request_id}/decide                       require_sales_manager      decide_approval
+    GET    /pipeline-projection                                 require_sales_manager      pipeline_projection
+  frontend_callers: frontend\src\pages\GodShell.jsx, frontend\src\pages\god\CustomerCreate.jsx, frontend\src\pages\god\GodPricingCompensation.jsx, frontend\src\pages\god\PlatformOverview.jsx, frontend\src\pages\god\Workspaces.jsx, frontend\src\pages\sales\CompensationCommand.jsx, frontend\src\pages\sales\ManagerCommand.jsx, frontend\src\pages\sales\PipelineProjection.jsx, frontend\src\pages\sales\Salespeople.jsx, frontend\src\pages\sales\TeamProposals.jsx
+  tests: tests\test_brand_capability_scope.py, tests\test_compensation_command_center.py, tests\test_executive_command_experience.py, tests\test_executive_portfolio_boundary.py, tests\test_executive_suite.py, tests\test_experience_severity.py, tests\test_god_compensation_navigation.py, tests\test_god_navigation.py, tests\test_god_pricing_console.py
+
+### sales_proposal_router.py  routes=22  lines=1120
+  services: appointment_invites, demo_sites, meeting_providers, package_pricing, pricing_approvals, proposal_service, sales_access
+  models:   BrandPackage, DemoSite, MeetingType, Opportunity, PROVIDER_LABELS, ProposalFile
+  routes_without_auth_dependency: 4
+    GET    /sales/opportunities/{opp_id}/proposals              require_sales_member       list_opportunity_proposals
+    POST   /sales/proposals                                     require_sales_member       create_proposal
+    GET    /sales/proposals/{proposal_id}                       require_sales_member       get_proposal
+    PATCH  /sales/proposals/{proposal_id}                       require_sales_member       update_proposal
+    POST   /sales/proposals/{proposal_id}/version               require_sales_member       create_new_version
+    POST   /sales/proposals/{proposal_id}/publish               require_sales_member       publish
+    POST   /sales/proposals/{proposal_id}/send                  require_sales_member       send
+    POST   /sales/proposals/{proposal_id}/revoke-access         require_sales_member       revoke_access
+    POST   /sales/proposals/{proposal_id}/pricing-request       require_sales_member       request_pricing_approval
+    POST   /sales/proposals/{proposal_id}/pricing-request/withdraw require_sales_member       withdraw_pricing_approval
+    POST   /sales/proposals/{proposal_id}/blocks                require_sales_member       add_block
+    DELETE /sales/proposals/{proposal_id}/blocks/{block_id}     require_sales_member       delete_block
+    GET    /sales/proposals/{proposal_id}/activity              require_sales_member       proposal_activity
+    GET    /deal-room/{token}                                   NO-GATE                    open_deal_room
+    POST   /deal-room/{token}/track                             NO-GATE                    track_deal_room_event
+    POST   /deal-room/{token}/decision                          NO-GATE                    deal_room_decision
+    POST   /sales/opportunities/{opportunity_id}/demo-site      require_sales_member       publish_demo_site
+    GET    /sales/opportunities/{opportunity_id}/demo-sites     require_sales_member       list_demo_sites
+    POST   /sales/demo-sites/{demo_id}/revoke                   require_sales_member       revoke_demo_site
+    GET    /public/demo/{token}                                 NO-GATE                    resolve_demo_site
+    POST   /sales/proposals/{proposal_id}/upload                require_sales_member       upload_proposal_file
+    GET    /sales/video/status                                  require_sales_member       video_provider_status
+  frontend_callers: frontend\src\App.jsx, frontend\src\pages\portal\DealRoom.jsx, frontend\src\pages\portal\DemoSite.jsx, frontend\src\pages\sales\ProposalPanel.jsx, frontend\src\pages\sales\SalesShell.jsx, frontend\src\pages\sales\VideoStatus.jsx
+  tests: NONE
+
+### sales_router.py  routes=14  lines=1639
+  services: appointment_meetings, availability, compensation, implementation_service, package_pricing, pipeline_projection, platform_owner, pricing_approvals, pricing_authority, proposal_workqueue, sales_access
+  models:   AppointmentMeeting, Implementation, Organization, Platform, User
+  routes_without_auth_dependency: 0
+    GET    /me                                                  require_sales_member       sales_me
+    GET    /packages                                            require_sales_member       sales_packages
+    GET    /my-day                                              require_sales_member       my_day
+    GET    /opportunities/{opp_id}/closing                      require_sales_member       opportunity_closing
+    GET    /opportunities                                       require_sales_member       list_opportunities
+    POST   /opportunities                                       require_sales_member       create_opportunity
+    GET    /opportunities/{opp_id}                              require_sales_member       get_opportunity
+    PATCH  /opportunities/{opp_id}                              require_sales_member       patch_opportunity
+    PUT    /opportunities/{opp_id}/discovery                    require_sales_member       upsert_discovery
+    POST   /opportunities/{opp_id}/notes                        require_sales_member       add_note
+    POST   /opportunities/{opp_id}/reassign                     require_sales_manager      reassign
+    GET    /team                                                require_sales_member       sales_team
+    GET    /implementations                                     require_sales_member       my_implementations
+    GET    /opportunities/{opportunity_id}/implementation       require_sales_member       opportunity_implementation
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\Admin.jsx, frontend\src\pages\GodBrandDetail.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\GodImplementations.jsx, frontend\src\pages\GodProvision.jsx, frontend\src\pages\GodSalesOps.jsx, frontend\src\pages\GodShell.jsx, frontend\src\pages\LeadCleanup.jsx
+  tests: tests\test_compensation_command_center.py, tests\test_custom_deal_endpoint.py, tests\test_team_activity_board.py
+
+### sales_scheduling_router.py  routes=21  lines=1334
+  services: appointment_invites, appointment_meetings, appointment_sync, availability, meeting_roles, sales_access
+  models:   SYNC_LABELS, SYNC_NEEDS_ATTENTION, User
+  routes_without_auth_dependency: 4
+    GET    /meeting-types                                       require_sales_member       list_meeting_types
+    GET    /availability/me                                     require_sales_member       get_my_availability
+    PUT    /availability/me                                     require_sales_member       put_my_availability
+    POST   /availability/time-off                               require_sales_member       add_time_off
+    DELETE /availability/time-off/{block_id}                    require_sales_member       delete_time_off
+    GET    /availability/team                                   require_sales_member       team_availability
+    POST   /availability/find                                   require_sales_member       find_team_time
+    POST   /appointments                                        require_sales_member       create_appointment
+    GET    /appointments                                        require_sales_member       list_appointments
+    GET    /appointments/confirm/{token}                        NO-GATE                    prospect_confirm_page
+    POST   /appointments/confirm/{token}                        NO-GATE                    prospect_confirm_submit
+    GET    /appointments/confirm/{token}/context                NO-GATE                    prospect_confirm_context
+    POST   /appointments/confirm/{token}/respond                NO-GATE                    prospect_confirm_respond
+    GET    /appointments/{appt_id}                              require_sales_member       get_appointment
+    POST   /appointments/{appt_id}/confirmation                 require_sales_member       set_confirmation
+    POST   /appointments/{appt_id}/cancel                       require_sales_member       cancel_appointment
+    POST   /appointments/{appt_id}/reschedule                   require_sales_member       reschedule_appointment
+    POST   /appointments/{appt_id}/resync                       require_sales_member       resync_appointment_sync
+    GET    /appointments/{appt_id}/host-link                    require_sales_member       get_meeting_host_link
+    POST   /appointments/{appt_id}/video/retry                  require_sales_member       retry_video_meeting
+    POST   /appointments/{appt_id}/resend-invitation            require_sales_member       resend_prospect_invitation
+  frontend_callers: frontend\src\App.jsx, frontend\src\pages\public\AppointmentConfirmPage.jsx, frontend\src\pages\sales\ApptSyncPanel.jsx, frontend\src\pages\sales\FindTeamTime.jsx, frontend\src\pages\sales\MyAvailability.jsx, frontend\src\pages\sales\MyDay.jsx, frontend\src\pages\sales\OpportunityDetail.jsx, frontend\src\pages\sales\RescheduleDialog.jsx, frontend\src\pages\sales\Salespeople.jsx, frontend\src\pages\sales\TeamAvailability.jsx
+  tests: NONE
+
+### sample_data_router.py  routes=2  lines=919
+  services: plan_limits
+  models:   BookingLink, CRMContact, CRMNote, Campaign, EmailMessage, PipelineConversation
+  routes_without_auth_dependency: 0
+    POST   /generate                                            require_super_admin        generate_sample_data
+    DELETE /clear                                               require_super_admin        clear_sample_data
+  frontend_callers: frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\Leads.jsx, frontend\src\pages\Templates.jsx, frontend\src\pages\Users.jsx
+  tests: tests\test_sample_data_router.py, tests\test_template_ai_service.py
+
+### settings_router.py  routes=17  lines=790
+  services: capabilities, platform_owner
+  models:   Organization, User
+  routes_without_auth_dependency: 0
+    GET    /profile                                             get_current_user           get_profile
+    PATCH  /profile                                             get_current_user           update_own_profile
+    PATCH  /booking                                             require_tenant_user        update_booking_settings
+    GET    /my-capabilities                                     require_tenant_user        get_my_capabilities
+    PUT    /twilio                                              require_tenant_context     update_twilio_config
+    PUT    /admin/twilio/{user_id}                              require_tenant_context     admin_assign_twilio
+    PUT    /notifications                                       get_current_user           update_notification_config
+    PUT    /booking-page                                        require_tenant_user        update_booking_page
+    PUT    /social-links                                        require_tenant_user        update_social_links
+    PATCH  /profile-photo                                       get_current_user           update_profile_photo
+    DELETE /profile-photo                                       get_current_user           delete_profile_photo
+    PATCH  /booking-settings                                    require_tenant_user        update_booking_settings
+    PATCH  /admin/profile/{user_id}                             require_tenant_context     admin_update_profile
+    GET    /admin/profile/{user_id}                             require_tenant_user        admin_get_profile
+    GET    /appointment-types                                   require_tenant_user        get_appointment_types
+    PUT    /appointment-types                                   require_tenant_user        update_appointment_types
+    DELETE /appointment-types                                   require_tenant_user        reset_appointment_types
+  frontend_callers: frontend\src\api\client.js, frontend\src\components\Layout.jsx, frontend\src\components\NotificationBell.jsx, frontend\src\components\ProfileOnboarding.jsx, frontend\src\pages\Availability.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\OrgSettings.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\Users.jsx, frontend\src\pages\public\BookingPage.jsx
+  tests: tests\conftest.py, tests\test_email_service.py, tests\test_settings_router.py, tests\test_sms_service.py
+
+### setup_router.py  routes=4  lines=160
+  services: calendar_service, microsoft_email_service
+  models:   User
+  routes_without_auth_dependency: 3
+    POST   /admin/setup-link/{user_id}                          get_current_user           generate_setup_link
+    GET    /setup/verify                                        NO-GATE                    verify_setup_token
+    GET    /setup/google-connect                                NO-GATE                    setup_google_connect
+    GET    /setup/microsoft-connect                             NO-GATE                    setup_microsoft_connect
+  frontend_callers: frontend\src\pages\SetupIntegrations.jsx, frontend\src\pages\Users.jsx
+  tests: NONE
+
+### sms_router.py  routes=13  lines=815
+  services: ai_conversation_service, cadence_service, certification_service, compliance_service, dedup_service, draft_reply_service, engagement_service, lead_scope, message_state, notification_service, pipeline_service, reply_classification_service, sms_service
+  models:   CadenceStatus, Lead, Message, Organization, Reply, ReplyClassification, User
+  routes_without_auth_dependency: 2
+    POST   /draft-reply/{lead_id}                               require_tenant_user        draft_reply_for_lead
+    POST   /send                                                require_tenant_user        send_single
+    POST   /send-batch                                          require_tenant_user        send_batch_endpoint
+    POST   /webhook/status-callback                             NO-GATE                    sms_status_callback
+    POST   /webhook/inbound                                     NO-GATE                    inbound_webhook
+    PATCH  /replies/{reply_id}/mark-reviewed                    require_tenant_user        mark_reply_reviewed
+    PATCH  /replies/{reply_id}/reclassify                       require_tenant_user        reclassify_reply
+    GET    /replies/activity-by-day                             require_tenant_user        reply_activity_by_day
+    GET    /replies/certification-batch                         require_tenant_or_observer replies_certification_batch
+    GET    /replies/counts                                      require_tenant_or_observer reply_counts
+    GET    /replies                                             require_tenant_or_observer list_replies
+    POST   /send-mms                                            require_tenant_user        send_mms_endpoint
+    POST   /upload-media                                        require_tenant_user        upload_media
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\components\MessageReview.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\EmailQueue.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Leads.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\ProposalEditor.jsx
+  tests: tests\conftest.py, tests\test_compliance_router.py, tests\test_draft_reply_router.py, tests\test_email_review_batch.py, tests\test_message_review_flow.py, tests\test_needs_attention_filter.py, tests\test_overview_charts_router.py, tests\test_replies_action_center.py, tests\test_reply_classification_service.py, tests\test_reply_triage_actions.py
+
+### social_webhooks_router.py  routes=7  lines=499
+  services: -
+  models:   Lead, Organization, User
+  routes_without_auth_dependency: 6
+    GET    /meta                                                NO-GATE                    meta_webhook_verify
+    POST   /meta                                                NO-GATE                    meta_webhook_receive
+    GET    /tiktok                                              NO-GATE                    tiktok_webhook_verify
+    POST   /tiktok                                              NO-GATE                    tiktok_webhook_receive
+    GET    /google                                              NO-GATE                    google_ads_webhook_verify
+    POST   /google                                              NO-GATE                    google_ads_webhook_receive
+    GET    /token                                               require_admin              get_or_create_webhook_token
+  frontend_callers: frontend\src\api\client.js, frontend\src\pages\Leads.jsx, frontend\src\pages\Settings.jsx, frontend\src\pages\SetupIntegrations.jsx
+  tests: tests\test_google_contacts_service.py, tests\test_lead_source_column.py, tests\test_plan_limits_coverage.py, tests\test_settings_router.py
+
+### survey_router.py  routes=4  lines=346
+  services: lead_scope, public_identity
+  models:   -
+  routes_without_auth_dependency: 3
+    GET    /results/{lead_id}                                   get_current_user           get_survey_results
+    GET    /{token}/context                                     NO-GATE                    get_survey_context_json
+    GET    /{token}                                             NO-GATE                    get_survey_page
+    POST   /{token}                                             NO-GATE                    submit_survey
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\ContextBanner.jsx, frontend\src\pages\GodCommandCenter.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\executive\ExecutiveSuite.jsx, frontend\src\pages\god\GodTools.jsx, frontend\src\pages\god\OrgCommandTable.jsx, frontend\src\pages\god\enterBrand.js, frontend\src\pages\god\enterCustomer.js
+  tests: tests\test_executive_suite.py, tests\test_god_navigation.py
+
+### templates_router.py  routes=5  lines=154
+  services: template_ai_service, template_service
+  models:   MessageTrack, User
+  routes_without_auth_dependency: 0
+    GET    /                                                    require_admin              list_templates
+    PUT    /                                                    require_admin              update_template
+    DELETE /{message_track}/{channel}                           require_admin              reset_template
+    POST   /ai/generate                                         require_admin              ai_generate_template
+    POST   /ai/rewrite                                          require_admin              ai_rewrite_template
+  frontend_callers: frontend\src\pages\Templates.jsx
+  tests: tests\test_audit_log_wiring.py, tests\test_template_ai_service.py
+
+### tier_definitions_router.py  routes=6  lines=213
+  services: tier_config_service
+  models:   Organization, TierDefinition, User
+  routes_without_auth_dependency: 0
+    GET                                                         get_current_user           get_tier_definitions
+    POST                                                        require_admin              create_tier_definition
+    PUT    /{tier_id}                                           require_admin              update_tier_definition
+    DELETE /{tier_id}                                           require_admin              delete_tier_definition
+    POST   /seed-defaults                                       require_admin              seed_default_tiers
+    POST   /reset-defaults                                      require_admin              reset_default_tiers
+  frontend_callers: frontend\src\pages\CadenceTemplates.jsx, frontend\src\pages\TierDefinitions.jsx
+  tests: tests\conftest.py
+
+### timeline_router.py  routes=1  lines=335
+  services: lead_scope
+  models:   -
+  routes_without_auth_dependency: 0
+    GET    /{lead_id}/activity                                  get_current_user           get_lead_timeline
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\pages\Activity.jsx, frontend\src\pages\LeadDetail.jsx, frontend\src\pages\Overview.jsx, frontend\src\pages\sales\ProposalPanel.jsx
+  tests: tests\test_overview_charts_router.py, tests\test_user_management.py
+
+### voice_router.py  routes=13  lines=990
+  services: ai_conversation_service, lead_scope, public_identity, sms_service, voice_orchestrator, voice_service
+  models:   Lead, Lead as LeadModel, Organization, User, User as UserModel, VoiceCall, VoiceCallCampaign, VoiceCallCampaign as VCCModel
+  routes_without_auth_dependency: 4
+    GET    /readiness/{lead_id}                                 get_current_user           call_readiness
+    POST   /call/{lead_id}                                      get_current_user           initiate_call
+    POST   /twiml/{lead_id}                                     NO-GATE                    get_twiml
+    POST   /status                                              NO-GATE                    call_status_callback
+    POST   /recording                                           NO-GATE                    recording_callback
+    GET    /calls                                               get_current_user           list_calls
+    GET    /calls/{call_id}                                     get_current_user           get_call
+    POST   /inbound                                             NO-GATE                    handle_inbound_call
+    POST   /campaigns                                           get_current_user           create_campaign
+    GET    /campaigns                                           get_current_user           list_campaigns
+    GET    /campaigns/{campaign_id}                             get_current_user           get_campaign
+    POST   /campaigns/{campaign_id}/pause                       get_current_user           pause_campaign
+    POST   /campaigns/{campaign_id}/cancel                      get_current_user           cancel_campaign
+  frontend_callers: frontend\src\App.jsx, frontend\src\components\Layout.jsx, frontend\src\components\VoiceCampaign.jsx, frontend\src\pages\AIHub.jsx, frontend\src\pages\CRMIntegration.jsx, frontend\src\pages\CampaignBuilder.jsx, frontend\src\pages\Campaigns.jsx, frontend\src\pages\DLCRegistration.jsx, frontend\src\pages\GodImplementationDetail.jsx, frontend\src\pages\LeadDetail.jsx
+  tests: tests\test_audit_log_wiring.py, tests\test_campaign_router.py, tests\test_overview_charts_router.py, tests\test_sms_router.py
+
+### voice_webhooks_router.py  routes=1  lines=357
+  services: cadence_service, comms, compliance_service, voice_attempt_policy
+  models:   CadenceStatus, IntegrationRequestLog, Lead, SuppressionSource, VoiceCall
+  routes_without_auth_dependency: 1
+    POST   /webhook                                             NO-GATE                    retell_webhook
+  frontend_callers: NONE
+  tests: tests\test_billing_webhook.py, tests\test_sms_router.py
+
+### workqueue_router.py  routes=1  lines=158
+  services: -
+  models:   -
+  routes_without_auth_dependency: 0
+    GET    /today                                               get_current_user           get_todays_work
+  frontend_callers: frontend\src\pages\WorkQueue.jsx
+  tests: tests\test_workqueue_router.py

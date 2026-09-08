@@ -1,0 +1,46 @@
+==============================================================================
+ROUTES WITH NO DISTINCTIVE SEGMENT ANYWHERE IN THE FRONTEND
+==============================================================================
+backend routes scanned: 603
+
+These are BUILT, DEPLOYED AND UNREACHABLE from the product, or
+they are machine-to-machine endpoints. Either is worth knowing:
+an endpoint nobody can reach is either a missing screen or dead
+code, and both cost something to carry.
+
+leads_router.py  (6)
+    GET    /leads/engagement-breakdown
+    GET    /leads/sparklines
+    PATCH  /leads/{lead_id}/lead-type
+    POST   /leads/maintenance/duplicate-dnc-repair
+    POST   /leads/maintenance/tier-status-repair
+    POST   /leads/sms-optin
+
+god_diagnostics_calendar.py  (4)
+    GET    /god/calendar-diagnostics
+    GET    /god/email-diagnostics
+    POST   /god/calendar-probe
+    POST   /god/calendar-write-test
+
+god_router.py  (3)
+    GET    /god/twilio-diagnostics
+    PATCH  /god/orgs/{org_id}/attempt-policy
+    POST   /god/orgs/{org_id}/exit-session
+
+admin_router.py  (2)
+    POST   /admin/orgs/{org_id}/seed-industry-tiers
+    POST   /admin/users/{user_id}/force-logout
+
+ai_router.py  (1)
+    POST   /ai/analyze-batch
+
+god_maintenance_router.py  (1)
+    POST   /god/maintenance/phone-audit
+
+god_ops_router.py  (1)
+    GET    /god/ops/won-queue
+
+god_sms_trace_router.py  (1)
+    GET    /god/sms-trace/{lead_id}
+
+TOTAL UNREACHABLE: 19 of 603

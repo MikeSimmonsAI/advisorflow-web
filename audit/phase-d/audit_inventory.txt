@@ -1,0 +1,604 @@
+==============================================================================
+BACKEND ROUTERS
+==============================================================================
+activity_router.py                           1 routes  prefix /activity
+admin_router.py                             30 routes  prefix /admin
+ai_conversation_router.py                    9 routes  prefix /ai-conversation
+ai_router.py                                 3 routes  prefix /ai
+audit_log_router.py                          2 routes  prefix /audit-log
+auth_router.py                              11 routes  prefix /auth
+auto_send_router.py                         10 routes  prefix /auto-send
+availability_router.py                       7 routes  prefix /availability
+billing_router.py                            8 routes  prefix /billing
+branding_router.py                           3 routes  prefix /branding
+cadence_router.py                            8 routes  prefix /cadence
+cadence_template_router.py                   6 routes  prefix /cadence-templates
+calendar_connections_router.py               3 routes  
+calendar_router.py                           9 routes  prefix /calendar
+campaign_router.py                          11 routes  prefix /campaigns
+case_file_router.py                          8 routes  prefix /case-file
+compensation_router.py                       7 routes  prefix /sales/compensation
+compliance_router.py                         6 routes  prefix /compliance
+compose_router.py                            2 routes  prefix /compose
+concierge_router.py                          1 routes  prefix /concierge
+contacts_router.py                           6 routes  prefix /crm
+crm_native_router.py                        14 routes  prefix /crm-native
+crm_router.py                                6 routes  prefix /crm
+customer_lifecycle_router.py                10 routes  prefix /god/customer-360
+customers_router.py                         22 routes  prefix /god/customers
+demo_router.py                               6 routes  prefix /demo
+dlc_router.py                                7 routes  prefix /10dlc
+email_router.py                             11 routes  prefix /email
+email_tracking_router.py                     2 routes  prefix /email-tracking
+executive_router.py                         16 routes  prefix /executive
+fiber_intake_router.py                       2 routes  prefix /intake
+fiber_leads_router.py                        2 routes  prefix /fiber-leads
+god_billing_router.py                        8 routes  prefix /god/billing
+god_diagnostics_calendar.py                  4 routes  prefix /god
+god_maintenance_router.py                    2 routes  prefix /god/maintenance
+god_ops_router.py                           31 routes  prefix /god/ops
+god_pricing_router.py                       14 routes  prefix /god/pricing
+god_router.py                               25 routes  prefix /god
+god_sms_trace_router.py                      4 routes  prefix /god/sms-trace
+google_contacts_router.py                    2 routes  prefix /google-contacts
+health_router.py                             2 routes  prefix /health
+import_batch_router.py                      10 routes  prefix /import-batches
+integrations_router.py                       6 routes  prefix /integrations
+lead_scraper_router.py                       4 routes  prefix /scraper
+leads_router.py                             31 routes  prefix /leads
+microsoft_router.py                          2 routes  prefix /microsoft
+notification_router.py                       2 routes  prefix /notifications
+objection_router.py                          1 routes  prefix /ai
+onboarding_router.py                         2 routes  prefix /onboarding
+org_settings_router.py                      15 routes  prefix /org-settings
+outcomes_router.py                           4 routes  prefix /outcomes
+pipeline_router.py                           7 routes  prefix /pipeline
+platform_context_router.py                   9 routes  prefix /god/platform
+proposal_router.py                          20 routes  prefix /proposals
+qualification_router.py                      8 routes  prefix /qualification
+reports_router.py                            5 routes  prefix /reports
+sales_manager_router.py                      5 routes  prefix /sales/manager
+sales_proposal_router.py                    22 routes  
+sales_router.py                             14 routes  prefix /sales
+sales_scheduling_router.py                  21 routes  prefix /sales
+sample_data_router.py                        2 routes  prefix /sample-data
+settings_router.py                          17 routes  prefix /settings
+setup_router.py                              4 routes  
+sms_router.py                               13 routes  prefix /sms
+social_webhooks_router.py                    7 routes  prefix /webhooks
+survey_router.py                             4 routes  prefix /survey
+templates_router.py                          5 routes  prefix /templates
+tier_definitions_router.py                   6 routes  prefix /tier-definitions
+timeline_router.py                           1 routes  prefix /leads
+voice_router.py                             13 routes  prefix /voice
+voice_webhooks_router.py                     1 routes  prefix /voice/retell
+workqueue_router.py                          1 routes  prefix /workqueue
+
+ROUTER FILES: 72   TOTAL ROUTES: 603
+
+==============================================================================
+BACKEND SERVICES  (name, lines, public defs)
+==============================================================================
+__init__.py                                        1 lines    0 defs
+access_diagnostic.py                             372 lines    2 defs
+ai_analysis_service.py                           149 lines    3 defs
+ai_conversation_service.py                      1117 lines    9 defs
+appointment_flow_service.py                      132 lines    3 defs
+appointment_invites.py                           536 lines    7 defs
+appointment_meetings.py                          329 lines    5 defs
+appointment_sync.py                              424 lines    5 defs
+auth_service.py                                   82 lines    5 defs
+auto_send_candidate_service.py                   160 lines    1 defs
+auto_send_eligibility_service.py                 164 lines    1 defs
+availability.py                                  485 lines   14 defs
+billing_catalog.py                               261 lines   10 defs
+billing_compensation.py                          309 lines    4 defs
+billing_policy.py                                257 lines    7 defs
+billing_schedule.py                              208 lines    2 defs
+billing_webhook.py                               632 lines    5 defs
+brand_config.py                                  310 lines    4 defs
+cadence_service.py                               438 lines    5 defs
+calendar_providers/__init__.py                   241 lines    6 defs
+calendar_providers/base.py                       126 lines    0 defs
+calendar_providers/google.py                     311 lines    0 defs
+calendar_providers/ics.py                        206 lines    0 defs
+calendar_providers/microsoft.py                  208 lines    0 defs
+calendar_service.py                              274 lines    5 defs
+capabilities.py                                  852 lines   17 defs
+certification_service.py                         219 lines    3 defs
+comms/__init__.py                                140 lines    8 defs
+comms/base.py                                    209 lines    0 defs
+comms/sms/__init__.py                              2 lines    0 defs
+comms/sms/twilio.py                               90 lines    0 defs
+comms/voice/__init__.py                            2 lines    0 defs
+comms/voice/retell.py                            355 lines    0 defs
+compensation.py                                  546 lines   10 defs
+compensation_ledger.py                           694 lines    9 defs
+compliance_service.py                            205 lines    4 defs
+crm_service.py                                   350 lines    2 defs
+customer_360.py                                  483 lines    5 defs
+customer_activation.py                           513 lines   10 defs
+customer_lifecycle.py                            383 lines    8 defs
+customer_provisioning.py                         422 lines   11 defs
+customer_readiness.py                            241 lines    3 defs
+data_cleanup.py                                  479 lines    3 defs
+deal_pricing.py                                  301 lines    4 defs
+dedup_service.py                                 212 lines    4 defs
+demo_firewall.py                                 200 lines    5 defs
+demo_runner.py                                   412 lines    7 defs
+demo_scenarios/__init__.py                        57 lines    4 defs
+demo_scenarios/base.py                           171 lines    4 defs
+demo_scenarios/brand_sales.py                    474 lines    0 defs
+demo_scenarios/customer_reactivation.py          381 lines    0 defs
+demo_scenarios/speed_to_lead.py                  196 lines    0 defs
+demo_sites.py                                    157 lines    8 defs
+draft_reply_service.py                           618 lines    3 defs
+email_poller_service.py                          478 lines    3 defs
+email_service.py                                 407 lines    6 defs
+email_tracking_service.py                         83 lines    1 defs
+engagement_service.py                            106 lines    3 defs
+entitlements.py                                  291 lines    7 defs
+environment.py                                   187 lines    9 defs
+evosys_billing_seed.py                           244 lines    1 defs
+evosys_comp_seed.py                              279 lines    2 defs
+executive_authority.py                           267 lines    7 defs
+executive_portfolio.py                           694 lines    4 defs
+external_busy.py                                 229 lines    4 defs
+feature_flags_service.py                          81 lines    3 defs
+god_operations.py                                530 lines    6 defs
+google_contacts_service.py                       150 lines    2 defs
+ics_builder.py                                   165 lines    4 defs
+implementation_service.py                        573 lines   16 defs
+import_commit_service.py                         257 lines    1 defs
+import_permissions.py                             46 lines    0 defs
+import_provenance.py                             198 lines    2 defs
+import_service.py                               1050 lines    5 defs
+import_staging_service.py                        416 lines    1 defs
+integration_auth.py                              181 lines    7 defs
+lead_capacity.py                                 283 lines    8 defs
+lead_scope.py                                    397 lines   13 defs
+manager_workspace.py                             714 lines    7 defs
+meeting_providers/__init__.py                    131 lines    5 defs
+meeting_providers/base.py                         95 lines    0 defs
+meeting_providers/zoom.py                        286 lines    0 defs
+meeting_roles.py                                 225 lines    4 defs
+message_state.py                                 136 lines    6 defs
+microsoft_email_service.py                       208 lines    3 defs
+notification_service.py                          137 lines    3 defs
+package_pricing.py                               436 lines   15 defs
+permission_values.py                             393 lines   11 defs
+pipeline_projection.py                           250 lines    2 defs
+pipeline_service.py                              681 lines    5 defs
+plan_limits.py                                   485 lines    8 defs
+platform_owner.py                                246 lines   13 defs
+platform_utils.py                                 59 lines    1 defs
+post_appointment_service.py                      202 lines    1 defs
+pricing_approvals.py                             476 lines   12 defs
+pricing_authority.py                             310 lines    5 defs
+proposal_service.py                             1205 lines   16 defs
+proposal_workqueue.py                            370 lines    2 defs
+provisioning.py                                  570 lines    9 defs
+public_identity.py                               523 lines    6 defs
+qualification.py                                1184 lines   15 defs
+qualification_diagnostic.py                      270 lines    1 defs
+reconciliation_diagnostic.py                     146 lines    1 defs
+reply_classification_service.py                  178 lines    2 defs
+request_context.py                                66 lines    3 defs
+retell_bridge.py                                 442 lines    7 defs
+sales_access.py                                  191 lines   11 defs
+sales_staff.py                                   383 lines   12 defs
+severity.py                                      167 lines    6 defs
+sms_content_policy.py                            236 lines    6 defs
+sms_service.py                                   682 lines   10 defs
+source_adapters.py                               373 lines    8 defs
+source_ingest.py                                 490 lines    8 defs
+source_reconciliation.py                         728 lines    9 defs
+staff_activation.py                              329 lines   11 defs
+template_ai_service.py                           199 lines    2 defs
+template_service.py                              124 lines    5 defs
+tenancy.py                                       104 lines    4 defs
+tenant_scheduling.py                            1162 lines   13 defs
+test_records.py                                   82 lines    4 defs
+tier_config_service.py                           469 lines    8 defs
+twilio_callbacks.py                              123 lines    3 defs
+voice_attempt_policy.py                          253 lines    3 defs
+voice_orchestrator.py                            312 lines    3 defs
+voice_service.py                                 289 lines    4 defs
+workspace_access.py                              838 lines   19 defs
+
+SERVICE FILES: 126
+
+==============================================================================
+MODELS  (file -> classes)
+==============================================================================
+billing_models.py                  BrandBillingPlan, BrandBillingConfig, BillingEvent, BillingInvoice, BillingPayment
+calendar_models.py                 CalendarConnection, ExternalBusyBlock, AppointmentConfirmationToken, AppointmentSyncLog
+cleanup_models.py                  CleanupExecution
+compensation_models.py             CompensationPlan, CompensationRule, CompensationPackageCap, CompensationEntry, StageProbability
+customer_lifecycle_models.py       CustomerLifecycleEvent
+demo_models.py                     DemoScenarioState, DemoEvent
+demo_site_models.py                DemoSite
+implementation_models.py           Implementation, ImplementationMilestone, CustomerActivation
+import_models.py                   ImportBatch, ImportStagedRow
+integration_models.py              IntegrationCredential, IntegrationRequestLog
+location_models.py                 Location, UserLocation
+meeting_models.py                  AppointmentMeeting, MeetingProviderConfig, MeetingIntelligence
+models.py                          Platform, PlatformEvent, Organization, User, ContactRegistry, Lead, Message, Reply, BookingLink, LeadOutcome, SuppressionEntry, UserCapabilityGrant, AuditLogEntry, Campaign, CadenceState, EmailMessage, Notification, MessageTemplate, CadenceTemplate, CadenceTemplateTouch, PipelineConversation, AdvisorAvailabilityBlock, VoiceCall, VoiceAgentConfig, VoiceCallCampaign, BookingFollowup, SurveyResponse, TierDefinition, RevokedToken, Proposal, ProposalBlock, ProposalToken, ProposalView, ProposalFile, CRMContact, CRMNote, PortalEvent
+pricing_policy_models.py           PricingPolicy
+qualification_models.py            QualificationRule
+sales_models.py                    Membership, BrandSalesOrg, BrandPackage, Opportunity, DiscoveryRecord, OpportunityEvent, PricingApprovalRequest
+scheduling_models.py               AvailabilityProfile, AvailabilityWindow, AvailabilityBlock, MeetingType, SalesAppointment, AppointmentParticipant
+source_records.py                  SourceRecord, SourceOpportunity
+staff_models.py                    StaffActivation
+
+MODEL CLASSES: 86 across 19 files
+
+==============================================================================
+AUTO MIGRATIONS
+==============================================================================
+COLUMNS_TO_ADD entries: 372 across 40 tables
+tables: audit_log_entries, booking_links, brand_packages, calendar_connections, campaigns, compensation_entries, crm_contacts, demo_sites, discovery_records, email_messages, implementations, import_batches, import_staged_rows, integration_credentials, integration_request_logs, lead_outcomes, leads, memberships, message_templates, messages, notifications, notificationtype, opportunities, organizations, platforms, pricing_approval_requests, pricing_policies, proposal_files, proposals, replies, sales_appointment_participants, sales_appointments, sales_meeting_types, short_name, suppressionsource, user_capability_grants, users, voice_agent_configs, voice_call_campaigns, voice_calls
+
+==============================================================================
+BACKGROUND / SCHEDULED WORK
+==============================================================================
+app/main.py  _review_request_loop
+app/main.py  _ai_conversation_loop
+app/main.py  _cadence_loop
+app/main.py                                          create_task=3 BackgroundTasks=0
+app/routers/proposal_router.py                       create_task=0 BackgroundTasks=2
+
+==============================================================================
+FRONTEND ROUTES (App.jsx)
+==============================================================================
+registered routes: 100
+
+-- GOD (24)
+   /god
+   /god/*
+   /god/audit
+   /god/billing
+   /god/brands/:brandId
+   /god/compensation
+   /god/customer-app
+   /god/customers
+   /god/customers/:orgId
+   /god/customers/:orgId/360
+   /god/customers/new
+   /god/diagnostics/qualification
+   /god/diagnostics/user-access
+   /god/executive-access
+   /god/implementations
+   /god/implementations/:implId
+   /god/lead-scraper
+   /god/organizations
+   /god/platform
+   /god/pricing
+   /god/provision/:oppId
+   /god/sales-operations
+   /god/users-all
+   /god/workspaces
+
+-- EXECUTIVE (7)
+   /executive
+   /executive/command-center
+   /executive/customer-health
+   /executive/organizations
+   /executive/organizations/:orgId/view
+   /executive/revenue
+   /executive/team
+
+-- SALES (14)
+   /sales
+   /sales/availability
+   /sales/calendar
+   /sales/compensation
+   /sales/manager
+   /sales/my-compensation
+   /sales/onboarding
+   /sales/opportunities/:oppId
+   /sales/pipeline
+   /sales/proposals
+   /sales/prospects
+   /sales/salespeople
+   /sales/team
+   /sales/team-pipeline
+
+-- OTHER (55)
+   *
+   /
+   /10dlc
+   /activate
+   /activity
+   /admin
+   /ai-hub
+   /appointments/confirm/:token
+   /audit-log
+   /auto-send
+   /availability
+   /billing
+   /book/:token
+   /cadence
+   /cadence-templates
+   /campaigns
+   /change-password
+   /compliance
+   /crm
+   /crm-connectors
+   /deal-room/:token
+   /demo
+   /demo/:token
+   /email-queue
+   /fiber-capture
+   /import-batches
+   /import-batches/:batchId
+   /lead-cleanup
+   /leads
+   /leads/:leadId
+   /login
+   /onboarding
+   /org-settings
+   /orgs
+   /pipeline
+   /portal/access/:token
+   /portal/view/:proposalId
+   /proposals
+   /proposals/:proposalId
+   /provision-client
+   /re-engagement
+   /replies
+   /reports
+   /scraper
+   /settings
+   /setup-integrations
+   /survey/:token
+   /system-health
+   /templates
+   /tier-definitions
+   /users
+   /users/:userId
+   /workqueue
+   /workspace/:organizationId
+   /workspaces
+
+==============================================================================
+FRONTEND PAGES  (file, lines)  -- ORPHANS FLAGGED
+==============================================================================
+pages/AIHub.jsx                                              322
+pages/AccessState.jsx                                        124
+pages/Activate.jsx                                           159
+pages/Activity.jsx                                           238
+pages/Admin.jsx                                              485
+pages/AuditLog.jsx                                           341
+pages/AutoSendQueue.jsx                                      413
+pages/Availability.jsx                                       855
+pages/Billing.jsx                                            665
+pages/CRM.jsx                                                581
+pages/CRMIntegration.jsx                                     423
+pages/Cadence.jsx                                            353
+pages/CadenceTemplates.jsx                                   287
+pages/CampaignBuilder.jsx                                    828
+pages/Campaigns.jsx                                          466   <-- NOT IMPORTED ANYWHERE
+pages/CaseFile.jsx                                           590
+pages/ChangePassword.jsx                                     120
+pages/Compliance.jsx                                         360
+pages/DLCRegistration.jsx                                    540
+pages/DemoConsole.jsx                                        302
+pages/EmailQueue.jsx                                        1235
+pages/FiberLeadCapture.jsx                                   262
+pages/GodBrandDetail.jsx                                     356
+pages/GodCommandCenter.jsx                                   309
+pages/GodControlAudit.jsx                                    137
+pages/GodCustomers.jsx                                       255
+pages/GodImplementationDetail.jsx                            385
+pages/GodImplementations.jsx                                 124
+pages/GodOrganizations.jsx                                   181
+pages/GodProvision.jsx                                       273
+pages/GodSalesOps.jsx                                        177
+pages/GodShell.jsx                                           661
+pages/ImportBatchReview.jsx                                  304
+pages/ImportBatches.jsx                                      256
+pages/LeadCleanup.jsx                                        420
+pages/LeadDetail.jsx                                        1902
+pages/LeadScraper.jsx                                        391
+pages/Leads.jsx                                             1735
+pages/Login.jsx                                              307
+pages/Onboarding.jsx                                         200
+pages/OrgManager.jsx                                         561
+pages/OrgSettings.jsx                                       1347
+pages/Overview.jsx                                           654
+pages/Pipeline.jsx                                           514
+pages/ProposalEditor.jsx                                     863
+pages/Proposals.jsx                                          236
+pages/ProvisionClient.jsx                                    626
+pages/ReEngagement.jsx                                       169
+pages/Replies.jsx                                            337
+pages/Reports.jsx                                            455
+pages/SalesImplementations.jsx                               212
+pages/Settings.jsx                                          1081
+pages/SetupIntegrations.jsx                                  218
+pages/SystemHealth.jsx                                       221
+pages/Templates.jsx                                          236
+pages/TierDefinitions.jsx                                    440
+pages/UserDetail.jsx                                         175
+pages/Users.jsx                                              628
+pages/WorkQueue.jsx                                          173
+pages/executive/ExecStyles.jsx                               389
+pages/executive/ExecUI.jsx                                   130
+pages/executive/ExecutiveCommandCenter.jsx                   265
+pages/executive/ExecutiveOrgPerformance.jsx                  339
+pages/executive/ExecutivePortfolio.jsx                       195
+pages/executive/ExecutiveRevenue.jsx                         198
+pages/executive/ExecutiveSuite.jsx                           320
+pages/executive/ExecutiveTeam.jsx                            125
+pages/god/AddSalesUser.jsx                                   233
+pages/god/ConfirmDialog.jsx                                   61
+pages/god/Customer360.jsx                                    639
+pages/god/CustomerCreate.jsx                                 157
+pages/god/CustomerDetail.jsx                                 498
+pages/god/ExceptionQueue.jsx                                 285
+pages/god/ExecutiveSummary.jsx                               119
+pages/god/GodBillingOps.jsx                                  438
+pages/god/GodExecutiveAccess.jsx                             264
+pages/god/GodOpsShared.jsx                                   121
+pages/god/GodPricingCompensation.jsx                        1346
+pages/god/GodStyles.jsx                                      374
+pages/god/GodTools.jsx                                       112
+pages/god/GodUsers.jsx                                       365
+pages/god/OrgCommandTable.jsx                                332
+pages/god/PackagePricing.jsx                                 207
+pages/god/PlatformHealth.jsx                                 128
+pages/god/PlatformOverview.jsx                               135
+pages/god/ProductStatus.jsx                                  106
+pages/god/QualificationDiagnostic.jsx                        727
+pages/god/ResetPasswordDialog.jsx                            172
+pages/god/RevenueMetrics.jsx                                  87
+pages/god/StatusBadge.jsx                                     74
+pages/god/UserAccessDiagnostic.jsx                           246
+pages/god/Workspaces.jsx                                     212
+pages/portal/DealRoom.jsx                                    274
+pages/portal/DemoSite.jsx                                     86
+pages/portal/PortalAccess.jsx                                115
+pages/portal/PortalViewer.jsx                               1017
+pages/public/AppointmentConfirmPage.jsx                      229
+pages/public/BookingPage.jsx                                 456
+pages/public/SurveyPage.jsx                                  314
+pages/sales/ApptSyncPanel.jsx                                154
+pages/sales/BillingOptions.jsx                               129   <-- NOT IMPORTED ANYWHERE
+pages/sales/CalendarConnections.jsx                          157
+pages/sales/ClosingPanel.jsx                                 192
+pages/sales/CompensationCommand.jsx                          617
+pages/sales/CustomizeDealDialog.jsx                          270
+pages/sales/DemoSitesPanel.jsx                               257
+pages/sales/FindTeamTime.jsx                                 286
+pages/sales/ManagerCommand.jsx                               417
+pages/sales/MyAvailability.jsx                               301
+pages/sales/MyCompensation.jsx                               254
+pages/sales/MyDay.jsx                                        352
+pages/sales/MyPipeline.jsx                                   212
+pages/sales/NewProspect.jsx                                  133
+pages/sales/OpportunityDetail.jsx                           1018
+pages/sales/PipelineProjection.jsx                           278
+pages/sales/ProposalPanel.jsx                                743
+pages/sales/Prospects.jsx                                    269
+pages/sales/ReassignControl.jsx                              101
+pages/sales/RescheduleDialog.jsx                             182
+pages/sales/SalesShell.jsx                                   283
+pages/sales/SalesStyles.jsx                                  697
+pages/sales/Salespeople.jsx                                  264
+pages/sales/TeamAvailability.jsx                             237
+pages/sales/TeamCalendar.jsx                                 311
+pages/sales/TeamProposals.jsx                                265
+pages/sales/VideoStatus.jsx                                  128
+pages/sales/parts.jsx                                        175
+
+PAGE FILES: 127   ORPHANS: 2
+
+==============================================================================
+FRONTEND COMPONENTS: 20 files
+
+==============================================================================
+TESTS
+==============================================================================
+conftest.py                                                0
+test_admin_dashboard_metrics.py                            4
+test_admin_revenue_dashboard.py                           10
+test_admin_router.py                                       8
+test_ai_analysis_service.py                               12
+test_audit_log_router.py                                   4
+test_audit_log_wiring.py                                  15
+test_auth_service.py                                       8
+test_auto_migrate.py                                      10
+test_auto_send_candidate_service.py                       12
+test_auto_send_eligibility_service.py                     12
+test_auto_send_router.py                                  25
+test_billing_acceptance.py                                19
+test_billing_authorization.py                             33
+test_billing_catalog.py                                   37
+test_billing_compensation.py                              17
+test_billing_operations.py                                22
+test_billing_plan_change.py                               20
+test_billing_webhook.py                                   21
+test_brand_capability_scope.py                            22
+test_build_version.py                                     10
+test_cadence_router.py                                     7
+test_cadence_service.py                                    9
+test_calendar_router.py                                    7
+test_campaign_router.py                                    4
+test_certification_service.py                             15
+test_compensation_command_center.py                       37
+test_compliance_preflight.py                              13
+test_compliance_router.py                                  9
+test_context_boundaries.py                                29
+test_context_routing_gates.py                             23
+test_cors_config.py                                        3
+test_custom_deal_endpoint.py                              13
+test_customer_360_authorization.py                        12
+test_customer_360_lifecycle.py                            37
+test_daily_briefing_router.py                              2
+test_deal_pricing_authority.py                            17
+test_dedup_service.py                                     10
+test_draft_reply_router.py                                 5
+test_email_review_batch.py                                16
+test_email_router.py                                       3
+test_email_service.py                                     14
+test_email_tracking_router.py                             10
+test_email_tracking_service.py                             8
+test_engagement_service.py                                12
+test_executive_command_center.py                           7
+test_executive_command_experience.py                      33
+test_executive_customer_health.py                         27
+test_executive_observation_identity.py                    17
+test_executive_portfolio_boundary.py                      31
+test_executive_suite.py                                   19
+test_experience_severity.py                               38
+test_feature_flags_service.py                              9
+test_god_compensation_navigation.py                       20
+test_god_navigation.py                                    23
+test_god_password_reset.py                                24
+test_god_pricing_console.py                               38
+test_google_contacts_service.py                           12
+test_health_router.py                                     10
+test_import_intelligence.py                               60
+test_import_service.py                                     9
+test_lead_capacity.py                                     24
+test_lead_cleanup_router.py                               13
+test_lead_source_column.py                                 5
+test_leads_router.py                                      13
+test_merge_readiness.py                                   76
+test_message_review_flow.py                                9
+test_microsoft_email_service.py                            8
+test_model_registry.py                                     5
+test_needs_attention_filter.py                             3
+test_new_inquiry_lead_tier.py                             17
+test_notification_service.py                               8
+test_outcomes_router.py                                   10
+test_overview_charts_router.py                             5
+test_pipeline_financials.py                               24
+test_plan_limits.py                                        9
+test_plan_limits_coverage.py                              10
+test_plan_limits_enforcement.py                           19
+test_platform_isolation.py                                13
+test_prep_demo_html.py                                    12
+test_reconcile_business.py                                19
+test_replies_action_center.py                             16
+test_reply_classification_service.py                      27
+test_reply_triage_actions.py                               5
+test_reports_router.py                                    15
+test_run_cadence_job.py                                    4
+test_sales_compensation.py                                36
+test_sample_data_router.py                                10
+test_self_password_change.py                              20
+test_settings_router.py                                    8
+test_sms_router.py                                         5
+test_sms_service.py                                       10
+test_sparklines.py                                         7
+test_team_activity_board.py                                8
+test_template_ai_service.py                               12
+test_template_service.py                                   7
+test_tier_config_service.py                               12
+test_upload_endpoints.py                                   6
+test_user_management.py                                   39
+test_workqueue_router.py                                   2
+
+TEST FILES: 100   TEST FUNCTIONS: 1564
