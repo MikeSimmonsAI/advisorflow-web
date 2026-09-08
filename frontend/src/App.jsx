@@ -77,9 +77,17 @@ import GodOrganizations from './pages/GodOrganizations'
 // any owner controls. Internal terminology (god, etc.) never appears here.
 import ExecutiveSuite from './pages/executive/ExecutiveSuite'
 import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
-import ExecutiveOrganizations from './pages/executive/ExecutiveOrganizations'
-import ExecutiveCustomerHealth from './pages/executive/ExecutiveCustomerHealth'
-import ExecObserveShell from './pages/executive/ExecObserveShell'
+// PORTFOLIO REPLACES the separate Organizations and Customer Health pages —
+// one set of organizations, described once, with health as a column and a
+// filter rather than as a second list somewhere else.
+import ExecutivePortfolio from './pages/executive/ExecutivePortfolio'
+import ExecutiveRevenue from './pages/executive/ExecutiveRevenue'
+import ExecutiveTeam from './pages/executive/ExecutiveTeam'
+// The organization drill-down, composed for an executive. Replaces the old
+// observation shell, which framed the customer workspace dashboard in a
+// read-only banner — the right screens for the person working the queue and
+// the wrong ones for the executive deciding whether the business is working.
+import ExecutiveOrgPerformance from './pages/executive/ExecutiveOrgPerformance'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
 import GodSalesOps from './pages/GodSalesOps'
@@ -767,13 +775,26 @@ export default function App() {
                no owner controls, no cross-brand visibility ever reaches here. */}
         <Route path="/executive" element={<ExecutiveRoute><Navigate to="/executive/command-center" replace /></ExecutiveRoute>} />
         <Route path="/executive/command-center" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCommandCenter /></ExecutiveSuite></ExecutiveRoute>} />
-        <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrganizations /></ExecutiveSuite></ExecutiveRoute>} />
-        <Route path="/executive/customer-health" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveCustomerHealth /></ExecutiveSuite></ExecutiveRoute>} />
-        {/* Executive observation: renders a rich read-only dashboard for the target org.
-            org_id comes from the URL path only — never from current_user.organization_id.
-            ExecObserveShell fetches org identity; ExecObservationOverview fetches data.
-            Both endpoints are require_brand_executive + platform-isolated server-side. */}
-        <Route path="/executive/organizations/:orgId/view" element={<ExecutiveRoute><ExecutiveSuite><ExecObserveShell /></ExecutiveSuite></ExecutiveRoute>} />
+        {/* PORTFOLIO AND HEALTH ARE ONE PAGE, not two.
+            They were separate because they were separate endpoints. They are
+            the same set of organizations described the same way, so splitting
+            them meant an executive had to know which of two lists to open to
+            answer one question. Health is now a column and a filter on the
+            portfolio, and /executive/customer-health redirects here so old
+            links, bookmarks and the previous nav all land somewhere real. */}
+        <Route path="/executive/organizations" element={<ExecutiveRoute><ExecutiveSuite><ExecutivePortfolio /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/customer-health" element={<Navigate to="/executive/organizations" replace />} />
+        <Route path="/executive/revenue" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveRevenue /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/team" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveTeam /></ExecutiveSuite></ExecutiveRoute>} />
+        {/* THE ORGANIZATION DRILL-DOWN — an executive performance view, not the
+            customer workspace with its controls hidden. See
+            ExecutiveOrgPerformance.jsx for why that distinction is the whole
+            point of this page.
+            org_id comes from the URL path only — never from
+            current_user.organization_id, and never from a stale org override.
+            The endpoint behind it is require_brand_executive + platform
+            isolated, so a forged id in the URL is a 404 rather than a leak. */}
+        <Route path="/executive/organizations/:orgId/view" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrgPerformance /></ExecutiveSuite></ExecutiveRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />

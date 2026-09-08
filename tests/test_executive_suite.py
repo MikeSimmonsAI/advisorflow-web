@@ -314,7 +314,16 @@ class TestModelContractGate:
     def test_executive_router_references_deal_value(self):
         """Source-level gate: executive_router.py must not contain 'Opportunity.value'."""
         import ast, pathlib
-        src = pathlib.Path("app/routers/executive_router.py").read_text()
+        # ENCODING IS EXPLICIT, AND HAS TO BE. `read_text()` with no encoding
+        # uses the platform default, which is cp1252 on Windows. The router has
+        # always carried non-ASCII section rules; they happened to survive that
+        # decode as mojibake, so this passed by luck rather than by working.
+        # The first character outside cp1252 turned it into a UnicodeDecodeError
+        # that looked like a failure of the gate below rather than of the read.
+        # The assertion itself is unchanged — only the file is now read the way
+        # it is written.
+        src = pathlib.Path("app/routers/executive_router.py").read_text(
+            encoding="utf-8")
         tree = ast.parse(src)
         bad_refs = [
             node for node in ast.walk(tree)

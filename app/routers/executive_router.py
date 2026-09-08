@@ -45,6 +45,10 @@ from app.models.sales_models import (
     ROLE_BRAND_EXECUTIVE, ROLE_SALES_MANAGER, ROLE_SALES_REP,
     BRAND_SALES_ROLES,
 )
+# THE ONE PLACE THE PORTFOLIO IS COMPUTED. Command Center totals, Portfolio
+# Health rows and the organization drill-down all read from this, so a headline
+# and the list behind it can never describe different sets.
+from app.services import executive_portfolio as portfolio_service
 
 router = APIRouter(prefix="/executive", tags=["executive"])
 
@@ -687,6 +691,191 @@ def get_customer_health(
         "platform_name":  platform.name,
         "summary":        summary,
         "organizations":  org_rows,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THE EXECUTIVE COMMAND EXPERIENCE
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# WHY THESE EXIST BESIDE THE ENDPOINTS ABOVE
+# ------------------------------------------
+# `/command-center` and `/customer-health` shipped early and other things read
+# them; they are left exactly as they are. What they could not answer is the
+# question an executive actually opens the product with — *how is my business
+# doing, and what needs me today* — because each computes its own slice with
+# its own queries, so a total on one screen and a list on another could
+# disagree the moment anybody checked.
+#
+# Everything below is served from `app/services/executive_portfolio.py`, where
+# ONE function builds the per-organization rows and the totals are summed from
+# those exact rows. A headline is therefore always openable, and the count
+# always matches.
+#
+# SCOPE IS UNCHANGED AND UNCHANGEABLE. Every route here takes
+# `require_brand_executive`, and the service cannot be called without a
+# platform id. There is no organization parameter that widens a portfolio and
+# no header that can substitute for the grant.
+
+@router.get("/portfolio")
+def get_portfolio(
+    executive=Depends(require_brand_executive),
+    db: Session = Depends(get_db),
+):
+    """The Executive Command Center — the whole authorized portfolio at once.
+
+    Returns the totals AND the organizations that need attention, because an
+    executive asking "how is my business doing" is really asking two questions
+    and the second one is the actionable half.
+
+    NOTHING IS FILLED IN. A rate with no denominator is null; revenue that
+    cannot be priced is null and reported with its coverage, so "$4,491 across
+    3 of 5 customers" is sayable and a bare "$4,491" that silently implies the
+    other two earn nothing is not.
+    """
+    user, mem, platform = executive
+    rows = portfolio_service.rows(db, platform.id)
+    totals = portfolio_service.portfolio(db, platform.id)
+
+    # WORST FIRST. An executive opens this to find trouble, so the exceptions
+    # lead and the healthy majority sits behind Portfolio Health.
+    ranked = sorted([r for r in rows if r["attention"]],
+                    key=portfolio_service.sort_key)
+
+    return {
+        "platform_id": platform.id,
+        "platform_name": platform.name,
+        "summary": totals,
+        # The attention list is capped for the page, and the page is told the
+        # true number so it can say "showing 6 of 11" rather than implying six
+        # is all there is.
+        "attention": [
+            {
+                "id": r["id"], "name": r["name"],
+                "health": r["health"], "health_label": r["health_label"],
+                "reason": r["reason"], "items": r["attention"],
+            }
+            for r in ranked[:8]
+        ],
+        "attention_total": len(ranked),
+        "health_labels": portfolio_service.HEALTH_LABELS,
+    }
+
+
+@router.get("/portfolio/health")
+def get_portfolio_health(
+    filter: str = "all",
+    executive=Depends(require_brand_executive),
+    db: Session = Depends(get_db),
+):
+    """Portfolio Health — every organization, with the reason for its state.
+
+    EVERY FILTER IS A REAL PREDICATE over data already on the row. An empty
+    result therefore means "none match" and never "we could not compute that",
+    which is the difference between a filter and a dead control.
+    """
+    user, mem, platform = executive
+    key = filter if filter in portfolio_service.FILTERS else "all"
+    rows = portfolio_service.rows(db, platform.id)
+    kept = [r for r in rows if portfolio_service.matches_filter(r, key)]
+    kept.sort(key=portfolio_service.sort_key)
+
+    # THE COUNT BESIDE EVERY FILTER, computed from the same rows the table is
+    # built from. A tab reading "Billing (0)" is useful; a tab that turns out
+    # to be empty only after you click it is not.
+    counts = {f: sum(1 for r in rows if portfolio_service.matches_filter(r, f))
+              for f in portfolio_service.FILTERS}
+
+    return {
+        "platform_id": platform.id,
+        "platform_name": platform.name,
+        "filter": key,
+        "filters": [{"key": f, "count": counts[f]}
+                    for f in portfolio_service.FILTERS],
+        "total": len(rows),
+        "shown": len(kept),
+        "organizations": kept,
+        "health_labels": portfolio_service.HEALTH_LABELS,
+        "recent_window_days": portfolio_service.RECENT_DAYS,
+    }
+
+
+@router.get("/organizations/{org_id}/performance")
+def get_org_performance(
+    org_id: str,
+    executive=Depends(require_brand_executive),
+    db: Session = Depends(get_db),
+):
+    """ONE organization, composed for an executive rather than for its staff.
+
+    THIS IS NOT THE CUSTOMER DASHBOARD WITH BUTTONS HIDDEN. The observation
+    endpoint above returns the operational queues a customer's own people work
+    from — hot replies to answer, leads to call. Useful, and not what a
+    regional executive needs: they are not going to work the queue, they are
+    deciding whether this organization is performing and what to do about it.
+
+    So this returns outcomes, rates, exceptions and the commercial picture, and
+    it deliberately returns NO per-lead action list.
+
+    SECURITY, IDENTICAL TO EVERY OTHER ROUTE HERE:
+      - require_brand_executive validates the grant; god is not whitelisted.
+      - org.platform_id == platform.id, so a cross-brand id is a 404 and not a
+        thinner page.
+      - `org_id` comes from the PATH. current_user.organization_id is never
+        read and never written — observing is not joining.
+      - GET only. `read_only: True` is returned so the frontend never has to
+        infer it.
+    """
+    user, mem, platform = executive
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org or org.platform_id != platform.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Organization not found.")
+
+    # BUILT FROM THE SAME ROWS AS THE PORTFOLIO. If this page and Portfolio
+    # Health could compute a customer's health differently, an executive would
+    # have two answers about the same business and no way to choose.
+    rows = portfolio_service.rows(db, platform.id)
+    row = next((r for r in rows if r["id"] == org_id), None)
+    if row is None:                                      # pragma: no cover
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Organization not found.")
+
+    # The peer comparison an executive actually wants: not a league table, just
+    # where this one sits against the rest of the portfolio on the two figures
+    # that matter. Reported only when there is something to compare against.
+    peers = [r for r in rows if r["id"] != org_id]
+
+    def _median(values):
+        vals = sorted(v for v in values if v is not None)
+        if not vals:
+            return None
+        mid = len(vals) // 2
+        return vals[mid] if len(vals) % 2 else round(
+            (vals[mid - 1] + vals[mid]) / 2, 1)
+
+    comparison = None
+    if peers:
+        comparison = {
+            "peer_count": len(peers),
+            "median_response_rate": _median([p["response_rate"] for p in peers]),
+            "median_conversion_rate": _median([p["conversion_rate"] for p in peers]),
+            "median_appointments": _median(
+                [float(p["appointments_total"]) for p in peers]),
+        }
+
+    return {
+        "read_only": True,
+        "platform_id": platform.id,
+        "platform_name": platform.name,
+        "organization": row,
+        "comparison": comparison,
+        # THE SWITCHER'S DATA, served with the page so moving between
+        # organizations never requires a round trip through the owner shell.
+        # Durable ids only — nothing here resolves an organization by name.
+        "portfolio": [{"id": r["id"], "name": r["name"],
+                       "health": r["health"], "health_label": r["health_label"]}
+                      for r in sorted(rows, key=lambda r: (r["name"] or "").lower())],
     }
 
 

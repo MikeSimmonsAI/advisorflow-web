@@ -42,6 +42,7 @@
 
 export const PLATFORM = 'platform'
 export const BRAND_SALES = 'brand_sales'
+export const EXECUTIVE = 'executive'
 export const CUSTOMER = 'customer'
 
 /**
@@ -74,6 +75,29 @@ const CUSTOMER_INSIDE_GOD = ['/god/customer-app']
 /** Brand-sales back office. Scoped by BRAND, never by a customer. */
 const BRAND_SALES_PREFIXES = ['/sales']
 
+/**
+ * THE EXECUTIVE LAYER — scoped by a PORTFOLIO, and by nothing else.
+ *
+ * An executive oversees one brand's customers. Their authority comes from a
+ * membership grant the server checks on every call, so a customer selection
+ * has no business travelling with these requests:
+ *
+ *   - Sending `X-Org-Override` here would either be ignored (it is — the
+ *     executive endpoints never read `current_user.organization_id`) or, if a
+ *     future route ever did read it, would silently narrow a portfolio to
+ *     whichever customer was last opened. An executive looking at a portfolio
+ *     of one cannot tell that from a portfolio that really has one.
+ *
+ *   - Showing the "VIEWING AS <customer>" banner over an executive screen
+ *     would be a false statement about what the page is doing. The executive
+ *     drill-down states its own context, from the organization in its URL.
+ *
+ * Executive routes are their own class rather than folded into PLATFORM,
+ * because they are not platform-wide: an executive sees one brand, and the
+ * distinction matters for what a banner is allowed to claim.
+ */
+const EXECUTIVE_PREFIXES = ['/executive']
+
 export function classifyRoute(pathname) {
   const path = (pathname || '/').split('?')[0]
 
@@ -83,6 +107,9 @@ export function classifyRoute(pathname) {
   if (path === '/god' || path.startsWith('/god/')) return PLATFORM
   if (PLATFORM_PATHS.some(p => path === p || path.startsWith(p + '/'))) {
     return PLATFORM
+  }
+  if (EXECUTIVE_PREFIXES.some(p => path === p || path.startsWith(p + '/'))) {
+    return EXECUTIVE
   }
   if (BRAND_SALES_PREFIXES.some(p => path === p || path.startsWith(p + '/'))) {
     return BRAND_SALES
@@ -124,6 +151,12 @@ export function contextLabel(pathname, { brandName, orgName } = {}) {
   }
   if (kind === BRAND_SALES) {
     return { mode: 'BRAND SALES', detail: brandName ? brandName + ' Sales' : 'Brand Sales', kind }
+  }
+  if (kind === EXECUTIVE) {
+    // The executive shell draws its own brand header, so this label exists for
+    // anything outside it that asks. It names the PORTFOLIO, never a customer.
+    return { mode: 'EXECUTIVE', detail: brandName ? brandName + ' Portfolio'
+      : 'Executive Portfolio', kind }
   }
   return {
     mode: 'CUSTOMER WORKSPACE',
