@@ -333,6 +333,15 @@ COLUMNS_TO_ADD = [
     # P0. Four ingestion routers pass `source=` to Lead(); the column never
     # existed, so social webhooks, fiber intake, field capture and scraper
     # imports raised TypeError on every single arrival. See models.Lead.source.
+    # Payment-method summary, mirrored from what Stripe sends on a paid
+    # invoice. NEVER a card number, never a token that could charge anything -
+    # a brand, the last four digits and an expiry, which is exactly what a
+    # customer needs to recognise which card is on file. The card itself lives
+    # at Stripe and is managed through the Portal.
+    ("organizations", "billing_card_brand", "VARCHAR"),
+    ("organizations", "billing_card_last4", "VARCHAR"),
+    ("organizations", "billing_card_exp_month", "INTEGER"),
+    ("organizations", "billing_card_exp_year", "INTEGER"),
     ("leads", "source", "VARCHAR"),
     ("leads", "capacity_state", "VARCHAR"),
     ("leads", "capacity_held_at", "TIMESTAMP"),

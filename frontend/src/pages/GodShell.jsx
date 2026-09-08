@@ -132,6 +132,13 @@ const NAV = [
   // behind a screen called "Pricing", which is where an owner would never
   // think to look for it.
   { label: 'Sales Compensation', path: '/god/compensation',   icon: 'briefcase' },
+  // A THIRD ENTRY, AND AGAIN BECAUSE IT IS A THIRD JOB. Pricing & Comp defines
+  // the rules; Sales Compensation is what the team earned; Billing & Revenue is
+  // what CUSTOMERS pay and which of them needs chasing — whose card failed, who
+  // is on a trial that ends this week, who scheduled a downgrade, who is
+  // sitting on held leads. Its seven backend routes existed for weeks with no
+  // link and no page, which is the same as not existing.
+  { label: 'Billing & Revenue', path: '/god/billing',         icon: 'dollar'   },
   // Control-plane diagnostics. Owner-only by the endpoint behind it, not by
   // the absence of this link.
   { label: 'Access Diagnostic', path: '/god/diagnostics/user-access', icon: 'shield' },

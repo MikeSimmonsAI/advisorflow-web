@@ -240,8 +240,52 @@ def upsert_invoice(db: Session, *, org: Organization, invoice: dict) -> BillingI
     row.paid_at = _ts((invoice.get("status_transitions") or {}).get("paid_at"))
     row.billing_plan_key = getattr(org, "billing_plan_key", None)
     row.billing_interval = getattr(org, "stripe_plan_interval", None)
+
+    _capture_card_summary(org, invoice)
+
     db.flush()
     return row
+
+
+def _capture_card_summary(org: Organization, invoice: dict) -> None:
+    """Remember WHICH CARD paid, and nothing else about it.
+
+    Brand, last four, expiry. That is what lets a customer recognise the card
+    on file; it is not a card number, not a CVC, and not a token that could
+    charge anything. The instrument stays at Stripe and is only ever changed
+    through the Portal.
+
+    DEFENSIVE ON EVERY LEVEL, because Stripe's invoice payload does not
+    guarantee any of this. Where the shape is not what we expect, the existing
+    values are left alone rather than blanked: a screen that says "Visa ....4242"
+    from last month is far better than one that silently forgets the card
+    because one webhook arrived without a charge expanded. And nothing is ever
+    invented - no default brand, no placeholder digits.
+    """
+    try:
+        charge = invoice.get("charge")
+        details = None
+        if isinstance(charge, dict):
+            details = (charge.get("payment_method_details") or {})
+        if not details:
+            pi = invoice.get("payment_intent")
+            if isinstance(pi, dict):
+                charges = ((pi.get("charges") or {}).get("data") or [])
+                if charges and isinstance(charges[0], dict):
+                    details = charges[0].get("payment_method_details") or {}
+        card = (details or {}).get("card") or {}
+        last4 = card.get("last4")
+        if not last4:
+            return
+        org.billing_card_brand = card.get("brand") or org.billing_card_brand
+        org.billing_card_last4 = str(last4)
+        if card.get("exp_month"):
+            org.billing_card_exp_month = int(card["exp_month"])
+        if card.get("exp_year"):
+            org.billing_card_exp_year = int(card["exp_year"])
+    except Exception:                                    # pragma: no cover
+        log.debug("billing_webhook: no usable card summary on invoice %s",
+                  invoice.get("id"))
 
 
 def apply_subscription(db: Session, org: Organization, sub: dict) -> None:

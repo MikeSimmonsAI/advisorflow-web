@@ -97,6 +97,7 @@ import GodControlAudit from './pages/GodControlAudit'
 // owner. Registered BEFORE the /god/* catch-all below or it would silently
 // render the Command Center instead.
 import GodPricingCompensation from './pages/god/GodPricingCompensation'
+import GodBillingOps from './pages/god/GodBillingOps'
 // Customer 360 — one customer's whole commercial and lifecycle picture. Its
 // route is registered as /god/customers/:orgId/360, three segments, so it
 // cannot be shadowed by the two-segment CustomerDetail route above it.
@@ -727,6 +728,11 @@ export default function App() {
             only — every endpoint behind it is require_god, so a typed URL is
             refused by the server rather than by the absence of a link. */}
         <Route path="/god/pricing" element={<GodRoute><GodModeLayout><GodPricingCompensation /></GodModeLayout></GodRoute>} />
+        {/* BILLING & REVENUE OPERATIONS. /god/billing had seven working backend
+            routes and NO frontend at all — built, deployed and unreachable.
+            Registered here, before the /god/* catch-all, or it would silently
+            render the Command Center instead. */}
+        <Route path="/god/billing" element={<GodRoute><GodModeLayout><GodBillingOps /></GodModeLayout></GodRoute>} />
         {/* SALES COMPENSATION — the SAME Compensation Command Center the sales
             workspace serves at /sales/compensation, rendered inside the God
             shell so the owner reaches operational compensation from the God

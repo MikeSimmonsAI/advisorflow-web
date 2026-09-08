@@ -267,6 +267,40 @@ def get_subscription(
         # pretending the change already happened.
         "pending_plan": getattr(org, "billing_pending_plan_key", None),
         "pending_effective_at": getattr(org, "billing_pending_effective_at", None),
+        # WHEN THIS CUSTOMER STARTED. Their own record, not a billing figure -
+        # and the one line on a billing screen that is about the relationship
+        # rather than the money.
+        "customer_since": getattr(org, "created_at", None),
+    }
+
+    # WHAT THEY ACTUALLY PAY, RESOLVED SERVER-SIDE.
+    #
+    # The recurring amount for the plan they are on, at the interval they are
+    # billed on. The browser is never told to compute this: an amount derived
+    # in a page is an amount a customer can edit, and this screen has already
+    # had one hand-maintained price list drift away from the catalogue.
+    #
+    # None where the plan carries no price for that interval, which the screen
+    # must render as "not priced" rather than as free.
+    result["recurring_cents"] = (
+        billing_catalog.price_cents_for(current_plan, result["stripe_plan_interval"])
+        if current_plan else None)
+    result["currency"] = getattr(current_plan, "currency", None) or "usd"
+
+    # THE CARD ON FILE, AS A SUMMARY. Brand, last four, expiry - mirrored from
+    # what Stripe volunteered on a paid invoice. NULL until an invoice has
+    # actually been paid, and never guessed: the screen says "managed in the
+    # billing portal" rather than inventing a brand.
+    last4 = getattr(org, "billing_card_last4", None)
+    result["payment_method"] = {
+        "brand": getattr(org, "billing_card_brand", None) if last4 else None,
+        "last4": last4,
+        "exp_month": getattr(org, "billing_card_exp_month", None) if last4 else None,
+        "exp_year": getattr(org, "billing_card_exp_year", None) if last4 else None,
+        "on_file": bool(last4),
+        # A customer id exists as soon as checkout starts, so it is not proof
+        # of a card - but without one there is no Portal to send them to.
+        "manageable": bool(getattr(org, "stripe_customer_id", None)),
     }
 
     # WHAT THE PLAN ACTUALLY ENFORCES, with usage. Shown so a customer can see

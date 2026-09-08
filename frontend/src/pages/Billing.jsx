@@ -175,6 +175,24 @@ export default function Billing() {
     } catch (e) { fail(e); }
   }
 
+  // CANCELLING A SCHEDULED CHANGE THAT HAS NOT HAPPENED YET.
+  //
+  // The endpoint existed and nothing on this page called it, so a customer who
+  // scheduled a downgrade by mistake had no way to undo it and would simply
+  // lose the tier at period end. This is that button.
+  async function handleCancelPending(pendingName) {
+    setErr(''); setErrStatus(null); setNotice('');
+    if (!window.confirm(
+      `Keep your current plan and cancel the scheduled change to ${pendingName}?`)) return;
+    setActionLoading('cancel-pending');
+    try {
+      await api.post('/billing/cancel-pending-change');
+      setNotice('The scheduled change was cancelled. You stay on your current plan.');
+      await load();
+      setActionLoading(null);
+    } catch (e) { fail(e); }
+  }
+
   // ── Everything below is DERIVED FROM THE SERVER'S ANSWER ────────────────
   const plans = catalog?.plans || [];
   const configured = Boolean(catalog?.configured) && plans.length > 0;
@@ -196,6 +214,34 @@ export default function Billing() {
   const annualOffered = plans.some(p => p.annual_cents !== null && p.annual_cents !== undefined);
   const invoices = sub?.invoices || [];
   const statusColor = STATUS_COLORS[billingStatus] || '#888';
+
+  // ── What the plan enforces, and how much of it is in use ────────────────
+  //
+  // The server has returned all of this since plan limits were built and this
+  // page rendered NONE of it, so a customer could hit a ceiling with no way to
+  // have seen it coming. `limits` reports the CURRENT plan's ceilings even
+  // when a downgrade is scheduled - the customer keeps what they paid for -
+  // and `pending_limits` previews what they drop to.
+  const limits = sub?.limits || null;
+  const heldLeads = limits?.capacity_hold?.held || 0;
+  const pm = sub?.payment_method || null;
+  const customerSince = when(sub?.customer_since);
+  const recurring = money(sub?.recurring_cents, sub?.currency);
+
+  const USAGE_ROWS = limits ? [
+    { key: 'max_users', label: 'Users' },
+    { key: 'max_leads', label: 'Leads' },
+  ].map(({ key, label }) => {
+    const cur = limits.limits?.[key] || {};
+    const pend = limits.pending_limits?.[key] || null;
+    return {
+      label,
+      used: cur.used ?? null,
+      limit: cur.limit ?? null,
+      unlimited: cur.unlimited !== false && (cur.limit === null || cur.limit === undefined),
+      pendingLimit: pend?.limit ?? null,
+    };
+  }) : [];
 
   // Start on the interval the customer is actually billed on, so the prices
   // shown are the ones they are paying.
@@ -274,6 +320,37 @@ export default function Billing() {
                 ? `${nameFor(currentKey)} until ${periodEnd}, then ${nameFor(pendingPlan)}.`
                 : `${nameFor(currentKey)} until the end of your current billing period, then ${nameFor(pendingPlan)}.`}
               {' '}You keep the plan you have already paid for until then.
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => handleCancelPending(nameFor(pendingPlan))}
+                  disabled={actionLoading === 'cancel-pending'}
+                  style={{ background: 'transparent', color: '#f59e0b', border: '1px solid #f59e0b66',
+                           borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  {actionLoading === 'cancel-pending' ? 'Cancelling…' : 'Keep my current plan'}
+                </button>
+              </div>
+            </div>
+          )}
+          {sub?.cancel_at_period_end && !pendingPlan && (
+            <div style={{ fontSize: '13px', color: '#ef4444', marginTop: '8px' }}>
+              Your subscription is set to cancel{periodEnd ? ` on ${periodEnd}` : ' at the end of this period'}.
+            </div>
+          )}
+        </div>
+
+        {/* WHAT THEY PAY AND SINCE WHEN. Both come from the server: the amount
+            is the catalogue's price for the plan and interval they are on, and
+            nothing on this page derives money any more. */}
+        <div style={{ minWidth: 170 }}>
+          <div style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>Recurring</div>
+          <div style={{ fontSize: '22px', fontWeight: '700' }}>
+            {recurring
+              ? <>{recurring}<span style={{ fontSize: 13, fontWeight: 400, color: '#888' }}>
+                  {currentInterval === 'year' ? '/yr' : '/mo'}</span></>
+              : <span style={{ fontSize: 15, color: '#888' }}>Not priced</span>}
+          </div>
+          {customerSince && (
+            <div style={{ fontSize: '13px', color: '#888', marginTop: '8px' }}>
+              Customer since {customerSince}
             </div>
           )}
         </div>
@@ -288,6 +365,114 @@ export default function Billing() {
           )}
         </div>
       </div>
+
+      {/* ── Plan usage / entitlements ────────────────────────────────────── */}
+      {limits && USAGE_ROWS.length > 0 && (
+        <div style={{ ...CARD, marginBottom: '32px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'baseline', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontWeight: '700', fontSize: '16px' }}>Plan usage</div>
+            <div style={{ fontSize: 12, color: '#888' }}>
+              Against your current plan{pendingPlan ? ' — not the scheduled one' : ''}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20 }}>
+            {USAGE_ROWS.map(row => {
+              // An unlimited entitlement has no bar to draw. Drawing an empty
+              // one would imply a ceiling that does not exist.
+              const pct = (!row.unlimited && row.limit)
+                ? Math.min(100, Math.round(((row.used || 0) / row.limit) * 100))
+                : null;
+              const near = pct !== null && pct >= 80;
+              const full = pct !== null && pct >= 100;
+              const bar = full ? '#ef4444' : near ? '#f59e0b' : '#1ef0a8';
+              return (
+                <div key={row.label}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between',
+                                fontSize: 13, marginBottom: 6 }}>
+                    <span style={{ color: '#ccc', fontWeight: 600 }}>{row.label}</span>
+                    <span style={{ color: full ? '#ef4444' : '#888',
+                                   fontVariantNumeric: 'tabular-nums' }}>
+                      {row.used ?? '—'}{row.unlimited
+                        ? ' used · unlimited'
+                        : ` of ${row.limit}`}
+                    </span>
+                  </div>
+                  {pct !== null && (
+                    <div style={{ height: 6, background: '#2a2a4a', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: bar }} />
+                    </div>
+                  )}
+                  {/* What a scheduled downgrade will reduce this to. Shown as a
+                      preview, never applied early — they paid for the tier they
+                      are on until the period ends. */}
+                  {pendingPlan && row.pendingLimit !== null && row.pendingLimit !== undefined && (
+                    <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 6 }}>
+                      Drops to {row.pendingLimit} on {nameFor(pendingPlan)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* HELD PROSPECTS. Real inbound business that arrived while the plan
+              was full — kept, not discarded, and not consuming the plan or any
+              paid automation until there is room. This is the number that makes
+              an upgrade conversation concrete. */}
+          {heldLeads > 0 && (
+            <div style={{ marginTop: 20, padding: '14px 16px', borderRadius: 8,
+                          background: '#f59e0b14', border: '1px solid #f59e0b44' }}>
+              <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                {heldLeads} inbound {heldLeads === 1 ? 'prospect is' : 'prospects are'} held over plan capacity
+              </div>
+              <div style={{ color: '#c9a15a', fontSize: 13 }}>
+                They arrived after your plan was full and have been kept safely — nothing was
+                discarded. They are not counted against your plan and no messages are sent to
+                them. Upgrade to release {heldLeads === 1 ? 'it' : 'them'} into your leads.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Payment method ───────────────────────────────────────────────── */}
+      {(pm?.on_file || pm?.manageable) && (
+        <div style={{ ...CARD, marginBottom: '32px', display: 'flex',
+                      justifyContent: 'space-between', alignItems: 'center',
+                      flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>Payment method</div>
+            {pm.on_file ? (
+              <>
+                <div style={{ fontSize: '16px', fontWeight: 700, textTransform: 'capitalize' }}>
+                  {pm.brand || 'Card'} •••• {pm.last4}
+                </div>
+                {pm.exp_month && pm.exp_year && (
+                  <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>
+                    Expires {String(pm.exp_month).padStart(2, '0')}/{pm.exp_year}
+                  </div>
+                )}
+              </>
+            ) : (
+              // NEVER A FABRICATED CARD. Until Stripe has told us what paid,
+              // this says so plainly rather than inventing a brand.
+              <div style={{ fontSize: 14, color: '#aaa', maxWidth: 460 }}>
+                No card details have been recorded yet. Your payment method is held securely
+                by Stripe and can be viewed or changed in the billing portal.
+              </div>
+            )}
+          </div>
+          {pm.manageable && (
+            <button onClick={handlePortal} disabled={actionLoading === 'portal'}
+              style={{ background: '#2a2a4a', color: '#fff', border: 'none', borderRadius: '8px',
+                       padding: '10px 20px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' }}>
+              {actionLoading === 'portal' ? 'Opening…' : 'Manage payment method →'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── The catalogue, or an honest empty state ──────────────────────── */}
       {!configured ? (
@@ -344,17 +529,51 @@ export default function Billing() {
               const accent = isCurrent ? '#1ef0a8' : '#2fb6ff';
               const busy = actionLoading === plan.key;
 
+              // ── WHAT THIS BUTTON ACTUALLY DOES, SAID ON THE BUTTON ──────
+              //
+              // Every card used to read "Select Plan", which is wrong in three
+              // separate ways once a subscription exists: it is not a
+              // selection, an upgrade and a downgrade behave completely
+              // differently, and one of the cards is the plan they are already
+              // on. The direction is decided the same way the server decides
+              // it — by comparing monthly-equivalent price — so the label
+              // matches the operation that will actually happen.
+              const currentCents = (() => {
+                const cp = planFor(currentKey);
+                if (!cp) return null;
+                const c = currentInterval === 'year' ? cp.annual_cents : cp.monthly_cents;
+                return (c === null || c === undefined)
+                  ? null : (currentInterval === 'year' ? c / 12 : c);
+              })();
+              const thisMonthly = (cents === null || cents === undefined)
+                ? null : (interval === 'year' ? cents / 12 : cents);
+              const direction = (currentCents === null || thisMonthly === null)
+                ? null
+                : (thisMonthly > currentCents ? 'upgrade'
+                  : thisMonthly < currentCents ? 'downgrade' : 'lateral');
+
+              const isPending = pendingPlan === plan.key;
+
               let label = hasSubscription ? 'Change plan' : 'Select plan';
               let disabled = busy;
               if (isCurrentExactly) { label = 'Current plan'; disabled = true; }
-              else if (!plan.is_purchasable) { label = 'Contact us'; }
+              else if (isPending) { label = 'Scheduled'; disabled = true; }
+              else if (!plan.is_purchasable) { label = 'Contact sales'; }
               else if (!priced) { label = `No ${interval === 'year' ? 'annual' : 'monthly'} price`; disabled = true; }
+              else if (hasSubscription && direction === 'upgrade') { label = 'Upgrade'; }
+              else if (hasSubscription && direction === 'downgrade') { label = 'Schedule downgrade'; }
+              else if (hasSubscription && direction === 'lateral') { label = 'Switch'; }
               if (busy) label = 'Working…';
 
               return (
-                <div key={plan.key} style={{ ...CARD, border: `1px solid ${isCurrent ? accent : '#2a2a4a'}`, position: 'relative' }}>
+                <div key={plan.key} style={{ ...CARD, border: `1px solid ${isPending ? '#f59e0b' : isCurrent ? accent : '#2a2a4a'}`, position: 'relative' }}>
                   {isCurrent && (
                     <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: accent, color: '#000', fontSize: '11px', fontWeight: '700', padding: '3px 12px', borderRadius: '20px', whiteSpace: 'nowrap' }}>CURRENT PLAN</div>
+                  )}
+                  {isPending && (
+                    <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: '#f59e0b', color: '#000', fontSize: '11px', fontWeight: '700', padding: '3px 12px', borderRadius: '20px', whiteSpace: 'nowrap' }}>
+                      SCHEDULED{periodEnd ? ` · ${periodEnd}` : ''}
+                    </div>
                   )}
                   <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '8px' }}>{plan.name}</div>
                   <div style={{ fontSize: '32px', fontWeight: '800', marginBottom: '4px' }}>

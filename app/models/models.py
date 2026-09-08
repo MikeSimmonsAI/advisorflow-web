@@ -479,6 +479,22 @@ class Organization(Base):
 
     billing_trial_end           = Column(DateTime, nullable=True)
 
+    # ── Payment method, as a RECOGNISABLE SUMMARY and nothing more ────────
+    #
+    # A brand, four digits and an expiry. That is what a customer needs to
+    # answer "which card is this billing?" and it is the most this platform
+    # will ever hold: no card number, no CVC, no token that could charge
+    # anything. The instrument itself lives at Stripe and is managed through
+    # the Portal, which is also the only place it can be changed.
+    #
+    # Mirrored from what Stripe volunteers on a paid invoice. When Stripe
+    # sends nothing, these stay NULL and the screen says the card is managed
+    # in the Portal - it never guesses at a brand or invents four digits.
+    billing_card_brand          = Column(String, nullable=True)   # "visa"
+    billing_card_last4          = Column(String, nullable=True)   # "4242"
+    billing_card_exp_month      = Column(Integer, nullable=True)
+    billing_card_exp_year       = Column(Integer, nullable=True)
+
     platform = relationship("Platform", back_populates="organizations")
     # `foreign_keys` IS REQUIRED HERE, NOT DECORATIVE. There are now three
     # foreign keys between `organizations` and `users`: this one

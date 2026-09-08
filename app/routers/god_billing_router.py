@@ -885,6 +885,212 @@ def revenue(platform_id: Optional[str] = Query(None),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# THE CUSTOMER ROSTER — one row per paying relationship, operationally usable
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# /revenue answers "how are we doing". This answers "WHICH CUSTOMER NEEDS
+# SOMETHING DONE ABOUT IT", which is a different question and the one somebody
+# actually opens a billing screen to ask. A total tells you a number is wrong;
+# only a roster tells you whose card failed.
+#
+# Read entirely from the local mirror. Nothing here calls Stripe.
+
+# The operational states a finance user filters on. Each is a QUESTION about
+# what needs attention, not a restatement of Stripe's status vocabulary -
+# "payment_problem" spans past_due and unpaid because to the person working the
+# list they are the same job.
+FILTERS = ("all", "active", "trialing", "payment_problem", "pending_downgrade",
+           "pending_cancellation", "no_payment_method", "held_capacity",
+           "commercial_data_incomplete", "canceled")
+
+
+def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, Any]:
+    """Everything a finance operator needs about one customer, in one row."""
+    key = getattr(o, "billing_plan_key", None) or o.plan
+    cache_key = (o.platform_id, key)
+    if cache_key not in plan_cache:
+        plan_cache[cache_key] = billing_catalog.resolve_plan(db, o.platform_id, key)
+    plan = plan_cache[cache_key]
+    interval = getattr(o, "stripe_plan_interval", None) or BillingInterval.MONTH
+
+    # MRR for THIS customer, priced from THEIR OWN brand's catalogue. None -
+    # never 0 - when the plan does not resolve, because "we cannot explain what
+    # this customer is paying" and "this customer pays nothing" are opposite
+    # facts that must not render identically.
+    mrr_cents = _monthly_equivalent_cents(plan, interval) if plan else None
+
+    last_payment = (db.query(BillingPayment)
+                    .filter(BillingPayment.organization_id == o.id)
+                    .order_by(BillingPayment.collected_at.desc().nullslast())
+                    .first())
+    invoice_count = (db.query(BillingInvoice)
+                     .filter(BillingInvoice.organization_id == o.id).count())
+
+    # Held inbound prospects. A customer sitting on held leads is a customer
+    # with real business they cannot work - the most actionable upgrade
+    # conversation on this screen.
+    from app.services import lead_capacity
+    held = lead_capacity.held_count(db, o.id)
+
+    # THE COMMERCIAL CHAIN, where one exists. A customer created outside the
+    # pipeline has no opportunity and no rep, and that is stated rather than
+    # fabricated - an invented salesperson on a self-serve signup would
+    # eventually pay somebody a commission.
+    source = {"from_pipeline": False, "opportunity_id": None,
+              "sales_rep": None, "note": "Created outside pipeline - "
+                                          "commercial data incomplete"}
+    try:
+        from app.models.sales_models import Opportunity
+        opp = (db.query(Opportunity)
+               .filter(Opportunity.customer_organization_id == o.id)
+               .order_by(Opportunity.created_at.asc())
+               .first())
+        if opp is not None:
+            rep = (db.query(User).filter(User.id == opp.owner_user_id).first()
+                   if getattr(opp, "owner_user_id", None) else None)
+            source = {
+                "from_pipeline": True,
+                "opportunity_id": opp.id,
+                "sales_rep": (getattr(rep, "full_name", None)
+                              or getattr(rep, "email", None)) if rep else None,
+                "note": None,
+            }
+    except Exception:                                    # pragma: no cover
+        log.debug("god_billing: could not resolve commercial source for %s", o.id)
+
+    implementation_status = None
+    try:
+        from app.models.implementation_models import Implementation
+        impl = (db.query(Implementation)
+                .filter(Implementation.organization_id == o.id)
+                .order_by(Implementation.created_at.desc())
+                .first())
+        implementation_status = getattr(impl, "status", None)
+    except Exception:                                    # pragma: no cover
+        pass
+
+    status = (getattr(o, "billing_status", None) or "").lower()
+    return {
+        "organization_id": o.id,
+        "name": o.name,
+        "platform_id": o.platform_id,
+        "plan_key": key,
+        "plan_name": getattr(plan, "name", None),
+        "billing_status": status or None,
+        "interval": interval,
+        "mrr_cents": mrr_cents,
+        "mrr_unavailable_reason": (
+            None if mrr_cents is not None else
+            ("no such plan in this brand's catalogue" if plan is None
+             else "plan has no %s price configured" % interval)),
+        "currency": getattr(plan, "currency", None) or "usd",
+        "current_period_end": getattr(o, "billing_current_period_end", None),
+        "trial_end": getattr(o, "billing_trial_end", None),
+        "pending_plan": getattr(o, "billing_pending_plan_key", None),
+        "pending_effective_at": getattr(o, "billing_pending_effective_at", None),
+        "cancel_at_period_end": bool(getattr(o, "billing_cancel_at_period_end", False)),
+        "card_last4": getattr(o, "billing_card_last4", None),
+        "card_brand": getattr(o, "billing_card_brand", None),
+        "has_subscription": bool(getattr(o, "stripe_subscription_id", None)),
+        "last_payment_at": getattr(last_payment, "collected_at", None),
+        "last_payment_cents": getattr(last_payment, "amount_cents", None),
+        "invoice_count": invoice_count,
+        "held_lead_count": held,
+        "implementation_status": implementation_status,
+        "commercial_source": source,
+        "customer_since": getattr(o, "created_at", None),
+    }
+
+
+def _matches_filter(row: Dict[str, Any], f: str) -> bool:
+    if f in (None, "", "all"):
+        return True
+    status = row["billing_status"] or ""
+    if f == "active":
+        return status == SubscriptionStatus.ACTIVE
+    if f == "trialing":
+        return status == SubscriptionStatus.TRIALING
+    if f == "payment_problem":
+        # past_due and unpaid are one job to whoever works this list.
+        return status in (SubscriptionStatus.PAST_DUE, "unpaid")
+    if f == "canceled":
+        return status in ("canceled", "incomplete_expired")
+    if f == "pending_downgrade":
+        return bool(row["pending_plan"])
+    if f == "pending_cancellation":
+        return bool(row["cancel_at_period_end"])
+    if f == "no_payment_method":
+        # Only meaningful for somebody who is supposed to be paying.
+        return row["has_subscription"] and not row["card_last4"]
+    if f == "held_capacity":
+        return (row["held_lead_count"] or 0) > 0
+    if f == "commercial_data_incomplete":
+        return not row["commercial_source"]["from_pipeline"]
+    return True
+
+
+@router.get("/customers")
+def billing_customers(platform_id: Optional[str] = Query(None),
+                      filter: str = Query("all"),
+                      q: Optional[str] = Query(None),
+                      limit: int = Query(200, ge=1, le=500),
+                      db: Session = Depends(get_db),
+                      user: User = Depends(require_god)):
+    """One row per customer, with everything needed to act on it.
+
+    `platform_id` segments by brand. BRAND ISOLATION IS THE POINT: without it
+    this is the platform owner's own book, and with it a brand's finance user
+    sees only their own customers. Brand A's billing must never appear in
+    Brand B's list.
+    """
+    if filter not in FILTERS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown filter %r. Expected one of: %s"
+                   % (filter, ", ".join(FILTERS)))
+
+    if platform_id:
+        _require_platform(db, platform_id)
+
+    orgs_q = db.query(Organization).filter(Organization.id != PLATFORM_OWN_ORG_ID)
+    if platform_id:
+        orgs_q = orgs_q.filter(Organization.platform_id == platform_id)
+    if q:
+        orgs_q = orgs_q.filter(Organization.name.ilike("%%%s%%" % q.strip()))
+
+    plan_cache: Dict[Any, Any] = {}
+    rows = [_customer_row(db, o, plan_cache)
+            for o in orgs_q.order_by(Organization.name.asc()).limit(limit).all()]
+
+    matched = [r for r in rows if _matches_filter(r, filter)]
+
+    # Counts for every filter, computed over the SAME scope, so the tabs show
+    # real numbers rather than making somebody click each one to find out.
+    counts = {f: sum(1 for r in rows if _matches_filter(r, f)) for f in FILTERS}
+
+    priced = [r["mrr_cents"] for r in matched if r["mrr_cents"] is not None]
+    return {
+        "customers": matched,
+        "counts": counts,
+        "total_in_scope": len(rows),
+        "shown": len(matched),
+        "filter": filter,
+        "scope": {"platform_id": platform_id, "all_brands": platform_id is None},
+        # The MRR of what is on screen, and how much of it could be priced.
+        # Reported together so a total is never read as complete when it is not.
+        "visible_mrr_cents": sum(priced) if priced else None,
+        "visible_priced": len(priced),
+        "visible_unpriced": len(matched) - len(priced),
+        "explanation": (
+            "Every figure is read from the local mirror the Stripe webhook "
+            "maintains; nothing here calls Stripe. A null mrr_cents carries a "
+            "reason and means the plan could not be priced - it never means "
+            "the customer pays nothing."
+        ),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # THE EVENT LEDGER — did Stripe tell us, and what did we do about it
 # ═══════════════════════════════════════════════════════════════════════════
 
