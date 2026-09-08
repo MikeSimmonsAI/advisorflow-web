@@ -172,6 +172,26 @@ class Platform(Base):
     website_url         = Column(String, nullable=True)   # marketing site
     app_base_url        = Column(String, nullable=True)   # customer-facing app host
 
+    # WHERE THIS BRAND'S PUBLIC LEADS LAND. Set by an operator, verified on
+    # every use, and the ONLY thing allowed to answer that question.
+    #
+    # The demo-request form on a brand's marketing site posts with no
+    # credential and no tenant context, so something has to decide which
+    # workspace receives the person. That used to be a name `ilike` with a
+    # "first organization in the table" fallback, which could and would put a
+    # stranger's contact details into a paying customer's workspace. NULL here
+    # means public intake for this brand is not configured, and the endpoint
+    # refuses - see app/services/public_intake.py.
+    #
+    # NO ForeignKey ON PURPOSE. `organizations.platform_id` already points the
+    # other way, so a database-level constraint here would make platforms and
+    # organizations mutually dependent and create_all() cannot order a cycle.
+    # The reference is verified in code instead, and more thoroughly than a
+    # constraint would: public_intake._verify checks that the organization
+    # exists, is active, AND belongs to this platform before a single lead is
+    # written. A dangling id refuses exactly like an unset one.
+    public_intake_organization_id = Column(String, nullable=True)
+
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -387,6 +407,31 @@ class Organization(Base):
     meta_webhook_verify_token = Column(String, nullable=True) # hub.verify_token
     meta_app_secret          = Column(String, nullable=True)  # HMAC signature check
     tiktok_webhook_secret    = Column(String, nullable=True)
+
+    # ── CRM inbound: has this customer finished migrating off the bare UUID? ──
+    #
+    # POST /crm/inbound/{org_id} accepted the organization UUID as its entire
+    # credential. That is being replaced by a real per-organization integration
+    # key (IntegrationCredential, kind `crm_inbound`), but a customer's CRM may
+    # be posting to the old URL RIGHT NOW and closing it without warning would
+    # break a live integration silently - the CRM would keep succeeding locally
+    # and simply stop delivering.
+    #
+    # So the two modes coexist, explicitly, per organization:
+    #   False -> legacy accepted. Every legacy call is logged, audited and
+    #            answered with a deprecation header. It is never treated as
+    #            secure and never reported as secure.
+    #   True  -> a valid credential is required. Nothing else gets in.
+    #
+    # THE TWO DEFAULTS DIFFER ON PURPOSE. The Python default is True, so every
+    # organization created from now on is secure from its first day. The
+    # server_default in auto_migrate is FALSE, so organizations that already
+    # exist - the only ones that can possibly have a legacy integration - keep
+    # working until an operator migrates them. There is no deadline here and no
+    # automatic flip: closing legacy for a customer is a deliberate act by
+    # someone who has checked that the customer's CRM is sending the key.
+    crm_inbound_secure_required = Column(Boolean, nullable=False, default=True,
+                                         server_default="0")
 
     # The organization's OWN Twilio account. These credentials — not an
     # advisor's — are what the whole tenant sends on, and what its A2P brand and

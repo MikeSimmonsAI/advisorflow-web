@@ -45,7 +45,23 @@ def gen_uuid():
 # versa. See `scope_kind` below and `require_retell` / `require_retell_tenant`.
 INTEGRATION_RETELL = "retell"
 INTEGRATION_RETELL_TENANT = "retell_tenant"
-INTEGRATION_KINDS = (INTEGRATION_RETELL, INTEGRATION_RETELL_TENANT)
+
+# A customer's own CRM pushing contacts INTO their workspace. Tenant-scoped for
+# the same reason `retell_tenant` is: the thing it reaches is one funeral home's
+# lead table, and a key issued for one must be refused by every other.
+#
+# WHY IT IS HERE AND NOT A NEW SYSTEM. POST /crm/inbound/{org_id} used to accept
+# the organization UUID as its whole credential - a value that appears in URLs,
+# support tickets and every operator's browser history, and which cannot be
+# rotated without changing the organization's identity. This model already
+# solves that: the secret is never stored, the scope is fixed at issue time, the
+# key rotates and revokes independently of anything it points at, and every use
+# lands in IntegrationRequestLog. A second credential system would have been a
+# second place to get all of that wrong.
+INTEGRATION_CRM_INBOUND = "crm_inbound"
+
+INTEGRATION_KINDS = (INTEGRATION_RETELL, INTEGRATION_RETELL_TENANT,
+                     INTEGRATION_CRM_INBOUND)
 
 SCOPE_BRAND = "brand"
 SCOPE_TENANT = "tenant"
@@ -53,7 +69,11 @@ SCOPE_TENANT = "tenant"
 ACTION_PING         = "ping"
 ACTION_AVAILABILITY = "availability"
 ACTION_BOOK         = "book"
-INTEGRATION_ACTIONS = (ACTION_PING, ACTION_AVAILABILITY, ACTION_BOOK)
+# One inbound push of contacts. Logged whether it succeeded or not, and whether
+# it arrived with a credential or on the legacy bare-UUID path.
+ACTION_INBOUND      = "inbound"
+INTEGRATION_ACTIONS = (ACTION_PING, ACTION_AVAILABILITY, ACTION_BOOK,
+                       ACTION_INBOUND)
 
 # The visible, non-secret half of a key. Safe to log, safe to put in a support
 # ticket, useless on its own.

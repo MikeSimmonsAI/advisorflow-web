@@ -708,6 +708,28 @@ COLUMNS_TO_ADD = [
      "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("pricing_policies", "effective_from", "DATE"),
     ("pricing_policies", "effective_to",   "DATE"),
+
+    # ── Public write-path hardening (2026-09-08) ────────────────────────────
+    #
+    # Where a brand's public, unauthenticated leads are allowed to land. NULL
+    # means "not configured", and the demo-request endpoint refuses rather than
+    # choosing an organization by name or by table order. No ForeignKey: see the
+    # comment on Platform.public_intake_organization_id for why a constraint
+    # here would make platforms and organizations mutually dependent.
+    ("platforms", "public_intake_organization_id", "VARCHAR"),
+
+    # Whether POST /crm/inbound/{org_id} still accepts the legacy bare-UUID
+    # call for this organization.
+    #
+    # DEFAULT FALSE IS DELIBERATE AND IS NOT THE MODEL'S DEFAULT. Every row that
+    # exists when this column lands is an organization that might already have a
+    # customer CRM posting to the old URL; defaulting them to TRUE would close
+    # that integration on the deploy, with no warning and no error the customer
+    # would see. New organizations get TRUE from the model's Python-side default
+    # instead, so nothing created from here on is ever open. Closing an existing
+    # customer is then one deliberate flip by an operator who has checked.
+    ("organizations", "crm_inbound_secure_required",
+     "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -1188,7 +1210,12 @@ def run_auto_migrations(engine) -> None:
                     last_pull_at        TIMESTAMP,
                     total_pushed        INTEGER DEFAULT 0,
                     total_pulled        INTEGER DEFAULT 0,
-                    created_at          TIMESTAMP DEFAULT NOW()
+                    -- CURRENT_TIMESTAMP, not NOW(). NOW() is Postgres-only, so
+                    -- this statement raised on every SQLite boot and the table
+                    -- was never created there - which is why nothing could test
+                    -- the CRM connection paths. CURRENT_TIMESTAMP is standard
+                    -- and means the same thing on both.
+                    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             conn.commit()
@@ -1434,3 +1461,29 @@ def run_auto_migrations(engine) -> None:
         except (OperationalError, ProgrammingError) as e:
             print(f"[auto_migrate] organizations.{col} note: {e}")
     print("[auto_migrate] org-level Twilio columns ensured.")
+
+    # ── CRM connection secrets: plaintext -> Fernet ──────────────────────────
+    #
+    # `crm_connections.api_key_encrypted` and `.webhook_secret` were written in
+    # PLAINTEXT despite the first column's name. This pass converts them in
+    # place using the same helper every other credential in this codebase uses.
+    #
+    # It runs on EVERY boot on purpose, and converges to zero work: a row whose
+    # value already decrypts is recognised and left alone, so re-running it is a
+    # read. It must run after the crm_connections CREATE TABLE above, which is
+    # why it sits at the end rather than beside the column list.
+    try:
+        from app.services.crm_secrets import migrate_crm_connection_secrets
+        summary = migrate_crm_connection_secrets(engine)
+        if summary.get("encrypted"):
+            print("[auto_migrate] crm secrets: encrypted %d plaintext value(s) "
+                  "across %d connection(s)."
+                  % (summary["encrypted"], summary["scanned"]))
+        else:
+            print("[auto_migrate] crm secrets: nothing to convert (%d scanned)."
+                  % summary.get("scanned", 0))
+    except Exception as e:
+        # A secret migration must never stop the service booting. The tolerant
+        # reader in crm_secrets keeps every existing connection working whether
+        # this pass ran or not.
+        print(f"[auto_migrate] crm secrets note: {e}")

@@ -52,7 +52,7 @@ from app.routers import (
 from app.routers.objection_router import router as objection_router
 from app.routers import onboarding_router, ai_conversation_router, cadence_template_router, auto_send_router, org_settings_router
 from app.routers import proposal_router
-from app.routers import reports_router, crm_router
+from app.routers import reports_router, crm_router, crm_inbound_router
 from app.routers.crm_native_router import router as crm_native_router
 from app.routers.survey_router import router as survey_router
 from app.routers.pipeline_router import router as pipeline_router
@@ -525,6 +525,12 @@ app.include_router(availability_router.router)
 app.include_router(voice_router.router)
 app.include_router(reports_router.router)
 app.include_router(crm_router.router)
+# Issuing, rotating and revoking the per-organization CRM inbound credentials,
+# plus the usage view that answers "who is still on the legacy path?". God-gated
+# on every route; deliberately NOT behind require_feature("crm") because an
+# operator must be able to revoke a key for a customer whose CRM feature has
+# since been turned off.
+app.include_router(crm_inbound_router.router)
 app.include_router(crm_native_router,
                    dependencies=[Depends(require_feature("crm"))])
 app.include_router(survey_router)

@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import tempfile
@@ -12,6 +13,7 @@ from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
 from app.deps import get_db, require_tenant_user, require_tenant_or_observer
+from app.limiter import limiter
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
 from app.services.import_service import import_leads_from_excel
@@ -1716,74 +1718,23 @@ def deduplicate_email_leads(
     }
 
 
-# ── PUBLIC: Landing page demo request (no auth required) ──────────────────
-class DemoRequestCreate(BaseModel):
-    first_name: str
-    last_name: str
-    phone: str
-    email: Optional[str] = None
-    notes: Optional[str] = None
-    source: str = "landing_page"
-    tier: Optional[str] = "demo_request"
-
-
-@router.post("/demo-request", status_code=201)
-def create_demo_request(
-    payload: DemoRequestCreate,
-    db: Session = Depends(get_db),
-):
-    """Public endpoint — no auth required. Called by bookaboost.com landing page."""
-    from app.models.models import Organization
-    import uuid
-    from datetime import datetime
-
-    bookaboost_org = db.query(Organization).filter(
-        Organization.name.ilike('%bookaboost%')
-    ).first()
-    if not bookaboost_org:
-        bookaboost_org = db.query(Organization).first()
-    if not bookaboost_org:
-        return {"status": "received", "message": "Demo request received."}
-
-    existing = None
-    if payload.phone:
-        existing = db.query(Lead).filter(
-            Lead.organization_id == bookaboost_org.id,
-            Lead.phone == payload.phone,
-        ).first()
-    if not existing and payload.email:
-        existing = db.query(Lead).filter(
-            Lead.organization_id == bookaboost_org.id,
-            Lead.email == payload.email,
-        ).first()
-
-    if existing:
-        existing.notes = f"{existing.notes or ''}\n[New demo request {datetime.utcnow().strftime('%Y-%m-%d')}] {payload.notes or ''}".strip()
-        db.commit()
-        return {"status": "updated", "message": "Demo request received."}
-
-    lead = Lead(
-        id=str(uuid.uuid4()),
-        organization_id=bookaboost_org.id,
-        first_name=payload.first_name.strip(),
-        last_name=payload.last_name.strip(),
-        phone=payload.phone.strip() if payload.phone else None,
-        email=payload.email.strip() if payload.email else None,
-        notes=payload.notes,
-        source_file=payload.source,
-        tier=payload.tier,
-        status='new',
-        created_at=datetime.utcnow(),
-    )
-
-    # PLAN CAPACITY - HELD, NEVER DROPPED. A public demo request is external
-    # arrival; nobody is watching, and the prospect is real.
-    from app.services import lead_capacity
-    lead_capacity.hold_if_over_capacity(db, lead, bookaboost_org)
-
-    db.add(lead)
-    db.commit()
-    return {"status": "created", "message": "Demo request received.", "id": str(lead.id)}
+# ── PUBLIC: Landing page demo request — see demo_request() further down ─────
+#
+# THERE WAS A SECOND HANDLER FOR THIS PATH AND IT COULD NEVER RUN.
+#
+# `POST /leads/demo-request` was declared twice in this file: once here, and
+# once near the bottom with a different request schema, a different response
+# shape, and the notification email to LEAD_NOTIFY_EMAILS. Starlette matches the
+# FIRST registration, so this one always won and the notifying one was dead
+# code that still read like the live path. Its OPTIONS preflight kept answering,
+# so a browser preflight succeeded and the POST then landed on a handler with
+# incompatible required fields.
+#
+# The two are now ONE handler, defined once, below `flag_lead`. It accepts the
+# union of both schemas and answers with the union of both response shapes, so
+# no caller of either version breaks. This comment is all that remains here on
+# purpose: the next person to look for the landing-page endpoint in the obvious
+# place should be told where it went, not find a third copy.
 
 
 class ManualLeadCreate(BaseModel):
@@ -2129,6 +2080,14 @@ def flag_lead(
 # every address in the LEAD_NOTIFY_EMAILS env var (comma-separated, set in Render).
 
 class DemoRequestPayload(BaseModel):
+    """The UNION of the two schemas this path used to have.
+
+    `first_name` is the only required field. The older handler also required
+    `last_name` and `phone`, so widening them to optional cannot break a caller
+    that was already sending them — it only stops rejecting callers the other
+    handler accepted. `notes`, `source` and `tier` come from that older schema
+    and are kept for the same reason.
+    """
     first_name: str
     last_name: Optional[str] = None
     email: Optional[str] = None
@@ -2136,70 +2095,160 @@ class DemoRequestPayload(BaseModel):
     company: Optional[str] = None
     industry: Optional[str] = None
     message: Optional[str] = None
+    notes: Optional[str] = None
+    source: Optional[str] = None
+    tier: Optional[str] = None
+    # Which brand's marketing site this came from. Optional: when absent the
+    # destination is resolved from the request Origin, and failing that from the
+    # single configured intake destination. See app/services/public_intake.py.
+    platform_slug: Optional[str] = None
 
 
-_DEMO_CORS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-}
-
-
-@router.options("/demo-request")
-def demo_request_preflight():
-    from fastapi.responses import JSONResponse
-    return JSONResponse(content={}, headers=_DEMO_CORS)
+# A CEILING ON UNAUTHENTICATED WRITES INTO A CUSTOMER'S WORKSPACE.
+#
+# Both public intake routes create rows in a real organization with no
+# credential at all. Without a ceiling, a script can fill a customer's lead
+# table faster than anyone notices, and the platform's own rule is that
+# production is never contaminated with fabricated prospects. Generous enough
+# that a marketing site having a good day is never throttled, and low enough
+# that a bulk submitter runs out.
+PUBLIC_INTAKE_LIMIT = "20/minute;100/hour"
 
 
 @router.post("/demo-request", status_code=201)
-def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
-    """
-    Public endpoint — no auth required. CORS open to any origin.
-    Accepts a demo request from bookaboost.live and fires notification
-    emails to LEAD_NOTIFY_EMAILS (comma-separated env var).
+@limiter.limit(PUBLIC_INTAKE_LIMIT)
+def demo_request(payload: DemoRequestPayload,
+                 request: Request,
+                 db: Session = Depends(get_db)):
+    """Public demo request from a brand's marketing site. No auth.
+
+    THE DESTINATION IS CONFIGURED, NEVER GUESSED. This used to resolve its
+    organization with `Organization.name.ilike('%bookaboost%')` and, failing
+    that, `db.query(Organization).first()` — so a rename silently redirected
+    public leads and the fallback wrote a stranger's name, phone number and
+    email into whichever paying customer's workspace came back first. It now
+    resolves an explicitly configured `Platform.public_intake_organization_id`
+    and REFUSES when there is none. A refusal is a 503 the operator can see and
+    fix; the alternative was a lead quietly landing in the wrong company.
+
+    CORS IS THE APP'S, NOT THIS ROUTE'S. The dead second copy of this handler
+    set `Access-Control-Allow-Origin: *` by hand while CORSMiddleware was
+    already setting the real origin — two values for one header, which browsers
+    reject outright. Both marketing domains are in ALLOWED_ORIGINS in main.py,
+    which is the one place that decides this.
     """
     import uuid as _uuid
-    from fastapi.responses import JSONResponse
-    from app.models.models import Organization
+    from app.services import public_intake
 
-    # Store in first active org as a web_lead
-    org = db.query(Organization).filter(Organization.is_active == True).first()
-    if org:
-        lead = Lead(
-            id=str(_uuid.uuid4()),
-            organization_id=org.id,
-            first_name=(payload.first_name or "").strip(),
-            last_name=(payload.last_name or "").strip() or None,
-            email=payload.email,
-            phone=payload.phone,
-            status="new",
-            tier="web_lead",
-            source_file="demo_request",
-            message_track="new_inquiry_intro",
-            notes=(
-                f"[Demo Request]\n"
-                f"Company: {payload.company or 'n/a'}\n"
-                f"Industry: {payload.industry or 'n/a'}\n"
-                f"Message: {payload.message or 'n/a'}"
-            ),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    try:
+        platform, org = public_intake.resolve_public_intake(
+            db, platform_slug=payload.platform_slug, origin=origin)
+    except public_intake.IntakeDestinationError as exc:
+        # The operator gets the reason in the log; the public caller gets a
+        # neutral message. Nothing about the platform's configuration, its
+        # organizations or their names is disclosed to an anonymous poster.
+        logging.getLogger(__name__).error(
+            "demo-request refused: %s (origin=%r, slug=%r)",
+            exc.reason, origin, payload.platform_slug)
+        raise HTTPException(
+            status_code=503,
+            detail="We can't accept demo requests right now. Please email us.")
 
-        # PLAN CAPACITY - HELD, NEVER DROPPED. Public, unauthenticated, CORS
-        # open to any origin: external arrival by every definition.
-        from app.services import lead_capacity
-        lead_capacity.hold_if_over_capacity(db, lead, org)
+    notes = payload.notes or ""
+    detail_lines = [
+        "Company: %s" % (payload.company or "n/a"),
+        "Industry: %s" % (payload.industry or "n/a"),
+        "Message: %s" % (payload.message or "n/a"),
+    ]
+    composed_notes = "[Demo Request]\n" + "\n".join(detail_lines)
+    if notes:
+        composed_notes = composed_notes + "\n" + notes
 
-        db.add(lead)
-        try:
-            db.commit()
-        except Exception:
-            db.rollback()
+    # DEDUPE, kept from the handler that was live. A prospect who fills the form
+    # twice is one prospect; the second submission appends to the first rather
+    # than creating a duplicate record for someone to call twice.
+    existing = None
+    if payload.phone:
+        existing = db.query(Lead).filter(
+            Lead.organization_id == org.id,
+            Lead.phone == payload.phone,
+        ).first()
+    if existing is None and payload.email:
+        existing = db.query(Lead).filter(
+            Lead.organization_id == org.id,
+            Lead.email == payload.email,
+        ).first()
 
+    if existing is not None:
+        stamp = datetime.utcnow().strftime("%Y-%m-%d")
+        existing.notes = ("%s\n[New demo request %s]\n%s"
+                          % (existing.notes or "", stamp, composed_notes)).strip()
+        db.commit()
+        _notify_demo_request(payload, platform)
+        return {
+            # BOTH RESPONSE SHAPES. One handler returned {"status": ...} and the
+            # other {"success": ...}; a caller checking either keeps working.
+            "success": True,
+            "status": "updated",
+            "message": "Demo request received. We'll be in touch soon!",
+            "id": str(existing.id),
+        }
+
+    lead = Lead(
+        id=str(_uuid.uuid4()),
+        organization_id=org.id,
+        first_name=(payload.first_name or "").strip(),
+        last_name=((payload.last_name or "").strip() or None),
+        email=(payload.email.strip() if payload.email else None),
+        phone=(payload.phone.strip() if payload.phone else None),
+        status="new",
+        tier=payload.tier or "web_lead",
+        source_file=payload.source or "demo_request",
+        message_track="new_inquiry_intro",
+        notes=composed_notes,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+
+    # PLAN CAPACITY - HELD, NEVER DROPPED. Public and unauthenticated: external
+    # arrival by every definition, and the prospect is real.
+    from app.services import lead_capacity
+    lead_capacity.hold_if_over_capacity(db, lead, org)
+
+    db.add(lead)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="We can't accept demo requests right now. Please email us.")
+
+    _notify_demo_request(payload, platform)
+    return {
+        "success": True,
+        "status": "created",
+        "message": "Demo request received. We'll be in touch soon!",
+        "id": str(lead.id),
+    }
+
+
+def _notify_demo_request(payload: "DemoRequestPayload", platform) -> None:
+    """Email the team. Kept from the handler that could never run — it was the
+    only one that did this, and losing it is how a demo request goes unanswered.
+
+    Never raises: a notification that fails must not lose a lead that was
+    already stored.
+    """
     # Fire notification emails
     notify_raw = os.environ.get("LEAD_NOTIFY_EMAILS", "")
     notify_addrs = [e.strip() for e in notify_raw.split(",") if e.strip()]
+    # The brand the request actually came to, not a hardcoded one. With more
+    # than one marketing site posting here, "New Demo Request — BookaBoost" on
+    # an EvoSys enquiry is a small lie that costs someone a reply.
+    _brand = getattr(platform, "name", None) or "the platform"
+    _site = getattr(platform, "website_url", None) or "the marketing site"
     if notify_addrs:
         try:
             import resend
@@ -2209,7 +2258,7 @@ def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
                 resend.api_key = api_key
                 html_body = f"""
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#222;">
-  <h2 style="color:#1565c0;margin-bottom:16px;">New Demo Request — BookaBoost</h2>
+  <h2 style="color:#1565c0;margin-bottom:16px;">New Demo Request — {_brand}</h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;">
     <tr><td style="padding:6px 12px 6px 0;font-weight:700;color:#555;width:120px;">Name</td>
         <td>{payload.first_name} {payload.last_name or ''}</td></tr>
@@ -2225,7 +2274,7 @@ def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
         <td>{payload.message or '—'}</td></tr>
   </table>
   <p style="margin-top:20px;font-size:12px;color:#888;">
-    Sent from bookaboost.live demo request form.
+    Sent from the {_site} demo request form.
   </p>
 </div>"""
                 resend.Emails.send({
@@ -2236,13 +2285,9 @@ def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
                 })
         except Exception as exc:
             import logging as _log
+            # The exception text only. A payload dump here would put a
+            # prospect's contact details in the log for a delivery failure.
             _log.getLogger(__name__).error("demo_request notify email failed: %s", exc)
-
-    from fastapi.responses import JSONResponse
-    return JSONResponse(
-        content={"success": True, "message": "Demo request received. We'll be in touch soon!"},
-        headers=_DEMO_CORS,
-    )
 
 
 # ── PUBLIC: SMS opt-in form submission (no auth required) ─────────────────────
@@ -2257,11 +2302,17 @@ class SmsOptinRequest(BaseModel):
     source: Optional[str] = "optin_page"
     optin_url: Optional[str] = None
     optin_timestamp: Optional[str] = None
+    # Which brand's opt-in page this came from. Optional for the same reason it
+    # is optional on the demo request: with one configured destination there is
+    # nothing to choose between, and with two the caller has to say.
+    platform_slug: Optional[str] = None
 
 
 @router.post("/sms-optin", status_code=201)
+@limiter.limit(PUBLIC_INTAKE_LIMIT)
 def sms_optin(
     payload: SmsOptinRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -2269,10 +2320,26 @@ def sms_optin(
     Records SMS consent from the /optin page on the Vercel booking app.
     Checks suppression list before creating lead record.
     Used as evidence of opt-in for Twilio A2P 10DLC campaign verification.
+
+    THE DESTINATION IS CONFIGURED, NOT "THE FIRST ACTIVE ORGANIZATION".
+
+    This route had the same defect as the demo-request one directly above, and
+    a worse consequence. It read:
+
+        # Route to the first active organization (Restland).
+        org = db.query(Organization).filter(Organization.is_active == True).first()
+
+    What this endpoint writes is a CONSENT RECORD - the evidence a carrier and
+    the TCPA rely on to show that a specific person agreed to be texted by a
+    specific business. Filing that under whichever organization happened to come
+    back first does not merely misplace a lead; it puts one company's name on
+    another company's consent, and every SMS later sent on the strength of it
+    inherits the mistake. It resolves the same configured destination as every
+    other public intake path now, and refuses when there is none.
     """
     import uuid
-    from app.models.models import Organization
     from app.services.dedup_service import normalize_phone
+    from app.services import public_intake
 
     if not payload.consent:
         raise HTTPException(status_code=400, detail="SMS consent is required.")
@@ -2281,11 +2348,15 @@ def sms_optin(
     if not phone_normalized:
         raise HTTPException(status_code=400, detail="A valid phone number is required.")
 
-    # Route to the first active organization (Restland).
-    # When multi-tenant billing is active, this can be org-scoped via a query param.
-    org = db.query(Organization).filter(Organization.is_active == True).first()
-    if not org:
-        raise HTTPException(status_code=500, detail="No active organization found.")
+    try:
+        _platform, org = public_intake.resolve_public_intake(
+            db, platform_slug=payload.platform_slug, origin=None)
+    except public_intake.IntakeDestinationError as exc:
+        logging.getLogger(__name__).error(
+            "sms-optin refused: %s (slug=%r)", exc.reason, payload.platform_slug)
+        raise HTTPException(
+            status_code=503,
+            detail="We can't record opt-ins right now. Please try again later.")
 
     # Check suppression / DNC list before creating record
     try:

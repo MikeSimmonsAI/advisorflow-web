@@ -124,8 +124,43 @@ def _detect_platform_slug(request: Request) -> str | None:
 # as user_authorized_platform_slugs(). Import above; call below.
 
 
+# ── THE PER-ADDRESS CEILING, ON TOP OF THE PER-ACCOUNT ONE ABOVE ────────────
+#
+# `_login_throttle_check` keys on (IP, EMAIL). That stops someone grinding one
+# account's password, and it is the right shape for that attack. It does
+# nothing at all about the more common one: PASSWORD SPRAYING - a single
+# plausible password tried against hundreds of different addresses. Every one of
+# those attempts lands in its own (IP, email) bucket, none of them ever reaches
+# ten failures, and the throttle never fires.
+#
+# So this adds a second ceiling on the caller's address alone, using the
+# limiter the rest of this codebase already uses rather than a second mechanism.
+# The two are complementary and neither replaces the other.
+#
+# THE NUMBERS ARE CHOSEN FOR A SHARED OFFICE, NOT FOR A LONE BROWSER. A funeral
+# home's whole staff arrives behind one NAT address; a per-minute allowance that
+# assumed one person per IP would lock out a team at 9am. 30/minute absorbs that
+# comfortably. The hourly ceiling is what actually bites a sprayer: sustained
+# attempts at machine speed run out of budget while a real office never
+# approaches it. Neither limit persists past its window, so nobody is ever
+# locked out permanently - which is the whole reason this is a throttle and not
+# a lockout.
+LOGIN_IP_LIMIT = "30/minute;200/hour"
+
+
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit(LOGIN_IP_LIMIT)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    return _do_login(request, form_data, db)
+
+
+def _do_login(request: Request, form_data: OAuth2PasswordRequestForm, db: Session):
+    """The actual sign-in. Undecorated on purpose.
+
+    `/auth/verify` is an alias that has to consume the same budget without
+    charging it twice, which it cannot do by calling a decorated `login`. Both
+    public entry points are decorated; this is not.
+    """
     # Rate-limit check BEFORE hitting the DB so we don't waste queries on locked-out attackers
     _login_throttle_check(request, form_data.username)
 
@@ -249,9 +284,14 @@ def enter_workspace(organization_id: str, request: Request,
 
 
 @router.post("/verify", response_model=TokenResponse)
+@limiter.limit(LOGIN_IP_LIMIT)
 def verify(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """Alias for /auth/login — keeps older frontend builds working."""
-    return login(request, form_data, db)
+    """Alias for /auth/login — keeps older frontend builds working.
+
+    Carries the same per-address ceiling. An alias that skipped it would be a
+    documented way around the limit, which is worse than not having one.
+    """
+    return _do_login(request, form_data, db)
 
 
 @router.post("/refresh")

@@ -30,7 +30,8 @@ from sqlalchemy.orm import Session
 from app.deps import get_db
 from app.models.integration_models import (
     IntegrationCredential, KEY_PREFIX_LEN, INTEGRATION_RETELL,
-    INTEGRATION_RETELL_TENANT, SCOPE_BRAND, SCOPE_TENANT,
+    INTEGRATION_RETELL_TENANT, INTEGRATION_CRM_INBOUND,
+    SCOPE_BRAND, SCOPE_TENANT,
 )
 
 log = logging.getLogger(__name__)
@@ -163,6 +164,31 @@ def require_retell_tenant(cred: IntegrationCredential = Depends(require_integrat
     key is refused by `require_retell` — the two surfaces share a key format and
     nothing else."""
     return _require_kind(cred, INTEGRATION_RETELL_TENANT, SCOPE_TENANT)
+
+
+# THERE IS NO `require_crm_inbound` DEPENDENCY, AND THAT IS DELIBERATE.
+#
+# The Retell routes can use a plain dependency because they have exactly one
+# answer: a valid key of the right kind, or 401. `/crm/inbound/{org_id}` has
+# three - a valid key, no key at all (temporarily allowed for organizations
+# that have not migrated off the bare-UUID path), and a WRONG key (always
+# refused, whatever the organization's mode). A dependency that raises before
+# the handler runs cannot express the middle case, so the route resolves the
+# credential itself with `resolve_credential` and `presented_bearer` below and
+# says out loud which mode it took. A `require_crm_inbound` written here would
+# have been a function nothing calls, which is its own kind of lie about how
+# the endpoint works. Add one when the legacy path is finally closed.
+
+
+def presented_bearer(request: Request) -> Optional[str]:
+    """Did the caller present a Bearer token at all?
+
+    Used by routes that must distinguish "no credential offered" (a legacy
+    caller, which may be temporarily allowed) from "a credential was offered
+    and it was wrong" (always refused). Returns the raw token, so callers must
+    never log or echo the return value.
+    """
+    return _bearer(request)
 
 
 def rate_limit_key(request: Request) -> str:

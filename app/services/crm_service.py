@@ -28,6 +28,8 @@ import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from app.services import crm_secrets
+
 logger = logging.getLogger(__name__)
 
 BB_SIG_HEADER = "X-BookaBoost-Signature"
@@ -78,7 +80,9 @@ def _build_payload(event_type: str, lead: Any, extra: dict, tag: str) -> dict:
 
 def _push_webhook(conn: dict, payload_dict: dict) -> dict:
     payload_json = json.dumps(payload_dict)
-    sig = _sign(conn.get("webhook_secret") or "", payload_json)
+    # The signing secret is stored encrypted; the signature must be computed
+    # over the PLAINTEXT secret or every receiver's verification would fail.
+    sig = _sign(crm_secrets.read_secret(conn.get("webhook_secret")), payload_json)
     headers = {
         "Content-Type": "application/json",
         BB_SIG_HEADER: sig,
@@ -95,7 +99,10 @@ def _push_webhook(conn: dict, payload_dict: dict) -> dict:
 # ── GoHighLevel direct API ────────────────────────────────────────────────────
 
 def _push_gohighlevel(conn: dict, event_type: str, lead: Any, extra: dict, tag: str) -> dict:
-    api_key = conn.get("api_key_encrypted") or ""  # stored as plaintext for now
+    # Decrypted here and nowhere else on this path. `read_secret` also accepts a
+    # legacy plaintext value, so a connection written before the encryption fix
+    # keeps working until the boot migration converts it.
+    api_key = crm_secrets.read_secret(conn.get("api_key_encrypted"))
     if not api_key:
         return {"success": False, "error": "No GHL API key configured"}
 
@@ -162,7 +169,7 @@ def _push_gohighlevel(conn: dict, event_type: str, lead: Any, extra: dict, tag: 
 # ── HubSpot direct API ────────────────────────────────────────────────────────
 
 def _push_hubspot(conn: dict, event_type: str, lead: Any, extra: dict, tag: str) -> dict:
-    api_key = conn.get("api_key_encrypted") or ""
+    api_key = crm_secrets.read_secret(conn.get("api_key_encrypted"))
     if not api_key:
         return {"success": False, "error": "No HubSpot API key configured"}
 
@@ -328,8 +335,12 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
     db.commit()
 
     if created > 0:
+        # CURRENT_TIMESTAMP, not NOW(): NOW() is Postgres-only and raised on
+        # SQLite, so this bookkeeping write took down the whole inbound import
+        # in any environment that was not Postgres — including every test that
+        # tried to exercise it.
         db.execute(text(
-            "UPDATE crm_connections SET last_pull_at = NOW(), "
+            "UPDATE crm_connections SET last_pull_at = CURRENT_TIMESTAMP, "
             "total_pulled = total_pulled + :count "
             "WHERE organization_id = :org_id AND active = TRUE"
         ), {"count": created, "org_id": org_id})

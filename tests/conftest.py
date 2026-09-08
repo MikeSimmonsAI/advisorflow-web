@@ -98,6 +98,58 @@ import app.models.registry  # noqa: F401  (imported for side effects)
 from app.services.auth_service import hash_password
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_allowance():
+    """Give every test its own login-throttle budget. BOTH throttles.
+
+    Under TestClient every request in the entire suite comes from one address
+    ("testclient"), so anything that counts per client really counts per SUITE.
+    Two independent mechanisms do that on the login path and both keep their
+    state in module-level memory that no test clears:
+
+      * slowapi, behind app.state.limiter, for the per-address ceiling.
+      * auth_router._login_failures, the hand-rolled per-(IP, email) brute-force
+        throttle - 10 failures per 15 minutes, and the suite runs in about 11,
+        so nothing in a single run ever ages out of that window.
+
+    The second one is the one that actually bit. Tests that deliberately send
+    wrong passwords for `sample_advisor` filled its bucket, and five unrelated
+    tests much later - all of which log in as that same advisor - got 429 where
+    they expected 200 or 401. Every one of them passes alone, which is exactly
+    how this kind of coupling hides.
+
+    This is NOT a weakened limit. Neither threshold changes, and the tests that
+    assert a throttle exhaust their budget inside one test, which is how it
+    behaves in production too. What is removed is one test's failures leaking
+    into another test's login.
+
+    tests/test_self_password_change.py has carried a local copy of the slowapi
+    half since /auth/change-password was limited; that copy is now redundant
+    rather than wrong.
+    """
+    from app.main import app
+    from app.routers import auth_router
+
+    def _clear():
+        limiter = getattr(app.state, "limiter", None)
+        if limiter is not None:
+            try:
+                limiter.reset()
+            except Exception:
+                pass
+        try:
+            with auth_router._login_lock:
+                auth_router._login_failures.clear()
+        except Exception:
+            pass
+
+    _clear()
+    yield
+    # Also on the way out, so a test that fills a bucket does not hand it to
+    # whatever runs next even if that test failed part-way through.
+    _clear()
+
+
 @pytest.fixture()
 def db_session():
     """

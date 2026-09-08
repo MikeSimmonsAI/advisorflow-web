@@ -8,23 +8,39 @@ Endpoints:
   DELETE /crm/connections/{id}        remove a connection
   POST   /crm/connections/{id}/test   send a test webhook
   POST   /crm/inbound/{org_id}        receive leads pushed FROM a CRM (pull-in)
+
+SECRETS. `webhook_secret` and `api_key_encrypted` are encrypted at rest with the
+platform's Fernet key (app/services/crm_secrets.py) and are never returned by
+any endpoint here. They were plaintext until 2026-09-08 — the api_key one inside
+a column whose name said otherwise.
+
+INBOUND AUTH. `/crm/inbound/{org_id}` no longer treats the organization UUID as
+a credential. It takes a scoped IntegrationCredential of kind `crm_inbound`, and
+temporarily still accepts unauthenticated calls from organizations that have not
+yet migrated — explicitly, visibly, and never described as secure. See the
+docstring on `inbound_leads`.
 """
 
 import ipaddress
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User
-from app.services import crm_service
+from app.services import crm_service, crm_secrets
+from app.services import integration_auth
+from app.models.integration_models import (
+    IntegrationRequestLog, INTEGRATION_CRM_INBOUND, ACTION_INBOUND, SCOPE_TENANT,
+)
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -70,7 +86,9 @@ class CRMConnectionCreate(BaseModel):
     crm_type: str = "webhook"          # webhook | gohighlevel | hubspot
     webhook_url: Optional[str] = None
     webhook_secret: Optional[str] = None
-    api_key: Optional[str] = None      # stored as api_key_encrypted (plaintext for now)
+    # Encrypted with the platform's Fernet key before it reaches the database,
+    # and never returned by any endpoint. See app/services/crm_secrets.py.
+    api_key: Optional[str] = None
     api_base_url: Optional[str] = None
     sync_mode: str = "push_only"       # push_only | pull_only | two_way
     push_events: list[str] = ["booking", "status_change"]
@@ -184,15 +202,17 @@ def create_connection(
         VALUES
             (:id, :org_id, :name, :crm_type, :webhook_url, :webhook_secret,
              :api_key, :api_base_url, :sync_mode, :push_events,
-             :annotation_tag, :active, NOW())
+             :annotation_tag, :active, CURRENT_TIMESTAMP)
     """), {
         "id": conn_id,
         "org_id": org_id,
         "name": payload.name,
         "crm_type": payload.crm_type,
         "webhook_url": _validate_webhook_url(payload.webhook_url),
-        "webhook_secret": payload.webhook_secret,
-        "api_key": payload.api_key,
+        # ENCRYPTED ON THE WAY IN. Both of these were written as plaintext, the
+        # api_key one into a column literally named `api_key_encrypted`.
+        "webhook_secret": crm_secrets.store_secret(payload.webhook_secret),
+        "api_key": crm_secrets.store_secret(payload.api_key),
         "api_base_url": payload.api_base_url,
         "sync_mode": payload.sync_mode,
         "push_events": json.dumps(payload.push_events),
@@ -222,9 +242,9 @@ def update_connection(
     if payload.webhook_url is not None:
         updates["webhook_url"] = _validate_webhook_url(payload.webhook_url)
     if payload.webhook_secret is not None:
-        updates["webhook_secret"] = payload.webhook_secret
+        updates["webhook_secret"] = crm_secrets.store_secret(payload.webhook_secret)
     if payload.api_key is not None:
-        updates["api_key_encrypted"] = payload.api_key
+        updates["api_key_encrypted"] = crm_secrets.store_secret(payload.api_key)
     if payload.api_base_url is not None:
         updates["api_base_url"] = payload.api_base_url
     if payload.sync_mode is not None:
@@ -303,21 +323,124 @@ def test_connection(
     }
 
 
+MODE_SECURE = "secure"
+MODE_LEGACY = "legacy"
+
+# One refusal for every way of failing. A caller must not be able to tell
+# "wrong key" from "no such organization" from "legacy is closed here" — each
+# distinction is free reconnaissance for whoever is probing.
+_INBOUND_REFUSED = "Invalid or missing integration credential."
+
+
+def _log_inbound(db: Session, *, org_id: str, cred, mode: str,
+                 success: bool, status_code: int, detail: str) -> None:
+    """Append-only record of one inbound push. Never writes a secret.
+
+    Only the non-secret key prefix is stored, exactly as the Retell integration
+    surface does. A legacy call has no credential at all, and says so, which is
+    what makes "who is still on the old path?" a query instead of a guess.
+    """
+    try:
+        db.add(IntegrationRequestLog(
+            credential_id=cred.id if cred else None,
+            integration_name=(cred.name if cred else "crm-inbound-legacy"),
+            key_prefix=(cred.key_prefix if cred else None),
+            action=ACTION_INBOUND,
+            organization_id=org_id,
+            success=success,
+            status_code=status_code,
+            detail="mode=%s %s" % (mode, detail),
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Observability must never be the reason an accepted lead is lost.
+        logging.getLogger(__name__).exception(
+            "crm inbound: could not write request log for org %s", org_id)
+
+
 @router.post("/inbound/{org_id}")
 def inbound_leads(
     org_id: str,
     payload: InboundPayload,
+    request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
-    """
-    CRM pushes contacts here. No auth required — org_id serves as the token
-    (it's a UUID, opaque to external parties).
-    Accepts either a `records` array or a single contact at the root level.
+    """A customer's CRM pushes contacts into that customer's workspace.
+
+    TWO MODES, AND THEY ARE NEVER CONFUSED FOR EACH OTHER.
+
+    SECURE — `Authorization: Bearer <key>`, an IntegrationCredential of kind
+    `crm_inbound` scoped to THIS organization. The key is matched by its
+    non-secret prefix and then verified with a constant-time compare against a
+    stored SHA-256; the secret itself is not in the database to be stolen. A key
+    issued for another organization is refused here, and a Retell key of either
+    kind is refused outright — scope is fixed at issue time and cannot be
+    widened by the caller.
+
+    LEGACY — no credential, admitted only while this organization still has
+    `crm_inbound_secure_required` unset. This exists because the endpoint used
+    to accept the organization UUID as its entire credential, and a customer's
+    CRM may be posting that way right now; closing it on deploy would break a
+    live integration silently. Every legacy call is logged, audited, and
+    answered with `Deprecation` and `Warning` headers plus `auth_mode: legacy`
+    in the body, so the mode is visible to the caller and countable by us. It is
+    never described as secure.
+
+    A BAD CREDENTIAL IS NEVER DOWNGRADED TO LEGACY. If a Bearer token is present
+    it must be valid for this organization, whatever the organization's mode —
+    otherwise an attacker could get in simply by sending a wrong key badly.
     """
     from app.models.models import Organization
+
     org = db.query(Organization).filter_by(id=org_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+    presented = integration_auth.presented_bearer(request)
+
+    # ORGANIZATION EXISTENCE IS NOT LEAKED. An unknown org id and a known one
+    # the caller has no key for return the same 401, so this endpoint cannot be
+    # used to confirm that an organization exists.
+    if org is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=_INBOUND_REFUSED,
+                            headers={"WWW-Authenticate": "Bearer"})
+
+    cred = None
+    mode = MODE_LEGACY
+
+    if presented:
+        cred = integration_auth.resolve_credential(db, presented)
+        scope_ok = False
+        if cred is not None:
+            try:
+                scope_ok = (cred.kind == INTEGRATION_CRM_INBOUND
+                            and cred.scope_kind() == SCOPE_TENANT
+                            and str(cred.organization_id) == str(org_id))
+            except ValueError:
+                # Scoped to both trees or neither: unresolvable, so refused.
+                scope_ok = False
+        if not scope_ok:
+            _log_inbound(db, org_id=org_id, cred=None, mode=MODE_SECURE,
+                         success=False, status_code=401,
+                         detail="credential rejected")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail=_INBOUND_REFUSED,
+                                headers={"WWW-Authenticate": "Bearer"})
+        mode = MODE_SECURE
+        try:
+            cred.last_used_at = datetime.utcnow()
+            db.add(cred)
+            db.flush()
+        except Exception:
+            pass  # bookkeeping only
+
+    elif getattr(org, "crm_inbound_secure_required", False):
+        _log_inbound(db, org_id=org_id, cred=None, mode=MODE_LEGACY,
+                     success=False, status_code=401,
+                     detail="legacy closed for this organization")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=_INBOUND_REFUSED,
+                            headers={"WWW-Authenticate": "Bearer"})
 
     records: list[dict] = []
     if payload.records:
@@ -329,7 +452,29 @@ def inbound_leads(
             records = [root]
 
     if not records:
-        return {"created": 0, "skipped": 0, "total": 0}
+        result = {"created": 0, "skipped": 0, "total": 0}
+    else:
+        result = crm_service.import_inbound_leads(db, org_id, records)
 
-    result = crm_service.import_inbound_leads(db, org_id, records)
+    _log_inbound(
+        db, org_id=org_id, cred=cred, mode=mode, success=True, status_code=200,
+        detail="created=%s skipped=%s held=%s total=%s" % (
+            result.get("created"), result.get("skipped"),
+            result.get("held_over_capacity"), result.get("total")),
+    )
+
+    result = dict(result)
+    result["auth_mode"] = mode
+    if mode == MODE_LEGACY:
+        # Say it in the protocol, not only in our logs. A CRM vendor reading
+        # response headers finds out before we have to write to them.
+        response.headers["Deprecation"] = "true"
+        response.headers["Warning"] = (
+            '299 - "Unauthenticated CRM inbound is deprecated. Request a '
+            'per-organization integration key and send it as an Authorization: '
+            'Bearer header."')
+        result["deprecation"] = (
+            "This endpoint was called without an integration credential. "
+            "Unauthenticated inbound is deprecated and will be closed for this "
+            "organization once its integration is migrated.")
     return result
