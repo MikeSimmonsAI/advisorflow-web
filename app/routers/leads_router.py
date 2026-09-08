@@ -1762,14 +1762,6 @@ def create_demo_request(
         db.commit()
         return {"status": "updated", "message": "Demo request received."}
 
-    # PLAN LIMIT. This lands in whichever org the marketing site is filed
-    # under, so it is checked like any other. In practice that org has no
-    # configured plan and the guard resolves to unlimited - but if one is ever
-    # configured, the ceiling applies here too rather than this being the one
-    # unauthenticated door that ignores it.
-    from app.services import plan_limits
-    plan_limits.require_capacity(db, bookaboost_org, plan_limits.LIMIT_LEADS, adding=1)
-
     lead = Lead(
         id=str(uuid.uuid4()),
         organization_id=bookaboost_org.id,
@@ -1783,6 +1775,12 @@ def create_demo_request(
         status='new',
         created_at=datetime.utcnow(),
     )
+
+    # PLAN CAPACITY - HELD, NEVER DROPPED. A public demo request is external
+    # arrival; nobody is watching, and the prospect is real.
+    from app.services import lead_capacity
+    lead_capacity.hold_if_over_capacity(db, lead, bookaboost_org)
+
     db.add(lead)
     db.commit()
     return {"status": "created", "message": "Demo request received.", "id": str(lead.id)}
@@ -1842,12 +1840,18 @@ def create_lead_manually(
                 dup_of = existing.id
                 break
 
-    # PLAN LIMIT. The ordinary single-create path from the Leads screen -
-    # charged to the org the row lands in, which this endpoint sets to the
-    # user's own organization.
-    from app.services import plan_limits
-    plan_limits.require_capacity_for_org_id(
-        db, current_user.organization_id, plan_limits.LIMIT_LEADS, adding=1)
+    # PLAN CAPACITY - USER-INITIATED, SO REFUSED CLEANLY.
+    #
+    # Somebody is sitting at the Leads screen and clicked Add. They are
+    # present, they can be told, and they can act on it - so this returns a
+    # structured PLAN_CAPACITY_REACHED naming the resource, the current count
+    # and the limit, rather than silently holding a lead they think they just
+    # created. Holding is for arrivals nobody is watching.
+    from app.models.models import Organization
+    from app.services import lead_capacity
+    _org = (db.query(Organization)
+            .filter(Organization.id == current_user.organization_id).first())
+    lead_capacity.require_capacity_user_initiated(db, _org, adding=1)
 
     lead = Lead(
         id=str(uuid.uuid4()),
@@ -2161,11 +2165,6 @@ def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
     # Store in first active org as a web_lead
     org = db.query(Organization).filter(Organization.is_active == True).first()
     if org:
-        # PLAN LIMIT. Same reasoning as the other public demo-request door:
-        # whichever org this lands in, its ceiling applies here too.
-        from app.services import plan_limits
-        plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
-
         lead = Lead(
             id=str(_uuid.uuid4()),
             organization_id=org.id,
@@ -2186,6 +2185,12 @@ def demo_request(payload: DemoRequestPayload, db: Session = Depends(get_db)):
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
+
+        # PLAN CAPACITY - HELD, NEVER DROPPED. Public, unauthenticated, CORS
+        # open to any origin: external arrival by every definition.
+        from app.services import lead_capacity
+        lead_capacity.hold_if_over_capacity(db, lead, org)
+
         db.add(lead)
         try:
             db.commit()
@@ -2311,11 +2316,6 @@ def sms_optin(
         db.commit()
         return {"success": True, "lead_id": existing.id, "action": "updated"}
 
-    # PLAN LIMIT. An SMS opt-in that is not already on file creates a lead in
-    # this org, so it goes through the same guard as every other door.
-    from app.services import plan_limits
-    plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
-
     lead = Lead(
         id=str(uuid.uuid4()),
         organization_id=org.id,
@@ -2336,6 +2336,16 @@ def sms_optin(
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
+
+    # PLAN CAPACITY - HELD, NEVER DROPPED.
+    #
+    # Somebody typed their number into an opt-in page and consented to be
+    # texted. Throwing that away over a billing ceiling would discard a
+    # written consent record, which is the one artefact this platform can
+    # least afford to lose.
+    from app.services import lead_capacity
+    lead_capacity.hold_if_over_capacity(db, lead, org)
+
     db.add(lead)
     db.commit()
     db.refresh(lead)

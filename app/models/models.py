@@ -695,6 +695,22 @@ class Lead(Base):
     status = Column(String, default="new")  # new, sent, replied, hot, booked, dnc, etc
     source_year = Column(Integer, nullable=True)  # e.g. 2012, 2013 (which cohort batch)
     source_file = Column(String, nullable=True)  # original upload filename for traceability
+    # WHERE THIS LEAD CAME FROM, for arrivals that are not a file.
+    #
+    # P0 DEFECT THIS FIXES. Four ingestion paths - social_webhooks_router,
+    # fiber_intake_router, fiber_leads_router and lead_scraper_router - have
+    # all been passing `source=` to Lead() against a column that did not
+    # exist. SQLAlchemy's declarative constructor rejects unknown keyword
+    # arguments, so EVERY social lead-gen webhook, every public fiber intake
+    # submission, every field capture and every scraper import raised
+    # TypeError at the moment of creating the lead. None of those four paths
+    # had a single test, which is exactly why it survived: the suite was green
+    # and the feature was dead.
+    #
+    # `source_file` was not reused for them. It means "the spreadsheet this
+    # row came out of", and writing "facebook" into it would corrupt the one
+    # column import traceability depends on.
+    source = Column(String, nullable=True)  # "facebook" | "fiber_intake" | ...
 
     # CRM history carried over from import - feeds the AI lead-quality analysis
     # Mike requested (last action taken + last contact date + original status
@@ -733,6 +749,30 @@ class Lead(Base):
     # the pair is not re-flagged unless the identifying data materially changes.
     duplicate_resolved_at = Column(DateTime, nullable=True)
     duplicate_resolved_by = Column(String, nullable=True)  # user id
+
+    # ── Capacity hold ─────────────────────────────────────────────────────
+    #
+    # An inbound prospect that arrived while the customer was at their plan's
+    # lead ceiling. THE LEAD IS KEPT. Refusing it would mean a real family who
+    # filled in a form is thrown away because of a billing number, which is
+    # not a decision a lead platform gets to make on the customer's behalf.
+    #
+    # Shaped like `is_duplicate` and for the same reason: a flag BESIDE
+    # `status`, never a value inside it. `status` says what the lead is;
+    # this says whether the plan can currently act on it. Overwriting status
+    # would destroy the former and break every `status == "new"` filter.
+    #
+    # While held the lead is excluded from SMS, email, voice, cadence
+    # enrollment, cadence steps, AI conversations and auto-send - by a direct
+    # check at each of those sites, exactly as `dnc` and `is_duplicate` are
+    # enforced, because this codebase has no single send chokepoint.
+    #
+    # It also does NOT count toward plan usage while held, so the ceiling
+    # stays meaningful and "used" stays truthful about what is consuming it.
+    capacity_state        = Column(String, nullable=True)   # None | "over_capacity"
+    capacity_held_at      = Column(DateTime, nullable=True)
+    capacity_hold_reason  = Column(String, nullable=True)   # e.g. "max_leads"
+    capacity_released_at  = Column(DateTime, nullable=True)
     duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
 
     # Physical address — collected at import or via lead edit

@@ -128,7 +128,7 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
     from app.services import plan_limits
     capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
 
-    limit_stopped = 0
+    capacity_blocked = 0
 
     for row in rows:
         if row.review_status == ImportRowReviewStatus.COMMITTED:
@@ -147,10 +147,14 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
             and row.review_status == ImportRowReviewStatus.MERGED)
 
         if not _is_merge and not capacity.has_room(1):
-            # Out of plan capacity. Stop, leaving the remaining rows in their
-            # current reviewed state so the import can be resumed after an
-            # upgrade. They are NOT rejected - there is nothing wrong with them.
-            limit_stopped += 1
+            # CAPACITY-BLOCKED IS NOT BAD DATA.
+            #
+            # The row stays in its current reviewed state so the import can be
+            # resumed after an upgrade. It is NOT marked REJECTED - there is
+            # nothing wrong with it, and telling the customer their data was
+            # rejected when their plan simply filled up sends them hunting a
+            # problem that does not exist.
+            capacity_blocked += 1
             continue
 
         try:
@@ -224,20 +228,22 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
 
     batch.recount(db)
     _limit_note = ""
-    if limit_stopped:
-        # Say WHY, in the batch itself. An import that silently stops short is
-        # how somebody concludes the importer lost their data.
+    if capacity_blocked:
+        # Say WHY, in the batch itself, and say it as CAPACITY - not as an
+        # error. An import that silently stops short is how somebody concludes
+        # the importer lost their data.
         _limit_note = (
-            f"{limit_stopped} row(s) were not imported because the plan's lead "
-            f"limit ({capacity.limit}) was reached. They remain reviewed and "
-            f"can be committed after an upgrade.")
+            f"PLAN_CAPACITY_REACHED: {capacity_blocked} row(s) were not imported "
+            f"because the plan's lead limit ({capacity.limit}) was reached. "
+            f"They are valid, remain reviewed, and can be committed after an "
+            f"upgrade. This is not a data problem.")
 
-    if ok_count > 0 and fail_count == 0 and not limit_stopped:
+    if ok_count > 0 and fail_count == 0 and not capacity_blocked:
         batch.status = ImportBatchStatus.COMMITTED
     elif ok_count > 0:
         batch.status = ImportBatchStatus.PARTIALLY_COMMITTED
         batch.error_message = _limit_note or batch.error_message
-    elif limit_stopped:
+    elif capacity_blocked:
         batch.status = ImportBatchStatus.FAILED
         batch.error_message = _limit_note
     else:

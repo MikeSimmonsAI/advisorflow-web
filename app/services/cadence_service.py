@@ -124,6 +124,12 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
         return None
     if lead.is_duplicate:
         return None
+    # PLAN CAPACITY HOLD. A cadence is a standing commitment to spend on this
+    # lead nine more times; enrolling a held prospect would turn one webhook
+    # arrival the plan does not cover into nine paid messages.
+    from app.services.lead_capacity import is_held
+    if is_held(lead):
+        return None
     if lead.contact_channel == "email_only":
         return None  # email-only leads use the email nurture flow, not SMS cadence
 
@@ -265,6 +271,7 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
     Returns a summary of what was sent / skipped / completed / errored,
     for logging or an admin-facing "last cadence run" view.
     """
+    from app.services.lead_capacity import is_held
     now = datetime.now(timezone.utc)
     query = (
         db.query(CadenceState)
@@ -291,6 +298,15 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
                 db, lead.id,
                 "stopped_dnc" if lead.status == "dnc" else "stopped_replied",
             )
+            continue
+
+        # PLAN CAPACITY HOLD, re-checked per step and not only at enrollment.
+        # A lead can be held AFTER it entered a cadence - it cannot today, but
+        # a future hold reason could - and a running cadence that ignored the
+        # hold would keep spending on schedule for weeks. Skipped rather than
+        # stopped: the hold is temporary and the cadence should resume where it
+        # left off once capacity exists, not be torn down and restarted.
+        if is_held(lead):
             continue
         has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
         if has_reply:

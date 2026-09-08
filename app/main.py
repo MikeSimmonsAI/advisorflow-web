@@ -979,9 +979,69 @@ async def on_startup():
     asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
 
 
+def _build_metadata() -> dict:
+    """What commit is actually running, from the deployment environment.
+
+    ═══════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ═══════════════════════════════════════════════════════════════════════
+
+    Because "is my change live?" had no answer. A push, a green build and a
+    healthy service prove that SOMETHING is deployed; they do not prove WHICH
+    commit, and a change that adds no new route is invisible from outside.
+    Verification degenerated into waiting a plausible number of minutes and
+    assuming - which is exactly how a stale build gets signed off.
+
+    Render sets RENDER_GIT_COMMIT on every deploy. It is read here, never
+    hard-coded: a literal hash in source would be a number that agreed with
+    itself and told nobody anything, and it would go stale the moment it
+    mattered.
+
+    NOTHING SENSITIVE. A commit SHA, a branch name and an environment label
+    are already public in the repository. No token, no repository URL with
+    credentials, no other environment variables - this endpoint is
+    unauthenticated, so it may only ever say things that are safe for anyone
+    to read.
+
+    Absent metadata reports "unknown" rather than failing. Local development
+    has no RENDER_GIT_COMMIT and must still boot and answer.
+    """
+    import os as _os
+
+    commit = (_os.environ.get("RENDER_GIT_COMMIT")
+              or _os.environ.get("GIT_COMMIT")
+              or _os.environ.get("SOURCE_VERSION")   # generic PaaS fallback
+              or "unknown")
+    branch = _os.environ.get("RENDER_GIT_BRANCH") or "unknown"
+
+    # RENDER_SERVICE_ID present means a Render deploy; its absence means local
+    # or another host. Stated rather than guessed at from the hostname.
+    environment = ("production" if _os.environ.get("RENDER_SERVICE_ID")
+                   else "development")
+
+    return {
+        "commit": commit,
+        "commit_short": commit[:7] if commit != "unknown" else "unknown",
+        "branch": branch,
+        "environment": environment,
+    }
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "phase": "1"}
+    # `status` and `phase` are unchanged so nothing consuming this breaks;
+    # `build` is added alongside them.
+    return {"status": "ok", "phase": "1", "build": _build_metadata()}
+
+
+@app.get("/version")
+def version():
+    """The same build metadata on its own, for deploy verification.
+
+    Separate from /health so a deploy check does not depend on the shape of a
+    liveness probe, and so a monitor can poll one without parsing the other.
+    """
+    return _build_metadata()
 
 
 # touched Thu Jul  9 12:08:59 UTC 2026

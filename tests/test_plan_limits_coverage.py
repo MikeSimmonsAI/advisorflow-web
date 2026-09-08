@@ -69,7 +69,15 @@ def _constructs_user_or_lead(src: str) -> bool:
 
 
 def _reaches_plan_limits(src: str) -> bool:
-    return "plan_limits" in src
+    """Either guard counts, because there are two doors into one decision.
+
+    `plan_limits` is the ceiling itself. `lead_capacity` is the arrival policy
+    built on top of it - it decides hold-vs-refuse and then calls plan_limits
+    to answer "is there room". A file that reaches either one has asked the
+    question; a file that reaches neither has not, and that is the only thing
+    this test is looking for.
+    """
+    return "plan_limits" in src or "lead_capacity" in src
 
 
 def test_every_user_or_lead_creation_file_reaches_the_plan_limit_guard():
@@ -149,6 +157,88 @@ def test_seat_usage_counts_memberships_not_just_homed_users():
     assert "SCOPE_CUSTOMER_ORG" in src, (
         "plan_limits.usage_for counts only User.organization_id. A person "
         "seconded into a customer workspace by membership would be free.")
+
+
+# Paths where a prospect ARRIVES rather than being typed in. Each must reach
+# lead_capacity.hold_if_over_capacity - i.e. keep the lead - and must NOT
+# refuse it. Listed explicitly so that adding a new webhook without a hold is
+# a decision somebody has to make here, in the open.
+INBOUND_PATHS = {
+    "routers/social_webhooks_router.py",
+    "routers/fiber_intake_router.py",
+    "routers/lead_scraper_router.py",
+    "services/crm_service.py",
+    "services/tenant_scheduling.py",
+}
+
+
+def test_every_inbound_arrival_path_holds_rather_than_refuses():
+    """THE policy regression.
+
+    The first ceiling refused every path equally, public webhooks included -
+    a real family filled in a form and the platform threw them away over a
+    billing number. If one of these files ever calls a refusing guard again
+    instead of holding, that decision comes back silently.
+    """
+    wrong = []
+    for rel in sorted(INBOUND_PATHS):
+        p = os.path.join(APP, rel.replace("/", os.sep))
+        src = open(p, encoding="utf-8").read()
+
+        if "hold_if_over_capacity" not in src:
+            wrong.append(f"{rel}: does not hold inbound leads over capacity")
+
+        # The refusing guards. `require_capacity(` and
+        # `require_capacity_user_initiated(` both raise; neither belongs on a
+        # path where nobody is watching to be told.
+        if "require_capacity" in src:
+            wrong.append(
+                f"{rel}: calls a REFUSING capacity guard. Inbound arrival "
+                f"must hold the prospect, never discard it.")
+
+    assert not wrong, "\n  ".join([""] + wrong)
+
+
+def test_user_initiated_paths_refuse_rather_than_hold():
+    """The other half. Somebody is present, so tell them.
+
+    Silently holding a lead the user believes they just created would be its
+    own kind of lie.
+    """
+    for rel in ("routers/fiber_leads_router.py",):
+        src = open(os.path.join(APP, rel.replace("/", os.sep)),
+                   encoding="utf-8").read()
+        assert "require_capacity_user_initiated" in src, (
+            f"{rel} is a user-initiated create path and must refuse with a "
+            f"structured PLAN_CAPACITY_REACHED, not hold silently.")
+
+
+def test_the_held_state_is_excluded_from_every_paid_resource_path():
+    """`dnc` is enforced by a check at each consumer; so is the hold.
+
+    If a consumer gains a dnc check but not a hold check, the customer gets
+    billed for outreach on a prospect their plan does not cover.
+    """
+    must_gate = {
+        "services/sms_service.py": "SMS",
+        "services/cadence_service.py": "cadence",
+        "services/ai_conversation_service.py": "AI conversations",
+        "services/voice_orchestrator.py": "voice",
+        "services/pipeline_service.py": "pipeline outreach",
+        "services/qualification.py": "qualification",
+        "services/compliance_service.py": "the compliance preflight",
+        "routers/auto_send_router.py": "auto-send selection",
+    }
+    missing = []
+    for rel, label in must_gate.items():
+        src = open(os.path.join(APP, rel.replace("/", os.sep)),
+                   encoding="utf-8").read()
+        if "is_held" not in src and "capacity_state" not in src:
+            missing.append(f"{rel} ({label})")
+
+    assert not missing, (
+        "These paths can spend money on a lead but do not check the capacity "
+        "hold:\n  " + "\n  ".join(missing))
 
 
 def test_bypass_reasons_are_all_role_restricted_and_explained():

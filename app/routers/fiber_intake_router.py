@@ -370,12 +370,6 @@ def fiber_intake_submit(
             }.items() if v
         }
 
-        # PLAN LIMIT. Public intake is still lead creation in a customer's
-        # organization, and a limit only the authenticated screens honour is
-        # not a limit.
-        from app.services import plan_limits
-        plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
-
         lead = Lead(
             id=str(uuid.uuid4()),
             organization_id=org.id,
@@ -391,9 +385,17 @@ def fiber_intake_submit(
             tier="prospect",
             message_track="new_inquiry_intro",
         )
+
+        # PLAN CAPACITY - HELD, NEVER DROPPED. External arrival: somebody
+        # filled in the public intake form. The prospect is kept with its
+        # service address, consent record and payload intact, and excluded
+        # from every paid path until there is room.
+        held = lead_capacity.hold_if_over_capacity(db, lead, org)
+
         db.add(lead)
         db.commit()
-        logger.info("fiber_intake: created lead %s for org %s", lead.id, org.id)
+        logger.info("fiber_intake: created lead %s for org %s%s", lead.id, org.id,
+                    " [HELD - plan lead limit reached]" if held else "")
     else:
         # Update service address + extra data if they re-submit
         existing.service_address = service_address.strip()

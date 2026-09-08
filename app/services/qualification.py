@@ -608,6 +608,19 @@ def qualify_one(lead: Lead, channel: str, ctx: QualificationContext) -> Dict[str
     if (getattr(lead, "status", None) or "").lower() == "dnc":
         return _decision(lead, EXCLUDED, [reason("dnc")], channel)
 
+    # PLAN CAPACITY HOLD -> EXCLUDED.
+    #
+    # Not REVIEW_REQUIRED. Review means a human could look at this and decide
+    # to send it anyway, and that is exactly what must not happen here: no
+    # amount of reviewing creates plan capacity. EXCLUDED is the honest bucket,
+    # and it keeps held prospects out of every count the send screens build.
+    #
+    # This is a lead the platform is holding FOR the customer, not a lead with
+    # anything wrong with it - which is why the reason code says capacity.
+    from app.services.lead_capacity import is_held
+    if is_held(lead):
+        return _decision(lead, EXCLUDED, [reason("over_plan_capacity")], channel)
+
     if (getattr(lead, "manual_flag", None) or "") == "remove_all":
         detail = getattr(lead, "manual_flag_reason", None) or ""
         return _decision(lead, EXCLUDED, [reason("flagged_remove_all", detail)], channel)

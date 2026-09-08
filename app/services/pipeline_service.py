@@ -533,7 +533,10 @@ def launch_pipeline(
 
     for lead in leads:
         try:
-            if lead.status == "dnc" or lead.is_duplicate:
+            from app.services.lead_capacity import is_held
+            # PLAN CAPACITY HOLD alongside the DNC and duplicate checks: a
+            # pipeline conversation is an outbound commitment like any other.
+            if lead.status == "dnc" or lead.is_duplicate or is_held(lead):
                 skipped += 1
                 continue
 

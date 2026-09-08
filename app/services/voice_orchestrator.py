@@ -78,6 +78,15 @@ def check_call_eligibility(db: Session, lead: Lead, organization_id: str,
     if (lead.status or "").lower() == "dnc":
         return Eligibility(False, "Lead is marked do-not-contact.", "lead_dnc")
 
+    # PLAN CAPACITY HOLD. A voice call is the most expensive thing this
+    # platform can do on a lead's behalf, per minute and per attempt.
+    from app.services.lead_capacity import is_held
+    if is_held(lead):
+        return Eligibility(False,
+                           "Lead is held over plan capacity - not callable "
+                           "until capacity is available or the plan is upgraded.",
+                           "lead_over_capacity")
+
     # THE ORG-WIDE SUPPRESSION AUTHORITY — the same list Twilio SMS consults.
     # This is the check the legacy Twilio voice path never made: a number could
     # sit on the suppression list while its Lead.status was never flipped, and

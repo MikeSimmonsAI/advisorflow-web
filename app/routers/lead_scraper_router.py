@@ -344,7 +344,7 @@ def scrape_import(
     imported = 0
     skipped = 0
 
-    # PLAN LIMIT - ENFORCED, NOT BYPASSED.
+    # PLAN CAPACITY - ENFORCED, NOT BYPASSED.
     #
     # This is god-only, but that is about who may run it, not about whose
     # leads these are. Scraped businesses become the CUSTOMER's leads and
@@ -352,8 +352,10 @@ def scrape_import(
     # waive the ceiling would make the ceiling meaningless the moment an
     # import is done on a customer's behalf, which is how these imports
     # normally happen.
-    from app.services import plan_limits
+    from app.models.models import Organization
+    from app.services import lead_capacity, plan_limits
     capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
+    _org_row = db.query(Organization).filter(Organization.id == org_id).first()
     over_limit = 0
 
     for biz in req.leads:
@@ -395,11 +397,6 @@ def scrape_import(
         if phone_type:
             notes_parts.append(f"Phone type: {phone_type}")
 
-        if not capacity.has_room(1):
-            over_limit += 1
-            continue
-        capacity.take(1)
-
         lead = Lead(
             id=str(uuid.uuid4()),
             organization_id=org_id,
@@ -415,19 +412,28 @@ def scrape_import(
             import_list_name=list_name,
             notes="\n".join(notes_parts),
         )
+
+        # PLAN CAPACITY - HELD, NEVER DROPPED. Scraper import is automation:
+        # the businesses were already gathered, and discarding them at write
+        # time would mean re-running the whole scrape after an upgrade to get
+        # back data the platform already had in hand.
+        if lead_capacity.hold_if_over_capacity(db, lead, _org_row,
+                                               counter=capacity):
+            over_limit += 1
+
         db.add(lead)
         imported += 1
 
     db.commit()
     logger.info(
-        "scraper_import: org=%s list='%s' imported=%d skipped=%d over_plan_limit=%d",
+        "scraper_import: org=%s list='%s' imported=%d skipped=%d held_over_capacity=%d",
         org_id, list_name, imported, skipped, over_limit,
     )
     return {"success": True, "imported": imported, "skipped": skipped,
             "list_name": list_name,
             # Reported apart from `skipped`, which means "already had this
-            # phone". An over-limit row is not a duplicate; it is a row the
-            # plan would not hold, and the operator must be able to tell the
-            # customer which of the two happened.
-            "over_plan_limit": over_limit,
+            # phone". A held row is not a duplicate; it is a real prospect the
+            # plan cannot be worked against yet, and the operator must be able
+            # to tell the customer which of the two happened.
+            "held_over_capacity": over_limit,
             "plan_lead_limit": capacity.limit}

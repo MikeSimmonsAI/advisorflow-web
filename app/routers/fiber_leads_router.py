@@ -89,17 +89,23 @@ def create_fiber_lead(
     if payload.notes:
         extra["notes"] = payload.notes
 
-    # PLAN LIMIT, charged to the org the row ACTUALLY lands in.
+    # PLAN CAPACITY - USER-INITIATED, SO REFUSED CLEANLY.
     #
-    # Deliberately `current_user.organization_id` and not the workspace org,
-    # because that is what the Lead() below sets. Note that this endpoint
-    # already dedups against `active_workspace_org_id` while creating against
-    # `current_user.organization_id` - a pre-existing mismatch, untouched here.
-    # The limit follows the row, not the dedup query, so the guard cannot be
-    # made to charge one customer for a lead filed under another.
-    from app.services import plan_limits
-    plan_limits.require_capacity_for_org_id(
-        db, current_user.organization_id, plan_limits.LIMIT_LEADS, adding=1)
+    # A logged-in rep is standing at a door capturing this by hand. They are
+    # present and can be told, so this refuses with the structured
+    # PLAN_CAPACITY_REACHED rather than quietly holding a lead they believe
+    # they just captured.
+    #
+    # Charged to `current_user.organization_id` and not the workspace org,
+    # because that is what the Lead() below sets. Note this endpoint already
+    # dedups against `active_workspace_org_id` while creating against
+    # `current_user.organization_id` - a pre-existing mismatch, untouched
+    # here. The limit follows the row, not the dedup query.
+    from app.models.models import Organization
+    from app.services import lead_capacity
+    _org = (db.query(Organization)
+            .filter(Organization.id == current_user.organization_id).first())
+    lead_capacity.require_capacity_user_initiated(db, _org, adding=1)
 
     lead = Lead(
         id=gen_uuid(),

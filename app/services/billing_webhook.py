@@ -331,6 +331,36 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
             org.billing_pending_effective_at = None
             org.stripe_schedule_id = None
 
+        # THE PLAN MOVED, SO HELD PROSPECTS MAY NOW FIT.
+        #
+        # This is the moment an upgrade actually becomes true - not when the
+        # customer clicked, but when Stripe says so - and it is therefore the
+        # right place to let inbound leads that were held over capacity back
+        # into normal working.
+        #
+        # Release only. Nothing is enrolled in a cadence, mailed, texted or
+        # handed to the AI: five thousand held leads released straight into
+        # outbound would spend the customer's money and their sending
+        # reputation on a decision they never made. They become ordinary new
+        # leads waiting for the customer's own action.
+        #
+        # Best-effort by design. A failure to release must never turn a
+        # successful billing event into a failed webhook, because Stripe would
+        # then retry a payment we have already banked.
+        if previous != resolved.key:
+            try:
+                from app.services import lead_capacity
+                released = lead_capacity.release_available(db, org)
+                if released["released"]:
+                    log.info("billing_webhook: plan change %s -> %s released %d "
+                             "held lead(s) for org %s (%d still held)",
+                             previous, resolved.key, released["released"],
+                             org.id, released["still_held"])
+            except Exception:                            # pragma: no cover
+                log.exception("billing_webhook: could not release held leads "
+                              "for org %s after plan change - the billing "
+                              "event itself stands", org.id)
+
 
 def handle_event(db: Session, event: dict) -> dict:
     """Process one verified Stripe event. Returns a summary for the response.

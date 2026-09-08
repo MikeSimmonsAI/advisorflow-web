@@ -105,12 +105,6 @@ def _upsert_social_lead(
     ).fetchone()
     assigned_user_id = row[0] if row else None
 
-    # PLAN LIMIT. A social lead-gen webhook is an ingestion path with no human
-    # in the loop, which is precisely why it must go through the same guard as
-    # the Leads screen rather than being trusted to stay small.
-    from app.services import plan_limits
-    plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
-
     lead = Lead(
         id=str(uuid.uuid4()),
         organization_id=org.id,
@@ -124,13 +118,26 @@ def _upsert_social_lead(
         tier="new_inquiry",
         message_track="new_inquiry_intro",
     )
+
+    # PLAN CAPACITY - HELD, NEVER DROPPED.
+    #
+    # This is external arrival: a real person filled in a lead form on
+    # Facebook, Instagram or TikTok and nobody at the customer is watching.
+    # Refusing here would throw that prospect away over a billing number, and
+    # no later upgrade could bring them back - the payload is gone.
+    #
+    # So the lead is written with everything it arrived with, flagged
+    # over-capacity, and excluded from every paid path until there is room.
+    held = lead_capacity.hold_if_over_capacity(db, lead, org)
+
     db.add(lead)
     db.commit()
     db.refresh(lead)
 
     logger.info(
-        "social_webhook: created lead %s from %s (org=%s, ref=%s)",
+        "social_webhook: created lead %s from %s (org=%s, ref=%s)%s",
         lead.id, source, org.id, source_ref,
+        " [HELD - plan lead limit reached]" if held else "",
     )
     return lead
 

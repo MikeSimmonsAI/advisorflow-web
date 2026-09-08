@@ -235,9 +235,23 @@ def usage_for(db: Session, org: Organization, key: str) -> int:
 
         return len(homed | seconded)
     if key == LIMIT_LEADS:
+        # HELD LEADS DO NOT CONSUME THE PLAN.
+        #
+        # An inbound prospect that arrived while the customer was at their
+        # ceiling is kept rather than dropped (lead_capacity), but it is not
+        # something they are using - they cannot text it, mail it, or work it.
+        # Counting it would produce "2,600 of 2,500 used", a number the
+        # customer can neither act on nor reduce, and would mean the ceiling
+        # stopped meaning anything the moment it was crossed.
+        #
+        # `IS NOT DISTINCT FROM NULL` in ORM form: every pre-existing row has
+        # capacity_state NULL and must keep counting.
         from app.models.models import Lead
+        from app.services.lead_capacity import OVER_CAPACITY
         return (db.query(Lead)
                 .filter(Lead.organization_id == org.id)
+                .filter((Lead.capacity_state.is_(None))
+                        | (Lead.capacity_state != OVER_CAPACITY))
                 .count())
     return 0
 
@@ -443,6 +457,16 @@ def report(db: Session, org: Optional[Organization]) -> dict:
     }
     for key in (LIMIT_USERS, LIMIT_LEADS):
         out["limits"][key] = check(db, org, key, adding=0)
+
+    # Held inbound prospects, reported SEPARATELY from usage. They are not
+    # consuming the plan, but the customer must be able to see that real
+    # business is waiting on an upgrade - a held lead nobody is told about is
+    # barely better than a dropped one.
+    try:
+        from app.services import lead_capacity
+        out["capacity_hold"] = lead_capacity.report(db, org)
+    except Exception:                                    # pragma: no cover
+        out["capacity_hold"] = {"held": 0, "oldest_held_at": None}
 
     pending_key = out["pending_plan"]
     if pending_key and org is not None:

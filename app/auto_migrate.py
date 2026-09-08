@@ -319,6 +319,25 @@ COLUMNS_TO_ADD = [
     ("leads", "duplicate_match_value", "VARCHAR"),
     ("leads", "duplicate_resolved_at", "TIMESTAMP"),
     ("leads", "duplicate_resolved_by", "VARCHAR"),
+    # Capacity hold. An inbound prospect that arrived while the customer was at
+    # their plan's lead ceiling is KEPT, flagged, and excluded from every
+    # paid-resource path until capacity exists - never dropped, and never
+    # counted against the plan while it is held.
+    #
+    # Deliberately shaped like the `duplicate_*` cluster above: a flag beside
+    # `status`, not a value inside it. Overwriting `status` would destroy what
+    # the lead actually is and break every `status == "new"` filter in the
+    # product, and a parallel table would be the second lead system the design
+    # forbids. NULL on every existing row, which is exactly right - no lead
+    # that predates this is held.
+    # P0. Four ingestion routers pass `source=` to Lead(); the column never
+    # existed, so social webhooks, fiber intake, field capture and scraper
+    # imports raised TypeError on every single arrival. See models.Lead.source.
+    ("leads", "source", "VARCHAR"),
+    ("leads", "capacity_state", "VARCHAR"),
+    ("leads", "capacity_held_at", "TIMESTAMP"),
+    ("leads", "capacity_hold_reason", "VARCHAR"),
+    ("leads", "capacity_released_at", "TIMESTAMP"),
     # Post-appointment review request — track that we've sent the Google review SMS
     ("booking_links", "review_request_sent_at", "TIMESTAMP"),
     # Appointment details moved OUT of the booking token and onto the row it

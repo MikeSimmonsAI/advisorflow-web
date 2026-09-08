@@ -694,6 +694,14 @@ def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str =
     if lead.status == "dnc" or lead.is_duplicate:
         return {"success": False, "error": "Lead is DNC or duplicate"}
 
+    # PLAN CAPACITY HOLD. An AI conversation spends on every turn - model
+    # tokens on each generation and a message on each send - so a held lead
+    # is the last thing that should be allowed to start one.
+    from app.services.lead_capacity import is_held
+    if is_held(lead):
+        return {"success": False,
+                "error": "Lead is held over plan capacity"}
+
     if not lead.email:
         return {"success": False, "error": "Lead has no email address"}
 
@@ -820,6 +828,15 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
                 conv.stage = "stopped"
                 conv.next_send_at = None
                 db.commit()
+                skipped += 1
+                continue
+
+            # PLAN CAPACITY HOLD, re-checked per touch. Skipped, NOT stopped -
+            # the hold is temporary, and tearing the conversation down would
+            # lose its thread and touch number for a condition that clears on
+            # upgrade.
+            from app.services.lead_capacity import is_held
+            if is_held(lead):
                 skipped += 1
                 continue
 

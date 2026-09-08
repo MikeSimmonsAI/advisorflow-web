@@ -613,6 +613,7 @@ def proactive_scan(
     # caller's own book by the same code that confines the lead list, and a
     # future edit to the scope reaches this query for free.
     from app.models.models import Message as _Msg
+    from app.services.lead_capacity import OVER_CAPACITY as _OVER_CAPACITY
     from app.services.lead_scope import authorized_lead_query as _alq
 
     pending_lead_ids = db.query(AutoSendItem.lead_id).filter(
@@ -625,6 +626,12 @@ def proactive_scan(
         .filter(
             Lead.status.in_(req.statuses),
             Lead.status != "dnc",
+            # PLAN CAPACITY HOLD, filtered in SQL rather than checked per row:
+            # auto-send picks its own candidates, so a held lead must never
+            # enter the selection at all. NULL is the normal state for every
+            # lead that predates the hold and must keep qualifying.
+            (Lead.capacity_state.is_(None))
+            | (Lead.capacity_state != _OVER_CAPACITY),
             Lead.phone.isnot(None),
             ~Lead.id.in_(db.query(pending_lead_ids.c.lead_id)),
             ~Lead.id.in_(db.query(contacted_lead_ids.c.lead_id)),

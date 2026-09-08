@@ -491,6 +491,15 @@ def send_sms(
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
+    # PLAN CAPACITY HOLD. Checked here beside the DNC check rather than only
+    # in compliance_service, because this function is called directly from
+    # paths that do not go through the preflight - the same reason the DNC
+    # check is duplicated here.
+    from app.services.lead_capacity import is_held
+    if is_held(lead):
+        raise ValueError(
+            f"Lead {lead.id} is held over plan capacity - blocked from sending.")
+
     # Independent suppression-list check, not a substitute for the
     # Lead.status check above but an additional, direct guard. REAL GAP
     # THIS CLOSES: a number could exist in the Compliance Center's
@@ -576,6 +585,13 @@ def send_mms(
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")
 
+    # PLAN CAPACITY HOLD. MMS costs more per message than SMS, so this is the
+    # last place a held lead should slip through.
+    from app.services.lead_capacity import is_held
+    if is_held(lead):
+        raise ValueError(
+            f"Lead {lead.id} is held over plan capacity - blocked from sending.")
+
     from app.services.compliance_service import is_phone_suppressed
     if is_phone_suppressed(db, lead.organization_id, lead.phone):
         raise ValueError(f"Lead {lead.id}'s phone is on the suppression list - blocked.")
@@ -649,11 +665,12 @@ def send_batch(
     template: str,
     include_booking_link: bool = True,
 ) -> dict:
-    """Sends to multiple leads, skipping any that are DNC/duplicate."""
+    """Sends to multiple leads, skipping any that are DNC/duplicate/held."""
+    from app.services.lead_capacity import is_held
     sent = []
     skipped = []
     for lead in leads:
-        if lead.is_duplicate or lead.status == "dnc":
+        if lead.is_duplicate or lead.status == "dnc" or is_held(lead):
             skipped.append(lead.id)
             continue
         try:

@@ -666,7 +666,7 @@ def import_leads_from_excel(
     from app.services import plan_limits
     capacity = plan_limits.counter_for_org_id(
         db, organization_id, plan_limits.LIMIT_LEADS)
-    skipped_over_plan_limit = 0
+    capacity_blocked = 0
 
     for row in rows:
         phone_norm = normalize_phone(row["phone"])
@@ -754,14 +754,23 @@ def import_leads_from_excel(
             except Exception:
                 last_contact_dt = None
 
-        # PLAN LIMIT, claimed at the moment of creation and not before, so
+        # PLAN CAPACITY, claimed at the moment of creation and not before, so
         # rows the dedup and validation above discarded never consume a slot.
+        #
+        # CAPACITY-BLOCKED IS NOT BAD DATA. This is a customer-initiated
+        # import, so rows past the ceiling are not imported - but they are
+        # counted under their own heading and reported separately, never
+        # folded in with the rows that were rejected for being unusable.
+        # Telling somebody their clean spreadsheet had errors, when what
+        # actually happened was that their plan filled up, sends them looking
+        # for a data problem that does not exist.
+        #
         # Skipped rather than raised: an exception here would abandon the rows
         # already imported and report the whole file as failed, when in fact
         # most of it succeeded and only the tail did not fit.
         if not dry_run:
             if not capacity.has_room(1):
-                skipped_over_plan_limit += 1
+                capacity_blocked += 1
                 continue
             capacity.take(1)
 
@@ -979,11 +988,21 @@ def import_leads_from_excel(
         "usable_email": usable_email_count,
         "skipped_no_contact_info": skipped_no_contact_info,
         "skipped_internal_records": skipped_internal_records,
-        # Rows that were valid and would have imported, but did not fit the
-        # plan's lead limit. Reported separately from every other skip reason
-        # because it is the only one the customer can fix by upgrading, and
-        # folding it into "skipped" would read as a data problem.
-        "skipped_over_plan_limit": skipped_over_plan_limit,
+        # ── THE FOUR OUTCOMES, REPORTED SEPARATELY ────────────────────────
+        #
+        # accepted          - rows that became leads
+        # capacity_blocked  - rows that were VALID and would have imported,
+        #                     but did not fit the plan. NOT bad data. The
+        #                     only outcome here the customer can fix by
+        #                     upgrading, and the reason it must never be
+        #                     folded into the rejected count.
+        # rejected_invalid  - rows the platform could not use: no contact
+        #                     information, or an internal record.
+        # total             - every row in the file.
+        "accepted": len(created_leads),
+        "capacity_blocked": capacity_blocked,
+        "rejected_invalid": skipped_no_contact_info + skipped_internal_records,
+        "total": len(rows),
         "plan_lead_limit": capacity.limit,
         "tier_breakdown": tier_counts,
         # IDs of every lead actually created in this batch - needed so a

@@ -807,11 +807,6 @@ def resolve_lead(db: Session, cred: IntegrationCredential, org: Organization,
         first = parts[0]
         last = " ".join(parts[1:])
 
-    # PLAN LIMIT. A booking that arrives for someone not yet on file creates a
-    # lead, so this is a lead-creation path like any other.
-    from app.services import plan_limits
-    plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1)
-
     lead = Lead(
         organization_id=org.id,
         assigned_to_id=advisor.id,
@@ -824,6 +819,16 @@ def resolve_lead(db: Session, cred: IntegrationCredential, org: Organization,
         # what the caller actually supplied.
         source_file="voice:%s" % cred.name,
     )
+
+    # PLAN CAPACITY - HELD, NEVER DROPPED.
+    #
+    # Somebody rang in and BOOKED. Refusing the lead here would refuse the
+    # appointment, which is the single worst place in the product to enforce a
+    # billing ceiling - the family is on the phone. The lead is kept and the
+    # booking stands; the hold only stops outbound spend against it.
+    from app.services import lead_capacity
+    lead_capacity.hold_if_over_capacity(db, lead, org)
+
     db.add(lead)
     db.flush()
     return lead

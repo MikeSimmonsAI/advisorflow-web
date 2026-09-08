@@ -94,6 +94,19 @@ def check_compliance_preflight(db: Session, lead: Lead,
             f"Lead {lead.id} is marked DNC - blocked from sending on any channel."
         )
 
+    # CAPACITY HOLD BLOCKS EVERYTHING, exactly like DNC and for the same
+    # structural reason: it lives on the lead, not on a phone number, so it
+    # stops email to a family whose hold arrived by web form just as it stops
+    # SMS. A held lead is a prospect the customer has not paid to work yet;
+    # spending their Twilio and Resend budget on it would turn a plan ceiling
+    # into a bill.
+    from app.services import lead_capacity
+    if lead_capacity.is_held(lead):
+        raise ValueError(
+            f"Lead {lead.id} is held over plan capacity - blocked from sending "
+            f"on any channel until capacity is available or the plan is upgraded."
+        )
+
     if (channel or CHANNEL_SMS).strip().lower() == CHANNEL_EMAIL:
         _check_email_permission(lead)
         return None
