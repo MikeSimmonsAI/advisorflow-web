@@ -184,6 +184,47 @@ const CSS = `
 .gm-dot.bad{background:var(--gm-red);box-shadow:0 0 10px rgba(255,93,125,.5)}
 .gm-dot.off{background:#2b425c}
 
+/* ── the shared severity vocabulary, God Mode's rendering of it ────────────
+   The five words come from app/services/severity.py and mean the same thing
+   here as they do on the Compensation Command Center. Two of them —
+   "can't check" and "nothing yet" — deliberately get NO colour: an unlit tile
+   is the honest rendering of a subsystem we cannot see, and colouring it green
+   is the exact green-for-silence mistake the endpoint exists to avoid.
+
+   A tile also carries a LEFT RULE in its severity's hue, so a grid of six
+   reads worst-first by eye without sorting. */
+.gm-sev{display:inline-block;border-radius:999px;padding:2px 8px;margin-bottom:7px;
+  font-size:7.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;
+  border:1px solid rgba(42,63,87,.9);background:rgba(12,23,39,.9);color:#5d7697}
+.gm-sev.sv-healthy{background:#0a2b22;border-color:#176f58;color:#44efbd}
+.gm-sev.sv-attention{background:#251e08;border-color:#70591d;color:#f4c652}
+.gm-sev.sv-action_required{background:#2a1017;border-color:#723142;color:#ff829b}
+.gm-sev.sv-unavailable{background:rgba(12,23,39,.9);border-color:#2a3f57;color:#6f8bab}
+.gm-sev.sv-no_data{background:transparent;border-style:dashed;border-color:#263c54;
+  color:#5d7697}
+
+.gm-health{border-left-width:3px;border-left-style:solid;
+  border-left-color:rgba(27,58,90,.9)}
+.gm-health.sv-healthy{border-left-color:rgba(23,111,88,.85)}
+.gm-health.sv-attention{border-left-color:rgba(112,89,29,.95)}
+.gm-health.sv-action_required{border-left-color:rgba(114,49,66,.95)}
+.gm-health.sv-unavailable{border-left-color:rgba(42,63,87,.9)}
+.gm-health.sv-no_data{border-left-color:rgba(30,46,64,.9)}
+
+/* the one-line verdict, above the explanation */
+.gm-health p.gm-health-head{color:#a9c0d6;font-size:9.5px;font-weight:600;
+  margin-bottom:5px}
+/* WHAT WOULD HAVE TO CHANGE. Replaced the old raw "needs: <table name>" line.
+   The lead-in is dimmer than the answer so the eye lands on the outcome. */
+.gm-health p.gm-health-needs{margin-top:7px;color:#7d99b7;font-size:8.5px;
+  line-height:1.55;font-style:italic}
+.gm-health p.gm-health-needs span{color:#4a637f;font-style:normal}
+/* The raw diagnostic when a check itself fell over. Quiet, last, monospace —
+   present for whoever needs it, never the sentence an owner reads. */
+.gm-health p.gm-health-tech{margin-top:6px;color:#41586f;font-size:8px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  line-height:1.45;word-break:break-word}
+
 /* ── owner action queue ────────────────────────────────────────────────── */
 /* Capped and scrolled, not uncapped. Production opened with 21 items against a
    six-tile health grid beside it, so the band ran a full screen taller than its
@@ -276,6 +317,25 @@ table.gm-table td.gm-num,table.gm-table th.gm-num{text-align:right;font-variant-
 
 /* ── empty / loading ───────────────────────────────────────────────────── */
 .gm-empty{padding:26px;text-align:center;color:#496078;font-size:11px}
+
+/* ── keyboard ──────────────────────────────────────────────────────────────
+   God Mode is built almost entirely out of <button> — health tiles, stat
+   cards, table rows, jump links — and had no visible focus state anywhere, so
+   a keyboard user tabbing through it could not tell where they were on a page
+   whose controls suspend customers and settle payments. The default outline
+   was also being suppressed by the reset, so this is restoring a state the
+   browser would otherwise have given us. */
+.gm-scope :focus-visible,
+.gm-health:focus-visible,
+.gm-stat:focus-visible{outline:2px solid #5bbef8;outline-offset:2px;
+  border-radius:10px}
+
+/* Motion is decoration here — the lift on hover, the transitions on tiles.
+   Anyone who has asked their machine to stop moving things should not have to
+   ask twice. */
+@media(prefers-reduced-motion:reduce){
+  .gm-health,.gm-stat,.gm-stat.gm-click:hover{transition:none;transform:none}
+}
 
 /* ── responsive ────────────────────────────────────────────────────────── */
 @media(max-width:1350px){

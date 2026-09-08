@@ -55,10 +55,23 @@ from app.routers.audit_log_router import log_action
 from app.services import capabilities as caps
 from app.services import compensation as comp
 from app.services import compensation_ledger as ledger
+from app.services import severity as sev
 from app.services.sales_access import (is_god, is_sales_manager,
                                        require_sales_member)
 
 log = logging.getLogger(__name__)
+
+
+def sev_vocabulary() -> List[Dict[str, str]]:
+    """The severity legend, served rather than duplicated in the client.
+
+    The screen renders a legend from this. Hard-coding the five words in React
+    would mean a change to the vocabulary shipped to some surfaces and not
+    others — the exact drift `app/services/severity.py` exists to end.
+    """
+    return [{"key": s, "label": sev.LABELS[s], "meaning": sev.MEANINGS[s]}
+            for s in sev.ALL]
+
 
 router = APIRouter(prefix="/sales/compensation", tags=["compensation"])
 
@@ -148,11 +161,19 @@ def my_compensation(db: Session = Depends(get_db),
     to prevent, and a filter that could be overridden by a query string is not
     a boundary.
     """
+    proj = ledger.projected(db, user, payee_user_id=user.id)
     return {
         "payee_user_id": user.id,
         "summary": ledger.summary(db, user, payee_user_id=user.id),
-        "projected": ledger.projected(db, user, payee_user_id=user.id),
+        "projected": proj,
         "entries": ledger.entries(db, user, payee_user_id=user.id, limit=500),
+        # A REP'S OWN ATTENTION LIST, narrowed to their own rows by the same
+        # `payee_user_id` that scopes everything else here. `can_settle` is
+        # NOT passed: a salesperson has no settlement authority by design, and
+        # telling them "you cannot settle this" would be noise about a power
+        # they were never meant to have.
+        "attention": ledger.attention(db, user, payee_user_id=user.id,
+                                      projected_summary=proj),
         "scope": "self",
     }
 
@@ -176,11 +197,21 @@ def overview(brand_sales_org_id: Optional[str] = Query(None),
               db.query(BrandSalesOrg).filter(BrandSalesOrg.id.in_(scope))
               .order_by(BrandSalesOrg.name.asc()).all()] if scope else []
 
+    proj = ledger.projected(db, user, brand_sales_org_id=brand_sales_org_id)
+    can_settle = any(_may_settle_brand(db, user, b) for b in scope)
+
     return {
         "summary": ledger.summary(db, user, brand_sales_org_id=brand_sales_org_id),
         # SEPARATE FROM EVERYTHING ELSE, ON PURPOSE. A projection is a forecast
         # from open deals; nothing in it is owed to anybody.
-        "projected": ledger.projected(db, user, brand_sales_org_id=brand_sales_org_id),
+        "projected": proj,
+        # WHAT NEEDS A HUMAN. Every item is counted from rows that exist; an
+        # empty list means there is genuinely nothing outstanding, which is
+        # something a finance screen should be able to say out loud.
+        "attention": ledger.attention(db, user,
+                                      brand_sales_org_id=brand_sales_org_id,
+                                      can_settle=can_settle,
+                                      projected_summary=proj),
         "payable_by_payee": ledger.by_payee(db, user, view=ledger.VIEW_PAYABLE_NOW,
                                             brand_sales_org_id=brand_sales_org_id),
         "brands": brands,
@@ -188,8 +219,9 @@ def overview(brand_sales_org_id: Optional[str] = Query(None),
         # legitimately settle for one brand and only read another, and a single
         # boolean would have to lie about one of them.
         "settlement_brands": [b for b in scope if _may_settle_brand(db, user, b)],
-        "can_process_payments": any(_may_settle_brand(db, user, b) for b in scope),
+        "can_process_payments": can_settle,
         "vocabulary": {
+            "severity": sev_vocabulary(),
             "views": [{"key": k, "label": v} for k, v in ledger.VIEW_LABELS.items()],
             "types": [{"key": PAYEE_SELLER, "label": "Direct seller commission"},
                       {"key": PAYEE_OVERRIDE, "label": "Manager / upline override"}],

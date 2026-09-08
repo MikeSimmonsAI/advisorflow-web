@@ -69,12 +69,20 @@ function when(v) {
     : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-// A figure the server could not source. Rendered as the REASON, never as a
-// zero — this is the component that keeps the screen honest.
+// A figure the server could not produce. Rendered as the REASON, never as a
+// zero — this is the component that keeps the screen honest. A $0 here would
+// claim a business earning nothing rather than a figure nobody can compute.
+//
+// THE WORDS CHANGED IN THE EXPERIENCE PASS, THE BEHAVIOUR DID NOT. It used to
+// read "no source", which describes our data model. An owner reading it cannot
+// tell whether the gap is in his setup or in our code. "not tracked" says the
+// same true thing in words that are about his business, and the reason is
+// still one hover away.
 function NoSource({ reason }) {
   return (
-    <span title={reason} style={{ color: '#7a7a95', fontSize: 13, fontStyle: 'italic' }}>
-      no source
+    <span title={reason || 'This figure is not being recorded anywhere yet.'}
+          style={{ color: '#7a7a95', fontSize: 13, fontStyle: 'italic' }}>
+      not tracked
     </span>
   );
 }

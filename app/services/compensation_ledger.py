@@ -478,3 +478,216 @@ def projected(db: Session, user: User, *,
         # which would read as a decision to pay nothing.
         "unconfigured_deals": unconfigured,
     }
+
+
+# ── what needs a human ──────────────────────────────────────────────────────
+
+def attention(db: Session, user: User, *,
+              brand_sales_org_id: Optional[str] = None,
+              payee_user_id: Optional[str] = None,
+              can_settle: Optional[bool] = None,
+              projected_summary: Optional[Dict[str, Any]] = None,
+              now: Optional[datetime] = None) -> Dict[str, Any]:
+    """The conditions on this ledger that a person has to do something about.
+
+    EVERY ITEM IS COUNTED FROM ROWS THAT EXIST. Not one of these is a rule of
+    thumb, a threshold somebody guessed at, or a reminder invented to make the
+    panel look busy. If the condition is absent the item is absent, and an
+    empty list means there is genuinely nothing to do — which is a useful thing
+    for a finance screen to be able to say.
+
+    WHAT IS DELIBERATELY *NOT* HERE
+    -------------------------------
+    "Holdbacks elapsed but not promoted" looks like an obvious alert and is
+    not a real condition. `payable_now` is DERIVED (see the module docstring):
+    a row whose holdback has passed reads as payable whether or not
+    `promote_due_to_payable()` has run, so nobody is underpaid and there is
+    nothing to chase. Listing it would train the reader to ignore this panel.
+
+    EACH ITEM OPENS. `view` and `filter` say exactly which ledger rows make the
+    item up, so the same reconciliation rule that governs the headline totals
+    governs the alerts: nothing here can describe a set the ledger will not
+    show.
+    """
+    now = now or datetime.utcnow()
+    from app.services import severity as sev
+
+    brand_ids = visible_brand_ids(db, user)
+    proj = projected_summary if projected_summary is not None else projected(
+        db, user, brand_sales_org_id=brand_sales_org_id,
+        payee_user_id=payee_user_id)
+
+    items: List[Dict[str, Any]] = []
+
+    def add(key, level, title, detail, *, count=0, amount=None, view=None,
+            filter_key=None, action_label=None, action_route=None):
+        items.append({
+            "key": key,
+            "severity": level,
+            "severity_label": sev.LABELS[level],
+            "title": title,
+            "detail": detail,
+            "count": count,
+            "amount": amount,
+            # Which ledger view proves it. None means the item is about the
+            # pipeline, which has no ledger rows by definition.
+            "view": view,
+            "filter": filter_key,
+            "action_label": action_label,
+            "action_route": action_route,
+        })
+
+    # ── 1. open deals nobody can be paid on ────────────────────────────────
+    # ACTION REQUIRED because it is silent: these deals are excluded from
+    # projected rather than counted as zero, so the number simply looks smaller
+    # and nothing on the screen says why until this item appears.
+    if proj.get("unconfigured_deals"):
+        n = proj["unconfigured_deals"]
+        add("unconfigured_commission", sev.ACTION_REQUIRED,
+            "%d open %s no commission rate" % (n, "deal has" if n == 1 else "deals have"),
+            "The package on %s has no rate configured, so nothing would be "
+            "earned if %s closed today. %s excluded from projected rather "
+            "than counted as $0 — counting them as zero would read as a "
+            "decision to pay nobody."
+            % ("this deal" if n == 1 else "these deals",
+               "it" if n == 1 else "they",
+               "It is" if n == 1 else "They are"),
+            count=n,
+            # A ROUTE THAT EXISTS. `/god/pricing` is the registered path for
+            # GodPricingCompensation; a plausible-looking `/god/pricing-
+            # compensation` would render the Command Center via the /god/*
+            # catch-all and look like the button did nothing.
+            action_label="Set the rates",
+            action_route="/god/pricing")
+
+    # ── 2. money waiting on a pricing decision ─────────────────────────────
+    if proj.get("pending_approval_deals"):
+        n = proj["pending_approval_deals"]
+        add("pending_approval", sev.ATTENTION,
+            "%s on %d %s awaiting pricing approval"
+            % (_money(proj.get("pending_approval_amount")), n,
+               "deal" if n == 1 else "deals"),
+            "Held out of projected compensation until the discount is "
+            "approved. An unapproved deal is not a promise, so it is reported "
+            "beside the forecast rather than inside it.",
+            count=n, amount=proj.get("pending_approval_amount"),
+            action_label="Review approvals",
+            action_route="/sales/manager")
+
+    # ── 3-5. conditions on rows that already exist ─────────────────────────
+    # One query, three reads of it. These are entries that have become money
+    # and have not yet been settled — the set where a problem still costs
+    # something.
+    open_rows = _scoped_query(db, brand_ids=brand_ids, payee_user_id=payee_user_id,
+                              brand_sales_org_id=brand_sales_org_id,
+                              view=VIEW_ALL, now=now).filter(
+        CompensationEntry.state.notin_([COMP_PAID, COMP_VOID])).all()
+
+    if open_rows:
+        plan_ids = sorted({r.plan_id for r in open_rows if r.plan_id})
+        live_plans = {p.id for p in db.query(CompensationPlan.id)
+                      .filter(CompensationPlan.id.in_(plan_ids)).all()} \
+            if plan_ids else set()
+
+        # THE RULE THAT PRODUCED THE AMOUNT CAN NO LONGER BE NAMED. The entry
+        # keeps its own rate snapshot, so nobody is paid the wrong amount —
+        # but "why this figure" now answers with a deleted plan, and that is
+        # the question an audit asks years later.
+        orphaned = [r for r in open_rows
+                    if not r.plan_id or r.plan_id not in live_plans]
+        if orphaned:
+            add("plan_snapshot_missing", sev.ATTENTION,
+                "%d unsettled %s a plan that no longer exists"
+                % (len(orphaned), "entry references"
+                   if len(orphaned) == 1 else "entries reference"),
+                "The amount is safe — each entry stored its own rate when it "
+                "was earned — but the plan it came from has been removed, so "
+                "the ledger can no longer name the rule. Nothing needs "
+                "correcting; it is here so it is not a surprise later.",
+                count=len(orphaned),
+                amount=_f(sum((r.amount or ZERO) for r in orphaned)),
+                view=VIEW_ALL)
+
+        # A CAP REDUCED SOMEBODY'S COMMISSION. Real money the seller did not
+        # get, decided by a rule rather than a person, and worth a manager
+        # seeing before the seller asks about it.
+        capped = [r for r in open_rows if r.capped_from_amount]
+        if capped:
+            withheld = sum(((r.capped_from_amount or ZERO) - (r.amount or ZERO))
+                           for r in capped)
+            add("capped", sev.ATTENTION,
+                "%d unsettled %s reduced by a cap"
+                % (len(capped), "entry was" if len(capped) == 1 else "entries were"),
+                "%s less than the uncapped rate would have paid. The cap came "
+                "from the plan in force when the commission was earned, not "
+                "from an edit made since."
+                % _money(_f(withheld)),
+                count=len(capped),
+                amount=_f(sum((r.amount or ZERO) for r in capped)),
+                view=VIEW_ALL)
+
+        # COMMISSION EARNED ON A DEAL THAT WAS NEVER PROVISIONED. Legitimate —
+        # a payment can land before the workspace is built — but a payable
+        # entry with no customer behind it is worth checking before it is paid.
+        opp_ids = sorted({r.opportunity_id for r in open_rows})
+        provisioned = {i.opportunity_id for i in db.query(Implementation.opportunity_id)
+                       .filter(Implementation.opportunity_id.in_(opp_ids)).all()} \
+            if opp_ids else set()
+        unprov = [r for r in open_rows if r.opportunity_id not in provisioned]
+        if unprov:
+            add("unprovisioned_customer", sev.ATTENTION,
+                "%d unsettled %s no provisioned customer"
+                % (len(unprov), "entry has" if len(unprov) == 1 else "entries have"),
+                "The deal was paid for but no customer workspace has been "
+                "created from it yet, so the ledger cannot show who the money "
+                "came from. Usually means implementation has not started.",
+                count=len(unprov),
+                amount=_f(sum((r.amount or ZERO) for r in unprov)),
+                # NO ACTION LINK ON PURPOSE. Provisioning is per-deal
+                # (`/god/provision/:oppId`) and there is no list page to send
+                # somebody to. A button that lands on the wrong screen is worse
+                # than no button, so this item explains and stops there.
+                view=VIEW_ALL)
+
+    # ── 6. can see the money, cannot release it ────────────────────────────
+    # Not a fault — it is the capability model working — but a finance viewer
+    # staring at a payable total with no button needs to be told why rather
+    # than left to conclude the screen is broken.
+    if can_settle is False:
+        payable = _scoped_query(db, brand_ids=brand_ids, payee_user_id=payee_user_id,
+                                brand_sales_org_id=brand_sales_org_id,
+                                view=VIEW_PAYABLE_NOW, now=now).all()
+        if payable:
+            add("payable_without_authority", sev.ATTENTION,
+                "%s is payable and you cannot settle it"
+                % _money(_f(sum((r.amount or ZERO) for r in payable))),
+                "You have compensation visibility for this brand but not "
+                "settlement authority, so the payment run has to be started by "
+                "someone who does. Nothing is wrong with the entries.",
+                count=len(payable),
+                amount=_f(sum((r.amount or ZERO) for r in payable)),
+                view=VIEW_PAYABLE_NOW)
+
+    # ── 7. reversed commission ─────────────────────────────────────────────
+    voided = _scoped_query(db, brand_ids=brand_ids, payee_user_id=payee_user_id,
+                           brand_sales_org_id=brand_sales_org_id,
+                           view=VIEW_VOID, now=now).all()
+    if voided:
+        add("voided", sev.ATTENTION,
+            "%d %s been voided"
+            % (len(voided), "entry has" if len(voided) == 1 else "entries have"),
+            "Voided commission is excluded from every total above. It stays in "
+            "the ledger rather than being deleted so the reversal itself has a "
+            "record.",
+            count=len(voided),
+            amount=_f(sum((r.amount or ZERO) for r in voided)),
+            view=VIEW_VOID)
+
+    return {"items": items, **sev.summarize(items)}
+
+
+def _money(v) -> str:
+    """A figure in prose. Kept here so the alert text and the screen agree."""
+    if v is None:
+        return "$0"
+    return "$%s" % format(int(round(float(v))), ",d")

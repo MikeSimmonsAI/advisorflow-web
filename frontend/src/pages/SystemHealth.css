@@ -146,6 +146,116 @@
   border: 1px solid rgba(47, 182, 255, 0.28);
 }
 
+/* ── the shared severity vocabulary ────────────────────────────────────────
+   Five states, the same five words the owner sees in God Mode and the same
+   five the Compensation Command Center uses. Two of them get no signal colour
+   on purpose: "can't check" and "nothing yet" are not good news, and painting
+   them green is the failure this vocabulary exists to prevent. They read as
+   deliberately unlit instead — present, legible, and clearly not a tick.
+
+   Every colour is a token, so this follows the light / dark appearance axis
+   rather than assuming the dark theme it was written in. */
+.health-sev {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: var(--bg-row);
+  border: 1px solid var(--border-subtle);
+}
+
+.health-sev.sv-healthy {
+  color: var(--signal-green);
+  background: var(--signal-green-dim);
+  border-color: rgba(30, 240, 168, 0.3);
+}
+
+.health-sev.sv-attention {
+  color: var(--signal-amber);
+  background: var(--signal-amber-dim);
+  border-color: rgba(255, 184, 61, 0.3);
+}
+
+.health-sev.sv-action_required {
+  color: var(--signal-red);
+  background: var(--signal-red-dim);
+  border-color: rgba(255, 77, 126, 0.32);
+}
+
+.health-sev.sv-unavailable {
+  color: var(--text-tertiary);
+  background: var(--bg-row);
+  border-color: var(--border-subtle);
+}
+
+.health-sev.sv-no_data {
+  color: var(--text-tertiary);
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border-subtle);
+}
+
+/* A card's left edge carries its severity, so the grid reads at a glance
+   without the reader parsing four pills. */
+.health-card {
+  border-left-width: 3px;
+}
+
+.health-card.sv-healthy { border-left-color: rgba(30, 240, 168, 0.5); }
+.health-card.sv-attention { border-left-color: rgba(255, 184, 61, 0.55); }
+.health-card.sv-action_required { border-left-color: rgba(255, 77, 126, 0.6); }
+.health-card.sv-unavailable,
+.health-card.sv-no_data { border-left-color: var(--border-subtle); }
+
+/* THE SUMMARY PANEL FOLLOWS THE VERDICT rather than always glowing green.
+   It previously wore a green border and green glow unconditionally, so a page
+   reporting two broken integrations still framed itself as healthy. */
+.system-health-summary.sv-healthy {
+  border-color: rgba(30, 240, 168, 0.28);
+  box-shadow: var(--panel-shadow), var(--glow-green-sm);
+}
+
+.system-health-summary.sv-attention {
+  border-color: rgba(255, 184, 61, 0.3);
+  box-shadow: var(--panel-shadow);
+}
+
+.system-health-summary.sv-action_required {
+  border-color: rgba(255, 77, 126, 0.34);
+  box-shadow: var(--panel-shadow);
+}
+
+.system-health-summary.sv-unavailable,
+.system-health-summary.sv-no_data {
+  border-color: var(--border-subtle);
+  box-shadow: var(--panel-shadow);
+}
+
+/* The headline is now words ("All clear" / "2 to fix"), not a 42px ratio, so
+   it needs a size that reads as a verdict rather than a metric. */
+.system-health-summary strong {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.system-health-summary.sv-healthy strong { color: var(--signal-green); }
+.system-health-summary.sv-action_required strong { color: var(--signal-red); }
+.system-health-summary.sv-attention strong { color: var(--signal-amber); }
+
+.system-health-summary span {
+  line-height: 1.5;
+  max-width: 34ch;
+}
+
 .health-card h2 {
   position: relative;
   z-index: 1;

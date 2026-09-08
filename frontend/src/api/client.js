@@ -10,6 +10,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflo
 // copy the value to the new key, and delete the old one so existing sessions
 // survive the rename without being logged out.
 
+import { shouldSendOrgOverride } from '../auth/routeAuthority'
 const KEY_TOKEN    = 'af_token'
 const KEY_USER     = 'af_user'
 const KEY_BRANDING = 'af_branding'
@@ -71,7 +72,28 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // organizations, users and leads across the whole estate, and a tile that
   // silently narrowed to one customer while the ones beside it did not would be
   // a wrong number sitting in a row of right ones.
-  const orgCtx = options.noOrgContext ? null : getOrgContext()
+  //
+  // AND ONLY ON CUSTOMER-SPACE ROUTES. THE LEAK THIS CLOSES:
+  //
+  // The override was previously sent from wherever the user happened to be
+  // standing. On the server `deps.get_current_user` answers it with
+  // `user.organization_id = org_override` for a god_admin, and ~179 routers
+  // read that attribute at face value — so after entering Restland, every
+  // later request, including ones to platform tools, arrived claiming to BE
+  // Restland, and the `_god_all_orgs` flag meaning "no customer selected"
+  // was silently off.
+  //
+  // That is not just a misleading banner. A back-office tool whose target
+  // defaults to `current_user.organization_id` would act on whichever
+  // customer the owner last looked at.
+  //
+  // The selection is still REMEMBERED across the trip — returning to the
+  // customer app does not mean picking them again — it is simply not SENT
+  // where it does not belong. `noOrgContext` remains the explicit opt-out for
+  // platform-wide reads made from inside customer space.
+  const routeAllowsOrg = shouldSendOrgOverride(
+    typeof window !== 'undefined' ? window.location.pathname : '/')
+  const orgCtx = (options.noOrgContext || !routeAllowsOrg) ? null : getOrgContext()
   if (orgCtx) headers['X-Org-Override'] = orgCtx.orgId
   // THE BRAND TRAVELS WITH THE REQUEST TOO.
   //

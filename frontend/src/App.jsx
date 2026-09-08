@@ -739,7 +739,27 @@ export default function App() {
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
         <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
-        <Route path="/scraper" element={<ProtectedRoute requireGodAdmin><LeadScraper /></ProtectedRoute>} />
+        {/* ══════════════════════════════════════════════════════════════
+            LEAD SCRAPER — A BACK-OFFICE TOOL, IN THE BACK-OFFICE SHELL.
+            ══════════════════════════════════════════════════════════════
+
+            It was god-only already, but it rendered inside the TENANT Layout,
+            so entering a customer first made it present itself as
+            "AdvisorFlow → EvoSys Pro → Restland Cemetery and Funeral Home" —
+            a platform acquisition tool wearing a customer's name. Worse, the
+            API client was sending that customer's X-Org-Override with its
+            requests, so the scraper's idea of "my organization" really was
+            Restland.
+
+            It now renders in GodModeLayout at a /god path, which classifies as
+            PLATFORM: no override is sent, and the authority bar says PLATFORM
+            rather than naming a customer. Importing INTO a customer is still
+            possible and is now an explicit, visible destination choice.
+
+            /scraper is kept as a redirect so old links and bookmarks land in
+            the right place instead of 404-ing. */}
+        <Route path="/god/lead-scraper" element={<GodRoute><GodModeLayout><LeadScraper /></GodModeLayout></GodRoute>} />
+        <Route path="/scraper" element={<Navigate to="/god/lead-scraper" replace />} />
         {/* ── Executive Suite routes ── brand-scoped, read-only.
                ExecutiveSuite wraps every child in the executive shell and
                verifies the brand_executive grant server-side. If the check

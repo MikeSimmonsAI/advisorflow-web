@@ -373,7 +373,10 @@ def fiber_intake_submit(
         lead = Lead(
             id=str(uuid.uuid4()),
             organization_id=org.id,
-            user_id=assigned_user_id,
+            # `assigned_to_id`, NOT `user_id` — Lead has no such column. Same
+            # defect as the missing `source`, and masked by it until that
+            # was fixed.
+            assigned_to_id=assigned_user_id,
             first_name=first_name.strip(),
             last_name=last_name.strip(),
             phone=phone.strip(),

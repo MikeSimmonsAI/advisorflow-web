@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, getCurrentUser, getBranding } from '../api/client'
 import { getMemberLabel } from '../utils/labels'
+import AppearanceToggle from '../components/AppearanceToggle'
 import '../styles/shared.css'
 import './Settings.css'
 
@@ -479,6 +480,25 @@ export default function Settings() {
           <p className="page-subtitle">Your Twilio connection, calendar, and notification preferences.</p>
         </div>
       </header>
+
+      {/* ── Appearance ──
+          FIRST, and deliberately. It is the setting most likely to be looked
+          for, it applies instantly, and it is the only one on this page that
+          belongs to the PERSON rather than to their Twilio, calendar or
+          booking configuration. */}
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2 className="panel-title">🌗 Appearance</h2>
+        </div>
+        <p className="settings-help">
+          Choose how the app looks on this device. <strong>System</strong> follows your
+          computer's own light or dark setting. Your choice is remembered here and does
+          not change anything for anyone else on your team.
+        </p>
+        <div style={{ padding: '4px 0 6px' }}>
+          <AppearanceToggle label={false} />
+        </div>
+      </section>
 
       {/* ── Profile Photo ── */}
       <section className="panel" style={{ marginBottom: 16 }}>

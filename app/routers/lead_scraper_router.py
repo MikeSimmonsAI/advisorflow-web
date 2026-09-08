@@ -400,7 +400,12 @@ def scrape_import(
         lead = Lead(
             id=str(uuid.uuid4()),
             organization_id=org_id,
-            user_id=current_user.id,
+            # `assigned_to_id`, NOT `user_id`. Lead has no `user_id` column and
+            # never has, so this line raised TypeError on every scraped import -
+            # the same defect class as the missing `source` column, and hidden
+            # behind it: SQLAlchemy's constructor fails on the first unknown
+            # keyword, so fixing `source` only exposed this one.
+            assigned_to_id=current_user.id,
             first_name=first_name,
             last_name=last_name,
             phone=phone,

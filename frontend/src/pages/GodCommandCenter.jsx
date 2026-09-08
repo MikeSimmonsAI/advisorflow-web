@@ -235,7 +235,15 @@ export default function GodCommandCenter() {
                       gap: 14, marginBottom: 28 }}
              className="gm-band2">
           <div>
-            <SectionLabel note="· live subsystem conditions, computed server-side">
+            {/* THE BAND'S OWN VERDICT, from the server's rollup rather than
+                counted here. "Worst wins" is the rule, and it deliberately
+                does not treat a subsystem we cannot see as fine — so a grid
+                containing one unmeasurable section never announces itself as
+                healthy. Rendering the rollup also stops it being dead data
+                the API computes and nothing reads. */}
+            <SectionLabel note={health?.overall
+              ? `· ${health.overall.overall_label.toLowerCase()} — ${health.overall.total} subsystems, worst wins`
+              : '· live subsystem conditions, computed server-side'}>
               PLATFORM HEALTH
             </SectionLabel>
             <PlatformHealth data={health} loading={loading} error={healthErr} onGo={go} />

@@ -18,6 +18,8 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 // `api` for the brand list. The rail's BRANDS section is driven by the platform
 // records rather than by a constant in this file — see the BRANDS block below.
 import { api, getCurrentUser, logout } from '../api/client'
+import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
+import AppearanceToggle from '../components/AppearanceToggle'
 import GodStyles from './god/GodStyles'
 
 function Ico({ d, size = 16, children }) {
@@ -172,8 +174,10 @@ const NAV = [
   // Access Diagnostic, which is why they are not merged.
   { label: 'Lead Qualification', path: '/god/diagnostics/qualification', icon: 'shield',
     hint: 'Who may be contacted on each channel, and why not' },
-  { label: 'Lead Scraper',     path: '/scraper',              icon: 'grid',
-    hint: 'Source and import prospect lists' },
+  // Back-office acquisition, and it now renders in THIS shell rather than the
+  // tenant one — see the route comment in App.jsx.
+  { label: 'Lead Scraper',     path: '/god/lead-scraper',     icon: 'grid',
+    hint: 'Back-office prospecting — import into a chosen customer' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SECURITY & PLATFORM
@@ -272,6 +276,10 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
   // "Audit & Security" were all being ellipsised.
   const railW = isMobile ? 264 : (collapsed ? 62 : 248)
+
+  // Which authority is in force on THIS screen. Everything the God shell is
+  // allowed to claim about scope follows from this one answer.
+  const onPlatformSurface = classifyRoute(location.pathname) === PLATFORM
 
   // EVERY BRAND WITH A CONFIGURED SITE, from the platform records.
   //
@@ -505,6 +513,15 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             <Ico d={ICONS.settings} size={13} />
             {!collapsed && 'Change password'}
           </button>
+          {/* APPEARANCE. In the rail footer beside the other per-person
+              settings, because that is what it is — Mike's choice, not the
+              brand's. Hidden when the rail is collapsed rather than shrunk to
+              three ambiguous glyphs in a 62px column. */}
+          {!collapsed && (
+            <div style={{ paddingTop: 2 }}>
+              <AppearanceToggle compact />
+            </div>
+          )}
           <button onClick={handleLogout} title="Sign out"
             style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none',
               border: 'none', color: '#3a5270', cursor: 'pointer', fontSize: '12px', padding: 0,
@@ -542,26 +559,92 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           <div style={{ color: '#2a4060', fontSize: '11px' }}><LiveClock /></div>
         </header>
 
-        {/* God Mode Org Session Banner — PRESERVED. Never let the owner forget the tenant. */}
-        {orgSession && (
-          <div style={{ background: 'rgba(245,185,66,0.1)', borderBottom: '1px solid rgba(245,185,66,0.3)',
-            padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, flexWrap: 'wrap' }}>
-            <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f5b942', boxShadow: '0 0 8px #f5b942' }} />
-            <span style={{ color: '#f5b942', fontWeight: 700, fontSize: '11px', letterSpacing: '0.1em' }}>GOD MODE SESSION</span>
-            <span style={{ color: '#a88030', fontSize: '11px' }}>—</span>
-            <span style={{ color: '#c09040', fontSize: '11px' }}>VIEWING AS: {orgSession.org_name}</span>
-            <div style={{ flex: 1 }} />
-            <button onClick={onExitOrgSession}
-              style={{ display: 'flex', alignItems: 'center', gap: 6,
-                background: 'rgba(245,185,66,0.15)', border: '1px solid rgba(245,185,66,0.4)',
-                borderRadius: 3, color: '#f5b942', cursor: 'pointer', fontFamily: 'inherit',
-                fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', padding: '3px 10px' }}
-            >
-              <Ico d={ICONS.arrowLeft} size={12} />
-              EXIT ORGANIZATION VIEW
-            </button>
-          </div>
-        )}
+        {/* ══════════════════════════════════════════════════════════════
+            THE AUTHORITY BAR. WHAT THIS SCREEN WILL ACTUALLY AFFECT.
+            ══════════════════════════════════════════════════════════════
+
+            THE BUG THIS FIXES. This used to render "GOD MODE SESSION —
+            VIEWING AS: Restland Cemetery and Funeral Home" over EVERY God
+            screen the moment a customer had been entered — Sales Compensation,
+            the Lead Scraper, Billing & Revenue, System Health. It was not just
+            confusing: the API client was also SENDING that customer's
+            X-Org-Override on those requests, and the server answers that
+            header by setting `user.organization_id`, so the banner was
+            describing something that really was happening.
+
+            The client no longer sends the override outside customer space
+            (see auth/routeAuthority.js), so on a platform screen the honest
+            statement is PLATFORM — and the remembered customer is shown as a
+            RETURN AFFORDANCE rather than as a scope, because it no longer
+            scopes anything here.
+
+            Three states, and each says which authority is in force:
+              PLATFORM        a God/back-office tool, estate-wide
+              CUSTOMER VIEW   operating as that customer, override in force
+            The customer state keeps the amber treatment precisely because it
+            is the one where somebody else's records are about to change. */}
+        <div style={{
+          background: onPlatformSurface ? 'rgba(47,182,255,0.07)' : 'rgba(245,185,66,0.1)',
+          borderBottom: '1px solid ' + (onPlatformSurface
+            ? 'rgba(47,182,255,0.22)' : 'rgba(245,185,66,0.3)'),
+          padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12,
+          flexShrink: 0, flexWrap: 'wrap' }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%',
+            background: onPlatformSurface ? '#2fb6ff' : '#f5b942',
+            boxShadow: '0 0 8px ' + (onPlatformSurface ? '#2fb6ff' : '#f5b942') }} />
+          {onPlatformSurface ? (
+            <>
+              <span style={{ color: '#2fb6ff', fontWeight: 700, fontSize: '11px',
+                             letterSpacing: '0.1em' }}>PLATFORM</span>
+              <span style={{ color: '#3a6a90', fontSize: '11px' }}>—</span>
+              <span style={{ color: '#5d90b4', fontSize: '11px' }}>
+                AdvisorFlow Platform · estate-wide, not scoped to a customer
+              </span>
+              <div style={{ flex: 1 }} />
+              {/* The remembered selection, offered as a way BACK rather than
+                  claimed as this screen's scope. */}
+              {orgSession && (
+                <button onClick={() => navigate('/god/customer-app')}
+                  title={'Return to ' + orgSession.org_name + "'s workspace"}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6,
+                    background: 'rgba(47,182,255,0.12)', border: '1px solid rgba(47,182,255,0.32)',
+                    borderRadius: 3, color: '#7cc7f5', cursor: 'pointer', fontFamily: 'inherit',
+                    fontSize: '11px', fontWeight: 600, padding: '3px 10px', maxWidth: 320,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  RESUME: {orgSession.org_name}
+                </button>
+              )}
+              {orgSession && (
+                <button onClick={onExitOrgSession}
+                  title="Forget the remembered customer entirely"
+                  style={{ background: 'none', border: '1px solid rgba(120,150,175,0.28)',
+                    borderRadius: 3, color: '#6f8ba5', cursor: 'pointer', fontFamily: 'inherit',
+                    fontSize: '11px', fontWeight: 600, padding: '3px 10px' }}>
+                  CLEAR
+                </button>
+              )}
+            </>
+          ) : orgSession ? (
+            <>
+              <span style={{ color: '#f5b942', fontWeight: 700, fontSize: '11px',
+                             letterSpacing: '0.1em' }}>CUSTOMER WORKSPACE</span>
+              <span style={{ color: '#a88030', fontSize: '11px' }}>—</span>
+              <span style={{ color: '#c09040', fontSize: '11px' }}>
+                VIEWING AS: {orgSession.org_name}
+              </span>
+              <div style={{ flex: 1 }} />
+              <button onClick={onExitOrgSession}
+                style={{ display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(245,185,66,0.15)', border: '1px solid rgba(245,185,66,0.4)',
+                  borderRadius: 3, color: '#f5b942', cursor: 'pointer', fontFamily: 'inherit',
+                  fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', padding: '3px 10px' }}
+              >
+                <Ico d={ICONS.arrowLeft} size={12} />
+                EXIT ORGANIZATION VIEW
+              </button>
+            </>
+          ) : null}
+        </div>
 
         <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', background: '#02050a' }}>
           {children}

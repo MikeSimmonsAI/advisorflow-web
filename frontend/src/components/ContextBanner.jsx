@@ -22,12 +22,27 @@
  * and cannot leave it, so there is nothing to warn them about.
  */
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api, clearAllContext, getOrgContext, getBrandContext } from '../api/client'
+import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
 import './ContextBanner.css'
 
 export default function ContextBanner() {
   const [ctx, setCtx] = useState(null)
   const [busy, setBusy] = useState(false)
+  const location = useLocation()
+
+  // ON A PLATFORM SURFACE THE CUSTOMER TRAIL IS A FALSE STATEMENT.
+  //
+  // The banner's job is to say WHOSE RECORDS THIS SCREEN WILL CHANGE. Since
+  // the API client stopped sending X-Org-Override outside customer space, a
+  // platform tool no longer operates as the entered customer — so a trail
+  // ending in "Restland Cemetery and Funeral Home" over Sales Compensation or
+  // the Lead Scraper would now be describing something that is not happening.
+  //
+  // The selection is not cleared. It is simply not ASSERTED here: return to
+  // the customer app and the banner comes back, because the context did.
+  const onPlatformSurface = classifyRoute(location.pathname) === PLATFORM
 
   useEffect(() => {
     let live = true
@@ -56,6 +71,7 @@ export default function ContextBanner() {
   }
 
   if (!ctx || ctx.is_neutral) return null
+  if (onPlatformSurface) return null
 
   const trail = Array.isArray(ctx.trail) && ctx.trail.length
     ? ctx.trail

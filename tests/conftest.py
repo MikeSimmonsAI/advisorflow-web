@@ -10,9 +10,46 @@ ships, not after someone's real leads get mishandled.
 
 import os
 import sys
+import threading
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# ── THE TEST CLIENT'S WORKER THREAD NEEDS A BIGGER STACK ────────────────────
+#
+# THE SYMPTOM. Running the full suite on Windows died partway through with
+#
+#     Windows fatal exception: stack overflow
+#
+# and a native crash — not a test failure, not a RecursionError, no summary
+# line. It landed on a different test each run (test_billing_authorization one
+# run, test_billing_plan_change the next), always a few hundred tests in, and
+# every one of those files passed when run on its own. That pattern is the
+# signature of an exhausted thread stack rather than a defect in any test:
+# a test that is genuinely broken fails in isolation too.
+#
+# WHY IT HAPPENS HERE. Starlette's TestClient does not run the ASGI app in the
+# main thread — it runs it in an anyio portal WORKER thread. On Windows a
+# worker thread gets a 1 MB stack by default, while the main thread gets 8 MB.
+# SQLAlchemy's statement compiler recurses once per node in the expression
+# tree, and its frames are large; a compile that is comfortable on the main
+# thread's stack can overflow a 1 MB one. Python's recursion limit never
+# catches it because the C stack runs out first, which is why there is no
+# RecursionError to see.
+#
+# THE FIX, AND WHAT IT IS NOT. This asks for 16 MB for threads created after
+# this point, which is the portal thread. It changes NO assertion, skips
+# nothing, and relaxes no gate — the suite runs the same tests it always did.
+# It has to be set before the first TestClient is constructed, so it lives at
+# conftest import time rather than in a fixture.
+#
+# The `try` is deliberate: `stack_size` raises on platforms that will not take
+# the value, and a test suite must not fail to import over a tuning hint.
+try:                                    # pragma: no cover - platform dependent
+    threading.stack_size(16 * 1024 * 1024)
+except (ValueError, RuntimeError):      # pragma: no cover
+    pass
 
 os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod-32chars!!")
 # A BRANDED host, deliberately.

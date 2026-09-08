@@ -348,21 +348,61 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
     grouped or aggregate and runs once for the whole platform.
 
     EVERY SECTION REPORTS ITS OWN SOURCE. A section whose data does not exist
-    says so with `status: "no_source"` and a `needs` string naming what would
-    have to be built. It never guesses, and it never renders green for silence.
+    says so and names what would have to change for it to be reportable. It
+    never guesses, and it never renders green for silence.
+
+    WRITTEN FOR THE OWNER, NOT FOR US
+    ---------------------------------
+    This endpoint used to answer with our backlog: "no source", "needs
+    invoices + payments tables", "needs a job/queue table with outcomes". Every
+    one of those was TRUE and none of them told Mike anything about his
+    business. A person who owns this platform reading "no source" learns only
+    that something is missing and cannot tell whether it is missing from his
+    setup or from our code.
+
+    So each section now says, in his words: what the state means for the
+    business, and what would have to change. The engineering detail that
+    remains useful — an actual exception — is carried separately in
+    `technical` so a screen can keep it out of the sentence an owner reads.
+
+    `severity` is the platform-wide vocabulary from `app/services/severity.py`,
+    shared with the Compensation Command Center so one word means one thing
+    everywhere. `status` keeps its original ok | warn | bad | off | no_source
+    spelling because other readers already depend on it; `severity` is derived
+    from it in one place rather than mapped by each caller.
 
     Sections: messaging · billing · jobs · integrations · customer_activity ·
-    security. `status` is one of ok | warn | bad | no_source.
+    security.
     """
+    from app.services import severity as sev
+
     now = datetime.utcnow()
     cutoff_30 = now - timedelta(days=30)
     cutoff_7 = now - timedelta(days=7)
     cutoff_1 = now - timedelta(days=1)
 
-    def _section(key, label, status, headline, detail, needs=None, to=None):
+    def _section(key, label, status, headline, detail, needs=None, to=None,
+                 technical=None):
+        s = sev.normalize(status)
         return {"key": key, "label": label, "status": status,
+                "severity": s, "severity_label": sev.LABELS[s],
+                "severity_meaning": sev.MEANINGS[s],
                 "headline": headline, "detail": detail,
-                "needs": needs, "to": to}
+                # WHAT WOULD HAVE TO CHANGE, phrased as an outcome rather than
+                # as a table name. "somewhere to record invoices and payments"
+                # is something an owner can decide about; "invoices + payments
+                # tables" is a ticket in our repo.
+                "needs": needs,
+                # The raw diagnostic, kept OUT of the owner's sentence. A
+                # screen may show it in small print; it is never the headline.
+                "technical": technical,
+                "to": to}
+
+    # The one thing to say when a check itself falls over. An owner needs to
+    # know we did not check, not what our stack trace said.
+    UNCHECKED = ("This check could not be completed just now, so no status is "
+                 "being reported for it. It is not a report that anything is "
+                 "wrong.")
 
     out = []
 
@@ -383,8 +423,10 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
             out.append(_section(
                 "messaging", "Messaging", "off",
                 "No messages in 30 days",
-                "Nothing has been sent platform-wide, so there is no delivery "
-                "rate to report.", to="/god/organizations"))
+                "No customer has sent a text or email through the platform in "
+                "the last 30 days, so there is no delivery rate to report yet. "
+                "Nothing is broken — nothing has been sent.",
+                to="/god/organizations"))
         else:
             fail_pct = round((failed / sent_30) * 100, 1)
             # Receipts only exist for messages Twilio has reported on. Counting
@@ -406,11 +448,13 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
                 out.append(_section(
                     "messaging", "Messaging", "warn",
                     "%d sent · no delivery receipts" % sent_30,
-                    "Not one of %d messages sent in 30 days has a delivery "
-                    "receipt, so whether they arrived is unknown. Receipts are "
-                    "written by the Twilio status-callback webhook."
+                    "All %d messages sent in the last 30 days left the "
+                    "platform, but the carrier has not confirmed a single one "
+                    "as delivered. Whether your customers' families actually "
+                    "received them is currently unknown."
                     % sent_30,
-                    needs="the status-callback webhook reporting back",
+                    needs="delivery confirmations coming back from the SMS "
+                          "carrier",
                     to="/god/organizations"))
             else:
                 status = "bad" if fail_pct >= 10 else "warn" if fail_pct >= 2 else "ok"
@@ -423,7 +467,8 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
     except Exception as e:                                   # pragma: no cover
         log.warning("platform-health messaging failed: %s", e)
         out.append(_section("messaging", "Messaging", "no_source",
-                            "Query failed", str(e)[:160]))
+                            "Can't check right now", UNCHECKED,
+                            technical=str(e)[:160]))
 
     # ── billing ────────────────────────────────────────────────────────────
     # Real, and deliberately unflattering: a customer with no Stripe customer
@@ -437,27 +482,37 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
                     if not getattr(o, "plan", None) or o.plan == "trial"]
         if not real_orgs:
             out.append(_section("billing", "Billing", "off",
-                                "No customers yet", "Nothing to bill."))
+                                "No customers yet",
+                                "There are no customer organizations to bill, "
+                                "so there is nothing to report here yet."))
         elif len(no_pm) == len(real_orgs):
             out.append(_section(
                 "billing", "Billing", "bad",
-                "Billing has never run",
-                "None of %d customers has a payment method, and there is no "
-                "invoice or payment table for charges to be written to."
+                "Nothing can be charged",
+                "Not one of your %d customers has a payment method on file, so "
+                "no subscription can be collected. Invoices and payments also "
+                "are not being recorded anywhere yet, which means even a "
+                "successful charge would leave you without a receipt to show."
                 % len(real_orgs),
-                needs="invoices + payments tables", to="/god/organizations"))
+                needs="a payment method on each customer, and somewhere to "
+                      "record invoices and payments",
+                to="/god/organizations"))
         else:
             status = "warn" if (no_pm or unpriced) else "ok"
             out.append(_section(
                 "billing", "Billing", status,
-                "%d of %d payable" % (len(real_orgs) - len(no_pm), len(real_orgs)),
-                "%d without a payment method · %d with no package assigned."
-                % (len(no_pm), len(unpriced)),
+                "%d of %d can be charged"
+                % (len(real_orgs) - len(no_pm), len(real_orgs)),
+                "%d %s no payment method on file · %d %s no package assigned, "
+                "so there is no price to charge."
+                % (len(no_pm), "customer has" if len(no_pm) == 1 else "customers have",
+                   len(unpriced), "has" if len(unpriced) == 1 else "have"),
                 to="/god/organizations"))
     except Exception as e:                                   # pragma: no cover
         log.warning("platform-health billing failed: %s", e)
         out.append(_section("billing", "Billing", "no_source",
-                            "Query failed", str(e)[:160]))
+                            "Can't check right now", UNCHECKED,
+                            technical=str(e)[:160]))
 
     # ── background jobs ────────────────────────────────────────────────────
     # THERE IS NO JOB TABLE. Scheduled sends run in-process and leave no
@@ -465,11 +520,13 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
     # report. A green tick here would be a lie about the one subsystem whose
     # silent failure nobody would notice.
     out.append(_section(
-        "jobs", "Background jobs", "no_source",
-        "No source",
-        "Scheduled work leaves no durable record, so queue depth and failure "
-        "counts cannot be reported.",
-        needs="a job/queue table with outcomes"))
+        "jobs", "Automated follow-ups", "no_source",
+        "Not measured yet",
+        "Reminders and follow-up messages run on a schedule in the background. "
+        "They do not currently write down whether each run finished, so we "
+        "cannot show you that they did. This is not a report that anything has "
+        "failed — it is a gap in what we can see.",
+        needs="a record of each scheduled run and whether it succeeded"))
 
     # ── integrations ───────────────────────────────────────────────────────
     try:
@@ -499,9 +556,10 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
         if total_c == 0:
             out.append(_section(
                 "integrations", "Integrations", "off",
-                "None issued",
-                "No integration credentials exist. Voice and calendar bridges "
-                "are not connected for any customer.",
+                "None connected",
+                "No customer has voice or calendar connected yet, so there is "
+                "nothing to report on. Those connections are set up per "
+                "customer as they are onboarded.",
                 to="/god/customers"))
         else:
             status = "bad" if fails else "warn" if (stale or never_used) else "ok"
@@ -520,9 +578,10 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
         log.warning("platform-health integrations failed: %s", e)
         out.append(_section(
             "integrations", "Integrations", "no_source",
-            "No source",
-            "Integration credential state could not be read.",
-            needs="integration_credentials table"))
+            "Can't check right now",
+            "We could not read which customers have voice and calendar "
+            "connected, so this is unknown rather than fine.",
+            technical=str(e)[:160]))
 
     # ── customer activity ──────────────────────────────────────────────────
     # Same definition of "activity" that _enrich_org uses, so this tile and the
@@ -549,20 +608,26 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
         n = len(ids)
         if n == 0:
             out.append(_section("customer_activity", "Customer activity", "off",
-                                "No active customers", "Nothing to measure."))
+                                "No active customers",
+                                "There are no active customer organizations "
+                                "yet, so there is no usage to measure."))
         else:
             quiet = n - w
             status = "bad" if quiet >= max(1, n // 2) else "warn" if quiet else "ok"
             out.append(_section(
                 "customer_activity", "Customer activity", status,
                 "%d of %d used it today" % (t, n),
-                "%d active in the last 7 days · %d silent for a week or more."
-                % (w, quiet),
+                "%d %s the platform in the last 7 days · %d %s gone quiet for a "
+                "week or more, which is usually the first sign of a customer "
+                "drifting away."
+                % (w, "customer used" if w == 1 else "customers used",
+                   quiet, "has" if quiet == 1 else "have"),
                 to="/god/organizations"))
     except Exception as e:                                   # pragma: no cover
         log.warning("platform-health activity failed: %s", e)
         out.append(_section("customer_activity", "Customer activity",
-                            "no_source", "Query failed", str(e)[:160]))
+                            "no_source", "Can't check right now", UNCHECKED,
+                            technical=str(e)[:160]))
 
     # ── security & access ──────────────────────────────────────────────────
     try:
@@ -582,20 +647,38 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
         # More than one platform-owner identity is the condition worth shouting
         # about: the whole identity model says there is exactly one.
         status = "bad" if owners != 1 else "ok"
-        headline = ("%d platform owner identities" % owners) if owners != 1 \
+        headline = ("%d platform owner accounts" % owners) if owners != 1 \
             else "1 platform owner"
-        detail = "%d organization(s) suspended · %d user account(s) deactivated" \
-                 % (suspended_orgs, deactivated)
+        detail = ("%d %s suspended · %d %s deactivated"
+                  % (suspended_orgs,
+                     "customer is" if suspended_orgs == 1 else "customers are",
+                     deactivated,
+                     "user account is" if deactivated == 1 else "user accounts are"))
         if ctx is not None:
-            detail += " · %d privileged context action(s) in 7 days" % int(ctx)
+            detail += (" · %d owner action%s taken inside a customer's "
+                       "workspace in the last 7 days"
+                       % (int(ctx), "" if int(ctx) == 1 else "s"))
+        if owners != 1:
+            detail += (". There should be exactly one platform owner account; "
+                       "more than one means somebody else holds the same "
+                       "authority you do.")
+        else:
+            detail += "."
         out.append(_section("security", "Security & access", status,
-                            headline, detail + ".", to="/god/audit"))
+                            headline, detail, to="/god/audit"))
     except Exception as e:                                   # pragma: no cover
         log.warning("platform-health security failed: %s", e)
         out.append(_section("security", "Security & access", "no_source",
-                            "Query failed", str(e)[:160]))
+                            "Can't check right now", UNCHECKED,
+                            technical=str(e)[:160]))
 
-    return {"as_of": now.isoformat(), "sections": out}
+    # THE PAGE'S OWN HEADLINE, rolled up the same way the Compensation Command
+    # Center rolls up its attention list — one vocabulary, one function.
+    # `worst` deliberately does NOT treat "can't check" as fine.
+    return {"as_of": now.isoformat(), "sections": out,
+            "overall": sev.summarize(out),
+            "legend": [{"key": s, "label": sev.LABELS[s],
+                        "meaning": sev.MEANINGS[s]} for s in sev.ALL]}
 
 
 @router.get("/twilio-diagnostics")

@@ -86,17 +86,24 @@ export default function ExecutiveSummary({
       />
       <Stat
         label="APPOINTMENTS"
-        value={funnel ? dash(fmt(funnel.booked)) : <NoSource />}
-        sub={funnel ? `${fmt(funnel.sold)} recorded as sold` : 'funnel API unreachable'}
+        value={funnel ? dash(fmt(funnel.booked)) : <NoSource>can't check</NoSource>}
+        sub={funnel ? `${fmt(funnel.sold)} recorded as sold`
+          : "appointment totals couldn't be read just now"}
         onClick={() => onGo('/god/organizations')}
-        title="GET /admin/dashboard/funnel → booked / sold, across every organization"
+        title="Booked and sold appointments across every organization"
       />
+      {/* OWNER-FACING, AND STILL HONEST. This used to read "no source" over
+          "no invoices table — see Revenue & Accounts", which tells Mike
+          nothing about his business and everything about our schema. The fact
+          is unchanged: no revenue has been recorded anywhere, so there is no
+          MRR to show and a $0 would be a lie about a system that has never
+          billed rather than a business earning nothing. */}
       <Stat
         label="MRR"
         tone="gm-warn"
-        value={<NoSource />}
-        sub="no invoices table — see Revenue & Accounts"
-        title="There is no monetary source. /billing/all returns no amounts, and no invoice or payment table exists."
+        value={<NoSource>not tracked yet</NoSource>}
+        sub="no invoices or payments recorded — nothing to total"
+        title="No revenue figure is being reported because no invoice or payment has ever been recorded. Showing $0 would imply a business earning nothing rather than a billing system that has not run."
       />
       <Stat
         label="OWNER ACTIONS"

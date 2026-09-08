@@ -6,14 +6,40 @@
  * settles it. Two screens that could both change a rate would eventually
  * disagree about what somebody earns.
  *
- * EVERY HEADLINE OPENS. Clicking a total filters the ledger to exactly the
- * rows that make it up, and the ledger prints its own sum beside the count —
- * so "PAYABLE NOW = $8,450" can be proved on the same screen rather than taken
- * on trust. A finance number nobody can reconcile is worse than no number.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT CHANGED IN THIS PASS, AND WHY
+ * ═══════════════════════════════════════════════════════════════════════════
  *
- * PROJECTED SITS APART FROM THE REST, deliberately and visibly. It is computed
- * live from open deals and is owed to nobody; the other four are rows in a
- * ledger that only exist because money was collected.
+ * THE OLD SCREEN WAS FIVE IDENTICAL RECTANGLES. Projected, earned, on hold,
+ * payable and paid were drawn at the same size, in the same colour, on one
+ * flat row — so the reader had to parse five 9px labels to find out which
+ * number was a forecast and which was money leaving the business this week.
+ * Every colour was a hard-coded light-theme literal, which is why the whole
+ * thing rendered as white slabs when God Mode embedded it in a dark shell.
+ *
+ * NOW THE LAYOUT CARRIES THE MEANING:
+ *
+ *   PROJECTED sits ON ITS OWN, above a rule, dashed and muted, with the
+ *   sentence explaining what it is beside it rather than buried underneath.
+ *   It is the one figure on this page owed to nobody.
+ *
+ *   PAYABLE NOW is the biggest number on the screen and the only one wearing
+ *   the accent, because it is the only one anybody acts on today.
+ *
+ *   EARNED / ON HOLD / PAID are peers below it, each with a coloured rule in
+ *   its own state's hue.
+ *
+ * ATTENTION REQUIRED IS NEW AND IS COMPUTED, NOT DECORATIVE. Every row comes
+ * from `ledger.attention()` and is counted from entries that exist. When there
+ * is nothing outstanding the panel says so out loud — a finance screen that
+ * can report "nothing to do" is more trustworthy than one that only ever
+ * shows problems.
+ *
+ * EVERY HEADLINE STILL OPENS. Clicking a total filters the ledger to exactly
+ * the rows that make it up, and the ledger prints its own sum beside the count
+ * — so "PAYABLE NOW = $8,450" can be proved on the same screen rather than
+ * taken on trust. A finance number nobody can reconcile is worse than no
+ * number.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -43,6 +69,10 @@ function CompShell({ children, embedded }) {
   // sales workspace's `sw-*` classes, which are scoped under it. Dropping it
   // inside God Mode would render an unstyled table; keeping it cannot leak,
   // because every one of those rules is prefixed by the scope.
+  //
+  // Since this pass the scope's palette follows `data-appearance`, so the
+  // embedded case now renders in God Mode's own dark family instead of
+  // punching white rectangles through it.
   if (embedded) {
     return (
       <div className="sw-scope">
@@ -56,15 +86,13 @@ function CompShell({ children, embedded }) {
     <div className="sw-scope">
       <SalesStyles />
       <div style={{ maxWidth: 1180, margin: '0 auto', padding: '22px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between',
-                      alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+        <div className="sw-cc-band">
           <div>
-            <div style={{ fontSize: 21, fontWeight: 700, color: '#0f2338' }}>
-              Compensation Command Center
-            </div>
-            <div className="sw-subtle" style={{ marginTop: 3 }}>
+            <h1 className="sw-cc-title">Compensation Command Center</h1>
+            <p className="sw-cc-sub">
               What the compensation rules produced — and what can be settled.
-            </div>
+              Every figure below opens the exact entries behind it.
+            </p>
           </div>
           <button className="sw-btn" onClick={() => nav(-1)}>Back</button>
         </div>
@@ -87,37 +115,44 @@ function day(v) {
     : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+function plural(n, one, many) { return n === 1 ? one : many }
+
+/* THE FOUR LEDGER STATES, as a chip. Tones come from the stylesheet's tonal
+ * tokens, so they are re-chosen for dark rather than dimmed. */
 const VIEW_TONE = {
-  on_hold: { bg: 'rgba(245,185,66,.14)', fg: '#8a6100', label: 'ON HOLD' },
-  payable_now: { bg: 'rgba(63,185,80,.14)', fg: '#1c6b2b', label: 'PAYABLE' },
-  paid: { bg: 'rgba(120,130,145,.14)', fg: '#4a5563', label: 'PAID' },
-  void: { bg: 'rgba(248,81,73,.14)', fg: '#9a2820', label: 'VOID' },
+  on_hold: { cls: 'sw-chip sw-amber', label: 'ON HOLD' },
+  payable_now: { cls: 'sw-chip sw-green', label: 'PAYABLE' },
+  paid: { cls: 'sw-chip', label: 'PAID' },
+  void: { cls: 'sw-chip sw-red', label: 'VOID' },
 }
 
 function Pill({ view }) {
   const t = VIEW_TONE[view] || VIEW_TONE.paid
+  return <span className={t.cls}>{t.label}</span>
+}
+
+/** One headline figure. Clicking it filters the ledger to the rows behind it. */
+function Tile({ label, value, sub, tone, lead, forecast, active, onClick }) {
+  const cls = ['sw-tile']
+  if (tone) cls.push('t-' + tone)
+  if (lead) cls.push('is-lead')
+  if (forecast) cls.push('is-forecast')
+  if (active) cls.push('is-on')
+  if (!onClick) cls.push('is-static')
   return (
-    <span style={{ background: t.bg, color: t.fg, fontSize: 10, fontWeight: 800,
-                   letterSpacing: '.06em', padding: '2px 8px', borderRadius: 20 }}>
-      {t.label}
-    </span>
+    <button type="button" className={cls.join(' ')}
+            onClick={onClick} disabled={!onClick}
+            aria-pressed={onClick ? !!active : undefined}>
+      <span className="sw-tile-label">{label}</span>
+      <div className="sw-tile-value">{value}</div>
+      {sub ? <div className="sw-tile-sub">{sub}</div> : null}
+    </button>
   )
 }
 
-function Stat({ label, value, sub, muted, active, onClick }) {
-  return (
-    <button type="button" onClick={onClick}
-            className="sw-card"
-            style={{ flex: '1 1 160px', minWidth: 160, textAlign: 'left',
-                     cursor: onClick ? 'pointer' : 'default',
-                     border: active ? '2px solid #1a5fa8' : undefined }}>
-      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.09em',
-                    color: '#5c6b7a' }}>{label}</div>
-      <div style={{ fontSize: 25, fontWeight: 700, marginTop: 4,
-                    color: muted ? '#8496a4' : '#0f2338' }}>{value}</div>
-      {sub ? <div className="sw-subtle" style={{ marginTop: 2 }}>{sub}</div> : null}
-    </button>
-  )
+/** The severity pill. `severity` is the server's word, not one derived here. */
+function Sev({ severity, label }) {
+  return <span className={'sw-sev sv-' + (severity || 'no_data')}>{label}</span>
 }
 
 /* ── settling a payment run ───────────────────────────────────────────────── */
@@ -150,62 +185,57 @@ function PayDialog({ lines, onClose, onDone }) {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(8,16,26,.6)', padding: 16 }}
-         onClick={onClose}>
-      <div className="sw-card" style={{ maxWidth: 560, width: '100%' }}
-           onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.08em',
-                      color: '#16324f' }}>
-          SETTLE {ids.length} {ids.length === 1 ? 'ENTRY' : 'ENTRIES'} — {usd(total)}
+    <div className="sw-modal-back" onClick={onClose}>
+      <div className="sw-modal" onClick={e => e.stopPropagation()}>
+        <div className="sw-card-h">
+          <div>
+            <h3>Settle {ids.length} {plural(ids.length, 'entry', 'entries')} — {usd(total)}</h3>
+            <small>
+              Paying {lines.length} {plural(lines.length, 'person', 'people')}. All
+              or nothing: if any entry cannot be settled, none of them are.
+            </small>
+          </div>
         </div>
 
-        <div className="sw-subtle" style={{ marginTop: 8 }}>
-          Paying {lines.length} {lines.length === 1 ? 'person' : 'people'}. This is
-          all or nothing: if any entry cannot be settled, none of them are, so a
-          half-finished run can never leave you unsure which cheques went out.
-        </div>
+        <div className="sw-card-b">
+          {err ? <div className="sw-err"><b>NOT PAID.</b> {err}</div> : null}
 
-        {err ? <div className="sw-notbuilt sw-mt"><b>NOT PAID</b><p>{err}</p></div> : null}
+          <div className="sw-field">
+            <label htmlFor="pay-ref">Payment reference (required)</label>
+            <input id="pay-ref" className="sw-input" value={reference}
+                   onChange={e => setReference(e.target.value)}
+                   placeholder="e.g. ACH-2026-09-06" />
+          </div>
+          <div className="sw-field">
+            <label htmlFor="pay-batch">Batch reference — groups this week's run</label>
+            <input id="pay-batch" className="sw-input" value={batch}
+                   onChange={e => setBatch(e.target.value)}
+                   placeholder="e.g. WK-2026-36" />
+          </div>
+          <div className="sw-field">
+            <label htmlFor="pay-method">Method</label>
+            <input id="pay-method" className="sw-input" value={method}
+                   onChange={e => setMethod(e.target.value)}
+                   placeholder="ACH, check, transfer" />
+          </div>
+          <div className="sw-field">
+            <label htmlFor="pay-note">Note</label>
+            <input id="pay-note" className="sw-input" value={note}
+                   onChange={e => setNote(e.target.value)} />
+          </div>
 
-        <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
-          <label style={{ display: 'block' }}>
-            <div className="sw-subtle">Payment reference (required)</div>
-            <input value={reference} onChange={e => setReference(e.target.value)}
-                   placeholder="e.g. ACH-2026-09-06"
-                   style={{ width: '100%', padding: 8 }} />
-          </label>
-          <label style={{ display: 'block' }}>
-            <div className="sw-subtle">Batch reference — groups this week's run</div>
-            <input value={batch} onChange={e => setBatch(e.target.value)}
-                   placeholder="e.g. WK-2026-36"
-                   style={{ width: '100%', padding: 8 }} />
-          </label>
-          <label style={{ display: 'block' }}>
-            <div className="sw-subtle">Method</div>
-            <input value={method} onChange={e => setMethod(e.target.value)}
-                   placeholder="ACH, check, transfer"
-                   style={{ width: '100%', padding: 8 }} />
-          </label>
-          <label style={{ display: 'block' }}>
-            <div className="sw-subtle">Note</div>
-            <input value={note} onChange={e => setNote(e.target.value)}
-                   style={{ width: '100%', padding: 8 }} />
-          </label>
-        </div>
+          <p className="sw-muted" style={{ marginTop: 12 }}>
+            No bank details are stored here. A reference identifies a payment
+            that happened elsewhere.
+          </p>
 
-        <div className="sw-subtle" style={{ marginTop: 10 }}>
-          No bank details are stored here. A reference identifies a payment that
-          happened elsewhere.
-        </div>
-
-        <div className="sw-flex sw-mt" style={{ gap: 8 }}>
-          <button className="sw-btn" onClick={submit}
-                  disabled={busy || !reference.trim() || !ids.length}>
-            {busy ? 'Settling…' : 'Mark ' + usd(total) + ' paid'}
-          </button>
-          <button className="sw-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <div className="sw-flex sw-mt" style={{ gap: 8 }}>
+            <button className="sw-btn sw-primary" onClick={submit}
+                    disabled={busy || !reference.trim() || !ids.length}>
+              {busy ? 'Settling…' : 'Mark ' + usd(total) + ' paid'}
+            </button>
+            <button className="sw-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          </div>
         </div>
       </div>
     </div>
@@ -215,6 +245,7 @@ function PayDialog({ lines, onClose, onDone }) {
 /* ── the screen ───────────────────────────────────────────────────────────── */
 
 export default function CompensationCommand({ embedded = false }) {
+  const nav = useNavigate()
   const [d, setD] = useState(null)
   const [payables, setPayables] = useState(null)
   const [rows, setRows] = useState(null)
@@ -263,18 +294,20 @@ export default function CompensationCommand({ embedded = false }) {
 
   const s = d?.summary
   const p = d?.projected
+  const att = d?.attention
+  const viewLabel = (d?.vocabulary?.views || []).find(v => v.key === view)?.label || view
 
   return (
     <CompShell embedded={embedded}>
-      {err ? <div className="sw-notbuilt"><b>PROBLEM</b><p>{err}</p></div> : null}
-      {!d && !err ? <div className="sw-subtle">Loading…</div> : null}
+      {err ? <div className="sw-err">{err}</div> : null}
+      {!d && !err ? <div className="sw-muted">Loading…</div> : null}
 
       {d ? (
         <>
           {d.brands?.length > 1 ? (
-            <div className="sw-flex" style={{ marginBottom: 12 }}>
-              <select value={brand} onChange={e => setBrand(e.target.value)}
-                      style={{ padding: 8 }}>
+            <div className="sw-filters">
+              <select className="sw-select" value={brand} aria-label="Brand"
+                      onChange={e => setBrand(e.target.value)}>
                 <option value="">All brands I can see</option>
                 {d.brands.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
@@ -283,203 +316,293 @@ export default function CompensationCommand({ embedded = false }) {
             </div>
           ) : null}
 
-          {/* PROJECTED IS SEPARATED FROM THE LEDGER FIGURES BY A LINE, not just
-              by wording. It is a forecast; the rest is money. */}
-          <div className="sw-flex" style={{ gap: 12, flexWrap: 'wrap' }}>
-            <Stat label="PROJECTED" muted value={usd(p.amount)}
-                  sub={p.deal_count + ' open deals · not owed'} />
+          {/* ── THE FORECAST, HELD APART ────────────────────────────────────
+              Not a smaller card in the same row — a different KIND of number,
+              so it gets its own band with the sentence that qualifies it
+              sitting beside it rather than three scrolls further down. */}
+          <div className="sw-cc-forecast">
+            <Tile forecast label="Projected" value={usd(p.amount)}
+                  sub={p.deal_count + ' open ' + plural(p.deal_count, 'deal', 'deals')} />
+            <p className="sw-cc-forecast-note">
+              <span>
+                <b>Projected is owed to nobody.</b> It is what today's open
+                deals would pay if they closed on today's terms. Commission
+                becomes real money only when a customer payment is actually
+                collected — everything below this line already has.
+              </span>
+            </p>
           </div>
 
-          <div className="sw-flex sw-mt" style={{ gap: 12, flexWrap: 'wrap' }}>
-            <Stat label="EARNED" value={usd(s.earned_total)}
-                  sub={s.earned_count + ' entries · lifetime'}
+          {/* ── THE LEDGER FIGURES ──────────────────────────────────────────
+              Four buckets, each one a filter on the table further down. */}
+          <div className="sw-tiles">
+            <Tile tone="earned" label="Earned" value={usd(s.earned_total)}
+                  sub={s.earned_count + ' ' + plural(s.earned_count, 'entry', 'entries')
+                       + ' · lifetime'}
                   active={view === 'all'} onClick={() => setView('all')} />
-            <Stat label="ON HOLD" value={usd(s.on_hold.amount)}
+            <Tile tone="hold" label="On hold" value={usd(s.on_hold.amount)}
                   sub={s.on_hold.count + ' in holdback'}
                   active={view === 'on_hold'} onClick={() => setView('on_hold')} />
-            <Stat label="PAYABLE NOW" value={usd(s.payable_now.amount)}
-                  sub={s.payable_now.count + ' ready'}
+            <Tile tone="payable" lead label="Payable now" value={usd(s.payable_now.amount)}
+                  sub={s.payable_now.count + ' ready to pay'}
                   active={view === 'payable_now'} onClick={() => setView('payable_now')} />
-            <Stat label="PAID" value={usd(s.paid.amount)}
+            <Tile tone="paid" label="Paid" value={usd(s.paid.amount)}
                   sub={s.paid.count + ' settled'}
                   active={view === 'paid'} onClick={() => setView('paid')} />
           </div>
 
-          {/* UPCOMING LIABILITY, from rows that already exist. Nothing here is
-              forecast from the pipeline — every entry was earned on a real
-              collected payment and carries a stored payable date. */}
+          {/* ── BECOMING PAYABLE ────────────────────────────────────────────
+              From rows that already exist. Nothing here is forecast from the
+              pipeline — every entry was earned on a real collected payment and
+              carries a stored payable date. */}
           <div className="sw-card sw-mt">
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.09em',
-                          color: '#16324f' }}>
-              BECOMING PAYABLE
+            <div className="sw-card-h">
+              <div>
+                <h3>BECOMING PAYABLE</h3>
+                <small>
+                  Commission already earned on collected payments, by the date
+                  its holdback elapses. Open pipeline is not counted — a deal
+                  with no collected payment has no payable date.
+                </small>
+              </div>
             </div>
-            <div className="sw-flex" style={{ gap: 18, marginTop: 8, flexWrap: 'wrap' }}>
-              {s.upcoming.map(u => (
-                <div key={u.window_days}>
-                  <div className="sw-subtle">Next {u.window_days} days</div>
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>{usd(u.amount)}</div>
-                  <div className="sw-subtle">{u.count} entries</div>
-                </div>
-              ))}
-            </div>
-            <div className="sw-subtle" style={{ marginTop: 8 }}>
-              From commissions already earned on collected payments. Open pipeline
-              is not counted — a deal with no collected payment has no payable date.
+            <div className="sw-card-b" style={{ paddingTop: 0 }}>
+              <div className="sw-becoming">
+                {s.upcoming.map(u => (
+                  <div className="sw-becoming-cell" key={u.window_days}>
+                    <span>Next {u.window_days} days</span>
+                    <b>{usd(u.amount)}</b>
+                    <small>{u.count} {plural(u.count, 'entry', 'entries')}</small>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* WEEKLY PAYABLES */}
+          {/* ── ATTENTION REQUIRED ──────────────────────────────────────────
+              Server-computed, worst first, every row counted from entries that
+              exist. An empty list is a real answer and says so. */}
+          <div className="sw-card sw-mt">
+            <div className="sw-card-h">
+              <div>
+                <h3>ATTENTION REQUIRED</h3>
+                <small>
+                  Conditions on this ledger that need a person. Each is counted
+                  from real entries — nothing here is a reminder or a threshold.
+                </small>
+              </div>
+              {att?.overall ? (
+                <span style={{ marginLeft: 'auto' }}>
+                  <Sev severity={att.overall} label={att.overall_label} />
+                </span>
+              ) : null}
+            </div>
+            <div className="sw-card-b" style={{ paddingTop: 0 }}>
+              {!att || !att.items.length ? (
+                <div className="sw-allclear">
+                  <div>
+                    <b>Nothing outstanding.</b>
+                    <p>
+                      No unrated packages, no capped or orphaned entries, and
+                      nothing waiting on a decision. This is checked against the
+                      ledger every time the page loads.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="sw-att">
+                  {att.items.map(it => (
+                    <div className={'sw-att-row sv-' + it.severity} key={it.key}>
+                      <div className="sw-att-bar" />
+                      <div className="sw-att-body">
+                        <div className="sw-att-t">
+                          <Sev severity={it.severity} label={it.severity_label} />
+                          <b>{it.title}</b>
+                        </div>
+                        <p className="sw-att-d">{it.detail}</p>
+                      </div>
+                      <div className="sw-att-side">
+                        {/* OPENING THE PROOF. `view` names the exact ledger
+                            bucket the item was counted from, so the claim can
+                            be checked in the table below rather than believed. */}
+                        {it.view ? (
+                          <button className="sw-tiny" onClick={() => setView(it.view)}>
+                            Show {it.count}
+                          </button>
+                        ) : null}
+                        {it.action_route ? (
+                          <button className="sw-tiny sw-primary"
+                                  onClick={() => nav(it.action_route)}>
+                            {it.action_label}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── THIS WEEK'S PAYMENT RUN ─────────────────────────────────────── */}
           {payables?.lines?.length ? (
             <div className="sw-card sw-mt">
-              <div className="sw-flex" style={{ justifyContent: 'space-between',
-                                                alignItems: 'center' }}>
-                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.09em',
-                              color: '#16324f' }}>
-                  PAYABLES — {usd(payables.total)} across {payables.lines.length}{' '}
-                  {payables.lines.length === 1 ? 'person' : 'people'}
+              <div className="sw-card-h">
+                <div>
+                  <h3>
+                    PAYABLES — {usd(payables.total)} across {payables.lines.length}{' '}
+                    {plural(payables.lines.length, 'person', 'people')}
+                  </h3>
+                  <small>One line per person. This is what a payment run is made of.</small>
                 </div>
-                <div className="sw-flex" style={{ gap: 8 }}>
+                <div className="sw-flex" style={{ gap: 8, marginLeft: 'auto' }}>
                   <button className="sw-btn" onClick={promote} disabled={busy}>
                     {busy ? '…' : 'Release elapsed holdbacks'}
                   </button>
                   {payables.can_process_payments ? (
-                    <button className="sw-btn" onClick={() => setPaying(true)}>
+                    <button className="sw-btn sw-primary" onClick={() => setPaying(true)}>
                       Settle all payable
                     </button>
                   ) : null}
                 </div>
               </div>
 
-              <div className="sw-tablewrap" style={{ marginTop: 10 }}>
-                <table className="sw-table">
-                  <thead>
-                    <tr>
-                      <th>Person</th>
-                      <th style={{ textAlign: 'right' }}>Seller</th>
-                      <th style={{ textAlign: 'right' }}>Override</th>
-                      <th style={{ textAlign: 'right' }}>Total</th>
-                      <th style={{ textAlign: 'right' }}>Entries</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payables.lines.map(l => (
-                      <tr key={l.payee_user_id}>
-                        <td>{l.payee_name}</td>
-                        <td style={{ textAlign: 'right' }}>{usd(l.seller_amount)}</td>
-                        <td style={{ textAlign: 'right' }}>{usd(l.override_amount)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          {usd(l.amount)}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>{l.count}</td>
+              <div className="sw-card-b">
+                <div className="sw-tablewrap">
+                  <table className="sw-table">
+                    <thead>
+                      <tr>
+                        <th>Person</th>
+                        <th className="sw-num">Seller</th>
+                        <th className="sw-num">Override</th>
+                        <th className="sw-num">Total</th>
+                        <th className="sw-num">Entries</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {!payables.can_process_payments ? (
-                <div className="sw-subtle" style={{ marginTop: 8 }}>
-                  You can see what is payable. Settling payments requires platform
-                  finance authority.
+                    </thead>
+                    <tbody>
+                      {payables.lines.map(l => (
+                        <tr key={l.payee_user_id}>
+                          <td>{l.payee_name}</td>
+                          <td className="sw-num">{usd(l.seller_amount)}</td>
+                          <td className="sw-num">{usd(l.override_amount)}</td>
+                          <td className="sw-num"><b>{usd(l.amount)}</b></td>
+                          <td className="sw-num">{l.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ) : null}
+                {!payables.can_process_payments ? (
+                  <p className="sw-muted" style={{ marginTop: 10 }}>
+                    You can see what is payable. Settling payments requires
+                    compensation authority over the brand, which is granted
+                    separately from being able to read these numbers.
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
-          {/* THE LEDGER — and its own sum, so the headline above is provable. */}
+          {/* ── THE LEDGER, AND ITS OWN SUM ─────────────────────────────────
+              The proof line is why the headlines above can be trusted: the
+              count and the total describe THIS EXACT SET of rows. */}
           <div className="sw-card sw-mt">
-            <div className="sw-flex" style={{ justifyContent: 'space-between',
-                                              alignItems: 'center' }}>
-              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.09em',
-                            color: '#16324f' }}>
-                LEDGER — {(rows?.count ?? 0)}{' '}
-                {rows?.count === 1 ? 'ENTRY' : 'ENTRIES'} TOTALLING {usd(rows?.total)}
-              </div>
-              <select value={view} onChange={e => setView(e.target.value)}
-                      style={{ padding: 6 }}>
-                {(d.vocabulary?.views || []).map(v => (
-                  <option key={v.key} value={v.key}>{v.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {!rows ? <div className="sw-subtle" style={{ marginTop: 10 }}>Loading…</div>
-              : !rows.entries.length ? (
-                <div className="sw-subtle" style={{ marginTop: 10 }}>
-                  No entries. Commission appears here when a customer payment on a
-                  won deal is recorded as collected — never because a deal was
-                  marked Won.
+            <div className="sw-card-h">
+              <div className="sw-ledger-h" style={{ marginBottom: 0, width: '100%' }}>
+                <div>
+                  <h3>LEDGER — {viewLabel.toUpperCase()}</h3>
+                  <small className="sw-proof">
+                    {(rows?.count ?? 0)} {plural(rows?.count, 'entry', 'entries')}{' '}
+                    totalling {usd(rows?.total)}
+                  </small>
                 </div>
-              ) : (
-              <div className="sw-tablewrap" style={{ marginTop: 10 }}>
-                <table className="sw-table" style={{ minWidth: 940 }}>
-                  <thead>
-                    <tr>
-                      <th>Person</th><th>Type</th><th>Customer</th><th>Deal</th>
-                      <th>Package</th>
-                      <th style={{ textAlign: 'right' }}>Amount</th>
-                      <th>Qualifying payment</th><th>Payable</th>
-                      <th>Status</th><th>Rule</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.entries.map(e => (
-                      <tr key={e.id}>
-                        <td>{e.payee_name}</td>
-                        <td>{e.compensation_type}</td>
-                        <td>{e.customer_name || <span className="sw-subtle">—</span>}</td>
-                        <td>{e.deal_name || '—'}</td>
-                        <td>{e.package_name || '—'}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                          {usd(e.amount)}
-                          {e.capped_from_amount ? (
-                            <div style={{ fontSize: 10, color: '#8a6100' }}>
-                              capped from {usd(e.capped_from_amount)}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td>
-                          <div style={{ fontSize: 11 }}>{e.collection_reference}</div>
-                          <div className="sw-subtle">{day(e.collected_at)}</div>
-                        </td>
-                        <td>
-                          {day(e.payable_at)}
-                          {e.paid_at ? (
-                            <div className="sw-subtle">paid {day(e.paid_at)}</div>
-                          ) : null}
-                        </td>
-                        <td><Pill view={e.view} /></td>
-                        {/* THE SNAPSHOT — what the plan said at the time, which
-                            is what answers "why this amount" years later. */}
-                        <td style={{ fontSize: 11 }}>
-                          {e.rate_amount !== null && e.rate_amount !== undefined
-                            ? usd(e.rate_amount) + ' fixed'
-                            : e.rate_percent !== null && e.rate_percent !== undefined
-                              ? e.rate_percent + '% ' + (e.basis_label || '')
-                              : '—'}
-                          <div className="sw-subtle">{e.plan_name || 'plan removed'}</div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <select className="sw-select" style={{ width: 'auto' }}
+                        aria-label="Ledger view"
+                        value={view} onChange={e => setView(e.target.value)}>
+                  {(d.vocabulary?.views || []).map(v => (
+                    <option key={v.key} value={v.key}>{v.label}</option>
+                  ))}
+                </select>
               </div>
-            )}
-          </div>
-
-          {p.unconfigured_deals > 0 ? (
-            <div className="sw-notbuilt sw-mt"
-                 style={{ borderColor: 'rgba(255,170,60,.45)' }}>
-              <b>{p.unconfigured_deals} OPEN{' '}
-                {p.unconfigured_deals === 1 ? 'DEAL HAS' : 'DEALS HAVE'} NO
-                CONFIGURED COMMISSION</b>
-              <p>
-                Their packages have no rate set, so they are excluded from
-                projected compensation rather than counted as $0 — which would
-                read as a decision to pay nothing. Set the rates in God Mode →
-                Pricing &amp; Comp.
-              </p>
             </div>
-          ) : null}
+
+            <div className="sw-card-b">
+              {!rows ? <div className="sw-muted">Loading…</div>
+                : !rows.entries.length ? (
+                  <div className="sw-blank">
+                    <b>No entries in this view.</b>
+                    <p>
+                      Commission appears here when a customer payment on a won
+                      deal is recorded as collected — never because a deal was
+                      marked Won. Nothing is missing; nothing has been collected
+                      that falls in this bucket.
+                    </p>
+                  </div>
+                ) : (
+                <div className="sw-tablewrap">
+                  <table className="sw-table" style={{ minWidth: 940 }}>
+                    <thead>
+                      <tr>
+                        <th>Person</th><th>Type</th><th>Customer</th><th>Deal</th>
+                        <th>Package</th>
+                        <th className="sw-num">Amount</th>
+                        <th>Qualifying payment</th><th>Payable</th>
+                        <th>Status</th><th>Rule</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.entries.map(e => (
+                        <tr key={e.id}>
+                          <td>{e.payee_name}</td>
+                          <td>{e.compensation_type}</td>
+                          <td>{e.customer_name
+                            || <span className="sw-muted">not provisioned</span>}</td>
+                          <td>{e.deal_name || '—'}</td>
+                          <td>{e.package_name || '—'}</td>
+                          <td className="sw-num">
+                            <b>{usd(e.amount)}</b>
+                            {e.capped_from_amount ? (
+                              <span className="sw-cap">
+                                capped from {usd(e.capped_from_amount)}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>
+                            {e.collection_reference}
+                            <span className="sw-muted" style={{ display: 'block' }}>
+                              {day(e.collected_at)}
+                            </span>
+                          </td>
+                          <td>
+                            {day(e.payable_at)}
+                            {e.paid_at ? (
+                              <span className="sw-muted" style={{ display: 'block' }}>
+                                paid {day(e.paid_at)}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td><Pill view={e.view} /></td>
+                          {/* THE SNAPSHOT — what the plan said at the time,
+                              which is what answers "why this amount" years
+                              later. A plan edit cannot rewrite it. */}
+                          <td>
+                            {e.rate_amount !== null && e.rate_amount !== undefined
+                              ? usd(e.rate_amount) + ' fixed'
+                              : e.rate_percent !== null && e.rate_percent !== undefined
+                                ? e.rate_percent + '% ' + (e.basis_label || '')
+                                : '—'}
+                            <span className="sw-muted" style={{ display: 'block' }}>
+                              {e.plan_name || 'plan removed'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         </>
       ) : null}
 

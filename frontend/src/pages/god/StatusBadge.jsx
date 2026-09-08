@@ -58,7 +58,16 @@ export function Dot({ color = T.blue, glow = false }) {
   }} />
 }
 
-/** Grey italic marker for anything with no backing data source. Never fake a number. */
-export function NoSource({ children = 'no source' }) {
+/** Grey italic marker for a figure nothing can produce. Never fake a number.
+ *
+ * THE DEFAULT WORDING IS THE OWNER'S, NOT OURS. This used to read "no source",
+ * which is accurate about our data model and meaningless to the person who
+ * owns the business — it does not say whether the gap is in his setup or in
+ * our code. "not tracked yet" says the same true thing about his business.
+ *
+ * Callers should still pass their own words where they can be more specific;
+ * this is the fallback, not the preferred answer.
+ */
+export function NoSource({ children = 'not tracked yet' }) {
   return <span style={{ color: T.ghost, fontStyle: 'italic' }}>{children}</span>
 }
