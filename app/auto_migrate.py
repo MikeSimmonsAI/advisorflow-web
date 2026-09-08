@@ -753,6 +753,51 @@ TABLES_TO_CREATE = [
         created_at TIMESTAMP DEFAULT NOW()
     )
     """,
+    # ── Executive Workspace deal-room tables (2026-09-08) ─────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS exec_workspace_items (
+        id VARCHAR PRIMARY KEY,
+        organization_id VARCHAR NOT NULL REFERENCES organizations(id),
+        platform_id VARCHAR NOT NULL REFERENCES platforms(id),
+        title VARCHAR NOT NULL,
+        status VARCHAR NOT NULL DEFAULT 'Draft',
+        working_notes TEXT,
+        created_by VARCHAR REFERENCES users(id),
+        updated_by VARCHAR REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS exec_workspace_files (
+        id VARCHAR PRIMARY KEY,
+        item_id VARCHAR NOT NULL REFERENCES exec_workspace_items(id) ON DELETE CASCADE,
+        organization_id VARCHAR NOT NULL REFERENCES organizations(id),
+        platform_id VARCHAR NOT NULL REFERENCES platforms(id),
+        filename VARCHAR NOT NULL,
+        content_type VARCHAR NOT NULL DEFAULT 'application/octet-stream',
+        file_size INTEGER NOT NULL DEFAULT 0,
+        file_data BYTEA NOT NULL,
+        is_current BOOLEAN NOT NULL DEFAULT TRUE,
+        replaces_file_id VARCHAR REFERENCES exec_workspace_files(id),
+        uploaded_by VARCHAR REFERENCES users(id),
+        uploaded_at TIMESTAMP DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS exec_workspace_versions (
+        id VARCHAR PRIMARY KEY,
+        item_id VARCHAR NOT NULL REFERENCES exec_workspace_items(id) ON DELETE CASCADE,
+        organization_id VARCHAR NOT NULL REFERENCES organizations(id),
+        platform_id VARCHAR NOT NULL REFERENCES platforms(id),
+        snapshot_title VARCHAR,
+        snapshot_notes TEXT,
+        snapshot_status VARCHAR,
+        trigger VARCHAR NOT NULL DEFAULT 'patch',
+        saved_by VARCHAR REFERENCES users(id),
+        saved_at TIMESTAMP DEFAULT NOW()
+    )
+    """,
 ]
 
 # (postgres enum type name, value to add) - SQLAlchemy's SAEnum writes

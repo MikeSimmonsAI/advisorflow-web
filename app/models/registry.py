@@ -114,3 +114,7 @@ import app.models.customer_lifecycle_models  # noqa: F401  (imported for side ef
 # moved, so a missing table would make revenue reporting quietly read zero
 # rather than fail. Do not remove this line.
 import app.models.billing_models  # noqa: F401  (imported for side effects)
+# Executive Workspace deal-room tables (exec_workspace_items / _files / _versions).
+# Same Base, same reason. Without this import those three tables are never created
+# and every workspace endpoint fails with a missing-table error on first use.
+import app.models.exec_workspace_models  # noqa: F401  (imported for side effects)

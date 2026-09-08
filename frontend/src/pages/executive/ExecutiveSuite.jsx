@@ -122,6 +122,10 @@ const NAV = [
     group: 'Team',
     items: [{ label: 'Sales Team', to: '/executive/team' }],
   },
+  {
+    group: 'Workspace',
+    items: [{ label: 'Workspace', to: '/executive/workspace' }],
+  },
 ]
 
 export default function ExecutiveSuite({ children }) {

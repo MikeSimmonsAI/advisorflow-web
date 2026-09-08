@@ -88,6 +88,8 @@ import ExecutiveTeam from './pages/executive/ExecutiveTeam'
 // read-only banner — the right screens for the person working the queue and
 // the wrong ones for the executive deciding whether the business is working.
 import ExecutiveOrgPerformance from './pages/executive/ExecutiveOrgPerformance'
+import ExecutiveWorkspace from './pages/executive/ExecutiveWorkspace'
+import ExecutiveWorkspaceItem from './pages/executive/ExecutiveWorkspaceItem'
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
 import GodSalesOps from './pages/GodSalesOps'
@@ -799,6 +801,8 @@ export default function App() {
             The endpoint behind it is require_brand_executive + platform
             isolated, so a forged id in the URL is a 404 rather than a leak. */}
         <Route path="/executive/organizations/:orgId/view" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveOrgPerformance /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/workspace" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveWorkspace /></ExecutiveSuite></ExecutiveRoute>} />
+        <Route path="/executive/workspace/:itemId" element={<ExecutiveRoute><ExecutiveSuite><ExecutiveWorkspaceItem /></ExecutiveSuite></ExecutiveRoute>} />
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />

@@ -122,6 +122,8 @@ from app.routers import qualification_router  # noqa: E402
 # Separate from god_router (owner control plane) and sales_router (brand sales
 # workspace). No tenant Layout; no god controls; no cross-brand visibility.
 from app.routers.executive_router import router as executive_router
+# Executive Workspace — deal-room content for customer organizations.
+from app.routers.exec_workspace_router import router as exec_workspace_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -624,6 +626,7 @@ app.include_router(qualification_router.router)
 # god_admin only for /executive/admin/grant|revoke; require_brand_executive
 # guards everything else. No tenant data; no cross-brand visibility.
 app.include_router(executive_router)
+app.include_router(exec_workspace_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
