@@ -53,13 +53,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 #
 # on two tests near the end — which looked like a billing defect and was not.
 # The requirement was only ever "more than the 1 MB default", because that is
-# what SQLAlchemy's compiler overflows. 4 MB clears it with room to spare and
-# is a quarter of the pressure. Do not raise this to fix an unrelated failure.
+# what SQLAlchemy's compiler overflows. Do not raise this to fix an unrelated
+# failure - raising it is what caused the second failure mode.
 #
-# The `try` is deliberate: `stack_size` raises on platforms that will not take
-# the value, and a test suite must not fail to import over a tuning hint.
+# WHY IT CAME DOWN AGAIN, FROM 4 MB TO 2 MB. The suite kept growing and the
+# same `can't start new thread` returned - one test, deep in the run, passing
+# in isolation. The note written when 4 MB was chosen said this would happen:
+# "if the suite grows much further, the stack size will need revisiting rather
+# than the tests." It grew, so this is that revision rather than another round
+# of trimming tests to fit.
+#
+# 2 MB is still double the Windows default that overflows, and halves the
+# reservation again. The floor is 1 MB - below that the original stack overflow
+# comes back - so this is the last halving available. If it returns after that,
+# the answer is fewer live portal threads (reusing one TestClient across a
+# file's requests), not a smaller stack.
 try:                                    # pragma: no cover - platform dependent
-    threading.stack_size(4 * 1024 * 1024)
+    threading.stack_size(2 * 1024 * 1024)
 except (ValueError, RuntimeError):      # pragma: no cover
     pass
 
@@ -163,6 +173,22 @@ def db_session():
     different, table-less database than the one this fixture set up -
     this was caught for real during testing ("no such table: users")
     before adding StaticPool fixed it.
+
+    THE ENGINE IS DISPOSED, NOT JUST THE SESSION - AND THAT IS LOAD-BEARING.
+
+    StaticPool keeps ONE SQLite connection open for the life of the engine, and
+    with sqlite:///:memory: that connection IS the database: close it and the
+    whole thing is freed, keep it and every table and row this test created
+    stays resident. Closing only the session left the engine - and therefore
+    that entire in-memory database, ~150 tables of schema plus its data - alive
+    for the remainder of the run, once per test.
+
+    Across a 1700-test suite that is a genuine leak, and it had already started
+    costing real runs: pytest died with MemoryError in the last tenth of the
+    suite, taking a dozen unrelated tests with it, and the failures moved around
+    between runs the way memory-pressure failures do. Every one of those tests
+    passes alone. Disposing here is not a workaround for that - it is the thing
+    that was missing.
     """
     from sqlalchemy.pool import StaticPool
     engine = create_engine(
@@ -173,8 +199,12 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = SessionLocal()
-    yield session
-    session.close()
+    try:
+        yield session
+    finally:
+        session.close()
+        # Releases the StaticPool connection and with it the in-memory database.
+        engine.dispose()
 
 
 # ── Twilio in tests ─────────────────────────────────────────────────────────

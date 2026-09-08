@@ -633,6 +633,68 @@ def test_public_intake_writes_are_throttled(client, db_session, sample_org):
     assert 429 in statuses, "public demo-request writes were unthrottled"
 
 
+# ── 4c. Configuring the destination from God Mode, not a shell ──────────────
+
+def test_god_can_see_and_set_the_public_intake_destination(
+        client, db_session, sample_org, god_headers):
+    platform = Platform(name="BookaBoost", slug="bookaboost")
+    db_session.add(platform)
+    db_session.flush()
+    sample_org.platform_id = platform.id
+    db_session.add(sample_org)
+    db_session.commit()
+
+    before = client.get("/god/platform/public-intake", headers=god_headers)
+    assert before.status_code == 200, before.text
+    row = [p for p in before.json()["platforms"] if p["slug"] == "bookaboost"][0]
+    assert row["configured"] is False
+
+    # Refused before it is configured — this is the state a fresh deploy is in.
+    assert client.post("/leads/demo-request",
+                       json={"first_name": "Dana"}).status_code == 503
+
+    put = client.put("/god/platform/public-intake/%s" % platform.id,
+                     json={"organization_id": sample_org.id}, headers=god_headers)
+    assert put.status_code == 200, put.text
+    assert put.json()["configured"] is True
+
+    after = client.post("/leads/demo-request", json={"first_name": "Dana"})
+    assert after.status_code == 201, after.text
+    assert db_session.query(Lead).one().organization_id == sample_org.id
+
+
+def test_a_destination_from_another_brand_is_refused_when_typed(
+        client, db_session, sample_org, other_org, god_headers):
+    """The misconfiguration is caught at configuration time, not by a prospect
+    who never heard back."""
+    bb = Platform(name="BookaBoost", slug="bookaboost")
+    ev = Platform(name="EvoSys Pro", slug="evosyspro")
+    db_session.add_all([bb, ev])
+    db_session.flush()
+    sample_org.platform_id = bb.id
+    other_org.platform_id = ev.id
+    db_session.add_all([sample_org, other_org])
+    db_session.commit()
+
+    r = client.put("/god/platform/public-intake/%s" % bb.id,
+                   json={"organization_id": other_org.id}, headers=god_headers)
+    assert r.status_code == 400
+    db_session.refresh(bb)
+    assert bb.public_intake_organization_id is None
+
+
+def test_public_intake_configuration_is_god_only(client, db_session,
+                                                 admin_auth_headers):
+    platform = Platform(name="BookaBoost", slug="bookaboost")
+    db_session.add(platform)
+    db_session.commit()
+    assert client.get("/god/platform/public-intake",
+                      headers=admin_auth_headers).status_code in (401, 403)
+    assert client.put("/god/platform/public-intake/%s" % platform.id,
+                      json={"organization_id": None},
+                      headers=admin_auth_headers).status_code in (401, 403)
+
+
 # ── 5. Login throttle ───────────────────────────────────────────────────────
 
 def test_login_still_works_normally(client, db_session, sample_advisor):
@@ -650,51 +712,76 @@ def test_wrong_password_still_returns_401_not_429(client, sample_advisor):
     assert r.json()["detail"] == "Incorrect email or password"
 
 
-def test_password_spraying_across_many_accounts_is_throttled(client, db_session):
-    """THE ATTACK THE OLD THROTTLE COULD NOT SEE.
+def test_the_per_address_ceiling_stops_password_spraying(
+        client, db_session, sample_advisor):
+    """THE ATTACK THE OLD THROTTLE COULD NOT SEE, and everything that follows
+    from stopping it — proved once, in one exhaustion.
 
     `_login_throttle_check` keys on (IP, email), so one attempt against each of
-    a hundred addresses never reaches any bucket's tenth failure. The per-address
-    ceiling is what stops it, and this is the test that proves it is there.
+    a hundred different addresses never reaches any bucket's tenth failure. The
+    per-address ceiling is what stops that.
+
+    THIS IS DELIBERATELY ONE TEST AND NOT THREE. Exhausting the ceiling costs
+    one HTTP request per attempt, and every TestClient request runs the app in
+    an anyio worker thread whose stack is reserved up front (see the
+    threading.stack_size note in conftest). Three separate tests each grinding
+    to the same 429 tripled that cost for no additional coverage: the ceiling is
+    either wired or it is not, and once it has engaged, every assertion about
+    its behaviour can be made against the same refusal. A full run of this suite
+    has already hit the machine's ceiling twice for related reasons, so the
+    thread budget is a real constraint and not a style preference.
     """
-    statuses = []
+    spray = []
     for i in range(45):
         r = client.post("/auth/login",
                         data={"username": "victim%d@example.com" % i,
                               "password": "Password1!"})
-        statuses.append(r.status_code)
+        spray.append(r)
         if r.status_code == 429:
             break
-    assert 429 in statuses, "spraying distinct accounts was never throttled"
+    assert spray[-1].status_code == 429, "spraying distinct accounts was never throttled"
+
+    refusal = spray[-1]
+
+    # NO ACCOUNT-EXISTENCE ORACLE. The refusal is identical whether the address
+    # is real or invented, and names neither.
+    real = client.post("/auth/login",
+                       data={"username": sample_advisor.email,
+                             "password": "WrongPass1!"})
+    ghost = client.post("/auth/login",
+                        data={"username": "nobody-at-all@example.com",
+                              "password": "WrongPass1!"})
+    assert real.status_code == ghost.status_code == 429
+    assert real.text == ghost.text
+    assert sample_advisor.email not in refusal.text
+    assert "exist" not in refusal.text.lower()
+
+    # /auth/verify IS AN ALIAS AND SHARES THE BUDGET.
+    #
+    # This assertion failed the first time it ran, and it was right to: slowapi
+    # namespaces a `limit` by endpoint, so the alias had been given its own
+    # 30/minute allowance and answered 401 while login was already refusing.
+    # Two doors to one operation with two budgets is a documented way to get
+    # double the ceiling. Both now use shared_limit with one scope.
+    aliased = client.post("/auth/verify",
+                          data={"username": "victim999@example.com",
+                                "password": "Password1!"})
+    assert aliased.status_code == 429
 
 
-def test_the_throttle_response_does_not_reveal_whether_an_account_exists(
-        client, db_session, sample_advisor):
-    real, fake = [], []
-    for i in range(60):
-        target = real if i % 2 == 0 else fake
-        email = sample_advisor.email if i % 2 == 0 else "ghost%d@example.com" % i
-        r = client.post("/auth/login",
-                        data={"username": email, "password": "WrongPass1!"})
-        target.append((r.status_code, r.text))
+def test_the_two_public_intake_routes_share_one_ceiling(
+        client, db_session, sample_org):
+    """Same reasoning as the login alias: alternating between demo-request and
+    sms-optin must not buy two allowances."""
+    _configure_intake(db_session, sample_org)
+    for i in range(30):
+        r = client.post("/leads/demo-request",
+                        json={"first_name": "Bot%d" % i,
+                              "phone": "+1214555%04d" % (7000 + i)})
         if r.status_code == 429:
             break
+    assert r.status_code == 429, "demo-request was never throttled"
 
-    limited = [t for t in (real + fake) if t[0] == 429]
-    assert limited, "the ceiling never engaged"
-    for _, text_body in limited:
-        assert sample_advisor.email not in text_body
-        assert "exist" not in text_body.lower()
-
-
-def test_verify_is_throttled_like_login(client, sample_advisor):
-    """The alias must not be a documented way around the ceiling."""
-    statuses = []
-    for i in range(45):
-        r = client.post("/auth/verify",
-                        data={"username": "spray%d@example.com" % i,
-                              "password": "Password1!"})
-        statuses.append(r.status_code)
-        if r.status_code == 429:
-            break
-    assert 429 in statuses
+    spill = client.post("/leads/sms-optin", json={
+        "first_name": "Bot", "phone": "+12145556999", "consent": True})
+    assert spill.status_code == 429

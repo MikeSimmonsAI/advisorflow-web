@@ -147,9 +147,20 @@ def _detect_platform_slug(request: Request) -> str | None:
 # a lockout.
 LOGIN_IP_LIMIT = "30/minute;200/hour"
 
+# ONE BUDGET SHARED BY BOTH ENTRY POINTS, NOT ONE EACH.
+#
+# `limiter.limit` namespaces its counter by ENDPOINT, so decorating /auth/login
+# and /auth/verify separately gives each its own 30/minute - and since verify is
+# a straight alias for login, that is a documented way to get 60. A test caught
+# it: the alias answered 401 while login was already refusing at 429.
+#
+# `shared_limit` takes an explicit scope, so both routes draw down the same
+# counter and the ceiling means what it says regardless of which door is used.
+LOGIN_LIMIT_SCOPE = "auth-login"
+
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit(LOGIN_IP_LIMIT)
+@limiter.shared_limit(LOGIN_IP_LIMIT, scope=LOGIN_LIMIT_SCOPE)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     return _do_login(request, form_data, db)
 
@@ -284,7 +295,7 @@ def enter_workspace(organization_id: str, request: Request,
 
 
 @router.post("/verify", response_model=TokenResponse)
-@limiter.limit(LOGIN_IP_LIMIT)
+@limiter.shared_limit(LOGIN_IP_LIMIT, scope=LOGIN_LIMIT_SCOPE)
 def verify(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Alias for /auth/login — keeps older frontend builds working.
 

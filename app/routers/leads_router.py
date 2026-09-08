@@ -2112,11 +2112,15 @@ class DemoRequestPayload(BaseModel):
 # production is never contaminated with fabricated prospects. Generous enough
 # that a marketing site having a good day is never throttled, and low enough
 # that a bulk submitter runs out.
+# ONE BUDGET ACROSS BOTH INTAKE ROUTES. `limiter.limit` counts per endpoint, so
+# separate decorators would let a bulk submitter take the full allowance twice
+# by alternating between them. A named scope makes the ceiling mean what it says.
 PUBLIC_INTAKE_LIMIT = "20/minute;100/hour"
+PUBLIC_INTAKE_SCOPE = "public-intake"
 
 
 @router.post("/demo-request", status_code=201)
-@limiter.limit(PUBLIC_INTAKE_LIMIT)
+@limiter.shared_limit(PUBLIC_INTAKE_LIMIT, scope=PUBLIC_INTAKE_SCOPE)
 def demo_request(payload: DemoRequestPayload,
                  request: Request,
                  db: Session = Depends(get_db)):
@@ -2309,7 +2313,7 @@ class SmsOptinRequest(BaseModel):
 
 
 @router.post("/sms-optin", status_code=201)
-@limiter.limit(PUBLIC_INTAKE_LIMIT)
+@limiter.shared_limit(PUBLIC_INTAKE_LIMIT, scope=PUBLIC_INTAKE_SCOPE)
 def sms_optin(
     payload: SmsOptinRequest,
     request: Request,

@@ -594,3 +594,123 @@ def owner_neutralize(req: NeutralizeRequest, db: Session = Depends(get_db),
         "memberships_untouched": _membership_count(db, user.id),
         "message": "The platform owner is now neutral.",
     }
+
+
+# ── PUBLIC INTAKE DESTINATION ───────────────────────────────────────────────
+#
+# Which organization receives a brand's public, unauthenticated leads: the
+# demo-request form on its marketing site, and the SMS opt-in page.
+#
+# THIS IS CONFIGURATION, NOT INFERENCE, AND UNTIL IT IS SET THOSE ROUTES REFUSE.
+# They used to choose by matching a name and, failing that, by taking whichever
+# organization came back first - see app/services/public_intake.py for what that
+# cost. Refusing is the honest replacement, but a refusal nobody can clear is
+# just an outage, so setting it lives here rather than in a shell.
+
+class PublicIntakeRequest(BaseModel):
+    # NULL clears the configuration and closes public intake for the brand.
+    organization_id: Optional[str] = None
+
+
+@router.get("/public-intake")
+def get_public_intake(db: Session = Depends(get_db),
+                      current_user: User = Depends(require_god)):
+    """Every brand and where its public leads currently land.
+
+    `configured` is what an operator needs at a glance: a brand whose marketing
+    site has a demo form and no destination here is a brand whose form is
+    returning 503 to real prospects right now.
+    """
+    out = []
+    for platform in db.query(Platform).order_by(Platform.slug).all():
+        org = None
+        if platform.public_intake_organization_id:
+            org = (db.query(Organization)
+                   .filter(Organization.id == platform.public_intake_organization_id)
+                   .first())
+        out.append({
+            "platform_id": platform.id,
+            "slug": platform.slug,
+            "name": platform.name,
+            "website_url": platform.website_url,
+            "configured": bool(org),
+            "organization_id": platform.public_intake_organization_id,
+            "organization_name": org.name if org else None,
+            # A configured id that no longer resolves, or points at another
+            # brand's customer, is reported as a problem rather than as
+            # configured - it refuses at request time either way.
+            "problem": (
+                None if org is None and not platform.public_intake_organization_id
+                else "configured organization no longer exists" if org is None
+                else "configured organization belongs to another brand"
+                if org.platform_id != platform.id
+                else None
+            ),
+        })
+    return {"platforms": out}
+
+
+@router.put("/public-intake/{platform_id}")
+def set_public_intake(platform_id: str,
+                      payload: PublicIntakeRequest,
+                      db: Session = Depends(get_db),
+                      current_user: User = Depends(require_god)):
+    """Point a brand's public intake at one of ITS OWN organizations.
+
+    The same three checks the request path makes are made here, so a
+    misconfiguration is refused when it is typed rather than discovered later by
+    a prospect who never heard back: the organization must exist, be active, and
+    belong to this platform.
+    """
+    platform = db.query(Platform).filter(Platform.id == platform_id).first()
+    if platform is None:
+        raise HTTPException(status_code=404, detail="Platform not found.")
+
+    before = platform.public_intake_organization_id
+
+    if payload.organization_id is None:
+        platform.public_intake_organization_id = None
+        db.add(platform)
+        log_action(db, None, current_user.id,
+                   action="platform.public_intake.cleared",
+                   target_type="platform", target_id=platform.id,
+                   before={"public_intake_organization_id": before},
+                   after={"public_intake_organization_id": None},
+                   commit=False)
+        db.commit()
+        return {"platform_id": platform.id, "slug": platform.slug,
+                "configured": False, "organization_id": None,
+                "message": "Public intake is closed for this brand. The demo "
+                           "request and opt-in routes will refuse until it is set."}
+
+    org = (db.query(Organization)
+           .filter(Organization.id == payload.organization_id).first())
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    if org.platform_id != platform.id:
+        raise HTTPException(
+            status_code=400,
+            detail="That organization belongs to a different brand. A public "
+                   "intake destination must be one of this brand's own "
+                   "organizations.")
+    if getattr(org, "is_active", True) is False:
+        raise HTTPException(
+            status_code=400,
+            detail="That organization is not active. Public leads would be "
+                   "written somewhere nobody is working.")
+
+    platform.public_intake_organization_id = org.id
+    db.add(platform)
+    log_action(db, org.id, current_user.id,
+               action="platform.public_intake.set",
+               target_type="platform", target_id=platform.id,
+               before={"public_intake_organization_id": before},
+               after={"public_intake_organization_id": org.id},
+               commit=False)
+    db.commit()
+
+    return {"platform_id": platform.id, "slug": platform.slug,
+            "configured": True, "organization_id": org.id,
+            "organization_name": org.name,
+            "message": "Public demo requests and SMS opt-ins for %s now land in %s."
+                       % (platform.name, org.name)}
