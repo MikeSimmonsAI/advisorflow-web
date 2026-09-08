@@ -114,11 +114,22 @@ class TestCommandCenterResponseShape:
             assert key in result["opportunities"], f"Missing opportunities key: {key}"
 
     def test_opp_stats_aggregation_with_data(self):
-        """Shape test with no-brand-org path (safe mock)."""
+        """Shape test with no-brand-org path (safe mock).
+
+        `active_customer_orgs` is now counted over the executive's ASSIGNED
+        portfolio rather than the whole brand, so the mock authorizes two
+        organizations and the count is still 2. Before the portfolio fix this
+        number was every organization on the platform — a figure an executive
+        was not entitled to and could not open.
+        """
         db2 = MagicMock()
         bso_q2 = MagicMock(); bso_q2.filter.return_value.all.return_value = []
+        # The authority join, which now runs before the org count.
+        auth_q2 = MagicMock()
+        auth_q2.join.return_value.filter.return_value.all.return_value = [
+            ("org-1",), ("org-2",)]
         org_q2 = MagicMock(); org_q2.filter.return_value.scalar.return_value = 2
-        seq2 = [bso_q2, org_q2]
+        seq2 = [bso_q2, auth_q2, org_q2]
         idx3 = [0]
         def qside3(*a, **kw):
             i = idx3[0]; idx3[0] += 1

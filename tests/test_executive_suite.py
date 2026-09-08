@@ -215,6 +215,13 @@ class TestObservationGates:
         org = self._make_org("org-restland", "plat-evo")
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = org
+        # THE PORTFOLIO BOUNDARY, which now runs before identity is returned.
+        # Being on the same brand is no longer sufficient: the organization has
+        # to be one this executive was assigned. Gate K below is the negative
+        # case and needs no stub, because an unstubbed join yields an empty
+        # portfolio and therefore the same 404 as a nonexistent id.
+        db.query.return_value.join.return_value.filter.return_value.all.return_value = [
+            ("org-restland",)]
         result = get_executive_org_detail(org_id="org-restland", executive=executive, db=db)
         assert result["id"] == "org-restland"
         assert result["name"] == "Test Org"
@@ -266,16 +273,25 @@ class TestObservationGates:
         org = self._make_org("org-restland", "plat-evo")
         db = MagicMock()
 
-        # First call (org lookup) returns the org; all subsequent aggregate
-        # queries return empty/zero via the MagicMock default chain.
+        # FIRST call is now the PORTFOLIO BOUNDARY, not the org lookup. This
+        # endpoint returns lead counts, reply bodies and named contacts, so the
+        # brand check that used to stand alone here was the most damaging form
+        # of the leak: one executive could read another executive's customers'
+        # conversations by pasting an id. Authorization runs first, and only an
+        # assigned organization gets as far as the org lookup.
+        #
+        # Second call is the org lookup. Everything after returns empty/zero
+        # through the MagicMock default chain, which is what this test wants —
+        # it is asserting the read_only contract, not the aggregates.
         call_count = {"n": 0}
         def query_side(*args):
             q = MagicMock()
             call_count["n"] += 1
             if call_count["n"] == 1:
-                # org lookup
+                q.join.return_value.filter.return_value.all.return_value = [
+                    ("org-restland",)]
+            elif call_count["n"] == 2:
                 q.filter.return_value.first.return_value = org
-            # All other queries: MagicMock returns 0/[] by default through chaining
             return q
 
         db.query.side_effect = query_side

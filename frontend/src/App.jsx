@@ -101,6 +101,10 @@ import GodImplementations from './pages/GodImplementations'
 import GodImplementationDetail from './pages/GodImplementationDetail'
 import GodCustomers from './pages/GodCustomers'
 import GodControlAudit from './pages/GodControlAudit'
+// Executive portfolio assignment — the management surface the executive
+// authority needs. Without it, per-organization access would be settable only
+// by a developer, which is the failure mode this platform keeps refusing.
+import GodExecutiveAccess from './pages/god/GodExecutiveAccess'
 // PRICING & COMPENSATION. Discount floors and commission plans, editable by the
 // owner. Registered BEFORE the /god/* catch-all below or it would silently
 // render the Command Center instead.
@@ -813,6 +817,11 @@ export default function App() {
         <Route path="/god/customers/:orgId/360" element={<GodRoute><GodModeLayout><Customer360 /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers/:orgId" element={<GodRoute><GodModeLayout><CustomerDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/audit" element={<GodRoute><GodModeLayout><GodControlAudit /></GodModeLayout></GodRoute>} />
+        {/* EXECUTIVE ACCESS — which customers each executive oversees.
+            Executive visibility was brand-wide with no organization dimension
+            and no management screen anywhere. Registered before the /god/*
+            catch-all, or it would silently render the Command Center. */}
+        <Route path="/god/executive-access" element={<GodRoute><GodModeLayout><GodExecutiveAccess /></GodModeLayout></GodRoute>} />
         {/* Pricing floors and compensation plans. GodRoute here is convenience
             only — every endpoint behind it is require_god, so a typed URL is
             refused by the server rather than by the absence of a link. */}

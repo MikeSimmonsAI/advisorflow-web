@@ -188,6 +188,11 @@ const NAV = [
   // absence of this link.
   { label: 'Access & Permissions', path: '/god/diagnostics/user-access', icon: 'shield',
     hint: 'What a given person can actually reach' },
+  // WHICH CUSTOMERS EACH EXECUTIVE OVERSEES. Executive visibility used to be
+  // brand-wide with no way to narrow it and no screen that managed it; this is
+  // where the per-organization assignment is set.
+  { label: 'Executive Access', path: '/god/executive-access', icon: 'shield',
+    hint: 'Which customers each executive oversees' },
   { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
   { label: 'Roadmap',          path: '/god#product-status',   icon: 'flag'     },

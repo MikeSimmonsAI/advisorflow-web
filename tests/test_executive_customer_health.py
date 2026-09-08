@@ -44,19 +44,35 @@ def make_executive_tuple(user=None, platform=None):
 
 
 def make_db(orgs, user_counts=None, total_leads=None, hot_leads=None,
-            booked=None, last_sms=None, last_reply=None, last_booking=None):
+            booked=None, last_sms=None, last_reply=None, last_booking=None,
+            authorized_ids=None):
     """
     DB mock whose query calls return data in the exact sequence
     get_customer_health issues them:
-      1. db.query(Organization)…                       → org list
-      2. db.query(User.organization_id, count)…        → user counts
-      3. db.query(Lead.organization_id, count) total   → total lead counts
-      4. db.query(Lead.organization_id, count) hot     → hot lead counts
-      5. db.query(Lead.organization_id, count) booked  → booked counts
-      6. db.query(Lead.organization_id, max(Message))… → last SMS
-      7. db.query(Lead.organization_id, max(Reply))…   → last reply
-      8. db.query(Lead.organization_id, max(Booking))… → last booking
+      1. db.query(Organization.id).join(Membership)…   → the AUTHORIZED set
+      2. db.query(Organization)…                       → org list
+      3. db.query(User.organization_id, count)…        → user counts
+      4. db.query(Lead.organization_id, count) total   → total lead counts
+      5. db.query(Lead.organization_id, count) hot     → hot lead counts
+      6. db.query(Lead.organization_id, count) booked  → booked counts
+      7. db.query(Lead.organization_id, max(Message))… → last SMS
+      8. db.query(Lead.organization_id, max(Reply))…   → last reply
+      9. db.query(Lead.organization_id, max(Booking))… → last booking
+
+    STEP 1 IS NEW AND IS THE POINT OF THE PORTFOLIO FIX. Executive visibility
+    used to be "every organization on the brand"; it is now "the organizations
+    this executive was explicitly assigned", resolved by
+    `executive_authority.portfolio_authority`. This mock models that query so
+    the health-classification assertions below keep testing classification
+    rather than accidentally testing authorization. By default it authorizes
+    exactly the organizations passed in, which is what every case here means.
     """
+    def authority_q():
+        ids = authorized_ids if authorized_ids is not None else [o.id for o in orgs]
+        q = MagicMock()
+        q.join.return_value.filter.return_value.all.return_value = [(i,) for i in ids]
+        return q
+
     def org_q():
         q = MagicMock()
         q.filter.return_value.order_by.return_value.all.return_value = orgs
@@ -73,6 +89,7 @@ def make_db(orgs, user_counts=None, total_leads=None, hot_leads=None,
         return q
 
     sequence = [
+        authority_q(),
         org_q(),
         filter_agg_q(user_counts),
         filter_agg_q(total_leads),
@@ -351,19 +368,45 @@ class TestCrossBrandIsolation:
 
     def test_org_query_uses_platform_id_filter(self):
         """The Organization query must filter by platform_id.
-        An executive from Brand A never receives Brand B orgs."""
+        An executive from Brand A never receives Brand B orgs.
+
+        THE PORTFOLIO FIX ADDED A SECOND BOUNDARY IN FRONT OF THIS ONE. Before
+        the organization query runs, `executive_authority` resolves which
+        organizations this executive was assigned, by joining Organization to
+        their assignment rows. That query is what the mock below returns first,
+        and the brand filter this test guards is still applied afterwards —
+        both boundaries, not one instead of the other.
+
+        The assertion is unchanged: a `.filter()` on the organization query.
+        What changed is that the mock now has to answer the authority query
+        too, or the endpoint short-circuits on an empty portfolio and never
+        reaches the query being tested.
+        """
         from app.routers.executive_router import get_customer_health
 
         platform_a = make_platform(id="plat-a", name="Brand A")
         exec_tuple = make_executive_tuple(platform=platform_a)
 
         db = MagicMock()
-        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        # 1st query: the authority join. Authorize one organization so the
+        # endpoint proceeds to the organization query this test is about.
+        auth_q = MagicMock()
+        auth_q.join.return_value.filter.return_value.all.return_value = [("org-1",)]
+        org_q = MagicMock()
+        org_q.filter.return_value.order_by.return_value.all.return_value = []
+
+        seq = [auth_q, org_q]
+        idx = icount()
+
+        def qside(*a, **kw):
+            i = next(idx)
+            return seq[i] if i < len(seq) else MagicMock()
+        db.query.side_effect = qside
 
         get_customer_health(executive=exec_tuple, db=db)
 
         # filter() must have been called on the Organization query
-        assert db.query.return_value.filter.called, \
+        assert org_q.filter.called, \
             "Organization query must call .filter() to apply platform_id scope — " \
             "without it, all orgs on all platforms would be returned."
 

@@ -38,16 +38,28 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # catches it because the C stack runs out first, which is why there is no
 # RecursionError to see.
 #
-# THE FIX, AND WHAT IT IS NOT. This asks for 16 MB for threads created after
-# this point, which is the portal thread. It changes NO assertion, skips
+# THE FIX, AND WHAT IT IS NOT. This asks for a larger stack for threads created
+# after this point, which is the portal thread. It changes NO assertion, skips
 # nothing, and relaxes no gate — the suite runs the same tests it always did.
 # It has to be set before the first TestClient is constructed, so it lives at
 # conftest import time rather than in a fixture.
 #
+# WHY 4 MB AND NOT MORE. The first version of this asked for 16 MB and traded
+# one failure mode for another: across a full run of ~1,650 tests, each with
+# its own TestClient and portal thread, the reservations added up until Windows
+# refused with
+#
+#     RuntimeError: can't start new thread
+#
+# on two tests near the end — which looked like a billing defect and was not.
+# The requirement was only ever "more than the 1 MB default", because that is
+# what SQLAlchemy's compiler overflows. 4 MB clears it with room to spare and
+# is a quarter of the pressure. Do not raise this to fix an unrelated failure.
+#
 # The `try` is deliberate: `stack_size` raises on platforms that will not take
 # the value, and a test suite must not fail to import over a tuning hint.
 try:                                    # pragma: no cover - platform dependent
-    threading.stack_size(16 * 1024 * 1024)
+    threading.stack_size(4 * 1024 * 1024)
 except (ValueError, RuntimeError):      # pragma: no cover
     pass
 

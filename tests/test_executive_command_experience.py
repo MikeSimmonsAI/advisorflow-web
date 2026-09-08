@@ -68,11 +68,16 @@ def _org(db, platform, name, *, active=True, created_days_ago=200, plan="starter
 
 
 def _exec_user(db, platform, *, name="Executive"):
-    """A brand executive: one membership row, no organization of their own.
+    """A brand executive: the BRAND GRANT only, no organization of their own.
 
     `organization_id` stays None on purpose and is asserted to stay None. An
     executive who acquires one has been made a member of somebody's workspace,
     which is the exact confusion this whole layer exists to prevent.
+
+    A GRANT ALONE IS NO LONGER A PORTFOLIO. It says which brand this person may
+    enter; which customers they see inside it comes from `_assign` below. That
+    used to be implicit — holding the grant exposed every organization on the
+    brand — and the fixtures here reflect the explicit model now.
     """
     u = User(organization_id=None, email="exec%d@evosyspro.live" % next(_SEQ),
              password_hash=hash_password("x"), full_name=name, role="advisor",
@@ -83,6 +88,17 @@ def _exec_user(db, platform, *, name="Executive"):
                       is_active=True))
     db.commit()
     return u
+
+
+def _assign(db, user, *orgs):
+    """Put organizations into an executive's portfolio, explicitly."""
+    from app.models.sales_models import SCOPE_CUSTOMER_ORG
+    for o in orgs:
+        db.add(Membership(user_id=user.id, scope_type=SCOPE_CUSTOMER_ORG,
+                          scope_id=o.id, role=ROLE_BRAND_EXECUTIVE,
+                          is_active=True))
+    db.commit()
+    return user
 
 
 def _lead(db, org, *, status="new", touched=None, created_days_ago=5):
@@ -112,6 +128,7 @@ def brand(db_session):
               touched=datetime.utcnow() - timedelta(days=2))
     for _ in range(60):
         _lead(db_session, bad, status="new", touched=None)
+    _assign(db_session, ex, good, bad)
     return {"platform": p, "exec": ex, "good": good, "bad": bad}
 
 
@@ -121,6 +138,7 @@ def other_brand(db_session):
     p = _platform(db_session, "Rival")
     ex = _exec_user(db_session, p, name="Rival Executive")
     org = _org(db_session, p, "Somebody Else Funeral Home")
+    _assign(db_session, ex, org)
     return {"platform": p, "exec": ex, "org": org}
 
 
@@ -434,7 +452,9 @@ def test_health_always_carries_a_reason_in_words(client, db_session, brand):
 def test_a_suspended_organization_says_so_rather_than_looking_quiet(
         db_session, brand):
     sus = _org(db_session, brand["platform"], "Suspended Home", active=False)
-    rows = portfolio.rows(db_session, brand["platform"].id)
+    _assign(db_session, brand["exec"], sus)
+    rows = portfolio.rows(db_session, brand["platform"].id,
+                          org_ids=[brand["good"].id, brand["bad"].id, sus.id])
     row = next(r for r in rows if r["id"] == sus.id)
     assert row["health"] == portfolio.INACTIVE
     assert "suspend" in row["reason"].lower()
@@ -444,8 +464,8 @@ def test_a_suspended_organization_says_so_rather_than_looking_quiet(
 def test_an_empty_portfolio_is_a_state_and_not_a_wall_of_zeroes(db_session):
     """A brand with no customers yet is normal, not broken."""
     p = _platform(db_session, "Fresh")
-    assert portfolio.rows(db_session, p.id) == []
-    s = portfolio.portfolio(db_session, p.id)
+    assert portfolio.rows(db_session, p.id, org_ids=[]) == []
+    s = portfolio.portfolio(db_session, p.id, org_ids=[])
     assert s["organizations"] == 0
     # The rates have no denominator, so they are absent rather than 0%.
     assert s["response_rate"] is None

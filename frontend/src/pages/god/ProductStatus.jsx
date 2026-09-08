@@ -29,14 +29,32 @@ export const MODULES = [
   { key: 'users',     label: 'Users & Identity',  live: true, to: '/god/users-all',       group: 'COMMAND' },
   { key: 'salesops',  label: 'Sales Operations',  live: true, to: '/god/sales-operations', group: 'OPERATIONS' },
   { key: 'impls',     label: 'Implementations',   live: true, to: '/god/implementations', group: 'OPERATIONS' },
-  { key: 'scraper',   label: 'Lead Scraper',      live: true, to: '/scraper',             group: 'OPERATIONS' },
+  // POINTS AT THE REGISTERED ROUTE. `/scraper` still redirects here for old
+  // links, but a status board should name the real destination.
+  { key: 'scraper',   label: 'Lead Scraper',      live: true, to: '/god/lead-scraper',    group: 'OPERATIONS' },
+  { key: 'pricing',   label: 'Pricing & Compensation', live: true, to: '/god/pricing',    group: 'OPERATIONS' },
+  { key: 'comp',      label: 'Sales Compensation', live: true, to: '/god/compensation',   group: 'OPERATIONS' },
   { key: 'audit',     label: 'Audit & Security',  live: true, to: '/god/audit',           group: 'PLATFORM' },
+  { key: 'execaccess', label: 'Executive Access', live: true, to: '/god/executive-access', group: 'PLATFORM' },
+
+  // ── SHIPPED SINCE THIS LIST WAS LAST TRUE ────────────────────────────────
+  // Billing was listed as waiting on "invoices + payments tables". Those
+  // tables now exist (BillingInvoice, BillingPayment), the plan catalogue
+  // prices customers per brand, and /god/billing is a registered screen. A
+  // roadmap that still calls a shipped feature unbuilt is exactly as
+  // misleading as a nav item that claims something works when it does not —
+  // it is the same lie pointing the other way.
+  { key: 'billing',   label: 'Billing & Revenue', live: true, to: '/god/billing',         group: 'PLATFORM' },
 
   // ── roadmap ──────────────────────────────────────────────────────────────
-  { key: 'billing',    label: 'Billing & Invoicing', live: false,
-    needs: 'invoices + payments tables — /billing/all returns no amounts' },
-  { key: 'revenue',    label: 'Revenue Analytics',   live: false,
-    needs: 'the billing model above; there is no monetary source to chart' },
+  // REVENUE ANALYTICS IS NOT A UI JOB, and listing it as one is how it stays
+  // permanently "next". Current revenue is now reportable — what is missing is
+  // HISTORY: every figure this platform stores is a current count, so a trend
+  // line would be drawn from a single point. The foundation is a snapshot, not
+  // a chart component.
+  { key: 'revenue',    label: 'Revenue Trends',      live: false,
+    needs: 'a periodic snapshot of revenue and usage — current figures are '
+         + 'already live in Billing & Revenue, but nothing records history to chart' },
   { key: 'godleads',   label: 'Cross-org Leads',     live: false,
     needs: 'a screen for GET /god/leads, which already returns the data' },
   { key: 'messaging',  label: 'Communications',      live: false,

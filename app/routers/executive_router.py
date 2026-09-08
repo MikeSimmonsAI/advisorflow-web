@@ -28,6 +28,7 @@ platform-owner terminology.
 """
 
 from datetime import datetime, timedelta, time as dt_time
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -49,6 +50,12 @@ from app.models.sales_models import (
 # Health rows and the organization drill-down all read from this, so a headline
 # and the list behind it can never describe different sets.
 from app.services import executive_portfolio as portfolio_service
+# THE ONE PLACE THE PORTFOLIO BOUNDARY IS DECIDED. Every route below resolves
+# its authorized organization ids here and passes them down; nothing in this
+# file re-derives a scope from a platform id.
+from app.services import executive_authority as exec_auth
+# Portfolio assignment is a privileged access change, so it leaves a record.
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/executive", tags=["executive"])
 
@@ -114,11 +121,16 @@ def get_command_center(
                 "won_value": float(rows.won_value or 0),
             }
 
+    # NARROWED TO THE ASSIGNED PORTFOLIO. This counter used to be every
+    # organization on the brand, so an executive assigned one customer was told
+    # they had five — a number they were not entitled to and could not open.
+    _allowed = exec_auth.authorized_org_ids(db, user, platform_id)
     active_orgs = (
         db.query(func.count(Organization.id))
-        .filter(Organization.platform_id == platform_id)
+        .filter(Organization.platform_id == platform_id,
+                Organization.id.in_(_allowed))
         .scalar() or 0
-    )
+    ) if _allowed else 0
 
     team_count = (
         db.query(func.count(Membership.id))
@@ -194,16 +206,24 @@ def get_executive_organizations(
     executive=Depends(require_brand_executive),
     db: Session = Depends(get_db),
 ):
-    """Customer organizations provisioned from this executive's brand platform."""
+    """Customer organizations THIS EXECUTIVE IS ASSIGNED, in their brand.
+
+    NARROWED IN THIS PASS, SHAPE UNCHANGED. It used to return every
+    organization on the platform, which meant an executive assigned one
+    customer could enumerate all of them from this endpoint even after the
+    Command Center was locked down. Same response contract, correct set.
+    """
     user, mem, platform = executive
     platform_id = platform.id
+    allowed = exec_auth.authorized_org_ids(db, user, platform_id)
 
     orgs = (
         db.query(Organization)
-        .filter(Organization.platform_id == platform_id)
+        .filter(Organization.platform_id == platform_id,
+                Organization.id.in_(allowed))
         .order_by(Organization.name)
         .all()
-    )
+    ) if allowed else []
 
     return {
         "platform_id": platform_id,
@@ -228,15 +248,23 @@ def get_executive_org_detail(
     executive=Depends(require_brand_executive),
     db: Session = Depends(get_db),
 ):
-    """Return org identity for the executive observation banner.
+    """Return org identity for the executive organization header.
 
     SECURITY:
     - require_brand_executive validates the grant (never modifies user)
-    - org.platform_id == platform.id enforced (cross-brand = 404)
+    - THE ORGANIZATION MUST BE IN THIS EXECUTIVE'S ASSIGNED PORTFOLIO. The
+      brand check alone was the defect — it let one executive resolve the name
+      of another executive's customer by pasting an id, which is a disclosure
+      even though the payload is only identity.
+    - unauthorized and nonexistent are the SAME 404, so the response never
+      confirms an id is real.
     """
     user, mem, platform = executive
+    if not exec_auth.may_view_org(db, user, platform.id, org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Organization not found.")
     org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org or org.platform_id != platform.id:
+    if not org:                                          # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Organization not found.")
     return {
@@ -258,15 +286,22 @@ def get_org_observation_overview(
     SECURITY INVARIANTS (never break these):
     - require_brand_executive validates brand_executive membership.
       It is never whitelisted for god_admin here — observation is an executive tool.
-    - org.platform_id == platform.id: cross-brand access returns 404.
+    - THE ORGANIZATION MUST BE IN THIS EXECUTIVE'S ASSIGNED PORTFOLIO. The
+      brand check that used to stand here was the defect: this endpoint returns
+      lead counts, reply bodies and named contacts, so one executive reaching
+      another executive's customer through it was the most damaging version of
+      the leak. Unauthorized and nonexistent are the same 404.
     - ALL queries use org_id from the path parameter, NEVER current_user.organization_id.
     - current_user.organization_id is never read, never mutated. Stays NULL for Michael.
     - Mutation is never performed. This endpoint is GET-only, read-only throughout.
     - read_only: True is always returned to inform the frontend.
     """
     user, mem, platform = executive
+    if not exec_auth.may_view_org(db, user, platform.id, org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Organization not found.")
     org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org or org.platform_id != platform.id:
+    if not org:                                          # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Organization not found.")
 
@@ -527,8 +562,10 @@ def get_customer_health(
 
     SECURITY:
     - require_brand_executive validates the grant before any query runs.
-    - All org queries are filtered by platform_id — cross-brand access is
-      structurally impossible; there is no org_id parameter to forge.
+    - Org queries are filtered by platform_id AND by this executive's assigned
+      portfolio. The platform filter alone was the defect: it made cross-brand
+      access impossible while leaving cross-PORTFOLIO access wide open inside
+      one brand.
     - current_user.organization_id is never read or used.
     """
     user, mem, platform = executive
@@ -536,13 +573,15 @@ def get_customer_health(
 
     now = datetime.utcnow()
 
-    # All customer organizations provisioned from this platform
+    # THIS EXECUTIVE'S ASSIGNED customer organizations, in this brand.
+    allowed = exec_auth.authorized_org_ids(db, user, platform_id)
     orgs = (
         db.query(Organization)
-        .filter(Organization.platform_id == platform_id)
+        .filter(Organization.platform_id == platform_id,
+                Organization.id.in_(allowed))
         .order_by(Organization.name)
         .all()
-    )
+    ) if allowed else []
 
     if not orgs:
         return {
@@ -734,8 +773,10 @@ def get_portfolio(
     other two earn nothing is not.
     """
     user, mem, platform = executive
-    rows = portfolio_service.rows(db, platform.id)
-    totals = portfolio_service.portfolio(db, platform.id)
+    auth = exec_auth.portfolio_authority(db, user, platform.id)
+    rows = portfolio_service.rows(db, platform.id, org_ids=auth["org_ids"])
+    totals = portfolio_service.portfolio(db, platform.id,
+                                         org_ids=auth["org_ids"])
 
     # WORST FIRST. An executive opens this to find trouble, so the exceptions
     # lead and the healthy majority sits behind Portfolio Health.
@@ -745,6 +786,12 @@ def get_portfolio(
     return {
         "platform_id": platform.id,
         "platform_name": platform.name,
+        # HOW THIS PORTFOLIO WAS DECIDED, so an empty one can be explained
+        # rather than looking broken. An executive granted a brand but assigned
+        # no customers has been half set up, and the screen should say that
+        # instead of rendering a wall of zeroes.
+        "portfolio_source": auth["source"],
+        "is_owner_view": auth["is_owner_view"],
         "summary": totals,
         # The attention list is capped for the page, and the page is told the
         # true number so it can say "showing 6 of 11" rather than implying six
@@ -776,7 +823,8 @@ def get_portfolio_health(
     """
     user, mem, platform = executive
     key = filter if filter in portfolio_service.FILTERS else "all"
-    rows = portfolio_service.rows(db, platform.id)
+    auth = exec_auth.portfolio_authority(db, user, platform.id)
+    rows = portfolio_service.rows(db, platform.id, org_ids=auth["org_ids"])
     kept = [r for r in rows if portfolio_service.matches_filter(r, key)]
     kept.sort(key=portfolio_service.sort_key)
 
@@ -792,6 +840,8 @@ def get_portfolio_health(
         "filter": key,
         "filters": [{"key": f, "count": counts[f]}
                     for f in portfolio_service.FILTERS],
+        "portfolio_source": auth["source"],
+        "is_owner_view": auth["is_owner_view"],
         "total": len(rows),
         "shown": len(kept),
         "organizations": kept,
@@ -819,25 +869,29 @@ def get_org_performance(
 
     SECURITY, IDENTICAL TO EVERY OTHER ROUTE HERE:
       - require_brand_executive validates the grant; god is not whitelisted.
-      - org.platform_id == platform.id, so a cross-brand id is a 404 and not a
-        thinner page.
+      - THE ORGANIZATION MUST BE IN THIS EXECUTIVE'S ASSIGNED PORTFOLIO. Being
+        on the same brand is NOT sufficient — that was the defect: two
+        executives under one white-label brand could open each other's
+        customers by pasting an id.
+      - An unauthorized id and a nonexistent id get the SAME 404 with the SAME
+        body. A 403 would confirm the organization exists, which is exactly
+        what somebody probing ids is trying to learn.
       - `org_id` comes from the PATH. current_user.organization_id is never
         read and never written — observing is not joining.
       - GET only. `read_only: True` is returned so the frontend never has to
         infer it.
     """
     user, mem, platform = executive
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    if not org or org.platform_id != platform.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Organization not found.")
+    auth = exec_auth.portfolio_authority(db, user, platform.id)
 
     # BUILT FROM THE SAME ROWS AS THE PORTFOLIO. If this page and Portfolio
     # Health could compute a customer's health differently, an executive would
-    # have two answers about the same business and no way to choose.
-    rows = portfolio_service.rows(db, platform.id)
+    # have two answers about the same business and no way to choose. It is also
+    # the authorization check: an id that is not in the authorized set produces
+    # no row, and no row is a 404.
+    rows = portfolio_service.rows(db, platform.id, org_ids=auth["org_ids"])
     row = next((r for r in rows if r["id"] == org_id), None)
-    if row is None:                                      # pragma: no cover
+    if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Organization not found.")
 
@@ -978,3 +1032,182 @@ def revoke_executive_membership(
     mem.is_active = False
     db.commit()
     return {"status": "revoked", "membership_id": mem.id}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EXECUTIVE PORTFOLIO MANAGEMENT — which customers, not just which brand
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# THE TWO GRANTS ARE DIFFERENT QUESTIONS AND BOTH ARE REQUIRED.
+#
+#     /admin/grant      → may this person enter this BRAND's Executive Suite
+#     /admin/portfolio  → which CUSTOMERS inside it may they see
+#
+# Before this, only the first existed, and holding it exposed every
+# organization on the brand. An assignment without a brand grant does not open
+# the suite; a brand grant without assignments produces an empty portfolio
+# rather than everything.
+#
+# god_admin only, exactly like the brand grant. An executive cannot widen their
+# own portfolio, and nothing in the Executive Suite calls these.
+
+@router.get("/admin/portfolio/{user_id}")
+def get_executive_portfolio_admin(
+    user_id: str,
+    platform_id: str,
+    user: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Every organization on a brand, flagged with whether this person has it.
+
+    Returns the WHOLE brand deliberately, each row carrying `assigned`. The
+    management screen is a checklist, and a checklist that only listed what was
+    already ticked could never be used to add anything.
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+    platform = db.query(Platform).filter(Platform.id == platform_id).first()
+    if not platform:
+        raise HTTPException(status_code=404, detail="Brand not found.")
+
+    brand_grant = (
+        db.query(Membership)
+        .filter(Membership.user_id == user_id,
+                Membership.scope_type == SCOPE_PLATFORM,
+                Membership.scope_id == platform_id,
+                Membership.role == ROLE_BRAND_EXECUTIVE,
+                Membership.is_active.is_(True))
+        .first()
+    )
+
+    assigned = set(exec_auth.assigned_org_ids(db, user_id))
+    orgs = (db.query(Organization)
+            .filter(Organization.platform_id == platform_id)
+            .order_by(Organization.name).all())
+
+    return {
+        "user": {"id": target.id, "email": target.email,
+                 "name": target.full_name or target.email},
+        "platform": {"id": platform.id, "name": platform.name},
+        # WITHOUT THE BRAND GRANT THE ASSIGNMENTS DO NOTHING, and the screen
+        # has to say so rather than letting somebody tick six boxes and wonder
+        # why the person still cannot sign in.
+        "has_brand_grant": brand_grant is not None,
+        "assigned_count": sum(1 for o in orgs if o.id in assigned),
+        "organizations": [
+            {"id": o.id, "name": o.name, "assigned": o.id in assigned,
+             "is_active": bool(o.is_active)}
+            for o in orgs
+        ],
+    }
+
+
+@router.post("/admin/portfolio/assign")
+def assign_executive_organization(
+    payload: dict,
+    user: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Give an executive one organization. Body: {user_id, organization_id}.
+
+    Idempotent, and audited: the membership row records `granted_by` and
+    `created_at`, so who gave whom access to which customer survives.
+    """
+    target_user_id = (payload.get("user_id") or "").strip()
+    org_id = (payload.get("organization_id") or "").strip()
+    if not target_user_id or not org_id:
+        raise HTTPException(status_code=400,
+                            detail="user_id and organization_id are required.")
+    if not db.query(User).filter(User.id == target_user_id).first():
+        raise HTTPException(status_code=404, detail="User not found.")
+    if not db.query(Organization).filter(Organization.id == org_id).first():
+        raise HTTPException(status_code=404, detail="Organization not found.")
+
+    result = exec_auth.assign(db, executive_user_id=target_user_id,
+                              organization_id=org_id,
+                              granted_by_user_id=user.id)
+    # AUDITED AGAINST THE ORGANIZATION, not the executive: the question an
+    # audit asks later is "who could see this customer, and who let them",
+    # which is answered by reading that organization's history.
+    log_action(db, organization_id=org_id, actor_user_id=user.id,
+               action="executive.portfolio.assign",
+               target_type="user", target_id=target_user_id,
+               details={"result": result["status"]})
+    return result
+
+
+@router.post("/admin/portfolio/unassign")
+def unassign_executive_organization(
+    payload: dict,
+    user: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Take an organization away. Body: {user_id, organization_id}.
+
+    DEACTIVATES, never deletes — the record that the access once existed is the
+    thing an audit needs most. Visibility is recomputed from `is_active` on
+    every request, so removal takes effect on the executive's very next page
+    load; there is no cached portfolio to invalidate.
+    """
+    target_user_id = (payload.get("user_id") or "").strip()
+    org_id = (payload.get("organization_id") or "").strip()
+    if not target_user_id or not org_id:
+        raise HTTPException(status_code=400,
+                            detail="user_id and organization_id are required.")
+
+    result = exec_auth.unassign(db, executive_user_id=target_user_id,
+                                organization_id=org_id)
+    log_action(db, organization_id=org_id, actor_user_id=user.id,
+               action="executive.portfolio.unassign",
+               target_type="user", target_id=target_user_id,
+               details={"result": result["status"]})
+    return result
+
+
+@router.get("/admin/executives")
+def list_executives(
+    platform_id: Optional[str] = None,
+    user: User = Depends(require_god),
+    db: Session = Depends(get_db),
+):
+    """Everyone holding an executive brand grant, and how big their portfolio is.
+
+    The entry point for the management screen: an owner needs to see who has
+    executive access before they can fix anybody's portfolio, and "granted a
+    brand but assigned nothing" is the state most worth spotting.
+    """
+    q = (db.query(Membership)
+         .filter(Membership.scope_type == SCOPE_PLATFORM,
+                 Membership.role == ROLE_BRAND_EXECUTIVE,
+                 Membership.is_active.is_(True)))
+    if platform_id:
+        q = q.filter(Membership.scope_id == platform_id)
+    grants = q.all()
+
+    user_ids = sorted({g.user_id for g in grants})
+    users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} \
+        if user_ids else {}
+    plat_ids = sorted({g.scope_id for g in grants})
+    plats = {p.id: p for p in
+             db.query(Platform).filter(Platform.id.in_(plat_ids)).all()} \
+        if plat_ids else {}
+
+    out = []
+    for g in grants:
+        u = users.get(g.user_id)
+        p = plats.get(g.scope_id)
+        if not u or not p:
+            continue
+        allowed = exec_auth.authorized_org_ids(db, u, p.id)
+        out.append({
+            "user_id": u.id,
+            "email": u.email,
+            "name": u.full_name or u.email,
+            "platform_id": p.id,
+            "platform_name": p.name,
+            "assigned_organizations": len(allowed),
+            "granted_at": g.created_at.isoformat() if g.created_at else None,
+        })
+    out.sort(key=lambda r: (r["platform_name"], r["name"].lower()))
+    return {"executives": out, "total": len(out)}

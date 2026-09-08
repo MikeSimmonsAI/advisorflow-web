@@ -45,11 +45,25 @@ HONESTY RULES, IN FORCE THROUGHOUT
    activity windows below are the ones the existing customer-health endpoint
    has always used; they are reused rather than re-guessed.
 
-SCOPE IS THE CALLER'S BRAND, ENFORCED IN THE QUERY
-==================================================
-Every read starts from `platform_id`. There is no organization parameter that
-widens it, and `rows()` cannot be called without one. An executive holds a
-portfolio, not a filter over everybody's.
+SCOPE IS AN EXPLICIT ORGANIZATION LIST, NOT A BRAND
+===================================================
+`rows()` takes `org_ids` as a REQUIRED keyword argument with no default, and
+the only thing that produces that list is
+`app/services/executive_authority.portfolio_authority()`.
+
+This used to filter on `Organization.platform_id == platform_id`, which meant
+holding an executive grant on a brand exposed every organization on it — two
+executives under one white-label brand saw each other's whole portfolio. The
+platform id is still passed, and is still applied, because an assignment must
+never let a portfolio cross a brand boundary; what changed is that it is no
+longer SUFFICIENT on its own.
+
+THE DEFAULT IS ABSENT ON PURPOSE. A service that could be called without a
+scope would eventually be called without one, and the failure mode is silent
+and total: every customer on the brand, rendered as though it were somebody's
+portfolio. An empty list is honoured as an empty portfolio, because an
+executive with no assignments has none — falling back to "everything" when the
+list is empty would reintroduce the exact defect this closes.
 """
 from __future__ import annotations
 
@@ -117,9 +131,19 @@ def _rate(numerator: int, denominator: int) -> Optional[float]:
 # THE ROWS — one record per customer organization, built in bulk
 # ═══════════════════════════════════════════════════════════════════════════
 
-def rows(db: Session, platform_id: str, *,
+def rows(db: Session, platform_id: str, *, org_ids: List[str],
          now: Optional[datetime] = None) -> List[Dict[str, Any]]:
-    """Every customer organization in this brand, with its executive picture.
+    """The executive picture for EXACTLY the organizations they were assigned.
+
+    `org_ids` is required and comes from `executive_authority`. It is applied
+    ALONGSIDE the platform filter, never instead of it: the id list is the
+    portfolio boundary, and the platform filter is the brand boundary, and a
+    row has to satisfy both. An assignment that has drifted into another brand
+    therefore grants nothing.
+
+    An EMPTY list means an empty portfolio. It is not treated as "unfiltered" —
+    that reading is what turned an executive grant into brand-wide access in
+    the first place.
 
     BULK BY CONSTRUCTION. One grouped query per fact, never one query per
     organization — a portfolio of forty customers must not cost forty round
@@ -130,8 +154,12 @@ def rows(db: Session, platform_id: str, *,
     recent = now - timedelta(days=RECENT_DAYS)
     week = now - timedelta(days=7)
 
+    if not org_ids:
+        return []
+
     orgs = (db.query(Organization)
-            .filter(Organization.platform_id == platform_id)
+            .filter(Organization.platform_id == platform_id,
+                    Organization.id.in_(list(org_ids)))
             .order_by(Organization.name).all())
     if not orgs:
         return []
@@ -557,7 +585,7 @@ def _held(db: Session, ids: List[str]) -> Dict[str, int]:
 # THE TOTALS — summed from the rows above, never queried separately
 # ═══════════════════════════════════════════════════════════════════════════
 
-def portfolio(db: Session, platform_id: str, *,
+def portfolio(db: Session, platform_id: str, *, org_ids: List[str],
               now: Optional[datetime] = None) -> Dict[str, Any]:
     """The Command Center's figures.
 
@@ -565,9 +593,13 @@ def portfolio(db: Session, platform_id: str, *,
     clicks a headline arrives at the organizations that make it up, and the
     count matches. A separate aggregate query would be faster and would
     eventually be wrong.
+
+    `org_ids` is required for the same reason it is required on `rows()`, and
+    is passed straight through — a total computed over a wider set than the
+    list behind it would be a number the executive is not entitled to.
     """
     now = now or datetime.utcnow()
-    rs = rows(db, platform_id, now=now)
+    rs = rows(db, platform_id, org_ids=org_ids, now=now)
 
     def total(field):
         return sum(int(r.get(field) or 0) for r in rs)
