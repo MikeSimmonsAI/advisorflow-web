@@ -155,6 +155,21 @@ def platform_overview(db: Session = Depends(get_db), user: User = Depends(requir
             {
                 "id": p.id, "name": p.name, "slug": p.slug,
                 "domain": p.domain, "is_active": bool(p.is_active),
+                # THE BRAND'S OWN DESTINATIONS, FROM THE BRAND'S OWN RECORD.
+                #
+                # `Platform` has carried website_url and app_base_url all along
+                # and no API returned either, so the God rail rendered ONE
+                # marketing link - whichever brand the current domain happened
+                # to be, falling back to EvoSys Pro - and BookaBoost and Harmony
+                # & Hustle had no destination at all. A rail that only
+                # understands one brand on a white-label platform is a rail that
+                # will be wrong for every brand added after it.
+                #
+                # NULL stays NULL. A brand with no site configured renders no
+                # link rather than a guessed URL; inventing one produces a dead
+                # link that looks like a broken product.
+                "website_url": p.website_url,
+                "app_base_url": p.app_base_url,
                 "customer_count": len(by_platform.get(p.id, [])),
                 "active_customer_count": sum(
                     1 for o in by_platform.get(p.id, []) if o.is_active),

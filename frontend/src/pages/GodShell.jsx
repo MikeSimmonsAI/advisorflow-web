@@ -15,8 +15,9 @@
  */
 import { useState, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, logout } from '../api/client'
-import { detectTheme, BRAND_CONFIG } from '../theme'
+// `api` for the brand list. The rail's BRANDS section is driven by the platform
+// records rather than by a constant in this file — see the BRANDS block below.
+import { api, getCurrentUser, logout } from '../api/client'
 import GodStyles from './god/GodStyles'
 
 function Ico({ d, size = 16, children }) {
@@ -63,8 +64,10 @@ const ICONS = {
  * no link.
  */
 const JUMP = [
-  // Customer App is NOT a static NavLink. It must carry the currently-selected
-  // org context into the tenant application. Routing through "/" hits
+  // ONE ENTRY, AND ONLY BECAUSE IT IS NOT A LINK.
+  //
+  // Customer App cannot be a NavLink: it must carry the currently-selected org
+  // context into the tenant application. Routing through "/" hits
   // HomeRedirect, which reads default_context from /auth/my-contexts and sends
   // God to /executive when executive_contexts exist — ignoring the org entirely.
   // Routing through /workspace/{id} hits WorkspaceRoute → assert_workspace_membership,
@@ -73,16 +76,15 @@ const JUMP = [
   // requires god_admin, reads the org context already set via X-Org-Override,
   // and renders the tenant application directly. action: 'customer_app' tells
   // the render loop to produce a button with navigate() instead of a NavLink.
+  //
+  // WORKSPACES WAS REMOVED FROM HERE. It is a first-class destination in
+  // CUSTOMERS below, and carrying it in both places meant the same rail listed
+  // the same screen twice — which reads as two different things and teaches the
+  // owner to distrust the grouping. A "Jump To" section earns its place only
+  // for destinations that are genuinely a different context; anything that
+  // duplicates primary navigation belongs in primary navigation, once.
   { label: 'Customer App',    action: 'customer_app', icon: 'grid',
     hint: 'The tenant application, as an organization sees it' },
-  // WAS: a single 'Sales Workspace' jump straight to /sales, with the brand
-  // named in this literal — 'EvoSys Pro brand sales'. There was no way to pick
-  // another brand, and /sales returned EVERY brand's pipeline for the owner, so
-  // a second brand would have silently merged two companies' deals onto one
-  // screen. Workspaces is the doorway now, and it is driven by the platform
-  // records rather than by this file.
-  { label: 'Workspaces',      path: '/god/workspaces', icon: 'briefcase',
-    hint: 'Choose a brand, then its sales workspace or one of its customers' },
 ]
 
 /**
@@ -108,46 +110,80 @@ const NAV = [
   // Platform overview is where the owner should LAND — with no customer
   // selected — rather than arriving already inside somebody's tenant.
   { label: 'Platform',         path: '/god/platform',         icon: 'layers'   },
-  { label: 'Organizations',    path: '/god/organizations',    icon: 'building' },
-  { label: 'Customers',        path: '/god/customers',        icon: 'globe'    },
-  { label: 'Workspaces',       path: '/god/workspaces',       icon: 'layers'   },
-  { label: 'Users & Identity', path: '/god/users-all',        icon: 'users'    },
 
-  { group: 'OPERATIONS' },
-  { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending' },
-  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch'   },
-  { label: 'Lead Scraper',     path: '/scraper',              icon: 'grid'     },
+  // ══════════════════════════════════════════════════════════════════════
+  // CUSTOMERS — three nouns the platform deliberately keeps separate.
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // They were adjacent in the rail with no explanation, which made them look
+  // like three names for one thing. The backend separates them on purpose and
+  // the hints below say why, because an owner who cannot tell them apart picks
+  // one at random and concludes the product is confused:
+  //
+  //   ORGANIZATIONS  the records and their administration
+  //   CUSTOMERS      the commercial relationship — lifecycle and Customer 360
+  //   WORKSPACES     the live tenant environments people actually work in
+  { group: 'CUSTOMERS' },
+  { label: 'Organizations',    path: '/god/organizations',    icon: 'building',
+    hint: 'Organization records and administration' },
+  { label: 'Customers',        path: '/god/customers',        icon: 'globe',
+    hint: 'Commercial lifecycle and Customer 360' },
+  { label: 'Workspaces',       path: '/god/workspaces',       icon: 'layers',
+    hint: 'Live tenant environments — enter one as its brand or customer' },
+  { label: 'Users & Identity', path: '/god/users-all',        icon: 'users',
+    hint: 'One row per human, every context they hold' },
+  // Implementations moved here from OPERATIONS: it is the handoff that follows
+  // a won customer, so it belongs beside the customer, not beside a scraper.
+  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',
+    hint: 'Onboarding handoff for sold customers' },
 
-  { group: 'PLATFORM' },
-  // Discount floors and commission plans. These are the numbers that decide
-  // what a deal may be sold for and what the team earns for selling it, so they
-  // sit in PLATFORM with the other owner-only surfaces rather than under
-  // OPERATIONS where a sales manager would expect to find them.
-  { label: 'Pricing & Comp',   path: '/god/pricing',          icon: 'dollar'   },
-  // TWO ENTRIES BECAUSE THEY ARE TWO JOBS, and one rail item made the second
-  // one invisible. Pricing & Comp DEFINES the rules — plans, rates, caps,
-  // holdbacks, and who may see or settle them. Sales Compensation is the money
-  // those rules produced: the ledger, what is on hold, what is payable now,
-  // what has been paid. Merging them to save a line would put a payment run
-  // behind a screen called "Pricing", which is where an owner would never
-  // think to look for it.
-  { label: 'Sales Compensation', path: '/god/compensation',   icon: 'briefcase' },
-  // A THIRD ENTRY, AND AGAIN BECAUSE IT IS A THIRD JOB. Pricing & Comp defines
-  // the rules; Sales Compensation is what the team earned; Billing & Revenue is
-  // what CUSTOMERS pay and which of them needs chasing — whose card failed, who
-  // is on a trial that ends this week, who scheduled a downgrade, who is
-  // sitting on held leads. Its seven backend routes existed for weeks with no
-  // link and no page, which is the same as not existing.
-  { label: 'Billing & Revenue', path: '/god/billing',         icon: 'dollar'   },
-  // Control-plane diagnostics. Owner-only by the endpoint behind it, not by
-  // the absence of this link.
-  { label: 'Access Diagnostic', path: '/god/diagnostics/user-access', icon: 'shield' },
-  // TWO DIAGNOSTICS, AND THEY ANSWER DIFFERENT QUESTIONS. Access asks WHAT MAY
-  // THIS PERSON REACH - identity, memberships, workspace resolution, scope.
-  // Qualification asks, of the population they may already reach, WHO MAY
-  // ACTUALLY BE CONTACTED on a channel, and why not for the rest. Merging them
-  // would produce one screen that answers neither question well.
-  { label: 'Lead Qualification', path: '/god/diagnostics/qualification', icon: 'shield' },
+  // ══════════════════════════════════════════════════════════════════════
+  // SALES & REVENUE — money in, and who earned it.
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // These four sat under PLATFORM with diagnostics and system health, which
+  // put a payment run in the same group as a log viewer. They are one
+  // operational domain and they now read as one.
+  { group: 'SALES & REVENUE' },
+  { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending',
+    hint: 'Pipeline and sales org operations' },
+  // Pricing & Comp DEFINES the rules — plans, rates, caps, holdbacks, and who
+  // may see or settle them. Sales Compensation is the money those rules
+  // produced. Billing & Revenue is what CUSTOMERS pay. Three jobs, three
+  // entries: merging any two would put one of them behind a screen name where
+  // nobody would think to look for it.
+  { label: 'Pricing & Compensation', path: '/god/pricing',    icon: 'dollar',
+    hint: 'Discount floors, commission plans, caps' },
+  { label: 'Sales Compensation', path: '/god/compensation',   icon: 'briefcase',
+    hint: 'The ledger — earned, payable, paid' },
+  { label: 'Billing & Revenue', path: '/god/billing',         icon: 'dollar',
+    hint: 'What customers pay and who needs chasing' },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // LEADS & AUTOMATION
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Only what is actually built and routed. Nothing here is a placeholder —
+  // the unfinished work is stated once in PRODUCT STATUS on the Command
+  // Center, which Roadmap below jumps to.
+  { group: 'LEADS & AUTOMATION' },
+  // Asks, of the population a user may already reach, WHO MAY ACTUALLY BE
+  // CONTACTED on a channel and why not for the rest. A different question from
+  // Access Diagnostic, which is why they are not merged.
+  { label: 'Lead Qualification', path: '/god/diagnostics/qualification', icon: 'shield',
+    hint: 'Who may be contacted on each channel, and why not' },
+  { label: 'Lead Scraper',     path: '/scraper',              icon: 'grid',
+    hint: 'Source and import prospect lists' },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SECURITY & PLATFORM
+  // ══════════════════════════════════════════════════════════════════════
+  { group: 'SECURITY & PLATFORM' },
+  // Asks WHAT MAY THIS PERSON REACH — identity, memberships, workspace
+  // resolution, scope. Owner-only by the endpoint behind it, not by the
+  // absence of this link.
+  { label: 'Access & Permissions', path: '/god/diagnostics/user-access', icon: 'shield',
+    hint: 'What a given person can actually reach' },
   { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
   { label: 'Roadmap',          path: '/god#product-status',   icon: 'flag'     },
@@ -237,14 +273,26 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   // "Audit & Security" were all being ellipsised.
   const railW = isMobile ? 264 : (collapsed ? 62 : 248)
 
-  // The marketing site for whichever brand this domain is. The AdvisorFlow
-  // (god) brand deliberately has no websiteUrl — there is no public AdvisorFlow
-  // site — so fall back to EvoSys Pro rather than rendering a dead link.
-  const brand = BRAND_CONFIG[detectTheme()] || {}
-  const websiteUrl = brand.websiteUrl || BRAND_CONFIG.evosyspro?.websiteUrl
-  const websiteLabel = brand.websiteUrl
-    ? (brand.displayName || 'Website')
-    : (BRAND_CONFIG.evosyspro?.displayName || 'Website')
+  // EVERY BRAND WITH A CONFIGURED SITE, from the platform records.
+  //
+  // Read once when the rail mounts. A failure here costs the BRANDS section
+  // and nothing else — a rail that will not render because a secondary list
+  // could not load is worse than a rail with one section missing.
+  const [brands, setBrands] = useState([])
+  useEffect(() => {
+    let live = true
+    api.get('/god/platform/overview', { noOrgContext: true })
+      .then(r => {
+        if (!live) return
+        setBrands((r?.platforms || [])
+          // Active brands only, and only those with a real destination. A
+          // brand with no website_url gets no link rather than a guessed one.
+          .filter(p => p.is_active && p.website_url)
+          .map(p => ({ id: p.id, name: p.name, website_url: p.website_url })))
+      })
+      .catch(() => { if (live) setBrands([]) })
+    return () => { live = false }
+  }, [])
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#02050a', color: '#c8d6e5',
@@ -376,20 +424,48 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               </NavLink>
             )
           })}
-          {websiteUrl && (
-            <a href={websiteUrl} target="_blank" rel="noopener noreferrer"
-              className="gm-nav-item gm-jump"
-              title={collapsed ? websiteLabel + ' website — opens in a new tab'
-                               : 'Opens in a new tab, so God Mode stays open here'}
-              style={{ justifyContent: collapsed ? 'center' : 'flex-start',
-                       padding: collapsed ? '10px 0' : '9px 14px' }}
-            >
-              <Ico d={ICONS.globe} size={14} />
-              {!collapsed && <span className="gm-nav-label">{websiteLabel} Site</span>}
-              {!collapsed && <Ico d={ICONS.external} size={11} />}
-            </a>
-          )}
         </div>
+
+        {/* ── BRANDS ──────────────────────────────────────────────────────
+            EVERY BRAND, FROM THE BRAND RECORDS. NOT ONE HARD-CODED LINK.
+
+            This rail used to render a single "EvoSys Pro Site" — whichever
+            brand the current DOMAIN happened to be, falling back to EvoSys Pro
+            when it could not tell. On a white-label platform that is the one
+            arrangement guaranteed to be wrong: BookaBoost and Harmony & Hustle
+            had no destination at all, and a fourth brand would have had none
+            either, forever, until somebody edited this file.
+
+            `Platform.website_url` has existed all along and no API returned it.
+            It does now, so this list is configuration rather than code: adding
+            a brand with a site configured adds its link here with no deploy.
+
+            A BRAND WITH NO SITE CONFIGURED RENDERS NOTHING. Guessing a URL from
+            a slug would produce a dead link that looks like a broken product,
+            and the whole section disappears when no brand has one. */}
+        {brands.length > 0 && (
+          <div style={{ borderTop: '1px solid rgba(78,157,211,.14)', padding: '8px 0', flexShrink: 0 }}>
+            {!collapsed && (
+              <div style={{ color: '#33506e', fontSize: 8.5, letterSpacing: '.16em',
+                            padding: '2px 14px 7px', fontWeight: 700 }}>
+                BRANDS
+              </div>
+            )}
+            {brands.map(b => (
+              <a key={b.id} href={b.website_url} target="_blank" rel="noopener noreferrer"
+                className="gm-nav-item gm-jump"
+                title={collapsed ? b.name + ' site — opens in a new tab'
+                                 : b.name + ' — opens in a new tab, God Mode stays open here'}
+                style={{ justifyContent: collapsed ? 'center' : 'flex-start',
+                         padding: collapsed ? '10px 0' : '9px 14px' }}
+              >
+                <Ico d={ICONS.globe} size={14} />
+                {!collapsed && <span className="gm-nav-label">{b.name}</span>}
+                {!collapsed && <Ico d={ICONS.external} size={11} />}
+              </a>
+            ))}
+          </div>
+        )}
 
         {/* Footer — owner identity + role */}
         <div style={{ padding: collapsed ? '12px 0' : '12px 16px', borderTop: '1px solid rgba(78,157,211,.14)',

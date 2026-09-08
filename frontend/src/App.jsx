@@ -481,6 +481,54 @@ function WorkspaceSelector() {
   )
 }
 
+/**
+ * THE CUSTOMER APPLICATION, ENTERED BY THE PLATFORM OWNER.
+ *
+ * God authority is preserved — this is not a downgrade to a tenant account and
+ * no membership is created (enterCustomer asserts that against the server's own
+ * memberships_before/after on every entry). What changes is only which
+ * organization's data the API returns, through X-Org-Override.
+ *
+ * THREE THINGS THIS GUARDS, EACH OF WHICH WAS A REAL WAY TO GET HURT:
+ *
+ *   NO CONTEXT AT ALL. A bookmark, a refresh after exiting, or a back button
+ *   landing here with no organization selected would otherwise render the
+ *   tenant app scoped to nothing — empty lists that look like a broken customer
+ *   rather than a missing selection. Sent to the roster to choose instead.
+ *
+ *   NOT GOD. The path sits under /god and the override header is a platform
+ *   capability; a tenant user who types this URL gets the same not-found
+ *   GodRoute gives, which does not confirm that a platform area exists.
+ *
+ *   STALE CONTEXT AFTER EXIT. Exiting clears the override, and browser
+ *   back onto this path re-reads it at render rather than trusting a captured
+ *   value — so back never resurrects a customer the owner has left.
+ */
+function GodCustomerAppRoute() {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+
+  const user = getCurrentUser()
+  if (user?.role !== 'god_admin') {
+    return (
+      <Layout>
+        <NotFound path={typeof window !== 'undefined' ? window.location.pathname : ''} />
+      </Layout>
+    )
+  }
+
+  // Read at RENDER, never from state captured on a previous visit. This is what
+  // makes browser back/forward safe: after an exit the context is gone, and
+  // returning here reads that rather than a stale copy.
+  const ctx = getOrgContext()
+  if (!ctx || !ctx.orgId) return <Navigate to="/god/customers" replace />
+
+  // ProtectedRoute supplies Layout + ContextBanner, which is where VIEWING AS
+  // and EXIT ORGANIZATION VIEW live. Overview is the tenant's own home screen —
+  // the customer application, not a God rendering of it.
+  return <ProtectedRoute><Overview /></ProtectedRoute>
+}
+
 function GodRoute({ children }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
@@ -752,6 +800,35 @@ export default function App() {
             endpoint behind it is require_god, so a typed URL is refused by the
             server rather than by the absence of a link. */}
         <Route path="/god/diagnostics/user-access" element={<GodRoute><GodModeLayout><UserAccessDiagnostic /></GodModeLayout></GodRoute>} />
+        {/* ══════════════════════════════════════════════════════════════
+            THE CUSTOMER APP, ENTERED AS GOD. THE ROUTE THAT NEVER EXISTED.
+            ══════════════════════════════════════════════════════════════
+
+            THE BUG THIS FIXES. Four separate call sites navigated here —
+            GodCustomers' Enter button, CustomerDetail, the Layout org picker
+            and GodShell's Customer App jump — and `/god/customer-app` was
+            never registered as a route. Every one of them fell through to the
+            `/god/*` catch-all below, which renders the God Command Center.
+
+            So the reported symptom was exact: clicking Enter established the
+            organization context correctly (the server call ran, X-Org-Override
+            and X-Brand-Override were both set) and then bounced the owner
+            straight back to the platform layer, looking for all the world like
+            entry had failed. It had not. Only the destination was missing.
+
+            IT RENDERS THE TENANT APPLICATION, NOT A GOD SCREEN. ProtectedRoute
+            wraps children in Layout + ContextBanner, which is where "VIEWING
+            AS" and EXIT ORGANIZATION VIEW come from, and Overview is the
+            tenant's own home. Which organization's data appears is decided by
+            X-Org-Override on every request — the durable id set by
+            enterCustomer — never by anything in this path.
+
+            NO ORGANIZATION ID IN THE URL, DELIBERATELY. The id lives in the
+            override context, so a stale bookmark cannot silently point the
+            owner at a different customer than the banner names. Entering
+            without a context is caught below and sent back to pick one rather
+            than rendering an empty tenant app. */}
+        <Route path="/god/customer-app" element={<GodCustomerAppRoute />} />
         {/* Both diagnostics, registered BEFORE the /god/* catch-all - a route
             added after it would silently render the Command Center instead. */}
         <Route path="/god/diagnostics/qualification" element={<GodRoute><GodModeLayout><QualificationDiagnostic /></GodModeLayout></GodRoute>} />

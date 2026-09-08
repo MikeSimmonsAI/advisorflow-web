@@ -213,17 +213,25 @@ export default function GodCustomers() {
                   <td data-label="Since">{when(o.customer_since)}</td>
                   <td data-label="Users" className="num">{o.user_count}</td>
                   <td data-label="Leads" className="num">{o.lead_count}</td>
+                  {/* TWO ACTIONS, TWO DESTINATIONS, AND THE LABELS SAY WHICH.
+                      "Enter" said nothing about what was being entered — the
+                      commercial record or the customer's actual product — and
+                      the two buttons sat side by side looking interchangeable.
+                      360 opens the commercial history; Workspace enters this
+                      customer's live operating environment as them. */}
                   <td data-label="" onClick={e => e.stopPropagation()}>
                     <div className="go-actions">
                       <button className="go-btn sm ghost"
+                              title={'Commercial history for ' + o.name}
                               onClick={() => nav('/god/customers/' +
                                                  o.organization_id + '/360')}>
                         360
                       </button>
                       <button className="go-btn sm"
+                              title={'Open ' + o.name + "'s workspace as them"}
                               disabled={entering === o.organization_id}
                               onClick={e => handleEnter(e, o.organization_id, o.name)}>
-                        {entering === o.organization_id ? '…' : 'Enter'}
+                        {entering === o.organization_id ? 'Entering…' : 'Workspace'}
                       </button>
                     </div>
                   </td>

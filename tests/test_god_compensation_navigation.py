@@ -67,18 +67,40 @@ def test_the_god_rail_offers_sales_compensation():
 
 
 def test_pricing_and_comp_survives_as_its_own_entry():
-    """Two jobs, two entries. Not merged to save a line."""
+    """Two jobs, two entries. Not merged to save a line.
+
+    The LABEL changed - 'Pricing & Comp' became 'Pricing & Compensation' when
+    the rail was regrouped by business function - but the invariant this test
+    defends did not: pricing keeps its own entry rather than being folded into
+    Sales Compensation. Asserting on the ROUTE is the durable half of that;
+    asserting on the exact wording of a label is not, so the label check is
+    kept loose enough to survive a rename and strict enough to catch a merge.
+    """
     shell = _src("pages", "GodShell.jsx")
-    assert "'Pricing & Comp'" in shell
     assert "'/god/pricing'" in shell
+    assert re.search(r"label:\s*'Pricing & Comp\w*'", shell), (
+        "the pricing entry has lost its own rail item")
 
 
-def test_both_entries_sit_in_the_platform_group():
-    """A payment run does not belong under OPERATIONS beside Lead Scraper."""
+def test_both_entries_sit_in_the_same_revenue_group():
+    """A payment run does not belong beside Lead Scraper.
+
+    Originally both sat under PLATFORM. That group also held Access Diagnostic,
+    Audit & Security and System Health, which put a payment run in the same
+    section as a log viewer, so the rail was regrouped and both moved together
+    into SALES & REVENUE. The rule is unchanged: they belong in ONE group, and
+    that group is about money rather than diagnostics.
+    """
     shell = _src("pages", "GodShell.jsx")
-    platform_block = shell.split("{ group: 'PLATFORM' }", 1)[1]
-    assert "'Sales Compensation'" in platform_block
-    assert "'Pricing & Comp'" in platform_block
+    parts = shell.split("{ group: 'SALES & REVENUE' }", 1)
+    assert len(parts) == 2, "the SALES & REVENUE rail group is missing"
+    # Bounded by the next group header, so this cannot pass on an entry that
+    # actually sits further down the rail.
+    block = re.split(r"\{ group: '", parts[1])[0]
+    assert "'Sales Compensation'" in block
+    assert re.search(r"label:\s*'Pricing & Comp\w*'", block)
+    assert "Lead Scraper" not in block, (
+        "Lead Scraper is back in the revenue group")
 
 
 def test_the_god_route_is_registered_and_renders_the_same_component():
