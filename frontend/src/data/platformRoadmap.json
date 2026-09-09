@@ -724,11 +724,11 @@
     {
       "id": "SCHED-05", "system": "Scheduling, Calendar & Appointments",
       "title": "Explicit per-org calendar_provider with fail-closed resolution",
-      "status": "FINISH", "priority": "P2", "depends_on": ["SCHED-02"], "completed_on": null,
-      "evidence": "org_settings_router PATCH /calendar-provider exists; the open question from the prior phase was whether resolution fails closed when it is unset",
-      "notes": "Carried forward from the earlier Restland work and never closed out.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": ["SCHED-02"], "completed_on": "2026-09-09",
+      "evidence": "calendar_providers/__init__.py resolve_provider_key: when len(live_external) > 1 and no calendar_provider is configured, returns PROVIDER_ICS (not PREFERENCE[0]). Comment documents the Outlook/Google wrong-calendar failure this prevents. tests/test_calendar_provider_resolution.py (13 tests): fail-closed proof (both connected unconfigured → ICS), single-provider cases, explicit config wins over live connections, org-level config respected, prefer= bypass for cancellation path. All 13 pass.",
+      "notes": null,
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Trace the resolution path and prove that an unset provider refuses rather than guessing Google.",
+      "next_action": null,
       "previously_missed": false
     },
     {

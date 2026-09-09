@@ -8,8 +8,7 @@ must NOT silently pick by PREFERENCE order. It must return PROVIDER_ICS so
 the booking surfaces as calendar_unavailable rather than writing to whichever
 calendar happens to be listed first.
 
-Why this matters: the maintenance router's god_maintenance_router.py documents
-the exact failure mode — a booking written before the provider fix went to
+Why this matters: a booking written before the provider fix went to
 Outlook because Microsoft was first in the PREFERENCE tuple, even though the
 advisor connected Google. Cancelling it through the Google client 404'd and
 reported "already deleted" while the event sat on the real Outlook calendar.
@@ -92,10 +91,7 @@ class TestFailClosedWhenUnconfigured:
                    return_value=(None, None)):
             result = resolve_provider_key(None, user)
 
-        assert result != PROVIDER_MICROSOFT, (
-            "Microsoft must not win silently when both providers are connected "
-            "but calendar_provider is unset"
-        )
+        assert result != PROVIDER_MICROSOFT
 
     def test_both_connected_unconfigured_does_not_return_google(self):
         """Google must not win silently either."""
@@ -111,10 +107,7 @@ class TestFailClosedWhenUnconfigured:
                    return_value=(None, None)):
             result = resolve_provider_key(None, user)
 
-        assert result != PROVIDER_GOOGLE, (
-            "Google must not win silently when both providers are connected "
-            "but calendar_provider is unset"
-        )
+        assert result != PROVIDER_GOOGLE
 
 
 # ─── single-provider cases (should still work, no ambiguity) ──────────────────
@@ -162,11 +155,6 @@ class TestSingleProviderUnconfigured:
 class TestExplicitConfigurationWins:
 
     def test_configured_microsoft_wins_even_when_google_connected(self):
-        """
-        If the advisor explicitly chose Microsoft, return Microsoft — even if
-        Google is the only live connection. The configuration is the decision;
-        the registry handles the fallback if the configured provider is broken.
-        """
         user = _user(calendar_provider="microsoft")
         live = {PROVIDER_GOOGLE: _connection(PROVIDER_GOOGLE)}
 
@@ -190,8 +178,8 @@ class TestExplicitConfigurationWins:
 
         assert result == PROVIDER_GOOGLE
 
+
     def test_configured_microsoft_wins_when_both_connected(self):
-        """Explicit choice beats fail-closed: both connected + configured → use configured."""
         user = _user(calendar_provider="microsoft")
         live = {
             PROVIDER_MICROSOFT: _connection(PROVIDER_MICROSOFT),
@@ -208,13 +196,12 @@ class TestExplicitConfigurationWins:
 
     def test_org_level_configuration_is_respected(self):
         """Organization-level `calendar_provider` counts as configured."""
-        user = _user(calendar_provider=None)  # not on the user row
+        user = _user(calendar_provider=None)
         live = {
             PROVIDER_MICROSOFT: _connection(PROVIDER_MICROSOFT),
             PROVIDER_GOOGLE:    _connection(PROVIDER_GOOGLE),
         }
 
-        # org has it set → configured_provider_key returns (google, "organization")
         with patch("app.services.calendar_providers._live_connections",
                    return_value=live), \
              patch("app.services.calendar_providers.configured_provider_key",
@@ -229,11 +216,6 @@ class TestExplicitConfigurationWins:
 class TestPreferOverride:
 
     def test_prefer_microsoft_bypasses_fail_closed(self):
-        """
-        The `prefer` argument is used by cancellation to replay the key that
-        was stored at booking time. It must bypass everything — the stored key
-        IS the decision.
-        """
         user = _user(calendar_provider=None)
         live = {
             PROVIDER_MICROSOFT: _connection(PROVIDER_MICROSOFT),
