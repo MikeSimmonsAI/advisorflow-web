@@ -776,6 +776,25 @@ async def on_startup():
     from app.auto_migrate import run_auto_migrations
     run_auto_migrations(engine)
 
+    # 2a-pre. CRM CONNECTION SECRETS — encrypt any plaintext api_key_encrypted /
+    #         webhook_secret rows left over from before crm_secrets.py existed.
+    #         Idempotent: already-encrypted rows are detected and skipped. Fails
+    #         soft: a migration error is logged but does not prevent startup.
+    try:
+        from app.services.crm_secrets import migrate_crm_connection_secrets
+        _crm_sec = migrate_crm_connection_secrets(engine)
+        if _crm_sec.get("encrypted", 0):
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "crm_secrets startup migration: encrypted %d previously-plaintext "
+                "secret(s) across %d scanned connection(s)",
+                _crm_sec["encrypted"], _crm_sec["scanned"])
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "crm_secrets startup migration failed — existing rows unchanged",
+            exc_info=True)
+
     # 2a. WORKSPACE MEMBERSHIP BACKFILL — the migration off the single column.
     #
     #     Customer tenancy was `users.organization_id` and nothing else, so

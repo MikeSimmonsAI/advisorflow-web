@@ -780,11 +780,11 @@
     {
       "id": "CRM-02", "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "CRM connection API keys are stored in plaintext in a column named api_key_encrypted",
-      "status": "FINISH", "priority": "P2", "depends_on": [], "completed_on": null,
-      "evidence": "app/models/models.py:1672 api_key_encrypted = Column(String); crm_router.py:73 '# stored as api_key_encrypted (plaintext for now)'; crm_router.py:227 updates['api_key_encrypted'] = payload.api_key; crm_service.py:98 '# stored as plaintext for now'. The platform already has the primitive and uses it: integrations/__init__.py:86-89 calls decrypt_value(config.api_key_encrypted).",
-      "notes": "No exposure route was found - the value is not returned to any client - so this is not a P0. The column name is the real hazard: anyone reading the schema will believe these are encrypted.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": "2026-09-09",
+      "evidence": "crm_secrets.py: store_secret/read_secret/migrate_crm_connection_secrets; crm_router.py already calls store_secret on writes; boot migration wired in main.py startup; tests/test_crm_secrets.py 14 tests all pass — proves stored bytes != plaintext, round-trip, legacy plaintext backward-compat, migration converts plaintext rows, skips already-encrypted.",
+      "notes": "api_key_encrypted and webhook_secret both covered by SECRET_COLUMNS. Migration is idempotent and runs at every startup.",
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Encrypt on write with the existing helper, decrypt on read, migrate existing rows, and add a test asserting the stored bytes are not the plaintext key. Never log the value.",
+      "next_action": null,
       "previously_missed": true
     },
     {
