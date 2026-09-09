@@ -787,7 +787,7 @@
       "id": "LEAD-02",
       "system": "Lead Data Platform",
       "title": "leads_router is a 2460-line, 31-route, 15-service file",
-      "status": "CONSOLIDATE",
+      "status": "COMPLETE",
       "priority": "P2",
       "depends_on": [
         "LEAD-01"
