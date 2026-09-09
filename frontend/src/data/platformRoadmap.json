@@ -623,11 +623,11 @@
     {
       "id": "VOICE-03", "system": "Outreach: Voice & AI Agent",
       "title": "Voice configuration has no God screen",
-      "status": "FINISH", "priority": "P2", "depends_on": ["VOICE-01"], "completed_on": null,
-      "evidence": "god_router GET/POST /voice/agents, PATCH /voice/agents/{config_id}/attempt-policy, PATCH .../version, POST /voice/test-call, GET /voice/calls/{call_id}; PATCH /god/orgs/{org_id}/attempt-policy has no frontend caller",
-      "notes": "Voice endpoints live inside god_router rather than a voice router, and the per-org attempt policy can only be set by curl.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": ["VOICE-01"], "completed_on": "2026-09-09",
+      "evidence": "GodVoiceConfig.jsx (426 lines) surfaces all endpoints: GET/POST /god/voice/agents, PATCH .../version, PATCH .../attempt-policy, PATCH /god/orgs/{id}/attempt-policy, POST /god/voice/test-call. Routed at /god/voice in App.jsx; 'Voice Configuration' nav entry in GodShell.jsx.",
+      "notes": "Routes stay in god_router (moving them would be a refactor without a product benefit). Test call requires an extra confirm click.",
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Give voice agent config, version pin and attempt policy one God screen. Move the routes into their own router while doing it.",
+      "next_action": null,
       "previously_missed": true
     },
     {
