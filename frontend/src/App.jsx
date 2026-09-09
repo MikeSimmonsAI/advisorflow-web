@@ -13,6 +13,14 @@ import DealRoom from './pages/portal/DealRoom'
 import PortalAccess from './pages/portal/PortalAccess'
 import DemoSite from './pages/portal/DemoSite'
 import PortalViewer from './pages/portal/PortalViewer'
+// AdvisorFlow LAUNCH ENGINE — the customer's Launch Pad. A platform
+// capability, worn by whichever white-label brand owns the customer
+// relationship (EvoSys Pro today, BookaBoost next). STAGE 1 IS A UI PROTOTYPE:
+// LaunchPad is a leaf that imports nothing from api/, auth/ or context/, makes
+// no request and touches no storage, so it cannot alter authorization
+// behaviour anywhere. Whether Stage 2 puts an invitation token in front of it
+// is a Stage 2 decision and nothing here presumes an answer.
+import LaunchPad from './pages/launch/LaunchPad'
 // Family-facing pages on the organization's own branded domain. The
 // public-identity resolver emits https://<branded-host>/book/:token and
 // /survey/:token; without these two routes those links 404.
@@ -657,6 +665,15 @@ export default function App() {
         <Route path="/demo/:token" element={<DemoSite />} />
         <Route path="/portal/access/:token" element={<PortalAccess />} />
         <Route path="/portal/view/:proposalId" element={<PortalViewer />} />
+        {/* ── LAUNCH ENGINE ── the customer's Launch Pad.
+            Two entries, one component: /launch opens on the first intake step
+            and /launch/:stepKey addresses one directly, so a step is a real
+            URL somebody can be sent to rather than a state nobody can link to.
+            An unknown stepKey falls back to the first step inside LaunchPad
+            rather than 404-ing a customer mid-onboarding.
+            STAGE 1: mock data only, no persistence, no submission. */}
+        <Route path="/launch" element={<LaunchPad />} />
+        <Route path="/launch/:stepKey" element={<LaunchPad />} />
         {/* The family's booking and feedback pages, on the customer's own
             branded host. These are the routes the public-identity resolver
             has been emitting; they reuse the existing booking/survey
