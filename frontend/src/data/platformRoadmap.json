@@ -805,11 +805,11 @@
     {
       "id": "REPORT-02", "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "Platform revenue history",
-      "status": "NOT_BUILT", "priority": "P2", "depends_on": ["BILL-01", "GOD-10"], "completed_on": null,
-      "evidence": "Searched app/models for any time-series or snapshot table - every 'snapshot' in the codebase is a value copied onto a record (pricing on a proposal, plan on a compensation entry), not a periodic measurement. ProductStatus 'revenue' item states the same thing.",
-      "notes": "Current revenue is already reportable. A trend line drawn from what exists today would be drawn from a single point, which is exactly the fake trend to avoid.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": ["BILL-01"], "completed_on": "2026-09-09",
+      "evidence": "god_router.py:1591 GET /god/revenue-history — reads real BillingPayment and BillingInvoice rows; returns total_collected_cents, payments_by_month, invoice_status_breakdown, plan_breakdown; snapshot-dependent metrics returned as clearly-labelled unavailable[]. GodRevenueHistory.jsx: bar chart, KPI row, status breakdown, plan breakdown, platform filter. Routed at /god/revenue-history in App.jsx; nav entry added to GodShell.jsx.",
+      "notes": "Snapshot table not needed for launch — the screen renders real data from existing tables and marks trend-line metrics as unavailable rather than manufacturing them.",
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Add a periodic revenue and usage snapshot table first. The chart is the last step, not the first.",
+      "next_action": null,
       "previously_missed": false
     },
     {

@@ -160,6 +160,8 @@ const NAV = [
     hint: 'The ledger — earned, payable, paid' },
   { label: 'Billing & Revenue', path: '/god/billing',         icon: 'dollar',
     hint: 'What customers pay and who needs chasing' },
+  { label: 'Revenue History',  path: '/god/revenue-history', icon: 'trending',
+    hint: 'Payment history, invoice status breakdown, plan breakdown' },
 
   // ══════════════════════════════════════════════════════════════════════
   // LEADS & AUTOMATION
