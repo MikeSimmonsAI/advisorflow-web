@@ -10,15 +10,110 @@
 import { useState, useMemo } from 'react'
 import roadmapData from '../../data/platformRoadmap.json'
 
+const BOARD_STYLES = `
+.rm-board { font-family: var(--god-font, system-ui, sans-serif); }
+
+/* ── tokens ── */
+.rm-board {
+  --rm-bg:       var(--god-card, #fff);
+  --rm-bg2:      var(--god-surface, #f9fafb);
+  --rm-border:   var(--god-border, #e5e7eb);
+  --rm-ink:      var(--god-text, #1f2937);
+  --rm-muted:    var(--god-muted, #6b7280);
+  --rm-faint:    var(--god-dim, #9ca3af);
+  --rm-row-sep:  var(--god-border, #f3f4f6);
+  --rm-input-bg: var(--god-field, #fff);
+  --rm-tab-sel:  var(--god-accent, #3b82f6);
+}
+
+[data-appearance="dark"] .rm-board {
+    --rm-bg:       #131c2b;
+    --rm-bg2:      #0d1524;
+    --rm-border:   #1e2e44;
+    --rm-ink:      #d4dfef;
+    --rm-muted:    #7a9cbf;
+    --rm-faint:    #4a6680;
+    --rm-row-sep:  #172236;
+    --rm-input-bg: #0c1726;
+    --rm-tab-sel:  #3b82f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) .rm-board {
+    --rm-bg:       #131c2b;
+    --rm-bg2:      #0d1524;
+    --rm-border:   #1e2e44;
+    --rm-ink:      #d4dfef;
+    --rm-muted:    #7a9cbf;
+    --rm-faint:    #4a6680;
+    --rm-row-sep:  #172236;
+    --rm-input-bg: #0c1726;
+    --rm-tab-sel:  #3b82f6;
+  }
+}
+
+/* ── layout pieces ── */
+.rm-section { margin-bottom:18px; border:1px solid var(--rm-border); border-radius:10px; background:var(--rm-bg); overflow:hidden; }
+.rm-section-hd { padding:12px 18px; background:var(--rm-bg2); border-bottom:1px solid var(--rm-border); }
+.rm-section-title { font-size:12px; font-weight:700; color:var(--rm-ink); }
+.rm-section-meta { font-size:11px; color:var(--rm-faint); }
+.rm-items { padding:0 18px; }
+.rm-row { border-bottom:1px solid var(--rm-row-sep); padding:9px 0; }
+.rm-row:last-child { border-bottom:none; }
+.rm-row-main { display:flex; gap:8px; align-items:flex-start; cursor:pointer; }
+.rm-row-main.no-detail { cursor:default; }
+.rm-id { font-size:10px; font-family:monospace; color:var(--rm-faint); min-width:70px; padding-top:1px; flex-shrink:0; }
+.rm-title { flex:1; font-size:12px; color:var(--rm-ink); line-height:1.5; }
+.rm-row-meta { display:flex; gap:5px; align-items:center; flex-shrink:0; }
+.rm-chevron { font-size:10px; color:var(--rm-faint); }
+.rm-detail { margin-top:8px; margin-left:78px; font-size:11px; line-height:1.6; color:var(--rm-muted); }
+.rm-alert { border-radius:6px; padding:6px 10px; margin-bottom:6px; }
+.rm-alert-warn { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; }
+.rm-alert-err  { background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; }
+[data-appearance="dark"] .rm-alert-warn { background:#1c1600; border-color:#6b4c00; color:#fbbf24; }
+[data-appearance="dark"] .rm-alert-err  { background:#1a0505; border-color:#7f1d1d; color:#fca5a5; }
+
+/* ── filter tabs ── */
+.rm-tabs { display:flex; gap:4px; }
+.rm-tab { font-size:11px; padding:4px 12px; border-radius:100px; cursor:pointer; border:1px solid var(--rm-border); background:var(--rm-bg); color:var(--rm-muted); font-weight:600; transition:background .15s,color .15s; }
+.rm-tab.active { border-color:var(--rm-tab-sel); background:color-mix(in srgb,var(--rm-tab-sel) 12%,transparent); color:var(--rm-tab-sel); }
+.rm-tab-count { margin-left:5px; font-weight:400; color:var(--rm-faint); }
+
+/* ── search ── */
+.rm-search { font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid var(--rm-border); background:var(--rm-input-bg); color:var(--rm-ink); flex:1; min-width:160px; max-width:280px; }
+.rm-search::placeholder { color:var(--rm-faint); }
+
+/* ── summary strip ── */
+.rm-summary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+.rm-summary-card { flex:1; min-width:100px; border:1px solid var(--rm-border); border-radius:8px; background:var(--rm-bg); padding:10px 14px; }
+.rm-summary-n { font-size:22px; font-weight:800; line-height:1; color:var(--rm-ink); }
+.rm-summary-l { font-size:10px; font-weight:600; color:var(--rm-faint); margin-top:3px; letter-spacing:.04em; text-transform:uppercase; }
+
+/* ── progress bar ── */
+.rm-prog { display:flex; align-items:center; gap:8px; }
+.rm-prog-track { flex:1; height:5px; background:var(--rm-border); border-radius:100px; overflow:hidden; }
+.rm-prog-fill  { height:100%; background:#22c55e; border-radius:100px; transition:width .3s; }
+.rm-prog-label { font-size:10px; color:var(--rm-faint); min-width:46px; text-align:right; }
+
+/* ── legend ── */
+.rm-legend { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; align-items:center; }
+.rm-legend-dot { width:8px; height:8px; border-radius:2px; display:inline-block; flex-shrink:0; }
+.rm-legend-text { font-size:10px; color:var(--rm-muted); }
+
+/* ── header row ── */
+.rm-header { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.rm-meta-line { font-size:10px; color:var(--rm-faint); margin-bottom:16px; }
+.rm-empty { padding:24px; text-align:center; color:var(--rm-faint); font-size:13px; }
+`
+
 // ── colour tokens per status ──────────────────────────────────────────────────
 const STATUS_META = {
-  COMPLETE:        { label: 'Complete',        bg: '#f0fdf4', text: '#166534', border: '#86efac' },
-  FINISH:          { label: 'Finish',          bg: '#fffbeb', text: '#92400e', border: '#fcd34d' },
-  CONSOLIDATE:     { label: 'Consolidate',     bg: '#fff7ed', text: '#9a3412', border: '#fdba74' },
-  REMOVE:          { label: 'Remove',          bg: '#fdf4ff', text: '#6b21a8', border: '#d8b4fe' },
-  NOT_BUILT:       { label: 'Not built',       bg: '#eff6ff', text: '#1e40af', border: '#93c5fd' },
-  POLICY_REQUIRED: { label: 'Policy needed',   bg: '#fef9c3', text: '#713f12', border: '#fde68a' },
-  BLOCKED:         { label: 'Blocked',         bg: '#fef2f2', text: '#991b1b', border: '#fca5a5' },
+  COMPLETE:        { label: 'Complete',      bg: '#f0fdf4', text: '#166534', border: '#86efac', dbg: '#071a0e', dtxt: '#4ade80', dborder: '#166534' },
+  FINISH:          { label: 'Finish',        bg: '#fffbeb', text: '#92400e', border: '#fcd34d', dbg: '#1a1200', dtxt: '#fbbf24', dborder: '#6b4c00' },
+  CONSOLIDATE:     { label: 'Consolidate',   bg: '#fff7ed', text: '#9a3412', border: '#fdba74', dbg: '#1a0900', dtxt: '#fb923c', dborder: '#7c2d12' },
+  REMOVE:          { label: 'Remove',        bg: '#fdf4ff', text: '#6b21a8', border: '#d8b4fe', dbg: '#16022a', dtxt: '#c084fc', dborder: '#581c87' },
+  NOT_BUILT:       { label: 'Not built',     bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', dbg: '#03142e', dtxt: '#60a5fa', dborder: '#1e3a8a' },
+  POLICY_REQUIRED: { label: 'Policy needed', bg: '#fef9c3', text: '#713f12', border: '#fde68a', dbg: '#1a1500', dtxt: '#facc15', dborder: '#6b5100' },
+  BLOCKED:         { label: 'Blocked',       bg: '#fef2f2', text: '#991b1b', border: '#fca5a5', dbg: '#1a0505', dtxt: '#f87171', dborder: '#7f1d1d' },
 }
 const PRIORITY_COLOR = { P0: '#dc2626', P1: '#f59e0b', P2: '#3b82f6', P3: '#9ca3af' }
 
@@ -29,12 +124,22 @@ const FILTER_TABS = [
   { key: 'complete', label: 'Complete'     },
 ]
 
+// Dark mode: check data-appearance on root (same pattern as rest of app)
+function useDark() {
+  return document.documentElement.getAttribute('data-appearance') === 'dark' ||
+    (!document.documentElement.getAttribute('data-appearance') &&
+     window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
+
 function StatusBadge({ status }) {
-  const m = STATUS_META[status] || { label: status, bg: '#f3f4f6', text: '#374151', border: '#d1d5db' }
+  const dark = useDark()
+  const m = STATUS_META[status] || { label: status, bg: '#f3f4f6', text: '#374151', border: '#d1d5db', dbg: '#1f2937', dtxt: '#9ca3af', dborder: '#374151' }
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 100,
-      background: m.bg, color: m.text, border: `1px solid ${m.border}`,
+      background: dark ? m.dbg : m.bg,
+      color: dark ? m.dtxt : m.text,
+      border: `1px solid ${dark ? m.dborder : m.border}`,
       whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em',
     }}>
       {m.label}
@@ -45,13 +150,11 @@ function StatusBadge({ status }) {
 function ProgressBar({ done, total }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ flex: 1, height: 5, background: '#e5e7eb', borderRadius: 100, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: '#22c55e', borderRadius: 100, transition: 'width .3s' }} />
+    <div className="rm-prog">
+      <div className="rm-prog-track">
+        <div className="rm-prog-fill" style={{ width: `${pct}%` }} />
       </div>
-      <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 46, textAlign: 'right' }}>
-        {done}/{total} ({pct}%)
-      </span>
+      <span className="rm-prog-label">{done}/{total} ({pct}%)</span>
     </div>
   )
 }
@@ -60,48 +163,36 @@ function ItemRow({ item }) {
   const [open, setOpen] = useState(false)
   const hasDetail = item.decision_required || item.next_action || item.blocked_reason || item.notes
   return (
-    <div style={{ borderBottom: '1px solid #f3f4f6', padding: '9px 0' }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: hasDetail ? 'pointer' : 'default' }}
+    <div className="rm-row">
+      <div className={`rm-row-main${hasDetail ? '' : ' no-detail'}`}
            onClick={() => hasDetail && setOpen(o => !o)}>
-        <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#9ca3af', minWidth: 70, paddingTop: 1 }}>
-          {item.id}
-        </span>
-        <span style={{ flex: 1, fontSize: 12, color: '#1f2937', lineHeight: 1.5 }}>
-          {item.title}
-        </span>
-        <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+        <span className="rm-id">{item.id}</span>
+        <span className="rm-title">{item.title}</span>
+        <div className="rm-row-meta">
           {item.decision_required && (
-            <span title="Decision required" style={{ fontSize: 10, color: '#b45309', fontWeight: 700 }}>⚑</span>
+            <span title="Decision required" style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700 }}>⚑</span>
           )}
-          <span style={{ fontSize: 10, fontWeight: 700, color: PRIORITY_COLOR[item.priority] || '#9ca3af' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: PRIORITY_COLOR[item.priority] || 'var(--rm-faint)' }}>
             {item.priority}
           </span>
           <StatusBadge status={item.status} />
-          {hasDetail && (
-            <span style={{ fontSize: 10, color: '#9ca3af' }}>{open ? '▲' : '▼'}</span>
-          )}
+          {hasDetail && <span className="rm-chevron">{open ? '▲' : '▼'}</span>}
         </div>
       </div>
       {open && hasDetail && (
-        <div style={{ marginTop: 8, marginLeft: 78, fontSize: 11, lineHeight: 1.6, color: '#4b5563' }}>
+        <div className="rm-detail">
           {item.decision_required && (
-            <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6,
-                          padding: '6px 10px', marginBottom: 6, color: '#92400e' }}>
+            <div className="rm-alert rm-alert-warn">
               <strong>Decision required:</strong> {item.decision_required}
             </div>
           )}
           {item.blocked_reason && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6,
-                          padding: '6px 10px', marginBottom: 6, color: '#991b1b' }}>
+            <div className="rm-alert rm-alert-err">
               <strong>Blocked:</strong> {item.blocked_reason}
             </div>
           )}
-          {item.next_action && (
-            <div style={{ marginBottom: 4 }}><strong>Next:</strong> {item.next_action}</div>
-          )}
-          {item.notes && (
-            <div style={{ color: '#6b7280' }}>{item.notes}</div>
-          )}
+          {item.next_action && <div style={{ marginBottom: 4 }}><strong>Next:</strong> {item.next_action}</div>}
+          {item.notes && <div>{item.notes}</div>}
         </div>
       )}
     </div>
@@ -117,22 +208,16 @@ function SystemSection({ system, items, filter }) {
   if (visible.length === 0) return null
   const done  = items.filter(i => i.status === 'COMPLETE').length
   const total = items.length
-
   return (
-    <div style={{ marginBottom: 20, border: '1px solid #e5e7eb', borderRadius: 10,
-                  background: '#fff', overflow: 'hidden' }}>
-      <div style={{ padding: '12px 18px', background: '#f9fafb',
-                    borderBottom: '1px solid #e5e7eb' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between',
-                      alignItems: 'center', marginBottom: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#1f2937' }}>{system}</span>
-          <span style={{ fontSize: 11, color: '#9ca3af' }}>
-            {visible.length} shown · {total} total
-          </span>
+    <div className="rm-section">
+      <div className="rm-section-hd">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <span className="rm-section-title">{system}</span>
+          <span className="rm-section-meta">{visible.length} shown · {total} total</span>
         </div>
         <ProgressBar done={done} total={total} />
       </div>
-      <div style={{ padding: '0 18px' }}>
+      <div className="rm-items">
         {visible.map(item => <ItemRow key={item.id} item={item} />)}
       </div>
     </div>
@@ -143,7 +228,6 @@ export default function RoadmapBoard() {
   const [filter, setFilter] = useState('action')
   const [search, setSearch] = useState('')
 
-  // Safe fallback if JSON fails to parse or is malformed
   const data = useMemo(() => {
     try {
       if (!roadmapData || !Array.isArray(roadmapData.items)) return null
@@ -169,80 +253,85 @@ export default function RoadmapBoard() {
 
   const totals = useMemo(() => {
     if (!data) return {}
+    const byStatus = {}
+    for (const item of data.items) byStatus[item.status] = (byStatus[item.status] || 0) + 1
     return {
       all:      data.items.length,
-      complete: data.items.filter(i => i.status === 'COMPLETE').length,
+      complete: byStatus.COMPLETE || 0,
       action:   data.items.filter(i => NEEDS_ACTION.has(i.status)).length,
+      blocked:  byStatus.BLOCKED || 0,
+      decision: data.items.filter(i => i.decision_required).length,
     }
   }, [data])
 
   if (!data) return (
-    <div style={{ border: '1px solid #fca5a5', background: '#fef2f2', borderRadius: 10,
-                  padding: '20px 24px', color: '#991b1b', fontSize: 13 }}>
+    <div className="rm-alert rm-alert-err" style={{ borderRadius: 10, padding: '20px 24px', fontSize: 13 }}>
       <strong>Roadmap data unavailable.</strong> Could not parse platformRoadmap.json.
     </div>
   )
 
+  const pct = totals.all ? Math.round((totals.complete / totals.all) * 100) : 0
+
   return (
-    <div style={{ fontFamily: 'var(--god-font, system-ui, sans-serif)',
-                  color: 'var(--god-text, #1f2937)' }}>
+    <div className="rm-board">
+      <style>{BOARD_STYLES}</style>
+
+      {/* Summary strip */}
+      <div className="rm-summary">
+        <div className="rm-summary-card">
+          <div className="rm-summary-n" style={{ color: '#22c55e' }}>{pct}%</div>
+          <div className="rm-summary-l">Complete</div>
+        </div>
+        <div className="rm-summary-card">
+          <div className="rm-summary-n">{totals.action}</div>
+          <div className="rm-summary-l">Need action</div>
+        </div>
+        <div className="rm-summary-card">
+          <div className="rm-summary-n" style={{ color: '#dc2626' }}>{totals.blocked}</div>
+          <div className="rm-summary-l">Blocked</div>
+        </div>
+        <div className="rm-summary-card">
+          <div className="rm-summary-n" style={{ color: '#f59e0b' }}>{totals.decision}</div>
+          <div className="rm-summary-l">Decisions needed</div>
+        </div>
+        <div className="rm-summary-card">
+          <div className="rm-summary-n">{totals.complete}/{totals.all}</div>
+          <div className="rm-summary-l">Items done</div>
+        </div>
+      </div>
 
       {/* Header row */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center',
-                    flexWrap: 'wrap', marginBottom: 16 }}>
-
-        {/* Filter tabs */}
-        <div style={{ display: 'flex', gap: 4 }}>
+      <div className="rm-header">
+        <div className="rm-tabs">
           {FILTER_TABS.map(tab => (
-            <button key={tab.key} onClick={() => setFilter(tab.key)} style={{
-              fontSize: 11, padding: '4px 12px', borderRadius: 100, cursor: 'pointer',
-              border: filter === tab.key ? '1px solid #3b82f6' : '1px solid #e5e7eb',
-              background: filter === tab.key ? '#eff6ff' : '#fff',
-              color: filter === tab.key ? '#1d4ed8' : '#6b7280', fontWeight: 600,
-            }}>
+            <button key={tab.key} className={`rm-tab${filter === tab.key ? ' active' : ''}`}
+                    onClick={() => setFilter(tab.key)}>
               {tab.label}
-              <span style={{ marginLeft: 5, fontWeight: 400, color: '#9ca3af' }}>
-                {totals[tab.key] ?? ''}
-              </span>
+              <span className="rm-tab-count">{totals[tab.key] ?? ''}</span>
             </button>
           ))}
         </div>
-
-        {/* Search */}
-        <input
-          value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search items…"
-          style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6,
-                   border: '1px solid #e5e7eb', flex: 1, minWidth: 160, maxWidth: 280 }}
-        />
-
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
+        <input className="rm-search" value={search} onChange={e => setSearch(e.target.value)}
+               placeholder="Search items…" />
+        <div className="rm-legend">
           {Object.entries(STATUS_META).slice(0,4).map(([k, v]) => (
-            <span key={k} style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: v.bg,
-                             border: `1px solid ${v.border}`, display: 'inline-block' }} />
-              <span style={{ color: '#6b7280' }}>{v.label}</span>
+            <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span className="rm-legend-dot" style={{ background: v.bg, border: `1px solid ${v.border}` }} />
+              <span className="rm-legend-text">{v.label}</span>
             </span>
           ))}
         </div>
       </div>
 
-      {/* Source attribution */}
-      <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 16 }}>
-        Source: platformRoadmap.json · schema_version {data.schema_version} · generated {data.generated_on}
-        {' · '}{data.items.length} items across {data.systems?.length ?? 0} systems
+      <div className="rm-meta-line">
+        platformRoadmap.json · v{data.schema_version} · {data.generated_on}
+        {' · '}{data.items.length} items · {data.systems?.length ?? 0} systems
       </div>
 
-      {/* Grouped systems */}
       {grouped.length === 0 ? (
-        <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-          No items match the current filter.
-        </div>
+        <div className="rm-empty">No items match the current filter.</div>
       ) : (
-        grouped.map(g => (
-          <SystemSection key={g.system} system={g.system} items={g.items} filter={filter} />
-        ))
+        grouped.map(g => <SystemSection key={g.system} system={g.system} items={g.items} filter={filter} />)
       )}
     </div>
   )
