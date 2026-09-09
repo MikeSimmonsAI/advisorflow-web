@@ -807,6 +807,11 @@ export default function OpportunityDetail() {
               This implementation is currently blocked. The implementation owner has the detail.
             </p>
           ) : null}
+          <div style={{ marginTop: 12 }}>
+            <button className="sw-btn sw-primary" onClick={() => nav('/sales/onboarding')}>
+              View all implementations →
+            </button>
+          </div>
         </div>
       ) : postWon && postWon.is_won ? (
         <div className="sw-card" style={{ marginBottom: 14 }}>
@@ -906,8 +911,12 @@ export default function OpportunityDetail() {
             <Card title="LIFECYCLE" sub="One continuous record — never re-created to change stage">
               <Lifecycle opp={opp} />
               {opp.customer_organization_id
-                ? <div className="sw-subtle sw-mt">
-                    Customer organization: {opp.customer_organization_id}
+                ? <div className="sw-subtle sw-mt" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span>Customer organization provisioned.</span>
+                    <button className="sw-btn" style={{ padding: '2px 10px', fontSize: 12 }}
+                            onClick={() => nav('/sales/onboarding')}>
+                      View onboarding →
+                    </button>
                   </div>
                 : <div className="sw-subtle sw-mt">
                     No customer organization yet — provisioning happens when the deal is Won.
