@@ -64,8 +64,11 @@ export default function CurrentSystemsStep({ v, set }) {
       <Group title="Initial Users"
         sub="Who gets an account on day one, and what each of them should be able to do. Send a list rather than typing it here if that is easier.">
         <Field label="Initial user list and roles" span={12}>
+          {/* The placeholder was three invented people at one specific
+              customer's domain. On anyone else's screen that reads as though
+              we already know their staff — wrong, and unsettling. */}
           <Area rows={5} value={v.userList} onChange={x => set('userList', x)}
-            placeholder={'Dana Whitfield — dwhitfield@atlantislp.com — Admin\nRay Okonkwo — ray@atlantislp.com — Admin\nCustomer Care team (4) — agent access'} />
+            placeholder={'Full name — email — access level, one per line\ne.g. Jane Doe — jane@yourcompany.com — Admin\nCustomer care team (4) — agent access'} />
         </Field>
         <Field span={12} label="Or attach a list">
           <Uploads>

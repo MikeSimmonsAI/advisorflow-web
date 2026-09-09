@@ -50,8 +50,12 @@ export default function BrandingAssetsStep({ v, set }) {
               </div>
             ))}
           </div>
+          {/* This claimed the colours were "detected from" one specific
+              customer's domain. Nothing detects them — they are placeholders —
+              and asserting a detection that did not happen, against a hostname
+              belonging to somebody else, is two wrong things in one line. */}
           <p className="lp-hint">
-            Detected from atlantislp.com — confirm or correct these.
+            Common starting points — correct them or add your own below.
           </p>
         </Field>
         <Field label="Corrections or additional colors" span={12} optional>

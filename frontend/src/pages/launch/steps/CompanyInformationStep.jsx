@@ -2,7 +2,7 @@
  * Step 1 — Company Information.
  *
  * The legal and operating facts every later step depends on. Seeded with
- * believable Atlantis values so the prototype reads as a working screen rather
+ * believable placeholder values so the screen reads as a working one rather
  * than an empty template — see MOCK_ANSWERS in launchConfig.
  *
  * The two collapsed areas at the bottom are the overflow. A twenty-field form
