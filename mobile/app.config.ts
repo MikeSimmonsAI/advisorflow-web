@@ -19,7 +19,22 @@ import type { ExpoConfig } from 'expo/config';
  * the link handling in `src/deeplinks.ts`.
  */
 
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+/**
+ * WHY THE DEFAULT IS PRODUCTION AND NOT localhost.
+ *
+ * It was localhost, on the reasoning that a build should not silently reach
+ * live customer data. That reasoning is right for a signed store build and
+ * wrong for a phone: `localhost` on a phone IS the phone, so the default
+ * guaranteed a preview that could not sign in at all — the first thing a person
+ * would try, failing for a reason invisible from the device.
+ *
+ * This value is not a guess. It is the same constant the web client treats as
+ * canonical (`frontend/src/api/client.js`: `API_BASE`), so the phone and the
+ * browser talk to exactly one backend. `EXPO_PUBLIC_API_URL` still overrides it
+ * for local development against a LAN address.
+ */
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL
+  ?? 'https://advisorflow-backend.onrender.com';
 
 const config: ExpoConfig = {
   name: 'EvoSys Pro',

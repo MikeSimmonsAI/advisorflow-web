@@ -1,17 +1,22 @@
 {
-  "//": "EXPO_PUBLIC_API_URL is intentionally NOT filled in for preview or production. The backend host is a deployment fact this branch does not know, and a guessed hostname baked into a signed build is worse than one that has to be supplied: it would produce an app that appears to work and quietly talks to nothing, or to the wrong environment. Set it per profile (or with `eas build --env`) once the host is confirmed.",
+  "//": "The API base is the same host frontend/src/api/client.js treats as canonical, so the phone and the browser talk to one backend. `preview` is the profile Mike installs on his Android phone: an internal-distribution APK, which unlike Expo Go CAN receive push notifications.",
   "cli": { "version": ">= 5.0.0", "appVersionSource": "local" },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "env": { "EXPO_PUBLIC_API_URL": "http://localhost:8000" }
+      "android": { "buildType": "apk" },
+      "env": { "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com" }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "//": "buildType apk, not app-bundle: an .aab cannot be sideloaded. A preview Mike cannot install by tapping a link is not a preview.",
+      "android": { "buildType": "apk" },
+      "env": { "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com" }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": { "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com" }
     }
   },
   "submit": { "production": {} }

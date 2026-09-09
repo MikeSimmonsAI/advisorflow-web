@@ -46,3 +46,11 @@ yarn-error.*
 
 # Scratch logs from install / export runs.
 _*.log
+
+# One-off verification scripts, kept on disk and out of the tree — same repo-root
+# scratch convention as _mobile_phase0.py. The durable version of the push-import
+# check lives in src/__tests__/no-static-push-import.test.ts, where it runs on
+# every suite instead of only when somebody remembers.
+mobile/_*.py
+_*.py
+_*.db

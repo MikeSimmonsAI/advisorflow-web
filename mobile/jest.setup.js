@@ -46,11 +46,22 @@ jest.mock('expo-notifications', () => ({
 
 jest.mock('expo-device', () => ({ isDevice: false, deviceName: 'Test Device' }));
 
+// `executionEnvironment` defaults to 'bare' — a real development build — so the
+// suite exercises the SUPPORTED push path unless a test deliberately switches
+// it to 'storeClient'. Defaulting to Expo Go would make every other test run
+// against the no-op branch and quietly stop covering push at all.
 jest.mock('expo-constants', () => ({
   __esModule: true,
+  ExecutionEnvironment: {
+    Bare: 'bare',
+    Standalone: 'standalone',
+    StoreClient: 'storeClient',
+  },
   default: {
     expoConfig: { version: '1.0.0-test', extra: { apiBaseUrl: 'https://api.test' } },
     deviceName: 'Test Device',
+    executionEnvironment: 'bare',
+    appOwnership: null,
   },
 }));
 

@@ -22,6 +22,7 @@ import { useExperience } from '../experience/ExperienceContext';
 import { biometrics } from '../auth/biometrics';
 import { secureStore } from '../auth/secureStore';
 import { devices } from '../api/endpoints';
+import { pushSupport } from '../push/runtime';
 import { outbox, type QueuedItem } from '../offline/queue';
 import { isFullyLogged } from '../comms/communications';
 import {
@@ -39,6 +40,8 @@ export function MoreScreen() {
   const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
   const [uploads, setUploads] = useState<{ durable: boolean; reason: string | null } | null>(null);
   const [queued, setQueued] = useState<QueuedItem[]>([]);
+  // Synchronous and cached — no native call, so it is safe to read in Expo Go.
+  const push = pushSupport();
 
   useEffect(() => {
     void (async () => {
@@ -124,9 +127,13 @@ export function MoreScreen() {
       <Card>
         <KeyValue
           label="Push notifications"
-          value={pushEnabled === null ? 'Unknown'
-            : pushEnabled ? 'On for this account' : 'Not switched on yet'}
+          value={!push.supported ? 'Not available here'
+            : pushEnabled === null ? 'Unknown'
+              : pushEnabled ? 'On for this account' : 'Not switched on yet'}
         />
+        {/* The runtime reason comes first: "not available here" without the
+            because is the kind of line that gets reported as a bug. */}
+        {push.reason ? <Text style={styles.note}>{push.reason}</Text> : null}
         <KeyValue
           label="Photo attachments"
           value={uploads === null ? 'Unknown'
