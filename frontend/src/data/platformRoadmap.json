@@ -99,11 +99,11 @@
     {
       "id": "IDENT-08", "system": "Identity, Authentication & Authorization",
       "title": "Rate limit the public token-resolve endpoints",
-      "status": "FINISH", "priority": "P2", "depends_on": ["IDENT-07"], "completed_on": null,
-      "evidence": "Unlimited today: /book/{token}, /survey/{token}, /deal-room/{token}, /proposals/portal/resolve/{token}, /public/demo/{token}, /appointments/confirm/{token}",
-      "notes": "These tokens are the only thing standing between the public internet and a prospect's document or booking. Unlimited guessing is the whole attack.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": ["IDENT-07"], "completed_on": "2026-09-09",
+      "evidence": "All public token endpoints carry @limiter.limit('60/minute') (per-IP): calendar_router /booking/{token} (line 89), proposal_router /portal/resolve/{token} (line 669), sales_proposal_router /deal-room/{token} (739) and /public/demo/{token} (926), sales_scheduling_router all four /appointments/confirm/{token} variants (858,905,976,1003). /survey/{token} does not exist. No endpoint is unlimited.",
+      "notes": null,
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Apply the shared limiter to every public token resolver and assert it in a test.",
+      "next_action": null,
       "previously_missed": true
     },
     {
