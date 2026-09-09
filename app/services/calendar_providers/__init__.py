@@ -166,9 +166,25 @@ def resolve_provider_key(db, user, prefer: str = None) -> str:
         return configured
 
     live = _live_connections(db, user)
-    for key in PREFERENCE:
-        if key in live:
-            return key
+    live_external = [k for k in PREFERENCE if k in live]
+
+    if len(live_external) > 1:
+        # SCHED-05 fail-closed: multiple external calendars connected but none
+        # explicitly chosen. Picking by PREFERENCE order silently writes to a
+        # calendar the advisor did not choose — which is how a booking ended up
+        # in Outlook when the customer uses Google. Return ICS so the caller
+        # surfaces calendar_unavailable rather than the wrong calendar. The fix
+        # is for the advisor (or their org admin) to set calendar_provider.
+        log.warning(
+            "user %s has %d external calendar connections but no calendar_provider "
+            "set — failing closed to ICS to avoid a silent wrong-calendar write",
+            getattr(user, "id", "?"),
+            len(live_external),
+        )
+        return PROVIDER_ICS
+
+    if len(live_external) == 1:
+        return live_external[0]
 
     # No connection row, but a token exists — this is a user connected before
     # the connections table existed. Treat the token as the source of truth
