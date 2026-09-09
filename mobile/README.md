@@ -35,12 +35,23 @@ npm test             # jest
 
 ### Two install flags this machine needs
 
-* `--legacy-peer-deps` — the Expo 57 template resolves `react-dom@19.2.8`
-  against `react@19.2.3`, which npm refuses. A pre-existing conflict in the
-  template, not something this app introduced.
+* `--legacy-peer-deps` — the Expo 57 template resolves `react-dom` against an
+  older `react` than its peer range asks for, and `react-test-renderer` (pulled
+  in by the testing library) asks for a newer one still. npm's strict resolver
+  refuses the tree. A pre-existing conflict in the template, not something this
+  app introduced. **`mobile/.npmrc` now sets `legacy-peer-deps=true`, so the
+  flag is no longer needed** — it is kept in the line above only because a
+  machine that already has a global npm config may not read a project `.npmrc`
+  the way you expect, and passing it twice costs nothing.
 * `--include=dev` — this machine's npm config sets `omit=dev`, so a plain
   `npm install` silently skips TypeScript, Jest and the testing library and then
   reports "up to date".
+
+The `.npmrc` is not a convenience. **The lockfile was resolved under legacy peer
+rules, so every install of it has to be**, and the EAS builder runs a fixed
+`npm ci --include=dev` with no flags of its own. Without that file the build
+dies in the Install dependencies phase in nine seconds, having compiled nothing.
+Delete the file only when the template's `react`/`react-dom` versions agree.
 
 ---
 
