@@ -8,7 +8,7 @@
  * silently lies about how many there are.
  */
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Panel, Empty, StatusBadge, Bar, when, errText } from './god/GodOpsShared'
 import './god/GodOps.css'
@@ -19,7 +19,12 @@ export default function GodImplementations() {
   const [statuses, setStatuses] = useState([])
   const [brands, setBrands] = useState([])
   const [err, setErr] = useState('')
-  const [f, setF] = useState({ status: '', brand_sales_org_id: '', flag: '' })
+  const [searchParams] = useSearchParams()
+  const [f, setF] = useState(() => ({
+    status: searchParams.get('status') || '',
+    brand_sales_org_id: searchParams.get('brand_sales_org_id') || '',
+    flag: searchParams.get('flag') || '',
+  }))
 
   useEffect(() => {
     api.get('/god/ops/brands').then(r => setBrands(r.brands || [])).catch(() => {})

@@ -593,6 +593,16 @@ def opportunity_list(
                 Opportunity.next_action_due_at < now,
             ),
         )
+    elif filter_by == "awaiting_provisioning":
+        # Won deals that have no Implementation record yet — they are counted
+        # by summary_stats as won_awaiting_provisioning.
+        impl_ids = db.query(Implementation.opportunity_id).filter(
+            Implementation.opportunity_id.isnot(None)
+        ).scalar_subquery()
+        q = q.filter(
+            Opportunity.status == "won",
+            Opportunity.id.notin_(impl_ids),
+        )
 
     rows = q.order_by(Opportunity.updated_at.desc().nullslast()).all()
 

@@ -9,6 +9,7 @@ const FILTERS = [
   { value: 'closing', label: 'Closing' },
   { value: 'stalled_or_overdue', label: 'Stalled / Overdue' },
   { value: 'won', label: 'Won' },
+  { value: 'awaiting_provisioning', label: 'Awaiting Provisioning' },
 ]
 
 export default function GodOpportunities() {

@@ -21,6 +21,7 @@ from app.models.sales_models import (
     STAGE_CLOSING,
 )
 from app.models.scheduling_models import SalesAppointment, APPT_SCHEDULED
+from app.models.implementation_models import Implementation
 from app.services.auth_service import create_access_token, hash_password
 from app.services.god_operations import STALLED_DAYS
 
@@ -308,4 +309,47 @@ class TestGodAppointmentList:
 
     def test_non_god_blocked(self, client, db_session, regular):
         r = client.get("/god/ops/appointments", headers=_h(db_session, regular))
+        assert r.status_code in (401, 403)
+
+
+# ── awaiting_provisioning filter ──────────────────────────────────────────────
+
+class TestAwaitingProvisioning:
+    """Won opps with no Implementation record appear; those with one do not."""
+
+    def test_won_no_impl_appears(self, client, db_session, god, bso):
+        opp = _opp(db_session, bso, status="won")
+        r = client.get("/god/ops/opportunities?filter_by=awaiting_provisioning",
+                       headers=_h(db_session, god))
+        assert r.status_code == 200
+        ids = [row["id"] for row in r.json()]
+        assert opp.id in ids
+
+    def test_won_with_impl_excluded(self, client, db_session, god, bso):
+        opp = _opp(db_session, bso, status="won")
+        # Implementation requires an organization — create a minimal one
+        n = next(_SEQ)
+        org = Organization(name="Impl Org %d" % n, slug="impl-org-%d" % n)
+        db_session.add(org); db_session.commit()
+        impl = Implementation(opportunity_id=opp.id, organization_id=org.id,
+                              platform_id=bso.platform_id,
+                              brand_sales_org_id=bso.id)
+        db_session.add(impl); db_session.commit()
+        r = client.get("/god/ops/opportunities?filter_by=awaiting_provisioning",
+                       headers=_h(db_session, god))
+        assert r.status_code == 200
+        ids = [row["id"] for row in r.json()]
+        assert opp.id not in ids
+
+    def test_open_opp_excluded(self, client, db_session, god, bso):
+        opp = _opp(db_session, bso, status="open")
+        r = client.get("/god/ops/opportunities?filter_by=awaiting_provisioning",
+                       headers=_h(db_session, god))
+        assert r.status_code == 200
+        ids = [row["id"] for row in r.json()]
+        assert opp.id not in ids
+
+    def test_non_god_blocked(self, client, db_session, regular):
+        r = client.get("/god/ops/opportunities?filter_by=awaiting_provisioning",
+                       headers=_h(db_session, regular))
         assert r.status_code in (401, 403)
