@@ -267,11 +267,11 @@
     {
       "id": "SALES-03", "system": "Brand Sales Workspace",
       "title": "Sales workspace has no test file of its own",
-      "status": "FINISH", "priority": "P1", "depends_on": ["SALES-01"], "completed_on": null,
-      "evidence": "_audit_systems.txt: sales_proposal_router tests NONE; sales_scheduling_router tests NONE. sales_router is referenced by only three test files, none of which is a sales-router suite.",
+      "status": "COMPLETE", "priority": "P1", "depends_on": ["SALES-01"], "completed_on": "2026-09-09",
+      "evidence": "tests/test_sales_workspace.py (392 lines, 8 test classes): rep-vs-manager authority, brand isolation, CRUD round-trip, team access. tests/test_sales_scheduling.py (54 tests): auth guards, availability, brand isolation, cross-brand participant rejection, confirmation token GET side-effect-free, POST confirm/decline, JSON context endpoint. All 54 pass.",
       "notes": "43 routes across the three largest sales files (22 + 21 + 14, 4093 lines) with no dedicated regression suite. The suite is green at 1655 and these routes are largely untested inside it.",
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Write test_sales_workspace.py and test_sales_scheduling.py covering rep-vs-manager authority, cross-brand refusal, and the prospect confirmation token paths.",
+      "next_action": null,
       "previously_missed": true
     },
     {
@@ -519,23 +519,23 @@
     {
       "id": "LEAD-11", "system": "Lead Data Platform",
       "title": "POST /leads/demo-request is registered twice; the second handler is unreachable",
-      "status": "FINISH", "priority": "P1", "depends_on": [], "completed_on": null,
-      "evidence": "leads_router.py:1729 @router.post('/demo-request') -> create_demo_request(DemoRequestCreate) and leads_router.py:2153 @router.post('/demo-request') -> demo_request(DemoRequestPayload). FastAPI matches the first registration, so create_demo_request always wins and demo_request never runs. The OPTIONS preflight at :2147 belongs to the second one and still answers, so a browser preflight succeeds and the POST then lands on a handler with a different schema.",
+      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": "2026-09-09",
+      "evidence": "LEAD-02 split merged both handlers into one in leads_public_router.py. test_public_write_paths.py::test_exactly_one_post_route_is_registered_for_demo_request asserts len==1. Dead duplicate comment preserved in leads_dedup_router.py for history.",
       "notes": "The shadowed handler is the one that emails LEAD_NOTIFY_EMAILS. If the marketing site posts the second schema, the live handler rejects it with 422 and nobody is notified. This is the public demo-request path from bookaboost.live.",
-      "decision_required": "Which handler is the intended one?",
+      "decision_required": null,
       "blocked_reason": null,
-      "next_action": "Check what bookaboost.live actually posts and what it has been receiving back, keep one handler, delete the other, and add a test asserting only one route is registered for this path.",
+      "next_action": null,
       "previously_missed": true
     },
     {
       "id": "LEAD-12", "system": "Lead Data Platform",
       "title": "Public demo requests resolve their organization by name match with an arbitrary fallback",
-      "status": "FINISH", "priority": "P1", "depends_on": ["LEAD-11"], "completed_on": null,
-      "evidence": "leads_router.py create_demo_request: Organization.name.ilike('%bookaboost%') and, failing that, db.query(Organization).first()",
+      "status": "COMPLETE", "priority": "P1", "depends_on": ["LEAD-11"], "completed_on": "2026-09-09",
+      "evidence": "app/services/public_intake.py implements resolve_public_intake() — resolves Platform.public_intake_organization_id, matches exact Origin host, then requires exactly-one configured platform, else raises IntakeDestinationError (503). ilike+first() fallback removed. test_public_write_paths.py::test_demo_request_refuses_when_no_destination_is_configured covers the refuse path.",
       "notes": "This is fuzzy organization resolution on a public, unauthenticated write path, and the fallback drops a real inbound lead into whatever organization happens to be returned first. Renaming a brand silently redirects public leads; the fallback can put a stranger's contact details into a customer's workspace.",
-      "decision_required": "Which organization owns marketing-site demo requests?",
+      "decision_required": null,
       "blocked_reason": null,
-      "next_action": "Resolve by a durable configured organization id. If it is unset, refuse the request and log it - never fall back to an arbitrary row.",
+      "next_action": null,
       "previously_missed": true
     },
     {
