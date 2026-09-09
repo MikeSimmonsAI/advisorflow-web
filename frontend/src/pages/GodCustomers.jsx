@@ -24,7 +24,7 @@
  * Customer 360 carries the rest.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { enterCustomer } from './god/enterCustomer'
 import { Panel, Empty, money, when, errText } from './god/GodOpsShared'
@@ -56,12 +56,13 @@ function Money({ c }) {
 
 export default function GodCustomers() {
   const nav = useNavigate()
+  const [searchParams] = useSearchParams()
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState('')
-  const [platform, setPlatform] = useState('')
-  const [showArchived, setShowArchived] = useState(false)
+  const [status, setStatus] = useState(searchParams.get('status') || '')
+  const [platform, setPlatform] = useState(searchParams.get('platform_id') || '')
+  const [showArchived, setShowArchived] = useState(searchParams.get('include_archived') === 'true')
   const [entering, setEntering] = useState(null)
 
   const load = useCallback(() => {
