@@ -16,6 +16,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
 
 const USE_CASES = ['file_check', 'appointment_reminder', 'reengagement']
+const USE_CASE_LABELS = {
+  file_check:           'File Check Call',
+  appointment_reminder: 'Appointment Reminder',
+  reengagement:         'Re-engagement Call',
+}
 const PROVIDERS = ['retell']
 
 function ReadinessChip({ ready, why }) {
@@ -77,7 +82,7 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
       const r = await onTestCall(agent.organization_id, testLeadId.trim(), agent.use_case)
       setTestResult({ ok: true, data: r })
     } catch (e) {
-      setTestResult({ ok: false, msg: e?.response?.data?.detail || e.message })
+      setTestResult({ ok: false, msg: e.detail || e.message })
     } finally { setTestCalling(false); setTestConfirm(false) }
   }
 
@@ -106,7 +111,7 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
             {agent.organization_name || agent.organization_id}
           </div>
           <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-            {agent.provider} · {agent.use_case}
+            {agent.provider} · {USE_CASE_LABELS[agent.use_case] || agent.use_case}
             {agent.label && <span> · {agent.label}</span>}
           </div>
           <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#9ca3af', marginTop: 4 }}>
@@ -243,9 +248,9 @@ function CreateAgentForm({ orgs, onCreated }) {
         organization_id: orgId, agent_id: agentId, from_number: fromNumber,
         provider, use_case: useCase, label: label || null,
       })
-      onCreated(r.data)
+      onCreated(r)
     } catch (e) {
-      setErr(e?.response?.data?.detail || e.message)
+      setErr(e.detail || e.message)
     } finally { setSaving(false) }
   }
 
@@ -284,7 +289,7 @@ function CreateAgentForm({ orgs, onCreated }) {
         </select>
         <span style={lbl}>Use case</span>
         <select value={useCase} onChange={e => setUseCase(e.target.value)} style={sel}>
-          {USE_CASES.map(u => <option key={u}>{u}</option>)}
+          {USE_CASES.map(u => <option key={u} value={u}>{USE_CASE_LABELS[u] || u}</option>)}
         </select>
       </div>
       <div style={fieldRow}>
@@ -317,11 +322,11 @@ export default function GodVoiceConfig() {
         api.get('/god/voice/agents'),
         api.get('/god/orgs', { params: { limit: 200 } }),
       ])
-      setAgents(aRes.data?.agents || [])
-      setOrgs(oRes.data?.orgs || [])
+      setAgents(aRes?.agents || [])
+      setOrgs(oRes?.orgs || [])
       setRefreshed(new Date())
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Failed to load voice config')
+      setError(e.detail || e.message || 'Failed to load voice config')
     } finally { setLoading(false) }
   }, [])
 
@@ -341,7 +346,7 @@ export default function GodVoiceConfig() {
     const r = await api.post('/god/voice/test-call', {
       organization_id: orgId, lead_id: leadId, use_case: useCase,
     })
-    return r.data
+    return r
   }
 
   const handleCreated = () => { setShowCreate(false); load() }
