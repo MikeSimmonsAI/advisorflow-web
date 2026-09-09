@@ -461,12 +461,12 @@
     {
       "id": "LEAD-05", "system": "Lead Data Platform",
       "title": "POST /crm/inbound/{org_id} accepts leads with no authentication",
-      "status": "FINISH", "priority": "P1", "depends_on": [], "completed_on": null,
-      "evidence": "app/routers/crm_router.py inbound_leads - its own docstring: 'No auth required - org_id serves as the token (it's a UUID, opaque to external parties)'",
+      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": "2026-09-09",
+      "evidence": "crm_router.py inbound_leads: Bearer IntegrationCredential (kind=crm_inbound, scope=tenant, org-matched). Legacy mode accepted only when crm_inbound_secure_required is unset; every legacy call gets Deprecation+Warning headers. Bad credentials never downgraded. crm_inbound_router.py: issue/rotate/revoke (god-only). test_public_write_paths.py covers secure auth, cross-tenant rejection, wrong key, bad-credential-not-downgraded, legacy deprecation headers.",
       "notes": "Anyone holding an org UUID can inject leads into that workspace. Not a P0 (no data exposure, no privilege escalation, nothing destructive) but it is a direct route to contaminating production with prospects nobody sent. The fix pattern already exists on the model: Organization.social_webhook_token.",
-      "decision_required": "Is any customer CRM already posting to this URL? Turning it off without a window breaks a live integration.",
+      "decision_required": null,
       "blocked_reason": null,
-      "next_action": "Issue a per-org inbound token, accept both the token and the bare UUID for a stated deprecation window, log which callers still use the old form, then close it.",
+      "next_action": null,
       "previously_missed": true
     },
     {
