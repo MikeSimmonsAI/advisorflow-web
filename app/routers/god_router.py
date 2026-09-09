@@ -1863,3 +1863,95 @@ def get_revenue_history(
         "unavailable": unavailable,
         "platform_filter": platform_id,
     }
+
+
+# ── GOD-10: Job-run ledger ───────────────────────────────────────────────────
+
+@router.get("/job-runs")
+def list_job_runs(
+    job_name: Optional[str] = Query(None, description="Filter by job name constant"),
+    status: Optional[str] = Query(None, description="Filter by status: running|success|error"),
+    limit: int = Query(100, ge=1, le=500),
+    _god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+) -> dict:
+    """List recent background-job run records.
+
+    Returns at most `limit` rows (default 100, max 500), newest first.
+    Filtered by job_name and/or status when supplied.
+
+    Response shape consumed by any God diagnostics screen:
+      runs   — list of job run dicts
+      total  — count matching the filter (before limit)
+    """
+    from app.models.job_models import JobRun
+
+    q = db.query(JobRun)
+    if job_name:
+        q = q.filter(JobRun.job_name == job_name)
+    if status:
+        q = q.filter(JobRun.status == status)
+
+    total = q.count()
+    rows = q.order_by(JobRun.started_at.desc()).limit(limit).all()
+
+    return {
+        "runs": [
+            {
+                "id": r.id,
+                "job_name": r.job_name,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                "status": r.status,
+                "error_summary": r.error_summary,
+                "duration_ms": r.duration_ms,
+                "metrics": r.metrics,
+            }
+            for r in rows
+        ],
+        "total": total,
+    }
+
+
+@router.get("/job-runs/latest")
+def get_job_runs_latest(
+    _god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return the most-recent run for each known background job.
+
+    Response shape:
+      jobs        — {job_name: {status, started_at, finished_at, duration_ms,
+                                error_summary, metrics}} or null when never run
+      all_healthy — True iff every known job's latest run was 'success'
+    """
+    from app.models.job_models import JobRun, JobName
+
+    known_jobs = [JobName.CADENCE_LOOP, JobName.AI_CONVERSATION, JobName.REVIEW_REQUEST]
+    jobs: dict = {}
+
+    for name in known_jobs:
+        row = (
+            db.query(JobRun)
+            .filter(JobRun.job_name == name)
+            .order_by(JobRun.started_at.desc())
+            .first()
+        )
+        if row is None:
+            jobs[name] = None
+        else:
+            jobs[name] = {
+                "status": row.status,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                "duration_ms": row.duration_ms,
+                "error_summary": row.error_summary,
+                "metrics": row.metrics,
+            }
+
+    all_healthy = all(
+        v is not None and v["status"] == "success"
+        for v in jobs.values()
+    )
+
+    return {"jobs": jobs, "all_healthy": all_healthy}
