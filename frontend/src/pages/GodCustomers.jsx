@@ -227,6 +227,13 @@ export default function GodCustomers() {
                                                  o.organization_id + '/360')}>
                         360
                       </button>
+                      {o.implementation && (
+                        <button className="go-btn sm ghost"
+                                title={'Open implementation for ' + o.name}
+                                onClick={() => nav('/god/implementations/' + o.implementation.id)}>
+                          Implementation
+                        </button>
+                      )}
                       <button className="go-btn sm"
                               title={'Open ' + o.name + "'s workspace as them"}
                               disabled={entering === o.organization_id}

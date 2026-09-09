@@ -1191,3 +1191,40 @@ def qualification_diagnostic_report(user_id: Optional[str] = Query(None),
                         "lookup": "user_id" if user_id else "email"},
                note="God ran a read-only qualification diagnostic. Nothing was sent.")
     return report
+
+
+# ── drilldown lists ──────────────────────────────────────────────────────────
+
+@router.get("/opportunities")
+def god_opportunity_list(
+    brand_id: Optional[str] = Query(None),
+    filter_by: Optional[str] = Query(None,
+        description="open | won | closing | stalled_or_overdue"),
+    salesperson_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_god),
+):
+    """All opportunities across every brand, with optional filters."""
+    return ops.opportunity_list(db, brand_id=brand_id,
+                                filter_by=filter_by,
+                                salesperson_id=salesperson_id)
+
+
+@router.get("/proposals")
+def god_proposal_list(
+    brand_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_god),
+):
+    """Outstanding proposals awaiting buyer action."""
+    return ops.proposal_list(db, brand_id=brand_id)
+
+
+@router.get("/appointments")
+def god_appointment_list(
+    brand_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_god),
+):
+    """Upcoming scheduled appointments."""
+    return ops.appointment_list(db, brand_id=brand_id)

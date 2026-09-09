@@ -59,22 +59,33 @@ export default function GodSalesOps() {
 
       <div className="go-kpis">
         <Kpi label="Brands selling" value={data.brands_selling} />
-        <Kpi label="Open opportunities" value={t.open_opportunities} />
-        <Kpi label="Pipeline value" value={money(t.pipeline_value)} />
-        <Kpi label="Closing" value={t.closing_opportunities} />
-        <Kpi label="Meetings scheduled" value={t.meetings_scheduled} />
+        <Kpi label="Open opportunities" value={t.open_opportunities}
+             onClick={() => nav('/god/opportunities?filter=open')} />
+        <Kpi label="Pipeline value" value={money(t.pipeline_value)}
+             onClick={() => nav('/god/opportunities?filter=open')} />
+        <Kpi label="Closing" value={t.closing_opportunities}
+             onClick={() => nav('/god/opportunities?filter=closing')} />
+        <Kpi label="Meetings scheduled" value={t.meetings_scheduled}
+             onClick={() => nav('/god/meetings')} />
         <Kpi label="Proposals outstanding" value={t.proposals_outstanding}
-             sub={(t.proposals_with_buyer_activity || 0) + ' with buyer activity'} />
-        <Kpi label="Won deals" value={t.won_deals} sub={money(t.won_value) + ' won'} />
+             sub={(t.proposals_with_buyer_activity || 0) + ' with buyer activity'}
+             onClick={() => nav('/god/proposals')} />
+        <Kpi label="Won deals" value={t.won_deals} sub={money(t.won_value) + ' won'}
+             onClick={() => nav('/god/opportunities?filter=won')} />
         <Kpi label="Awaiting provisioning" value={t.won_awaiting_provisioning}
-             tone={t.won_awaiting_provisioning > 0 ? 'alert' : undefined} />
-        <Kpi label="Customers onboarding" value={t.customers_onboarding} />
-        <Kpi label="Customers live" value={t.customers_live} tone="good" />
+             tone={t.won_awaiting_provisioning > 0 ? 'alert' : undefined}
+             onClick={() => nav('/god/implementations')} />
+        <Kpi label="Customers onboarding" value={t.customers_onboarding}
+             onClick={() => nav('/god/customers')} />
+        <Kpi label="Customers live" value={t.customers_live} tone="good"
+             onClick={() => nav('/god/customers')} />
         <Kpi label="Blocked" value={t.implementations_blocked}
-             tone={t.implementations_blocked > 0 ? 'alert' : undefined} />
+             tone={t.implementations_blocked > 0 ? 'alert' : undefined}
+             onClick={() => nav('/god/implementations')} />
         <Kpi label="Stalled / overdue" value={(t.stalled_opportunities || 0) + ' / ' + (t.overdue_next_actions || 0)}
              sub="opportunities / next actions"
-             tone={(t.stalled_opportunities || t.overdue_next_actions) ? 'alert' : undefined} />
+             tone={(t.stalled_opportunities || t.overdue_next_actions) ? 'alert' : undefined}
+             onClick={() => nav('/god/opportunities?filter=stalled_or_overdue')} />
       </div>
 
       {t.customer_organizations_without_implementation > 0 ? (

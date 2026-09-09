@@ -23,18 +23,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.models import (
     Organization, Platform, User, Proposal, Lead,
     PROP_SENT, PROP_VIEWED, PROP_ACCEPTED, PROP_CHANGE_REQUESTED,
-    PROP_SUPERSEDED, PROP_DECLINED, PROP_EXPIRED,
+    PROP_SUPERSEDED, PROP_DECLINED, PROP_EXPIRED, PROPOSAL_STATUS_LABELS,
 )
 from app.models.sales_models import (
     Opportunity, BrandSalesOrg, BrandPackage, Membership,
     SCOPE_BRAND_SALES_ORG, ROLE_SALES_MANAGER, ROLE_SALES_REP,
-    STAGE_CLOSING, STAGE_WON, STAGE_LOST, STAGE_ONBOARDING, STAGE_LIVE,
+    STAGE_CLOSING, STAGE_WON, STAGE_LOST, STAGE_ONBOARDING, STAGE_LIVE, STAGE_LABELS,
 )
 from app.models.scheduling_models import SalesAppointment, APPT_SCHEDULED
 from app.models.implementation_models import (
@@ -527,3 +527,147 @@ def customer_organizations(db: Session, *, platform_id: Optional[str] = None,
             "created_at": o.created_at,
         })
     return out
+
+
+# ── god-scoped drilldown lists ───────────────────────────────────────────────
+
+def _opp_row(opp: Opportunity, bso: BrandSalesOrg, owner_name: str, now: datetime) -> Dict:
+    stale_before = now - timedelta(days=STALLED_DAYS)
+    ts = opp.updated_at or opp.created_at or now
+    is_stalled = opp.status == "open" and ts < stale_before
+    is_overdue = (
+        opp.status == "open"
+        and opp.next_action_due_at is not None
+        and opp.next_action_due_at < now
+    )
+    return {
+        "id": opp.id,
+        "company_name": opp.company_name,
+        "contact_name": opp.contact_name,
+        "stage": opp.stage,
+        "stage_label": STAGE_LABELS.get(opp.stage, opp.stage),
+        "status": opp.status,
+        "deal_value": _deal_value(opp),
+        "next_action": opp.next_action,
+        "next_action_due_at": opp.next_action_due_at,
+        "updated_at": opp.updated_at,
+        "won_at": opp.won_at,
+        "is_stalled": is_stalled,
+        "is_overdue": is_overdue,
+        "owner_name": owner_name,
+        "brand_id": bso.id,
+        "brand_name": bso.name,
+    }
+
+
+def opportunity_list(
+    db: Session,
+    brand_id: Optional[int] = None,
+    filter_by: Optional[str] = None,
+    salesperson_id: Optional[int] = None,
+) -> List[Dict]:
+    """God-scoped opportunity list with optional filters."""
+    from app.models.models import User as UserModel
+    now = datetime.utcnow()
+    stale_before = now - timedelta(days=STALLED_DAYS)
+
+    q = db.query(Opportunity, BrandSalesOrg).join(
+        BrandSalesOrg, BrandSalesOrg.id == Opportunity.brand_sales_org_id
+    )
+    if brand_id is not None:
+        q = q.filter(Opportunity.brand_sales_org_id == brand_id)
+    if salesperson_id is not None:
+        q = q.filter(Opportunity.owner_user_id == salesperson_id)
+
+    if filter_by == "open":
+        q = q.filter(Opportunity.status == "open")
+    elif filter_by == "won":
+        q = q.filter(Opportunity.status == "won")
+    elif filter_by == "closing":
+        q = q.filter(Opportunity.status == "open", Opportunity.stage == STAGE_CLOSING)
+    elif filter_by == "stalled_or_overdue":
+        q = q.filter(
+            Opportunity.status == "open",
+            or_(
+                func.coalesce(Opportunity.updated_at, Opportunity.created_at) < stale_before,
+                Opportunity.next_action_due_at < now,
+            ),
+        )
+
+    rows = q.order_by(Opportunity.updated_at.desc().nullslast()).all()
+
+    # batch-load owner names
+    owner_ids = list({opp.owner_user_id for opp, _ in rows if opp.owner_user_id})
+    owners: Dict[int, str] = {}
+    if owner_ids:
+        for u in db.query(UserModel).filter(UserModel.id.in_(owner_ids)).all():
+            owners[u.id] = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.email
+
+    return [_opp_row(opp, bso, owners.get(opp.owner_user_id, "—"), now) for opp, bso in rows]
+
+
+def _prop_row(prop: Proposal, bso: BrandSalesOrg) -> Dict:
+    return {
+        "id": prop.id,
+        "proposal_number": prop.proposal_number,
+        "title": prop.title,
+        "client_company": prop.client_company,
+        "sales_status": prop.sales_status,
+        "sales_status_label": PROPOSAL_STATUS_LABELS.get(prop.sales_status, prop.sales_status),
+        "final_amount": _f(prop.final_amount),
+        "sent_at": prop.sent_at,
+        "first_viewed_at": prop.first_viewed_at,
+        "last_viewed_at": prop.last_viewed_at,
+        "brand_id": bso.id,
+        "brand_name": bso.name,
+        "opportunity_id": prop.opportunity_id,
+    }
+
+
+def proposal_list(db: Session, brand_id: Optional[int] = None) -> List[Dict]:
+    """Outstanding proposals awaiting buyer action."""
+    q = db.query(Proposal, BrandSalesOrg).join(
+        BrandSalesOrg, BrandSalesOrg.id == Proposal.brand_sales_org_id
+    ).filter(
+        Proposal.sales_status.in_(OUTSTANDING_PROPOSAL_STATUSES),
+        Proposal.deleted_at.is_(None),
+    )
+    if brand_id is not None:
+        q = q.filter(Proposal.brand_sales_org_id == brand_id)
+
+    rows = q.order_by(Proposal.sent_at.desc().nullslast()).all()
+    return [_prop_row(p, bso) for p, bso in rows]
+
+
+def _appt_row(appt: SalesAppointment, bso: BrandSalesOrg) -> Dict:
+    return {
+        "id": appt.id,
+        "title": appt.title,
+        "prospect_name": appt.prospect_name,
+        "prospect_company": appt.prospect_company,
+        "prospect_email": appt.prospect_email,
+        "starts_at": appt.starts_at,
+        "ends_at": appt.ends_at,
+        "timezone": appt.timezone,
+        "meeting_url": appt.meeting_url,
+        "status": appt.status,
+        "brand_id": bso.id,
+        "brand_name": bso.name,
+        "opportunity_id": appt.opportunity_id,
+    }
+
+
+def appointment_list(db: Session, brand_id: Optional[int] = None) -> List[Dict]:
+    """Scheduled (upcoming) appointments across all brands."""
+    now = datetime.utcnow()
+    q = db.query(SalesAppointment, BrandSalesOrg).join(
+        BrandSalesOrg, BrandSalesOrg.id == SalesAppointment.brand_sales_org_id
+    ).filter(
+        SalesAppointment.status == APPT_SCHEDULED,
+        SalesAppointment.starts_at >= now,
+    )
+    if brand_id is not None:
+        q = q.filter(SalesAppointment.brand_sales_org_id == brand_id)
+
+    rows = q.order_by(SalesAppointment.starts_at.asc()).all()
+    return [_appt_row(a, bso) for a, bso in rows]

@@ -51,9 +51,15 @@ export function StatusBadge({ status, label }) {
   </span>
 }
 
-export function Kpi({ label, value, sub, tone }) {
+export function Kpi({ label, value, sub, tone, onClick }) {
   return (
-    <div className={'go-kpi' + (tone ? ' ' + tone : '')}>
+    <div
+      className={'go-kpi' + (tone ? ' ' + tone : '') + (onClick ? ' clickable' : '')}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e => (e.key === 'Enter' || e.key === ' ') && onClick()) : undefined}
+    >
       <div className="k">{label}</div>
       <div className="v">{value}</div>
       {sub ? <div className="s">{sub}</div> : null}

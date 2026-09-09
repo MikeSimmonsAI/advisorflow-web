@@ -102,6 +102,9 @@ import CustomerDetail from './pages/god/CustomerDetail'
 import GodImplementations from './pages/GodImplementations'
 import GodImplementationDetail from './pages/GodImplementationDetail'
 import GodCustomers from './pages/GodCustomers'
+import GodOpportunities from './pages/god/GodOpportunities'
+import GodProposals from './pages/god/GodProposals'
+import GodMeetings from './pages/god/GodMeetings'
 import GodControlAudit from './pages/GodControlAudit'
 // Executive portfolio assignment — the management surface the executive
 // authority needs. Without it, per-organization access would be settable only
@@ -812,6 +815,9 @@ export default function App() {
         <Route path="/god/implementations" element={<GodRoute><GodModeLayout><GodImplementations /></GodModeLayout></GodRoute>} />
         <Route path="/god/implementations/:implId" element={<GodRoute><GodModeLayout><GodImplementationDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/customers" element={<GodRoute><GodModeLayout><GodCustomers /></GodModeLayout></GodRoute>} />
+        <Route path="/god/opportunities" element={<GodRoute><GodModeLayout><GodOpportunities /></GodModeLayout></GodRoute>} />
+        <Route path="/god/proposals" element={<GodRoute><GodModeLayout><GodProposals /></GodModeLayout></GodRoute>} />
+        <Route path="/god/meetings" element={<GodRoute><GodModeLayout><GodMeetings /></GodModeLayout></GodRoute>} />
         {/* Platform overview is where the owner lands with NO customer selected.
             "new" is a static segment so React Router ranks it above :orgId. */}
         <Route path="/god/platform" element={<GodRoute><GodModeLayout><PlatformOverview /></GodModeLayout></GodRoute>} />
