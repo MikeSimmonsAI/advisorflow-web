@@ -128,6 +128,9 @@ export default function ManagerCommand() {
 
   const filterName = filter ? (reps.find(r => r.user_id === filter)?.name || '') : null
 
+  const scrollTo = id =>
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
   return (
     <SalesShell
       title="Team Command"
@@ -140,14 +143,18 @@ export default function ManagerCommand() {
       {/* ── the four numbers that decide where to look ── */}
       <div className="sw-metrics">
         <Metric label="Needs your attention" value={att.total} attn={att.total > 0}
-                sub={att.red ? `${att.red} urgent` : 'nothing urgent'} />
+                sub={att.red ? `${att.red} urgent` : 'nothing urgent'}
+                onClick={() => scrollTo('mc-attention')} />
         <Metric label="Waiting on your approval" value={appr.pending_count}
                 attn={appr.pending_count > 0}
-                sub={appr.pending_count ? 'someone is blocked' : 'nothing pending'} />
+                sub={appr.pending_count ? 'someone is blocked' : 'nothing pending'}
+                onClick={appr.pending_count > 0 ? () => scrollTo('mc-approvals') : undefined} />
         <Metric label="Meetings today" value={today.total_meetings}
-                sub={today.unconfirmed ? `${today.unconfirmed} unconfirmed` : 'all confirmed'} />
+                sub={today.unconfirmed ? `${today.unconfirmed} unconfirmed` : 'all confirmed'}
+                onClick={() => scrollTo('mc-today')} />
         <Metric label="In closing" value={closing.count}
-                sub={closing.total_value ? money(closing.total_value) : '—'} />
+                sub={closing.total_value ? money(closing.total_value) : '—'}
+                onClick={closing.count > 0 ? () => scrollTo('mc-closing') : undefined} />
       </div>
 
       {/* ── PIPELINE FINANCIAL PROJECTION ──
@@ -159,7 +166,7 @@ export default function ManagerCommand() {
 
       {/* ── APPROVALS — first when someone is blocked on you ── */}
       {appr.pending_count > 0 ? (
-        <Card title="WAITING ON YOUR APPROVAL"
+        <div id="mc-approvals"><Card title="WAITING ON YOUR APPROVAL"
               sub="A rep cannot set these prices. Until you answer, they are stuck.">
           {appr.pending.map(r => (
             <div key={r.id} className="sw-appr">
@@ -194,13 +201,13 @@ export default function ManagerCommand() {
               </div>
             </div>
           ))}
-        </Card>
+        </Card></div>
       ) : null}
 
       <div className="sw-two">
         <div>
           {/* ── ATTENTION ── */}
-          <Card
+          <div id="mc-attention"><Card
             title="ATTENTION REQUIRED"
             sub={filter
               ? `Filtered to ${filterName} — click their name again to clear`
@@ -242,10 +249,10 @@ export default function ManagerCommand() {
                 ))}
               </div>
             ))}
-          </Card>
+          </Card></div>
 
           {/* ── CLOSING PIPELINE ── */}
-          <Card title="CLOSING PIPELINE"
+          <div id="mc-closing"><Card title="CLOSING PIPELINE"
                 sub="Deals with a number on them, soonest expiry first">
             {closing.rows.length === 0 ? (
               <Empty title="Nothing in closing">
@@ -298,12 +305,12 @@ export default function ManagerCommand() {
                 </table>
               </div>
             )}
-          </Card>
+          </Card></div>
         </div>
 
         <div>
           {/* ── TEAM TODAY ── */}
-          <Card title="TEAM TODAY"
+          <div id="mc-today"><Card title="TEAM TODAY"
                 sub={`${today.working_today} of ${today.people.length} have something booked`}>
             {today.people.map(p => (
               <div key={p.user_id} className="sw-person">
@@ -335,7 +342,7 @@ export default function ManagerCommand() {
                 ))}
               </div>
             ))}
-          </Card>
+          </Card></div>
 
           {/* ── REP ACTIVITY ── */}
           <Card title="YOUR REPS"

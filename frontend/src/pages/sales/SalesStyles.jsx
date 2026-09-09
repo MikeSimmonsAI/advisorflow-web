@@ -204,6 +204,10 @@ const CSS = `
 .sw-metric b{display:block;font-size:22px;margin-top:5px}
 .sw-metric small{font-size:9px;color:var(--sw-ink3)}
 .sw-metric.sw-attn{border-left:3px solid var(--sw-amber)}
+.sw-metric-link{cursor:pointer;text-align:left;width:100%;
+  transition:border-color .1s,box-shadow .1s}
+.sw-metric-link:hover{border-color:var(--sw-teal);
+  box-shadow:0 0 0 3px var(--sw-accent-bg)}
 
 .sw-grid2{display:grid;grid-template-columns:1.25fr .75fr;gap:16px}
 .sw-grid-even{display:grid;grid-template-columns:1fr 1fr;gap:16px}

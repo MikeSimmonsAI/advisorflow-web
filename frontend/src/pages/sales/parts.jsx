@@ -29,14 +29,19 @@ export function Card({ title, sub, right, children, bodyless }) {
   )
 }
 
-export function Metric({ label, value, sub, attn }) {
-  return (
-    <div className={'sw-metric' + (attn ? ' sw-attn' : '')}>
-      <span>{label}</span>
-      <b>{value}</b>
-      {sub && <small>{sub}</small>}
-    </div>
-  )
+export function Metric({ label, value, sub, attn, onClick }) {
+  const cls = 'sw-metric' + (attn ? ' sw-attn' : '') + (onClick ? ' sw-metric-link' : '')
+  return onClick
+    ? <button className={cls} onClick={onClick} type="button">
+        <span>{label}</span>
+        <b>{value}</b>
+        {sub && <small>{sub}</small>}
+      </button>
+    : <div className={cls}>
+        <span>{label}</span>
+        <b>{value}</b>
+        {sub && <small>{sub}</small>}
+      </div>
 }
 
 export function Empty({ title, children }) {
