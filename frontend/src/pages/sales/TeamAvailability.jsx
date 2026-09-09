@@ -38,7 +38,7 @@ const TA_STYLE = `
   --ta-legend-border: #e6ebef;
 }
 @media (prefers-color-scheme: dark) {
-  .ta-root:not([data-theme="light"]) {
+  :root:not([data-appearance="light"]) .ta-root {
     --ta-header-bg:     #1e2428;
     --ta-header-border: #2d3840;
     --ta-col-border:    #2d3840;
@@ -56,7 +56,7 @@ const TA_STYLE = `
     --ta-legend-border: #2d3840;
   }
 }
-[data-theme="dark"] .ta-root {
+[data-appearance="dark"] .ta-root {
   --ta-header-bg:     #1e2428;
   --ta-header-border: #2d3840;
   --ta-col-border:    #2d3840;
