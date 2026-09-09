@@ -153,11 +153,11 @@
     {
       "id": "GOD-04", "system": "Platform Ownership & God Mode Operations",
       "title": "Wire the God roadmap board to this data file",
-      "status": "FINISH", "priority": "P2", "depends_on": ["GOD-03"], "completed_on": null,
-      "evidence": "ProductStatus.jsx MODULES covers God Mode screens only - it says nothing about the customer workspace, the sales workspace, the executive layer, outreach, scheduling or import.",
-      "notes": "The in-product roadmap is honest about what it covers but it is a nav board, not a platform roadmap. This file is the platform roadmap and nothing reads it yet.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": ["GOD-03"], "completed_on": "2026-09-09",
+      "evidence": "RoadmapBoard.jsx imports platformRoadmap.json directly; renders all items grouped by system with filter tabs (needs action / all / complete), full-text search, per-system progress bars, expand-on-click detail rows, and summary KPI strip. Routed at /god/roadmap in App.jsx; 'Roadmap' nav link in GodShell.jsx nav rail.",
+      "notes": "ProductStatus.jsx kept as the nav board it already was; RoadmapBoard is the platform-wide feature tracker.",
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Build one God screen that renders platformRoadmap.json grouped by system, and keep MODULES as the nav rail it already is.",
+      "next_action": null,
       "previously_missed": true
     },
     {
