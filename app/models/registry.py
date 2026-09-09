@@ -246,3 +246,7 @@ import app.models.session_models  # noqa: F401  (imported for side effects)
 # notifications simply never arrive — which is precisely why it is worth
 # naming: silence is what a broken push system looks like from the outside.
 import app.models.device_models  # noqa: F401  (imported for side effects)
+# Background job records (background_jobs). Same Base, same reason. Without this
+# import the table is never created and job persistence silently has nowhere to
+# write — jobs appear to enqueue but leave no durable record.
+import app.models.job_models  # noqa: F401  (imported for side effects)

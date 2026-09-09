@@ -14,7 +14,7 @@ Success page logic:
 import html
 import logging
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -28,6 +28,7 @@ from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/survey", tags=["survey"])
+from app.limiter import limiter
 
 
 class SurveySubmission(BaseModel):
@@ -139,8 +140,9 @@ def get_survey_results(
     }
 
 
+@limiter.limit("60/minute")
 @router.get("/{token}/context")
-def get_survey_context_json(token: str, db: Session = Depends(get_db)):
+def get_survey_context_json(request: Request, token: str, db: Session = Depends(get_db)):
     """The same survey, as JSON, for the branded public page.
 
     Public - the token is the whole authorization, exactly as for the HTML
@@ -179,8 +181,9 @@ def get_survey_context_json(token: str, db: Session = Depends(get_db)):
     }
 
 
+@limiter.limit("60/minute")
 @router.get("/{token}", response_class=HTMLResponse)
-def get_survey_page(token: str, db: Session = Depends(get_db)):
+def get_survey_page(request: Request, token: str, db: Session = Depends(get_db)):
     """The original backend-rendered survey. Kept deliberately.
 
     Links already sent to families point here. Retiring it to tidy the
@@ -318,8 +321,9 @@ async function submitSurvey() {{
     return HTMLResponse(content=html)
 
 
+@limiter.limit("60/minute")
 @router.post("/{token}")
-def submit_survey(token: str, payload: SurveySubmission, db: Session = Depends(get_db)):
+def submit_survey(request: Request, token: str, payload: SurveySubmission, db: Session = Depends(get_db)):
     """Store survey response. Idempotent — silently ignores duplicates."""
     followup, lead, advisor, _ = _get_survey_context(db, token)
 
