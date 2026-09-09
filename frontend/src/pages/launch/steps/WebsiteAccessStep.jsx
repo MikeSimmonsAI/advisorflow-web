@@ -25,7 +25,16 @@
  */
 import { Group, Field, Text, Note, Collapse, Area, Fields } from '../LaunchUI'
 
-export default function WebsiteAccessStep({ v, set }) {
+export default function WebsiteAccessStep({ v, set, customer }) {
+  // Prefer what they typed on step 1; fall back to nothing rather than to a
+  // guess. An invented hostname in a subtitle reads as a fact we already know.
+  const siteHost = (() => {
+    const raw = (v.website || '').trim()
+    if (!raw) return null
+    try { return new URL(raw.includes('://') ? raw : 'https://' + raw).hostname }
+    catch { return raw }
+  })()
+
   return (
     <>
       <Note tone="secure" icon="shield" title="Credentials will be securely encrypted when submitted">
@@ -35,8 +44,11 @@ export default function WebsiteAccessStep({ v, set }) {
         moment we go live — we will remind you to.
       </Note>
 
+      {/* The customer's own site, from their answers — not a literal domain.
+          This named one specific customer's hostname, which is wrong on every
+          other customer's screen. */}
       <Group title="Web Hosting"
-        sub="Where the current atlantislp.com site is served from.">
+        sub={'Where the current ' + (siteHost || 'website') + ' is served from.'}>
         <Field label="Current Web Hosting Provider" span={6} required>
           <Text value={v.hostProvider} onChange={x => set('hostProvider', x)}
             placeholder="SiteGround, GoDaddy, WP Engine…" />

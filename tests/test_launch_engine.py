@@ -558,7 +558,7 @@ class TestBrandIsConfiguration:
         assert r["customer"]["name"] == "Gamma Gas"
 
     def test_no_customer_or_brand_name_is_hard_coded_in_the_engine(self):
-        """Atlantis may be the first configured customer. It must not be a branch."""
+        """A customer may be the first one configured. It must not be a branch."""
         import pathlib
         root = pathlib.Path(__file__).resolve().parents[1]
         for rel in ("app/services/launch_intake.py", "app/routers/launch_router.py",
@@ -570,3 +570,41 @@ class TestBrandIsConfiguration:
             for brand in ("evosys", "bookaboost"):
                 assert ('== "%s' % brand) not in text
                 assert ("== '%s" % brand) not in text
+
+    def test_no_customer_identity_is_hard_coded_in_THE_UI_EITHER(self):
+        """The backend guard alone was not enough, and this is how I found out.
+
+        The engine modules were clean while five step components still carried
+        one customer's name, staff and domain in placeholders and subtitles —
+        "Detected from <their domain>", "<Their name> receives it", three
+        invented people at their email domain. All of it shipped to production
+        in the bundle and would have appeared on every other customer's screen.
+
+        A guard that covers only the files you were thinking about is a guard
+        that certifies the half you already trusted.
+
+        COMMENTS STRIPPED BEFORE SEARCHING, on purpose. The bundler drops
+        comments, so a customer named in a `//` line never reaches a browser —
+        and several of these files legitimately discuss the first customer by
+        name while explaining why nothing is hard-coded. What matters is what
+        SHIPS: a string literal, a placeholder, a subtitle, JSX text. Flagging
+        prose would push somebody to delete the explanation instead of the bug.
+        """
+        import pathlib
+        import re
+
+        ui = (pathlib.Path(__file__).resolve().parents[1]
+              / "frontend" / "src" / "pages" / "launch")
+
+        def shipped(src: str) -> str:
+            src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)   # block comments
+            src = re.sub(r"^\s*//.*$", "", src, flags=re.M)   # whole-line //
+            return src.lower()
+
+        offenders = []
+        for path in sorted(ui.rglob("*.js*")):
+            if "atlantis" in shipped(path.read_text(encoding="utf-8")):
+                offenders.append(str(path.relative_to(ui)))
+        assert not offenders, (
+            "these Launch Engine UI files ship a specific customer's identity: %s"
+            % ", ".join(offenders))

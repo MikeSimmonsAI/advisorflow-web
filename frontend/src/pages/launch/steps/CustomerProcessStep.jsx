@@ -13,13 +13,16 @@
 import { Group, Field, Text, Area, Select, Note, Ico, Fields, Collapse }
   from '../LaunchUI'
 
-const FLOW = [
+// The customer's own name, not a literal. This read "Atlantis receives it" —
+// which is correct for exactly one customer and wrong, visibly and
+// embarrassingly, for every other one that ever opens this screen.
+const flowFor = name => ([
   { k: 'Stage 1', t: 'Customer submits information' },
-  { k: 'Stage 2', t: 'Atlantis receives it' },
+  { k: 'Stage 2', t: (name || 'You') + ' receive' + (name ? 's' : '') + ' it' },
   { k: 'Stage 3', t: 'Team reviews / contacts customer' },
   { k: 'Stage 4', t: 'Rate, plan or enrollment action' },
   { k: 'Stage 5', t: 'Follow-up and completion' },
-]
+])
 
 const RESPONSE = [
   { value: '', label: 'Select…' },
@@ -45,7 +48,7 @@ export default function CustomerProcessStep({ v, set, customer }) {
         sub={'Roughly how an enquiry moves through ' + customer.name + ' right now. Use it to frame your answers below.'} >
         <Field span={12} label="">
           <div className="lp-flow">
-            {FLOW.map(s => (
+            {flowFor(customer?.name).map(s => (
               <div className="lp-fstep" key={s.k}>
                 <div className="lp-fbox">
                   <b>{s.k}</b>
