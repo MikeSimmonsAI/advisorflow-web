@@ -145,6 +145,7 @@ import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
 import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
 import GodJobRuns from './pages/god/GodJobRuns'
 import GodVoiceConfig from './pages/god/GodVoiceConfig'
+import GodRevenueHistory from './pages/god/GodRevenueHistory'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -899,6 +900,8 @@ export default function App() {
         <Route path="/god/diagnostics/twilio"    element={<GodRoute><GodModeLayout><GodTwilioDiagnostics /></GodModeLayout></GodRoute>} />
         <Route path="/god/diagnostics/job-runs"  element={<GodRoute><GodModeLayout><GodJobRuns /></GodModeLayout></GodRoute>} />
         <Route path="/god/voice"                 element={<GodRoute><GodModeLayout><GodVoiceConfig /></GodModeLayout></GodRoute>} />
+        {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}
+        <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

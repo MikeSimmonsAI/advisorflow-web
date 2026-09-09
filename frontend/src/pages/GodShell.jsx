@@ -207,6 +207,8 @@ const NAV = [
     hint: 'Run history for cadence, AI, and review loops' },
   { label: 'Voice Configuration', path: '/god/voice',               icon: 'settings',
     hint: 'Agent mappings, version pins, attempt policy, test calls' },
+  { label: 'Revenue History',    path: '/god/revenue-history',      icon: 'trending',
+    hint: 'Real payment history by month — no manufactured trends' },
 ]
 
 function LiveClock() {

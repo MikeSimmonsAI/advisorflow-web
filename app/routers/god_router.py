@@ -1586,3 +1586,117 @@ def get_job_runs_latest(
 
     all_healthy = all(result.get(n, {}).get("status") == "success" for n in known_jobs)
     return {"jobs": result, "all_healthy": all_healthy}
+
+
+# ── REPORT-02: Platform revenue history ──────────────────────────────────────
+@router.get("/revenue-history", response_model=dict)
+def get_revenue_history(
+    platform_id: Optional[str] = Query(None, description="Narrow to one platform; omit for all"),
+    _god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Real payment and invoice history across all platforms.
+
+    REPORT-02 constraint: never invents trends. Any metric that requires a
+    periodic snapshot table (which does not yet exist) is named in
+    `unavailable` with an honest explanation. Nothing is manufactured.
+
+    Sources:
+      BillingPayment.paid_at + amount_cents  → payments_by_month (real history)
+      BillingInvoice.status                  → invoice_status_breakdown
+      BillingInvoice.billing_plan_key        → plan_breakdown
+    """
+    from app.models.billing_models import BillingInvoice, BillingPayment
+    from collections import defaultdict
+
+    def _apply_platform(q, model):
+        if platform_id:
+            return q.filter(model.platform_id == platform_id)
+        return q
+
+    # ── payments by month ────────────────────────────────────────────────────
+    payments = _apply_platform(
+        db.query(BillingPayment).filter(BillingPayment.paid_at.isnot(None)),
+        BillingPayment,
+    ).order_by(BillingPayment.paid_at).all()
+
+    by_month: dict = defaultdict(lambda: {"payment_count": 0, "collected_cents": 0})
+    for p in payments:
+        key = p.paid_at.strftime("%Y-%m")
+        by_month[key]["payment_count"] += 1
+        by_month[key]["collected_cents"] += p.amount_cents or 0
+
+    payments_by_month = [{"month": k, **v} for k, v in sorted(by_month.items())]
+
+    data_since = payments[0].paid_at.isoformat() if payments else None
+    total_collected_cents = sum(p.amount_cents or 0 for p in payments)
+    total_payment_count = len(payments)
+
+    # ── invoice status breakdown ─────────────────────────────────────────────
+    invoices = _apply_platform(db.query(BillingInvoice), BillingInvoice).all()
+
+    status_map: dict = defaultdict(lambda: {"count": 0, "paid_cents": 0, "due_cents": 0})
+    for inv in invoices:
+        s = inv.status or "unknown"
+        status_map[s]["count"] += 1
+        status_map[s]["paid_cents"] += inv.amount_paid_cents or 0
+        status_map[s]["due_cents"]  += inv.amount_due_cents  or 0
+
+    invoice_status_breakdown = [
+        {"status": s, **v} for s, v in sorted(status_map.items())
+    ]
+
+    # ── plan breakdown ───────────────────────────────────────────────────────
+    plan_map: dict = defaultdict(lambda: {"invoice_count": 0, "collected_cents": 0})
+    for inv in invoices:
+        key = inv.billing_plan_key or "unassigned"
+        plan_map[key]["invoice_count"] += 1
+        plan_map[key]["collected_cents"] += inv.amount_paid_cents or 0
+
+    plan_breakdown = [
+        {"plan_key": k, **v}
+        for k, v in sorted(plan_map.items(), key=lambda x: -x[1]["collected_cents"])
+    ]
+
+    # ── unavailable metrics ──────────────────────────────────────────────────
+    unavailable = [
+        {
+            "metric": "mrr_trend",
+            "label": "MRR over time",
+            "reason": (
+                "No periodic subscription-state snapshot exists. Current MRR "
+                "is reportable from Billing & Revenue; a trend line requires a "
+                "scheduled snapshot job that has not been built yet."
+            ),
+        },
+        {
+            "metric": "customer_count_trend",
+            "label": "Active customers over time",
+            "reason": (
+                "The Organization table records current state only. "
+                "A historical count requires a periodic snapshot or a "
+                "status-change event log, neither of which exists yet."
+            ),
+        },
+        {
+            "metric": "churn_rate",
+            "label": "Monthly churn rate",
+            "reason": (
+                "No subscription cancellation date is tracked locally. "
+                "The Stripe customer.subscription.deleted webhook is not yet "
+                "mirrored into the billing tables."
+            ),
+        },
+    ]
+
+    return {
+        "data_since": data_since,
+        "total_collected_cents": total_collected_cents,
+        "total_payment_count": total_payment_count,
+        "total_invoice_count": len(invoices),
+        "payments_by_month": payments_by_month,
+        "invoice_status_breakdown": invoice_status_breakdown,
+        "plan_breakdown": plan_breakdown,
+        "unavailable": unavailable,
+        "platform_filter": platform_id,
+    }
