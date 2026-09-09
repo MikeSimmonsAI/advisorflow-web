@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
+from app.limiter import limiter
 from app.models.models import (
     User, Proposal, ProposalBlock, ProposalToken, PortalEvent,
     PROP_DRAFT, PROP_INTERNAL_REVIEW, PROP_READY, PROP_SENT, PROP_VIEWED,
@@ -735,6 +736,7 @@ class DecisionIn(BaseModel):
 
 
 @router.get("/deal-room/{token}")
+@limiter.limit("60/minute")
 def open_deal_room(token: str, request: Request, db: Session = Depends(get_db)):
     """Open the deal room. Records PORTAL_OPENED.
 
@@ -764,6 +766,7 @@ def open_deal_room(token: str, request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/deal-room/{token}/track")
+@limiter.limit("60/minute")
 def track_deal_room_event(token: str, body: TrackIn, request: Request,
                           db: Session = Depends(get_db)):
     """Record a defensible act: the proposal was viewed, a demo was opened, a
@@ -788,6 +791,7 @@ def track_deal_room_event(token: str, body: TrackIn, request: Request,
 
 
 @router.post("/deal-room/{token}/decision")
+@limiter.limit("60/minute")
 def deal_room_decision(token: str, body: DecisionIn, request: Request,
                        db: Session = Depends(get_db)):
     """Accept, decline, or request a change.
@@ -919,7 +923,8 @@ def revoke_demo_site(demo_id: str,
 # is the only thing this route accepts.
 
 @router.get("/public/demo/{token}")
-def resolve_demo_site(token: str, db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+def resolve_demo_site(request: Request, token: str, db: Session = Depends(get_db)):
     demo = _demos.resolve(db, token)
     if demo is None:
         # One message for every failure mode. Distinguishing expired from

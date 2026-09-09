@@ -15,6 +15,7 @@ from app.services.calendar_service import (
     create_calendar_event_for_booking, cancel_calendar_event,
 )
 from app.services import lead_scope
+from app.limiter import limiter
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 logger = logging.getLogger(__name__)
@@ -90,7 +91,8 @@ class BookingConfirmRequest(BaseModel):
 
 
 @router.get("/booking/{token}")
-def get_booking_by_token(token: str, db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+def get_booking_by_token(request: Request, token: str, db: Session = Depends(get_db)):
     """
     Public endpoint — no auth required.
     The Vercel booking frontend calls this to get booking details by token.

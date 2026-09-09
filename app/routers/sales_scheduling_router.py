@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
+from app.limiter import limiter
 from app.models.models import User
 from app.models.sales_models import (
     BrandSalesOrg, Opportunity, OpportunityEvent,
@@ -854,7 +855,8 @@ def _confirm_page(title: str, body_html: str) -> HTMLResponse:
 
 
 @router.get("/appointments/confirm/{token}", include_in_schema=False)
-def prospect_confirm_page(token: str, db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+def prospect_confirm_page(request: Request, token: str, db: Session = Depends(get_db)):
     """Render the confirmation page. CHANGES NOTHING.
 
     This is a GET and it must stay side-effect free. Corporate mail scanners
@@ -900,6 +902,7 @@ def prospect_confirm_page(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/appointments/confirm/{token}", include_in_schema=False)
+@limiter.limit("60/minute")
 async def prospect_confirm_submit(token: str, request: Request,
                                   db: Session = Depends(get_db)):
     """Record the prospect's answer. The only endpoint here that changes state.
@@ -970,7 +973,8 @@ async def prospect_confirm_submit(token: str, request: Request,
 # nothing more - no prospect email, no opportunity, no internal ids.
 
 @router.get("/appointments/confirm/{token}/context", include_in_schema=False)
-def prospect_confirm_context(token: str, db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+def prospect_confirm_context(request: Request, token: str, db: Session = Depends(get_db)):
     """Everything the branded confirmation page renders. CHANGES NOTHING."""
     row, appt, err = apinvite.resolve_token(db, token)
     if err:
@@ -996,6 +1000,7 @@ def prospect_confirm_context(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/appointments/confirm/{token}/respond", include_in_schema=False)
+@limiter.limit("60/minute")
 async def prospect_confirm_respond(token: str, request: Request,
                                    db: Session = Depends(get_db)):
     """Record the prospect's answer from the branded page.

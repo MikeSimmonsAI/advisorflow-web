@@ -35,12 +35,13 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin
+from app.limiter import limiter
 from app.models.models import (
     User, Organization, Proposal, ProposalBlock, ProposalToken, ProposalView, ProposalFile,
 )
@@ -665,7 +666,9 @@ def serve_proposal_file(file_id: str, db: Session = Depends(get_db)):
 # ── Client portal surface (no internal JWT) ────────────────────────────────────
 
 @router.get("/portal/resolve/{token}")
+@limiter.limit("60/minute")
 def resolve_portal_token(
+    request: Request,
     token: str,
     db: Session = Depends(get_db),
 ):
