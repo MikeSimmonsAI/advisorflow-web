@@ -44,11 +44,21 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 HOT_REPLY_CLASSIFICATIONS = (ReplyClassification.INTERESTED, ReplyClassification.CALLBACK)
 
 
-def _get_org_ids(db: Session, current_user: User) -> list:
+def _get_org_ids(db: Session, current_user: User, platform_id: Optional[str] = None) -> list:
     """Return org IDs to scope queries to.
-    god_admin sees ALL organizations; everyone else is scoped to their own org."""
+
+    god_admin sees ALL organizations by default; when platform_id is supplied
+    the result is scoped to that brand only, so cross-brand aggregation can
+    be filtered when the operator wants one brand's numbers rather than all
+    brands combined (REPORT-04).
+
+    Non-god users are always scoped to their own organization.
+    """
     if current_user.role == "god_admin":
-        return [str(row[0]) for row in db.query(Organization.id).all()]
+        q = db.query(Organization.id)
+        if platform_id:
+            q = q.filter(Organization.platform_id == platform_id)
+        return [str(row[0]) for row in q.all()]
     return [str(current_user.organization_id)]
 
 
@@ -97,6 +107,7 @@ def _resolve_date_range(start_date: Optional[str], end_date: Optional[str]) -> t
 def conversion_trend(
     start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to 30 days before end_date"),
     end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today"),
+    platform_id: Optional[str] = Query(default=None, description="Scope to one platform (god_admin only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -116,7 +127,7 @@ def conversion_trend(
     created on this day."
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_ids = _get_org_ids(db, current_user)
+    org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
 
     replies = (
         db.query(Reply, Lead.id)
@@ -185,6 +196,7 @@ def conversion_trend(
 def engagement_vs_conversion(
     start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to 30 days before end_date"),
     end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today"),
+    platform_id: Optional[str] = Query(default=None, description="Scope to one platform (god_admin only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -207,7 +219,7 @@ def engagement_vs_conversion(
     advisor's engagement rate for the leads they worked in this window.
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_ids = _get_org_ids(db, current_user)
+    org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
     is_god = current_user.role == "god_admin"
 
     advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role.in_(["advisor", "org_admin"])).all()
@@ -318,6 +330,7 @@ def engagement_vs_conversion(
 def by_client_list(
     start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to 30 days before end_date"),
     end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today"),
+    platform_id: Optional[str] = Query(default=None, description="Scope to one platform (god_admin only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -339,7 +352,7 @@ def by_client_list(
     rows exist, not silently lose them out of the totals.
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_ids = _get_org_ids(db, current_user)
+    org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
     is_god = current_user.role == "god_admin"
 
     UNLABELLED = "\u2014 no list label"
@@ -431,6 +444,7 @@ def by_client_list(
 def revenue_by_period(
     start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to 30 days before end_date"),
     end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today"),
+    platform_id: Optional[str] = Query(default=None, description="Scope to one platform (god_admin only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -445,7 +459,7 @@ def revenue_by_period(
     future relative to when the sale was recorded and is sometimes null.
     """
     start, end = _resolve_date_range(start_date, end_date)
-    org_ids = _get_org_ids(db, current_user)
+    org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
     is_god = current_user.role == "god_admin"
 
     sale_outcomes = (
@@ -499,6 +513,7 @@ def revenue_by_period(
 
 @router.get("/crm-summary")
 def crm_summary(
+    platform_id: Optional[str] = Query(default=None, description="Scope to one platform (god_admin only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -507,7 +522,7 @@ def crm_summary(
     - Total contacts by stage
     - Custom field fill rates and value breakdowns
     """
-    org_ids = _get_org_ids(db, current_user)
+    org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
     is_god = current_user.role == "god_admin"
     # For field schema use first org (or current user's org if available)
     org_id = current_user.organization_id

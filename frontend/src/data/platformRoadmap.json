@@ -1514,7 +1514,7 @@
       "id": "REPORT-04",
       "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "god_admin on tenant reporting aggregates across every brand",
-      "status": "CONSOLIDATE",
+      "status": "COMPLETE",
       "priority": "P2",
       "depends_on": [
         "GOD-01"
