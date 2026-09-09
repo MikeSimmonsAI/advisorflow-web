@@ -129,6 +129,7 @@ import MyPipeline from './pages/sales/MyPipeline'
 import ManagerCommand from './pages/sales/ManagerCommand'
 // Compensation Command Center (management) and My Compensation (a rep's own).
 // Two screens because they are two authorities, not one screen with a flag.
+import SalesShell from './pages/sales/SalesShell'
 import CompensationCommand from './pages/sales/CompensationCommand'
 import MyCompensation from './pages/sales/MyCompensation'
 import OpportunityDetail from './pages/sales/OpportunityDetail'
@@ -704,7 +705,7 @@ export default function App() {
             finance authority, so a rep who types either URL gets a 403 rather
             than a screen. My Compensation is scoped to the caller's own token
             and takes no payee parameter at all. */}
-        <Route path="/sales/compensation" element={<SalesRoute><CompensationCommand /></SalesRoute>} />
+        <Route path="/sales/compensation" element={<SalesRoute><SalesShell><CompensationCommand embedded /></SalesShell></SalesRoute>} />
         <Route path="/sales/my-compensation" element={<SalesRoute><MyCompensation /></SalesRoute>} />
         <Route path="/sales/calendar" element={<SalesRoute><TeamCalendar /></SalesRoute>} />
         <Route path="/sales/team-pipeline" element={<SalesRoute><MyPipeline scope="team" /></SalesRoute>} />
