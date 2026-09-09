@@ -104,9 +104,21 @@ const config: ExpoConfig = {
     ],
     'expo-notifications',
   ],
+  // The EAS account this project belongs to. Stated rather than inferred from
+  // whoever happens to be logged in, so a build from another machine or from CI
+  // cannot silently create a second project under a different account.
+  owner: 'evosysproceo2026',
   extra: {
     apiBaseUrl,
-    eas: { projectId: process.env.EAS_PROJECT_ID ?? undefined },
+    eas: {
+      // `eas init` created @evosysproceo2026/evosyspro-mobile and could not
+      // write this itself: the config is dynamic (app.config.ts), and EAS only
+      // edits static app.json. Hard-coded rather than left to EAS_PROJECT_ID,
+      // because an unset env var there means "no project", and EAS answers that
+      // by offering to create ANOTHER one — which is how an account ends up
+      // with three projects for one app and builds scattered across them.
+      projectId: process.env.EAS_PROJECT_ID ?? '945a731d-5d02-471a-96d5-610f18ad4a4e',
+    },
   },
   experiments: { typedRoutes: false },
 };

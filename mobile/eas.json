@@ -1,23 +1,36 @@
 {
-  "//": "The API base is the same host frontend/src/api/client.js treats as canonical, so the phone and the browser talk to one backend. `preview` is the profile Mike installs on his Android phone: an internal-distribution APK, which unlike Expo Go CAN receive push notifications.",
-  "cli": { "version": ">= 5.0.0", "appVersionSource": "local" },
+  "cli": {
+    "version": ">= 5.0.0",
+    "appVersionSource": "local"
+  },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com" }
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com"
+      }
     },
     "preview": {
       "distribution": "internal",
-      "//": "buildType apk, not app-bundle: an .aab cannot be sideloaded. A preview Mike cannot install by tapping a link is not a preview.",
-      "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com" }
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com" }
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://advisorflow-backend.onrender.com"
+      }
     }
   },
-  "submit": { "production": {} }
+  "submit": {
+    "production": {}
+  }
 }

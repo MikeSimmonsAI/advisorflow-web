@@ -159,6 +159,25 @@ calling it and no screen changes.
 
 ---
 
+## EAS build
+
+```bash
+npx eas-cli build --profile preview --platform android
+```
+
+Project: `@evosysproceo2026/evosyspro-mobile`. The id is hard-coded in
+`app.config.ts` because the config is dynamic and `eas init` can only write into
+a static `app.json` — and because an unset `EAS_PROJECT_ID` reads to EAS as "no
+project", which it answers by offering to create another one.
+
+`preview` and `development` build an **APK**, not an app bundle: an `.aab`
+cannot be sideloaded, and a preview nobody can install by tapping a link is not
+a preview.
+
+**`eas.json` takes no comments.** EAS validates it against a strict schema and
+rejects `"//"` keys outright (`"build.preview.//" is not allowed`), so any
+rationale about the profiles belongs here rather than in the file.
+
 ## Deployment dependencies (configuration, not code)
 
 | | env | effect until set |
