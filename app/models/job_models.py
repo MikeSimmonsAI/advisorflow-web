@@ -23,9 +23,39 @@ from app.models.models import Base
 
 # Canonical job-name constants — avoids magic strings scattered across loops.
 class JobName:
+    # In-process asyncio loops, started by the FastAPI web service at startup.
     CADENCE_LOOP      = "cadence_loop"
     AI_CONVERSATION   = "ai_conversation_loop"
     REVIEW_REQUEST    = "review_request_loop"
+
+    # Render cron SERVICES. Separate names on purpose, even where the work
+    # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
+    # cron, and folding both into "cadence_loop" would make the ledger unable to
+    # answer the only question worth asking when something stops — WHICH of the
+    # two stopped. A shared name reads as healthy for as long as either one
+    # survives, which is precisely when you most need to know one has died.
+    CADENCE_CRON        = "cadence_cron"
+    AI_CONVERSATION_CRON = "ai_conversation_cron"
+    EMAIL_POLLER        = "email_poller"
+
+
+# The cron services, kept beside the constants so a new cron cannot be added
+# without a name — the email poller ran every minute for the platform's whole
+# life with no constant, no writer and no entry in any reader's list, so it was
+# invisible by construction rather than by accident.
+CRON_JOB_NAMES = (
+    JobName.CADENCE_CRON,
+    JobName.AI_CONVERSATION_CRON,
+    JobName.EMAIL_POLLER,
+)
+
+LOOP_JOB_NAMES = (
+    JobName.CADENCE_LOOP,
+    JobName.AI_CONVERSATION,
+    JobName.REVIEW_REQUEST,
+)
+
+ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
 
 
 class JobRun(Base):

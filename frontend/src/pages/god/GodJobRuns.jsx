@@ -11,9 +11,14 @@ import { useState, useEffect } from 'react'
 import { api } from '../../api/client'
 
 const JOB_LABELS = {
+  // In-process loops (web service)
   cadence_loop:          'Cadence Loop',
   ai_conversation_loop:  'AI Conversation',
   review_request_loop:   'Review Requests',
+  // Render cron services — separate processes, separate schedules
+  cadence_cron:          'Cadence (cron)',
+  ai_conversation_cron:  'AI Conversation (cron)',
+  email_poller:          'Email Poller (cron)',
 }
 
 const STATUS_COLORS = {
@@ -21,6 +26,10 @@ const STATUS_COLORS = {
   error:     { bg: '#fef2f2', text: '#991b1b', border: '#fca5a5' },
   running:   { bg: '#eff6ff', text: '#1d4ed8', border: '#93c5fd' },
   never_run: { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
+  // Not grey. "never_run" is a benign fact about a job; ledger_unavailable is
+  // a broken ledger, and rendering the two the same shade is the exact
+  // ambiguity this status was added to end.
+  ledger_unavailable: { bg: '#fef2f2', text: '#991b1b', border: '#fca5a5' },
 }
 
 function PulseCard({ jobName, info }) {
@@ -146,7 +155,13 @@ export default function GodJobRuns() {
     marginBottom: 20,
   }
 
-  const KNOWN_JOBS = ['cadence_loop', 'ai_conversation_loop', 'review_request_loop']
+  // Loops run inside the web dyno; crons are separate Render services. Listed
+  // separately because "which one stopped" is the only useful question when
+  // cadence work quietly halts, and both run cadence on different schedules.
+  const KNOWN_JOBS = [
+    'cadence_loop', 'ai_conversation_loop', 'review_request_loop',
+    'cadence_cron', 'ai_conversation_cron', 'email_poller',
+  ]
 
   return (
     <div style={pageStyle}>

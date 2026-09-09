@@ -17,26 +17,35 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.deps import SessionLocal
+from app.models.job_models import JobName
 from app.services.ai_conversation_service import process_scheduled_touches
+from app.services.job_run_service import record_job_run_sync
 
 
 def main():
     db = SessionLocal()
     started_at = datetime.now(timezone.utc)
     try:
-        result = process_scheduled_touches(db)
-        finished_at = datetime.now(timezone.utc)
-        summary = {
-            "job": "ai_conversation_scheduler",
-            "started_at": started_at.isoformat(),
-            "finished_at": finished_at.isoformat(),
-            "duration_seconds": (finished_at - started_at).total_seconds(),
-            **result,
-        }
+        # Recorded under CADENCE-style cron naming, NOT under the in-process
+        # ai_conversation_loop name. The two are genuinely different runs: the
+        # loop calls process_scheduled_touches per-org every 2 minutes from the
+        # web dyno, this cron calls it unscoped every 15. One name for both
+        # would read "healthy" whenever either survives.
+        with record_job_run_sync(JobName.AI_CONVERSATION_CRON, db_factory=SessionLocal) as m:
+            result = process_scheduled_touches(db)
+            finished_at = datetime.now(timezone.utc)
+            summary = {
+                "job": JobName.AI_CONVERSATION_CRON,
+                "started_at": started_at.isoformat(),
+                "finished_at": finished_at.isoformat(),
+                "duration_seconds": (finished_at - started_at).total_seconds(),
+                **result,
+            }
+            m.update({k: v for k, v in result.items() if isinstance(v, (int, float, str))})
         print(json.dumps(summary, indent=2))
         return summary
     except Exception as e:
-        summary = {"job": "ai_conversation_scheduler", "error": str(e)}
+        summary = {"job": JobName.AI_CONVERSATION_CRON, "error": str(e)}
         print(json.dumps(summary, indent=2))
         return summary
     finally:

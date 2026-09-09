@@ -25,7 +25,7 @@ a short human-readable summary.
 
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -96,6 +96,87 @@ async def record_job_run(
         raise
     finally:
         # --- close row --------------------------------------------------
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        status = "error" if caught_exc else "success"
+        err_str = _safe_err(caught_exc) if caught_exc else None
+
+        try:
+            db2: Session = db_factory()
+            try:
+                db2.query(JobRun).filter(JobRun.id == run_id).update(
+                    {
+                        "finished_at": datetime.now(timezone.utc),
+                        "status": status,
+                        "error_summary": err_str,
+                        "duration_ms": duration_ms,
+                        "metrics": metrics if metrics else None,
+                    },
+                    synchronize_session=False,
+                )
+                db2.commit()
+            finally:
+                db2.close()
+        except Exception as close_exc:
+            log.warning(
+                "job_run_service: could not close run row %s for %s: %s",
+                run_id, job_name, close_exc,
+            )
+
+
+@contextmanager
+def record_job_run_sync(
+    job_name: str,
+    db_factory: Callable[[], Session],
+):
+    """Synchronous twin of record_job_run(), for the Render cron entrypoints.
+
+    WHY A SECOND ONE. The three scripts under app/jobs/ are plain synchronous
+    `python app/jobs/x.py` processes launched by Render cron. They cannot use
+    an async context manager without an event loop, so for the ledger's whole
+    life they simply did not record — they printed a JSON blob to stdout and
+    that was all. Render's cron run-history showed the truth; the platform's
+    own System Health screen could not, because nothing ever reached job_runs.
+
+    Wrapping each script's body in this makes a cron run as visible as a loop
+    iteration, using the same table and the same semantics. It is not a second
+    job framework: there is one ledger, one row shape, one recorder — this is
+    the sync door into it.
+
+    Same contract as the async version, deliberately: yields a mutable metrics
+    dict, always closes the row, and SWALLOWS its own database errors so that a
+    metrics failure can never fail the job it is measuring. A cron process that
+    exits non-zero because its bookkeeping hiccuped would page somebody about
+    the wrong problem.
+    """
+    from app.models.job_models import JobRun
+
+    metrics: dict[str, Any] = {}
+    run_id: int | None = None
+    started = datetime.now(timezone.utc)
+    t0 = time.monotonic()
+
+    try:
+        db: Session = db_factory()
+        try:
+            row = JobRun(job_name=job_name, started_at=started, status="running")
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            run_id = row.id
+        finally:
+            db.close()
+    except Exception as exc:
+        log.warning("job_run_service: could not open run row for %s: %s", job_name, exc)
+        yield metrics
+        return
+
+    caught_exc: Exception | None = None
+    try:
+        yield metrics
+    except Exception as exc:
+        caught_exc = exc
+        raise
+    finally:
         duration_ms = int((time.monotonic() - t0) * 1000)
         status = "error" if caught_exc else "success"
         err_str = _safe_err(caught_exc) if caught_exc else None

@@ -50,6 +50,14 @@ def run_for_all_organizations():
     started_at = datetime.now(timezone.utc)
 
     try:
+      # Recorded as cadence_cron, distinct from the web dyno's hourly
+      # cadence_loop. Same underlying run_due_cadences, two different
+      # schedules on two different services; the ledger has to be able to say
+      # which one stopped.
+      from app.models.job_models import JobName
+      from app.services.job_run_service import record_job_run_sync
+
+      with record_job_run_sync(JobName.CADENCE_CRON, db_factory=SessionLocal) as _m:
         orgs = db.query(Organization).filter(Organization.is_active == True).all()
         overall_summary = {
             "started_at": started_at.isoformat(),
@@ -89,6 +97,13 @@ def run_for_all_organizations():
         finished_at = datetime.now(timezone.utc)
         overall_summary["finished_at"] = finished_at.isoformat()
         overall_summary["duration_seconds"] = (finished_at - started_at).total_seconds()
+
+        # Totals only — per_org is unbounded and belongs in stdout, not in a
+        # JSONB column that a health screen renders.
+        _m["organizations_processed"] = overall_summary["organizations_processed"]
+        _m["sent"] = overall_summary["total_sent"]
+        _m["completed"] = overall_summary["total_completed"]
+        _m["errors"] = overall_summary["total_errors"]
 
         print(json.dumps(overall_summary, indent=2))
         return overall_summary

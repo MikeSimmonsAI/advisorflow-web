@@ -1543,14 +1543,24 @@ def get_job_runs_latest(
 ) -> dict:
     """Most-recent run for each known job — quick pulse check for System Health.
 
-    Returns one record per job name (the most recent by started_at), plus
-    a top-level 'all_healthy' bool that is True only when every known job
-    has a 'success' status as its most recent run.
+    Returns one record per job name (the most recent by started_at), plus:
+      all_healthy   — True only when all three IN-PROCESS LOOPS last succeeded.
+                      Scoped to the loops on purpose; see the note below.
+      jobs_in_error — any known job (loop or cron) whose LAST run failed.
+      ledger        — whether the job_runs table is readable at all, and what
+                      is actually in it. Without this, "never_run" is
+                      indistinguishable from "the ledger does not exist".
     """
-    from app.models.job_models import JobRun, JobName
+    from app.models.job_models import (
+        ALL_JOB_NAMES, LOOP_JOB_NAMES, JobRun, JobName,
+    )
     from sqlalchemy import func as _func
 
-    known_jobs = [JobName.CADENCE_LOOP, JobName.AI_CONVERSATION, JobName.REVIEW_REQUEST]
+    # Every job the platform runs — the three in-process loops AND the three
+    # Render cron services. The cron services were absent from this list for as
+    # long as it existed, so a cron could stop dead without the health screen
+    # changing by a single pixel.
+    known_jobs = list(ALL_JOB_NAMES)
 
     # ── THE LEDGER HAS TO BE ABLE TO REPORT ITS OWN ABSENCE ──────────────────
     #
@@ -1626,14 +1636,41 @@ def get_job_runs_latest(
         if name not in result:
             result[name] = {"status": "never_run", "started_at": None}
 
-    all_healthy = all(result.get(n, {}).get("status") == "success" for n in known_jobs)
+    # `all_healthy` DELIBERATELY STILL MEANS THE IN-PROCESS LOOPS ONLY.
+    #
+    # The obvious move on adding the crons is to fold them into this boolean.
+    # That would be wrong, and wrong in the way that quietly destroys an alert:
+    # cadence_cron runs once a day at 14:00 UTC, so from every deploy until the
+    # next 14:00 it has legitimately never run, and all_healthy would sit false
+    # for up to 24 hours at a time for no reason at all. A signal that is red
+    # most of the time is a signal nobody reads, and the next real outage is the
+    # one that gets ignored.
+    #
+    # So the loops — which tick every 2, 30 and 60 minutes and are genuinely
+    # expected to have a recent successful run at all times — keep this boolean,
+    # and its meaning does not change under existing consumers. The crons are
+    # reported as themselves, plus one thing that is unambiguous whatever the
+    # schedule: a job whose LAST run failed.
+    all_healthy = all(
+        result.get(n, {}).get("status") == "success" for n in LOOP_JOB_NAMES
+    )
+
+    # Never-run is ambiguous for a cron; a failed run never is.
+    jobs_in_error = sorted(
+        n for n in known_jobs if result.get(n, {}).get("status") == "error"
+    )
 
     # Jobs with rows that nobody enumerates. Reported rather than hidden: a job
     # that writes to the ledger and is missing from `known_jobs` is invisible on
     # the screen while looking perfectly healthy in the database.
     ledger["untracked_jobs"] = [n for n in ledger["distinct_jobs"] if n not in known_jobs]
 
-    return {"jobs": result, "all_healthy": all_healthy, "ledger": ledger}
+    return {
+        "jobs": result,
+        "all_healthy": all_healthy,
+        "jobs_in_error": jobs_in_error,
+        "ledger": ledger,
+    }
 
 
 @router.get("/revenue-history")

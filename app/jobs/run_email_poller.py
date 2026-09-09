@@ -33,7 +33,9 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.deps import SessionLocal
+from app.models.job_models import JobName
 from app.services.email_poller_service import poll_all_orgs
+from app.services.job_run_service import record_job_run_sync
 
 
 def main():
@@ -41,23 +43,32 @@ def main():
     started_at = datetime.now(timezone.utc)
 
     try:
-        result = poll_all_orgs(db)
-        finished_at = datetime.now(timezone.utc)
+        # THE STDOUT SUMMARY IS NOT A RECORD. It goes to Render's cron run
+        # history, which is a different product surface that the platform's own
+        # System Health screen cannot read. This job ran every minute for the
+        # platform's entire life and never once appeared in job_runs, so it was
+        # not merely untracked — it was unobservable from inside the product.
+        with record_job_run_sync(JobName.EMAIL_POLLER, db_factory=SessionLocal) as m:
+            result = poll_all_orgs(db)
+            finished_at = datetime.now(timezone.utc)
 
-        summary = {
-            "job": "email_poller",
-            "started_at": started_at.isoformat(),
-            "finished_at": finished_at.isoformat(),
-            "duration_seconds": (finished_at - started_at).total_seconds(),
-            **result,
-        }
+            summary = {
+                "job": JobName.EMAIL_POLLER,
+                "started_at": started_at.isoformat(),
+                "finished_at": finished_at.isoformat(),
+                "duration_seconds": (finished_at - started_at).total_seconds(),
+                **result,
+            }
+            # Same counts the stdout blob carries, so the ledger and the cron
+            # history cannot disagree about what happened.
+            m.update({k: v for k, v in result.items() if isinstance(v, (int, float, str))})
 
         print(json.dumps(summary, indent=2))
         return summary
 
     except Exception as e:
         error_summary = {
-            "job": "email_poller",
+            "job": JobName.EMAIL_POLLER,
             "started_at": started_at.isoformat(),
             "error": str(e),
             "errors": 1,
