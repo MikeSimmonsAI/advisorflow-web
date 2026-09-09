@@ -117,10 +117,19 @@ export default function MyDay() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [wq, setWq] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    try { setData(await api.get('/sales/my-day')) }
+    try {
+      const [dayData, wqData] = await Promise.allSettled([
+        api.get('/sales/my-day'),
+        api.get('/workqueue/today'),
+      ])
+      if (dayData.status === 'fulfilled') setData(dayData.value)
+      else throw new Error(dayData.reason?.message || 'Could not load My Day.')
+      if (wqData.status === 'fulfilled') setWq(wqData.value)
+    }
     catch (e) { setError(e.message || 'Could not load My Day.') }
     finally { setLoading(false) }
   }, [])
@@ -165,6 +174,59 @@ export default function MyDay() {
           onClose={() => setCreating(false)}
           onCreated={opp => { setCreating(false); open(opp.id) }}
         />
+      )}
+
+      {/* ── Advisor Work Queue ─────────────────────────────────────────────
+          Fetched in parallel with my-day. Only renders when at least one
+          bucket has items — an empty queue is not a card, it's silence. */}
+      {wq && (wq.needs_text?.length + wq.needs_reply?.length +
+              wq.cadence_due?.length + wq.outcomes_needed?.length) > 0 && (
+        <div style={{
+          display: 'flex', gap: 12, flexWrap: 'wrap',
+          marginBottom: 18,
+          padding: '12px 16px',
+          borderRadius: 8,
+          background: 'var(--sw-surface2, #f3f6fa)',
+          border: '1px solid var(--sw-line, #dde3ea)',
+        }}>
+          <span style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.07em',
+            color: 'var(--sw-ink2, #6b7280)',
+            alignSelf: 'center', marginRight: 4,
+          }}>TODAY'S WORK QUEUE</span>
+          {wq.needs_text?.length > 0 && (
+            <span style={{
+              padding: '4px 12px', borderRadius: 20,
+              background: 'var(--sw-amber-bg, #fef3c7)',
+              color: 'var(--sw-amber-ink, #92400e)',
+              fontSize: 12, fontWeight: 600,
+            }}>{wq.needs_text.length} need text</span>
+          )}
+          {wq.needs_reply?.length > 0 && (
+            <span style={{
+              padding: '4px 12px', borderRadius: 20,
+              background: 'var(--sw-green-bg, #d1fae5)',
+              color: 'var(--sw-green-ink, #065f46)',
+              fontSize: 12, fontWeight: 600,
+            }}>{wq.needs_reply.length} to reply</span>
+          )}
+          {wq.cadence_due?.length > 0 && (
+            <span style={{
+              padding: '4px 12px', borderRadius: 20,
+              background: 'var(--sw-amber-bg, #fef3c7)',
+              color: 'var(--sw-amber-ink, #92400e)',
+              fontSize: 12, fontWeight: 600,
+            }}>{wq.cadence_due.length} cadence due</span>
+          )}
+          {wq.outcomes_needed?.length > 0 && (
+            <span style={{
+              padding: '4px 12px', borderRadius: 20,
+              background: 'var(--sw-surface3, #e5e7eb)',
+              color: 'var(--sw-ink, #1f2937)',
+              fontSize: 12, fontWeight: 600,
+            }}>{wq.outcomes_needed.length} outcome needed</span>
+          )}
+        </div>
       )}
 
       <div className="sw-metrics">
