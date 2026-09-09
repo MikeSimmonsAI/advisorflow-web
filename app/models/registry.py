@@ -59,6 +59,11 @@ import app.models.demo_models  # noqa: F401  (imported for side effects)
 # nowhere to write. These tables plus Opportunity.customer_organization_id are
 # the ONLY places the brand-sales tree and the customer-tenant tree meet.
 import app.models.implementation_models  # noqa: F401  (imported for side effects)
+# Launch Engine intake - the customer's ANSWERS, hanging off the
+# implementation above. NOTE: this file contains the whole module TWICE (a
+# merge artifact); this import is added to BOTH blocks on purpose, because an
+# import added to only one copy looks correct in a diff and half-works.
+import app.models.launch_intake_models  # noqa: F401  (imported for side effects)
 # Staff/brand-sales access activation (staff_activations) - same Base, same
 # reason. A control-plane identity has organization_id = NULL, so it cannot
 # use the customer activation table, whose organization_id is NOT NULL.
@@ -179,6 +184,11 @@ import app.models.demo_models  # noqa: F401  (imported for side effects)
 # nowhere to write. These tables plus Opportunity.customer_organization_id are
 # the ONLY places the brand-sales tree and the customer-tenant tree meet.
 import app.models.implementation_models  # noqa: F401  (imported for side effects)
+# Launch Engine intake - the customer's ANSWERS, hanging off the
+# implementation above. NOTE: this file contains the whole module TWICE (a
+# merge artifact); this import is added to BOTH blocks on purpose, because an
+# import added to only one copy looks correct in a diff and half-works.
+import app.models.launch_intake_models  # noqa: F401  (imported for side effects)
 # Staff/brand-sales access activation (staff_activations) - same Base, same
 # reason. A control-plane identity has organization_id = NULL, so it cannot
 # use the customer activation table, whose organization_id is NOT NULL.

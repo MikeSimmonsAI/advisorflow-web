@@ -99,6 +99,8 @@ from app.routers.compensation_router import router as compensation_router
 from app.routers.platform_context_router import router as platform_context_router
 # Customer provisioning: create, locate, staff, entitle, review, activate.
 from app.routers.customers_router import router as customers_router
+from app.routers.launch_router import router as launch_router
+from app.routers.launch_router import god_router as launch_god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
@@ -579,6 +581,11 @@ app.include_router(customer_360_router)  # Customer 360 + customer lifecycle —
 app.include_router(compensation_router)  # Compensation Command Center + ledger + settlement
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
 app.include_router(customers_router)          # Customer provisioning engine
+# Launch Engine — the customer's onboarding intake, and the staff view of it.
+# NOT mounted under /onboarding: that prefix belongs to public self-serve
+# signup and has nothing to do with customer implementation despite the name.
+app.include_router(launch_router)             # /launch  — customer, session-scoped
+app.include_router(launch_god_router)         # /god/launch — staff, god_admin only
 app.include_router(email_tracking_router)
 # Stripe billing: /billing/plans is public; subscription/checkout/portal are
 # org_admin+ (each org manages its own card); /billing/all is god_admin only.
