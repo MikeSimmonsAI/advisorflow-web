@@ -576,7 +576,7 @@ class User(Base):
     # A NULL here is NOT "unknown org" — it is a positive assertion that this
     # person has no customer tenancy. Never backfill it to make a query simpler,
     # and never let a write path default it. Tenant writes are gated by
-    # app/services/tenancy.py; see claude/SALES_WORKSPACE_ARCHITECTURE.md.
+    # app/services/lead_scope.py and Membership; see claude/SALES_WORKSPACE_ARCHITECTURE.md.
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)

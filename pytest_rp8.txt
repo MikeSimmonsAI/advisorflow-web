@@ -1,0 +1,75 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-8.3.3, pluggy-1.6.0 -- C:\Program Files\Python312\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Dev\advisorflow-web
+configfile: pytest.ini
+plugins: anyio-4.14.2
+collecting ... collected 1 item
+
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed FAILED [100%]
+
+================================== FAILURES ===================================
+_______________ TestLegacyAdapter.test_rp8_legacy_bypass_closed _______________
+
+self = <test_merge_readiness.TestLegacyAdapter object at 0x000002D0BC52D1F0>
+
+    def test_rp8_legacy_bypass_closed(self):
+        """
+        REVERT PROOF: Prove the bypass is closed.
+    
+        Phase A (BREAK): Monkey-patch _stage_batch in leads_router to a no-op
+        (simulating restoring the old direct call to import_leads_from_excel).
+        \u2192 GATE FAILS: No ImportStagedRow records created, pipeline bypassed.
+    
+        Phase B (RESTORE): Restore canonical _stage_batch.
+        \u2192 GATE PASSES: ImportStagedRow records created with compliance fields.
+        """
+        import app.routers.leads_router as lr
+    
+        csv = b"First Name,Phone,Allow Emails?,Allow Text Message?\nPat,2145550116,Yes,No\n"
+        client = _client(self.db)
+        hdr = _hdr(self.admin, self.db)
+    
+        # \u2500\u2500 PHASE A: BREAK \u2014 no-op _stage_batch (simulates bypass) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+>       original_stage_batch = lr._stage_batch
+E       AttributeError: module 'app.routers.leads_router' has no attribute '_stage_batch'
+
+tests\test_merge_readiness.py:1203: AttributeError
+============================== warnings summary ===============================
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\_internal\_config.py:291: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+  C:\Dev\advisorflow-web\app\routers\god_router.py:914: DeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    scope: str = Query("admins", regex="^(admins|all|internal|tenant)$"),
+
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\fields.py:801: PydanticDeprecatedSince20: `max_items` is deprecated and will be removed, use `max_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warn('`max_items` is deprecated and will be removed, use `max_length` instead', DeprecationWarning)
+
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+  C:\Dev\advisorflow-web\app\main.py:733: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_merge_readiness.py::TestLegacyAdapter::test_rp8_legacy_bypass_closed - AttributeError: module 'app.routers.leads_router' has no attribute '_stage_batch'
+======================= 1 failed, 7 warnings in 10.45s ========================
+DONE_FAIL 

@@ -35,151 +35,263 @@
   ],
   "items": [
     {
-      "id": "IDENT-01", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-01",
+      "system": "Identity, Authentication & Authorization",
       "title": "Password login, JWT refresh, logout, self-service password change",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "app/routers/auth_router.py (11 routes); tests/test_self_password_change.py; tests/test_user_management.py",
       "notes": "Login and verify are the only public auth routes; every other token route is present and gated.",
-      "decision_required": null, "blocked_reason": null, "next_action": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "IDENT-02", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-02",
+      "system": "Identity, Authentication & Authorization",
       "title": "Passwordless activation links for customer admins and brand sales staff",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "auth_router /activation, /activation/accept, /staff-activation, /staff-activation/accept; app/services/customer_activation.py, staff_activation.py; app/models/staff_models.py",
       "notes": "Satisfies the standing rule that no operator ever needs a shell or a seeded password to onboard a person.",
-      "decision_required": null, "blocked_reason": null, "next_action": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "IDENT-03", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-03",
+      "system": "Identity, Authentication & Authorization",
       "title": "God-initiated password reset with audit",
-      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "admin_router POST /users/{user_id}/reset-password (require_super_admin); tests/test_god_password_reset.py; frontend/src/pages/god/ResetPasswordDialog.jsx",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null,
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "IDENT-04", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-04",
+      "system": "Identity, Authentication & Authorization",
       "title": "Multi-context identity: one human, many workspaces, explicit entry",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "auth_router GET /my-contexts, GET /workspace/{organization_id}; app/services/workspace_access.py; frontend/src/auth/routeAuthority.js classifies PLATFORM / EXECUTIVE / BRAND SALES / CUSTOMER",
       "notes": "Route authority decides whether X-Org-Override is sent at all. This is what closed the stale-context leak.",
-      "decision_required": null, "blocked_reason": null, "next_action": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "IDENT-05", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-05",
+      "system": "Identity, Authentication & Authorization",
       "title": "Membership scope model (platform / brand sales org / customer org) with granted_by audit",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "app/models/sales_models.py Membership with SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG, granted_by, created_at",
       "notes": "Tenancy is a membership, never an inferred email or a NULL organization_id.",
-      "decision_required": null, "blocked_reason": null, "next_action": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "IDENT-06", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-06",
+      "system": "Identity, Authentication & Authorization",
       "title": "Brand-scoped capability grants and capability-scope health",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["IDENT-05"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "IDENT-05"
+      ],
+      "completed_on": null,
       "evidence": "god_pricing_router GET/PUT /brand-access, GET /capability-scope-health; app/models UserCapabilityGrant; tests/test_brand_capability_scope.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null,
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "IDENT-07", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-07",
+      "system": "Identity, Authentication & Authorization",
       "title": "Rate limit POST /auth/login and POST /auth/verify",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": "2026-09-09",
-      "evidence": "auth_router.py: @limiter.shared_limit('30/minute;200/hour', scope='auth-login') on POST /auth/login. shared_limit scope ensures any future /auth/verify alias draws the same budget. /auth/verify does not exist as a separate route. Second layer: in-memory per-(IP,email) throttle (_login_throttle_check) — 10 failures in 15 min triggers 429. Both mechanisms confirmed in place.",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
+      "evidence": "auth_router.py: @limiter.shared_limit('30/minute;200/hour', scope='auth-login') on POST /auth/login. shared_limit scope ensures any future /auth/verify alias draws the same budget. /auth/verify does not exist as a separate route. Second layer: in-memory per-(IP,email) throttle (_login_throttle_check) \u00e2\u20ac\u201d 10 failures in 15 min triggers 429. Both mechanisms confirmed in place.",
       "notes": null,
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "IDENT-08", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-08",
+      "system": "Identity, Authentication & Authorization",
       "title": "Rate limit the public token-resolve endpoints",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["IDENT-07"], "completed_on": "2026-09-09",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "IDENT-07"
+      ],
+      "completed_on": "2026-09-09",
       "evidence": "All public token endpoints carry @limiter.limit('60/minute') (per-IP): calendar_router /booking/{token} (line 89), proposal_router /portal/resolve/{token} (line 669), sales_proposal_router /deal-room/{token} (739) and /public/demo/{token} (926), sales_scheduling_router all four /appointments/confirm/{token} variants (858,905,976,1003). /survey/{token} does not exist. No endpoint is unlimited.",
       "notes": null,
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "IDENT-09", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-09",
+      "system": "Identity, Authentication & Authorization",
       "title": "MFA / SSO for platform and brand staff",
-      "status": "NOT_BUILT", "priority": "P2", "depends_on": [], "completed_on": null,
+      "status": "NOT_BUILT",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "Searched app/ for mfa, totp, two_factor, saml, oidc, single sign - zero matches.",
       "notes": "A god_admin account with a password and no second factor holds every brand and every customer.",
       "decision_required": "Is MFA required before more brands are onboarded, or is it acceptable for the current operator set?",
-      "blocked_reason": null, "next_action": "Decide scope (god and brand staff only, or everyone) before designing.",
+      "blocked_reason": null,
+      "next_action": "Decide scope (god and brand staff only, or everyone) before designing.",
       "previously_missed": true
     },
     {
-      "id": "IDENT-10", "system": "Identity, Authentication & Authorization",
+      "id": "IDENT-10",
+      "system": "Identity, Authentication & Authorization",
       "title": "POST /admin/users/{user_id}/force-logout has no caller",
-      "status": "REMOVE", "priority": "P3", "depends_on": [], "completed_on": null,
-      "evidence": "_audit_reach2.txt: no frontend file references the path; admin_router.py force_logout_user",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
+      "evidence": "POST /admin/users/{user_id}/force-logout not found in codebase \u2014 already removed before this pass. No further action needed.",
       "notes": "A real operator capability with no way to invoke it.",
-      "decision_required": "Give it a button on the God user screen, or delete it.",
-      "blocked_reason": null, "next_action": "Decide, then act. Do not leave it half-present.",
-      "previously_missed": true
-    },
-    {
-      "id": "GOD-01", "system": "Platform Ownership & God Mode Operations",
-      "title": "Platform / brand / customer context switching with an explicit banner and exit",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["IDENT-04"], "completed_on": null,
-      "evidence": "platform_context_router (9 routes, all require_god); frontend ContextBanner.jsx; tests/test_context_boundaries.py, tests/test_god_navigation.py",
-      "notes": "Platform operations are no longer silently scoped by a stale customer context.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "GOD-02", "system": "Platform Ownership & God Mode Operations",
-      "title": "Neutral platform owner identity (owner-state, owner-neutralize)",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["GOD-01"], "completed_on": null,
-      "evidence": "platform_context_router GET /owner-state, POST /owner-neutralize; app/services/platform_owner.py",
-      "notes": "Keeps customer operational activity from pointing back at the platform God account.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "GOD-03", "system": "Platform Ownership & God Mode Operations",
-      "title": "God Mode navigation, shell and in-product module status board",
-      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": null,
-      "evidence": "frontend/src/pages/god/ProductStatus.jsx MODULES drives both the panel and the GodShell rail; 13 live modules, 7 declared roadmap items each with a 'needs' string",
-      "notes": "No dead nav items: a module is only in the rail when live:true and a route exists.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "GOD-04", "system": "Platform Ownership & God Mode Operations",
-      "title": "Wire the God roadmap board to this data file",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["GOD-03"], "completed_on": "2026-09-09",
-      "evidence": "RoadmapBoard.jsx imports platformRoadmap.json directly; renders all items grouped by system with filter tabs (needs action / all / complete), full-text search, per-system progress bars, expand-on-click detail rows, and summary KPI strip. Routed at /god/roadmap in App.jsx; 'Roadmap' nav link in GodShell.jsx nav rail.",
-      "notes": "ProductStatus.jsx kept as the nav board it already was; RoadmapBoard is the platform-wide feature tracker.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "GOD-05", "system": "Platform Ownership & God Mode Operations",
+      "id": "GOD-01",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "Platform / brand / customer context switching with an explicit banner and exit",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "IDENT-04"
+      ],
+      "completed_on": null,
+      "evidence": "platform_context_router (9 routes, all require_god); frontend ContextBanner.jsx; tests/test_context_boundaries.py, tests/test_god_navigation.py",
+      "notes": "Platform operations are no longer silently scoped by a stale customer context.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "GOD-02",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "Neutral platform owner identity (owner-state, owner-neutralize)",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "GOD-01"
+      ],
+      "completed_on": null,
+      "evidence": "platform_context_router GET /owner-state, POST /owner-neutralize; app/services/platform_owner.py",
+      "notes": "Keeps customer operational activity from pointing back at the platform God account.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "GOD-03",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "God Mode navigation, shell and in-product module status board",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
+      "evidence": "frontend/src/pages/god/ProductStatus.jsx MODULES drives both the panel and the GodShell rail; 13 live modules, 7 declared roadmap items each with a 'needs' string",
+      "notes": "No dead nav items: a module is only in the rail when live:true and a route exists.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "GOD-04",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "Wire the God roadmap board to this data file",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "GOD-03"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "RoadmapBoard.jsx imports platformRoadmap.json directly; renders all items grouped by system with filter tabs (needs action / all / complete), full-text search, per-system progress bars, expand-on-click detail rows, and summary KPI strip. Routed at /god/roadmap in App.jsx; 'Roadmap' nav link in GodShell.jsx nav rail.",
+      "notes": "ProductStatus.jsx kept as the nav board it already was; RoadmapBoard is the platform-wide feature tracker.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "GOD-05",
+      "system": "Platform Ownership & God Mode Operations",
       "title": "Control-plane audit log for privileged actions",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "audit_log_router (2 routes, require_admin); god_ops_router GET /audit; app/models AuditLogEntry; tests/test_audit_log_router.py, tests/test_audit_log_wiring.py",
       "notes": "Executive assignment and unassignment write audit entries against the organization.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "GOD-06", "system": "Platform Ownership & God Mode Operations",
+      "id": "GOD-06",
+      "system": "Platform Ownership & God Mode Operations",
       "title": "Demo / scenario environment with a side-effect firewall",
-      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "demo_router (6 routes, require_demo_env / require_demo_operator); app/services/environment.py, demo_scenarios/, demo_runner.py; sample_data_router (require_super_admin)",
       "notes": "GET /demo/environment is deliberately public so a client can tell which environment it is in before it offers demo controls.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "GOD-07", "system": "Platform Ownership & God Mode Operations",
+      "id": "GOD-07",
+      "system": "Platform Ownership & God Mode Operations",
       "title": "Operator diagnostics exist but are curl-only",
-      "status": "COMPLETE", "priority": "P3", "depends_on": [], "completed_on": "2026-09-09",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
       "evidence": "docs/operator-diagnostics-runbook.md: 9 curl-only endpoints documented with curl examples, parameters, and what to look for. Twilio, phone-audit, voice attempt-policy, and user-access diagnostics already have UI screens. Decision taken: accept as documented curl endpoints.",
       "notes": "Nine real, working, god-gated diagnostics. Decision: curl-only is acceptable for operator tooling; knowledge now captured in runbook rather than manufactured as a UI.",
       "decision_required": null,
@@ -188,280 +300,548 @@
       "previously_missed": true
     },
     {
-      "id": "GOD-08", "system": "Platform Ownership & God Mode Operations",
+      "id": "GOD-08",
+      "system": "Platform Ownership & God Mode Operations",
       "title": "Customer cleanup preview / execute / rules / history has no UI",
-      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": "2026-09-09",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
       "evidence": "CustomerCleanupPanel added to Customer360.jsx: loads rules (GET /cleanup/rules), previews scoped to orgId (POST /cleanup/preview), shows categories breakdown + confirmation_phrase, execute behind typed confirmation (POST /cleanup/execute), shows receipt, shows past cleanups touching this customer (GET /cleanup/history, filtered client-side by org_id).",
       "notes": "Panel is collapsed by default; rules and history load lazily on first expand. Execute button stays disabled until the exact confirmation phrase is typed.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "GOD-09", "system": "Platform Ownership & God Mode Operations",
+      "id": "GOD-09",
+      "system": "Platform Ownership & God Mode Operations",
       "title": "Cross-org lead browser",
-      "status": "NOT_BUILT", "priority": "P3", "depends_on": [], "completed_on": null,
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "GET /god/leads exists and returns data; no screen renders it (ProductStatus 'godleads' roadmap item)",
       "notes": "The in-product roadmap already states this accurately.",
-      "decision_required": null, "blocked_reason": null, "next_action": "Build the screen, or drop the endpoint.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Build the screen, or drop the endpoint.",
       "previously_missed": false
     },
     {
-      "id": "GOD-10", "system": "Platform Ownership & God Mode Operations",
+      "id": "GOD-10",
+      "system": "Platform Ownership & God Mode Operations",
       "title": "Durable record of scheduled work (job runs)",
-      "status": "NOT_BUILT", "priority": "P2", "depends_on": [], "completed_on": null,
+      "status": "NOT_BUILT",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "Three asyncio loops in app/main.py:977-979 (review request 30m, AI conversation 2m, cadence 1h) plus Render cron entry points in app/jobs/. Searched app/models for JobRun / scheduler_run / snapshot table - none exists. health_router.py:66 says outright it returns None until a scheduler-run table is added.",
       "notes": "Nothing can answer 'did the cadence run last night' after the fact. The health screen is honest about not knowing, which is the right behaviour and also the reason this matters.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": "Add a job_runs table written by every loop and cron entry point, then let System Health read it.",
       "previously_missed": false
     },
     {
-      "id": "EXEC-01", "system": "Executive Portfolio Layer",
+      "id": "EXEC-01",
+      "system": "Executive Portfolio Layer",
       "title": "One canonical executive portfolio authority enforced server-side",
-      "status": "COMPLETE", "priority": "P0", "depends_on": ["IDENT-05"],
+      "status": "COMPLETE",
+      "priority": "P0",
+      "depends_on": [
+        "IDENT-05"
+      ],
       "completed_on": "commit 5092028",
       "evidence": "app/services/executive_authority.py portfolio_authority / authorized_org_ids / may_view_org; every org query in executive_router narrowed through it; tests/test_executive_portfolio_boundary.py (three executives, same brand, different portfolios)",
       "notes": "An executive sees ONLY explicitly assigned organizations. A role is not a portfolio. Unauthorized and nonexistent org ids return the same not-found. Do not weaken this boundary.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "EXEC-02", "system": "Executive Portfolio Layer",
+      "id": "EXEC-02",
+      "system": "Executive Portfolio Layer",
       "title": "Executive Command Center, Portfolio Health and organization drill-down",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["EXEC-01"],
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "EXEC-01"
+      ],
       "completed_on": "commit 74bba05",
       "evidence": "executive_router 16 routes; app/services/executive_portfolio.py; frontend/src/pages/executive/*; tests/test_executive_command_center.py, test_executive_command_experience.py, test_executive_customer_health.py, test_executive_suite.py",
       "notes": "Health carries human-readable reasons. MRR is null rather than 0 when a plan does not resolve; rates are null without a denominator.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "EXEC-03", "system": "Executive Portfolio Layer",
+      "id": "EXEC-03",
+      "system": "Executive Portfolio Layer",
       "title": "Executive surface scoping (data-surface platform / executive / workspace)",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["EXEC-02"], "completed_on": "commit 74bba05",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "EXEC-02"
+      ],
+      "completed_on": "commit 74bba05",
       "evidence": "frontend/src/pages/executive/ExecStyles.jsx; routeAuthority.js EXECUTIVE prefix classified before the CUSTOMER fallback so executive routes never send X-Org-Override",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "EXEC-04", "system": "Executive Portfolio Layer",
+      "id": "EXEC-04",
+      "system": "Executive Portfolio Layer",
       "title": "God Mode executive portfolio assignment UI",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["EXEC-01"], "completed_on": "commit 5092028",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "EXEC-01"
+      ],
+      "completed_on": "commit 5092028",
       "evidence": "executive_router /admin/executives, /admin/portfolio/{user_id}, /admin/portfolio/assign, /admin/portfolio/unassign (all require_god, all audited); frontend/src/pages/god/GodExecutiveAccess.jsx at /god/executive-access",
       "notes": "Unassign deactivates the membership, never deletes it. The screen re-reads from the server after each toggle rather than flipping local state.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "SALES-01", "system": "Brand Sales Workspace",
+      "id": "SALES-01",
+      "system": "Brand Sales Workspace",
       "title": "Opportunity lifecycle: create, discovery, notes, closing, reassignment",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["IDENT-05"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "IDENT-05"
+      ],
+      "completed_on": null,
       "evidence": "sales_router 14 routes (require_sales_member; reassign is require_sales_manager); app/services/sales_access.py; tests/test_custom_deal_endpoint.py, test_team_activity_board.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "SALES-02", "system": "Brand Sales Workspace",
+      "id": "SALES-02",
+      "system": "Brand Sales Workspace",
       "title": "Manager command: rep detail, approvals, pipeline projection",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SALES-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SALES-01"
+      ],
+      "completed_on": null,
       "evidence": "sales_manager_router 5 routes (require_sales_manager); app/services/manager_workspace.py, pipeline_projection.py, pricing_approvals.py",
       "notes": "Pipeline projection is split into honest components rather than one blended figure.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "SALES-03", "system": "Brand Sales Workspace",
+      "id": "SALES-03",
+      "system": "Brand Sales Workspace",
       "title": "Sales workspace has no test file of its own",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SALES-01"], "completed_on": "2026-09-09",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SALES-01"
+      ],
+      "completed_on": "2026-09-09",
       "evidence": "tests/test_sales_workspace.py (392 lines, 8 test classes): rep-vs-manager authority, brand isolation, CRUD round-trip, team access. tests/test_sales_scheduling.py (54 tests): auth guards, availability, brand isolation, cross-brand participant rejection, confirmation token GET side-effect-free, POST confirm/decline, JSON context endpoint. All 54 pass.",
       "notes": "43 routes across the three largest sales files (22 + 21 + 14, 4093 lines) with no dedicated regression suite. The suite is green at 1655 and these routes are largely untested inside it.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "SALES-04", "system": "Brand Sales Workspace",
+      "id": "SALES-04",
+      "system": "Brand Sales Workspace",
       "title": "Sales workspace appearance tokens (light / dark / system)",
-      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": "commit 307ce78",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": "commit 307ce78",
       "evidence": "frontend/src/pages/sales/SalesStyles.jsx tokenized; only two #fff literals remain, both label-on-teal; tests/test_experience_severity.py",
       "notes": "This was the cause of white rectangles inside dark God Mode.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "BILL-01", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-01",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Brand-scoped plan catalogue and server-side price resolution",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "god_billing_router 8 routes (require_god); app/services/billing_catalog.py; tests/test_billing_catalog.py, test_billing_operations.py",
       "notes": "The client never names a price. The server resolves plan and price.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "BILL-02", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-02",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Stripe checkout, portal, plan change in place, scheduled downgrade",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["BILL-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "BILL-01"
+      ],
+      "completed_on": null,
       "evidence": "billing_router 8 routes; change-plan modifies in place rather than creating a second subscription; downgrade uses a Stripe Subscription Schedule; tests/test_billing_plan_change.py, test_billing_acceptance.py",
       "notes": "Credentials are read from environment only. Sandbox until explicitly approved for production.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "BILL-03", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-03",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Webhook: signature verification, fail-closed, idempotency, invoices and payments",
-      "status": "COMPLETE", "priority": "P0", "depends_on": ["BILL-02"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P0",
+      "depends_on": [
+        "BILL-02"
+      ],
+      "completed_on": null,
       "evidence": "billing_router POST /webhook verifies the Stripe signature and returns 503 when the secret is absent; app/services/billing_webhook.py enforces stripe_event_id idempotency and resolves the plan from the Stripe price id, not from metadata; tests/test_billing_webhook.py",
       "notes": "Checked directly during the P0 sweep. No payment integrity defect found.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "BILL-04", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-04",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Failed-payment consequence (grace period, suspension)",
-      "status": "POLICY_REQUIRED", "priority": "P1", "depends_on": ["BILL-03"], "completed_on": null,
+      "status": "POLICY_REQUIRED",
+      "priority": "P1",
+      "depends_on": [
+        "BILL-03"
+      ],
+      "completed_on": null,
       "evidence": "app/models/billing_models.py:241 and app/services/billing_policy.py:27 - past_due_grace_days and suspend_on_past_due are deliberately NULL; app/services/entitlements.py:271 treats unset as 'do not suspend'; evosys_billing_seed.py leaves the row NULL on purpose",
       "notes": "The code is correct and refuses to invent a consequence. Today a failed payment changes nothing.",
       "decision_required": "How many days past due before service is restricted, and what exactly is restricted?",
-      "blocked_reason": null, "next_action": "Mike decides, then set the column through the god billing screen. Do not seed a default.",
+      "blocked_reason": null,
+      "next_action": "Mike decides, then set the column through the god billing screen. Do not seed a default.",
       "previously_missed": false
     },
     {
-      "id": "BILL-05", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-05",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Subscription cancellation timing",
-      "status": "POLICY_REQUIRED", "priority": "P1", "depends_on": ["BILL-03"], "completed_on": null,
+      "status": "POLICY_REQUIRED",
+      "priority": "P1",
+      "depends_on": [
+        "BILL-03"
+      ],
+      "completed_on": null,
       "evidence": "billing_policy.py:28 cancel_timing OPEN; billing_router.py:500 refuses rather than guessing",
       "notes": "Immediate versus end-of-period is a commercial promise, not a default.",
       "decision_required": "Does cancellation take effect immediately or at period end?",
-      "blocked_reason": null, "next_action": "Mike decides.", "previously_missed": false
-    },
-    {
-      "id": "BILL-06", "system": "Commercial: Billing, Plans & Entitlements",
-      "title": "Trial length",
-      "status": "POLICY_REQUIRED", "priority": "P2", "depends_on": ["BILL-03"], "completed_on": null,
-      "evidence": "billing_policy.py:29 trial_days OPEN; evosys_billing_seed.py:227 NOT SEEDED",
-      "notes": null,
-      "decision_required": "Is there a trial, and how long?",
-      "blocked_reason": null, "next_action": "Mike decides.", "previously_missed": false
-    },
-    {
-      "id": "BILL-07", "system": "Commercial: Billing, Plans & Entitlements",
-      "title": "Refund and chargeback compensation clawback",
-      "status": "POLICY_REQUIRED", "priority": "P1", "depends_on": ["BILL-03", "COMP-02"], "completed_on": null,
-      "evidence": "billing_models.py:266 - a refund is RECORDED but no clawback is applied; billing_policy.py:176 'Clawback - OPEN, AND NOT IMPLEMENTED'",
-      "notes": "A refunded payment currently leaves the commission earned from it untouched. That is a money defect waiting on a decision, not on code.",
-      "decision_required": "Does a refund or chargeback claw back the commission, in full or pro rata, and within what window?",
-      "blocked_reason": null, "next_action": "Mike decides, then implement against the existing CompensationEntry model.",
+      "blocked_reason": null,
+      "next_action": "Mike decides.",
       "previously_missed": false
     },
     {
-      "id": "BILL-08", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-06",
+      "system": "Commercial: Billing, Plans & Entitlements",
+      "title": "Trial length",
+      "status": "POLICY_REQUIRED",
+      "priority": "P2",
+      "depends_on": [
+        "BILL-03"
+      ],
+      "completed_on": null,
+      "evidence": "billing_policy.py:29 trial_days OPEN; evosys_billing_seed.py:227 NOT SEEDED",
+      "notes": null,
+      "decision_required": "Is there a trial, and how long?",
+      "blocked_reason": null,
+      "next_action": "Mike decides.",
+      "previously_missed": false
+    },
+    {
+      "id": "BILL-07",
+      "system": "Commercial: Billing, Plans & Entitlements",
+      "title": "Refund and chargeback compensation clawback",
+      "status": "POLICY_REQUIRED",
+      "priority": "P1",
+      "depends_on": [
+        "BILL-03",
+        "COMP-02"
+      ],
+      "completed_on": null,
+      "evidence": "billing_models.py:266 - a refund is RECORDED but no clawback is applied; billing_policy.py:176 'Clawback - OPEN, AND NOT IMPLEMENTED'",
+      "notes": "A refunded payment currently leaves the commission earned from it untouched. That is a money defect waiting on a decision, not on code.",
+      "decision_required": "Does a refund or chargeback claw back the commission, in full or pro rata, and within what window?",
+      "blocked_reason": null,
+      "next_action": "Mike decides, then implement against the existing CompensationEntry model.",
+      "previously_missed": false
+    },
+    {
+      "id": "BILL-08",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Plan pricing is stated in two places that can drift",
-      "status": "CONSOLIDATE", "priority": "P2", "depends_on": ["BILL-01"], "completed_on": null,
+      "status": "CONSOLIDATE",
+      "priority": "P2",
+      "depends_on": [
+        "BILL-01"
+      ],
+      "completed_on": null,
       "evidence": "app/routers/concierge_router.py hard-codes Starter/Growth/Professional/Enterprise prices, onboarding fees, lead caps, overage rates and the month-to-month uplift inside the public AI concierge system prompt. The billing catalogue holds the same figures per brand.",
       "notes": "The concierge is live on bookaboost.live and quotes prices to prospects. Nothing keeps it in step with the catalogue - a price change in God Mode does not change what the concierge says.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": "Have the concierge read plan pricing from billing_catalog at request time, or state plainly in its prompt that it must not quote figures.",
       "previously_missed": true
     },
     {
-      "id": "BILL-09", "system": "Commercial: Billing, Plans & Entitlements",
+      "id": "BILL-09",
+      "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Plan entitlement enforcement, shipped unset",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["BILL-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "BILL-01"
+      ],
+      "completed_on": null,
       "evidence": "app/services/entitlements.py, plan_limits.py, capabilities.py; tests/test_plan_limits.py, test_plan_limits_enforcement.py, test_plan_limits_coverage.py",
       "notes": "Limits are enforced server-side and ship unset so no customer is silently capped by a default nobody chose.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "COMP-01", "system": "Sales Compensation & Pricing Authority",
+      "id": "COMP-01",
+      "system": "Sales Compensation & Pricing Authority",
       "title": "Commission policies, plans, rules and caps with an audit trail",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["IDENT-06"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "IDENT-06"
+      ],
+      "completed_on": null,
       "evidence": "god_pricing_router 14 routes (all require_god); PricingPolicy model; tests/test_god_pricing_console.py, test_compensation_command_center.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "COMP-02", "system": "Sales Compensation & Pricing Authority",
+      "id": "COMP-02",
+      "system": "Sales Compensation & Pricing Authority",
       "title": "Compensation ledger: earn, hold, promote, pay, with collection recording",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["COMP-01", "BILL-03"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "COMP-01",
+        "BILL-03"
+      ],
+      "completed_on": null,
       "evidence": "compensation_router 7 routes; app/services/compensation_ledger.py, compensation.py, billing_compensation.py; a Stripe payment becomes a compensation earning; tests/test_compensation_command_center.py",
       "notes": "Plan is snapshotted onto the entry so a later catalogue change cannot rewrite what was earned.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "COMP-03", "system": "Sales Compensation & Pricing Authority",
+      "id": "COMP-03",
+      "system": "Sales Compensation & Pricing Authority",
       "title": "Compensation attention signals on the canonical severity vocabulary",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["COMP-02"], "completed_on": "commit 307ce78",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "COMP-02"
+      ],
+      "completed_on": "commit 307ce78",
       "evidence": "app/services/severity.py (healthy / attention / action_required / unavailable / no_data, unknown normalises to unavailable and never to healthy); compensation_ledger.attention(); tests/test_experience_severity.py",
       "notes": "Consumed by Platform Health, System Health and Compensation so one word means one thing platform-wide.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "COMP-04", "system": "Sales Compensation & Pricing Authority",
+      "id": "COMP-04",
+      "system": "Sales Compensation & Pricing Authority",
       "title": "Per-deal pricing resolver and honest pipeline projection",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["COMP-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "COMP-01"
+      ],
+      "completed_on": null,
       "evidence": "app/services/deal_pricing.py, package_pricing.py, pricing_authority.py, pipeline_projection.py; tests/test_custom_deal_endpoint.py",
       "notes": "Explains the one-time versus recurring split rather than blending them into a single headline.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "CUST-01", "system": "Customer Provisioning, Lifecycle & Customer 360",
+      "id": "CUST-01",
+      "system": "Customer Provisioning, Lifecycle & Customer 360",
       "title": "Customer provisioning: org, locations, users, features, readiness, activation",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["IDENT-02"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "IDENT-02"
+      ],
+      "completed_on": null,
       "evidence": "customers_router 22 routes (all require_god); app/services/customer_provisioning.py, customer_readiness.py, provisioning.py; tests/test_user_management.py, test_plan_limits_enforcement.py",
       "notes": "No seed script, no shell, no direct insert: a customer is created and activated entirely from the product.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "CUST-02", "system": "Customer Provisioning, Lifecycle & Customer 360",
+      "id": "CUST-02",
+      "system": "Customer Provisioning, Lifecycle & Customer 360",
       "title": "Customer 360 and lifecycle: cancellation, offboarding, archive, reactivate, deletion impact",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["CUST-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "CUST-01"
+      ],
+      "completed_on": null,
       "evidence": "customer_lifecycle_router 10 routes (all require_god); app/services/customer_360.py, customer_lifecycle.py; tests/test_customer_360_lifecycle.py, test_customer_360_authorization.py",
       "notes": "Memberships are preserved on archive so a returning customer is not rebuilt from scratch.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "CUST-03", "system": "Customer Provisioning, Lifecycle & Customer 360",
+      "id": "CUST-03",
+      "system": "Customer Provisioning, Lifecycle & Customer 360",
       "title": "Implementation tracking from Won to Launch",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["CUST-01", "SALES-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "CUST-01",
+        "SALES-01"
+      ],
+      "completed_on": null,
       "evidence": "god_ops_router implementations routes (owner, status, milestones, launch, billing, customer-admin); app/services/implementation_service.py; frontend GodImplementations.jsx, GodImplementationDetail.jsx",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "CUST-04", "system": "Customer Provisioning, Lifecycle & Customer 360",
+      "id": "CUST-04",
+      "system": "Customer Provisioning, Lifecycle & Customer 360",
       "title": "GET /god/ops/won-queue has no caller",
-      "status": "REMOVE", "priority": "P3", "depends_on": ["CUST-03"], "completed_on": null,
-      "evidence": "_audit_reach2.txt; god_ops_router won_queue (require_sales_member)",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [
+        "CUST-03"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "GET /god/ops/won-queue not found in codebase \u2014 already removed before this pass. No further action needed.",
       "notes": "The Won handoff is visible elsewhere; this endpoint is a second answer to the same question with no caller.",
-      "decision_required": "Delete, or surface it as the sales-side Won queue?",
-      "blocked_reason": null, "next_action": "Decide.", "previously_missed": true
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
     },
     {
-      "id": "LEAD-01", "system": "Lead Data Platform",
+      "id": "LEAD-01",
+      "system": "Lead Data Platform",
       "title": "Lead model, scoping, tiering, timeline, duplicate handling and capacity",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "leads_router 31 routes, 2460 lines; app/services/lead_scope.py, dedup_service.py, lead_capacity.py; tests/test_leads_router.py, test_lead_capacity.py, test_dedup_service.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "LEAD-02", "system": "Lead Data Platform",
+      "id": "LEAD-02",
+      "system": "Lead Data Platform",
       "title": "leads_router is a 2460-line, 31-route, 15-service file",
-      "status": "CONSOLIDATE", "priority": "P2", "depends_on": ["LEAD-01"], "completed_on": null,
+      "status": "CONSOLIDATE",
+      "priority": "P2",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
       "evidence": "_audit_systems.txt: leads_router imports ai_conversation_service, cadence_service, compliance_service, dedup_service, email_service, import_commit_service, import_permissions, import_service, import_staging_service, lead_capacity, lead_scope, message_state, platform_owner, public_identity, sms_service. It also declares POST /demo-request twice.",
       "notes": "The duplicate POST /demo-request is the visible symptom: two handlers, one path, and only one of them can ever run. This file is where lead reads, imports, maintenance, messaging and public intake all collided.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": "Split into leads_read, leads_import, leads_maintenance and leads_public. Resolve the duplicate demo-request route first and prove which handler was live.",
       "previously_missed": true
     },
     {
-      "id": "LEAD-03", "system": "Lead Data Platform",
+      "id": "LEAD-03",
+      "system": "Lead Data Platform",
       "title": "Import batch pipeline with a staged permission ladder",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["LEAD-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
       "evidence": "import_batch_router 10 routes gated by require_import_leads / _review / _commit / _admin; app/services/import_staging_service.py, import_commit_service.py, import_permissions.py; tests/test_import_intelligence.py, test_merge_readiness.py",
       "notes": "Upload, review, mark ready and commit are genuinely separate authorities, not one admin flag.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "LEAD-04", "system": "Lead Data Platform",
+      "id": "LEAD-04",
+      "system": "Lead Data Platform",
       "title": "Lead qualification engine with per-org rules and a God diagnostic",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["LEAD-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
       "evidence": "qualification_router 8 routes; app/services/qualification.py, qualification_diagnostic.py; frontend/src/pages/god/QualificationDiagnostic.jsx; tests referenced across 10 suites",
       "notes": "Platform defaults are generic; EvoSys-specific rules live in org-scoped rows, not in the engine.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "LEAD-05", "system": "Lead Data Platform",
+      "id": "LEAD-05",
+      "system": "Lead Data Platform",
       "title": "POST /crm/inbound/{org_id} accepts leads with no authentication",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": "2026-09-09",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
       "evidence": "crm_router.py inbound_leads: Bearer IntegrationCredential (kind=crm_inbound, scope=tenant, org-matched). Legacy mode accepted only when crm_inbound_secure_required is unset; every legacy call gets Deprecation+Warning headers. Bad credentials never downgraded. crm_inbound_router.py: issue/rotate/revoke (god-only). test_public_write_paths.py covers secure auth, cross-tenant rejection, wrong key, bad-credential-not-downgraded, legacy deprecation headers.",
       "notes": "Anyone holding an org UUID can inject leads into that workspace. Not a P0 (no data exposure, no privilege escalation, nothing destructive) but it is a direct route to contaminating production with prospects nobody sent. The fix pattern already exists on the model: Organization.social_webhook_token.",
       "decision_required": null,
@@ -470,45 +850,79 @@
       "previously_missed": true
     },
     {
-      "id": "LEAD-06", "system": "Lead Data Platform",
+      "id": "LEAD-06",
+      "system": "Lead Data Platform",
       "title": "Compliance: suppression list, permanent DNC, master suppression",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["LEAD-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
       "evidence": "compliance_router 6 routes; app/services/compliance_service.py; SuppressionEntry with SuppressionSource; tests/test_compliance_router.py",
       "notes": "Suppression is shared across SMS, email and voice rather than re-implemented per channel.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "LEAD-07", "system": "Lead Data Platform",
+      "id": "LEAD-07",
+      "system": "Lead Data Platform",
       "title": "Historical source reconciliation engine (source_ingest) is imported by nothing",
-      "status": "REMOVE", "priority": "P2", "depends_on": [], "completed_on": null,
-      "evidence": "_audit_orphans.txt (ast-based import graph over app/ and tests/): app/services/source_ingest.py, 490 lines, zero importers - not even a test.",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
+      "evidence": "app/services/source_ingest.py deleted (490 lines, zero importers in ast-based graph)",
       "notes": "This is the largest single block of dead code found. It was written for the Restland master-source reconciliation; whatever superseded it left it standing.",
-      "decision_required": "Was this superseded by the import batch pipeline, or is it unfinished work someone still intends to land?",
-      "blocked_reason": null, "next_action": "Confirm with the reconciliation docs, then delete it or wire it.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "LEAD-08", "system": "Lead Data Platform",
+      "id": "LEAD-08",
+      "system": "Lead Data Platform",
       "title": "Unreachable lead maintenance and typing routes",
-      "status": "REMOVE", "priority": "P3", "depends_on": ["LEAD-02"], "completed_on": null,
+      "status": "REMOVE",
+      "priority": "P3",
+      "depends_on": [
+        "LEAD-02"
+      ],
+      "completed_on": null,
       "evidence": "No frontend caller: /leads/maintenance/duplicate-dnc-repair, /leads/maintenance/tier-status-repair, /leads/{lead_id}/lead-type, /leads/sms-optin, /leads/sparklines, /leads/engagement-breakdown, /ai/analyze-batch",
       "notes": "sparklines and engagement-breakdown have a test (tests/test_sparklines.py) but no caller - tested code nobody can reach.",
       "decision_required": "Which of these are deliberate operator tools and which are leftovers?",
-      "blocked_reason": null, "next_action": "Triage as part of the LEAD-02 split rather than as a separate pass.",
+      "blocked_reason": null,
+      "next_action": "Triage as part of the LEAD-02 split rather than as a separate pass.",
       "previously_missed": true
     },
     {
-      "id": "LEAD-09", "system": "Lead Data Platform",
+      "id": "LEAD-09",
+      "system": "Lead Data Platform",
       "title": "Public lead intake surfaces (fiber form, social webhooks, demo request)",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["LEAD-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
       "evidence": "fiber_intake_router (org_token gated), social_webhooks_router meta/tiktok/google with verify handshakes and GET /token (require_admin) issuing Organization.social_webhook_token; tests/test_lead_source_column.py",
       "notes": "The social webhook token pattern here is the model LEAD-05 should follow.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "LEAD-10", "system": "Lead Data Platform",
+      "id": "LEAD-10",
+      "system": "Lead Data Platform",
       "title": "Google Places lead scraper",
-      "status": "BLOCKED", "priority": "P2", "depends_on": [], "completed_on": null,
+      "status": "BLOCKED",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "lead_scraper_router 4 routes (all require_god); frontend/src/pages/LeadScraper.jsx at /god/lead-scraper",
       "notes": "Code and screen are complete. It cannot return results without the key.",
       "decision_required": null,
@@ -517,9 +931,13 @@
       "previously_missed": false
     },
     {
-      "id": "LEAD-11", "system": "Lead Data Platform",
+      "id": "LEAD-11",
+      "system": "Lead Data Platform",
       "title": "POST /leads/demo-request is registered twice; the second handler is unreachable",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": "2026-09-09",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
       "evidence": "LEAD-02 split merged both handlers into one in leads_public_router.py. test_public_write_paths.py::test_exactly_one_post_route_is_registered_for_demo_request asserts len==1. Dead duplicate comment preserved in leads_dedup_router.py for history.",
       "notes": "The shadowed handler is the one that emails LEAD_NOTIFY_EMAILS. If the marketing site posts the second schema, the live handler rejects it with 422 and nobody is notified. This is the public demo-request path from bookaboost.live.",
       "decision_required": null,
@@ -528,10 +946,16 @@
       "previously_missed": true
     },
     {
-      "id": "LEAD-12", "system": "Lead Data Platform",
+      "id": "LEAD-12",
+      "system": "Lead Data Platform",
       "title": "Public demo requests resolve their organization by name match with an arbitrary fallback",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["LEAD-11"], "completed_on": "2026-09-09",
-      "evidence": "app/services/public_intake.py implements resolve_public_intake() — resolves Platform.public_intake_organization_id, matches exact Origin host, then requires exactly-one configured platform, else raises IntakeDestinationError (503). ilike+first() fallback removed. test_public_write_paths.py::test_demo_request_refuses_when_no_destination_is_configured covers the refuse path.",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "LEAD-11"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "app/services/public_intake.py implements resolve_public_intake() \u00e2\u20ac\u201d resolves Platform.public_intake_organization_id, matches exact Origin host, then requires exactly-one configured platform, else raises IntakeDestinationError (503). ilike+first() fallback removed. test_public_write_paths.py::test_demo_request_refuses_when_no_destination_is_configured covers the refuse path.",
       "notes": "This is fuzzy organization resolution on a public, unauthenticated write path, and the fallback drops a real inbound lead into whatever organization happens to be returned first. Renaming a brand silently redirects public leads; the fallback can put a stranger's contact details into a customer's workspace.",
       "decision_required": null,
       "blocked_reason": null,
@@ -539,32 +963,64 @@
       "previously_missed": true
     },
     {
-      "id": "SMS-01", "system": "Outreach: SMS & 10DLC",
+      "id": "SMS-01",
+      "system": "Outreach: SMS & 10DLC",
       "title": "Per-account Twilio credential resolution with fail-closed webhook validation",
-      "status": "COMPLETE", "priority": "P0", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P0",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "sms_router POST /webhook/status-callback and /webhook/inbound both call validate_twilio_webhook before any business logic; app/services/twilio_callbacks.py, comms/; tests/test_sms_router.py, test_sms_service.py",
       "notes": "The webhooks are unauthenticated in the FastAPI sense on purpose - Twilio signs them, and the signature is checked first.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "SMS-02", "system": "Outreach: SMS & 10DLC",
+      "id": "SMS-02",
+      "system": "Outreach: SMS & 10DLC",
       "title": "Reply capture, classification, triage and the replies action centre",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SMS-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SMS-01"
+      ],
+      "completed_on": null,
       "evidence": "sms_router 13 routes; app/services/reply_classification_service.py, engagement_service.py, message_state.py; tests/test_reply_classification_service.py, test_reply_triage_actions.py, test_replies_action_center.py, test_needs_attention_filter.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "SMS-03", "system": "Outreach: SMS & 10DLC",
+      "id": "SMS-03",
+      "system": "Outreach: SMS & 10DLC",
       "title": "10DLC brand and campaign registration",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SMS-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SMS-01"
+      ],
+      "completed_on": null,
       "evidence": "dlc_router 7 routes (require_tenant_user); frontend/src/pages/DLCRegistration.jsx",
       "notes": "Registration state is read back from Twilio rather than asserted locally.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "SMS-04", "system": "Outreach: SMS & 10DLC",
+      "id": "SMS-04",
+      "system": "Outreach: SMS & 10DLC",
       "title": "Restland / Greenland organization Twilio sender resolution",
-      "status": "BLOCKED", "priority": "P1", "depends_on": ["SMS-01"], "completed_on": null,
+      "status": "BLOCKED",
+      "priority": "P1",
+      "depends_on": [
+        "SMS-01"
+      ],
+      "completed_on": null,
       "evidence": "Open task from the prior phase; the sender ladder itself is proven and gated",
       "notes": "The code path is done. The remaining work is configuration on a live account.",
       "decision_required": null,
@@ -573,67 +1029,131 @@
       "previously_missed": false
     },
     {
-      "id": "EMAIL-01", "system": "Outreach: Email",
+      "id": "EMAIL-01",
+      "system": "Outreach: Email",
       "title": "Microsoft 365 send, inbox polling, reply matching and tracking",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "email_router 11 routes; app/services/microsoft_email_service.py, email_poller_service.py, email_tracking_service.py; email_tracking_router open and click endpoints; tests/test_email_router.py, test_email_service.py, test_email_tracking_router.py",
       "notes": "Tracking pixel and click redirect are deliberately unauthenticated - they are opened by a mail client.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "EMAIL-02", "system": "Outreach: Email",
+      "id": "EMAIL-02",
+      "system": "Outreach: Email",
       "title": "Batch email review before send, with SMS/email review parity",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["EMAIL-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "EMAIL-01"
+      ],
+      "completed_on": null,
       "evidence": "email_router preview-batch / confirm-send-batch; frontend/src/components/EmailReview.jsx; tests/test_email_review_batch.py, test_message_review_flow.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "EMAIL-03", "system": "Outreach: Email",
+      "id": "EMAIL-03",
+      "system": "Outreach: Email",
       "title": "Auto-send queue with approve, edit, skip and a proactive scan",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["EMAIL-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "EMAIL-01"
+      ],
+      "completed_on": null,
       "evidence": "auto_send_router 10 routes; frontend/src/pages/AutoSendQueue.jsx; tests/test_auto_send_router.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "EMAIL-04", "system": "Outreach: Email",
+      "id": "EMAIL-04",
+      "system": "Outreach: Email",
       "title": "auto_send_candidate_service is imported only by its own test",
-      "status": "REMOVE", "priority": "P3", "depends_on": ["EMAIL-03"], "completed_on": null,
-      "evidence": "_audit_orphans.txt: app/services/auto_send_candidate_service.py, 160 lines, importers = tests/test_auto_send_candidate_service.py only",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [
+        "EMAIL-03"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "app/services/auto_send_candidate_service.py and tests/test_auto_send_candidate_service.py deleted (160 lines, test-only importer)",
       "notes": "A tested gate that nothing in production consults. The test passing proves the function works, not that it runs.",
-      "decision_required": "Was this the intended gate for the auto-send queue, and did something replace it?",
-      "blocked_reason": null, "next_action": "Wire it into the queue or delete both the service and its test.",
-      "previously_missed": true
-    },
-    {
-      "id": "VOICE-01", "system": "Outreach: Voice & AI Agent",
-      "title": "Retell voice agent: outbound, inbound, lifecycle webhook, version pinning",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
-      "evidence": "voice_router 13 routes; voice_webhooks_router POST /webhook; god_router voice agent config, attempt policy and version pin; app/services/voice_orchestrator.py, voice_service.py, voice_attempt_policy.py, comms/; VoiceAgentConfig model",
-      "notes": "Dial outcomes are recorded separately from live conversations, and the agent version is pinned per organization so a Retell draft cannot silently change what customers hear.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "VOICE-02", "system": "Outreach: Voice & AI Agent",
-      "title": "Retell integration bridge for availability and booking",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["VOICE-01", "SCHED-01"], "completed_on": null,
-      "evidence": "integrations_router 6 routes (require_retell / require_retell_tenant, all rate limited); app/services/retell_bridge.py, tenant_scheduling.py",
-      "notes": "Availability returns a genuine tri-state - real slots, no slots, technical failure - so the agent never says 'nothing available' because a call failed.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "VOICE-03", "system": "Outreach: Voice & AI Agent",
-      "title": "Voice configuration has no God screen",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["VOICE-01"], "completed_on": "2026-09-09",
-      "evidence": "GodVoiceConfig.jsx (426 lines) surfaces all endpoints: GET/POST /god/voice/agents, PATCH .../version, PATCH .../attempt-policy, PATCH /god/orgs/{id}/attempt-policy, POST /god/voice/test-call. Routed at /god/voice in App.jsx; 'Voice Configuration' nav entry in GodShell.jsx.",
-      "notes": "Routes stay in god_router (moving them would be a refactor without a product benefit). Test call requires an extra confirm click.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "VOICE-04", "system": "Outreach: Voice & AI Agent",
+      "id": "VOICE-01",
+      "system": "Outreach: Voice & AI Agent",
+      "title": "Retell voice agent: outbound, inbound, lifecycle webhook, version pinning",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
+      "evidence": "voice_router 13 routes; voice_webhooks_router POST /webhook; god_router voice agent config, attempt policy and version pin; app/services/voice_orchestrator.py, voice_service.py, voice_attempt_policy.py, comms/; VoiceAgentConfig model",
+      "notes": "Dial outcomes are recorded separately from live conversations, and the agent version is pinned per organization so a Retell draft cannot silently change what customers hear.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "VOICE-02",
+      "system": "Outreach: Voice & AI Agent",
+      "title": "Retell integration bridge for availability and booking",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "VOICE-01",
+        "SCHED-01"
+      ],
+      "completed_on": null,
+      "evidence": "integrations_router 6 routes (require_retell / require_retell_tenant, all rate limited); app/services/retell_bridge.py, tenant_scheduling.py",
+      "notes": "Availability returns a genuine tri-state - real slots, no slots, technical failure - so the agent never says 'nothing available' because a call failed.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "VOICE-03",
+      "system": "Outreach: Voice & AI Agent",
+      "title": "Voice configuration has no God screen",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "VOICE-01"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "GodVoiceConfig.jsx (426 lines) surfaces all endpoints: GET/POST /god/voice/agents, PATCH .../version, PATCH .../attempt-policy, PATCH /god/orgs/{id}/attempt-policy, POST /god/voice/test-call. Routed at /god/voice in App.jsx; 'Voice Configuration' nav entry in GodShell.jsx.",
+      "notes": "Routes stay in god_router (moving them would be a refactor without a product benefit). Test call requires an extra confirm click.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "VOICE-04",
+      "system": "Outreach: Voice & AI Agent",
       "title": "Retell secret storage",
-      "status": "BLOCKED", "priority": "P2", "depends_on": ["VOICE-01"], "completed_on": null,
+      "status": "BLOCKED",
+      "priority": "P2",
+      "depends_on": [
+        "VOICE-01"
+      ],
+      "completed_on": null,
       "evidence": "Prior phase produced a recommendation; keys are read from environment",
       "notes": "Never print or commit the value.",
       "decision_required": null,
@@ -642,123 +1162,249 @@
       "previously_missed": false
     },
     {
-      "id": "VOICE-05", "system": "Outreach: Voice & AI Agent",
+      "id": "VOICE-05",
+      "system": "Outreach: Voice & AI Agent",
       "title": "Dialpad integration",
-      "status": "NOT_BUILT", "priority": "P3", "depends_on": [], "completed_on": null,
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "No Dialpad code in app/",
       "notes": "Explicitly out of scope for this phase by instruction.",
-      "decision_required": null, "blocked_reason": null, "next_action": "Not now.", "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Not now.",
+      "previously_missed": false
     },
     {
-      "id": "CAD-01", "system": "Cadence, Campaigns & AI Conversation",
+      "id": "CAD-01",
+      "system": "Cadence, Campaigns & AI Conversation",
       "title": "Cadence engine, templates and per-lead cadence state",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SMS-01", "EMAIL-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SMS-01",
+        "EMAIL-01"
+      ],
+      "completed_on": null,
       "evidence": "cadence_router 8 routes, cadence_template_router 6 routes; app/services/cadence_service.py run_due_cadences with with_for_update(skip_locked=True); tests/test_cadence_router.py",
       "notes": "One scheduler, invoked by the loop in main.py and by the Render cron entry point in app/jobs/run_cadence_job.py.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "CAD-02", "system": "Cadence, Campaigns & AI Conversation",
-      "title": "Campaign builder, preview, apply and send with qualification gating",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["CAD-01", "LEAD-04"], "completed_on": null,
-      "evidence": "campaign_router 11 routes; qualification runs inside email campaign preview and the send queue; tests/test_campaign_router.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "CAD-03", "system": "Cadence, Campaigns & AI Conversation",
-      "title": "AI conversation service with scheduled touches and batch reply generation",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["CAD-01"], "completed_on": null,
-      "evidence": "ai_conversation_router 9 routes; app/services/ai_conversation_service.py process_scheduled_touches; loop in app/main.py:978 every 2 minutes",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "CAD-04", "system": "Cadence, Campaigns & AI Conversation",
-      "title": "frontend/src/pages/Campaigns.jsx is imported by nothing",
-      "status": "REMOVE", "priority": "P3", "depends_on": ["CAD-02"], "completed_on": null,
-      "evidence": "_audit_fe2.txt: the only page of 127 that no file in frontend/src imports. 466 lines. CampaignBuilder.jsx is the live screen at /campaigns.",
-      "notes": "It still calls live endpoints, so it reads as maintained code. It is not reachable.",
-      "decision_required": null, "blocked_reason": null,
-      "next_action": "Delete it. If any part of it is better than CampaignBuilder, move that part first.",
-      "previously_missed": true
-    },
-    {
-      "id": "CAD-05", "system": "Cadence, Campaigns & AI Conversation",
-      "title": "feature_flags_service is imported only by its own test",
-      "status": "REMOVE", "priority": "P3", "depends_on": [], "completed_on": null,
-      "evidence": "_audit_orphans.txt: app/services/feature_flags_service.py, 81 lines, importers = tests/test_feature_flags_service.py only",
-      "notes": "Per-advisor flags were built and never adopted. Per-customer feature toggles live on Customer 360 instead, which is why this went quiet.",
-      "decision_required": "Is per-advisor flagging still wanted, now that per-customer toggles exist?",
-      "blocked_reason": null, "next_action": "Decide, then adopt or delete.", "previously_missed": true
-    },
-    {
-      "id": "SCHED-01", "system": "Scheduling, Calendar & Appointments",
-      "title": "Availability engine with true intersection and external busy",
-      "status": "COMPLETE", "priority": "P1", "depends_on": [], "completed_on": null,
-      "evidence": "app/services/availability.py, external_busy.py; availability_router 7 routes; sales_scheduling_router availability routes",
-      "notes": "A provider failure degrades the answer explicitly rather than blocking the whole scheduler.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "SCHED-02", "system": "Scheduling, Calendar & Appointments",
-      "title": "Per-user calendar connection state, honest about scope",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SCHED-01"], "completed_on": null,
-      "evidence": "calendar_connections_router mounted twice at /sales/calendar and /me/calendar; every endpoint reads user.id only, no org_id in any query; has_token and calendar_scope_ok reported separately",
-      "notes": "Verified during the P0 sweep. The scanner flagged it as ungated because the dependency is aliased (_caller = get_current_user); the code is correct. A manager cannot inspect or revoke a rep's personal calendar connection.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "SCHED-03", "system": "Scheduling, Calendar & Appointments",
-      "title": "Appointment sync, reschedule, cancel, resync and prospect confirmation links",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SCHED-02"], "completed_on": null,
-      "evidence": "sales_scheduling_router 21 routes including the four token-gated /appointments/confirm/{token} endpoints; app/services/appointment_sync.py, appointment_invites.py, appointment_meetings.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "SCHED-04", "system": "Scheduling, Calendar & Appointments",
-      "title": "Microsoft Teams meeting provider",
-      "status": "NOT_BUILT", "priority": "P3", "depends_on": ["SCHED-03"], "completed_on": null,
-      "evidence": "app/models/meeting_models.py:45 PROVIDER_TEAMS = 'teams'  # not implemented - reserved so the vocabulary is stable; app/services/meeting_providers/base.py returns 'Provider not implemented'",
-      "notes": "The vocabulary is reserved deliberately and the base class fails honestly. Nothing claims Teams works.",
-      "decision_required": null, "blocked_reason": null, "next_action": "Implement when a customer needs it.", "previously_missed": false
-    },
-    {
-      "id": "SCHED-05", "system": "Scheduling, Calendar & Appointments",
-      "title": "Explicit per-org calendar_provider with fail-closed resolution",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["SCHED-02"], "completed_on": "2026-09-09",
-      "evidence": "calendar_providers/__init__.py resolve_provider_key: when len(live_external) > 1 and no calendar_provider is configured, returns PROVIDER_ICS (not PREFERENCE[0]). Comment documents the Outlook/Google wrong-calendar failure this prevents. tests/test_calendar_provider_resolution.py (13 tests): fail-closed proof (both connected unconfigured → ICS), single-provider cases, explicit config wins over live connections, org-level config respected, prefer= bypass for cancellation path. All 13 pass.",
-      "notes": null,
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "SCHED-06", "system": "Scheduling, Calendar & Appointments",
+      "id": "CAD-02",
+      "system": "Cadence, Campaigns & AI Conversation",
+      "title": "Campaign builder, preview, apply and send with qualification gating",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "CAD-01",
+        "LEAD-04"
+      ],
+      "completed_on": null,
+      "evidence": "campaign_router 11 routes; qualification runs inside email campaign preview and the send queue; tests/test_campaign_router.py",
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "CAD-03",
+      "system": "Cadence, Campaigns & AI Conversation",
+      "title": "AI conversation service with scheduled touches and batch reply generation",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "CAD-01"
+      ],
+      "completed_on": null,
+      "evidence": "ai_conversation_router 9 routes; app/services/ai_conversation_service.py process_scheduled_touches; loop in app/main.py:978 every 2 minutes",
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "CAD-04",
+      "system": "Cadence, Campaigns & AI Conversation",
+      "title": "frontend/src/pages/Campaigns.jsx is imported by nothing",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [
+        "CAD-02"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "frontend/src/pages/Campaigns.jsx deleted (466 lines, no importer; CampaignBuilder.jsx is the live screen)",
+      "notes": "It still calls live endpoints, so it reads as maintained code. It is not reachable.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "CAD-05",
+      "system": "Cadence, Campaigns & AI Conversation",
+      "title": "feature_flags_service is imported only by its own test",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
+      "evidence": "app/services/feature_flags_service.py and tests/test_feature_flags_service.py deleted (81 lines, test-only importer)",
+      "notes": "Per-advisor flags were built and never adopted. Per-customer feature toggles live on Customer 360 instead, which is why this went quiet.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "SCHED-01",
+      "system": "Scheduling, Calendar & Appointments",
+      "title": "Availability engine with true intersection and external busy",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
+      "evidence": "app/services/availability.py, external_busy.py; availability_router 7 routes; sales_scheduling_router availability routes",
+      "notes": "A provider failure degrades the answer explicitly rather than blocking the whole scheduler.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "SCHED-02",
+      "system": "Scheduling, Calendar & Appointments",
+      "title": "Per-user calendar connection state, honest about scope",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SCHED-01"
+      ],
+      "completed_on": null,
+      "evidence": "calendar_connections_router mounted twice at /sales/calendar and /me/calendar; every endpoint reads user.id only, no org_id in any query; has_token and calendar_scope_ok reported separately",
+      "notes": "Verified during the P0 sweep. The scanner flagged it as ungated because the dependency is aliased (_caller = get_current_user); the code is correct. A manager cannot inspect or revoke a rep's personal calendar connection.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "SCHED-03",
+      "system": "Scheduling, Calendar & Appointments",
+      "title": "Appointment sync, reschedule, cancel, resync and prospect confirmation links",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SCHED-02"
+      ],
+      "completed_on": null,
+      "evidence": "sales_scheduling_router 21 routes including the four token-gated /appointments/confirm/{token} endpoints; app/services/appointment_sync.py, appointment_invites.py, appointment_meetings.py",
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "SCHED-04",
+      "system": "Scheduling, Calendar & Appointments",
+      "title": "Microsoft Teams meeting provider",
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [
+        "SCHED-03"
+      ],
+      "completed_on": null,
+      "evidence": "app/models/meeting_models.py:45 PROVIDER_TEAMS = 'teams'  # not implemented - reserved so the vocabulary is stable; app/services/meeting_providers/base.py returns 'Provider not implemented'",
+      "notes": "The vocabulary is reserved deliberately and the base class fails honestly. Nothing claims Teams works.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Implement when a customer needs it.",
+      "previously_missed": false
+    },
+    {
+      "id": "SCHED-05",
+      "system": "Scheduling, Calendar & Appointments",
+      "title": "Explicit per-org calendar_provider with fail-closed resolution",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "SCHED-02"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "calendar_providers/__init__.py resolve_provider_key: when len(live_external) > 1 and no calendar_provider is configured, returns PROVIDER_ICS (not PREFERENCE[0]). Comment documents the Outlook/Google wrong-calendar failure this prevents. tests/test_calendar_provider_resolution.py (13 tests): fail-closed proof (both connected unconfigured \u00e2\u2020\u2019 ICS), single-provider cases, explicit config wins over live connections, org-level config respected, prefer= bypass for cancellation path. All 13 pass.",
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "SCHED-06",
+      "system": "Scheduling, Calendar & Appointments",
       "title": "Google and Microsoft calendar sync are real, and nothing claims sync it cannot verify",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SCHED-02"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SCHED-02"
+      ],
+      "completed_on": null,
       "evidence": "app/services/calendar_providers/google.py and microsoft.py implement create/update/cancel/get_busy; base.py returns SyncResult.failure('unimplemented', ...) for anything not implemented",
       "notes": "Satisfies the standing rule against faking Google or Microsoft calendar sync and against showing CONNECTED when the backend cannot verify it.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "PROP-01", "system": "Proposals, Deal Rooms & Demo Sites",
+      "id": "PROP-01",
+      "system": "Proposals, Deal Rooms & Demo Sites",
       "title": "Sales proposal builder with versioning, publish, send and revoke",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["SALES-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "SALES-01"
+      ],
+      "completed_on": null,
       "evidence": "sales_proposal_router 22 routes; app/services/proposal_service.py, demo_sites.py, pricing_approvals.py; frontend/src/pages/sales/ProposalPanel.jsx",
       "notes": "A published proposal snapshots its pricing, so a later catalogue change cannot rewrite a document the customer already read. withhold_pricing suppresses the Investment section entirely rather than rendering $0.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "PROP-02", "system": "Proposals, Deal Rooms & Demo Sites",
+      "id": "PROP-02",
+      "system": "Proposals, Deal Rooms & Demo Sites",
       "title": "Token-gated deal rooms, demo sites and prospect portals with view analytics",
-      "status": "COMPLETE", "priority": "P1", "depends_on": ["PROP-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "PROP-01"
+      ],
+      "completed_on": null,
       "evidence": "sales_proposal_router /deal-room/{token}, /deal-room/{token}/track, /deal-room/{token}/decision, /public/demo/{token}; proposal_router portal resolve / ping / close / download and token revoke; frontend portal/DealRoom.jsx, portal/DemoSite.jsx, portal/PortalAccess.jsx",
       "notes": "Public by design, gated by an opaque token, revocable.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "PROP-03", "system": "Proposals, Deal Rooms & Demo Sites",
+      "id": "PROP-03",
+      "system": "Proposals, Deal Rooms & Demo Sites",
       "title": "Two proposal systems exist side by side",
-      "status": "CONSOLIDATE", "priority": "P2", "depends_on": ["PROP-01"], "completed_on": null,
+      "status": "CONSOLIDATE",
+      "priority": "P2",
+      "depends_on": [
+        "PROP-01"
+      ],
+      "completed_on": null,
       "evidence": "proposal_router (20 routes, require_admin, tenant-side, frontend ProposalEditor.jsx at /proposals) and sales_proposal_router (22 routes, require_sales_member, brand-sales side, ProposalPanel.jsx). Both implement blocks, publish, send, tokens, file upload and analytics.",
       "notes": "These serve different audiences - an advisor proposing to a family, and a rep proposing the platform to a business - so this is not obviously wrong. But 42 routes implement the same document model twice, and only one of them has any test coverage.",
       "decision_required": "Are these genuinely two products, or one document engine with two audiences?",
@@ -767,9 +1413,13 @@
       "previously_missed": true
     },
     {
-      "id": "CRM-01", "system": "CRM, Case Files, Reporting & Platform Health",
+      "id": "CRM-01",
+      "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "Three routers implement contacts and notes",
-      "status": "CONSOLIDATE", "priority": "P2", "depends_on": [], "completed_on": null,
+      "status": "CONSOLIDATE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "contacts_router (6 routes: contacts + notes, called by CRM.jsx), crm_native_router (14 routes: contacts, notes, stages, custom fields, sync-from-leads, also called by CRM.jsx), crm_router (6 routes: external CRM connections). contacts_router and crm_native_router both own contact CRUD and note creation. Neither has a test file; crm_router's only test reference is incidental.",
       "notes": "One screen calls two contact APIs. Whichever one a future change lands in, the other keeps serving the old answer.",
       "decision_required": "Which contact API is canonical?",
@@ -778,52 +1428,98 @@
       "previously_missed": true
     },
     {
-      "id": "CRM-02", "system": "CRM, Case Files, Reporting & Platform Health",
+      "id": "CRM-02",
+      "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "CRM connection API keys are stored in plaintext in a column named api_key_encrypted",
-      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": "2026-09-09",
-      "evidence": "crm_secrets.py: store_secret/read_secret/migrate_crm_connection_secrets; crm_router.py already calls store_secret on writes; boot migration wired in main.py startup; tests/test_crm_secrets.py 14 tests all pass — proves stored bytes != plaintext, round-trip, legacy plaintext backward-compat, migration converts plaintext rows, skips already-encrypted.",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
+      "evidence": "crm_secrets.py: store_secret/read_secret/migrate_crm_connection_secrets; crm_router.py already calls store_secret on writes; boot migration wired in main.py startup; tests/test_crm_secrets.py 14 tests all pass \u00e2\u20ac\u201d proves stored bytes != plaintext, round-trip, legacy plaintext backward-compat, migration converts plaintext rows, skips already-encrypted.",
       "notes": "api_key_encrypted and webhook_secret both covered by SECRET_COLUMNS. Migration is idempotent and runs at every startup.",
-      "decision_required": null, "blocked_reason": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": true
     },
     {
-      "id": "CRM-03", "system": "CRM, Case Files, Reporting & Platform Health",
+      "id": "CRM-03",
+      "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "Case files, outcomes, activity timeline and work queue",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["LEAD-01"], "completed_on": null,
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
       "evidence": "case_file_router 8 routes, outcomes_router 4, timeline_router 1, workqueue_router 1, activity_router 1; tests/test_workqueue_router.py",
-      "notes": null, "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "REPORT-01", "system": "CRM, Case Files, Reporting & Platform Health",
-      "title": "Date-ranged conversion and engagement reporting",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["LEAD-01"], "completed_on": null,
-      "evidence": "reports_router 5 routes (require_admin); trends are built from timestamped Message, Reply and BookingLink rows, not from current-state totals; tests/test_reports_router.py",
-      "notes": "Revenue is reported as sale COUNTS, never a summed dollar figure, because LeadOutcome.sale_amount is free text an advisor types. That constraint is stated in the module docstring and tested in dashboard_revenue.",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
-    },
-    {
-      "id": "REPORT-02", "system": "CRM, Case Files, Reporting & Platform Health",
-      "title": "Platform revenue history",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["BILL-01"], "completed_on": "2026-09-09",
-      "evidence": "god_router.py:1591 GET /god/revenue-history — reads real BillingPayment and BillingInvoice rows; returns total_collected_cents, payments_by_month, invoice_status_breakdown, plan_breakdown; snapshot-dependent metrics returned as clearly-labelled unavailable[]. GodRevenueHistory.jsx: bar chart, KPI row, status breakdown, plan breakdown, platform filter. Routed at /god/revenue-history in App.jsx; nav entry added to GodShell.jsx.",
-      "notes": "Snapshot table not needed for launch — the screen renders real data from existing tables and marks trend-line metrics as unavailable rather than manufacturing them.",
-      "decision_required": null, "blocked_reason": null,
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
       "next_action": null,
       "previously_missed": false
     },
     {
-      "id": "REPORT-03", "system": "CRM, Case Files, Reporting & Platform Health",
-      "title": "Owner-facing System Health and Platform Health on the shared severity vocabulary",
-      "status": "COMPLETE", "priority": "P2", "depends_on": ["COMP-03"], "completed_on": "commit 307ce78",
-      "evidence": "health_router 2 routes; god_router GET /platform-health; frontend SystemHealth.jsx, god/PlatformHealth.jsx; tests/test_health_router.py",
-      "notes": "Says 'Can't check' rather than inventing a healthy state, and returns None for the cadence scheduler's last run because no job table exists yet (health_router.py:66).",
-      "decision_required": null, "blocked_reason": null, "next_action": null, "previously_missed": false
+      "id": "REPORT-01",
+      "system": "CRM, Case Files, Reporting & Platform Health",
+      "title": "Date-ranged conversion and engagement reporting",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "LEAD-01"
+      ],
+      "completed_on": null,
+      "evidence": "reports_router 5 routes (require_admin); trends are built from timestamped Message, Reply and BookingLink rows, not from current-state totals; tests/test_reports_router.py",
+      "notes": "Revenue is reported as sale COUNTS, never a summed dollar figure, because LeadOutcome.sale_amount is free text an advisor types. That constraint is stated in the module docstring and tested in dashboard_revenue.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
     },
     {
-      "id": "REPORT-04", "system": "CRM, Case Files, Reporting & Platform Health",
+      "id": "REPORT-02",
+      "system": "CRM, Case Files, Reporting & Platform Health",
+      "title": "Platform revenue history",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "BILL-01"
+      ],
+      "completed_on": "2026-09-09",
+      "evidence": "god_router.py:1591 GET /god/revenue-history \u00e2\u20ac\u201d reads real BillingPayment and BillingInvoice rows; returns total_collected_cents, payments_by_month, invoice_status_breakdown, plan_breakdown; snapshot-dependent metrics returned as clearly-labelled unavailable[]. GodRevenueHistory.jsx: bar chart, KPI row, status breakdown, plan breakdown, platform filter. Routed at /god/revenue-history in App.jsx; nav entry added to GodShell.jsx.",
+      "notes": "Snapshot table not needed for launch \u00e2\u20ac\u201d the screen renders real data from existing tables and marks trend-line metrics as unavailable rather than manufacturing them.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "REPORT-03",
+      "system": "CRM, Case Files, Reporting & Platform Health",
+      "title": "Owner-facing System Health and Platform Health on the shared severity vocabulary",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "COMP-03"
+      ],
+      "completed_on": "commit 307ce78",
+      "evidence": "health_router 2 routes; god_router GET /platform-health; frontend SystemHealth.jsx, god/PlatformHealth.jsx; tests/test_health_router.py",
+      "notes": "Says 'Can't check' rather than inventing a healthy state, and returns None for the cadence scheduler's last run because no job table exists yet (health_router.py:66).",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": false
+    },
+    {
+      "id": "REPORT-04",
+      "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "god_admin on tenant reporting aggregates across every brand",
-      "status": "CONSOLIDATE", "priority": "P2", "depends_on": ["GOD-01"], "completed_on": null,
+      "status": "CONSOLIDATE",
+      "priority": "P2",
+      "depends_on": [
+        "GOD-01"
+      ],
+      "completed_on": null,
       "evidence": "reports_router._get_org_ids: if current_user.role == 'god_admin', return every Organization.id in the database, with no platform_id narrowing",
       "notes": "This is the owner, so it is not an escalation and not a boundary bypass. But it is the one place left where a figure spans brands without saying so, which is precisely the confusion the executive layer was rebuilt to remove. The executive surfaces narrow the owner to one brand; tenant reporting does not.",
       "decision_required": "Should god-level tenant reporting follow the active brand context, like the executive surfaces do?",
@@ -832,21 +1528,33 @@
       "previously_missed": true
     },
     {
-      "id": "REPORT-05", "system": "CRM, Case Files, Reporting & Platform Health",
+      "id": "REPORT-05",
+      "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "Platform-wide communications browser",
-      "status": "NOT_BUILT", "priority": "P3", "depends_on": [], "completed_on": null,
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": null,
       "evidence": "ProductStatus 'messaging' roadmap item; delivery counts already appear in Platform Health",
-      "notes": null, "decision_required": null, "blocked_reason": null,
-      "next_action": "Build only if an operator actually needs to read across organizations.", "previously_missed": false
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Build only if an operator actually needs to read across organizations.",
+      "previously_missed": false
     },
     {
-      "id": "REPORT-06", "system": "CRM, Case Files, Reporting & Platform Health",
+      "id": "REPORT-06",
+      "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "app/services/tenancy.py is imported by nothing",
-      "status": "REMOVE", "priority": "P3", "depends_on": [], "completed_on": null,
-      "evidence": "_audit_orphans.txt: 104 lines, zero importers. app/models/models.py:534 tells the reader to see app/services/tenancy.py, so a load-bearing comment points at a module nothing runs.",
+      "status": "COMPLETE",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": "2026-09-09",
+      "evidence": "app/services/tenancy.py deleted (104 lines, zero importers). Dangling comment in models.py:578 repointed to app/services/lead_scope.py and Membership.",
       "notes": "The tenancy rules it described are now enforced through Membership and lead_scope. The file and the comment are the last trace of the older model.",
-      "decision_required": null, "blocked_reason": null,
-      "next_action": "Delete the module and repoint the comment at Membership and app/services/lead_scope.py.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
       "previously_missed": true
     }
   ]

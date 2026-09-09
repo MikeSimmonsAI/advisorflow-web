@@ -1,0 +1,187 @@
+
+============================================================================
+1. PUSH NOTIFICATION INFRASTRUCTURE
+============================================================================
+-- any push provider, device token or APNs/FCM reference?
+   NONE FOUND
+
+-- the Notification model as it exists
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+
+    type = Column(SAEnum(NotificationType), nullable=False)
+    message = Column(Text, nullable=False)
+    is_sent = Column(Boolean, default=False)
+    sent_at = Column(DateTime, nullable=True)
+    is_read = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# MessageTemplate - org-customizable copy per message track, for both SMS
+# and email channels. Falls back to the hardcoded defaults in
+# cadence_service.py / email_service.py when no override exists for a
+# given org+track+channel combination, so the system works out of the box
+# without anyone touching this table, but Mike (or any org_admin) can
+# customize the wording per tier without a code deploy.
+# ---------------------------------------------------------------------------
+
+============================================================================
+2. FILE / PHOTO UPLOAD — WHERE DO THE BYTES GO?
+============================================================================
+-- UploadFile endpoints
+   app\routers\email_router.py:8  UploadFile, File, Form)
+   app\routers\email_router.py:599  file: UploadFile = File(None),
+   app\routers\import_batch_router.py:16  from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+   app\routers\import_batch_router.py:98  file: UploadFile = File(...),
+   app\routers\leads_router.py:7  APIRouter, Depends, UploadFile, File, Form, Query, HTTPException, Request, Response,
+   app\routers\leads_router.py:47  file: UploadFile = File(...),
+   app\routers\leads_router.py:119  file: UploadFile = File(...),
+   app\routers\proposal_router.py:38  from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+   app\routers\proposal_router.py:601  file: UploadFile = File(...),
+   app\routers\sales_proposal_router.py:26  APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form,
+   app\routers\sales_proposal_router.py:963  file: UploadFile = File(...),
+   app\routers\sms_router.py:4  from fastapi import APIRouter, Depends, HTTPException, Form, Query, Request, UploadFile, File
+   app\routers\sms_router.py:752  file: UploadFile = File(...),
+
+-- storage destination: s3 / blob / local disk / base64 in a column
+   app\routers\import_batch_router.py:109  with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+   app\routers\import_batch_router.py:110  shutil.copyfileobj(file.file, tmp)
+   app\routers\leads_router.py:73  with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
+   app\routers\leads_router.py:163  with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as tmp:
+   app\routers\sms_router.py:759  In production, replace local storage with S3 or Cloudinary upload.
+   app\routers\sms_router.py:774  upload_dir = "/tmp/bookaboost_media"
+   app\routers\sms_router.py:775  os.makedirs(upload_dir, exist_ok=True)
+   app\routers\sms_router.py:776  dest = os.path.join(upload_dir, filename)
+   app\services\sms_service.py:582  media_url must be a publicly accessible URL (e.g. uploaded to S3 or Cloudinary).
+
+============================================================================
+3. EXISTING PWA / MOBILE ARTIFACTS IN THE FRONTEND
+============================================================================
+   manifest.json                absent
+   manifest.webmanifest         absent
+   sw.js                        absent
+   service-worker.js            absent
+   workbox-config.js            absent
+   capacitor.config.ts          absent
+   capacitor.config.json        absent
+
+-- index.html mobile-relevant tags
+   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+============================================================================
+4. BROWSER ASSUMPTIONS A NATIVE CLIENT WOULD BREAK
+============================================================================
+-- cookie-based state (a native client has no cookie jar by default)
+   NONE FOUND
+
+-- OAuth redirect flows (need a native redirect / app-link strategy)
+   app\services\calendar_service.py:36  GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "https://<your-domain>/calendar/oauth/callback")
+   app\services\calendar_service.py:56  "redirect_uris": [GOOGLE_REDIRECT_URI],
+   app\services\calendar_service.py:59  return Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=GOOGLE_REDIRECT_URI)
+   app\services\microsoft_email_service.py:46  MICROSOFT_REDIRECT_URI = os.environ.get("MICROSOFT_REDIRECT_URI", "https://<your-domain>/microsoft/oauth/callback")
+   app\services\microsoft_email_service.py:81  "redirect_uri": MICROSOFT_REDIRECT_URI,
+   app\services\microsoft_email_service.py:106  "redirect_uri": MICROSOFT_REDIRECT_URI,
+   app\services\twilio_callbacks.py:34  falls back to deriving the origin from `GOOGLE_REDIRECT_URI`, which render.yaml
+   app\services\twilio_callbacks.py:55  _DERIVE_FROM = ("GOOGLE_REDIRECT_URI", "MICROSOFT_REDIRECT_URI")
+
+-- FRONTEND_URL / hardcoded web origins used to build links back
+   app\auto_migrate.py:427  ("platforms", "app_base_url", "VARCHAR"),
+   app\auto_migrate.py:1172  "app_base_url")
+   app\models\models.py:173  app_base_url        = Column(String, nullable=True)   # customer-facing app host
+   app\routers\billing_router.py:7  APP_BASE_URL             — https://advisorflow-frontend.onrender.com
+   app\routers\billing_router.py:45  or os.environ.get("APP_BASE_URL", "").strip()
+   app\routers\billing_router.py:670  or os.environ.get("APP_BASE_URL", "").strip()
+   app\routers\calendar_router.py:24  FRONTEND_SETTINGS_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/settings"
+   app\routers\calendar_router.py:25  FRONTEND_SETUP_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/setup-integrations"
+   app\routers\calendar_router.py:686  lead_url = f"{os.environ.get('FRONTEND_URL', 'https://advisorflow-frontend.onrender.com')}/leads/{lead.id}"
+   app\routers\microsoft_router.py:19  FRONTEND_SETTINGS_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/settings"
+   app\routers\microsoft_router.py:20  FRONTEND_SETUP_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/setup-integrations"
+   app\routers\platform_context_router.py:160  # `Platform` has carried website_url and app_base_url all along
+   app\routers\platform_context_router.py:172  "app_base_url": p.app_base_url,
+   app\routers\sales_proposal_router.py:861  base = ident.get("app_base_url") or PUBLIC_BASE_URL
+   app\routers\sales_proposal_router.py:892  base = ident.get("app_base_url") or PUBLIC_BASE_URL
+   app\routers\setup_router.py:47  FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+   app\routers\setup_router.py:92  link = f"{FRONTEND_URL}/setup-integrations?token={token}"
+   app\routers\voice_router.py:40  FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://advisorflow-frontend.onrender.com")
+   app\routers\voice_router.py:331  f"<p><a href='{FRONTEND_URL}/leads/{lead_id}'>View lead →</a></p>"
+   app\services\ai_conversation_service.py:423  frontend_url = os.environ.get("FRONTEND_URL", "https://advisorflow-frontend.onrender.com")
+   app\services\ai_conversation_service.py:428  <br><a href="{frontend_url}/leads/{lead.id}" style="background:#1a5fa8;color:#fff;padding:12px 24px;border-radius:6px;te
+   app\services\appointment_invites.py:43  # Last-resort host for a confirmation link. The brand's own `app_base_url` is
+   app\services\appointment_invites.py:89  "app_base_url": "https://app.evosyspro.live",
+   app\services\appointment_invites.py:100  "app_base_url": os.environ.get("FRONTEND_URL", "").rstrip("/") or None,
+   app\services\appointment_invites.py:125  "app_base_url":  cfg.get("app_base_url"),
+   app\services\appointment_invites.py:234  `base` is the brand's own `app_base_url`. The branded frontend serves
+   app\services\appointment_invites.py:447  url = confirm_url(tok.token, ident.get("app_base_url"))
+   app\services\brand_config.py:7  support_phone, website, app_base_url, accent
+   app\services\brand_config.py:67  "app_base_url":   "https://app.evosyspro.live",
+   app\services\brand_config.py:87  "app_base_url":   "https://app.bookaboost.live",
+   app\services\brand_config.py:105  "app_base_url":   "https://app.harmonyhustle.com",
+   app\services\brand_config.py:123  "app_base_url":   None,
+   app\services\brand_config.py:145  "app_base_url":   None,
+   app\services\brand_config.py:168  "app_base_url":        "app_base_url",
+   app\services\brand_config.py:227  if not out.get("app_base_url"):
+   app\services\brand_config.py:228  out["app_base_url"] = "https://" + str(domain).strip().rstrip("/")
+   app\services\email_poller_service.py:373  lead_url = f"{os.environ.get('FRONTEND_URL', 'https://advisorflow-frontend.onrender.com')}/leads/{lead.id}"
+   app\services\proposal_service.py:936  (ident.get("app_base_url") or PUBLIC_BASE_URL).rstrip("/"), tok.token)
+   app\services\public_identity.py:286  if reg and reg.get("app_base_url"):
+   app\services\public_identity.py:287  ident.public_base_url = reg["app_base_url"].rstrip("/")
+   ... (truncated)
+
+============================================================================
+5. PAGINATION — CAN A PHONE ASK FOR A PAGE?
+============================================================================
+-- list endpoints exposing limit/offset/cursor/page
+   app\routers\activity_router.py:27  limit: int = Query(default=200, ge=1, le=500),
+   app\routers\admin_router.py:229  page: int = Query(1, ge=1),
+   app\routers\audit_log_router.py:141  limit: int = Query(default=50, ge=1, le=200),
+   app\routers\audit_log_router.py:142  offset: int = Query(default=0, ge=0),
+   app\routers\compensation_router.py:237  limit: int = Query(500, ge=1, le=2000),
+   app\routers\compliance_router.py:106  limit: int = Query(default=500, ge=1, le=1000),
+   app\routers\compliance_router.py:107  offset: int = Query(default=0, ge=0),
+   app\routers\compliance_router.py:253  limit: int = Query(default=1000, ge=1, le=5000),
+   app\routers\compliance_router.py:254  offset: int = Query(default=0, ge=0),
+   app\routers\crm_inbound_router.py:94  limit: int = Query(default=100, le=500),
+   app\routers\crm_native_router.py:319  page: int = Query(default=1, ge=1),
+   app\routers\customers_router.py:535  def cleanup_history(limit: int = Query(50, ge=1, le=500),
+   app\routers\customer_lifecycle_router.py:59  limit: int = Query(300, ge=1, le=1000),
+   app\routers\email_router.py:693  limit: int = Query(default=150, ge=1, le=500),
+   app\routers\god_billing_router.py:1036  limit: int = Query(200, ge=1, le=500),
+   app\routers\god_billing_router.py:1100  limit: int = Query(50, ge=1, le=200),
+   app\routers\god_billing_router.py:1101  offset: int = Query(0, ge=0),
+   app\routers\god_ops_router.py:271  limit: int = Query(200, ge=1, le=500),
+   app\routers\god_ops_router.py:969  limit: int = Query(300, ge=1, le=1000),
+   app\routers\god_ops_router.py:1043  limit: int = Query(200, ge=1, le=1000),
+   app\routers\god_pricing_router.py:617  def pricing_audit(limit: int = Query(50, le=200),
+   app\routers\god_router.py:801  limit: int = Query(50, ge=1, le=200),
+   app\routers\god_router.py:883  skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+   app\routers\god_router.py:915  skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=500),
+   app\routers\god_sms_trace_router.py:55  limit: int = Query(default=20, ge=1, le=100),
+   app\routers\god_sms_trace_router.py:545  limit: int = Query(default=50, ge=1, le=200),
+   app\routers\import_batch_router.py:83  page: int = Query(1, ge=1),
+   app\routers\import_batch_router.py:84  per_page: int = Query(20, ge=1, le=100),
+   app\routers\import_batch_router.py:142  page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
+   app\routers\leads_router.py:523  page: int = Query(1, ge=1),
+   app\routers\leads_router.py:642  page: int = Query(1, ge=1),
+
+============================================================================
+6. LEAD LIST SHAPE (the screen a phone opens most)
+============================================================================
+@router.get("/")
+def list_leads(
+    request: Request,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    tier: Optional[str] = Query(None),
+    message_track: Optional[str] = Query(None),
+    temperature: Optional[str] = Query(None),
+    import_list_name: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):

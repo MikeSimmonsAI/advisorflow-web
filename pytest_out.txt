@@ -1,0 +1,871 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-8.3.3, pluggy-1.6.0
+rootdir: C:\Dev\advisorflow-web
+configfile: pytest.ini
+plugins: anyio-4.14.2
+collected 1846 items
+
+tests\test_admin_dashboard_metrics.py ....                               [  0%]
+tests\test_admin_revenue_dashboard.py ..........                         [  0%]
+tests\test_admin_router.py ........                                      [  1%]
+tests\test_ai_analysis_service.py ............                           [  1%]
+tests\test_audit_log_router.py ....                                      [  2%]
+tests\test_audit_log_wiring.py ...............                           [  2%]
+tests\test_auth_service.py ........                                      [  3%]
+tests\test_auto_migrate.py ..........                                    [  3%]
+tests\test_auto_send_candidate_service.py ............                   [  4%]
+tests\test_auto_send_eligibility_service.py ............                 [  5%]
+tests\test_auto_send_router.py .........................                 [  6%]
+tests\test_billing_acceptance.py ...........................             [  7%]
+tests\test_billing_authorization.py .................................... [  9%]
+............                                                             [ 10%]
+tests\test_billing_catalog.py .......................................... [ 12%]
+.....                                                                    [ 13%]
+tests\test_billing_compensation.py .................                     [ 14%]
+tests\test_billing_operations.py ...............................         [ 15%]
+tests\test_billing_plan_change.py ....................                   [ 16%]
+tests\test_billing_webhook.py .....................                      [ 17%]
+tests\test_brand_capability_scope.py ......................              [ 19%]
+tests\test_build_version.py ..........                                   [ 19%]
+tests\test_cadence_router.py .......                                     [ 20%]
+tests\test_cadence_service.py .........                                  [ 20%]
+tests\test_calendar_router.py .......                                    [ 20%]
+tests\test_campaign_router.py ....                                       [ 21%]
+tests\test_certification_service.py ...............                      [ 21%]
+tests\test_compensation_command_center.py .............................. [ 23%]
+.......                                                                  [ 23%]
+tests\test_compliance_preflight.py .............                         [ 24%]
+tests\test_compliance_router.py .........                                [ 25%]
+tests\test_context_boundaries.py .............................           [ 26%]
+tests\test_context_routing_gates.py .......................              [ 27%]
+tests\test_cors_config.py ...                                            [ 28%]
+tests\test_custom_deal_endpoint.py .............                         [ 28%]
+tests\test_customer_360_authorization.py ..............................  [ 30%]
+tests\test_customer_360_lifecycle.py ................................... [ 32%]
+..                                                                       [ 32%]
+tests\test_daily_briefing_router.py ..                                   [ 32%]
+tests\test_deal_pricing_authority.py .................                   [ 33%]
+tests\test_dedup_service.py ..........                                   [ 34%]
+tests\test_draft_reply_router.py .....                                   [ 34%]
+tests\test_email_review_batch.py ................                        [ 35%]
+tests\test_email_router.py ...                                           [ 35%]
+tests\test_email_service.py ..............                               [ 36%]
+tests\test_email_tracking_router.py ..........                           [ 36%]
+tests\test_email_tracking_service.py ........                            [ 37%]
+tests\test_engagement_service.py ............                            [ 37%]
+tests\test_exec_workspace.py .....................                       [ 38%]
+tests\test_executive_command_center.py .......                           [ 39%]
+tests\test_executive_command_experience.py ............................. [ 40%]
+....                                                                     [ 41%]
+tests\test_executive_customer_health.py ...........................      [ 42%]
+tests\test_executive_observation_identity.py .................           [ 43%]
+tests\test_executive_portfolio_boundary.py ............................. [ 44%]
+....                                                                     [ 45%]
+tests\test_executive_suite.py ...................                        [ 46%]
+tests\test_experience_severity.py ...................................... [ 48%]
+                                                                         [ 48%]
+tests\test_feature_flags_service.py .........                            [ 48%]
+tests\test_god_compensation_navigation.py ....................           [ 49%]
+tests\test_god_navigation.py ...........................                 [ 51%]
+tests\test_god_ops_drilldowns.py .........................               [ 52%]
+tests\test_god_password_reset.py ........................                [ 53%]
+tests\test_god_pricing_console.py ...................................... [ 56%]
+......                                                                   [ 56%]
+tests\test_google_contacts_service.py ............                       [ 56%]
+tests\test_health_router.py ...............                              [ 57%]
+tests\test_import_intelligence.py ...................................... [ 59%]
+......................                                                   [ 61%]
+tests\test_import_service.py ssssssss.                                   [ 61%]
+tests\test_lead_capacity.py ........................                     [ 62%]
+tests\test_lead_cleanup_router.py .............                          [ 63%]
+tests\test_lead_source_column.py ............                            [ 64%]
+tests\test_leads_router.py .............                                 [ 64%]
+tests\test_merge_readiness.py .......................................... [ 67%]
+..................................                                       [ 69%]
+tests\test_message_review_flow.py .........                              [ 69%]
+tests\test_microsoft_email_service.py ........                           [ 69%]
+tests\test_mobile_devices.py .....................                       [ 71%]
+tests\test_mobile_sessions.py .......................                    [ 72%]
+tests\test_model_registry.py .....                                       [ 72%]
+tests\test_needs_attention_filter.py ...                                 [ 72%]
+tests\test_new_inquiry_lead_tier.py .................                    [ 73%]
+tests\test_notification_service.py ........                              [ 74%]
+tests\test_outcomes_router.py ..........                                 [ 74%]
+tests\test_overview_charts_router.py .....                               [ 74%]
+tests\test_pipeline_financials.py ........................               [ 76%]
+tests\test_plan_limits.py .........                                      [ 76%]
+tests\test_plan_limits_coverage.py ..........                            [ 77%]
+tests\test_plan_limits_enforcement.py ...................                [ 78%]
+tests\test_platform_isolation.py .............                           [ 78%]
+tests\test_prep_demo_html.py ............                                [ 79%]
+tests\test_public_write_paths.py ....................................... [ 81%]
+..                                                                       [ 81%]
+tests\test_reconcile_business.py ..................................      [ 83%]
+tests\test_replies_action_center.py ................                     [ 84%]
+tests\test_reply_classification_service.py ...........................   [ 86%]
+tests\test_reply_triage_actions.py .....                                 [ 86%]
+tests\test_reports_router.py ...............                             [ 87%]
+tests\test_run_cadence_job.py ....                                       [ 87%]
+tests\test_sales_compensation.py ....................................    [ 89%]
+tests\test_sales_workspace.py .....................................      [ 91%]
+tests\test_sample_data_router.py ..........                              [ 91%]
+tests\test_self_password_change.py ....................                  [ 92%]
+tests\test_settings_router.py ........                                   [ 93%]
+tests\test_sms_router.py .....                                           [ 93%]
+tests\test_sms_service.py ..........                                     [ 94%]
+tests\test_sparklines.py .......                                         [ 94%]
+tests\test_team_activity_board.py ........                               [ 94%]
+tests\test_template_ai_service.py ............                           [ 95%]
+tests\test_template_service.py .......                                   [ 95%]
+tests\test_tier_config_service.py ............                           [ 96%]
+tests\test_upload_endpoints.py ......                                    [ 96%]
+tests\test_user_management.py .......................................    [ 99%]
+tests\test_workqueue_router.py ..                                        [ 99%]
+tests\test_zoom_integration.py ...............                           [100%]
+
+============================== warnings summary ===============================
+..\..\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\_internal\_config.py:291
+..\..\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\_internal\_config.py:291
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\_internal\_config.py:291: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+app\routers\god_router.py:914
+  C:\Dev\advisorflow-web\app\routers\god_router.py:914: DeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    scope: str = Query("admins", regex="^(admins|all|internal|tenant)$"),
+
+..\..\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\fields.py:801
+..\..\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\fields.py:801
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\fields.py:801: PydanticDeprecatedSince20: `max_items` is deprecated and will be removed, use `max_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warn('`max_items` is deprecated and will be removed, use `max_length` instead', DeprecationWarning)
+
+app\main.py:733
+  C:\Dev\advisorflow-web\app\main.py:733: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+..\..\Users\simmo\AppData\Roaming\Python\Python312\site-packages\fastapi\applications.py:4495
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+tests/test_audit_log_wiring.py: 2 warnings
+tests/test_auth_service.py: 1 warning
+tests/test_god_password_reset.py: 1 warning
+tests/test_plan_limits.py: 6 warnings
+tests/test_user_management.py: 4 warnings
+  C:\Dev\advisorflow-web\app\services\staff_activation.py:131: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_audit_log_wiring.py: 1 warning
+tests/test_campaign_router.py: 4 warnings
+tests/test_god_pricing_console.py: 5 warnings
+tests/test_public_write_paths.py: 6 warnings
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\pydantic\main.py:1114: PydanticDeprecatedSince20: The `dict` method is deprecated; use `model_dump` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warnings.warn('The `dict` method is deprecated; use `model_dump` instead.', category=PydanticDeprecatedSince20)
+
+tests/test_audit_log_wiring.py::test_apply_campaign_logs_action
+tests/test_campaign_router.py::test_campaign_preview_combines_tier_and_source_year_without_modifying_data
+tests/test_campaign_router.py::test_campaign_apply_updates_only_matching_org_leads_and_skips_dnc
+tests/test_campaign_router.py::test_campaign_apply_can_start_cadence_for_eligible_matching_leads
+tests/test_campaign_router.py::test_campaign_list_is_org_isolated
+  C:\Dev\advisorflow-web\app\routers\campaign_router.py:506: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_auto_send_candidate_service.py: 5 warnings
+tests/test_draft_reply_router.py: 3 warnings
+tests/test_email_review_batch.py: 3 warnings
+tests/test_email_service.py: 7 warnings
+tests/test_sms_router.py: 4 warnings
+tests/test_sms_service.py: 1 warning
+  C:\Dev\advisorflow-web\app\services\sms_service.py:388: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    expires_at=datetime.utcnow() + timedelta(days=BOOKING_TOKEN_TTL_DAYS),
+
+tests/test_auto_send_candidate_service.py::test_candidate_phase_with_eligible_reply_creates_a_real_row
+tests/test_auto_send_candidate_service.py::test_auto_phase_also_runs_the_eligibility_check
+tests/test_auto_send_candidate_service.py::test_first_ever_reply_is_correctly_flagged_as_first
+tests/test_auto_send_candidate_service.py::test_reply_with_prior_history_is_correctly_flagged_as_not_first
+tests/test_auto_send_candidate_service.py::test_eligible_candidate_gets_a_real_drafted_reply
+tests/test_auto_send_candidate_service.py::test_drafting_failure_still_creates_candidate_with_empty_draft_not_a_crash
+  C:\Dev\advisorflow-web\app\services\auto_send_candidate_service.py:123: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_auto_send_router.py: 31 warnings
+  C:\Dev\advisorflow-web\tests\test_auto_send_router.py:87: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_auto_send_router.py::test_approve_sends_the_exact_queued_message
+tests/test_auto_send_router.py::test_edit_then_approve_sends_the_edited_body_not_the_original
+tests/test_auto_send_router.py::test_approve_all_only_touches_the_callers_own_pending_items
+tests/test_message_review_flow.py::test_confirm_send_batch_sends_edited_message_text
+tests/test_message_review_flow.py::test_confirm_send_batch_starts_cadence_after_sending
+tests/test_sms_service.py::test_send_sms_creates_message_record_on_success
+tests/test_sms_service.py::test_send_sms_requesting_a_booking_link_sends_no_url_and_mints_no_token
+tests/test_sms_service.py::test_send_sms_skips_booking_link_when_not_requested
+tests/test_sms_service.py::test_send_batch_skips_dnc_and_duplicate_leads
+  C:\Dev\advisorflow-web\app\services\sms_service.py:567: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    lead.last_messaged_at = datetime.utcnow()
+
+tests/test_auto_send_router.py::test_approve_sends_the_exact_queued_message
+tests/test_auto_send_router.py::test_approve_sends_an_email_channel_item
+tests/test_auto_send_router.py::test_approve_marks_failed_when_the_email_provider_rejects
+tests/test_auto_send_router.py::test_approve_still_emails_a_lead_whose_phone_is_suppressed
+tests/test_auto_send_router.py::test_edit_then_approve_sends_the_edited_body_not_the_original
+  C:\Dev\advisorflow-web\app\routers\auto_send_router.py:336: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    item.actioned_at = datetime.utcnow()
+
+tests/test_auto_send_router.py::test_approve_does_not_send_to_a_dnc_lead
+tests/test_auto_send_router.py::test_approve_respects_the_suppression_list
+tests/test_auto_send_router.py::test_approve_blocks_a_dnc_lead_on_the_email_channel
+tests/test_auto_send_router.py::test_approve_blocks_email_for_an_explicit_email_opt_out
+  C:\Dev\advisorflow-web\app\routers\auto_send_router.py:320: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    item.actioned_at = datetime.utcnow()
+
+tests/test_auto_send_router.py::test_skip_sends_nothing_at_all
+tests/test_auto_send_router.py::test_history_shows_actioned_items_not_pending_ones
+  C:\Dev\advisorflow-web\app\routers\auto_send_router.py:364: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    item.actioned_at = datetime.utcnow()
+
+tests/test_auto_send_router.py::test_approve_all_only_touches_the_callers_own_pending_items
+  C:\Dev\advisorflow-web\app\routers\auto_send_router.py:408: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    item.actioned_at = datetime.utcnow()
+
+tests/test_billing_acceptance.py: 228 warnings
+tests/test_billing_authorization.py: 284 warnings
+tests/test_billing_catalog.py: 165 warnings
+tests/test_billing_compensation.py: 403 warnings
+tests/test_billing_operations.py: 180 warnings
+tests/test_billing_plan_change.py: 196 warnings
+tests/test_billing_webhook.py: 115 warnings
+tests/test_brand_capability_scope.py: 371 warnings
+tests/test_compensation_command_center.py: 829 warnings
+tests/test_context_boundaries.py: 2 warnings
+tests/test_custom_deal_endpoint.py: 168 warnings
+tests/test_customer_360_authorization.py: 334 warnings
+tests/test_customer_360_lifecycle.py: 416 warnings
+tests/test_deal_pricing_authority.py: 116 warnings
+tests/test_exec_workspace.py: 228 warnings
+tests/test_executive_command_experience.py: 72 warnings
+tests/test_executive_portfolio_boundary.py: 274 warnings
+tests/test_experience_severity.py: 238 warnings
+tests/test_god_compensation_navigation.py: 179 warnings
+tests/test_god_ops_drilldowns.py: 107 warnings
+tests/test_god_password_reset.py: 2 warnings
+tests/test_god_pricing_console.py: 724 warnings
+tests/test_health_router.py: 15 warnings
+tests/test_lead_capacity.py: 144 warnings
+tests/test_mobile_devices.py: 1 warning
+tests/test_mobile_sessions.py: 23 warnings
+tests/test_pipeline_financials.py: 230 warnings
+tests/test_plan_limits.py: 72 warnings
+tests/test_plan_limits_enforcement.py: 77 warnings
+tests/test_public_write_paths.py: 24 warnings
+tests/test_sales_compensation.py: 581 warnings
+tests/test_sales_workspace.py: 140 warnings
+tests/test_sample_data_router.py: 268 warnings
+tests/test_self_password_change.py: 1 warning
+tests/test_sms_router.py: 12 warnings
+tests/test_upload_endpoints.py: 6 warnings
+tests/test_user_management.py: 1 warning
+tests/test_zoom_integration.py: 278 warnings
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\schema.py:3596: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+tests/test_billing_authorization.py::test_revenue_segments_by_brand
+tests/test_billing_authorization.py::test_a_refund_is_netted_off_the_collected_figure
+tests/test_billing_authorization.py::test_the_brand_list_reports_which_brands_can_bill_anybody
+  C:\Dev\advisorflow-web\tests\test_billing_authorization.py:581: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_billing_authorization.py::test_revenue_segments_by_brand
+tests/test_billing_authorization.py::test_revenue_segments_by_brand
+tests/test_billing_authorization.py::test_revenue_segments_by_brand
+tests/test_billing_authorization.py::test_revenue_reports_no_source_rather_than_a_fabricated_zero
+tests/test_billing_authorization.py::test_a_refund_is_netted_off_the_collected_figure
+  C:\Dev\advisorflow-web\app\routers\god_billing_router.py:739: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_billing_compensation.py: 23 warnings
+tests/test_billing_webhook.py: 24 warnings
+  C:\Dev\advisorflow-web\app\services\billing_webhook.py:137: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    received_at=datetime.utcnow(),
+
+tests/test_billing_compensation.py: 12 warnings
+tests/test_brand_capability_scope.py: 13 warnings
+tests/test_compensation_command_center.py: 67 warnings
+tests/test_experience_severity.py: 18 warnings
+tests/test_god_compensation_navigation.py: 8 warnings
+tests/test_god_pricing_console.py: 4 warnings
+tests/test_sales_compensation.py: 16 warnings
+  C:\Dev\advisorflow-web\app\services\compensation.py:464: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    earned_at=datetime.utcnow(),
+
+tests/test_billing_compensation.py: 22 warnings
+tests/test_billing_webhook.py: 19 warnings
+  C:\Dev\advisorflow-web\app\services\billing_webhook.py:484: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    row.processed_at = datetime.utcnow()
+
+tests/test_billing_compensation.py::test_a_refund_is_recorded_without_mutating_paid_compensation
+  C:\Dev\advisorflow-web\tests\test_billing_compensation.py:512: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    paid_at=datetime.utcnow() - timedelta(days=30)),
+
+tests/test_billing_compensation.py: 1 warning
+tests/test_brand_capability_scope.py: 8 warnings
+tests/test_compensation_command_center.py: 10 warnings
+tests/test_god_compensation_navigation.py: 1 warning
+tests/test_sales_compensation.py: 1 warning
+  C:\Dev\advisorflow-web\app\services\compensation.py:489: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_billing_compensation.py::test_a_refund_is_recorded_without_mutating_paid_compensation
+tests/test_compensation_command_center.py::test_an_entry_cannot_be_paid_twice
+tests/test_compensation_command_center.py::test_paying_records_who_how_and_under_what_batch
+tests/test_compensation_command_center.py::test_changing_the_plan_does_not_move_a_paid_entry
+tests/test_compensation_command_center.py::test_every_headline_equals_the_sum_of_the_rows_behind_it
+tests/test_sales_compensation.py::test_a_payable_entry_can_be_paid
+  C:\Dev\advisorflow-web\app\services\compensation.py:538: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    entry.paid_at = paid_at or datetime.utcnow()
+
+tests/test_billing_compensation.py::test_a_refund_is_recorded_without_mutating_paid_compensation
+tests/test_billing_compensation.py::test_a_refund_webhook_records_against_the_original_payment
+  C:\Dev\advisorflow-web\app\services\billing_compensation.py:294: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    payment.refunded_at = refunded_at or datetime.utcnow()
+
+tests/test_billing_webhook.py::test_an_unhandled_event_type_is_recorded_as_ignored_not_dropped
+  C:\Dev\advisorflow-web\app\services\billing_webhook.py:434: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    row.processed_at = datetime.utcnow()
+
+tests/test_billing_webhook.py::test_an_event_for_an_unknown_customer_is_recorded_and_not_actioned
+  C:\Dev\advisorflow-web\app\services\billing_webhook.py:454: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    row.processed_at = datetime.utcnow()
+
+tests/test_brand_capability_scope.py: 13 warnings
+  C:\Dev\advisorflow-web\tests\test_brand_capability_scope.py:128: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=days_ago))
+
+tests/test_brand_capability_scope.py: 2 warnings
+tests/test_compensation_command_center.py: 11 warnings
+tests/test_experience_severity.py: 3 warnings
+tests/test_god_compensation_navigation.py: 2 warnings
+  C:\Dev\advisorflow-web\app\services\compensation_ledger.py:294: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_brand_capability_scope.py: 4 warnings
+tests/test_compensation_command_center.py: 8 warnings
+tests/test_experience_severity.py: 6 warnings
+tests/test_god_compensation_navigation.py: 4 warnings
+  C:\Dev\advisorflow-web\app\services\compensation_ledger.py:316: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_brand_capability_scope.py: 4 warnings
+tests/test_compensation_command_center.py: 3 warnings
+tests/test_experience_severity.py: 17 warnings
+tests/test_god_compensation_navigation.py: 4 warnings
+  C:\Dev\advisorflow-web\app\services\compensation_ledger.py:512: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_brand_capability_scope.py: 5 warnings
+tests/test_compensation_command_center.py: 3 warnings
+tests/test_experience_severity.py: 2 warnings
+tests/test_god_compensation_navigation.py: 4 warnings
+  C:\Dev\advisorflow-web\app\services\compensation_ledger.py:386: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_brand_capability_scope.py::test_a_manager_granted_the_capability_may_then_settle
+tests/test_brand_capability_scope.py::test_a_dual_role_user_holds_both_authorities_without_merging_them
+tests/test_brand_capability_scope.py::test_a_finance_user_with_no_membership_can_still_work
+tests/test_compensation_command_center.py::test_the_owner_can_record_a_collection_and_settle_it
+tests/test_compensation_command_center.py::test_a_second_settlement_of_the_same_entries_is_refused_and_changes_nothing
+tests/test_compensation_command_center.py::test_a_partial_batch_pays_nothing_at_all
+  C:\Dev\advisorflow-web\app\routers\compensation_router.py:432: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    paid_at = body.paid_at or datetime.utcnow()
+
+tests/test_compensation_command_center.py: 25 warnings
+tests/test_experience_severity.py: 9 warnings
+tests/test_god_pricing_console.py: 2 warnings
+tests/test_sales_compensation.py: 5 warnings
+  C:\Dev\advisorflow-web\app\services\compensation.py:421: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at = collected_at or datetime.utcnow()
+
+tests/test_compensation_command_center.py::test_a_fresh_entry_is_on_hold_not_payable
+tests/test_compensation_command_center.py::test_an_elapsed_holdback_reads_as_payable_even_before_promotion
+  C:\Dev\advisorflow-web\app\services\compensation_ledger.py:180: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_compensation_command_center.py::test_an_elapsed_holdback_reads_as_payable_even_before_promotion
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:203: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_promotion_moves_only_elapsed_entries
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:212: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_an_entry_cannot_be_paid_twice
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_paying_records_who_how_and_under_what_batch
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:275: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_changing_the_plan_does_not_move_a_paid_entry
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:337: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_every_headline_equals_the_sum_of_the_rows_behind_it
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:395: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_payables_by_payee_reconciles_to_the_payable_rows
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:419: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_upcoming_liability_only_counts_rows_that_already_exist
+  C:\Dev\advisorflow-web\app\services\compensation_ledger.py:366: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_compensation_command_center.py::test_a_manager_cannot_settle_payments
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:543: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_the_owner_can_record_a_collection_and_settle_it
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:575: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "collected_at": (datetime.utcnow()
+
+tests/test_compensation_command_center.py::test_a_second_settlement_of_the_same_entries_is_refused_and_changes_nothing
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:605: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_compensation_command_center.py::test_a_partial_batch_pays_nothing_at_all
+  C:\Dev\advisorflow-web\tests\test_compensation_command_center.py:629: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_context_boundaries.py::test_scraped_imports_respect_the_capacity_hold
+tests/test_lead_capacity.py::test_an_inbound_lead_over_capacity_is_persisted_not_discarded
+tests/test_lead_capacity.py::test_a_held_lead_retains_everything_it_arrived_with
+tests/test_lead_capacity.py::test_the_hold_does_not_overwrite_the_leads_status
+  C:\Dev\advisorflow-web\app\services\lead_capacity.py:179: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    lead.capacity_held_at = datetime.utcnow()
+
+tests/test_custom_deal_endpoint.py: 11 warnings
+tests/test_sales_workspace.py: 4 warnings
+  C:\Dev\advisorflow-web\app\routers\sales_router.py:1135: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_custom_deal_endpoint.py: 5 warnings
+tests/test_sales_workspace.py: 8 warnings
+  C:\Dev\advisorflow-web\app\routers\sales_router.py:263: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    SalesAppointment.ends_at >= datetime.utcnow())
+
+tests/test_custom_deal_endpoint.py: 5 warnings
+tests/test_sales_workspace.py: 11 warnings
+  C:\Dev\advisorflow-web\app\routers\sales_router.py:197: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return max(0, (datetime.utcnow() - opp.stage_changed_at).days)
+
+tests/test_custom_deal_endpoint.py: 5 warnings
+tests/test_sales_workspace.py: 12 warnings
+  C:\Dev\advisorflow-web\app\routers\sales_router.py:229: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_custom_deal_endpoint.py::test_below_the_floor_is_refused_with_a_reason
+tests/test_custom_deal_endpoint.py::test_a_refused_price_is_not_written_to_the_deal
+tests/test_custom_deal_endpoint.py::test_a_refusal_creates_exactly_one_pending_request
+tests/test_custom_deal_endpoint.py::test_asking_twice_replaces_rather_than_stacks
+tests/test_custom_deal_endpoint.py::test_asking_twice_replaces_rather_than_stacks
+tests/test_custom_deal_endpoint.py::test_the_refusal_is_recorded_on_the_timeline
+tests/test_custom_deal_endpoint.py::test_approval_writes_the_agreed_price_with_the_manager_as_actor
+tests/test_custom_deal_endpoint.py::test_denial_leaves_the_deal_untouched
+  C:\Dev\advisorflow-web\app\services\pricing_approvals.py:360: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_custom_deal_endpoint.py::test_approval_writes_the_agreed_price_with_the_manager_as_actor
+tests/test_custom_deal_endpoint.py::test_denial_leaves_the_deal_untouched
+  C:\Dev\advisorflow-web\app\services\pricing_approvals.py:185: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_customer_360_authorization.py::test_the_owner_can_walk_a_customer_through_the_whole_lifecycle
+  C:\Dev\advisorflow-web\app\services\customer_lifecycle.py:223: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed = max(0, int((datetime.utcnow() - started).days // 30))
+
+tests/test_customer_360_authorization.py: 1 warning
+tests/test_customer_360_lifecycle.py: 10 warnings
+  C:\Dev\advisorflow-web\app\services\customer_lifecycle.py:276: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    org.cancellation_requested_at = datetime.utcnow()
+
+tests/test_customer_360_authorization.py::test_the_owner_can_walk_a_customer_through_the_whole_lifecycle
+tests/test_customer_360_lifecycle.py::test_cancellation_preserves_the_customer_and_all_their_history
+tests/test_customer_360_lifecycle.py::test_cancellation_preserves_the_pricing_agreed_at_the_sale
+tests/test_customer_360_lifecycle.py::test_cancellation_does_not_touch_earned_or_paid_compensation
+tests/test_customer_360_lifecycle.py::test_completing_a_cancellation_closes_the_workspace_but_keeps_memberships
+tests/test_customer_360_lifecycle.py::test_a_cancelled_customer_is_still_searchable
+tests/test_customer_360_lifecycle.py::test_a_reactivated_customer_keeps_the_record_of_having_left
+tests/test_customer_360_lifecycle.py::test_cancellation_and_permanent_deletion_are_separate_operations
+tests/test_customer_360_lifecycle.py::test_reading_and_cancelling_never_modify_the_proposal
+  C:\Dev\advisorflow-web\app\services\customer_lifecycle.py:322: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    org.cancelled_at = datetime.utcnow()
+
+tests/test_customer_360_authorization.py::test_archived_customers_are_hidden_by_default_and_returned_on_request
+tests/test_customer_360_lifecycle.py::test_archiving_retains_every_record_and_remains_retrievable
+  C:\Dev\advisorflow-web\app\services\customer_lifecycle.py:348: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    org.archived_at = datetime.utcnow()
+
+tests/test_customer_360_lifecycle.py::test_a_reactivated_customer_keeps_the_record_of_having_left
+  C:\Dev\advisorflow-web\app\services\customer_lifecycle.py:374: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    org.reactivated_at = datetime.utcnow()
+
+tests/test_email_review_batch.py: 14 warnings
+tests/test_lead_capacity.py: 1 warning
+  C:\Dev\advisorflow-web\app\services\qualification.py:486: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.now = now or datetime.utcnow()
+
+tests/test_email_review_batch.py::test_confirm_send_batch_sends_the_advisors_edited_text
+tests/test_email_review_batch.py::test_confirm_send_batch_reports_blocked_separately_from_skipped
+tests/test_email_review_batch.py::test_confirm_send_batch_allows_a_review_bucket_lead_through
+  C:\Dev\advisorflow-web\app\routers\email_router.py:548: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    email_msg.sent_at = datetime.utcnow()
+
+tests/test_email_review_batch.py::test_confirm_send_batch_sends_the_advisors_edited_text
+tests/test_email_review_batch.py::test_confirm_send_batch_reports_blocked_separately_from_skipped
+tests/test_email_review_batch.py::test_confirm_send_batch_allows_a_review_bucket_lead_through
+  C:\Dev\advisorflow-web\app\routers\email_router.py:550: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    lead.last_messaged_at = datetime.utcnow()
+
+tests/test_exec_workspace.py: 42 warnings
+  C:\Dev\advisorflow-web\tests\test_exec_workspace.py:56: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow() - timedelta(days=60),
+
+tests/test_executive_command_experience.py: 47 warnings
+  C:\Dev\advisorflow-web\tests\test_executive_command_experience.py:65: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow() - timedelta(days=created_days_ago))
+
+tests/test_executive_command_experience.py: 63 warnings
+  C:\Dev\advisorflow-web\tests\test_executive_command_experience.py:128: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    touched=datetime.utcnow() - timedelta(days=2))
+
+tests/test_executive_command_experience.py: 1323 warnings
+  C:\Dev\advisorflow-web\tests\test_executive_command_experience.py:109: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow() - timedelta(days=created_days_ago))
+
+tests/test_executive_command_experience.py: 37 warnings
+tests/test_executive_portfolio_boundary.py: 49 warnings
+  C:\Dev\advisorflow-web\app\services\executive_portfolio.py:153: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_executive_command_experience.py: 5 warnings
+tests/test_executive_portfolio_boundary.py: 5 warnings
+  C:\Dev\advisorflow-web\app\services\executive_portfolio.py:601: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_executive_customer_health.py: 23 warnings
+tests/test_executive_portfolio_boundary.py: 1 warning
+  C:\Dev\advisorflow-web\app\routers\executive_router.py:574: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_executive_customer_health.py::TestCustomerHealthResponseShape::test_org_row_keys_match_frontend_contract
+tests/test_executive_customer_health.py::TestCustomerHealthResponseShape::test_org_plan_field_returned
+tests/test_executive_customer_health.py::TestCustomerHealthResponseShape::test_active_users_from_db
+tests/test_executive_customer_health.py::TestCustomerHealthResponseShape::test_zero_counts_when_no_data
+  C:\Dev\advisorflow-web\tests\test_executive_customer_health.py:36: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    o.created_at = created_at or (datetime.utcnow() - timedelta(days=90))
+
+tests/test_executive_customer_health.py::TestCustomerHealthResponseShape::test_no_activity_sets_last_operational_activity_to_none
+  C:\Dev\advisorflow-web\tests\test_executive_customer_health.py:223: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    org = make_org(platform_id=platform.id, created_at=datetime.utcnow() - timedelta(days=90))
+
+tests/test_executive_customer_health.py: 11 warnings
+  C:\Dev\advisorflow-web\tests\test_executive_customer_health.py:262: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_executive_customer_health.py::TestHealthClassification::test_last_op_is_max_of_sms_reply_booking
+  C:\Dev\advisorflow-web\tests\test_executive_customer_health.py:311: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_executive_customer_health.py::TestHealthClassification::test_summary_counts_match_org_classifications
+  C:\Dev\advisorflow-web\tests\test_executive_customer_health.py:334: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_executive_portfolio_boundary.py: 92 warnings
+  C:\Dev\advisorflow-web\tests\test_executive_portfolio_boundary.py:71: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow() - timedelta(days=120))
+
+tests/test_executive_suite.py::TestObservationGates::test_gate_j_observe_returns_read_only_flag
+  C:\Dev\advisorflow-web\app\routers\executive_router.py:308: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_experience_severity.py::test_a_viewer_without_settlement_authority_is_told_why_there_is_no_button
+  C:\Dev\advisorflow-web\tests\test_experience_severity.py:368: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    e.payable_at = datetime.utcnow() - timedelta(days=1)   # holdback elapsed
+
+tests/test_experience_severity.py::test_a_rep_is_never_told_they_lack_settlement_authority
+  C:\Dev\advisorflow-web\tests\test_experience_severity.py:407: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    e.payable_at = datetime.utcnow() - timedelta(days=1)
+
+tests/test_experience_severity.py::test_platform_health_gives_every_section_a_canonical_severity
+tests/test_experience_severity.py::test_a_subsystem_we_cannot_see_is_never_reported_as_healthy
+tests/test_experience_severity.py::test_platform_health_does_not_answer_in_engineering_vocabulary
+tests/test_experience_severity.py::test_platform_health_says_what_would_have_to_change_in_plain_words
+tests/test_experience_severity.py::test_platform_health_ships_the_legend_it_is_rendered_with
+  C:\Dev\advisorflow-web\app\routers\god_router.py:379: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_experience_severity.py: 20 warnings
+  C:\Users\simmo\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py:941: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    cursor.execute(statement, parameters)
+
+tests/test_god_compensation_navigation.py::test_the_endpoints_did_not_become_god_only
+tests/test_god_compensation_navigation.py::test_a_finance_user_with_no_sales_membership_still_reaches_the_data
+tests/test_god_compensation_navigation.py::test_a_customer_workspace_admin_cannot_reach_the_command_center
+tests/test_god_compensation_navigation.py::test_a_sales_manager_keeps_visibility_but_not_settlement
+tests/test_god_compensation_navigation.py::test_cross_brand_access_still_fails_server_side
+tests/test_god_compensation_navigation.py::test_my_compensation_stays_scoped_to_the_caller
+tests/test_god_compensation_navigation.py::test_god_authority_did_not_regress
+tests/test_god_compensation_navigation.py::test_god_authority_did_not_regress
+  C:\Dev\advisorflow-web\tests\test_god_compensation_navigation.py:228: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=days_ago))
+
+tests/test_god_ops_drilldowns.py: 12 warnings
+  C:\Dev\advisorflow-web\app\services\god_operations.py:571: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_god_ops_drilldowns.py::TestGodOpportunityList::test_filter_stalled
+  C:\Dev\advisorflow-web\tests\test_god_ops_drilldowns.py:175: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    old_ts = datetime.utcnow() - timedelta(days=STALLED_DAYS + 2)
+
+tests/test_god_ops_drilldowns.py::TestGodOpportunityList::test_filter_overdue
+  C:\Dev\advisorflow-web\tests\test_god_ops_drilldowns.py:186: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    past_due = datetime.utcnow() - timedelta(days=3)
+
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_returns_future_scheduled
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_past_appointment_excluded
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_row_has_required_keys
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_brand_filter
+  C:\Dev\advisorflow-web\tests\test_god_ops_drilldowns.py:102: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_returns_future_scheduled
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_past_appointment_excluded
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_row_has_required_keys
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_brand_filter
+  C:\Dev\advisorflow-web\tests\test_god_ops_drilldowns.py:103: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, hours=1),
+
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_returns_future_scheduled
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_past_appointment_excluded
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_row_has_required_keys
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_brand_filter
+  C:\Dev\advisorflow-web\app\services\god_operations.py:672: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_god_ops_drilldowns.py::TestGodAppointmentList::test_past_appointment_excluded
+  C:\Dev\advisorflow-web\tests\test_god_ops_drilldowns.py:280: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    past = datetime.utcnow() - timedelta(days=2)
+
+tests/test_lead_capacity.py::test_release_frees_held_leads_oldest_first_up_to_the_headroom
+tests/test_lead_capacity.py::test_release_does_not_start_any_outreach
+tests/test_lead_capacity.py::test_an_upgrade_to_unlimited_releases_everything
+  C:\Dev\advisorflow-web\app\services\lead_capacity.py:227: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_model_registry.py::test_cross_module_foreign_keys_resolve
+  C:\Dev\advisorflow-web\tests\test_model_registry.py:101: SAWarning: Cannot correctly sort tables; there are unresolvable cycles between tables "organizations, users", which is usually caused by mutually dependent foreign key constraints.  Foreign key constraints involving these tables will not be considered; this warning may raise an error in a future release.
+    Base.metadata.sorted_tables
+
+tests/test_public_write_paths.py::test_inbound_accepts_a_correct_credential_for_its_own_org
+tests/test_public_write_paths.py::test_rotation_invalidates_the_old_key_and_the_new_one_works
+tests/test_public_write_paths.py::test_every_inbound_call_is_logged_without_the_secret
+  C:\Dev\advisorflow-web\app\routers\crm_router.py:431: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cred.last_used_at = datetime.utcnow()
+
+tests/test_public_write_paths.py::test_inbound_accepts_a_correct_credential_for_its_own_org
+tests/test_public_write_paths.py::test_rotation_invalidates_the_old_key_and_the_new_one_works
+tests/test_public_write_paths.py::test_legacy_is_accepted_but_marked_deprecated
+tests/test_public_write_paths.py::test_every_inbound_call_is_logged_without_the_secret
+tests/test_public_write_paths.py::test_every_inbound_call_is_logged_without_the_secret
+tests/test_public_write_paths.py::test_god_usage_view_identifies_the_legacy_backlog
+  C:\Dev\advisorflow-web\app\services\crm_service.py:320: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    source_year=str(rec.get("source_year") or datetime.utcnow().year),
+
+tests/test_public_write_paths.py::test_inbound_accepts_a_correct_credential_for_its_own_org
+tests/test_public_write_paths.py::test_rotation_invalidates_the_old_key_and_the_new_one_works
+tests/test_public_write_paths.py::test_legacy_is_accepted_but_marked_deprecated
+tests/test_public_write_paths.py::test_every_inbound_call_is_logged_without_the_secret
+tests/test_public_write_paths.py::test_every_inbound_call_is_logged_without_the_secret
+tests/test_public_write_paths.py::test_god_usage_view_identifies_the_legacy_backlog
+  C:\Dev\advisorflow-web\app\services\crm_service.py:322: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_public_write_paths.py: 47 warnings
+  C:\Dev\advisorflow-web\app\routers\leads_router.py:2214: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_public_write_paths.py: 47 warnings
+  C:\Dev\advisorflow-web\app\routers\leads_router.py:2215: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    updated_at=datetime.utcnow(),
+
+tests/test_public_write_paths.py::test_a_repeat_submission_updates_rather_than_duplicating
+  C:\Dev\advisorflow-web\app\routers\leads_router.py:2188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    stamp = datetime.utcnow().strftime("%Y-%m-%d")
+
+tests/test_public_write_paths.py::test_sms_optin_lands_in_the_configured_organization
+  C:\Dev\advisorflow-web\app\routers\leads_router.py:2406: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    f"[SMS Opt-In {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC] "
+
+tests/test_public_write_paths.py::test_sms_optin_lands_in_the_configured_organization
+  C:\Dev\advisorflow-web\app\routers\leads_router.py:2411: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_public_write_paths.py::test_sms_optin_lands_in_the_configured_organization
+  C:\Dev\advisorflow-web\app\routers\leads_router.py:2412: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    updated_at=datetime.utcnow(),
+
+tests/test_sales_compensation.py::test_an_entry_inside_the_holdback_stays_earned
+  C:\Dev\advisorflow-web\tests\test_sales_compensation.py:470: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_amount=Decimal("1497.00"), collected_at=datetime.utcnow())
+
+tests/test_sales_compensation.py::test_an_entry_inside_the_holdback_stays_earned
+  C:\Dev\advisorflow-web\tests\test_sales_compensation.py:471: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    moved = comp.promote_due_to_payable(db_session, now=datetime.utcnow())
+
+tests/test_sales_compensation.py::test_an_entry_past_the_holdback_becomes_payable
+  C:\Dev\advisorflow-web\tests\test_sales_compensation.py:481: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_sales_compensation.py::test_an_entry_past_the_holdback_becomes_payable
+  C:\Dev\advisorflow-web\tests\test_sales_compensation.py:482: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    moved = comp.promote_due_to_payable(db_session, now=datetime.utcnow())
+
+tests/test_sales_compensation.py::test_a_payable_entry_can_be_paid
+  C:\Dev\advisorflow-web\tests\test_sales_compensation.py:500: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    collected_at=datetime.utcnow() - timedelta(days=20))
+
+tests/test_sales_workspace.py::TestOpportunities::test_create_opportunity
+  C:\Dev\advisorflow-web\app\routers\sales_router.py:994: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    stage_changed_at=datetime.utcnow(),
+
+tests/test_sales_workspace.py::TestMyDay::test_my_day_returns_200
+tests/test_sales_workspace.py::TestMyDay::test_my_day_has_required_keys
+tests/test_sales_workspace.py::TestMyDay::test_my_day_pipeline_summary_has_totals
+  C:\Dev\advisorflow-web\app\routers\sales_router.py:763: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_sample_data_router.py::test_generate_creates_leads_with_sample_tag
+tests/test_sample_data_router.py::test_generate_creates_variety_of_tiers_and_statuses
+tests/test_sample_data_router.py::test_generate_creates_replies_and_cadence_state
+tests/test_sample_data_router.py::test_clear_removes_only_sample_tagged_leads_never_real_ones
+tests/test_sample_data_router.py::test_clear_also_removes_associated_replies_and_cadence_state
+tests/test_sample_data_router.py::test_clear_does_not_affect_other_organizations_sample_data
+  C:\Dev\advisorflow-web\app\routers\sample_data_router.py:403: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    nowu = datetime.utcnow()
+
+tests/test_sms_router.py::test_inbound_webhook_creates_reply_and_reclassifies_hot
+tests/test_sms_router.py::test_inbound_webhook_stop_keyword_sets_dnc_and_cold
+tests/test_sms_router.py::test_inbound_webhook_stop_reply_creates_suppression_entry
+tests/test_sms_router.py::test_inbound_webhook_neutral_reply_does_not_set_hot
+  C:\Dev\advisorflow-web\app\services\pipeline_service.py:392: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    pipeline.last_inbound_at = datetime.utcnow()
+
+tests/test_sms_router.py::test_inbound_webhook_creates_reply_and_reclassifies_hot
+tests/test_sms_router.py::test_inbound_webhook_stop_keyword_sets_dnc_and_cold
+tests/test_sms_router.py::test_inbound_webhook_stop_reply_creates_suppression_entry
+tests/test_sms_router.py::test_inbound_webhook_neutral_reply_does_not_set_hot
+  C:\Dev\advisorflow-web\app\services\pipeline_service.py:493: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    pipeline.flagged_at = datetime.utcnow()
+
+tests/test_workqueue_router.py::test_workqueue_scopes_to_logged_in_advisor_and_org
+tests/test_workqueue_router.py::test_workqueue_includes_and_excludes_each_bucket_correctly
+  C:\Dev\advisorflow-web\app\routers\workqueue_router.py:46: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_workqueue_router.py::test_workqueue_includes_and_excludes_each_bucket_correctly
+  C:\Dev\advisorflow-web\tests\test_workqueue_router.py:100: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_zoom_integration.py::test_requires_video_backfill_on_untouched_rows
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:223: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_zoom_integration.py::test_requires_video_not_overwritten_when_user_edited_row
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_zoom_integration.py::test_ensure_meeting_creates_provider_meeting
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:291: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_zoom_integration.py::test_ensure_meeting_creates_provider_meeting
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:292: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, minutes=30),
+
+tests/test_zoom_integration.py::test_ensure_meeting_creates_provider_meeting
+tests/test_zoom_integration.py::test_ensure_meeting_is_idempotent
+tests/test_zoom_integration.py::test_ensure_meeting_is_idempotent
+tests/test_zoom_integration.py::test_no_zoom_for_non_video_type
+tests/test_zoom_integration.py::test_cancel_meeting_clears_join_url_and_calls_provider
+tests/test_zoom_integration.py::test_host_url_encrypted_at_rest
+tests/test_zoom_integration.py::test_meeting_out_has_no_host_url_field
+tests/test_zoom_integration.py::test_meeting_row_is_scoped_to_its_brand
+  C:\Dev\advisorflow-web\app\services\appointment_meetings.py:108: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_zoom_integration.py::test_ensure_meeting_is_idempotent
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:330: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=2),
+
+tests/test_zoom_integration.py::test_ensure_meeting_is_idempotent
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:331: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=2, minutes=30),
+
+tests/test_zoom_integration.py::test_no_zoom_for_non_video_type
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:363: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_zoom_integration.py::test_no_zoom_for_non_video_type
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:364: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, minutes=30),
+
+tests/test_zoom_integration.py::test_cancel_meeting_clears_join_url_and_calls_provider
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:393: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_zoom_integration.py::test_cancel_meeting_clears_join_url_and_calls_provider
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:394: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, minutes=30),
+
+tests/test_zoom_integration.py::test_cancel_meeting_clears_join_url_and_calls_provider
+  C:\Dev\advisorflow-web\app\services\appointment_meetings.py:248: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = now or datetime.utcnow()
+
+tests/test_zoom_integration.py::test_host_url_encrypted_at_rest
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:441: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_zoom_integration.py::test_host_url_encrypted_at_rest
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:442: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, minutes=30),
+
+tests/test_zoom_integration.py::test_meeting_out_has_no_host_url_field
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:473: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_zoom_integration.py::test_meeting_out_has_no_host_url_field
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:474: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, minutes=30),
+
+tests/test_zoom_integration.py::test_meeting_row_is_scoped_to_its_brand
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:509: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    starts_at=datetime.utcnow() + timedelta(days=1),
+
+tests/test_zoom_integration.py::test_meeting_row_is_scoped_to_its_brand
+  C:\Dev\advisorflow-web\tests\test_zoom_integration.py:510: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ends_at=datetime.utcnow() + timedelta(days=1, minutes=30),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========= 1838 passed, 8 skipped, 10105 warnings in 864.63s (0:14:24) =========
+DONE_OK  
