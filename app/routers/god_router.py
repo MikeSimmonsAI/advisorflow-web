@@ -1471,3 +1471,118 @@ def god_get_voice_call(call_id: str, god: User = Depends(require_god),
         "transfer_status": c.transfer_status,
         "error_message": c.error_message,
     }
+
+
+# ── GOD-10: Background Job Run Ledger ─────────────────────────────────────
+
+
+class JobRunSummary(BaseModel):
+    """One row from the job_runs table — safe to expose to God."""
+    id: int
+    job_name: str
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    status: str
+    error_summary: Optional[str] = None
+    duration_ms: Optional[int] = None
+    metrics: Optional[dict] = None
+
+
+class JobRunsResponse(BaseModel):
+    runs: list[JobRunSummary]
+    total: int
+
+
+@router.get("/job-runs", response_model=JobRunsResponse)
+def get_job_runs(
+    job_name: Optional[str] = Query(None, description="Filter by job name (cadence_loop, ai_conversation_loop, review_request_loop)"),
+    status: Optional[str] = Query(None, description="Filter by status: running | success | error"),
+    limit: int = Query(50, ge=1, le=500),
+    _god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+) -> JobRunsResponse:
+    """Most-recent background-loop run records — god_admin only.
+
+    Returns the latest `limit` rows from job_runs, newest first.
+    Use job_name and status query params to filter by loop or outcome.
+    No secrets, message bodies, or credentials are stored in this table.
+    """
+    from app.models.job_models import JobRun
+
+    q = db.query(JobRun)
+    if job_name:
+        q = q.filter(JobRun.job_name == job_name)
+    if status:
+        q = q.filter(JobRun.status == status)
+
+    total = q.count()
+    rows = q.order_by(JobRun.started_at.desc()).limit(limit).all()
+
+    return JobRunsResponse(
+        runs=[
+            JobRunSummary(
+                id=r.id,
+                job_name=r.job_name,
+                started_at=r.started_at,
+                finished_at=r.finished_at,
+                status=r.status,
+                error_summary=r.error_summary,
+                duration_ms=r.duration_ms,
+                metrics=r.metrics,
+            )
+            for r in rows
+        ],
+        total=total,
+    )
+
+
+@router.get("/job-runs/latest", response_model=dict)
+def get_job_runs_latest(
+    _god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Most-recent run for each known job — quick pulse check for System Health.
+
+    Returns one record per job name (the most recent by started_at), plus
+    a top-level 'all_healthy' bool that is True only when every known job
+    has a 'success' status as its most recent run.
+    """
+    from app.models.job_models import JobRun, JobName
+    from sqlalchemy import func as _func
+
+    known_jobs = [JobName.CADENCE_LOOP, JobName.AI_CONVERSATION, JobName.REVIEW_REQUEST]
+
+    # Subquery: max started_at per job_name
+    sub = (
+        db.query(
+            JobRun.job_name,
+            _func.max(JobRun.started_at).label("max_started"),
+        )
+        .group_by(JobRun.job_name)
+        .subquery()
+    )
+    rows = (
+        db.query(JobRun)
+        .join(sub, (JobRun.job_name == sub.c.job_name) & (JobRun.started_at == sub.c.max_started))
+        .all()
+    )
+
+    result: dict[str, dict] = {}
+    for r in rows:
+        result[r.job_name] = {
+            "id": r.id,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "status": r.status,
+            "duration_ms": r.duration_ms,
+            "metrics": r.metrics,
+            "error_summary": r.error_summary,
+        }
+
+    # Fill in known jobs that have never run
+    for name in known_jobs:
+        if name not in result:
+            result[name] = {"status": "never_run", "started_at": None}
+
+    all_healthy = all(result.get(n, {}).get("status") == "success" for n in known_jobs)
+    return {"jobs": result, "all_healthy": all_healthy}

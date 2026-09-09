@@ -650,14 +650,19 @@ app.include_router(device_router)
 async def _review_request_loop():
     """Send Google review request SMS after appointments end. Runs every 30 min."""
     from app.crons.review_request_cron import run_review_request_cron
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
     import logging as _log
     _logger = _log.getLogger("review_request_cron")
     await asyncio.sleep(60)  # brief startup delay
     while True:
         try:
-            sent = run_review_request_cron(engine)
-            if sent:
-                _logger.info("review_request_cron: sent %d messages", sent)
+            async with record_job_run(JobName.REVIEW_REQUEST, db_factory=SessionLocal) as _m:
+                sent = run_review_request_cron(engine)
+                _m["sent"] = sent or 0
+                if sent:
+                    _logger.info("review_request_cron: sent %d messages", sent)
         except Exception as exc:
             _logger.error("review_request_cron error: %s", exc)
         await asyncio.sleep(1800)  # 30 minutes
@@ -672,32 +677,40 @@ async def _ai_conversation_loop():
     web server process — all exceptions are caught and logged.
     """
     from app.routers.ai_conversation_router import process_scheduled_touches
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
     from app.deps import SessionLocal
     from app.models.models import Organization
     import logging as _log
     _logger = _log.getLogger("ai_conversation_loop")
     await asyncio.sleep(30)  # brief startup delay
     while True:
-        db = SessionLocal()
-        try:
-            orgs = db.query(Organization).filter(Organization.is_active == True).all()
-            org_ids = [o.id for o in orgs]
-        except Exception as exc:
-            _logger.error("ai_conversation_loop: failed to fetch orgs: %s", exc)
-            org_ids = []
-        finally:
-            db.close()
-
-        for org_id in org_ids:
+        async with record_job_run(JobName.AI_CONVERSATION, db_factory=SessionLocal) as _m:
+            db = SessionLocal()
             try:
-                db = SessionLocal()
-                try:
-                    process_scheduled_touches(db, org_id=org_id)
-                finally:
-                    db.close()
+                orgs = db.query(Organization).filter(Organization.is_active == True).all()
+                org_ids = [o.id for o in orgs]
             except Exception as exc:
-                _logger.error("ai_conversation_loop: org=%s error: %s", org_id, exc)
-                # Isolation: continue to next org regardless of this error
+                _logger.error("ai_conversation_loop: failed to fetch orgs: %s", exc)
+                org_ids = []
+                _m["fetch_error"] = str(exc)[:200]
+            finally:
+                db.close()
+
+            _org_errors = 0
+            for org_id in org_ids:
+                try:
+                    db = SessionLocal()
+                    try:
+                        process_scheduled_touches(db, org_id=org_id)
+                    finally:
+                        db.close()
+                except Exception as exc:
+                    _logger.error("ai_conversation_loop: org=%s error: %s", org_id, exc)
+                    _org_errors += 1
+                    # Isolation: continue to next org regardless of this error
+            _m["orgs_processed"] = len(org_ids)
+            _m["org_errors"] = _org_errors
 
         await asyncio.sleep(120)  # 2 minutes
 
@@ -710,6 +723,8 @@ async def _cadence_loop():
     All exceptions are caught so a bad row never crashes the web server.
     """
     from app.services.cadence_service import run_due_cadences
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
     from app.deps import SessionLocal
     import logging as _log
     _logger = _log.getLogger("cadence_loop")
@@ -717,12 +732,16 @@ async def _cadence_loop():
     while True:
         db = SessionLocal()
         try:
-            result = run_due_cadences(db)  # organization_id=None → all orgs
-            if result.get("sent"):
-                _logger.info(
-                    "cadence_loop: sent=%s completed=%s errors=%s",
-                    result.get("sent", 0), result.get("completed", 0), result.get("errors", 0),
-                )
+            async with record_job_run(JobName.CADENCE_LOOP, db_factory=SessionLocal) as _m:
+                result = run_due_cadences(db)  # organization_id=None → all orgs
+                _m["sent"]      = result.get("sent", 0)
+                _m["completed"] = result.get("completed", 0)
+                _m["errors"]    = result.get("errors", 0)
+                if result.get("sent"):
+                    _logger.info(
+                        "cadence_loop: sent=%s completed=%s errors=%s",
+                        result.get("sent", 0), result.get("completed", 0), result.get("errors", 0),
+                    )
         except Exception as exc:
             _logger.error("cadence_loop: error: %s", exc)
         finally:
@@ -882,6 +901,33 @@ async def on_startup():
         except Exception as e:
             import logging as _logging
             _logging.getLogger(__name__).warning("Index migration note (%s): %s", _idx_sql[:60], e)
+
+    # 3c. GOD-10 — durable job_runs table for background-loop lifecycle tracking.
+    #     CREATE TABLE / INDEX IF NOT EXISTS are idempotent — safe every startup.
+    _job_runs_ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS job_runs (
+            id            BIGSERIAL    PRIMARY KEY,
+            job_name      VARCHAR(64)  NOT NULL,
+            started_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+            finished_at   TIMESTAMP    NULL,
+            status        VARCHAR(16)  NOT NULL DEFAULT 'running',
+            error_summary VARCHAR(512) NULL,
+            duration_ms   INTEGER      NULL,
+            metrics       JSONB        NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_job_runs_job_name   ON job_runs (job_name);",
+        "CREATE INDEX IF NOT EXISTS ix_job_runs_started_at ON job_runs (started_at DESC);",
+    ]
+    for _ddl in _job_runs_ddl:
+        try:
+            with engine.connect() as conn:
+                conn.execute(_text(_ddl))
+                conn.commit()
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("job_runs DDL note: %s", e)
 
     # 4. Ensure the master super_admin account has the correct role.
     #    NOTE: password_hash is intentionally NOT set here — it would overwrite
