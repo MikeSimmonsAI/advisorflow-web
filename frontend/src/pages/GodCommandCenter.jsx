@@ -39,6 +39,7 @@ import OrgCommandTable from './god/OrgCommandTable'
 import RevenueMetrics from './god/RevenueMetrics'
 import GodTools from './god/GodTools'
 import ProductStatus from './god/ProductStatus'
+import RoadmapBoard from './god/RoadmapBoard'
 import ConfirmDialog from './god/ConfirmDialog'
 import { enterCustomer } from './god/enterCustomer'
 
@@ -285,7 +286,12 @@ export default function GodCommandCenter() {
           </div>
           <div id="product-status">
             <SectionLabel note="· what is finished, and what is next">PRODUCT STATUS</SectionLabel>
+            {/* Live route chips — driven by ProductStatus.MODULES (route registry) */}
             <ProductStatus onGo={go} />
+            {/* Full feature-status board — driven by platformRoadmap.json (GOD-04) */}
+            <div style={{ marginTop: 20 }}>
+              <RoadmapBoard />
+            </div>
           </div>
         </div>
 

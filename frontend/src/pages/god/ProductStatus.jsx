@@ -46,27 +46,9 @@ export const MODULES = [
   // it is the same lie pointing the other way.
   { key: 'billing',   label: 'Billing & Revenue', live: true, to: '/god/billing',         group: 'PLATFORM' },
 
-  // ── roadmap ──────────────────────────────────────────────────────────────
-  // REVENUE ANALYTICS IS NOT A UI JOB, and listing it as one is how it stays
-  // permanently "next". Current revenue is now reportable — what is missing is
-  // HISTORY: every figure this platform stores is a current count, so a trend
-  // line would be drawn from a single point. The foundation is a snapshot, not
-  // a chart component.
-  { key: 'revenue',    label: 'Revenue Trends',      live: false,
-    needs: 'a periodic snapshot of revenue and usage — current figures are '
-         + 'already live in Billing & Revenue, but nothing records history to chart' },
-  { key: 'godleads',   label: 'Cross-org Leads',     live: false,
-    needs: 'a screen for GET /god/leads, which already returns the data' },
-  { key: 'messaging',  label: 'Communications',      live: false,
-    needs: 'a platform-wide message browser; delivery counts are already live in Platform Health' },
-  { key: 'cadence',    label: 'Pipeline & Cadence',  live: false,
-    needs: 'a god-level cadence designer; cadences exist per organization only' },
-  { key: 'jobs',       label: 'Queue & Job Health',  live: false,
-    needs: 'a job table — scheduled work currently leaves no durable record' },
-  { key: 'flags',      label: 'Feature Flags',       live: false,
-    needs: 'a flag store; per-customer feature toggles already exist on Customer 360' },
-  { key: 'settings',   label: 'System Settings',     live: false,
-    needs: 'a platform settings model' },
+  // GOD-04: roadmap items (live: false) removed from this list.
+  // platformRoadmap.json is the authoritative source for feature status.
+  // RoadmapBoard.jsx reads it directly — no duplication here.
 ]
 
 export const LIVE_MODULES = MODULES.filter(m => m.live)
@@ -86,20 +68,8 @@ export default function ProductStatus({ onGo }) {
           ))}
         </div>
       </div>
-      <div className="gm-modbox">
-        <h4 className="next">COMING NEXT</h4>
-        <div className="gm-chips">
-          {NEXT_MODULES.map(m => (
-            <span key={m.key} className="gm-chip next" title={'Waiting on: ' + m.needs}>
-              {m.label}
-            </span>
-          ))}
-        </div>
-        <p style={{ margin: '10px 0 0', fontSize: 8.5, color: '#4a637f', lineHeight: 1.6 }}>
-          Hover any item to see exactly what it is waiting on. Nothing here is
-          hidden behind a button that would do nothing if you pressed it.
-        </p>
-      </div>
     </div>
   )
 }
+// GOD-04: COMING NEXT chips removed — feature-status detail is now in
+// RoadmapBoard.jsx (reads platformRoadmap.json). No hardcoded roadmap content here.
