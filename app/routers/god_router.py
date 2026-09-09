@@ -1552,6 +1552,48 @@ def get_job_runs_latest(
 
     known_jobs = [JobName.CADENCE_LOOP, JobName.AI_CONVERSATION, JobName.REVIEW_REQUEST]
 
+    # ── THE LEDGER HAS TO BE ABLE TO REPORT ITS OWN ABSENCE ──────────────────
+    #
+    # "never_run" used to mean two completely different things and the screen
+    # could not tell them apart:
+    #
+    #   (a) the table is there, the loop is running, this job simply has no row
+    #   (b) the table was never created, so NOTHING can ever have a row
+    #
+    # Both paths are silent by construction. The CREATE TABLE in main.py's
+    # startup is wrapped in try/except and only logs; record_job_run() swallows
+    # its own write failures on purpose, so that a metrics problem can never
+    # take down the loop it is measuring. Two deliberate swallows in series
+    # mean a missing ledger looks exactly like three idle jobs — which is how a
+    # screenshot ends up contradicting the source code with nobody able to say
+    # which one is lying.
+    #
+    # So the endpoint now answers that question itself, with real numbers, and
+    # a caller never has to infer runtime state from the fact that code exists.
+    ledger: dict = {
+        "table_present": True,
+        "total_rows": None,
+        "distinct_jobs": [],
+        "newest_started_at": None,
+        "error": None,
+    }
+    try:
+        ledger["total_rows"] = db.query(_func.count(JobRun.id)).scalar() or 0
+        ledger["distinct_jobs"] = sorted(
+            n for (n,) in db.query(JobRun.job_name).distinct().all() if n
+        )
+        newest = db.query(_func.max(JobRun.started_at)).scalar()
+        ledger["newest_started_at"] = newest.isoformat() if newest else None
+    except Exception as exc:  # noqa: BLE001 — a diagnostic must not 500
+        db.rollback()
+        ledger["table_present"] = False
+        ledger["error"] = f"{type(exc).__name__}: {exc}"[:300]
+        return {
+            "jobs": {n: {"status": "ledger_unavailable", "started_at": None} for n in known_jobs},
+            "all_healthy": False,
+            "ledger": ledger,
+        }
+
     # Subquery: max started_at per job_name
     sub = (
         db.query(
@@ -1585,7 +1627,13 @@ def get_job_runs_latest(
             result[name] = {"status": "never_run", "started_at": None}
 
     all_healthy = all(result.get(n, {}).get("status") == "success" for n in known_jobs)
-    return {"jobs": result, "all_healthy": all_healthy}
+
+    # Jobs with rows that nobody enumerates. Reported rather than hidden: a job
+    # that writes to the ledger and is missing from `known_jobs` is invisible on
+    # the screen while looking perfectly healthy in the database.
+    ledger["untracked_jobs"] = [n for n in ledger["distinct_jobs"] if n not in known_jobs]
+
+    return {"jobs": result, "all_healthy": all_healthy, "ledger": ledger}
 
 
 @router.get("/revenue-history")
@@ -1865,9 +1913,200 @@ def get_revenue_history(
     }
 
 
-# ── GOD-10: Job-run ledger ───────────────────────────────────────────────────
+@router.get("/zoom-diagnostics")
+def zoom_diagnostics(
+    _god: User = Depends(require_god),
+) -> dict:
+    """Ask Zoom directly why Server-to-Server OAuth is failing, and report the answer.
 
-@router.get("/job-runs")
+    WHY THIS EXISTS. `ZoomProvider._access_token` throws away Zoom's response on
+    a non-200 and substitutes one fixed sentence naming five possible causes at
+    once. That sentence is correct and useless: it cannot distinguish a wrong
+    account id from an unactivated Marketplace app from a mismatched client
+    id/secret pair, so the operator is told "verify everything" every time and
+    an actually-configured account looks identical to an empty one.
+
+    Zoom, meanwhile, says exactly which it is — `invalid_client`,
+    `invalid_grant`, "Invalid account_id" — in the body that was discarded.
+    This endpoint performs the same token request and returns THAT.
+
+    WHAT IT NEVER RETURNS: the account id, the client id, the client secret, the
+    access token, or any part of them. Only presence, length, HTTP status and
+    Zoom's own error strings — none of which are secret, all of which are what
+    you need to fix it.
+    """
+    import base64 as _b64
+    import os as _os
+
+    import httpx as _httpx
+
+    def _describe(name: str) -> dict:
+        """Presence and shape only. Length and whitespace catch the two most
+        common real faults — a truncated paste and a trailing newline — without
+        revealing anything about the value itself."""
+        raw = _os.environ.get(name)
+        if raw is None:
+            return {"present": False, "empty": True, "length": 0, "has_surrounding_whitespace": False}
+        return {
+            "present": True,
+            "empty": raw.strip() == "",
+            "length": len(raw),
+            "has_surrounding_whitespace": raw != raw.strip(),
+        }
+
+    env = {n: _describe(n) for n in ("ZOOM_ACCOUNT_ID", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET")}
+    env["ZOOM_HOST_ID"] = _describe("ZOOM_HOST_ID")
+
+    missing = [n for n in ("ZOOM_ACCOUNT_ID", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET")
+               if not env[n]["present"] or env[n]["empty"]]
+    if missing:
+        return {
+            "env": env,
+            "token_request": None,
+            "verdict": "env_missing",
+            "explanation": ("These variables are absent or blank on THIS service: "
+                            + ", ".join(missing)
+                            + ". Zoom was never contacted. Note that Render env vars are "
+                              "per-service — setting them on one service does not set them "
+                              "on another."),
+        }
+
+    account_id = (_os.environ.get("ZOOM_ACCOUNT_ID") or "").strip()
+    client_id = (_os.environ.get("ZOOM_CLIENT_ID") or "").strip()
+    client_secret = (_os.environ.get("ZOOM_CLIENT_SECRET") or "").strip()
+    basic = _b64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("ascii")
+
+    token_request: dict = {}
+    try:
+        r = _httpx.post(
+            "https://zoom.us/oauth/token",
+            params={"grant_type": "account_credentials", "account_id": account_id},
+            headers={"Authorization": "Basic " + basic},
+            timeout=20.0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "env": env,
+            "token_request": {"transport_error": f"{type(exc).__name__}: {exc}"[:300]},
+            "verdict": "transport_failure",
+            "explanation": "Could not reach zoom.us from this service at all — "
+                           "network or egress problem, not a credential problem.",
+        }
+
+    body: dict = {}
+    try:
+        parsed = r.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:  # noqa: BLE001
+        body = {}
+
+    token_request = {
+        "http_status": r.status_code,
+        # Zoom's own error vocabulary. Not secret; the whole point of the call.
+        "zoom_error": body.get("error"),
+        "zoom_reason": body.get("reason") or body.get("error_description"),
+        "zoom_error_code": body.get("errorCode") or body.get("code"),
+        "token_obtained": bool(body.get("access_token")),
+        "expires_in": body.get("expires_in"),
+        "granted_scope_count": len((body.get("scope") or "").split()) if body.get("scope") else None,
+    }
+
+    if r.status_code == 200 and body.get("access_token"):
+        # A token proves the app is activated and the credentials pair. It does
+        # NOT prove the app can create meetings — that needs meeting:write, and
+        # a scope problem surfaces only on a real API call. So make one.
+        probe: dict = {}
+        try:
+            host = (_os.environ.get("ZOOM_HOST_ID") or "me").strip() or "me"
+            pr = _httpx.get(
+                f"https://api.zoom.us/v2/users/{host}",
+                headers={"Authorization": "Bearer " + body["access_token"]},
+                timeout=20.0,
+            )
+            pbody = {}
+            try:
+                parsed_p = pr.json()
+                if isinstance(parsed_p, dict):
+                    pbody = parsed_p
+            except Exception:  # noqa: BLE001
+                pass
+            probe = {
+                "endpoint": "GET /users/{host}",
+                "http_status": pr.status_code,
+                "zoom_code": pbody.get("code"),
+                "zoom_message": pbody.get("message"),
+            }
+        except Exception as exc:  # noqa: BLE001
+            probe = {"transport_error": f"{type(exc).__name__}: {exc}"[:300]}
+
+        if probe.get("http_status") == 200:
+            verdict, explanation = "ok", ("Token issued and the host account resolved. "
+                                          "Zoom Server-to-Server OAuth is working on this service.")
+        elif probe.get("http_status") in (400, 404):
+            verdict, explanation = "host_not_found", (
+                "Credentials are valid and a token was issued, but ZOOM_HOST_ID does not "
+                "resolve on this account. Set it to a real user id or email on the same "
+                "Zoom account, or unset it to use the app owner ('me').")
+        elif probe.get("http_status") == 403:
+            verdict, explanation = "missing_scopes", (
+                "Credentials are valid but the app lacks the required scopes. Add "
+                "user:read:admin (or user:read) and meeting:write to the Server-to-Server "
+                "OAuth app, then re-activate it — scope changes require re-activation.")
+        else:
+            verdict, explanation = "token_ok_probe_failed", (
+                "A token was issued, so the credentials are correct; the follow-up API "
+                "call did not succeed. See probe.zoom_message.")
+        return {"env": env, "token_request": token_request, "probe": probe,
+                "verdict": verdict, "explanation": explanation}
+
+    # Non-200: map Zoom's own vocabulary to one concrete cause.
+    err = (body.get("error") or "").lower()
+    reason = (body.get("reason") or body.get("error_description") or "").lower()
+
+    if "account" in reason and ("invalid" in reason or "not found" in reason):
+        verdict, explanation = "wrong_account_id", (
+            "Zoom recognised the client credentials but rejected the account id. "
+            "ZOOM_ACCOUNT_ID must be the Account ID shown on the Server-to-Server OAuth "
+            "app's own App Credentials page — not the client id, and not a user id.")
+    elif err == "invalid_client" or "client_id or client_secret" in reason:
+        verdict, explanation = "client_id_secret_mismatch", (
+            "Zoom rejected the client id/secret pair. The two values must come from the "
+            "SAME app; a client id from one app with a secret from another fails exactly "
+            "like this. A regenerated secret also invalidates the old one immediately.")
+    elif r.status_code == 401:
+        verdict, explanation = "app_not_activated_or_unauthorized", (
+            "Zoom returned 401. The usual cause is a Server-to-Server OAuth app that was "
+            "created but never Activated — status must read 'Activated', not 'Created' or "
+            "'Draft'. A deactivated app returns 401 with valid credentials.")
+    elif err == "unsupported_grant_type":
+        verdict, explanation = "wrong_app_type", (
+            "This app does not support account_credentials, which means it is not a "
+            "Server-to-Server OAuth app. A general OAuth or JWT app cannot be used here — "
+            "create a Server-to-Server OAuth app.")
+    else:
+        verdict, explanation = "rejected_see_zoom_fields", (
+            "Zoom rejected the token request. zoom_error and zoom_reason above are Zoom's "
+            "verbatim answer and name the specific cause.")
+
+    return {"env": env, "token_request": token_request, "verdict": verdict,
+            "explanation": explanation}
+
+
+# ── GOD-10: Job-run ledger ───────────────────────────────────────────────────
+#
+# DEAD SECOND COPIES. Both paths below were already registered earlier in this
+# file (/job-runs at the JobRunsResponse handler, /job-runs/latest above), and
+# FastAPI serves the FIRST match — so neither of these ever answered a request.
+# They were not merely redundant: the second `def get_job_runs_latest` rebound
+# the module-level name, so anything importing that symbol got the copy that
+# does NOT serve traffic, and its never-run shape differs (`None` instead of
+# `{"status": "never_run"}`). Two definitions disagreeing about the response
+# shape, one of them unreachable, is how a screen gets debugged against code
+# that never runs. Decorators removed rather than the bodies deleted, matching
+# the REMOVED_DUPLICATE convention already used in this file.
+
+# REMOVED_DUPLICATE @router.get("/job-runs")
 def list_job_runs(
     job_name: Optional[str] = Query(None, description="Filter by job name constant"),
     status: Optional[str] = Query(None, description="Filter by status: running|success|error"),
@@ -1913,12 +2152,15 @@ def list_job_runs(
     }
 
 
-@router.get("/job-runs/latest")
-def get_job_runs_latest(
+# REMOVED_DUPLICATE @router.get("/job-runs/latest")
+def _get_job_runs_latest_superseded(
     _god: User = Depends(require_god),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Return the most-recent run for each known background job.
+    """SUPERSEDED — see the REMOVED_DUPLICATE note above. Renamed so it stops
+    rebinding the live handler's name at import time.
+
+    Return the most-recent run for each known background job.
 
     Response shape:
       jobs        — {job_name: {status, started_at, finished_at, duration_ms,

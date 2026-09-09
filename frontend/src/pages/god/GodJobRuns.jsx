@@ -175,6 +175,60 @@ export default function GodJobRuns() {
         </div>
       )}
 
+      {/* LEDGER STATE — read this before believing the cards below.
+          "never_run" on all three means one of two very different things, and
+          until the server started reporting `ledger` there was no way to tell
+          them apart from this screen: either the loops are idle, or the
+          job_runs table does not exist and nothing can ever be recorded. */}
+      {pulse?.ledger && (
+        <div style={{
+          ...cardStyle,
+          marginBottom: 20,
+          borderColor: pulse.ledger.table_present ? 'var(--god-border, #e5e7eb)' : '#fca5a5',
+          background: pulse.ledger.table_present ? 'var(--god-card, #fff)' : '#fef2f2',
+        }}>
+          {!pulse.ledger.table_present ? (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
+                Job ledger unavailable — the cards below cannot be trusted
+              </div>
+              <div style={{ fontSize: 12, color: '#991b1b', marginTop: 6 }}>
+                The <code>job_runs</code> table could not be read, so no run can ever be
+                recorded and every job will read as “never run” regardless of whether it
+                is running. This is a database problem, not a job problem.
+              </div>
+              {pulse.ledger.error && (
+                <div style={{ fontSize: 11, fontFamily: 'monospace', marginTop: 8,
+                              color: '#7f1d1d', whiteSpace: 'pre-wrap' }}>
+                  {pulse.ledger.error}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--god-muted, #6b7280)' }}>
+              Ledger healthy — <strong>{pulse.ledger.total_rows}</strong>{' '}
+              recorded run{pulse.ledger.total_rows === 1 ? '' : 's'}
+              {pulse.ledger.newest_started_at
+                ? <> · most recent {new Date(pulse.ledger.newest_started_at).toLocaleString()}</>
+                : <> · no runs recorded yet</>}
+              {pulse.ledger.total_rows === 0 && (
+                <div style={{ marginTop: 6, color: '#b45309' }}>
+                  The table exists and is empty. The loops start 30–90s after the web
+                  service boots, so an empty ledger means the service has not completed a
+                  cycle since its last restart — or the loops are not running in the
+                  process serving this request.
+                </div>
+              )}
+              {pulse.ledger.untracked_jobs?.length > 0 && (
+                <div style={{ marginTop: 6, color: '#b45309' }}>
+                  Recording but not shown above: {pulse.ledger.untracked_jobs.join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Pulse cards */}
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 24 }}>
         {KNOWN_JOBS.map(name => (

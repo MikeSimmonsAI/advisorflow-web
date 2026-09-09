@@ -50,8 +50,12 @@ EXEMPT = {
     # old body is kept as documentation. Asserted below to stay unreachable.
     "routers/onboarding_router.py": "retired implementation, unreachable behind a 410",
 
-    # Docstring example, not a call site.
-    "services/tenancy.py": "the match is a docstring example, not executable",
+    # services/tenancy.py was exempted here for a docstring example. The file was
+    # deleted in 0fef68b ("REMOVE: delete 7 dead-code files"), and the entry
+    # outlived it — which is exactly what test_exempt_list_has_no_stale_entries
+    # exists to catch. An exemption for a file that no longer exists is not
+    # harmless: it is a standing permission slip nobody can review, and if the
+    # path is ever reused the new file inherits the waiver silently.
 }
 
 

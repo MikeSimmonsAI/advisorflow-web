@@ -62,6 +62,46 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// THE OPTIONS THAT ARE OURS, NOT `fetch`'s. Everything else in `options` is
+// spread into fetch() verbatim, so anything we invent has to be named here or
+// it silently becomes a no-op property on the request init object.
+const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect']
+
+/**
+ * Serialise a `params` object onto a path as a query string.
+ *
+ * WHY THIS EXISTS. Five call sites were written axios-style:
+ *
+ *     api.get('/god/job-runs', { params: { status, limit: 100 } })
+ *
+ * `params` means nothing to `fetch`. It was spread into the request init,
+ * ignored, and the request went out UNFILTERED — with no error, no warning and
+ * a perfectly successful 200 response. That is the worst shape a bug can take:
+ * the God Mode job-run and revenue-history filters appeared to work, returned
+ * data, and were simply answering a different question than the one asked.
+ *
+ * Empty string, null and undefined are DROPPED rather than sent as blanks: the
+ * call sites use `|| undefined` to mean "no filter", and `?status=` is not the
+ * same request as one with no status at all.
+ */
+function withQuery(path, params) {
+  if (!params || typeof params !== 'object') return path
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        if (v !== undefined && v !== null && v !== '') qs.append(key, String(v))
+      }
+    } else {
+      qs.append(key, String(value))
+    }
+  }
+  const query = qs.toString()
+  if (!query) return path
+  return path + (path.includes('?') ? '&' : '?') + query
+}
+
 async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   const token = getToken()
   const headers = { ...options.headers }
@@ -136,9 +176,15 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   const isUpload = options.body instanceof FormData
   const retriesAllowed = isUpload ? 0 : MAX_RETRIES
 
+  // Strip our own options before they reach fetch(), and fold `params` into
+  // the URL. Doing it here rather than in api.get() means every verb gets it.
+  const fetchOptions = { ...options, headers }
+  for (const key of CLIENT_ONLY_OPTIONS) delete fetchOptions[key]
+  const url = `${API_BASE}${withQuery(path, options.params)}`
+
   let res
   try {
-    res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+    res = await fetch(url, fetchOptions)
   } catch (networkErr) {
     if (attempt < retriesAllowed) {
       await sleep(RETRY_DELAY_MS)
