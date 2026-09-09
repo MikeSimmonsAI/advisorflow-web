@@ -46,6 +46,7 @@ from app.models.calendar_models import SYNC_LABELS, SYNC_NEEDS_ATTENTION
 from app.services import appointment_sync as apsync
 from app.services import appointment_invites as apinvite
 from app.services import appointment_meetings as apmeet
+from app.services.meeting_providers import get_provider, PROVIDER_ZOOM
 
 router = APIRouter(prefix="/sales", tags=["sales-scheduling"])
 
@@ -1331,3 +1332,102 @@ def resend_prospect_invitation(appt_id: str,
     out = _appt_out(db, appt, user)
     out["invite_report"] = report
     return out
+
+
+# ── Video meeting status ─────────────────────────────────────────────────────
+
+@router.get("/video/status")
+def video_status(verify: bool = Query(False),
+                 user: User = Depends(require_sales_member),
+                 db: Session = Depends(get_db)):
+    """Zoom configuration health for this brand.
+
+    Returns state, credential source and which meeting types will auto-create
+    a Zoom room. No credential values are ever included.
+
+    Pass ?verify=true to perform a real round-trip to the Zoom API — this
+    proves both that credentials are valid AND that the S2S OAuth scope is
+    present. A status that only proves a database row exists is worth nothing,
+    so the 'Test connection' button in VideoStatus.jsx always uses verify=true.
+
+    HOST URL SAFETY: this endpoint never reads or returns a host URL.
+    """
+    from app.models.meeting_models import MeetingProviderConfig
+
+    org = _org(user, db)
+
+    # ensure_meeting_types triggers the requires_video backfill for brands that
+    # were seeded before Checkpoint 4. Idempotent — a no-op if already set.
+    types = ensure_meeting_types(db, org.id)
+    db.commit()
+
+    type_out = [
+        {"id": t.id, "name": t.name, "requires_video": t.requires_video}
+        for t in types
+    ]
+
+    provider = get_provider(db, org.id, PROVIDER_ZOOM, None)
+    _ready, _reason = provider.is_ready() if provider is not None else (False, None)
+    if provider is None or not _ready:
+        return {
+            "state": "not_configured",
+            "provider_label": "Zoom",
+            "detail": None,
+            "credential_source": None,
+            "last_verified_at": None,
+            "setup_hint": (
+                "Set ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET "
+                "as server environment variables to enable automatic Zoom "
+                "meeting creation for this brand."
+            ),
+            "meeting_types": type_out,
+        }
+
+    cfg_row = (db.query(MeetingProviderConfig)
+               .filter(MeetingProviderConfig.brand_sales_org_id == org.id,
+                       MeetingProviderConfig.provider == PROVIDER_ZOOM,
+                       MeetingProviderConfig.is_active.is_(True)).first())
+    credential_source = "brand_config" if cfg_row else "environment"
+    last_verified_at = (
+        cfg_row.last_verified_at.isoformat()
+        if cfg_row and cfg_row.last_verified_at else None
+    )
+
+    if verify:
+        result = provider.verify()
+        if result.ok:
+            if cfg_row:
+                cfg_row.last_verified_at = datetime.utcnow()
+                db.commit()
+                last_verified_at = cfg_row.last_verified_at.isoformat()
+            return {
+                "state": "ready",
+                "provider_label": "Zoom Server-to-Server OAuth",
+                "detail": "Connected — host identity and API scope confirmed.",
+                "credential_source": credential_source,
+                "last_verified_at": last_verified_at,
+                "meeting_types": type_out,
+            }
+        return {
+            "state": "error",
+            "provider_label": "Zoom Server-to-Server OAuth",
+            "detail": result.error_message or "Zoom API returned an error.",
+            "credential_source": credential_source,
+            "last_verified_at": last_verified_at,
+            "setup_hint": (
+                "Check that ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET "
+                "are correct and that the Server-to-Server OAuth app has the "
+                "meeting:write:admin and user:read:admin scopes activated."
+            ),
+            "meeting_types": type_out,
+        }
+
+    # Credentials present but no live verify requested.
+    return {
+        "state": "ready",
+        "provider_label": "Zoom Server-to-Server OAuth",
+        "detail": "Credentials present. Use 'Test connection' to verify scope.",
+        "credential_source": credential_source,
+        "last_verified_at": last_verified_at,
+        "meeting_types": type_out,
+    }
