@@ -121,12 +121,14 @@ class ZoomProvider(MeetingProvider):
             return None, MeetingResult.failure("transport", e)
 
         if r.status_code != 200:
-            # 400/401 here means the credentials are wrong or the app was
-            # deactivated. Only a human with Zoom access can fix that, so it is
-            # 'auth' and never retried on the user's behalf.
+            # 400/401 here means the credentials are wrong, the app was never
+            # activated, or the app was deactivated. Only a human with Zoom
+            # Marketplace access can fix that.
             return None, MeetingResult.failure(
-                "auth", "Zoom rejected the credentials — check the Server-to-Server "
-                        "OAuth app's account id, client id and secret.")
+                "auth", "Zoom rejected the credentials — verify that the "
+                        "Server-to-Server OAuth app is Activated in Zoom Marketplace "
+                        "(App status must be 'Activated', not just 'Created'), and "
+                        "confirm the account id, client id and client secret are correct.")
         try:
             body = r.json()
             token = body["access_token"]
