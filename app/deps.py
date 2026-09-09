@@ -74,13 +74,57 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
-    # Single-session enforcement
+    # ── SESSION ENFORCEMENT — PER DEVICE, NOT PER PERSON ────────────────────
+    #
+    # This was one comparison: the token's `jti` against `users.session_token`.
+    # Correct, and the reason a phone could not coexist with a desktop — the
+    # column held one value, every login and every 30-minute refresh overwrote
+    # it, and whichever device wrote last silently signed the other one out.
+    #
+    # A session is now a row in `user_sessions`, one per device. The row is
+    # authoritative WHENEVER ONE EXISTS for the presented jti, and that ordering
+    # is the whole security argument:
+    #
+    #   * A row that is revoked or expired is a REFUSAL, full stop. There is no
+    #     fall-through to the column afterwards. Without that, revoking a
+    #     session while `session_token` still happened to hold the same jti
+    #     would be a revocation that did nothing.
+    #   * A row belonging to a different user is a refusal too. `jti` is unique,
+    #     so this cannot happen by accident — which is exactly why it is worth
+    #     refusing rather than assuming.
+    #   * Only when NO row exists does the old column decide. That is a token
+    #     minted before this table shipped, and it keeps working across the
+    #     deploy under precisely the rule it was issued under. Everything that
+    #     kills sessions clears the column as well as revoking the rows, so a
+    #     legacy token dies with the rest.
+    #
+    # The resolved row is published on request.state so /auth/refresh can rotate
+    # THIS session instead of minting a new one, and /auth/logout can end this
+    # device without touching the others.
     token_jti = payload.get("jti")
-    if token_jti and user.session_token != token_jti:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired. Please log in again.",
-        )
+    try:
+        request.state.auth_session = None
+    except Exception:                       # pragma: no cover - defensive
+        pass
+    if token_jti:
+        from app.services import session_service
+        sess = session_service.find_by_jti(db, token_jti)
+        if sess is not None:
+            if sess.user_id != user.id or not sess.is_live:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session expired. Please log in again.",
+                )
+            try:
+                request.state.auth_session = sess
+            except Exception:               # pragma: no cover - defensive
+                pass
+            session_service.touch(db, sess)
+        elif user.session_token != token_jti:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired. Please log in again.",
+            )
 
     # Enforce must_change_password server-side
     if user.must_change_password:

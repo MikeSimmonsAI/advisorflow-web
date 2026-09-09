@@ -234,7 +234,10 @@ def _do_login(request: Request, form_data: OAuth2PasswordRequestForm, db: Sessio
         _log.warning("workspace backfill at login failed for user=%s", user.id,
                      exc_info=True)
 
-    token = create_access_token(user, db)
+    # `request` is passed so the new session row is labelled with the device
+    # that opened it. Every value it reads is optional and none of it is
+    # trusted — see session_service.describe_client.
+    token = create_access_token(user, db, request=request)
     return TokenResponse(
         access_token=token,
         role=user.role,
@@ -307,35 +310,159 @@ def verify(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), d
 
 @router.post("/refresh")
 def refresh_token(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Issue a fresh 2-hour JWT for the currently authenticated user.
-    Called silently by the frontend every 30 minutes while the app is open.
-    Generates a new session_token UUID, invalidating any other active sessions.
-    Returns 401 if the token has expired or the session was invalidated.
+    Issue a fresh JWT for the currently authenticated device.
+
+    THIS ROTATES ONE SESSION. IT DOES NOT MINT A NEW ONE.
+    -----------------------------------------------------
+    It used to call create_access_token, which wrote a brand-new UUID over
+    `users.session_token` — so the web client's silent refresh, running every 30
+    minutes in whatever tab happened to be open, was ending every other session
+    the person had. That is what made a phone and a desktop mutually exclusive.
+
+    Now the caller's OWN session row gets a new jti and a fresh expiry. The old
+    token dies because its jti no longer exists; every other device's row is
+    untouched, and the table does not gain a row every half hour.
+
+    A revoked or expired session cannot rotate — session_service.rotate refuses
+    it. Falling through to a fresh session there would let a dead credential
+    resurrect itself, which would make revocation decorative.
+
+    Callers holding a token minted before `user_sessions` existed have no row to
+    rotate, so they get a new session in the normal way. That is the one path
+    that still behaves like the old endpoint, and only until they next sign in.
     """
-    token = create_access_token(current_user, db)
+    from app.services import session_service
+
+    sess = getattr(request.state, "auth_session", None)
+    if sess is not None:
+        try:
+            new_jti = session_service.rotate(db, sess)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired. Please log in again.",
+            )
+        token = create_access_token(current_user, db, session=sess)
+        _ = new_jti
+    else:
+        token = create_access_token(current_user, db, request=request)
     return {"access_token": token, "token_type": "bearer"}
 
 
 @router.post("/logout")
 def logout(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Invalidate the current session immediately by clearing session_token.
-    Any outstanding JWT for this user becomes worthless.
-    Re-fetches the real user row in case current_user was detached from the
-    DB session by the god_admin X-Org-Override logic in get_current_user.
+    Sign out THIS device. Other devices stay signed in.
+
+    Before per-device sessions, the only available logout was "clear the one
+    column", which ended every session the person had — signing out of a shared
+    desktop in the office also signed out the phone in their pocket. That is now
+    an explicit choice (`POST /auth/logout-all`) rather than the only behaviour.
+
+    The legacy column is still cleared when the caller has no session row, which
+    is a pre-migration token: for that caller the column IS the session, and
+    leaving it set would mean a logout that logged nobody out.
     """
+    from app.services import session_service
+    from app.models.session_models import REVOKE_LOGOUT
+
+    sess = getattr(request.state, "auth_session", None)
+    if sess is not None:
+        session_service.revoke(db, sess, REVOKE_LOGOUT)
+        return {"success": True, "scope": "this_device"}
+
     real_user = db.query(User).filter(User.id == current_user.id).first()
     if real_user:
         real_user.session_token = None
         db.commit()
-    return {"success": True}
+    return {"success": True, "scope": "legacy_all"}
+
+
+@router.post("/logout-all")
+def logout_all(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Sign out everywhere — every device, including this one.
+
+    This is the "I lost my phone" button, and it is why per-device sessions did
+    not cost anything in safety. Both halves are needed: revoking the rows ends
+    every modern session, and clearing the column ends any token old enough to
+    predate the table.
+    """
+    from app.services import session_service
+    from app.models.session_models import REVOKE_LOGOUT_ALL
+
+    ended = session_service.revoke_all_for_user(
+        db, current_user.id, REVOKE_LOGOUT_ALL, commit=False)
+    real_user = db.query(User).filter(User.id == current_user.id).first()
+    if real_user:
+        real_user.session_token = None
+    db.commit()
+    return {"success": True, "sessions_ended": ended}
+
+
+@router.get("/sessions")
+def list_sessions(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The caller's own live sessions — one entry per signed-in device.
+
+    Scoped to `current_user.id` in the query itself. There is no parameter to
+    name somebody else, because a session list is exactly the shape of endpoint
+    that grows one by accident.
+
+    `jti` is never returned; `to_public_dict` decides what a holder may see
+    about their own credentials, and the credential identifier is not on that
+    list.
+    """
+    from app.services import session_service
+
+    current = getattr(request.state, "auth_session", None)
+    current_id = getattr(current, "id", None)
+    rows = session_service.live_sessions_for_user(db, current_user.id)
+    out = []
+    for r in rows:
+        d = r.to_public_dict()
+        d["is_current"] = (r.id == current_id)
+        out.append(d)
+    return {"sessions": out, "count": len(out)}
+
+
+@router.delete("/sessions/{session_id}")
+def revoke_session(
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """End one of the caller's own sessions — "sign out my old iPad".
+
+    The lookup filters on user_id as well as session id, so naming another
+    person's session returns 404 and confirms nothing about whether it exists.
+    """
+    from app.services import session_service
+    from app.models.session_models import REVOKE_LOGOUT
+
+    ok = session_service.revoke_by_id(db, current_user.id, session_id,
+                                      REVOKE_LOGOUT)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Session not found.")
+    current = getattr(request.state, "auth_session", None)
+    return {"success": True,
+            "was_current": bool(current is not None and current.id == session_id)}
 
 
 @router.post("/change-password")
@@ -397,6 +524,15 @@ def change_password(
     # token in existence for this account is now refused, and the only way back
     # in is the password just set. Nobody else's account is touched.
     real_user.session_token = None
+    # AND EVERY PER-DEVICE SESSION ROW, which is where a session actually lives
+    # now. Clearing the column alone would have ended only pre-migration tokens
+    # and left the phone, the tablet and the second browser signed in — turning
+    # the one paragraph above into a comment about something that no longer
+    # happened. Per-device sessions must never make the password-change kill
+    # switch weaker than it was when there was only one session to kill.
+    from app.services import session_service as _sessions
+    from app.models.session_models import REVOKE_PASSWORD_CHANGE as _WHY
+    _sessions.revoke_all_for_user(db, real_user.id, _WHY, commit=False)
     db.commit()
 
     # No token is returned on purpose - see above. `success` is kept so callers

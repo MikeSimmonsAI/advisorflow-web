@@ -27,6 +27,33 @@ from app.routers.audit_log_router import log_action
 from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
 from app.services import lead_scope
 
+
+def _revoke_every_session(db: Session, user_id: str) -> int:
+    """End every live per-device session for this account. No commit.
+
+    THE ADMINISTRATIVE KILL SWITCH, AFTER SESSIONS BECAME ROWS.
+    -----------------------------------------------------------
+    `users.session_token` used to BE the session, so `target.session_token =
+    None` ended the one credential a person could hold. Three endpoints here —
+    deactivate, force-logout and reset-password — each relied on exactly that,
+    and each carries a comment explaining why leaving a session alive would make
+    the action a lie.
+
+    Per-device sessions gave a person several credentials at once, which would
+    have quietly demoted all three of those actions to "sign out whichever
+    device logged in most recently" if this call were not beside every one of
+    them. So the column is still cleared (it is what a pre-migration token is
+    checked against) AND the rows are revoked. Both, always, together.
+
+    Deliberately does not commit: each caller has other writes in the same
+    transaction and a half-applied deactivation is not a thing worth inventing.
+    """
+    from app.services import session_service
+    from app.models.session_models import REVOKE_ADMIN
+    return session_service.revoke_all_for_user(db, user_id, REVOKE_ADMIN,
+                                               commit=False)
+
+
 # ── Industry-specific tier presets ────────────────────────────────────────────
 # Each entry: (tier_key, tier_label, track_key, track_label, ai_tone_context, sort_order)
 INDUSTRY_TIERS = {
@@ -988,7 +1015,13 @@ def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=400, detail="Cannot deactivate a super_admin or god_admin account.")
 
     target.is_active = False
-    target.session_token = None  # immediately invalidate any active JWT
+    target.session_token = None  # immediately invalidate any pre-session JWT
+    # ...and every per-device session row, which is where a live credential
+    # actually lives now. The column alone stopped being the whole answer when
+    # one person could hold several sessions at once; a deactivation that left
+    # the phone signed in would be worse than no deactivation, because it would
+    # read as done.
+    _revoke_every_session(db, target.id)
     db.commit()
 
     log_action(
@@ -1038,6 +1071,7 @@ def force_logout_user(user_id: str, db: Session = Depends(get_db), current_user:
         raise HTTPException(status_code=400, detail="Cannot force-logout a super_admin or god_admin account.")
 
     target.session_token = None
+    _revoke_every_session(db, target.id)   # every device, not just the last one
     db.commit()
 
     log_action(
@@ -1185,6 +1219,7 @@ def reset_user_password(
     # the new password, which mints a fresh one. Nobody else's session is
     # touched, and the login flow itself is unchanged.
     target.session_token = None
+    _revoke_every_session(db, target.id)   # and every device they are signed in on
 
     if not req.new_password:
         row, raw = _activation.issue(db, target, current_user,

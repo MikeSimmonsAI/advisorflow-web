@@ -124,6 +124,9 @@ from app.routers import qualification_router  # noqa: E402
 from app.routers.executive_router import router as executive_router
 # Executive Workspace — deal-room content for customer organizations.
 from app.routers.exec_workspace_router import router as exec_workspace_router
+# Mobile device support: push registration and the upload capability probe.
+# Additive only — it adds routes under /me and changes none.
+from app.routers.device_router import router as device_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -282,10 +285,20 @@ ALLOWED_ORIGINS = [
 # frontend client sends appears here.
 from app.services.workspace_access import WORKSPACE_HEADER
 
+from app.services.session_service import CLIENT_HEADERS as _CLIENT_HEADERS
+
 BROWSER_HEADERS = [
     "Authorization", "Content-Type", "Accept", "Origin",
     "X-Org-Override", "X-Brand-Override",
     WORKSPACE_HEADER,
+    # The device-description headers per-device sessions read. A NATIVE app is
+    # not subject to CORS and would work without them being listed — which is
+    # exactly why they are listed. The moment the web client adopts one, an
+    # unlisted header turns every request into a preflight failure the server
+    # never sees and cannot log, which is the trap the paragraph above records
+    # X-Workspace-Id falling into. Listing them now costs nothing and removes
+    # the trap in advance.
+    *_CLIENT_HEADERS,
 ]
 
 app.add_middleware(
@@ -627,6 +640,9 @@ app.include_router(qualification_router.router)
 # guards everything else. No tenant data; no cross-brand visibility.
 app.include_router(executive_router)
 app.include_router(exec_workspace_router)
+# Mobile device support (/me/devices, /me/uploads). Registered last, so its
+# routes cannot shadow anything and its absence cannot break anything.
+app.include_router(device_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

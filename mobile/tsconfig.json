@@ -1,0 +1,15 @@
+{
+  "//": "No baseUrl/paths alias: TypeScript 6 deprecates baseUrl and every import here is relative anyway. `types` names jest explicitly because the test files use its globals and expo/tsconfig.base does not include them.",
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "types": ["jest", "node"]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  "exclude": ["node_modules"]
+}

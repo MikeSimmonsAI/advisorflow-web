@@ -1,0 +1,18 @@
+{
+  "//": "EXPO_PUBLIC_API_URL is intentionally NOT filled in for preview or production. The backend host is a deployment fact this branch does not know, and a guessed hostname baked into a signed build is worse than one that has to be supplied: it would produce an app that appears to work and quietly talks to nothing, or to the wrong environment. Set it per profile (or with `eas build --env`) once the host is confirmed.",
+  "cli": { "version": ">= 5.0.0", "appVersionSource": "local" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "EXPO_PUBLIC_API_URL": "http://localhost:8000" }
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": { "production": {} }
+}
