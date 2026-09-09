@@ -23,13 +23,15 @@ import './OrgManager.css'
 // panel. Granting "all features" must never hand over the power to re-register
 // a customer's carrier brand.
 const FEATURES_FALLBACK = []
-// Plan tiers — matches BookaBoost / EvoSys Pro pricing
+// Plan tiers — labels only. Prices are database-driven via billing_catalog /
+// BrandBillingPlan and are NOT stored here. Hardcoded price strings were the
+// second source of truth that caused BILL-08; they have been removed.
 const PLANS = [
-  { value: 'trial',        label: 'Trial',        price: null },
-  { value: 'starter',      label: 'Starter',      price: '$500/mo' },
-  { value: 'growth',       label: 'Growth',       price: '$1,000/mo' },
-  { value: 'professional', label: 'Professional', price: '$2,000/mo' },
-  { value: 'enterprise',   label: 'Enterprise',   price: 'Custom' },
+  { value: 'trial',        label: 'Trial' },
+  { value: 'starter',      label: 'Starter' },
+  { value: 'growth',       label: 'Growth' },
+  { value: 'professional', label: 'Professional' },
+  { value: 'enterprise',   label: 'Enterprise' },
 ]
 
 // Features each plan tier includes by default.
@@ -428,7 +430,7 @@ export default function OrgManager() {
                       >
                         {PLANS.map(p => (
                           <option key={p.value} value={p.value}>
-                            {p.label}{p.price ? ` — ${p.price}` : ''}
+                            {p.label}
                           </option>
                         ))}
                       </select>

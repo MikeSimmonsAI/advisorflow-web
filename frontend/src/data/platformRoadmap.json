@@ -600,7 +600,7 @@
       "id": "BILL-08",
       "system": "Commercial: Billing, Plans & Entitlements",
       "title": "Plan pricing is stated in two places that can drift",
-      "status": "CONSOLIDATE",
+      "status": "COMPLETE",
       "priority": "P2",
       "depends_on": [
         "BILL-01"
