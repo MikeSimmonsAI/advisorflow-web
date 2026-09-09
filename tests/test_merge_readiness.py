@@ -1193,7 +1193,7 @@ class TestLegacyAdapter:
         Phase B (RESTORE): Restore canonical _stage_batch.
         → GATE PASSES: ImportStagedRow records created with compliance fields.
         """
-        import app.routers.leads_router as lr
+        import app.routers.leads_import_router as lr
 
         csv = b"First Name,Phone,Allow Emails?,Allow Text Message?\nPat,2145550116,Yes,No\n"
         client = _client(self.db)
