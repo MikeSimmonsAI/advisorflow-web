@@ -138,6 +138,12 @@ const NAV = [
   // a won customer, so it belongs beside the customer, not beside a scraper.
   { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',
     hint: 'Onboarding handoff for sold customers' },
+  // Customer Launches sits directly beneath Implementations because it is the
+  // same customers seen from the other side: Implementations is what WE owe
+  // them, Launches is what THEY still owe us. Two entries, one record —
+  // /god/launch reads the Implementation rows rather than tracking its own.
+  { label: 'Customer Launches', path: '/god/launches',        icon: 'branch',
+    hint: 'Onboarding intake — including customers who never started' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SALES & REVENUE — money in, and who earned it.

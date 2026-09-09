@@ -10,7 +10,7 @@
  * STAGE 1: every control here is a controlled input over local React state.
  * Nothing persists, nothing uploads, nothing is sent anywhere.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ICONS } from './launchConfig'
 
 /** One icon, from the single path table. `d` may be a key or a raw path. */
@@ -133,24 +133,65 @@ export function Collapse({ title, meta, children, open: initial = false }) {
 }
 
 /**
- * An upload tile.
+ * An upload tile — a real one.
  *
- * STAGE 1 IS VISUAL ONLY. Clicking toggles the tile's own "received" look so
- * the state can be reviewed in the prototype; no file dialog opens, nothing
- * reaches the network, and there is no storage behind it. Stage 2 replaces the
- * onClick with a real picker and this component keeps its shape.
+ * Clicking opens a file picker and the chosen file is stored against the
+ * customer's implementation, org-isolated, on the server. The tile reports
+ * what is actually held rather than what was clicked.
  */
-export function Upload({ title, note, tag = 'Not provided', icon = 'upload' }) {
-  const [filled, setFilled] = useState(false)
+export function Upload({ title, note, tag = 'Not provided', icon = 'upload',
+                         files, onUpload, onRemove }) {
+  // REAL UPLOAD, SAME TILE. The prototype's version was a button that toggled
+  // its own boolean — it looked exactly like this and stored nothing. The
+  // classes and the markup are unchanged so the approved design is untouched;
+  // what changed is that `filled` is now the presence of an actual stored file
+  // rather than a local `useState(false)` a click flipped.
+  //
+  // A tile is matched to its uploads by its own title, sent as the file's
+  // label, so the slot a document was dropped into survives a refresh.
+  const mine = (files || []).filter(f => f.label === title)
+  const filled = mine.length > 0
+  const inputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const pick = async e => {
+    const file = e.target.files && e.target.files[0]
+    // Clear immediately so choosing the same file twice still fires onChange.
+    e.target.value = ''
+    if (!file || !onUpload) return
+    setBusy(true); setErr(null)
+    try { await onUpload(file, title) }
+    catch (ex) { setErr(ex?.detail || 'Upload failed') }
+    finally { setBusy(false) }
+  }
+
   return (
-    <button type="button" className={'lp-upload' + (filled ? ' filled' : '')}
-      onClick={() => setFilled(f => !f)}>
+    <div className={'lp-upload' + (filled ? ' filled' : '')}
+         style={{ cursor: busy ? 'progress' : 'pointer' }}
+         onClick={() => { if (!busy && inputRef.current) inputRef.current.click() }}>
+      <input ref={inputRef} type="file" onChange={pick}
+             style={{ display: 'none' }} aria-label={title} />
       <span className="lp-ui"><Ico name={filled ? 'check' : icon} size={16}
         stroke={filled} /></span>
       <b>{title}</b>
-      {note ? <span>{note}</span> : null}
-      <span className="lp-utag">{filled ? 'Received' : tag}</span>
-    </button>
+      {err
+        ? <span style={{ color: '#b91c1c' }}>{err}</span>
+        : mine.length
+          ? <span>{mine.map(f => f.filename).join(', ')}</span>
+          : note ? <span>{note}</span> : null}
+      <span className="lp-utag">
+        {busy ? 'Uploading…' : filled ? 'Received' : tag}
+      </span>
+      {filled && onRemove ? (
+        <button type="button" className="lp-ulink"
+          onClick={ev => { ev.stopPropagation(); mine.forEach(f => onRemove(f.id)) }}
+          style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer',
+                   color: '#64748b', textDecoration: 'underline', fontSize: 11 }}>
+          Remove
+        </button>
+      ) : null}
+    </div>
   )
 }
 

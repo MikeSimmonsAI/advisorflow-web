@@ -1,5 +1,5 @@
 /**
- * LaunchPad — the AdvisorFlow Launch Engine, customer-facing surface.
+ * LaunchPad — the Launch Engine, customer-facing surface.
  *
  * ===========================================================================
  * WHAT THIS IS
@@ -9,43 +9,44 @@
  *          |
  *     LAUNCH ENGINE          onboarding, owned by the platform
  *          |
- *     WHITE-LABEL BRAND      EvoSys Pro today; BookaBoost next
+ *     WHITE-LABEL BRAND      whichever brand owns the relationship
  *          |
- *     CUSTOMER ORGANIZATION  Atlantis Light & Power
+ *     CUSTOMER ORGANIZATION  the customer being onboarded
  *
  * The customer sees the BRAND. AdvisorFlow powers this and is credited once,
- * in the rail footer. Nothing in this component knows the words "EvoSys Pro"
- * or "Atlantis" — both arrive as props from launchConfig, which is the single
- * file Stage 2 replaces with a fetch.
+ * in the rail footer. Nothing in this component knows any brand's or
+ * customer's name — both arrive from GET /launch/me, which reads them from the
+ * Platform and Organization rows behind the signed-in session.
  *
  * ===========================================================================
- * STAGE 1 — UI PROTOTYPE, AND ONLY THAT
+ * WHERE THE DATA COMES FROM, AND WHY NOT FROM HERE
  * ===========================================================================
  *
- * This page makes NO network requests. It creates no context, reads no auth
- * state, sends no header and touches no storage — not localStorage, not
- * sessionStorage. Every answer lives in the React state below for the life of
- * the tab and is gone on refresh, which is exactly what was asked for and is
- * also the only responsible place for the credential fields on Step 3 to live
- * until encryption exists.
+ * The org is NEVER in the URL. `/launch` takes no id and this component sends
+ * none: the server resolves the workspace from the session. A `/launch/:orgId`
+ * route would be a customer-enumeration endpoint wearing a feature's clothes.
  *
- * It is a LEAF. It imports nothing from api/, auth/ or context/, so it cannot
- * alter authorization behaviour anywhere in the application. The route in
- * App.jsx is a single unguarded entry beside the other customer-facing
- * surfaces; whether Stage 2 puts an invitation token in front of it is a Stage
- * 2 decision and nothing here presumes an answer.
+ * Completion percentages come from the server too. A percentage computed in
+ * the browser is one devtools can set to 100, and "required" enforced only in
+ * React is not required.
+ *
+ * NOTHING IS KEPT IN localStorage. The draft lives in component state between
+ * keystrokes and in the database the moment it saves; there is no third copy
+ * to go stale, and no credential sitting in a browser store.
  *
  * ===========================================================================
  * THE TWO PROGRESS AXES
  * ===========================================================================
  *
- * TOP    implementation lifecycle — seven phases, mostly the brand's work.
- * RIGHT  intake completion — eight sections, all the customer's.
+ * TOP    implementation lifecycle — where the whole project stands.
+ * RIGHT  intake completion — the eight sections, all the customer's.
  *
  * See LaunchProgress.jsx for why merging them would be wrong.
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+
+import { api } from '../../api/client'
 
 import LaunchStyles from './LaunchStyles'
 import LaunchSidebar from './LaunchSidebar'
@@ -65,61 +66,207 @@ import CustomerProcessStep from './steps/CustomerProcessStep'
 import FilesDocumentsStep from './steps/FilesDocumentsStep'
 import ReviewSubmitStep from './steps/ReviewSubmitStep'
 
-import { MOCK_BRAND, MOCK_CUSTOMER, MOCK_ANSWERS, STEPS, STEP_KEYS, LIFECYCLE }
-  from './launchConfig'
-
 const STEP_COMPONENTS = {
-  company:  CompanyInformationStep,
+  company: CompanyInformationStep,
   branding: BrandingAssetsStep,
-  website:  WebsiteAccessStep,
-  compare:  ComparePowerStep,
-  systems:  CurrentSystemsStep,
-  process:  CustomerProcessStep,
-  files:    FilesDocumentsStep,
-  review:   ReviewSubmitStep,
+  website: WebsiteAccessStep,
+  compare: ComparePowerStep,
+  systems: CurrentSystemsStep,
+  process: CustomerProcessStep,
+  files: FilesDocumentsStep,
+  review: ReviewSubmitStep,
 }
 
-export default function LaunchPad({ brand = MOCK_BRAND,
-                                    customer = MOCK_CUSTOMER }) {
+function Centered({ children }) {
+  return (
+    <div className="lp-scope" data-surface="launch">
+      <LaunchStyles />
+      <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center',
+                    padding: '48px 24px' }}>
+        <div style={{ maxWidth: 520, textAlign: 'center' }}>{children}</div>
+      </div>
+    </div>
+  )
+}
+
+export default function LaunchPad() {
   const { stepKey } = useParams()
   const navigate = useNavigate()
 
-  const active = STEP_KEYS.includes(stepKey) ? stepKey : 'company'
-  const step = STEPS.find(s => s.key === active) || STEPS[0]
-  const index = STEPS.indexOf(step)
+  const [launch, setLaunch] = useState(null)
+  const [loadErr, setLoadErr] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  const [answers, setAnswers] = useState(MOCK_ANSWERS)
+  const [answers, setAnswers] = useState({})
+  const [secretsSet, setSecretsSet] = useState([])
+  const [files, setFiles] = useState([])
+  const [stepMeta, setStepMeta] = useState(null)
+
   const [railOpen, setRailOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveErr, setSaveErr] = useState(null)
+
+  const steps = launch?.overview?.steps || []
+  const stepKeys = useMemo(() => steps.map(s => s.key), [steps])
+  const active = stepKeys.includes(stepKey) ? stepKey : (stepKeys[0] || 'company')
+  const step = steps.find(s => s.key === active) || null
+  const index = steps.findIndex(s => s.key === active)
+
+  // A ref, not state: the unload guard has to read the CURRENT value at the
+  // moment the browser asks, and a closure captured at mount would forever
+  // report the value from mount.
+  const dirtyRef = useRef(false)
+
+  const reloadLaunch = useCallback(async () => {
+    const d = await api.get('/launch/me')
+    setLaunch(d)
+    return d
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.get('/launch/me')
+      .then(d => { if (alive) { setLaunch(d); setLoadErr(null) } })
+      .catch(e => { if (alive) setLoadErr(e?.detail || 'Could not load your launch.') })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [])
+
+  // Load the active step's saved answers. This is what makes refresh and
+  // "come back tomorrow" work — the server is the only source of truth, so a
+  // reload is a fetch rather than a recovery.
+  useEffect(() => {
+    if (!launch) return undefined
+    let alive = true
+    setSaved(false)
+    setSaveErr(null)
+    api.get('/launch/me/steps/' + active)
+      .then(d => {
+        if (!alive) return
+        setAnswers(d.answers || {})
+        setSecretsSet(d.secrets_set || [])
+        setStepMeta(d)
+        dirtyRef.current = false
+      })
+      .catch(e => { if (alive) setSaveErr(e?.detail || 'Could not load this section.') })
+    return () => { alive = false }
+  }, [active, launch])
+
+  const loadFiles = useCallback(() => {
+    api.get('/launch/me/files')
+      .then(d => setFiles(d.files || []))
+      .catch(() => setFiles([]))
+  }, [])
+
+  useEffect(() => { if (launch) loadFiles() }, [launch, loadFiles])
+
+  // An honest unsaved-work guard: it fires only when something actually
+  // changed since the last save, so it never cries wolf on a page the person
+  // merely looked at.
+  useEffect(() => {
+    const onBeforeUnload = e => {
+      if (!dirtyRef.current) return undefined
+      e.preventDefault()
+      e.returnValue = ''
+      return ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
 
   const set = useCallback((key, value) => {
     setAnswers(a => ({ ...a, [key]: value }))
+    dirtyRef.current = true
     setSaved(false)
   }, [])
 
-  // The intake figure the ring and the document meter both show. One number,
-  // computed once, so the two can never disagree on screen.
-  const overallPct = useMemo(
-    () => Math.round(STEPS.reduce((t, s) => t + s.pct, 0) / STEPS.length),
-    [])
+  const persist = useCallback(async () => {
+    setSaving(true)
+    setSaveErr(null)
+    try {
+      const res = await api.put('/launch/me/steps/' + active, { answers })
+      setStepMeta(res)
+      setSecretsSet(res.secrets_set || [])
+      // A stored credential must not linger in the field after the write.
+      if ((res.secrets_set || []).length) {
+        setAnswers(a => {
+          const nextAnswers = { ...a }
+          for (const k of res.secrets_set) delete nextAnswers[k]
+          return nextAnswers
+        })
+      }
+      dirtyRef.current = false
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 2600)
+      await reloadLaunch()
+      return true
+    } catch (e) {
+      setSaveErr(e?.detail || 'Could not save. Your answers are still on screen.')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }, [active, answers, reloadLaunch])
 
   const goTo = useCallback(key => {
     navigate('/launch/' + key)
     setRailOpen(false)
-    setSaved(false)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0 })
   }, [navigate])
 
-  // STAGE 1: a draft "saves" by confirming and nothing else. Better a visible
-  // no-op the reviewer can see than a silent one they assume is working.
-  const saveDraft = useCallback(() => {
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 2600)
-  }, [])
+  const saveAndGo = useCallback(async key => {
+    const ok = await persist()
+    if (ok) goTo(key)
+  }, [persist, goTo])
 
-  const next = STEPS[index + 1]
-  const prev = STEPS[index - 1]
+  const uploadFile = useCallback(async (file, label) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('step_key', 'files')
+    if (label) fd.append('label', label)
+    const row = await api.upload('/launch/me/files', fd)
+    loadFiles()
+    reloadLaunch()
+    return row
+  }, [loadFiles, reloadLaunch])
+
+  const removeFile = useCallback(async id => {
+    await api.delete('/launch/me/files/' + id)
+    loadFiles()
+    reloadLaunch()
+  }, [loadFiles, reloadLaunch])
+
+  const submit = useCallback(async () => {
+    await persist()
+    const res = await api.post('/launch/me/submit', {})
+    await reloadLaunch()
+    return res
+  }, [persist, reloadLaunch])
+
+  if (loading) {
+    return <Centered><p style={{ color: '#64748b' }}>Loading your launch…</p></Centered>
+  }
+  if (loadErr) {
+    return (
+      <Centered>
+        <h2 style={{ margin: '0 0 8px', fontSize: 20 }}>Your launch is not ready yet</h2>
+        <p style={{ color: '#64748b', lineHeight: 1.6 }}>{loadErr}</p>
+      </Centered>
+    )
+  }
+  if (!launch || !step) {
+    return <Centered><p style={{ color: '#64748b' }}>Nothing to show yet.</p></Centered>
+  }
+
+  const brand = launch.brand
+  const customer = launch.customer
+  const overall = launch.overview.overall_pct
   const StepBody = STEP_COMPONENTS[active]
+  const next = steps[index + 1]
+  const prev = steps[index - 1]
+  const submitted = !!(launch.submission && !launch.submission.reviewed_at)
 
   return (
     <div className="lp-scope" data-surface="launch">
@@ -131,28 +278,36 @@ export default function LaunchPad({ brand = MOCK_BRAND,
         <div className="lp-body">
           <LaunchHeader brand={brand} customer={customer} />
 
-          {/* The prototype says so, on the screen. Removed in Stage 2. */}
-          <div className="lp-proto">
-            <b>Stage 1 prototype</b>
-            <span>
-              Design review only — mock data, no persistence, nothing submitted.
-            </span>
-          </div>
+          {submitted ? (
+            <div className="lp-proto">
+              <b>Submitted</b>
+              <span>
+                Your intake is with the implementation team. They will reopen it
+                if anything needs changing.
+              </span>
+            </div>
+          ) : null}
 
           <main className="lp-main">
             <LaunchHero brand={brand} customer={customer} />
-            <LaunchProgress phases={LIFECYCLE} intakePct={overallPct} />
+            <LaunchProgress phases={launch.lifecycle}
+                            currentStatus={launch.implementation?.status}
+                            intakePct={overall} />
 
             <div className="lp-work">
               <div style={{ minWidth: 0 }}>
                 <OnboardingStepShell
                   step={step}
-                  total={STEPS.length}
-                  pct={overallPct}
+                  total={steps.length}
+                  pct={step.pct}
                   saved={saved}
-                  onSaveDraft={saveDraft}
+                  saving={saving}
+                  error={saveErr}
+                  savedAt={stepMeta?.updated_at}
+                  missing={step.missing}
+                  onSaveDraft={persist}
                   onBack={prev ? () => goTo(prev.key) : null}
-                  onContinue={next ? () => goTo(next.key) : null}
+                  onContinue={next ? () => saveAndGo(next.key) : null}
                   continueLabel="Save & Continue"
                 >
                   <StepBody
@@ -160,8 +315,17 @@ export default function LaunchPad({ brand = MOCK_BRAND,
                     set={set}
                     brand={brand}
                     customer={customer}
-                    steps={STEPS}
+                    steps={steps}
                     onGoTo={goTo}
+                    secretsSet={secretsSet}
+                    files={files}
+                    onUpload={uploadFile}
+                    onRemoveFile={removeFile}
+                    onSubmit={submit}
+                    blockers={launch.blockers}
+                    overview={launch.overview}
+                    submission={launch.submission}
+                    readOnly={submitted}
                   />
                 </OnboardingStepShell>
 
@@ -170,10 +334,10 @@ export default function LaunchPad({ brand = MOCK_BRAND,
 
               <aside className="lp-side">
                 <OnboardingProgressPanel
-                  steps={STEPS}
+                  steps={steps}
                   activeKey={active}
                   onSelect={goTo}
-                  overallPct={overallPct}
+                  overallPct={overall}
                   brand={brand}
                 />
               </aside>

@@ -47,6 +47,11 @@ const NAV_GROUPS = [
     label: 'Workspace',
     items: [
       { to: '/', label: 'Overview', icon: 'grid' },
+      // LAUNCH — the customer's onboarding. Shown ONLY to organizations that
+      // actually have an implementation, because a nav item that leads to
+      // "nothing here for you" on most accounts trains people to ignore the
+      // nav. `launchOnly` is answered by a single GET /launch/me on mount.
+      { to: '/launch', label: 'Launch', icon: 'zap', launchOnly: true },
       { to: '/leads', label: 'Leads', icon: 'users' },
       { to: '/replies', label: 'Replies', icon: 'message' },
       { to: '/activity', label: 'Activity', icon: 'send' },
@@ -204,6 +209,19 @@ export default function Layout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // DOES THIS ORGANIZATION HAVE A LAUNCH? One cheap call, once per mount,
+  // answered by the server rather than guessed from a role or a plan name.
+  // `null` = not yet known and the nav item stays hidden; a 404 is the normal
+  // answer for the large majority of orgs and is not an error.
+  const [hasLaunch, setHasLaunch] = useState(null)
+  useEffect(() => {
+    let alive = true
+    api.get('/launch/me', { skipRedirect: true })
+      .then(() => { if (alive) setHasLaunch(true) })
+      .catch(() => { if (alive) setHasLaunch(false) })
+    return () => { alive = false }
+  }, [])
   // Non-admin regular advisors start collapsed; admins start expanded
   const isAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || user?.role === 'god_admin'
   // Remembered per browser so the choice survives a reload. Falls back to the
@@ -481,6 +499,11 @@ export default function Layout({ children }) {
             const isOrgAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
+              // Only orgs with a real implementation see Launch. `null` means
+              // the answer has not arrived yet, and the item stays hidden
+              // until it does — a nav entry that appears a second late is far
+              // better than one that flashes and vanishes.
+              if (item.launchOnly && hasLaunch !== true) return false
               // A capability item is NEVER shown on the strength of a role.
               // That is the whole difference: `adminOnly` asks who you are,
               // `capability` asks what the server says you may administer.

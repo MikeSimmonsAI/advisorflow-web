@@ -157,6 +157,7 @@ import GodLeadBrowser from './pages/god/GodLeadBrowser'
 import GodVoiceConfig from './pages/god/GodVoiceConfig'
 import GodRevenueHistory from './pages/god/GodRevenueHistory'
 import RoadmapBoard from './pages/god/RoadmapBoard'
+import GodLaunches from './pages/god/GodLaunches'
 import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
@@ -229,6 +230,24 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
  * calls /sales/me and shows a plain refusal if the server says no.
  */
 function SalesRoute({ children }) {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  return <>{children}</>
+}
+
+/**
+ * LaunchRoute — the Launch Engine frame, also not the tenant Layout.
+ *
+ * LaunchPad renders its own full-page brand shell; the tenant nav alongside it
+ * would be two chromes arguing on one screen.
+ *
+ * THIS GATE IS A REDIRECT, NOT AUTHORIZATION. It stops an anonymous visitor
+ * reaching the page at all. WHICH customer's intake they get is decided
+ * server-side from the session — `/launch` takes no organization id in the URL
+ * for anyone to change — and a customer with no implementation gets an honest
+ * "not ready yet" from the API rather than an empty form to fill in.
+ */
+function LaunchRoute({ children }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   return <>{children}</>
@@ -671,9 +690,13 @@ export default function App() {
             URL somebody can be sent to rather than a state nobody can link to.
             An unknown stepKey falls back to the first step inside LaunchPad
             rather than 404-ing a customer mid-onboarding.
-            STAGE 1: mock data only, no persistence, no submission. */}
-        <Route path="/launch" element={<LaunchPad />} />
-        <Route path="/launch/:stepKey" element={<LaunchPad />} />
+
+            NO ORGANIZATION ID IN EITHER ROUTE, and there never will be. The
+            customer's workspace is resolved from the session on the server; a
+            /launch/:orgId route would be a customer-enumeration endpoint
+            wearing a feature's clothes. */}
+        <Route path="/launch" element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
+        <Route path="/launch/:stepKey" element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
         {/* The family's booking and feedback pages, on the customer's own
             branded host. These are the routes the public-identity resolver
             has been emitting; they reuse the existing booking/survey
@@ -927,6 +950,10 @@ export default function App() {
         <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
+        {/* Customer Launches — the staff view of onboarding intake. Sits in
+            God Mode beside the other implementation surfaces rather than
+            introducing a separate staff console. */}
+        <Route path="/god/launches"              element={<GodRoute><GodModeLayout><GodLaunches /></GodModeLayout></GodRoute>} />
         {/* GOD-08: maintenance ops (booking cleanup, phone audit) */}
         <Route path="/god/maintenance"           element={<GodRoute><GodModeLayout><GodMaintenanceOps /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />

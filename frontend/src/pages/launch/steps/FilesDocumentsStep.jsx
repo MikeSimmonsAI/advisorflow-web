@@ -5,12 +5,14 @@
  * rather than by file type. Compliance language is last and separate because
  * it is the group most likely to need somebody else in the company.
  *
- * STAGE 1: prototype uploads only. See LaunchUI.Upload.
+ * Uploads are real: each tile stores its file against this customer's
+ * implementation, org-isolated, and reports what is actually held.
  */
 import { Group, Field, Note, Upload, Uploads, Area, Collapse, Fields }
   from '../LaunchUI'
 
-export default function FilesDocumentsStep({ v, set }) {
+export default function FilesDocumentsStep({ v, set, files, onUpload, onRemoveFile }) {
+  const up = { files, onUpload, onRemove: onRemoveFile }
   return (
     <>
       <Note tone="info" icon="folder" title="Two items are still outstanding">
@@ -23,9 +25,9 @@ export default function FilesDocumentsStep({ v, set }) {
         sub="Duplicates from Branding & Assets are fine — anything here is enough.">
         <Field span={12} label="">
           <Uploads>
-            <Upload title="Logo & branding assets" note="Logos, colors, fonts" />
-            <Upload title="Website materials" note="Copy, page list, sitemap" />
-            <Upload title="Existing customer communication templates"
+            <Upload {...up} title="Logo & branding assets" note="Logos, colors, fonts" />
+            <Upload {...up} title="Website materials" note="Copy, page list, sitemap" />
+            <Upload {...up} title="Existing customer communication templates"
               note="The emails and letters you send today" />
           </Uploads>
         </Field>
@@ -35,12 +37,12 @@ export default function FilesDocumentsStep({ v, set }) {
         sub="What the build and the migration are shaped around.">
         <Field span={12} label="">
           <Uploads>
-            <Upload title="ComparePower documentation" note="API docs, agreements" />
-            <Upload title="Initial user list" note="Name, email, role" />
-            <Upload title="Sample customer data" note="A handful of records, any format"
+            <Upload {...up} title="ComparePower documentation" note="API docs, agreements" />
+            <Upload {...up} title="Initial user list" note="Name, email, role" />
+            <Upload {...up} title="Sample customer data" note="A handful of records, any format"
               tag="Required" />
-            <Upload title="Sample lead data" note="Recent enquiries as they arrive today" />
-            <Upload title="Sample electricity bill" note="One redacted example" />
+            <Upload {...up} title="Sample lead data" note="Recent enquiries as they arrive today" />
+            <Upload {...up} title="Sample electricity bill" note="One redacted example" />
           </Uploads>
         </Field>
       </Group>
@@ -49,9 +51,9 @@ export default function FilesDocumentsStep({ v, set }) {
         sub="What we are legally required to show, and what you are permitted to send. If these live with a lawyer or a compliance officer, loop them in now rather than at launch.">
         <Field span={12} label="">
           <Uploads>
-            <Upload title="Privacy policy" note="Current published version" />
-            <Upload title="Terms & disclosures" note="Including any PUC-required language" />
-            <Upload title="SMS / email consent language" note="How you capture opt-in today"
+            <Upload {...up} title="Privacy policy" note="Current published version" />
+            <Upload {...up} title="Terms & disclosures" note="Including any PUC-required language" />
+            <Upload {...up} title="SMS / email consent language" note="How you capture opt-in today"
               tag="Required" />
           </Uploads>
         </Field>
