@@ -1588,8 +1588,171 @@ def get_job_runs_latest(
     return {"jobs": result, "all_healthy": all_healthy}
 
 
+@router.get("/revenue-history")
+def get_revenue_history(
+    platform_id: Optional[str] = Query(None, description="Filter by platform id"),
+    _god: User = Depends(require_god),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Real payment and invoice history across all organizations — god_admin only.
+
+    Response shape consumed by GodRevenueHistory.jsx (REPORT-02):
+      total_collected_cents      — sum of all BillingPayment.amount_cents
+      total_payment_count        — count of BillingPayment rows
+      total_invoice_count        — count of BillingInvoice rows
+      data_since                 — ISO timestamp of the oldest payment, or null
+      payments_by_month          — [{month, collected_cents}] newest-first
+      invoice_status_breakdown   — [{status, count, paid_cents}]
+      plan_breakdown             — [{plan_key, invoice_count, collected_cents}]
+      unavailable                — [{metric, label, reason}] for metrics we cannot compute
+
+    Returns graceful empty results if the billing tables have not yet been
+    migrated (table does not exist → no 500, just empty arrays and a note).
+    """
+    try:
+        from app.models.billing_models import BillingPayment, BillingInvoice
+
+        # ── Payments aggregate ────────────────────────────────────────────
+
+        pq = db.query(BillingPayment)
+        if platform_id:
+            pq = pq.filter(BillingPayment.platform_id == platform_id)
+
+        total_payment_count = pq.count()
+
+        pf = [BillingPayment.platform_id == platform_id] if platform_id else []
+        total_collected_cents = int(
+            db.query(func.coalesce(func.sum(BillingPayment.amount_cents), 0))
+            .filter(*pf)
+            .scalar() or 0
+        )
+
+        # Oldest payment — drives "data since"
+        oldest = (
+            pq.order_by(BillingPayment.collected_at.asc())
+            .with_entities(BillingPayment.collected_at)
+            .first()
+        )
+        data_since = oldest[0].isoformat() if oldest and oldest[0] else None
+
+        # Payments by month (last 24 months, newest first)
+        raw_months = (
+            db.query(
+                func.to_char(BillingPayment.collected_at, "YYYY-MM").label("month"),
+                func.sum(BillingPayment.amount_cents).label("collected_cents"),
+            )
+            .filter(*pf)
+            .group_by(text("1"))
+            .order_by(text("1 DESC"))
+            .limit(24)
+            .all()
+        )
+        payments_by_month = [
+            {"month": r.month, "collected_cents": int(r.collected_cents or 0)}
+            for r in raw_months
+        ]
+
+        # ── Invoices ──────────────────────────────────────────────────────
+
+        iq_f = [BillingInvoice.platform_id == platform_id] if platform_id else []
+        total_invoice_count = db.query(BillingInvoice).filter(*iq_f).count()
+
+        # Status breakdown
+        inv_status_rows = (
+            db.query(
+                BillingInvoice.status,
+                func.count(BillingInvoice.id).label("count"),
+                func.coalesce(func.sum(BillingInvoice.amount_paid_cents), 0).label("paid_cents"),
+            )
+            .filter(*iq_f)
+            .group_by(BillingInvoice.status)
+            .order_by(text("count DESC"))
+            .all()
+        )
+        invoice_status_breakdown = [
+            {
+                "status": r.status or "unknown",
+                "count": r.count,
+                "paid_cents": int(r.paid_cents or 0),
+            }
+            for r in inv_status_rows
+        ]
+
+        # Plan breakdown (from BillingInvoice.billing_plan_key)
+        plan_rows = (
+            db.query(
+                BillingInvoice.billing_plan_key,
+                func.count(BillingInvoice.id).label("invoice_count"),
+                func.coalesce(func.sum(BillingInvoice.amount_paid_cents), 0).label("collected_cents"),
+            )
+            .filter(*iq_f)
+            .group_by(BillingInvoice.billing_plan_key)
+            .order_by(text("collected_cents DESC"))
+            .all()
+        )
+        plan_breakdown = [
+            {
+                "plan_key": r.billing_plan_key or "unknown",
+                "invoice_count": r.invoice_count,
+                "collected_cents": int(r.collected_cents or 0),
+            }
+            for r in plan_rows
+        ]
+
+        # MRR and churn require snapshot tables not yet built
+        unavailable = [
+            {
+                "metric": "mrr",
+                "label": "MRR (Monthly Recurring Revenue)",
+                "reason": "Requires a monthly-snapshot table. Computable only from active "
+                          "subscriptions via the Stripe API — not yet implemented here.",
+            },
+            {
+                "metric": "churn",
+                "label": "Churn Rate",
+                "reason": "Requires subscription-start and end timestamps per org. "
+                          "Not yet tracked in the billing schema.",
+            },
+        ]
+
+        return {
+            "total_collected_cents": total_collected_cents,
+            "total_payment_count": total_payment_count,
+            "total_invoice_count": total_invoice_count,
+            "data_since": data_since,
+            "payments_by_month": payments_by_month,
+            "invoice_status_breakdown": invoice_status_breakdown,
+            "plan_breakdown": plan_breakdown,
+            "unavailable": unavailable,
+        }
+
+    except Exception as exc:
+        exc_str = str(exc).lower()
+        if "does not exist" in exc_str or "no such table" in exc_str or "undefined table" in exc_str:
+            log.warning("revenue-history: billing tables not yet migrated — %s", exc)
+            return {
+                "total_collected_cents": 0,
+                "total_payment_count": 0,
+                "total_invoice_count": 0,
+                "data_since": None,
+                "payments_by_month": [],
+                "invoice_status_breakdown": [],
+                "plan_breakdown": [],
+                "unavailable": [
+                    {
+                        "metric": "all",
+                        "label": "All Revenue Metrics",
+                        "reason": "Billing tables (billing_payments, billing_invoices) have not yet "
+                                  "been migrated. Run alembic upgrade head to activate this view.",
+                    }
+                ],
+            }
+        log.exception("revenue-history query failed")
+        raise
+
+
 # ── REPORT-02: Platform revenue history ──────────────────────────────────────
-@router.get("/revenue-history", response_model=dict)
+# REMOVED_DUPLICATE @router.get("/revenue-history", response_model=dict)
 def get_revenue_history(
     platform_id: Optional[str] = Query(None, description="Narrow to one platform; omit for all"),
     _god: User = Depends(require_god),
