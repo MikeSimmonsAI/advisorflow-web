@@ -62,10 +62,10 @@ export default function GodTwilioDiagnostics() {
     setLoading(true); setError(null)
     try {
       const res = await api.get('/god/twilio-diagnostics')
-      setData(res.data)
+      setData(res)
       setRefreshed(new Date())
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Failed to load diagnostics')
+      setError(e.detail || e.message || 'Failed to load diagnostics')
     } finally {
       setLoading(false)
     }

@@ -118,12 +118,12 @@ export default function GodJobRuns() {
           },
         }),
       ])
-      setPulse(pulseRes.data)
-      setRuns(runsRes.data.runs || [])
-      setTotal(runsRes.data.total || 0)
+      setPulse(pulseRes)
+      setRuns(runsRes.runs || [])
+      setTotal(runsRes.total || 0)
       setRefreshed(new Date())
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Failed to load job runs')
+      setError(e.detail || e.message || 'Failed to load job runs')
     } finally {
       setLoading(false)
     }

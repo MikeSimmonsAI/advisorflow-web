@@ -130,11 +130,11 @@ export default function GodRevenueHistory() {
         api.get('/god/revenue-history', { params: pid ? { platform_id: pid } : {} }),
         api.get('/god/platforms'),
       ])
-      setData(histRes.data)
-      setPlatforms(platRes.data?.platforms || [])
+      setData(histRes)
+      setPlatforms(platRes?.platforms || [])
       setRefreshed(new Date())
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Failed to load revenue history')
+      setError(e.detail || e.message || 'Failed to load revenue history')
     } finally { setLoading(false) }
   }
 
