@@ -178,7 +178,8 @@ export default function MyDay() {
 
       {/* ── Advisor Work Queue ─────────────────────────────────────────────
           Fetched in parallel with my-day. Only renders when at least one
-          bucket has items — an empty queue is not a card, it's silence. */}
+          bucket has items — an empty queue is not a card, it's silence.
+          Every chip navigates to /workqueue so the number leads to the work. */}
       {wq && (wq.needs_text?.length + wq.needs_reply?.length +
               wq.cadence_due?.length + wq.outcomes_needed?.length) > 0 && (
         <div style={{
@@ -188,43 +189,44 @@ export default function MyDay() {
           borderRadius: 8,
           background: 'var(--sw-surface2, #f3f6fa)',
           border: '1px solid var(--sw-line, #dde3ea)',
+          alignItems: 'center',
         }}>
-          <span style={{
+          <button onClick={() => nav('/workqueue')} style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
             fontSize: 11, fontWeight: 700, letterSpacing: '0.07em',
-            color: 'var(--sw-ink2, #6b7280)',
-            alignSelf: 'center', marginRight: 4,
-          }}>TODAY'S WORK QUEUE</span>
+            color: 'var(--sw-ink2, #6b7280)', marginRight: 4,
+          }}>TODAY'S WORK QUEUE →</button>
           {wq.needs_text?.length > 0 && (
-            <span style={{
-              padding: '4px 12px', borderRadius: 20,
-              background: 'var(--sw-amber-bg, #fef3c7)',
-              color: 'var(--sw-amber-ink, #92400e)',
+            <button onClick={() => nav('/workqueue')} style={{
+              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: 'var(--sw-warn-bg, #fef3c7)',
+              color: 'var(--sw-warn-fg, #92400e)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.needs_text.length} need text</span>
+            }}>{wq.needs_text.length} need text</button>
           )}
           {wq.needs_reply?.length > 0 && (
-            <span style={{
-              padding: '4px 12px', borderRadius: 20,
-              background: 'var(--sw-green-bg, #d1fae5)',
-              color: 'var(--sw-green-ink, #065f46)',
+            <button onClick={() => nav('/workqueue')} style={{
+              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: 'var(--sw-ok-bg, #d1fae5)',
+              color: 'var(--sw-ok-fg, #065f46)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.needs_reply.length} to reply</span>
+            }}>{wq.needs_reply.length} to reply</button>
           )}
           {wq.cadence_due?.length > 0 && (
-            <span style={{
-              padding: '4px 12px', borderRadius: 20,
-              background: 'var(--sw-amber-bg, #fef3c7)',
-              color: 'var(--sw-amber-ink, #92400e)',
+            <button onClick={() => nav('/workqueue')} style={{
+              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: 'var(--sw-warn-bg, #fef3c7)',
+              color: 'var(--sw-warn-fg, #92400e)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.cadence_due.length} cadence due</span>
+            }}>{wq.cadence_due.length} cadence due</button>
           )}
           {wq.outcomes_needed?.length > 0 && (
-            <span style={{
-              padding: '4px 12px', borderRadius: 20,
-              background: 'var(--sw-surface3, #e5e7eb)',
+            <button onClick={() => nav('/workqueue')} style={{
+              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: 'var(--sw-neu-bg, #e5e7eb)',
               color: 'var(--sw-ink, #1f2937)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.outcomes_needed.length} outcome needed</span>
+            }}>{wq.outcomes_needed.length} outcome needed</button>
           )}
         </div>
       )}
