@@ -2101,7 +2101,28 @@ def zoom_diagnostics(
     err = (body.get("error") or "").lower()
     reason = (body.get("reason") or body.get("error_description") or "").lower()
 
-    if "account" in reason and ("invalid" in reason or "not found" in reason):
+    # DISABLED IS CHECKED FIRST, AND THAT ORDERING IS THE WHOLE POINT.
+    #
+    # Zoom returns `error: invalid_client` for a DEACTIVATED app as well as for
+    # a genuinely mismatched credential pair, and puts the real difference only
+    # in `reason`. Because the invalid_client branch came first, this endpoint
+    # confidently told the operator to go and re-check the client id and secret
+    # while Zoom was plainly saying "The app has been disabled by the
+    # developer" — sending somebody to verify a pairing that was never wrong.
+    #
+    # That is exactly the failure this endpoint was written to end, reproduced
+    # inside the endpoint itself. Live production returned this case; the
+    # mapping, not the credentials, was the defect.
+    if "disabled" in reason or "deactivated" in reason:
+        verdict, explanation = "app_disabled_in_marketplace", (
+            "Zoom says the app itself is switched off: \"%s\". The credentials are "
+            "not the problem and re-entering them will not help. In Zoom "
+            "Marketplace, open the Server-to-Server OAuth app and Activate it "
+            "(Manage > Built App > the app > Activation). A deactivated app "
+            "rejects every token request with invalid_client no matter how "
+            "correct the account id, client id and secret are."
+            % (body.get("reason") or "app disabled"))
+    elif "account" in reason and ("invalid" in reason or "not found" in reason):
         verdict, explanation = "wrong_account_id", (
             "Zoom recognised the client credentials but rejected the account id. "
             "ZOOM_ACCOUNT_ID must be the Account ID shown on the Server-to-Server OAuth "
