@@ -190,11 +190,11 @@
     {
       "id": "GOD-08", "system": "Platform Ownership & God Mode Operations",
       "title": "Customer cleanup preview / execute / rules / history has no UI",
-      "status": "FINISH", "priority": "P2", "depends_on": [], "completed_on": null,
-      "evidence": "customers_router POST /cleanup/preview, GET /cleanup/rules, POST /cleanup/execute, GET /cleanup/history, GET /cleanup/history/{execution_id} - all require_god, none called from the frontend",
-      "notes": "A controlled-deletion path with a receipt and a preview, built precisely so destructive work is reviewable, and it can only be driven by curl.",
+      "status": "COMPLETE", "priority": "P2", "depends_on": [], "completed_on": "2026-09-09",
+      "evidence": "CustomerCleanupPanel added to Customer360.jsx: loads rules (GET /cleanup/rules), previews scoped to orgId (POST /cleanup/preview), shows categories breakdown + confirmation_phrase, execute behind typed confirmation (POST /cleanup/execute), shows receipt, shows past cleanups touching this customer (GET /cleanup/history, filtered client-side by org_id).",
+      "notes": "Panel is collapsed by default; rules and history load lazily on first expand. Execute button stays disabled until the exact confirmation phrase is typed.",
       "decision_required": null, "blocked_reason": null,
-      "next_action": "Put preview and receipt on the Customer 360 screen. Execute stays behind an explicit confirmation.",
+      "next_action": null,
       "previously_missed": true
     },
     {

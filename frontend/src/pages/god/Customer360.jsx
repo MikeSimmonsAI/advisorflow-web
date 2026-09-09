@@ -246,6 +246,204 @@ function OffboardDialog({ orgId, name, onClose, onDone }) {
   )
 }
 
+/* ── test-data cleanup (preview → confirm → execute) ─────────────────────── */
+
+function CustomerCleanupPanel({ orgId }) {
+  const [open, setOpen]           = useState(false)
+  const [rules, setRules]         = useState(null)      // [{key, description}]
+  const [selected, setSelected]   = useState([])
+  const [preview, setPreview]     = useState(null)      // preview response
+  const [typed, setTyped]         = useState('')
+  const [busy, setBusy]           = useState(false)
+  const [receipt, setReceipt]     = useState(null)
+  const [err, setErr]             = useState(null)
+  const [history, setHistory]     = useState(null)
+
+  // Load rules the first time the panel is expanded
+  useEffect(() => {
+    if (!open || rules) return
+    api.get('/god/customers/cleanup/rules')
+      .then(r => { setRules(r.rules || []); setErr(null) })
+      .catch(e => setErr(errText(e)))
+  }, [open, rules])
+
+  // Load cleanup history (all, then filter client-side for this org)
+  useEffect(() => {
+    if (!open || history) return
+    api.get('/god/customers/cleanup/history', { params: { limit: 100 } })
+      .then(r => {
+        const mine = (r.executions || []).filter(ex =>
+          !ex.org_ids?.length || ex.org_ids.includes(orgId)
+        )
+        setHistory(mine)
+      })
+      .catch(() => setHistory([]))
+  }, [open, history, orgId])
+
+  function toggle(key) {
+    setSelected(s => s.includes(key) ? s.filter(k => k !== key) : [...s, key])
+    setPreview(null); setReceipt(null); setErr(null)
+  }
+
+  async function runPreview() {
+    if (!selected.length) return
+    setBusy(true); setErr(null); setPreview(null); setReceipt(null)
+    try {
+      const res = await api.post('/god/customers/cleanup/preview', {
+        rules: selected, org_ids: [orgId],
+      })
+      setPreview(res); setTyped('')
+    } catch (e) { setErr(errText(e)) }
+    finally { setBusy(false) }
+  }
+
+  async function runExecute() {
+    if (!preview || typed !== preview.confirmation_phrase) return
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.post('/god/customers/cleanup/execute', {
+        rules: selected, org_ids: [orgId],
+        confirmation: typed, execution_id: preview.execution_id,
+      })
+      setReceipt(res); setPreview(null); setTyped('')
+      setHistory(null)  // invalidate so it reloads next time
+    } catch (e) { setErr(errText(e)) }
+    finally { setBusy(false) }
+  }
+
+  const STATUS_COLOR = { succeeded: '#22c55e', failed: '#ef4444', previewed: '#9ca3af', superseded: '#d97706' }
+
+  return (
+    <Panel title="Test-data cleanup">
+      <div className="go-body">
+        <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--go-dim)' }}>
+          Preview what test leads would be removed for this customer, then confirm before anything is deleted.
+          Organizations, users and integrations are never touched.
+        </p>
+
+        <button className="go-btn sm ghost" onClick={() => setOpen(o => !o)}>
+          {open ? '▲ Collapse' : '▼ Expand cleanup tool'}
+        </button>
+
+        {open && (
+          <div style={{ marginTop: 14 }}>
+            {err && <div className="go-note err" style={{ marginBottom: 10 }}>{err}</div>}
+
+            {/* Rule selection */}
+            {rules === null ? (
+              <div style={{ color: 'var(--go-dim)', fontSize: 12 }}>Loading rules…</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6,
+                              color: 'var(--go-dim)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  Select rules to apply
+                </div>
+                {rules.map(r => (
+                  <label key={r.key} style={{ display: 'flex', alignItems: 'flex-start',
+                                             gap: 8, marginBottom: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={selected.includes(r.key)}
+                           onChange={() => toggle(r.key)}
+                           style={{ marginTop: 2, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12 }}>
+                      <b style={{ fontFamily: 'monospace' }}>{r.key}</b>
+                      {' — '}{r.description}
+                    </span>
+                  </label>
+                ))}
+                <button className="go-btn sm" onClick={runPreview}
+                        disabled={busy || !selected.length} style={{ marginTop: 8 }}>
+                  {busy ? 'Running…' : 'Preview'}
+                </button>
+              </>
+            )}
+
+            {/* Preview results */}
+            {preview && !receipt && (
+              <div style={{ marginTop: 14, padding: '12px 14px',
+                            border: '1px solid #fcd34d', borderRadius: 8,
+                            background: '#fffbeb' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                  Preview: {preview.total_records} record{preview.total_records !== 1 ? 's' : ''} would be deleted
+                </div>
+                {(preview.categories || []).filter(c => c.count > 0).map(c => (
+                  <div key={c.key} style={{ display: 'flex', gap: 10, fontSize: 12,
+                                            borderBottom: '1px solid #fde68a', padding: '4px 0' }}>
+                    <span style={{ fontFamily: 'monospace', minWidth: 100 }}>{c.key}</span>
+                    <span style={{ fontWeight: 700 }}>{c.count}</span>
+                    <span style={{ color: '#92400e' }}>{c.description}</span>
+                  </div>
+                ))}
+                {preview.total_records === 0 ? (
+                  <div style={{ fontSize: 12, color: '#92400e' }}>
+                    Nothing matches the selected rules for this customer.
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 12, marginBottom: 6 }}>
+                      Type exactly: <code style={{ fontWeight: 700 }}>{preview.confirmation_phrase}</code>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input value={typed} onChange={e => setTyped(e.target.value)}
+                             placeholder="Type the phrase above"
+                             style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6,
+                                      border: '1px solid #fcd34d', flex: 1 }} />
+                      <button className="go-btn sm danger"
+                              disabled={busy || typed !== preview.confirmation_phrase}
+                              onClick={runExecute}>
+                        {busy ? 'Deleting…' : 'Execute'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Receipt */}
+            {receipt && (
+              <div style={{ marginTop: 14, padding: '12px 14px',
+                            border: '1px solid #86efac', borderRadius: 8,
+                            background: '#f0fdf4' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#166534', marginBottom: 4 }}>
+                  Done — {receipt.actual_total ?? 0} record{receipt.actual_total !== 1 ? 's' : ''} deleted
+                </div>
+                <div style={{ fontSize: 11, color: '#166534' }}>
+                  Execution ID: <code>{receipt.execution_id}</code>
+                </div>
+              </div>
+            )}
+
+            {/* History */}
+            {history?.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 8,
+                              color: 'var(--go-dim)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  Past cleanups touching this customer
+                </div>
+                {history.map(ex => (
+                  <div key={ex.execution_id} style={{
+                    display: 'flex', gap: 12, alignItems: 'flex-start',
+                    padding: '6px 0', borderBottom: '1px solid var(--go-line)',
+                    fontSize: 12,
+                  }}>
+                    <span style={{ fontWeight: 700, color: STATUS_COLOR[ex.status] || '#6b7280',
+                                   minWidth: 80 }}>{ex.status}</span>
+                    <span style={{ color: 'var(--go-dim)' }}>
+                      {ex.rules?.join(', ') || '—'}
+                    </span>
+                    <span style={{ marginLeft: 'auto', color: 'var(--go-dim)', whiteSpace: 'nowrap' }}>
+                      {ex.target_lead_count} leads · {ex.created_at ? new Date(ex.created_at).toLocaleDateString() : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
 /* ── permanent delete ────────────────────────────────────────────────────── */
 
 function DeleteDialog({ orgId, name, onClose, onDone }) {
@@ -566,6 +764,8 @@ export default function Customer360() {
           </div>
         </div>
       </Panel>
+
+      <CustomerCleanupPanel orgId={orgId} />
 
       {/* ── compensation, god-only and served as such ── */}
       {comp ? (
