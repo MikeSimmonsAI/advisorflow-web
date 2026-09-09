@@ -180,6 +180,8 @@ const NAV = [
   // tenant one — see the route comment in App.jsx.
   { label: 'Lead Scraper',     path: '/god/lead-scraper',     icon: 'grid',
     hint: 'Back-office prospecting — import into a chosen customer' },
+  { label: 'Lead Browser',     path: '/god/lead-browser',     icon: 'users',
+    hint: 'Search and browse all leads across every organization' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SECURITY & PLATFORM
@@ -210,8 +212,6 @@ const NAV = [
     hint: 'Run history for cadence, AI, and review loops' },
   { label: 'Voice Configuration', path: '/god/voice',               icon: 'settings',
     hint: 'Agent mappings, version pins, attempt policy, test calls' },
-  { label: 'Revenue History',    path: '/god/revenue-history',      icon: 'trending',
-    hint: 'Real payment history by month — no manufactured trends' },
   { label: 'Maintenance Ops',    path: '/god/maintenance',           icon: 'tool',
     hint: 'Booking cleanup (dry-run), phone audit — silent, no SMS/email sent' },
 ]

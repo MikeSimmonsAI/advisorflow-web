@@ -145,6 +145,7 @@ import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
 import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
 import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
 import GodJobRuns from './pages/god/GodJobRuns'
+import GodLeadBrowser from './pages/god/GodLeadBrowser'
 import GodVoiceConfig from './pages/god/GodVoiceConfig'
 import GodRevenueHistory from './pages/god/GodRevenueHistory'
 import RoadmapBoard from './pages/god/RoadmapBoard'
@@ -905,6 +906,8 @@ export default function App() {
         <Route path="/god/voice"                 element={<GodRoute><GodModeLayout><GodVoiceConfig /></GodModeLayout></GodRoute>} />
         {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}
         <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />
+        {/* GOD-09: cross-org lead browser */}
+        <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* GOD-08: maintenance ops (booking cleanup, phone audit) */}
