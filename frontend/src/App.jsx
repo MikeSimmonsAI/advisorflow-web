@@ -142,6 +142,9 @@ import GodUsers from './pages/god/GodUsers'
 import Workspaces from './pages/god/Workspaces'
 import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
 import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
+import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
+import GodJobRuns from './pages/god/GodJobRuns'
+import GodVoiceConfig from './pages/god/GodVoiceConfig'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -892,6 +895,10 @@ export default function App() {
         {/* Both diagnostics, registered BEFORE the /god/* catch-all - a route
             added after it would silently render the Command Center instead. */}
         <Route path="/god/diagnostics/qualification" element={<GodRoute><GodModeLayout><QualificationDiagnostic /></GodModeLayout></GodRoute>} />
+        {/* GOD-07 / VOICE-03: diagnostics + voice config — registered BEFORE /god/* catch-all */}
+        <Route path="/god/diagnostics/twilio"    element={<GodRoute><GodModeLayout><GodTwilioDiagnostics /></GodModeLayout></GodRoute>} />
+        <Route path="/god/diagnostics/job-runs"  element={<GodRoute><GodModeLayout><GodJobRuns /></GodModeLayout></GodRoute>} />
+        <Route path="/god/voice"                 element={<GodRoute><GodModeLayout><GodVoiceConfig /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

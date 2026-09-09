@@ -196,6 +196,17 @@ const NAV = [
   { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
   { label: 'Roadmap',          path: '/god#product-status',   icon: 'flag'     },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // DIAGNOSTICS
+  // ══════════════════════════════════════════════════════════════════════
+  { group: 'DIAGNOSTICS' },
+  { label: 'Twilio Diagnostics', path: '/god/diagnostics/twilio',   icon: 'monitor',
+    hint: 'Delivery receipt config and message delivery breakdown' },
+  { label: 'Background Jobs',    path: '/god/diagnostics/job-runs', icon: 'activity',
+    hint: 'Run history for cadence, AI, and review loops' },
+  { label: 'Voice Configuration', path: '/god/voice',               icon: 'settings',
+    hint: 'Agent mappings, version pins, attempt policy, test calls' },
 ]
 
 function LiveClock() {
