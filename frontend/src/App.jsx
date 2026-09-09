@@ -146,6 +146,8 @@ import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
 import GodJobRuns from './pages/god/GodJobRuns'
 import GodVoiceConfig from './pages/god/GodVoiceConfig'
 import GodRevenueHistory from './pages/god/GodRevenueHistory'
+import RoadmapBoard from './pages/god/RoadmapBoard'
+import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -902,6 +904,10 @@ export default function App() {
         <Route path="/god/voice"                 element={<GodRoute><GodModeLayout><GodVoiceConfig /></GodModeLayout></GodRoute>} />
         {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}
         <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />
+        {/* GOD-04: platform roadmap board */}
+        <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
+        {/* GOD-08: maintenance ops (booking cleanup, phone audit) */}
+        <Route path="/god/maintenance"           element={<GodRoute><GodModeLayout><GodMaintenanceOps /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

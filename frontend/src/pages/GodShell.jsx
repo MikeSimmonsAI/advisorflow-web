@@ -195,7 +195,8 @@ const NAV = [
     hint: 'Which customers each executive oversees' },
   { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
-  { label: 'Roadmap',          path: '/god#product-status',   icon: 'flag'     },
+  { label: 'Roadmap',          path: '/god/roadmap',           icon: 'flag',
+    hint: '93 capability items across 15 systems — what is complete, what needs finishing' },
 
   // ══════════════════════════════════════════════════════════════════════
   // DIAGNOSTICS
@@ -209,6 +210,8 @@ const NAV = [
     hint: 'Agent mappings, version pins, attempt policy, test calls' },
   { label: 'Revenue History',    path: '/god/revenue-history',      icon: 'trending',
     hint: 'Real payment history by month — no manufactured trends' },
+  { label: 'Maintenance Ops',    path: '/god/maintenance',           icon: 'tool',
+    hint: 'Booking cleanup (dry-run), phone audit — silent, no SMS/email sent' },
 ]
 
 function LiveClock() {
