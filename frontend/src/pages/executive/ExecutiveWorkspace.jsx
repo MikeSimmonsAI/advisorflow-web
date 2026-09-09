@@ -38,21 +38,61 @@ function StatusPill({ status }) {
   )
 }
 
-function EmptyState({ filtered }) {
+function EmptyState({ filtered, onNew }) {
+  if (filtered) return (
+    <div style={{ textAlign: 'center', padding: '56px 0', color: 'var(--ex-ink2)' }}>
+      <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.5 }}>⊘</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ex-ink)' }}>No items match this filter</div>
+      <div style={{ fontSize: 13, marginTop: 6 }}>Try a different organization or status.</div>
+    </div>
+  )
   return (
-    <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--ex-ink2)' }}>
-      <div style={{ fontSize: 36, marginBottom: 12 }}>📁</div>
-      <div style={{ fontSize: 16, fontWeight: 600 }}>
-        {filtered ? 'No items match this filter' : 'No workspace items yet'}
+    <div style={{
+      textAlign: 'center', padding: '64px 32px',
+      border: '1px dashed var(--ex-line)', borderRadius: 12,
+      background: 'var(--ex-surface2)',
+    }}>
+      <div style={{ fontSize: 40, marginBottom: 14 }}>📋</div>
+      <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--ex-ink)', marginBottom: 8 }}>
+        Your deal room is empty
       </div>
-      {!filtered && (
-        <div style={{ fontSize: 14, marginTop: 6, color: 'var(--ex-ink3)' }}>
-          Create the first item to start building your deal room.
-        </div>
-      )}
+      <div style={{ fontSize: 14, color: 'var(--ex-ink2)', maxWidth: 360, margin: '0 auto 20px' }}>
+        Create a workspace item for each customer engagement — proposals, approvals, and handoff documents all live here.
+      </div>
+      <button
+        onClick={onNew}
+        style={{
+          background: 'var(--ex-accent)', color: 'var(--ex-accent-ink)', border: 'none',
+          borderRadius: 8, padding: '10px 22px', fontSize: 14, fontWeight: 600,
+          cursor: 'pointer',
+        }}
+      >
+        + Create first item
+      </button>
     </div>
   )
 }
+
+// Force browser native form controls to match the current colour scheme
+const EXEC_FORM_STYLES = `
+[data-surface="executive"] input,
+[data-surface="executive"] select,
+[data-surface="executive"] textarea {
+  color-scheme: light;
+}
+[data-appearance="dark"] [data-surface="executive"] input,
+[data-appearance="dark"] [data-surface="executive"] select,
+[data-appearance="dark"] [data-surface="executive"] textarea {
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) [data-surface="executive"] input,
+  :root:not([data-appearance="light"]) [data-surface="executive"] select,
+  :root:not([data-appearance="light"]) [data-surface="executive"] textarea {
+    color-scheme: dark;
+  }
+}
+`
 
 const inputStyle = {
   width: '100%', padding: '7px 10px', borderRadius: 6,
@@ -107,7 +147,8 @@ export default function ExecutiveWorkspace() {
   }
 
   return (
-    <div style={{ padding: '32px 40px', maxWidth: 960 }}>
+    <div data-surface="executive" style={{ padding: '32px 40px', maxWidth: 960 }}>
+      <style>{EXEC_FORM_STYLES}</style>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -227,7 +268,7 @@ export default function ExecutiveWorkspace() {
       {error && <div style={{ color: 'var(--ex-danger, #dc2626)', padding: '20px 0' }}>{error}</div>}
 
       {!loading && !error && visible.length === 0 && (
-        <EmptyState filtered={!!(filterOrg || filterStatus)} />
+        <EmptyState filtered={!!(filterOrg || filterStatus)} onNew={() => setCreating(true)} />
       )}
 
       {!loading && !error && visible.length > 0 && (
