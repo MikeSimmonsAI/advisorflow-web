@@ -42,9 +42,10 @@
  * number.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesStyles from './SalesStyles'
+import SalesShell from './SalesShell'
 
 /* DELIBERATELY NOT INSIDE SalesShell.
  *
@@ -58,8 +59,23 @@ import SalesStyles from './SalesStyles'
  * So this page carries its own chrome. A sales manager still reaches it from
  * the workspace nav; a finance user reaches the same URL and simply sees it.
  */
-function CompShell({ children, embedded }) {
+function CompShell({ children, embedded, fromSales }) {
   const nav = useNavigate()
+
+  // FROM_SALES: manager navigated here via SalesShell's MY TEAM nav.
+  // They hold a sales membership so SalesShell loads cleanly and gives
+  // them the full left nav. Finance admins who access the URL directly
+  // never have fromSales=true, so they continue to get CompShell chrome.
+  if (fromSales) {
+    return (
+      <SalesShell
+        title="Compensation"
+        subtitle="What the compensation rules produced — and what can be settled."
+      >
+        {children}
+      </SalesShell>
+    )
+  }
 
   // EMBEDDED means God Mode already drew the page frame and the rail. Drawing a
   // second header and a Back button inside it would give the owner two titles
@@ -246,6 +262,11 @@ function PayDialog({ lines, onClose, onDone }) {
 
 export default function CompensationCommand({ embedded = false }) {
   const nav = useNavigate()
+  const location = useLocation()
+  // fromSales: true when a manager clicked "Compensation" in the SalesShell
+  // MY TEAM nav. Causes CompShell to delegate to SalesShell for full nav chrome.
+  // Finance admins navigating directly never carry this state.
+  const fromSales = !embedded && location.state?.fromSales === true
   const [d, setD] = useState(null)
   const [payables, setPayables] = useState(null)
   const [rows, setRows] = useState(null)
@@ -298,7 +319,7 @@ export default function CompensationCommand({ embedded = false }) {
   const viewLabel = (d?.vocabulary?.views || []).find(v => v.key === view)?.label || view
 
   return (
-    <CompShell embedded={embedded}>
+    <CompShell embedded={embedded} fromSales={fromSales}>
       {err ? <div className="sw-err">{err}</div> : null}
       {!d && !err ? <div className="sw-muted">Loading…</div> : null}
 

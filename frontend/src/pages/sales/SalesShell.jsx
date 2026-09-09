@@ -76,8 +76,10 @@ const MANAGER_NAV = [
   // and the settlement of it. Not the configuration screen: rates and plans
   // live in God Mode → Pricing & Comp. Gated server-side by manager scope;
   // settling payments needs platform finance authority on top.
+  // state tells CompensationCommand that it was opened from SalesShell so it
+  // can wrap itself in SalesShell chrome instead of a disconnected Back button.
   { to: '/sales/compensation',  label: 'Compensation',      icon: '＄',
-    permission: 'view_team_pipeline' },
+    permission: 'view_team_pipeline', state: { fromSales: true } },
   // Reports is genuinely not built, and its PURPOSE has not been decided yet.
   // Team Command was built on the principle that a manager screen measuring
   // effort instead of obstacles becomes a stick; Reports may cut against that,
@@ -233,6 +235,7 @@ export default function SalesShell({ title, subtitle, actions, children }) {
                       key={item.to}
                       to={item.to}
                       end={item.end}
+                      state={item.state}
                       className={({ isActive }) => (isActive ? 'sw-on' : '')}
                     >
                       <span>{item.icon}</span><span>{item.label}</span>
