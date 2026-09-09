@@ -137,7 +137,32 @@ type RequestOptions = {
 
 const DEFAULT_TIMEOUT = 20000;
 
-export async function request<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
+/**
+ * GATEWAY STATUSES — the edge answered, the app server did not.
+ *
+ * These do NOT come from our backend. They come from the proxy in front of it,
+ * and their bodies are the proxy's own plain text, e.g.
+ *
+ *     upstream connect error or disconnect/reset before headers.
+ *     reset reason: connection termination
+ *
+ * That is what a redeploy looks like from outside: the old instance is
+ * terminated, the new one has not accepted a listener yet, and for roughly
+ * twenty to forty seconds every request gets this. This backend is deployed
+ * many times a day, so a phone that launches during one of those windows and
+ * treats it as a permanent failure is a phone that appears broken on a server
+ * that is fine.
+ *
+ * A browser survives it because a person presses reload. The app has to do
+ * that for itself.
+ */
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+const GATEWAY_RETRIES = 2;
+const GATEWAY_BACKOFF_MS = [1200, 3500];
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export async function request<T = unknown>(path: string, opts: RequestOptions = {}, attempt = 0): Promise<T> {
   const { method = 'GET', body, form, allowUnauthorized, timeoutMs = DEFAULT_TIMEOUT } = opts;
 
   const headers = await buildHeaders(opts.headers);
@@ -175,6 +200,27 @@ export async function request<T = unknown>(path: string, opts: RequestOptions = 
   }
   clearTimeout(timer);
 
+  // A REDEPLOY IS NOT A FAILED REQUEST. Ride it out before telling anybody
+  // anything: two retries over ~5s covers the window without turning a genuine
+  // outage into a spinner that never ends. The body is deliberately not read
+  // here — it belongs to the proxy, not to this API, and parsing it would be
+  // treating another system's error page as our own response.
+  if (GATEWAY_STATUSES.has(response.status)) {
+    if (attempt < GATEWAY_RETRIES) {
+      await sleep(GATEWAY_BACKOFF_MS[attempt] ?? 3500);
+      return request<T>(path, opts, attempt + 1);
+    }
+    // `offline: true` on purpose. From the caller's side this is the same
+    // situation as a dropped connection — nothing was processed, the request
+    // is safe to repeat, and the UI should offer retry rather than accuse the
+    // person of doing something they may not do.
+    throw new ApiError(
+      response.status,
+      'The server is restarting. Please try again in a moment.',
+      true,
+    );
+  }
+
   if (response.status === 401 && !allowUnauthorized) {
     // ONE handler, called once. It clears secure storage and routes to
     // sign-in; nothing here retries, because the server has already said the
@@ -201,7 +247,23 @@ export async function request<T = unknown>(path: string, opts: RequestOptions = 
   try {
     return JSON.parse(text) as T;
   } catch {
-    return text as unknown as T;
+    // A 2xx WHOSE BODY IS NOT JSON DID NOT COME FROM THIS API.
+    //
+    // This used to `return text as unknown as T` — handing the raw body to the
+    // caller as though it had parsed. Every endpoint here returns JSON, so the
+    // only things that arrive this way are somebody else's: a proxy's plain
+    // text, a captive-portal login page, an HTML error from an edge that
+    // answered 200. Screens then rendered that text as if it were data, which
+    // is how a proxy's "upstream connect error / connection termination" ends
+    // up displayed inside the app as though the app had said it.
+    //
+    // Failing here costs nothing real and makes the wrong-response case
+    // visible instead of decorative.
+    throw new ApiError(
+      response.status,
+      'The server returned an unexpected response. Please try again in a moment.',
+      true,
+    );
   }
 }
 
