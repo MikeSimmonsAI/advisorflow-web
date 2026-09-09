@@ -128,25 +128,20 @@ services:
   - type: web
     name: advisorflow-frontend
     runtime: static
-    buildCommand: "echo using pre-built dist"
+    buildCommand: "cd frontend && npm ci && npm run build"
     staticPublishPath: frontend/dist
     # ── BUILD FILTER ────────────────────────────────────────────────────────
-    # Mirror image of the Python filter: this service publishes the committed
-    # contents of frontend/dist and its build command is a literal `echo`, so
-    # nothing under app/, alembic/, tests/ or scripts/ can change a single byte
-    # of what it serves — yet all 90 pushes in August rebuilt it.
+    # Render builds the frontend from source on every push that touches
+    # frontend/src or this file. frontend/dist is no longer committed to git —
+    # Render produces it during the build step and serves it directly.
     #
-    # DENYLIST, NOT ALLOWLIST, for the same reason as the backend: the tempting
-    # allowlist here is `paths: ["frontend/dist/**"]`, and it is a trap. It
-    # would also skip a change to THIS FILE — the rewrite rule and
-    # VITE_API_BASE_URL both live below — so a routing or API-origin change
-    # would silently never ship. Anything not named here still builds.
+    # DENYLIST, NOT ALLOWLIST: ignoredPaths fails toward deploying (anything
+    # not listed still triggers a build). An allowlist would silently skip
+    # legitimate changes (e.g. a change to this file's rewrite rules).
     #
-    # frontend/src/** is deliberately NOT ignored. dist is pre-built and
-    # committed, so a src-only commit needs no deploy, but ignoring src would
-    # break the day the build command starts compiling from source. The cost of
-    # being wrong in that direction is a stale production frontend; the cost of
-    # being wrong in this direction is one `echo`.
+    # frontend/dist/** is ignored because a committed dist artifact should
+    # never be the trigger — only source changes matter. frontend/src/** is
+    # intentionally NOT ignored so every source change rebuilds correctly.
     buildFilter:
       ignoredPaths:
         - "app/**"
@@ -166,6 +161,7 @@ services:
         - "requirements-dev.txt"
         - "pytest.ini"
         - "alembic.ini"
+        - "frontend/dist/**"
     # Catch-all rewrite so React Router handles deep links on hard refresh.
     # Without this, Render's static server returns 404 for /leads/123, /settings, etc.
     routes:
@@ -173,6 +169,8 @@ services:
         source: /*
         destination: /index.html
     envVars:
+      - key: NODE_VERSION
+        value: "20.11.0"
       - key: VITE_API_BASE_URL
         value: https://advisorflow-backend.onrender.com
 
