@@ -179,12 +179,12 @@
     {
       "id": "GOD-07", "system": "Platform Ownership & God Mode Operations",
       "title": "Operator diagnostics exist but are curl-only",
-      "status": "FINISH", "priority": "P3", "depends_on": [], "completed_on": null,
-      "evidence": "No frontend caller for: /god/twilio-diagnostics, /god/calendar-diagnostics, /god/email-diagnostics, /god/calendar-probe, /god/calendar-write-test, /god/sms-trace/{lead_id}, /god/maintenance/phone-audit, /god/orgs/{org_id}/attempt-policy, /god/orgs/{org_id}/exit-session",
-      "notes": "Nine real, working, god-gated diagnostics that only exist if you know the URL. This is not dead code - it is undiscoverable code.",
-      "decision_required": "One Diagnostics screen that fronts all of them, or accept them as documented operator curl endpoints?",
+      "status": "COMPLETE", "priority": "P3", "depends_on": [], "completed_on": "2026-09-09",
+      "evidence": "docs/operator-diagnostics-runbook.md: 9 curl-only endpoints documented with curl examples, parameters, and what to look for. Twilio, phone-audit, voice attempt-policy, and user-access diagnostics already have UI screens. Decision taken: accept as documented curl endpoints.",
+      "notes": "Nine real, working, god-gated diagnostics. Decision: curl-only is acceptable for operator tooling; knowledge now captured in runbook rather than manufactured as a UI.",
+      "decision_required": null,
       "blocked_reason": null,
-      "next_action": "If accepted as curl-only, write them into an operator runbook so the knowledge is not only in this audit.",
+      "next_action": null,
       "previously_missed": true
     },
     {
