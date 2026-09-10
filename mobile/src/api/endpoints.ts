@@ -279,6 +279,25 @@ export const owner = {
   implementations: (params: Record<string, string | number | boolean | undefined> = {}) =>
     api.get<Record<string, unknown>>(`/god/ops/implementations${qs(params)}`),
   revenue: () => api.get<Record<string, unknown>>('/god/billing/revenue'),
+
+  /**
+   * THE AGGREGATE, NOT THE ROWS. `/god/billing/revenue` returns one row per
+   * organization and a phone should not sum a hundred of them to show one
+   * number. This endpoint already carries `visible_mrr_cents`, `visible_priced`
+   * and `visible_unpriced` — computed by the same billing service the desktop
+   * uses, so the two cannot disagree.
+   *
+   * `visible_unpriced` is why revenue is reportable at all: a customer with no
+   * plan has no MRR, which is neither zero revenue nor a failure, and the
+   * server says so per row in `mrr_unavailable_reason`.
+   */
+  billingCustomers: (params: { scope?: string; platform_id?: string } = {}) =>
+    api.get<Record<string, unknown>>(`/god/billing/customers${qs(params)}`),
+
+  /** Platform activity. The owner Activity tab reads this rather than
+   *  reconstructing a feed from five unrelated lists. */
+  audit: (params: { limit?: number; category?: string } = {}) =>
+    api.get<Record<string, unknown>>(`/god/ops/audit${qs({ limit: 40, ...params })}`),
 };
 
 // ── customer workspace / advisor (tenant routers) ───────────────────────────

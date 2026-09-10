@@ -177,14 +177,14 @@ export const TABS: Record<ExperienceKind, Array<{ name: string; title: string }>
   sales: [
     { name: 'my-day', title: 'My Day' },
     { name: 'leads', title: 'Leads' },
+    { name: 'pipeline', title: 'Pipeline' },
     { name: 'calendar', title: 'Calendar' },
-    { name: 'compensation', title: 'Pay' },
     { name: 'more', title: 'More' },
   ],
   manager: [
-    { name: 'home', title: 'Home' },
-    { name: 'team', title: 'Team' },
+    { name: 'home', title: 'Today' },
     { name: 'pipeline', title: 'Pipeline' },
+    { name: 'team', title: 'Team' },
     { name: 'approvals', title: 'Approvals' },
     { name: 'more', title: 'More' },
   ],
@@ -203,7 +203,33 @@ export const TABS: Record<ExperienceKind, Array<{ name: string; title: string }>
   owner: [
     { name: 'command', title: 'Command' },
     { name: 'customers', title: 'Customers' },
-    { name: 'issues', title: 'Issues' },
+    { name: 'activity', title: 'Activity' },
     { name: 'more', title: 'More' },
   ],
+};
+
+/**
+ * ROUTES THAT EXIST BUT ARE NOT TABS.
+ *
+ * A PERMANENT TAB IS A PROMISE THAT SOMETHING IS ALWAYS THERE. Issues held one
+ * of the owner's four, and it was empty almost every day — so a quarter of the
+ * navigation was reserved for nothing, while Activity (which always has
+ * content) had nowhere to live. Issues is now reached from the exception rows
+ * on Command, which is where somebody is when they care about it.
+ *
+ * Compensation left the salesperson's tab bar for the same reason and the
+ * opposite cause: it is important but it is not a place you go five times a
+ * day. It sits in More, one tap away.
+ *
+ * These still have to be DECLARED. Expo Router registers every file in a group
+ * as a tab unless told otherwise, so an undeclared screen would reappear in the
+ * bar with a default label — which is how you get a fifth tab called "issues"
+ * that nobody chose.
+ */
+export const HIDDEN_ROUTES: Record<ExperienceKind, string[]> = {
+  sales: ['compensation'],
+  manager: [],
+  advisor: [],
+  executive: [],
+  owner: ['issues'],
 };

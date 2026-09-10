@@ -1,140 +1,206 @@
 /**
- * MANAGER HOME.
+ * SALES MANAGER · TODAY — the team's day, what is stuck, what needs a decision.
  *
- * A manager is a salesperson too — `sales_access.is_sales_member` returns true
- * for `sales_manager`, and decision #4 says a manager sells personally. So this
- * screen leads with what needs a decision and keeps the manager's OWN day on
- * it, rather than replacing one with the other. A manager who cannot see their
- * own appointments has to switch experiences to do their own job.
+ * ONE REQUEST, ONE MOMENT. `/sales/manager/overview` is deliberately a single
+ * endpoint — the router says so in its own docstring: six endpoints would give
+ * six loading states and six slightly different "now", so a meeting could
+ * appear in Team Today and be missing from the rep rollup drawn a second later.
+ * This screen honours that and does not go and fetch the pieces separately.
  *
- * What it does NOT do is recreate the desktop back office. Everything here is
- * something that needs a decision today: an approval waiting, a deal that
- * slipped, an appointment in an hour. Reports, exports and configuration stay
- * on a computer, where they are usable.
+ * Its real shape is:
+ *
+ *     team · team_today · attention { items, total, red, by_kind, by_owner }
+ *     approvals { pending, pending_count, recent } · closing_pipeline
+ *     reps · proposal_queues
+ *
+ * A MANAGER IS NOT A SMALL OWNER. Nothing here is platform-wide: every figure
+ * is this brand's, resolved by `require_sales_manager` against a membership. A
+ * manager who opens this cannot see another brand's team by any route the app
+ * offers, and asking would be refused server-side rather than filtered here.
  */
 
 import React from 'react';
 import { router } from 'expo-router';
 
-import { manager, sales, scheduling } from '../../src/api/endpoints';
-import {
-  asCount, asList, asMoney, pick, useScopedQuery, useScopedRefresh,
-} from '../../src/hooks/useApi';
+import { manager } from '../../src/api/endpoints';
+import { asList, asMoney, pick, useScopedQuery, useScopedRefresh } from '../../src/hooks/useApi';
+import { numField } from '../../src/api/state';
 import { useActiveExperience } from '../../src/experience/ExperienceContext';
 import {
-  Card, EmptyState, ErrorState, KeyValue, Loading, Row, Screen,
-  ScreenTitle, SectionHeader,
+  AttentionItem, Metric, MetricGrid, SectionRetry, Skeleton,
+} from '../../src/components/data';
+import {
+  EmptyState, Pill, Row, Screen, ScreenTitle, SectionHeader,
 } from '../../src/components/ui';
-import { isoDate, nameOf, relativeOf, timeOf } from '../../src/format';
-import { stageLabel } from '../../src/vocab';
+import { nameOf, relativeOf, timeOf } from '../../src/format';
 import { palette } from '../../src/theme/tokens';
-import type { Appointment, ApprovalRequest } from '../../src/api/types';
 
-export default function ManagerHome() {
+type Rec = Record<string, unknown>;
+
+export default function ManagerToday() {
   const exp = useActiveExperience();
   const brand = exp.brandSalesOrgId;
   const refresh = useScopedRefresh();
-  const today = isoDate(new Date());
 
-  const overview = useScopedQuery(['manager', 'overview', brand],
-    () => manager.overview({ brand_sales_org_id: brand }));
-  const approvals = useScopedQuery(['manager', 'approvals', brand],
-    () => manager.approvals(brand));
-  const mine = useScopedQuery(['appointments', 'today', brand, 'mine'],
-    () => scheduling.appointments({
-      brand_sales_org_id: brand, date_from: today, date_to: today, scope: 'mine',
-    }));
-  const day = useScopedQuery(['my-day', brand], () => sales.myDay(brand));
+  const q = useScopedQuery(['manager', 'overview', brand], () =>
+    manager.overview({ brand_sales_org_id: brand }));
 
-  if (overview.isLoading && approvals.isLoading) {
-    return <Screen><Loading label="Loading your team" /></Screen>;
-  }
+  const payload = (q.data ?? {}) as Rec;
 
-  const pending = asList<ApprovalRequest>(approvals.data, 'approvals', 'requests', 'items')
-    .filter((a) => !a.status || String(a.status).toLowerCase() === 'pending');
-  const myAppts = asList<Appointment>(mine.data, 'appointments', 'items');
-  const o = overview.data ?? {};
-  const followUps = asList<Record<string, unknown>>(
-    pick(day.data, 'overdue_follow_ups', 'follow_ups'), 'items');
+  const attentionTotal = numField(q, 'attention.total');
+  const attentionRed = numField(q, 'attention.red');
+  const approvalsPending = numField(q, 'approvals.pending_count');
+  const teamSize = numField(q, 'team.length');
+
+  const teamToday = asList<Rec>(pick(payload, 'team_today'), 'items', 'appointments');
+  const attentionItems = asList<Rec>(pick(payload, 'attention.items'), 'items');
+  const pendingApprovals = asList<Rec>(pick(payload, 'approvals.pending'), 'items');
+  const reps = asList<Rec>(pick(payload, 'reps'), 'items');
+  const closing = asList<Rec>(pick(payload, 'closing_pipeline'), 'items', 'deals');
+
+  const team = asList<Rec>(pick(payload, 'team'), 'items');
 
   return (
-    <Screen refreshing={overview.isFetching || approvals.isFetching} onRefresh={refresh}>
-      <ScreenTitle title="Team" subtitle={exp.detail ?? 'What needs you today'} />
+    <Screen refreshing={q.isFetching} onRefresh={refresh}>
+      <ScreenTitle
+        title="Today"
+        subtitle={String(pick(payload, 'brand_name') ?? exp.detail ?? 'Your team')}
+      />
 
-      {overview.isError && approvals.isError ? (
-        <ErrorState error={overview.error} onRetry={refresh} />
-      ) : null}
+      <SectionRetry
+        show={q.isError}
+        onRetry={refresh}
+        note="The team overview could not be loaded."
+      />
 
-      {pending.length ? (
+      {q.isLoading ? <Skeleton rows={3} /> : null}
+
+      <MetricGrid>
+        <Metric
+          label="Needs intervention"
+          field={attentionTotal}
+          hint={attentionRed.value ? `${attentionRed.value} urgent` : undefined}
+        />
+        <Metric
+          label="Approvals waiting"
+          field={approvalsPending}
+          onPress={() => router.push('/(manager)/approvals' as never)}
+        />
+        <Metric
+          label="Team"
+          field={team.length ? { state: 'ready', value: team.length } : teamSize}
+          onPress={() => router.push('/(manager)/team' as never)}
+        />
+        <Metric
+          label="Meetings today"
+          field={{ state: teamToday.length ? 'ready' : 'zero', value: teamToday.length }}
+        />
+      </MetricGrid>
+
+      {/* ── APPROVALS FIRST: a manager is the only person who can clear these ─ */}
+      {pendingApprovals.length ? (
         <>
-          <SectionHeader title={`Waiting on you · ${pending.length}`} />
-          {pending.map((a) => (
-            <Row
-              key={String(a.id)}
-              title={String(a.opportunity_name ?? 'Pricing approval')}
-              subtitle={a.requested_by_name ? `From ${a.requested_by_name}` : null}
-              meta={[
-                a.requested_amount != null ? `Asking ${asMoney(a.requested_amount)}` : null,
-                a.floor_amount != null ? `floor ${asMoney(a.floor_amount)}` : null,
-              ].filter(Boolean).join(' · ')}
-              accent={palette.warning}
+          <SectionHeader title={`Waiting on you · ${pendingApprovals.length}`} />
+          {pendingApprovals.slice(0, 5).map((a, i) => (
+            <AttentionItem
+              key={String(pick(a, 'id') ?? i)}
+              title={String(pick(a, 'opportunity_name', 'company_name', 'title')
+                ?? 'Pricing request')}
+              why={String(pick(a, 'reason', 'summary', 'detail') ?? '') || null}
+              action="Decide"
+              tone="danger"
               onPress={() => router.push('/(manager)/approvals' as never)}
             />
           ))}
         </>
-      ) : (
-        <EmptyState title="No approvals waiting" body="Nothing is blocked on a decision from you." />
-      )}
+      ) : null}
 
-      <SectionHeader title="Team today" />
-      <Card>
-        <KeyValue label="Reps" value={asCount(pick(o, 'rep_count', 'team.count', 'reps_total'))} />
-        <KeyValue
-          label="Appointments today"
-          value={asCount(pick(o, 'appointments_today', 'today.appointments'))}
-        />
-        <KeyValue
-          label="Open pipeline"
-          value={asMoney(pick(o, 'pipeline_value', 'pipeline.total', 'open_value'))}
-        />
-        <KeyValue
-          label="Deals in closing"
-          value={asCount(pick(o, 'closing_count', 'stages.closing'))}
-        />
-      </Card>
-
-      {myAppts.length ? (
+      {/* ── EXCEPTIONS THE SERVER RAISED ──────────────────────────────────── */}
+      {attentionItems.length ? (
         <>
-          <SectionHeader title={`Your own day · ${myAppts.length}`} />
-          {myAppts.map((a) => (
-            <Row
-              key={String(a.id)}
-              title={String(a.title ?? 'Appointment')}
-              subtitle={a.prospect_name ?? a.opportunity_name ?? null}
-              meta={timeOf(a.starts_at)}
-              accent={palette.accent}
-              onPress={() => router.push(`/appointment/${a.id}` as never)}
+          <SectionHeader title={`Needs intervention · ${attentionItems.length}`} />
+          {attentionItems.slice(0, 8).map((a, i) => (
+            <AttentionItem
+              key={String(pick(a, 'id', 'opportunity_id') ?? i)}
+              title={nameOf(a, 'Deal')}
+              why={String(pick(a, 'reason', 'kind', 'detail') ?? '') || null}
+              action="Open the deal"
+              tone={pick(a, 'severity') === 'red' ? 'danger' : 'warning'}
+              onPress={() => {
+                const id = pick(a, 'opportunity_id', 'id');
+                if (id) router.push(`/opportunity/${String(id)}` as never);
+              }}
             />
           ))}
         </>
       ) : null}
 
-      {followUps.length ? (
+      {/* ── TEAM TODAY ────────────────────────────────────────────────────── */}
+      {teamToday.length ? (
         <>
-          <SectionHeader title={`Your overdue follow-ups · ${followUps.length}`} />
-          {followUps.slice(0, 5).map((f, i) => (
+          <SectionHeader title={`Team today · ${teamToday.length}`} />
+          {teamToday.map((a, i) => (
             <Row
-              key={String(f.id ?? i)}
-              title={nameOf(f, 'Follow-up')}
-              subtitle={typeof f.stage === 'string' ? stageLabel(f.stage) : null}
-              meta={`Due ${relativeOf(f.due_at ?? f.follow_up_at)}`}
-              accent={palette.danger}
+              key={String(pick(a, 'id') ?? i)}
+              title={String(pick(a, 'title', 'meeting_type') ?? 'Appointment')}
+              subtitle={[pick(a, 'owner_name', 'salesperson_name'),
+                         pick(a, 'prospect_name', 'company_name')]
+                .filter(Boolean).join(' · ') || null}
+              meta={timeOf(pick(a, 'starts_at'))}
+              accent={palette.accent}
               onPress={() => {
-                if (f.opportunity_id) router.push(`/opportunity/${f.opportunity_id}` as never);
+                const id = pick(a, 'id', 'appointment_id');
+                if (id) router.push(`/appointment/${String(id)}` as never);
               }}
             />
           ))}
         </>
+      ) : null}
+
+      {/* ── CLOSING SOON ──────────────────────────────────────────────────── */}
+      {closing.length ? (
+        <>
+          <SectionHeader title="Closing soon" />
+          {closing.slice(0, 6).map((d, i) => (
+            <Row
+              key={String(pick(d, 'opportunity_id', 'id') ?? i)}
+              title={nameOf(d, 'Deal')}
+              subtitle={String(pick(d, 'owner_name', 'salesperson_name') ?? '') || null}
+              meta={relativeOf(pick(d, 'expected_close_date', 'close_date'))}
+              onPress={() => {
+                const id = pick(d, 'opportunity_id', 'id');
+                if (id) router.push(`/opportunity/${String(id)}` as never);
+              }}
+              right={pick(d, 'amount') != null
+                ? <Pill label={asMoney(pick(d, 'amount'))} tone="accent" />
+                : undefined}
+            />
+          ))}
+        </>
+      ) : null}
+
+      {/* ── REP ROLLUP ────────────────────────────────────────────────────── */}
+      {reps.length ? (
+        <>
+          <SectionHeader title="Team activity" />
+          {reps.map((r, i) => (
+            <Row
+              key={String(pick(r, 'user_id', 'id') ?? i)}
+              title={String(pick(r, 'name', 'full_name') ?? 'Salesperson')}
+              subtitle={`${pick(r, 'open_deals') ?? 0} open`}
+              meta={relativeOf(pick(r, 'last_activity_at', 'generated_at'))}
+              onPress={() => router.push('/(manager)/team' as never)}
+            />
+          ))}
+        </>
+      ) : null}
+
+      {!q.isLoading && !pendingApprovals.length && !attentionItems.length
+        && !teamToday.length ? (
+        <EmptyState
+          title="Quiet day"
+          body="No approvals waiting, nothing flagged for intervention, and no team meetings scheduled today."
+        />
       ) : null}
     </Screen>
   );

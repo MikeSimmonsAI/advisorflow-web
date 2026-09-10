@@ -19,7 +19,7 @@ import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useExperience } from '../experience/ExperienceContext';
-import { ExperienceKind, TABS } from '../experience/resolve';
+import { ExperienceKind, HIDDEN_ROUTES, TABS } from '../experience/resolve';
 import { palette, type as typography } from '../theme/tokens';
 
 /** One glyph per destination. Keyed by tab name, shared across experiences so
@@ -38,6 +38,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   revenue: 'bar-chart-outline',
   customers: 'briefcase-outline',
   issues: 'warning-outline',
+  activity: 'pulse-outline',
   more: 'ellipsis-horizontal',
 };
 
@@ -85,6 +86,11 @@ export function ExperienceTabs({ kind }: { kind: ExperienceKind }) {
             ),
           }}
         />
+      ))}
+      {/* Real routes, deliberately absent from the bar. Declaring them with
+          href:null is what stops Expo Router auto-adding them as tabs. */}
+      {HIDDEN_ROUTES[kind].map((name) => (
+        <Tabs.Screen key={name} name={name} options={{ href: null }} />
       ))}
     </Tabs>
   );

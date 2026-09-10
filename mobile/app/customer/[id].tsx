@@ -1,32 +1,50 @@
 /**
- * OWNER · CUSTOMER DETAIL (Customer 360, read-only on mobile).
+ * CUSTOMER — awareness and quick operational actions.
  *
- * `GET /god/customer-360/customers/{org_id}` is the same record the desktop
- * shows. What the desktop ALSO shows, and this screen deliberately does not,
- * is the row of lifecycle actions beside it: request cancellation, start
- * offboarding, complete cancellation, archive, permanent delete.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT CHANGED
+ * ═══════════════════════════════════════════════════════════════════════════
  *
- * Those are the six most consequential buttons in the platform and they are all
- * one tap from each other. On a phone, held one-handed, walking — no. The
- * routes exist and are authorised; this app simply never calls them, and the
- * screen says so rather than leaving the owner to wonder whether the feature is
- * missing or the page is broken.
+ * The previous screen was a six-row metadata table and a closing paragraph
+ * explaining what the app deliberately cannot do. The paragraph was the largest
+ * piece of content on it. Telling somebody at length what a screen is not for
+ * is not a feature — the restraint is still absolute, it is simply no longer
+ * announced. Destructive lifecycle actions (cancel, offboard, archive, delete,
+ * major billing change) are not rendered, not imported, and not reachable.
+ *
+ * WHAT IT IS NOW: who they are, whether they are healthy, what needs doing,
+ * what happened lately, and a way to reach them — in that order, because that
+ * is the order somebody standing outside a meeting needs them.
+ *
+ * EVERY NUMBER GOES THROUGH api/state.ts. A customer whose MRR could not be
+ * read shows "Unavailable" with the server's reason, never $0 — telling an
+ * owner a paying customer bills nothing is worse than telling him nothing.
  */
 
 import React from 'react';
-import { StyleSheet, Text } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 
 import { owner } from '../../src/api/endpoints';
+import { pick, useScopedQuery, useScopedRefresh } from '../../src/hooks/useApi';
 import {
-  asCount, asList, asMoney, pick, useScopedQuery, useScopedRefresh,
-} from '../../src/hooks/useApi';
+  anyError, centsField, listField, numField, textField, withNotConfigured,
+} from '../../src/api/state';
 import {
-  Card, ErrorState, KeyValue, Loading, Row, Screen, ScreenTitle, SectionHeader,
-  SeverityPill,
+  ActivityItem, AttentionItem, Metric, MetricGrid, SectionRetry, Skeleton,
+} from '../../src/components/data';
+import { ContactActions } from '../../src/components/ContactActions';
+import {
+  Card, EmptyState, Pill, Screen, ScreenTitle, SectionHeader, SeverityPill,
 } from '../../src/components/ui';
 import { relativeOf } from '../../src/format';
-import { palette, type as typography } from '../../src/theme/tokens';
+
+function money(v: number | string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString(undefined, {
+    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
+  });
+}
 
 export default function CustomerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -35,66 +53,150 @@ export default function CustomerDetail() {
   const query = useScopedQuery(['owner', 'customer', id],
     () => owner.customer360(String(id)), { enabled: !!id });
 
-  if (query.isLoading) return <Screen><Loading label="Loading customer" /></Screen>;
-  if (query.isError) return <Screen><ErrorState error={query.error} onRetry={refresh} /></Screen>;
-
-  const c = query.data ?? {};
+  const c = (query.data ?? {}) as Record<string, unknown>;
   const org = (pick<Record<string, unknown>>(c, 'organization', 'customer') ?? c) as
     Record<string, unknown>;
-  const events = asList<Record<string, unknown>>(
-    pick(c, 'lifecycle_events', 'events', 'history'), 'items');
+
+  const name = String(pick(org, 'name', 'organization_name') ?? 'Customer');
+  const health = String(pick(c, 'severity', 'health', 'health_label') ?? '');
+  const active = pick(org, 'is_active') !== false;
+
+  // ── the numbers ──────────────────────────────────────────────────────────
+  const users = numField(query, 'counts.users', 'user_count', 'staffing.active_users');
+  const leads = numField(query, 'counts.leads', 'lead_count');
+  const mrrRaw = centsField(query, 'billing.mrr_cents', 'mrr_cents', 'pricing.mrr_cents');
+  const mrr = withNotConfigured(
+    mrrRaw,
+    textField(query, 'billing.mrr_unavailable_reason', 'mrr_unavailable_reason').value,
+  );
+  const plan = textField(query, 'billing.plan_name', 'plan_name', 'pricing.plan_name', 'plan');
+  const since = textField(query, 'organization.created_at', 'created_at');
+  const implStatus = textField(query,
+    'implementation.status_label', 'implementation.status', 'implementation_status');
+
+  // ── what needs doing ─────────────────────────────────────────────────────
+  const warnings = listField<unknown>(
+    { data: pick(c, 'implementation.launch_warnings', 'launch_warnings'), isLoading: false },
+    'items');
+  const blockers = listField<Record<string, unknown>>(
+    { data: pick(c, 'blockers', 'exceptions', 'attention'), isLoading: false }, 'items');
+
+  const billingStatus = String(
+    pick(c, 'billing.billing_status', 'billing_status', 'pricing.billing_status') ?? '')
+    .toLowerCase();
+  const billingProblem = billingStatus
+    && !['active', 'trialing', 'ok', 'paid'].includes(billingStatus);
+
+  const attention: Array<{ title: string; why?: string | null; tone?: 'warning' | 'danger' }> = [];
+  if (billingProblem) {
+    attention.push({
+      title: `Billing is ${billingStatus.replace(/_/g, ' ')}`,
+      why: 'Commercial status needs review on a computer.',
+      tone: 'danger',
+    });
+  }
+  for (const w of (warnings.value ?? [])) {
+    attention.push({
+      title: typeof w === 'string' ? w : String(pick(w, 'label', 'message', 'title') ?? 'Launch warning'),
+      why: typeof w === 'string' ? null : String(pick(w, 'detail', 'why') ?? '') || null,
+      tone: 'warning',
+    });
+  }
+  for (const b of (blockers.value ?? [])) {
+    attention.push({
+      title: String(pick(b, 'title', 'label', 'summary') ?? 'Blocker'),
+      why: String(pick(b, 'detail', 'reason', 'why') ?? '') || null,
+      tone: 'warning',
+    });
+  }
+
+  // ── recent activity ──────────────────────────────────────────────────────
+  const events = listField<Record<string, unknown>>(
+    { data: pick(c, 'lifecycle_events', 'events', 'timeline', 'history'), isLoading: false },
+    'items', 'events');
+
+  // ── how to reach them ────────────────────────────────────────────────────
+  const phone = textField(query,
+    'primary_contact.phone', 'contact.phone', 'organization.phone', 'phone').value;
+  const email = textField(query,
+    'primary_contact.email', 'contact.email', 'organization.email', 'email').value;
+  const contactName = textField(query,
+    'primary_contact.name', 'contact.name', 'primary_contact.full_name').value;
+
+  const failed = anyError(users, leads, mrr);
 
   return (
     <Screen refreshing={query.isFetching} onRefresh={refresh}>
       <ScreenTitle
-        title={String(org.name ?? org.organization_name ?? 'Customer')}
-        subtitle={String(org.plan ?? org.billing_status ?? '')}
+        title={name}
+        subtitle={[plan.value, implStatus.value].filter(Boolean).join(' · ') || undefined}
       />
 
       <Card>
-        <KeyValue
-          label="Health"
-          value={<SeverityPill value={String(pick(c, 'severity', 'health') ?? '')} />}
-        />
-        <KeyValue label="Status" value={String(org.billing_status ?? org.status ?? '—')} />
-        <KeyValue label="Users" value={asCount(pick(c, 'user_count', 'counts.users'))} />
-        <KeyValue label="Leads" value={asCount(pick(c, 'lead_count', 'counts.leads'))} />
-        <KeyValue
-          label="Recurring revenue"
-          value={asMoney(pick(c, 'recurring_revenue', 'mrr', 'revenue.recurring'))}
-        />
-        <KeyValue
-          label="Customer since"
-          value={org.created_at ? relativeOf(org.created_at) : '—'}
-        />
+        <MetricGrid>
+          <Metric label="Health" field={{ state: 'ready', value: health || 'Not rated' }} />
+          <Metric
+            label="Status"
+            field={{ state: 'ready', value: active ? 'Active' : 'Inactive' }}
+          />
+        </MetricGrid>
       </Card>
 
-      {events.length ? (
+      <SectionRetry show={failed} onRetry={refresh}
+                    note="Some of this customer's figures could not be loaded." />
+
+      {query.isLoading ? <Skeleton rows={3} /> : null}
+
+      {/* ── OVERVIEW ──────────────────────────────────────────────────────── */}
+      <SectionHeader title="Overview" />
+      <MetricGrid>
+        <Metric label="Recurring revenue" field={mrr} format={money} emphasis />
+        <Metric label="Users" field={users} />
+        <Metric label="Leads" field={leads} />
+        <Metric
+          label="Customer since"
+          field={since.state === 'ready'
+            ? { state: 'ready', value: relativeOf(since.value) }
+            : since}
+        />
+      </MetricGrid>
+
+      {/* ── NEEDS ATTENTION ───────────────────────────────────────────────── */}
+      {attention.length ? (
         <>
-          <SectionHeader title="Lifecycle" />
-          {events.slice(0, 20).map((e, i) => (
-            <Row
-              key={String(e.id ?? i)}
-              title={String(e.event ?? e.type ?? 'Event')}
-              subtitle={typeof e.reason === 'string' ? e.reason
-                : typeof e.note === 'string' ? e.note : null}
-              meta={relativeOf(e.created_at ?? e.occurred_at)}
-            />
+          <SectionHeader title="Needs attention" />
+          {attention.map((a, i) => (
+            <AttentionItem key={i} title={a.title} why={a.why} tone={a.tone ?? 'warning'} />
           ))}
         </>
       ) : null}
 
+      {/* ── QUICK ACTIONS ─────────────────────────────────────────────────── */}
+      <SectionHeader title="Quick actions" />
       <Card>
-        <Text style={styles.note}>
-          Cancelling, offboarding, archiving and deleting this customer are not
-          available on mobile — deliberately. Those actions end a live business
-          and belong on a computer with the full picture in front of you.
-        </Text>
+        <ContactActions
+          phone={phone}
+          email={email}
+          personLabel={contactName ?? name}
+        />
       </Card>
+
+      {/* ── RECENT ACTIVITY ───────────────────────────────────────────────── */}
+      <SectionHeader title="Recent activity" />
+      {!(events.value ?? []).length ? (
+        <EmptyState title="Nothing recent" />
+      ) : (
+        <Card>
+          {(events.value ?? []).slice(0, 12).map((e, i) => (
+            <ActivityItem
+              key={String(pick(e, 'id') ?? i)}
+              title={String(pick(e, 'summary', 'event', 'event_type', 'type') ?? 'Event')}
+              detail={String(pick(e, 'detail', 'reason', 'note') ?? '') || null}
+              when={relativeOf(pick(e, 'occurred_at', 'created_at'))}
+            />
+          ))}
+        </Card>
+      )}
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  note: { ...typography.caption, color: palette.textFaint },
-});
