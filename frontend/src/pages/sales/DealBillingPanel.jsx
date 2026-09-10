@@ -89,12 +89,16 @@ export default function DealBillingPanel({ opp }) {
             {data.recurring_cents === null ? '—' : money(data.recurring_cents) + '/mo'}
           </b>
         </div>
-        {data.term_months ? (
-          <div>
-            <div className="sw-subtle" style={{ fontSize: 10 }}>TERM</div>
-            <b style={{ fontSize: 16 }}>{data.term_months} months</b>
-          </div>
-        ) : null}
+        {/* COMMITMENT, ALWAYS. A recurring figure without it is ambiguous
+            between two real prices — $500 committed and $597 not — and the rep
+            quoting it cannot tell which they are looking at. */}
+        <div>
+          <div className="sw-subtle" style={{ fontSize: 10 }}>COMMITMENT</div>
+          <b style={{ fontSize: 13 }}>
+            {data.commitment_label
+              || (data.term_months ? data.term_months + ' months' : '—')}
+          </b>
+        </div>
         <div>
           <div className="sw-subtle" style={{ fontSize: 10 }}>PRICING FROM</div>
           <b style={{ fontSize: 13 }}>{data.pricing_source}</b>
@@ -119,10 +123,20 @@ export default function DealBillingPanel({ opp }) {
               ? ' A manager approved this exact figure.'
               : ' Set within the pricing authority of whoever agreed it.'}
           </div>
-          {data.custom_pricing.entitlement_plan_unset && (
-            <div className="sw-subtle" style={{ fontSize: 10, marginTop: 5 }}>
-              This customer will not sit on a standard plan tier, so plan feature
-              limits are not applied to them.
+          {/* ENTITLEMENTS, TRUTHFULLY. "Not on a tier" is not the same as "no
+              limits", and saying so vaguely is how a negotiated customer ends
+              up quietly uncapped. */}
+          {data.custom_pricing.entitlement && (
+            <div className="sw-subtle" style={{ fontSize: 10, marginTop: 6 }}>
+              {data.custom_pricing.entitlement.source === 'custom_agreement_snapshot'
+                ? <>Entitlements come from this customer&apos;s own agreement.
+                    {(data.custom_pricing.entitlement.unset_dimensions || []).length > 0
+                      && <> Not yet recorded:{' '}
+                           {data.custom_pricing.entitlement.unset_dimensions.join(', ')}.</>}
+                  </>
+                : <><b>Entitlements need configuring.</b> This customer is on no
+                    standard tier and no agreed limits have been recorded, so no
+                    ceiling applies to anything yet.</>}
             </div>
           )}
         </div>

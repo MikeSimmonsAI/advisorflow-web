@@ -87,6 +87,19 @@ COLUMNS_TO_ADD = [
     ("organizations", "billing_pending_effective_at", "TIMESTAMP"),
     ("organizations", "stripe_schedule_id", "VARCHAR"),
 
+    # ── The month-to-month rate (2026-09-10) ───────────────────────────────
+    # A second monthly PRICE on the same tier, not a second tier. `monthly_cents`
+    # is the committed (term-agreement) rate; these hold the no-commitment rate
+    # and its own Stripe Price. Both nullable: a brand that only sells term
+    # agreements has no month-to-month price, and `deal_billing` refuses such a
+    # deal by name rather than falling back to the discounted term rate.
+    #
+    # `brand_billing_plans` is created by create_all, which never ADDS columns to
+    # an existing table — so without these two lines every deployed environment
+    # would query a column its database does not have and take down billing.
+    ("brand_billing_plans", "month_to_month_cents", "INTEGER"),
+    ("brand_billing_plans", "stripe_price_id_month_to_month", "VARCHAR"),
+
     # ── Import batch options (2026-09-07) ──────────────────────────────────
     # POST /leads/upload/confirm accepted all four of these as multipart form
     # fields and then handed none of them to the pipeline, so a "Source year"

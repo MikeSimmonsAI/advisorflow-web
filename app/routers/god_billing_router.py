@@ -182,12 +182,17 @@ def _plan_full(p: BrandBillingPlan) -> Dict[str, Any]:
         "name": p.name,
         "description": p.description,
         "sort_order": p.sort_order,
+        # `monthly_cents` is the COMMITTED rate; `month_to_month_cents` is the
+        # same tier without a commitment. Both are shown because a screen that
+        # showed one would make the other invisible to the person configuring it.
         "monthly_cents": p.monthly_cents,
         "annual_cents": p.annual_cents,
+        "month_to_month_cents": p.month_to_month_cents,
         "currency": p.currency,
         "stripe_product_id": p.stripe_product_id,
         "stripe_price_id_monthly": p.stripe_price_id_monthly,
         "stripe_price_id_annual": p.stripe_price_id_annual,
+        "stripe_price_id_month_to_month": p.stripe_price_id_month_to_month,
         # Advertised ceilings. NULL is UNLIMITED, not zero — the screen must be
         # able to tell them apart, so neither is coerced.
         "max_leads": p.max_leads,
@@ -360,6 +365,9 @@ class PlanIn(BaseModel):
     # which is how a quoted Enterprise tier is expressed, not zero.
     monthly_cents: Optional[int] = None
     annual_cents: Optional[int] = None
+    # The same tier's no-commitment monthly rate, and its own Stripe Price.
+    # Configuration, not a second product — see BillingCommitment.
+    month_to_month_cents: Optional[int] = None
     max_leads: Optional[int] = None
     max_users: Optional[int] = None
     features: Optional[List[str]] = None
@@ -368,6 +376,7 @@ class PlanIn(BaseModel):
     stripe_product_id: Optional[str] = None
     stripe_price_id_monthly: Optional[str] = None
     stripe_price_id_annual: Optional[str] = None
+    stripe_price_id_month_to_month: Optional[str] = None
 
 
 def _validate_cents(value: Optional[int], field: str) -> Optional[int]:
@@ -456,6 +465,9 @@ def upsert_plan(platform_id: str, key: str, body: PlanIn,
         plan.monthly_cents = _validate_cents(data["monthly_cents"], "monthly_cents")
     if "annual_cents" in data:
         plan.annual_cents = _validate_cents(data["annual_cents"], "annual_cents")
+    if "month_to_month_cents" in data:
+        plan.month_to_month_cents = _validate_cents(
+            data["month_to_month_cents"], "month_to_month_cents")
     if "max_leads" in data:
         plan.max_leads = _validate_ceiling(data["max_leads"], "max_leads")
     if "max_users" in data:
@@ -474,7 +486,7 @@ def upsert_plan(platform_id: str, key: str, body: PlanIn,
     if "is_active" in data:
         plan.is_active = bool(data["is_active"])
     for field in ("stripe_product_id", "stripe_price_id_monthly",
-                  "stripe_price_id_annual"):
+                  "stripe_price_id_annual", "stripe_price_id_month_to_month"):
         if field in data:
             setattr(plan, field, _reject_credential(data[field], field))
 
@@ -668,6 +680,129 @@ class SeedIn(BaseModel):
     # Explicit, and false by default. The preview is the safe call; writing what
     # every customer of a brand will be charged should require saying so.
     apply: bool = False
+
+
+class EntitlementSnapshotIn(BaseModel):
+    """The ceilings a Custom customer's agreement actually granted.
+
+    EVERY FIELD OPTIONAL, AND OMITTED IS NOT ZERO. A dimension nobody agreed is
+    left unrecorded and reported as NEEDS CONFIGURATION — it does not become
+    unlimited and it does not become a standard tier's number.
+
+    To record a genuinely uncapped dimension, name it in `unlimited` rather than
+    leaving it blank. "Nobody decided" and "we agreed no cap" are different
+    commercial facts and this is the only place they can be told apart.
+    """
+    max_leads: Optional[int] = None
+    max_users: Optional[int] = None
+    max_locations: Optional[int] = None
+    sms_monthly_allowance: Optional[int] = None
+    voice_minutes_monthly_allowance: Optional[int] = None
+    email_monthly_allowance: Optional[int] = None
+    unlimited: Optional[List[str]] = None
+    features: Optional[List[str]] = None
+    opportunity_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+@router.get("/customers/{organization_id}/entitlements")
+def read_customer_entitlements(organization_id: str,
+                               db: Session = Depends(get_db),
+                               user: User = Depends(require_god)) -> dict:
+    """What this customer is entitled to, and how confidently we know it."""
+    from app.services import plan_limits
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+    return {
+        "organization_id": org.id,
+        "organization_name": org.name,
+        "billing_plan_key": getattr(org, "billing_plan_key", None),
+        "entitlement": plan_limits.entitlement_state(db, org),
+        "recordable_dimensions": list(plan_limits.SNAPSHOT_DIMENSIONS),
+    }
+
+
+@router.put("/customers/{organization_id}/entitlements")
+def set_customer_entitlements(organization_id: str, body: EntitlementSnapshotIn,
+                              db: Session = Depends(get_db),
+                              user: User = Depends(require_god)) -> dict:
+    """Record what a Custom customer's agreement granted.
+
+    SUPERSEDES, NEVER OVERWRITES. A renegotiation writes a new snapshot and
+    marks the previous one superseded, so what the customer was entitled to last
+    quarter stays answerable. That is the same reason a proposal is versioned
+    rather than edited.
+
+    A SNAPSHOT OF LITERAL NUMBERS, not a pointer at the catalogue — so a brand
+    later raising Starter's lead ceiling cannot retroactively change what this
+    customer was sold.
+    """
+    from datetime import datetime as _dt
+
+    from app.models.billing_models import CustomerEntitlementSnapshot
+    from app.services import entitlements as _ent
+    from app.services import plan_limits
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    data = _fields_set(body)
+
+    unlimited = data.get("unlimited")
+    if unlimited is not None:
+        bad = [k for k in unlimited if k not in plan_limits.SNAPSHOT_DIMENSIONS]
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail="Not recordable dimension(s): %s. Valid: %s"
+                       % (", ".join(sorted(set(bad))),
+                          ", ".join(plan_limits.SNAPSHOT_DIMENSIONS)))
+
+    features = data.get("features")
+    if features is not None:
+        # Validated against the ONE feature registry, so a typo cannot be
+        # recorded as an entitlement that grants nothing and is never noticed.
+        features = _ent.normalize_keys(features)
+
+    for field in plan_limits.SNAPSHOT_DIMENSIONS:
+        if field in data and data[field] is not None and int(data[field]) < 0:
+            raise HTTPException(status_code=400,
+                                detail="%s cannot be negative." % field)
+
+    before = plan_limits.entitlement_state(db, org)
+
+    previous = plan_limits.current_snapshot(db, org)
+    if previous is not None:
+        previous.superseded_at = _dt.utcnow()
+
+    snap = CustomerEntitlementSnapshot(
+        organization_id=org.id,
+        platform_id=getattr(org, "platform_id", None),
+        opportunity_id=data.get("opportunity_id"),
+        source="custom_deal",
+        features_json=json.dumps(features) if features is not None else None,
+        unlimited_json=json.dumps(sorted(set(unlimited))) if unlimited else None,
+        note=(data.get("note") or None),
+        created_by=user.id,
+    )
+    for field in plan_limits.SNAPSHOT_DIMENSIONS:
+        if field in data:
+            setattr(snap, field, data[field])
+    db.add(snap)
+    db.flush()
+
+    after = plan_limits.entitlement_state(db, org)
+    _audit(db, user, "customer.entitlements_recorded", "organization", org.id,
+           before=before, after=after,
+           note="entitlement snapshot for %s" % org.name,
+           platform_id=getattr(org, "platform_id", None))
+    db.commit()
+    return {"organization_id": org.id, "snapshot_id": snap.id,
+            "superseded_snapshot_id": getattr(previous, "id", None),
+            "entitlement": after}
 
 
 @router.post("/brands/{platform_id}/seed")

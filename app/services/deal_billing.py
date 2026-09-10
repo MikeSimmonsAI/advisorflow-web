@@ -97,7 +97,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.services import billing_catalog, deal_pricing
+from app.models.billing_models import BillingCommitment
+from app.services import billing_catalog, deal_pricing, plan_limits
 
 log = logging.getLogger("deal_billing")
 
@@ -142,8 +143,9 @@ BLOCKER_TEXT = {
         "The billing plan this package maps to is not currently purchasable "
         "for this brand.",
     B_NO_PRICE_ID:
-        "The mapped billing plan has no Stripe price configured for this "
-        "interval.",
+        "The mapped billing plan has no Stripe price configured for what this "
+        "deal agreed to. A term agreement and a month-to-month deal are two "
+        "different prices on the same plan, and each needs its own.",
     B_RATE_MISMATCH:
         "The monthly rate negotiated on this deal does not match the catalogue "
         "rate for the mapped plan. Charging either one silently would be wrong; "
@@ -216,6 +218,24 @@ def mapped_plan(db: Session, platform_id: Optional[str], package):
     if plan is None:
         return None, B_PLAN_UNAVAILABLE
     return plan, None
+
+
+def commitment_for(res: Dict[str, Any]) -> str:
+    """Which of the plan's two monthly prices this deal agreed to.
+
+    Read off the deal's own resolved STRUCTURE rather than off `billing_option`
+    directly, because the structure is what `package_pricing.quote()` actually
+    priced. A deal whose billing option says term_agreement but which produced
+    no committed term came back as month-to-month, and the amount already
+    quoted to the customer is the month-to-month one; billing must charge what
+    was quoted, not what the option field aspired to.
+
+    Anything that is not clearly month-to-month resolves to the committed rate,
+    which is the pre-existing behaviour of `monthly_cents`.
+    """
+    if res.get("structure") == deal_pricing.STRUCTURE_M2M:
+        return BillingCommitment.MONTH_TO_MONTH
+    return BillingCommitment.TERM
 
 
 def _custom_product_name(res: Dict[str, Any]) -> str:
@@ -362,6 +382,12 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
     setup = res["implementation_fee"]
     mrr = res["mrr"]
 
+    # The commercial commitment, resolved once and used everywhere below, so the
+    # price lookup, the blocker detail and the rendered label cannot disagree.
+    commitment = commitment_for(res)
+    commitment_label = billing_catalog.commitment_label(
+        commitment, res.get("term_months"))
+
     blockers: List[Dict[str, Any]] = []
     out: Dict[str, Any] = {
         "opportunity_id": opp.id,
@@ -378,6 +404,10 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
         "package_name": res["package_name"],
         "is_custom_rate": res["is_custom_rate"],
         "term_months": res["term_months"],
+        # WHAT THE CUSTOMER COMMITTED TO, named. A recurring figure with no
+        # commitment beside it is two different deals sharing one number.
+        "commitment": commitment,
+        "commitment_label": commitment_label,
         # Money as cents + a decimal string. Never a float.
         "setup_cents": _cents(setup),
         "setup_amount": None if setup is None else str(setup),
@@ -454,20 +484,15 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
                 "authority": auth["basis"],
                 "approval_id": auth["approval_id"],
                 "approved_at": auth["approved_at"],
-                # REPORTED BECAUSE IT IS TRUE, NOT DECIDED HERE.
+                # WHAT THIS CUSTOMER IS ACTUALLY ENTITLED TO, read from the
+                # entitlement engine rather than asserted here.
                 #
                 # An inline price belongs to no catalogue plan, so the webhook
-                # correctly leaves `billing_plan_key` unset — and plan_limits
-                # then finds no plan and applies no ceilings (its documented
-                # behaviour: no plan means unlimited, never zero). A custom
-                # customer therefore runs without plan-derived feature limits.
-                #
-                # Which entitlements a custom deal should carry is a POLICY
-                # DECISION nobody has made, and guessing one here would either
-                # cap a customer at a tier they did not buy or bill them
-                # against a plan they are not paying for. So it is surfaced on
-                # the deal instead of quietly resolved.
-                "entitlement_plan_unset": True,
+                # correctly leaves `billing_plan_key` unset. `plan_limits` then
+                # falls through to this customer's own recorded agreement, and
+                # says plainly when there isn't one — which is NEEDS
+                # CONFIGURATION, not a decision, and not unlimited.
+                "entitlement": plan_limits.entitlement_state(db, org),
                 # Named where the sold package DOES map to a tier, so whoever
                 # decides that policy can see which tier was on the table. It
                 # is deliberately not applied: writing this key onto the org
@@ -488,6 +513,7 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
                     # keeps the webhook from mapping this org onto a tier.
                     "plan": None,
                     "interval": "month",
+                    "commitment": commitment,
                     "cents": _cents(mrr),
                     "label": _custom_product_name(res),
                     "authority": auth["basis"],
@@ -504,24 +530,46 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
                         why, package=res["package_name"],
                         billing_plan_key=getattr(res["package"], "billing_plan_key", None)))
                 else:
-                    price_id = billing_catalog.stripe_price_id_for(plan, "month")
-                    cat_cents = billing_catalog.price_cents_for(plan, "month")
+                    # WHICH OF THE PLAN'S TWO MONTHLY PRICES THIS DEAL AGREED TO.
+                    # A month-to-month deal must resolve the no-commitment rate;
+                    # resolving the term rate would hand it a discount it never
+                    # committed for, and would then compare the deal's own
+                    # correctly-quoted $597 against a $500 catalogue figure and
+                    # report a mismatch on a deal that is perfectly consistent.
+                    price_id = billing_catalog.stripe_price_id_for(
+                        plan, "month", commitment)
+                    cat_cents = billing_catalog.price_cents_for(
+                        plan, "month", commitment)
                     out["plan"] = {"key": plan.key, "name": plan.name,
                                    "catalogue_cents": cat_cents,
+                                   "commitment": commitment,
                                    "stripe_price_configured": bool(price_id)}
-                    if not price_id:
-                        blockers.append(_blocker(B_NO_PRICE_ID, plan=plan.key))
+                    if cat_cents is None and not price_id:
+                        # The plan exists but has nothing configured for THIS
+                        # commitment. Named as the missing-price case rather
+                        # than falling back to the other commitment's rate.
+                        blockers.append(_blocker(
+                            B_NO_PRICE_ID, plan=plan.key,
+                            commitment=commitment, detail=(
+                                "No %s price is configured for this plan."
+                                % commitment_label)))
+                    elif not price_id:
+                        blockers.append(_blocker(B_NO_PRICE_ID, plan=plan.key,
+                                                 commitment=commitment))
                     elif cat_cents is not None and _cents(mrr) != cat_cents:
                         # Reported, never silently resolved either way.
                         blockers.append(_blocker(
                             B_RATE_MISMATCH, plan=plan.key,
+                            commitment=commitment,
                             deal_cents=_cents(mrr), catalogue_cents=cat_cents))
                     else:
                         out["charges"].append({
                             "kind": "subscription",
                             "pricing_mode": PRICING_CATALOGUE,
                             "plan": plan.key,
-                            "interval": "month", "cents": cat_cents,
+                            "interval": "month",
+                            "commitment": commitment,
+                            "cents": cat_cents,
                             "stripe_price_id_configured": True})
 
         existing = (getattr(org, "billing_status", None) or "").lower()

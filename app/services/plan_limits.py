@@ -86,6 +86,7 @@ suite uses a single connection.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -184,12 +185,61 @@ def effective_plan(db: Session, org: Optional[Organization]):
         getattr(org, "billing_plan_key", None) or getattr(org, "plan", None))
 
 
-def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[int]:
-    """The configured ceiling, or None for unlimited / unconfigured."""
-    plan = effective_plan(db, org)
-    if plan is None:
+def current_snapshot(db: Session, org: Optional[Organization]):
+    """The live entitlement snapshot for a customer who sits on no catalogue tier.
+
+    A Custom deal bills against an inline Stripe price and therefore leaves the
+    organization with no `billing_plan_key` — deliberately. This is where what
+    that customer actually bought is recorded. Superseded rows are excluded but
+    kept, so a renegotiation does not erase what was true before it.
+    """
+    if org is None:
         return None
-    value = getattr(plan, key, None)
+    from app.models.billing_models import CustomerEntitlementSnapshot
+    return (db.query(CustomerEntitlementSnapshot)
+            .filter(CustomerEntitlementSnapshot.organization_id == org.id,
+                    CustomerEntitlementSnapshot.superseded_at.is_(None))
+            .order_by(CustomerEntitlementSnapshot.created_at.desc())
+            .first())
+
+
+def _snapshot_unlimited(snapshot) -> list:
+    """Dimensions the agreement explicitly says are uncapped."""
+    raw = getattr(snapshot, "unlimited_json", None)
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [k for k in val if isinstance(k, str)] if isinstance(val, list) else []
+
+
+def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[int]:
+    """The configured ceiling, or None for unlimited / unconfigured.
+
+    RESOLUTION ORDER, and the reason for it:
+
+      1. THE CATALOGUE PLAN, where the organization is on one. Unchanged.
+      2. THE ENTITLEMENT SNAPSHOT, for a customer who is not — a Custom deal.
+         Without this step such a customer has no ceiling on anything, which is
+         the one category of customer whose terms were individually negotiated
+         and so the last place an accidental "unlimited" belongs.
+
+    NULL still returns None at both levels, and that is deliberate: this
+    function answers "what is the ceiling", and it must not start refusing
+    things for organizations that have never had one. Whether a NULL means
+    *agreed unlimited* or *nobody has decided* is a different question, and
+    `entitlement_state()` is where it gets a truthful answer rather than being
+    collapsed into an enforcement decision nobody made.
+    """
+    plan = effective_plan(db, org)
+    source = plan
+    if source is None:
+        source = current_snapshot(db, org)
+    if source is None:
+        return None
+    value = getattr(source, key, None)
     if value is None:
         return None
     try:
@@ -197,6 +247,96 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
     except (TypeError, ValueError):
         return None
     return value if value > 0 else None
+
+
+# Every ceiling a snapshot can record. Named here so `entitlement_state` reports
+# the same list the God write path accepts, and a new dimension cannot be added
+# to one without the other noticing.
+SNAPSHOT_DIMENSIONS = (
+    "max_leads", "max_users", "max_locations",
+    "sms_monthly_allowance", "voice_minutes_monthly_allowance",
+    "email_monthly_allowance",
+)
+
+ENTITLEMENT_CATALOGUE = "catalogue_plan"
+ENTITLEMENT_SNAPSHOT = "custom_agreement_snapshot"
+ENTITLEMENT_NONE = "unset"
+
+
+def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
+    """WHAT THIS CUSTOMER IS ENTITLED TO, AND HOW CONFIDENTLY WE KNOW IT.
+
+    Separate from `limit_for` on purpose. `limit_for` answers a yes/no question
+    at the moment somebody adds a user; this answers the reporting question — is
+    this customer on a tier, on a negotiated agreement, or on nothing at all,
+    and which dimensions has nobody actually decided?
+
+    THE DISTINCTION THAT MATTERS. A NULL ceiling has two completely different
+    meanings and no enforcement path can tell them apart:
+
+        agreed as uncapped   — a real commercial term, named in `unlimited_json`
+        never recorded       — nobody decided, and it shows up in
+                               `unset_dimensions` as NEEDS CONFIGURATION
+
+    Reporting them as one thing is how a Custom customer ends up quietly
+    unlimited and nobody notices until they are running 40,000 leads on a deal
+    that agreed 5,000.
+    """
+    if org is None:
+        return {"source": ENTITLEMENT_NONE, "limits": {},
+                "unset_dimensions": list(SNAPSHOT_DIMENSIONS),
+                "agreed_unlimited": [], "policy_required": True,
+                "explanation": "No organization."}
+
+    plan = effective_plan(db, org)
+    if plan is not None:
+        limits = {k: getattr(plan, k, None) for k in ("max_leads", "max_users")}
+        return {
+            "source": ENTITLEMENT_CATALOGUE,
+            "plan_key": plan.key,
+            "limits": limits,
+            # A catalogue tier's NULL genuinely is "unlimited" — it is the
+            # brand's own published rate card, and the brand decided.
+            "unset_dimensions": [],
+            "agreed_unlimited": [k for k, v in limits.items() if v is None],
+            "policy_required": False,
+            "explanation": "On the %s tier; its published ceilings apply." % plan.key,
+        }
+
+    snap = current_snapshot(db, org)
+    if snap is None:
+        return {
+            "source": ENTITLEMENT_NONE,
+            "plan_key": None,
+            "limits": {},
+            "unset_dimensions": list(SNAPSHOT_DIMENSIONS),
+            "agreed_unlimited": [],
+            "policy_required": True,
+            "explanation": (
+                "This customer is on no catalogue tier and has no recorded "
+                "entitlement agreement, so no ceiling applies to anything. That "
+                "is NEEDS CONFIGURATION, not a decision — record what the deal "
+                "actually agreed."),
+        }
+
+    unlimited = _snapshot_unlimited(snap)
+    limits = {k: getattr(snap, k, None) for k in SNAPSHOT_DIMENSIONS}
+    unset = [k for k in SNAPSHOT_DIMENSIONS
+             if limits.get(k) is None and k not in unlimited]
+    return {
+        "source": ENTITLEMENT_SNAPSHOT,
+        "plan_key": None,
+        "snapshot_id": snap.id,
+        "opportunity_id": snap.opportunity_id,
+        "limits": limits,
+        "unset_dimensions": unset,
+        "agreed_unlimited": unlimited,
+        "policy_required": bool(unset),
+        "explanation": (
+            "Entitlements come from this customer's own agreement, not a "
+            "catalogue tier."
+            + (" Not yet recorded: %s." % ", ".join(unset) if unset else "")),
+    }
 
 
 def usage_for(db: Session, org: Organization, key: str) -> int:

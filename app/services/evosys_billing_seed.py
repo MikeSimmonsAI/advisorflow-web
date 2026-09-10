@@ -59,17 +59,24 @@ log = logging.getLogger(__name__)
 # God admin previews and applies — and nowhere in the billing engine, which
 # reads them back out of `brand_billing_plans` like any other brand's.
 #
-#   Starter        $1,500 setup   $500 / month
-#   Growth         $2,500 setup   $1,000 / month
-#   Professional   $5,000 setup   $2,000 / month
-#   Custom         approved amounts only, never a default — see
-#                  deal_billing.approved_custom_recurring()
+#                          setup      TERM /mo    MONTH-TO-MONTH /mo
+#   Starter                $1,500       $500            $597
+#   Growth                 $2,500     $1,000          $1,297
+#   Professional           $5,000     $2,000          $2,597
+#   Custom            approved amounts only, never a default — see
+#                     deal_billing.custom_recurring_authority()
+#
+# TWO PRICES PER TIER, NOT SIX TIERS. `monthly_cents` is the committed rate
+# earned by a term agreement; `month_to_month_cents` is the same tier's price
+# for a customer who committed to nothing. The customer buys Starter either
+# way — the commitment is a property of the deal, not a different product.
 EVOSYS_PLANS = [
     {
         "key": "starter",
         "name": "Starter",
         "sort_order": 10,
-        "monthly_cents": 50000,          # $500 / month
+        "monthly_cents": 50000,          # $500 / month, committed
+        "month_to_month_cents": 59700,   # $597 / month, no commitment
         "max_leads": 2500,
         "max_users": 2,
         "is_purchasable": True,
@@ -83,7 +90,8 @@ EVOSYS_PLANS = [
         "key": "growth",
         "name": "Growth",
         "sort_order": 20,
-        "monthly_cents": 100000,         # $1,000 / month
+        "monthly_cents": 100000,         # $1,000 / month, committed
+        "month_to_month_cents": 129700,  # $1,297 / month, no commitment
         "max_leads": 5000,
         "max_users": 3,
         "is_purchasable": True,
@@ -98,7 +106,8 @@ EVOSYS_PLANS = [
         "key": "professional",
         "name": "Professional",
         "sort_order": 30,
-        "monthly_cents": 200000,         # $2,000 / month
+        "monthly_cents": 200000,         # $2,000 / month, committed
+        "month_to_month_cents": 259700,  # $2,597 / month, no commitment
         "max_leads": 7500,
         "max_users": 5,
         "is_purchasable": True,
@@ -114,6 +123,7 @@ EVOSYS_PLANS = [
         "name": "Enterprise",
         "sort_order": 40,
         "monthly_cents": None,           # quoted, never self-serve
+        "month_to_month_cents": None,    # likewise — a quote, not a rate card
         "max_leads": None,               # NULL = unlimited
         "max_users": None,
         # is_purchasable False is what makes the checkout guard refuse this
@@ -171,6 +181,7 @@ def seed(db: Session, platform_id: str, *, apply: bool = False) -> dict:
             "name": spec["name"],
             "sort_order": spec["sort_order"],
             "monthly_cents": spec["monthly_cents"],
+            "month_to_month_cents": spec["month_to_month_cents"],
             "max_leads": spec["max_leads"],
             "max_users": spec["max_users"],
             "is_purchasable": spec["is_purchasable"],

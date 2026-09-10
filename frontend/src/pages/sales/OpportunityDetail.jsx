@@ -185,8 +185,36 @@ function RecordIdentity({ opp, editing, saved, onSave, onSaved, onCancel }) {
           <Info label="BRAND" value={opp.brand_sales_org?.name} />
           <Info label="PACKAGE INTEREST" value={opp.package_interest?.name} />
           <Info label="SELECTED PACKAGE" value={opp.selected_package?.name} />
-          <Info label="DEAL VALUE" value={opp.deal_value != null ? money(opp.deal_value) : null} />
+          {/* `deal_value` IS NOT WHAT THE CUSTOMER WILL BE CHARGED, and shown
+              here under that name it read exactly as if it were. On a live deal
+              it sat at $1,497 — the legacy catalogue figure — three lines above
+              a Billing panel correctly stating a $1,500 setup fee. Two numbers,
+              both authoritative-looking, differing by three dollars: the kind of
+              contradiction a rep repeats to a customer.
+
+              So it is shown ONLY where it is still the only signal there is — a
+              legacy deal carrying neither a package nor a negotiated rate, which
+              is the one case `deal_pricing` reads it for. Where commercial terms
+              resolve, the Billing panel is the single authority and this would
+              only compete with it.
+
+              The column itself is untouched: pipeline reporting still reads it,
+              the pricing card still edits it behind its own disclosure, and no
+              historical data is migrated. This is a presentation fix. */}
+          {!opp.selected_package_id && opp.custom_unit_price == null
+            && opp.deal_value != null ? (
+            <Info label="LEGACY DEAL VALUE (REPORTING ONLY)"
+                  value={money(opp.deal_value)} />
+          ) : null}
         </div>
+        {!opp.selected_package_id && opp.custom_unit_price == null
+          && opp.deal_value != null && (
+          <p className="sw-subtle" style={{ margin: '8px 0 0', fontSize: 11 }}>
+            This deal has no package and no negotiated rate, so the legacy value
+            is all there is. It is a one-time figure used for pipeline reporting
+            — not a quote, and not what the customer would be charged.
+          </p>
+        )}
         {saved && (
           <p className="sw-subtle" style={{ margin: '10px 0 0', fontSize: 12 }}>
             Record updated. The change is on this deal's timeline.

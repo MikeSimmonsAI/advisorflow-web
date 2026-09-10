@@ -39,14 +39,25 @@ def world(db_session):
     db_session.add(brand)
     db_session.commit()
 
-    # The catalogue plan the package will map to.
+    # THE CATALOGUE PLAN, SHAPED LIKE PRODUCTION: one tier, TWO monthly prices.
+    # `monthly_cents` is the committed (term) rate; `month_to_month_cents` is
+    # the same tier without a commitment, and it is higher. A fixture with only
+    # one of them cannot tell a correct resolution from a lucky one.
     plan = BrandBillingPlan(platform_id=plat.id, key="growth", name="Growth",
-                            is_active=True, monthly_cents=50000,
-                            stripe_price_id_monthly="price_growth_test")
+                            is_active=True,
+                            monthly_cents=50000,
+                            month_to_month_cents=59700,
+                            stripe_price_id_monthly="price_growth_term_test",
+                            stripe_price_id_month_to_month="price_growth_m2m_test")
     db_session.add(plan)
 
+    # The sold package carries the matching pair: `contract_monthly_price` is
+    # earned by the term, `monthly_price` is the no-commitment rate.
     pkg = BrandPackage(platform_id=plat.id, key="growth", name="Growth Package",
-                       price=Decimal("2500.00"), monthly_price=Decimal("500.00"))
+                       price=Decimal("2500.00"),
+                       monthly_price=Decimal("597.00"),
+                       contract_monthly_price=Decimal("500.00"),
+                       contract_term_months=13)
     db_session.add(pkg)
     db_session.commit()
 
@@ -58,9 +69,13 @@ def world(db_session):
     # BOTH, because a real Won deal has both — and because the two drift apart
     # on purpose once the customer is provisioned. See
     # test_a_PROVISIONED_customer_is_still_Won.
+    # An explicit TERM deal. The old fixture said `billing_option="monthly"`,
+    # which is not one of the two valid options — `normalize_option` therefore
+    # fell back to the default, month-to-month, and every test that thought it
+    # was exercising the committed rate was silently exercising the other one.
     opp = Opportunity(company_name="Acme Power", brand_sales_org_id=brand.id,
                       stage="won", status="won", selected_package_id=pkg.id,
-                      billing_option="monthly")
+                      billing_option="term_agreement", contract_term_months=13)
     db_session.add(opp)
     db_session.commit()
 
@@ -237,6 +252,199 @@ class TestTermsResolution:
         assert terms["setup_cents"] is None
         assert terms["recurring_cents"] is None
         assert terms["charges"] == []
+
+
+# ── term vs month-to-month: the same tier, two configured prices ────────────
+
+# The approved EvoSys rate card, as (setup, term /mo, month-to-month /mo).
+# Stated once here so a test cannot pass against a figure it also supplied.
+RATE_CARD = {
+    "starter":      (150000,  50000,  59700),
+    "growth":       (250000, 100000, 129700),
+    "professional": (500000, 200000, 259700),
+}
+
+
+class TestCommitmentResolution:
+    """A term agreement and a month-to-month deal are two prices on ONE tier.
+
+    The customer bought Starter either way. What differs is the rate, because
+    the lower one is earned by committing. The failure this class guards is
+    resolving the committed rate for a customer who committed to nothing —
+    which hands away the discount silently, on every renewal, forever.
+    """
+
+    def _tier(self, db, world, key, *, commitment):
+        """Configure one tier end to end and point the deal at it.
+
+        UPSERTS the plan: the brand is unique on (platform_id, key), the fixture
+        already ships a `growth` plan, and one test configures the same tier
+        twice to compare the two commitments.
+        """
+        from app.models.billing_models import BrandBillingPlan
+        setup, term_cents, m2m_cents = RATE_CARD[key]
+
+        plan = (db.query(BrandBillingPlan)
+                .filter(BrandBillingPlan.platform_id == world["plat"].id,
+                        BrandBillingPlan.key == key).first())
+        if plan is None:
+            plan = BrandBillingPlan(platform_id=world["plat"].id, key=key,
+                                    name=key.title())
+            db.add(plan)
+        plan.name = key.title()
+        plan.is_active = True
+        plan.is_purchasable = True
+        plan.monthly_cents = term_cents
+        plan.month_to_month_cents = m2m_cents
+        plan.stripe_price_id_monthly = "price_%s_term" % key
+        plan.stripe_price_id_month_to_month = "price_%s_m2m" % key
+
+        pkg = BrandPackage(
+            platform_id=world["plat"].id, key=_n(key), name=key.title(),
+            setup_fee=Decimal(setup) / 100,
+            monthly_price=Decimal(m2m_cents) / 100,          # no commitment
+            contract_monthly_price=Decimal(term_cents) / 100,  # committed
+            contract_term_months=13,
+            billing_plan_key=key)
+        db.add(pkg)
+        db.commit()
+
+        world["opp"].selected_package_id = pkg.id
+        world["opp"].billing_option = (
+            "term_agreement" if commitment == "term_agreement" else "month_to_month")
+        world["opp"].contract_term_months = (
+            13 if commitment == "term_agreement" else None)
+        db.commit()
+        return plan, pkg
+
+    @pytest.mark.parametrize("key", ["starter", "growth", "professional"])
+    def test_a_TERM_deal_resolves_the_committed_rate(self, db_session, world, key):
+        setup, term_cents, m2m_cents = RATE_CARD[key]
+        self._tier(db_session, world, key, commitment="term_agreement")
+
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+        assert terms["commitment"] == "term_agreement"
+        assert terms["setup_cents"] == setup
+        assert terms["recurring_cents"] == term_cents
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["cents"] == term_cents
+        assert sub["commitment"] == "term_agreement"
+        assert sub["plan"] == key
+        # The discount is real: the committed rate is BELOW the standard one.
+        assert term_cents < m2m_cents
+        assert terms["billable"] is True
+
+    @pytest.mark.parametrize("key", ["starter", "growth", "professional"])
+    def test_a_MONTH_TO_MONTH_deal_resolves_the_standard_rate(
+            self, db_session, world, key):
+        setup, term_cents, m2m_cents = RATE_CARD[key]
+        self._tier(db_session, world, key, commitment="month_to_month")
+
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+        assert terms["commitment"] == "month_to_month"
+        assert terms["setup_cents"] == setup          # setup is identical
+        assert terms["recurring_cents"] == m2m_cents
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["cents"] == m2m_cents
+        assert sub["commitment"] == "month_to_month"
+        # STILL THE SAME TIER. Not "starter_mtm", not a fourth package.
+        assert sub["plan"] == key
+        assert terms["plan"]["key"] == key
+
+    @pytest.mark.parametrize("key", ["starter", "growth", "professional"])
+    def test_the_two_commitments_never_resolve_the_same_amount(
+            self, db_session, world, key):
+        """The whole point, stated as one assertion: switching the commitment
+        must move the money."""
+        self._tier(db_session, world, key, commitment="term_agreement")
+        term = deal_billing.terms_for(db_session, world["opp"])["recurring_cents"]
+        self._tier(db_session, world, key, commitment="month_to_month")
+        m2m = deal_billing.terms_for(db_session, world["opp"])["recurring_cents"]
+        assert term != m2m
+        assert (term, m2m) == RATE_CARD[key][1:]
+
+    def test_a_month_to_month_deal_uses_the_month_to_month_STRIPE_PRICE(
+            self, client, db_session, world):
+        """Not just the right number — the right Stripe object. Charging the
+        committed Price would bill $500 while the panel promised $597."""
+        self._tier(db_session, world, "growth", commitment="month_to_month")
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
+             patch("app.routers.billing_router._stripe_client"), \
+             patch("app.routers.billing_router._get_or_create_customer",
+                   return_value="cus_test123"), \
+             patch("app.routers.billing_router._brand_base_url",
+                   return_value="https://brand.test"):
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 200, r.text
+        kw = create.call_args.kwargs
+        assert kw["line_items"][0]["price"] == "price_growth_m2m"
+        assert kw["metadata"]["plan"] == "growth"
+        assert kw["metadata"]["commitment"] == "month_to_month"
+
+    def test_a_missing_month_to_month_price_REFUSES_rather_than_falling_back(
+            self, db_session, world):
+        """THE REVENUE LEAK THIS PREVENTS. With no month-to-month price
+        configured, falling back to the committed rate would give a customer who
+        promised nothing the discount earned by a 13-month commitment — and
+        nothing would ever report it."""
+        plan, _pkg = self._tier(db_session, world, "growth",
+                                commitment="month_to_month")
+        plan.month_to_month_cents = None
+        plan.stripe_price_id_month_to_month = None
+        db_session.commit()
+
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        codes = {b["code"] for b in terms["blockers"]}
+        assert deal_billing.B_NO_PRICE_ID in codes
+        row = next(b for b in terms["blockers"]
+                   if b["code"] == deal_billing.B_NO_PRICE_ID)
+        assert row["commitment"] == "month_to_month"
+        assert all(c["kind"] != "subscription" for c in terms["charges"])
+        # And emphatically not the term rate.
+        assert not any(c.get("cents") == 100000 for c in terms["charges"])
+
+    def test_the_webhook_can_map_a_month_to_month_price_back_to_its_plan(
+            self, db_session, world):
+        """`billing_webhook` resolves the plan from the price on the live
+        subscription on EVERY renewal. If the month-to-month price did not
+        resolve, every such customer would silently lose their tier — and their
+        entitlements — at the first renewal."""
+        from app.services import billing_catalog
+
+        plan, _pkg = self._tier(db_session, world, "growth",
+                                commitment="month_to_month")
+        found = billing_catalog.resolve_plan_by_price_id(
+            db_session, world["plat"].id, "price_growth_m2m")
+        assert found is not None
+        assert found.key == "growth"
+        assert billing_catalog.interval_for_price_id(found, "price_growth_m2m") == "month"
+        assert billing_catalog.commitment_for_price_id(
+            found, "price_growth_m2m") == "month_to_month"
+        assert billing_catalog.commitment_for_price_id(
+            found, "price_growth_term") == "term_agreement"
+
+    def test_a_price_from_ANOTHER_BRAND_never_resolves(self, db_session, world):
+        """Cross-brand contamination, on the new column as well as the old."""
+        from app.models.billing_models import BrandBillingPlan
+        from app.services import billing_catalog
+
+        other = Platform(name="Other", slug=_n("oth"))
+        db_session.add(other)
+        db_session.commit()
+        db_session.add(BrandBillingPlan(
+            platform_id=other.id, key="growth", name="Growth", is_active=True,
+            monthly_cents=1, month_to_month_cents=2,
+            stripe_price_id_month_to_month="price_OTHER_m2m"))
+        db_session.commit()
+
+        assert billing_catalog.resolve_plan_by_price_id(
+            db_session, world["plat"].id, "price_OTHER_m2m") is None
 
 
 # ── a custom recurring rate ─────────────────────────────────────────────────
@@ -459,6 +667,181 @@ class TestCustomRecurring:
         assert kinds == {"setup_fee", "subscription"}
 
 
+class TestCustomEntitlements:
+    """A Custom customer is on no tier. That must not mean "no limits".
+
+    Nor may it mean "whatever Starter says". The agreed ceilings are recorded
+    against the customer and read from there, and a dimension nobody agreed is
+    reported as NEEDS CONFIGURATION rather than silently granted.
+    """
+
+    def _custom_customer(self, db, world):
+        """A won Custom deal with a provisioned org on no catalogue plan."""
+        world["opp"].custom_unit_price = Decimal("250.00")
+        world["opp"].custom_min_units = 15
+        world["opp"].custom_term_months = 24
+        world["org"].billing_plan_key = None
+        world["org"].plan = None
+        db.commit()
+
+    def test_a_custom_customer_on_no_tier_reports_UNSET_not_unlimited(
+            self, db_session, world):
+        """The exact failure this closes: silence read as permission."""
+        from app.services import plan_limits
+
+        self._custom_customer(db_session, world)
+        state = plan_limits.entitlement_state(db_session, world["org"])
+        assert state["source"] == plan_limits.ENTITLEMENT_NONE
+        assert state["policy_required"] is True
+        # Every dimension is named as unrecorded, not quietly uncapped.
+        assert set(state["unset_dimensions"]) == set(plan_limits.SNAPSHOT_DIMENSIONS)
+        assert state["agreed_unlimited"] == []
+        assert "NEEDS CONFIGURATION" in state["explanation"]
+
+    def test_the_deal_surfaces_that_state_rather_than_a_bare_flag(
+            self, db_session, world):
+        self._custom_customer(db_session, world)
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        ent = terms["custom_pricing"]["entitlement"]
+        assert ent["source"] == "unset"
+        assert ent["policy_required"] is True
+
+    def test_recorded_agreement_ceilings_are_what_apply(self, client, db_session, world):
+        """Agreement-driven, and enforced through the EXISTING limits engine —
+        not a second one."""
+        from app.services import plan_limits
+
+        self._custom_customer(db_session, world)
+        r = client.put(
+            "/god/billing/customers/%s/entitlements" % world["org"].id,
+            json={"max_users": 25, "max_leads": 50000, "max_locations": 12,
+                  "unlimited": ["email_monthly_allowance"],
+                  "opportunity_id": world["opp"].id,
+                  "note": "Negotiated: 12 locations, 25 seats."},
+            headers=_h(db_session, world["god"]))
+        assert r.status_code == 200, r.text
+
+        state = plan_limits.entitlement_state(db_session, world["org"])
+        assert state["source"] == plan_limits.ENTITLEMENT_SNAPSHOT
+        assert state["limits"]["max_users"] == 25
+        assert state["limits"]["max_leads"] == 50000
+        assert state["opportunity_id"] == world["opp"].id
+        # Explicitly agreed as uncapped — a decision, not an absence.
+        assert "email_monthly_allowance" in state["agreed_unlimited"]
+        # Still unrecorded, and still reported as such.
+        assert "sms_monthly_allowance" in state["unset_dimensions"]
+        assert state["policy_required"] is True
+
+        # And the ONE enforcement path reads it.
+        assert plan_limits.limit_for(db_session, world["org"], "max_users") == 25
+        assert plan_limits.limit_for(db_session, world["org"], "max_leads") == 50000
+
+    def test_a_custom_customer_is_never_given_a_standard_tiers_limits(
+            self, client, db_session, world):
+        """The other wrong fix. Growth allows 3 users; this customer agreed 25
+        and must not be capped at somebody else's number."""
+        from app.services import plan_limits
+
+        world["plan"].max_users = 3
+        db_session.commit()
+        self._custom_customer(db_session, world)
+        client.put("/god/billing/customers/%s/entitlements" % world["org"].id,
+                   json={"max_users": 25},
+                   headers=_h(db_session, world["god"]))
+        assert plan_limits.limit_for(db_session, world["org"], "max_users") == 25
+        state = plan_limits.entitlement_state(db_session, world["org"])
+        assert state["plan_key"] is None
+
+    def test_a_catalogue_customer_still_uses_the_catalogue(self, db_session, world):
+        """The snapshot is a FALLBACK for customers on no tier. It must not
+        override a tier the customer actually is on."""
+        from app.services import plan_limits
+
+        world["plan"].max_users = 3
+        world["org"].billing_plan_key = "growth"
+        db_session.commit()
+        state = plan_limits.entitlement_state(db_session, world["org"])
+        assert state["source"] == plan_limits.ENTITLEMENT_CATALOGUE
+        assert state["plan_key"] == "growth"
+        assert state["policy_required"] is False
+        assert plan_limits.limit_for(db_session, world["org"], "max_users") == 3
+
+    def test_a_snapshot_does_not_MUTATE_when_the_catalogue_changes(
+            self, client, db_session, world):
+        """Matrix item 21. The agreement is a snapshot of literal numbers, so a
+        brand editing its rate card later cannot rewrite what an existing
+        customer was sold."""
+        from app.services import plan_limits
+
+        self._custom_customer(db_session, world)
+        client.put("/god/billing/customers/%s/entitlements" % world["org"].id,
+                   json={"max_users": 25, "max_leads": 50000},
+                   headers=_h(db_session, world["god"]))
+
+        # The brand rewrites its catalogue afterwards.
+        world["plan"].max_users = 1
+        world["plan"].max_leads = 10
+        world["plan"].monthly_cents = 999999
+        db_session.commit()
+
+        state = plan_limits.entitlement_state(db_session, world["org"])
+        assert state["limits"]["max_users"] == 25
+        assert state["limits"]["max_leads"] == 50000
+
+    def test_a_renegotiation_SUPERSEDES_and_keeps_history(
+            self, client, db_session, world):
+        from app.models.billing_models import CustomerEntitlementSnapshot
+        from app.services import plan_limits
+
+        self._custom_customer(db_session, world)
+        first = client.put(
+            "/god/billing/customers/%s/entitlements" % world["org"].id,
+            json={"max_users": 10}, headers=_h(db_session, world["god"])).json()
+        second = client.put(
+            "/god/billing/customers/%s/entitlements" % world["org"].id,
+            json={"max_users": 40}, headers=_h(db_session, world["god"])).json()
+
+        assert second["superseded_snapshot_id"] == first["snapshot_id"]
+        assert plan_limits.limit_for(db_session, world["org"], "max_users") == 40
+        # Nothing was deleted — last quarter's terms stay answerable.
+        assert db_session.query(CustomerEntitlementSnapshot).filter(
+            CustomerEntitlementSnapshot.organization_id == world["org"].id
+        ).count() == 2
+
+    def test_an_unknown_dimension_or_feature_is_refused(self, client, db_session, world):
+        """A typo recorded as an entitlement grants nothing and is never noticed."""
+        from app.models.billing_models import CustomerEntitlementSnapshot
+
+        self._custom_customer(db_session, world)
+        bad_dim = client.put(
+            "/god/billing/customers/%s/entitlements" % world["org"].id,
+            json={"unlimited": ["max_widgets"]},
+            headers=_h(db_session, world["god"]))
+        assert bad_dim.status_code == 400
+        bad_feat = client.put(
+            "/god/billing/customers/%s/entitlements" % world["org"].id,
+            json={"features": ["teleportation"]},
+            headers=_h(db_session, world["god"]))
+        assert bad_feat.status_code == 400
+        # NOTHING WAS WRITTEN by either refusal.
+        assert db_session.query(CustomerEntitlementSnapshot).count() == 0
+
+    def test_a_rep_cannot_record_entitlements(self, client, db_session, world):
+        """Commercial entitlement is control-plane, not sales."""
+        from app.models.billing_models import CustomerEntitlementSnapshot
+
+        r = client.put("/god/billing/customers/%s/entitlements" % world["org"].id,
+                       json={"max_users": 999},
+                       headers=_h(db_session, world["rep"]))
+        assert r.status_code == 403
+        assert db_session.query(CustomerEntitlementSnapshot).count() == 0
+
+    def test_anonymous_cannot_record_entitlements(self, client, db_session, world):
+        r = client.put("/god/billing/customers/%s/entitlements" % world["org"].id,
+                       json={"max_users": 999})
+        assert r.status_code in (401, 403)
+
+
 class TestCustomCheckoutComposition:
     def _ready(self, db, world, unit="1750.00", units=1):
         world["opp"].custom_unit_price = Decimal(unit)
@@ -580,7 +963,7 @@ class TestCustomCheckoutComposition:
         r, create = self._post(client, db_session, world)
         assert r.status_code == 200, r.text
         item = create.call_args.kwargs["line_items"][0]
-        assert item["price"] == "price_growth_test"
+        assert item["price"] == "price_growth_term_test"
         assert "price_data" not in item
         assert create.call_args.kwargs["metadata"]["plan"] == "growth"
 
@@ -677,7 +1060,7 @@ class TestCheckoutComposition:
         assert create.call_count == 1
         kw = create.call_args.kwargs
         assert kw["mode"] == "subscription"
-        assert kw["line_items"][0]["price"] == "price_growth_test"
+        assert kw["line_items"][0]["price"] == "price_growth_term_test"
         # The setup fee rides the first invoice rather than a second session.
         items = kw["subscription_data"]["add_invoice_items"]
         assert items[0]["price_data"]["unit_amount"] == 250000
@@ -699,8 +1082,13 @@ class TestCheckoutComposition:
         assert meta["source"] == "deal_billing"
 
     def test_a_setup_only_deal_uses_payment_mode(self, client, db_session, world):
-        """No recurring rate means no subscription — not a £0 one."""
+        """No recurring rate means no subscription — not a £0 one.
+
+        BOTH monthly rates have to go. Clearing only `monthly_price` leaves the
+        contracted rate standing, and this deal is a term agreement.
+        """
         world["pkg"].monthly_price = None
+        world["pkg"].contract_monthly_price = None
         world["org"].stripe_customer_id = "cus_test123"
         db_session.commit()
         with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
@@ -729,6 +1117,73 @@ class TestCheckoutComposition:
             client.post("/sales/opportunities/%s/billing/checkout" % world["opp"].id,
                         headers=_h(db_session, world["god"]))
         assert db_session.query(BillingPayment).count() == before
+
+
+# ── the seller sees ONE authoritative commercial truth ──────────────────────
+
+class TestNoContradictoryCustomerPrice:
+    """Matrix item 20. Two authoritative-looking prices on one screen.
+
+    Live production showed `DEAL VALUE $1,497` in the deal's Record block while
+    the Billing panel — correctly — showed a $1,500 one-time setup. Both looked
+    definitive. A rep reading the first quotes a number the customer will not be
+    charged.
+
+    The column is deliberately NOT deleted: `deal_pricing` still reads it as
+    `legacy_one_time_value` for deals that have nothing else, and pipeline
+    reporting sums it. This guards the PRESENTATION only.
+    """
+
+    def _record_block(self) -> str:
+        import pathlib
+        import re
+        src = pathlib.Path("frontend/src/pages/sales/OpportunityDetail.jsx").read_text(
+            encoding="utf-8")
+        # Comments explain the reasoning and legitimately mention the old label;
+        # only shipped markup matters, so they are stripped first.
+        src = re.sub(r"\{/\*.*?\*/\}", "", src, flags=re.S)
+        src = re.sub(r"//[^\n]*", "", src)
+        start = src.index('className="sw-infogrid"')
+        return src[start:start + 2000]
+
+    def test_the_record_block_never_shows_deal_value_unconditionally(self):
+        block = self._record_block()
+        assert "deal_value" in block, (
+            "The legacy value should still be reachable for deals that have "
+            "nothing else — this guard is about how, not whether.")
+        # It must be gated on the deal having no resolved commercial terms.
+        assert "selected_package_id" in block and "custom_unit_price" in block, (
+            "`deal_value` is rendered without checking whether the deal has "
+            "resolved commercial terms. On a deal with a package or a "
+            "negotiated rate it competes with the Billing panel, which is the "
+            "authority on what the customer is charged.")
+
+    def test_it_is_not_labelled_as_though_it_were_the_charge(self):
+        block = self._record_block()
+        assert 'label="DEAL VALUE"' not in block, (
+            "A bare 'DEAL VALUE' label reads as what the customer will pay.")
+        assert "LEGACY" in block and "REPORTING" in block
+
+    def test_the_billing_panel_states_the_commitment(self):
+        """A recurring figure with no commitment beside it is ambiguous between
+        two real prices — $500 committed and $597 not."""
+        import pathlib
+        src = pathlib.Path("frontend/src/pages/sales/DealBillingPanel.jsx").read_text(
+            encoding="utf-8")
+        assert "COMMITMENT" in src
+        assert "commitment_label" in src
+
+    def test_terms_for_always_answers_the_seller_questions(self, db_session, world):
+        """Package, setup, recurring, commitment, pricing source — the five
+        things a rep has to be able to state without inferring any of them."""
+        world["pkg"].billing_plan_key = "growth"
+        db_session.commit()
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        for field in ("package_name", "setup_cents", "recurring_cents",
+                      "commitment", "commitment_label", "pricing_source",
+                      "billable", "blockers"):
+            assert field in terms, field
+        assert terms["commitment_label"]
 
 
 # ── no secret ever leaves the server ────────────────────────────────────────

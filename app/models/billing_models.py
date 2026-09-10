@@ -72,6 +72,40 @@ class BillingInterval:
     ALL = (MONTH, YEAR)
 
 
+class BillingCommitment:
+    """WHETHER THE CUSTOMER COMMITTED TO A TERM — a second, separate axis.
+
+    Interval is how often the card is charged. Commitment is what the customer
+    promised in exchange for the rate. They are independent, and conflating
+    them is why this class exists rather than a third "interval".
+
+    A term agreement and a month-to-month deal are BOTH billed monthly. They
+    differ only in price: the term rate is lower and is earned by committing to
+    `term_months`. So "Starter month-to-month" is not a different interval and
+    it is emphatically not a different PRODUCT — the customer bought Starter.
+    It is the same tier at its no-commitment price.
+
+    THIS IS WHY THERE ARE NOT SIX PACKAGES. Six tiers would mean six things to
+    name, six things to sell, six sets of entitlements to keep in step, and a
+    rep choosing between "Starter" and "Starter MTM" in a dropdown. One tier
+    with two configured prices keeps the product identity singular and puts the
+    commercial choice where it belongs — on the deal.
+
+    The strings match `package_pricing.BILLING_MONTH_TO_MONTH` /
+    `BILLING_TERM_AGREEMENT` deliberately. The sales side already had this
+    vocabulary; a second set of words for the same two ideas would need a
+    translation table that someone eventually gets backwards.
+    """
+    MONTH_TO_MONTH = "month_to_month"
+    TERM = "term_agreement"
+    ALL = (MONTH_TO_MONTH, TERM)
+
+    # What a caller that says nothing means. The TERM rate is the default
+    # because it is what `monthly_cents` has always held, so every existing
+    # caller keeps resolving the price it resolved before this class existed.
+    DEFAULT = TERM
+
+
 class SubscriptionStatus:
     """Mirrors Stripe's own subscription status vocabulary.
 
@@ -156,8 +190,30 @@ class BrandBillingPlan(Base):
     # ── Price ─────────────────────────────────────────────────────────────
     # Cents, integer, never float. Nullable for a "contact us" tier such as
     # Enterprise, which is listed but not self-serve purchasable.
+    # `monthly_cents` is the COMMITTED (term-agreement) monthly rate — the
+    # lower one, earned by committing to a term. It keeps that name because it
+    # is what every existing caller already resolves.
     monthly_cents = Column(Integer, nullable=True)
     annual_cents = Column(Integer, nullable=True)
+
+    # ── The no-commitment monthly rate ────────────────────────────────────
+    #
+    # THE SAME TIER, PRICED FOR A CUSTOMER WHO PROMISED NOTHING. Higher than
+    # `monthly_cents` by design: the term rate is a discount earned by the
+    # commitment, so a month-to-month customer pays the standard price.
+    #
+    # A SEPARATE COLUMN RATHER THAN A SEPARATE PLAN. Making "Starter MTM" its
+    # own `brand_billing_plans` row would double the catalogue, split one
+    # product's entitlements across two rows that have to be kept in step, and
+    # let a customer end up on a "tier" nobody sells. The tier is Starter; this
+    # is one of its two prices.
+    #
+    # NULL is a real state: a brand that only sells term agreements has no
+    # month-to-month price, and `deal_billing` then refuses that deal by name
+    # rather than falling back to the term rate — which would hand a
+    # no-commitment customer the discount.
+    month_to_month_cents = Column(Integer, nullable=True)
+
     currency = Column(String, default="usd", nullable=False)
 
     # ── Stripe object mapping ─────────────────────────────────────────────
@@ -165,8 +221,14 @@ class BrandBillingPlan(Base):
     # and are safe to store and to log. Nothing in this file ever stores an
     # API key or a webhook secret; those stay in the environment.
     stripe_product_id = Column(String, nullable=True)
+    # The COMMITTED monthly Price, matching `monthly_cents`.
     stripe_price_id_monthly = Column(String, nullable=True)
     stripe_price_id_annual = Column(String, nullable=True)
+    # The no-commitment monthly Price, matching `month_to_month_cents`. A
+    # DIFFERENT Stripe Price on the SAME Stripe Product — which is exactly how
+    # Stripe models one product sold at two prices, so nothing here invents a
+    # structure Stripe does not already have.
+    stripe_price_id_month_to_month = Column(String, nullable=True)
 
     # ── Entitlement ceilings ──────────────────────────────────────────────
     # These were previously returned to the UI and enforced by NOTHING - no
@@ -437,3 +499,101 @@ class BillingPayment(Base):
 
     collected_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CustomerEntitlementSnapshot — what a NON-CATALOGUE customer actually bought
+# ──────────────────────────────────────────────────────────────────────────────
+
+class CustomerEntitlementSnapshot(Base):
+    """The agreed limits for a customer who sits on no catalogue tier.
+
+    ═══════════════════════════════════════════════════════════════════════
+    THE HOLE THIS FILLS, AND THE TWO WRONG WAYS TO FILL IT
+    ═══════════════════════════════════════════════════════════════════════
+
+    A Custom deal is billed at its own negotiated rate against an inline Stripe
+    price, so the customer's organization ends with NO `billing_plan_key` — by
+    design, because naming a tier would bill them against a plan they are not
+    paying for. But `plan_limits.effective_plan()` reads exactly that key, so a
+    Custom customer resolves to no plan, and no plan means no ceiling.
+
+    The two obvious fixes are both wrong:
+
+      ASSIGN THE NEAREST STANDARD TIER. Caps a customer at limits they never
+      agreed to, using a tier chosen by whoever wrote the mapping. A $3,750/mo
+      customer held to Starter's two users is a support ticket that reads like
+      a platform fault.
+
+      LEAVE THEM UNLIMITED. Silently grants every ceiling in the product to the
+      one category of customer whose terms were negotiated individually, which
+      is precisely where "unlimited" is least likely to be what was sold.
+
+    So the limits are neither guessed nor ignored: they are RECORDED, from the
+    agreement, by a person, and read from here.
+
+    ═══════════════════════════════════════════════════════════════════════
+    A SNAPSHOT, NOT A REFERENCE
+    ═══════════════════════════════════════════════════════════════════════
+
+    Every number here is a literal copy taken when the agreement was accepted.
+    Nothing points at `brand_billing_plans`, so a later catalogue edit — a brand
+    raising Starter's lead ceiling, say — cannot retroactively change what an
+    existing customer was sold. Same reason a proposal snapshots its pricing
+    rather than re-deriving it.
+
+    ═══════════════════════════════════════════════════════════════════════
+    NULL MEANS UNSET, AND UNSET IS NOT UNLIMITED
+    ═══════════════════════════════════════════════════════════════════════
+
+    A NULL ceiling here does NOT mean "no limit". It means nobody has recorded
+    one, which is a different thing and is reported as such:
+    `plan_limits.entitlement_state()` returns those dimensions in
+    `unset_dimensions` so a screen can say NEEDS CONFIGURATION rather than
+    implying an allowance that was never agreed.
+
+    To record a genuinely uncapped dimension — which some Custom deals really do
+    buy — name it in `unlimited_json`. That is a decision somebody made and can
+    be audited, rather than an absence being read as one.
+    """
+    __tablename__ = "customer_entitlement_snapshots"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    platform_id = Column(String, nullable=True, index=True)
+
+    # PROVENANCE. Which deal this came from, so the agreed ceilings can always
+    # be traced back to the paperwork that agreed them.
+    opportunity_id = Column(String, nullable=True, index=True)
+    source = Column(String, nullable=False, default="custom_deal")
+
+    # ── The agreed ceilings. NULL = not recorded, NOT unlimited. ──────────
+    max_leads = Column(Integer, nullable=True)
+    max_users = Column(Integer, nullable=True)
+    max_locations = Column(Integer, nullable=True)
+    sms_monthly_allowance = Column(Integer, nullable=True)
+    voice_minutes_monthly_allowance = Column(Integer, nullable=True)
+    email_monthly_allowance = Column(Integer, nullable=True)
+
+    # The agreed feature allow-list, as entitlements.FEATURES keys. NULL means
+    # not recorded here, and the organization's own `enabled_features` governs.
+    features_json = Column(Text, nullable=True)
+
+    # Dimensions deliberately agreed as uncapped, named one by one. A JSON list
+    # of the ceiling field names above.
+    unlimited_json = Column(Text, nullable=True)
+
+    note = Column(Text, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # History is kept. A renegotiation supersedes rather than overwrites, so
+    # what a customer was entitled to last quarter stays answerable.
+    superseded_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_customer_entitlement_current", "organization_id", "superseded_at"),
+    )

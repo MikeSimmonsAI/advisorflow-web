@@ -2156,6 +2156,146 @@ def zoom_diagnostics(
             "explanation": explanation}
 
 
+@router.get("/billing/stripe-diagnostics")
+def stripe_diagnostics(
+    db: Session = Depends(get_db),
+    _god: User = Depends(require_god),
+) -> dict:
+    """Is Stripe configured on THIS service, and in which mode — without ever
+    reading a secret's value.
+
+    WHY THIS EXISTS. "Are the Stripe keys set?" was previously answerable only
+    by triggering a checkout and reading the failure, or by opening the Render
+    dashboard. Both are worse than a diagnostic: the first needs a real deal and
+    still cannot distinguish a missing key from a missing webhook secret, and
+    the second is not available to anyone reading this from the app.
+
+    WHAT IT WILL NOT DO. It never returns, logs, or puts in an error message any
+    part of a key. Presence, length, surrounding whitespace and the LIVE/TEST
+    prefix are all it reads — the same shape the Zoom diagnostic uses, for the
+    same reason: length catches a truncated paste and whitespace catches a
+    trailing newline, and neither reveals anything about the value.
+
+    THE PREFIX IS THE IMPORTANT BIT. `sk_test_` and `sk_live_` are the
+    difference between a rehearsal and real money leaving a real card. Reporting
+    which one is configured is what makes "do not touch live-mode money" a thing
+    somebody can actually check before running a test transaction.
+    """
+    import os as _os
+
+    def _describe(name: str) -> dict:
+        raw = _os.environ.get(name)
+        if raw is None:
+            return {"present": False, "empty": True, "length": 0,
+                    "has_surrounding_whitespace": False, "mode": None}
+        v = raw.strip()
+        # Prefix only. Never the key, never a fragment of it, never a hash.
+        mode = None
+        if v.startswith(("sk_test_", "rk_test_", "pk_test_", "whsec_test_")):
+            mode = "test"
+        elif v.startswith(("sk_live_", "rk_live_", "pk_live_")):
+            mode = "live"
+        return {
+            "present": True,
+            "empty": v == "",
+            "length": len(raw),
+            "has_surrounding_whitespace": raw != raw.strip(),
+            "mode": mode,
+        }
+
+    env = {n: _describe(n) for n in
+           ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_PUBLISHABLE_KEY", "APP_BASE_URL")}
+
+    secret = env["STRIPE_SECRET_KEY"]
+    hook = env["STRIPE_WEBHOOK_SECRET"]
+    have_secret = secret["present"] and not secret["empty"]
+    have_hook = hook["present"] and not hook["empty"]
+
+    # ── What the catalogue has, per brand ────────────────────────────────
+    #
+    # Configuration and credentials are two different halves of "can we charge
+    # anybody", and reporting only one sends somebody to fix the wrong thing.
+    from app.models.billing_models import BrandBillingPlan
+    from app.models.models import Platform
+
+    brands = []
+    for p in db.query(Platform).order_by(Platform.name.asc()).all():
+        plans = (db.query(BrandBillingPlan)
+                 .filter(BrandBillingPlan.platform_id == p.id).all())
+        rows = []
+        for pl in plans:
+            rows.append({
+                "key": pl.key,
+                "term_cents": pl.monthly_cents,
+                "month_to_month_cents": pl.month_to_month_cents,
+                "stripe_product_id": pl.stripe_product_id,
+                # A tier needs a Price per commitment it actually sells. Both
+                # are reported because a plan with one of the two configured is
+                # exactly the half-finished state this endpoint exists to show.
+                "stripe_price_id_monthly": pl.stripe_price_id_monthly,
+                "stripe_price_id_month_to_month": pl.stripe_price_id_month_to_month,
+                "term_price_mapped": bool(pl.stripe_price_id_monthly),
+                "month_to_month_price_mapped": bool(pl.stripe_price_id_month_to_month),
+                "is_purchasable": bool(pl.is_purchasable),
+            })
+        needs_term = [r["key"] for r in rows
+                      if r["is_purchasable"] and r["term_cents"] is not None
+                      and not r["term_price_mapped"]]
+        needs_m2m = [r["key"] for r in rows
+                     if r["is_purchasable"] and r["month_to_month_cents"] is not None
+                     and not r["month_to_month_price_mapped"]]
+        brands.append({
+            "platform_id": p.id, "name": p.name, "plans": rows,
+            "prices_missing_term": needs_term,
+            "prices_missing_month_to_month": needs_m2m,
+            "fully_mapped": not needs_term and not needs_m2m and bool(rows),
+        })
+
+    if not have_secret and not have_hook:
+        verdict = "stripe_not_configured"
+        explanation = (
+            "Neither STRIPE_SECRET_KEY nor STRIPE_WEBHOOK_SECRET is set on this "
+            "service, so nothing can be charged and no webhook can be verified. "
+            "The webhook returning 503 is correct fail-closed behaviour and must "
+            "not be relaxed. Set both in the Render dashboard for "
+            "advisorflow-backend using Stripe TEST-mode values. Render env vars "
+            "are per-service — setting them elsewhere does not set them here.")
+    elif not have_secret:
+        verdict = "secret_key_missing"
+        explanation = ("STRIPE_WEBHOOK_SECRET is set but STRIPE_SECRET_KEY is not. "
+                       "No checkout session can be created.")
+    elif not have_hook:
+        verdict = "webhook_secret_missing"
+        explanation = (
+            "STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is not. Checkout "
+            "can be created, but no payment can ever be CONFIRMED: the webhook "
+            "fails closed with 503, and the webhook is the only authority that "
+            "says money arrived. Do not treat a completed checkout as payment.")
+    elif secret["mode"] == "live":
+        verdict = "configured_live_mode"
+        explanation = (
+            "A LIVE-mode secret key is configured. Real cards will be charged. "
+            "Do not run rehearsal transactions against this configuration.")
+    elif secret["mode"] == "test":
+        verdict = "configured_test_mode"
+        explanation = ("Stripe TEST mode is configured. Safe to run an end-to-end "
+                       "rehearsal; no real money moves.")
+    else:
+        verdict = "configured_mode_unknown"
+        explanation = ("Both values are set, but the secret key does not carry a "
+                       "recognisable sk_test_/sk_live_ prefix, so the mode cannot "
+                       "be confirmed from the prefix alone.")
+
+    return {
+        "env": env,
+        "credentials_ready": bool(have_secret and have_hook),
+        "brands": brands,
+        "verdict": verdict,
+        "explanation": explanation,
+    }
+
+
 @router.post("/zoom-diagnostics/test-meeting")
 def zoom_test_meeting(
     _god: User = Depends(require_god),

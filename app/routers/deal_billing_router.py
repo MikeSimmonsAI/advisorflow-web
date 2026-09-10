@@ -154,6 +154,11 @@ def deal_billing_checkout(
                 meta["pricing_approval_id"] = str(sub["approval_id"])
         else:
             meta["plan"] = sub["plan"]
+        # Recorded for both modes: which rate the customer agreed to is part of
+        # what was sold, and the invoice trail should not need the deal to
+        # answer it.
+        if sub.get("commitment"):
+            meta["commitment"] = str(sub["commitment"])
 
     currency = (getattr(org, "billing_currency", None) or "usd").lower()
 
@@ -185,7 +190,12 @@ def deal_billing_checkout(
                 from app.services import billing_catalog
                 platform_id = billing_catalog.platform_id_for_org(db, org)
                 plan = billing_catalog.resolve_plan(db, platform_id, sub["plan"])
-                price_id = billing_catalog.stripe_price_id_for(plan, "month")
+                # THE SAME COMMITMENT `terms_for` PRICED. Resolving the price
+                # without it would charge a month-to-month customer the
+                # committed rate — the readiness panel would show $597 and the
+                # card would be charged $500.
+                price_id = billing_catalog.stripe_price_id_for(
+                    plan, "month", sub.get("commitment"))
                 line_item = {"price": price_id, "quantity": 1}
                 sub_meta = {**meta, "plan": sub["plan"]}
             kwargs = {

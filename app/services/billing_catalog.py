@@ -33,7 +33,8 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.billing_models import (BillingInterval, BrandBillingPlan)
+from app.models.billing_models import (BillingCommitment, BillingInterval,
+                                       BrandBillingPlan)
 from app.models.models import Organization
 
 log = logging.getLogger(__name__)
@@ -114,19 +115,49 @@ def resolve_plan_by_price_id(db: Session, platform_id: Optional[str],
                 "brand scope - a price must resolve within one brand's "
                 "catalogue or not at all", price_id)
         return None
+    # THE MONTH-TO-MONTH PRICE IS MATCHED HERE TOO, and it has to be. This
+    # lookup is how `billing_webhook` turns the price on a live subscription
+    # back into a plan key on every renewal. Omitting the third column would
+    # mean every month-to-month customer resolved to no plan at all — losing
+    # their tier, and with it their entitlements, silently and permanently.
     return (db.query(BrandBillingPlan)
             .filter(BrandBillingPlan.platform_id == platform_id)
             .filter((BrandBillingPlan.stripe_price_id_monthly == price_id)
-                    | (BrandBillingPlan.stripe_price_id_annual == price_id))
+                    | (BrandBillingPlan.stripe_price_id_annual == price_id)
+                    | (BrandBillingPlan.stripe_price_id_month_to_month == price_id))
             .first())
 
 
 def interval_for_price_id(plan: BrandBillingPlan, price_id: str) -> Optional[str]:
-    """Which interval that price represents on this plan."""
-    if price_id and plan.stripe_price_id_annual == price_id:
+    """Which interval that price represents on this plan.
+
+    Both monthly prices — committed and month-to-month — are the MONTH
+    interval. They differ in commitment, not in how often the card is charged.
+    """
+    if not price_id:
+        return None
+    if plan.stripe_price_id_annual == price_id:
         return BillingInterval.YEAR
-    if price_id and plan.stripe_price_id_monthly == price_id:
+    if price_id in (plan.stripe_price_id_monthly,
+                    plan.stripe_price_id_month_to_month):
         return BillingInterval.MONTH
+    return None
+
+
+def commitment_for_price_id(plan: BrandBillingPlan,
+                            price_id: Optional[str]) -> Optional[str]:
+    """Which commitment that price represents, or None if it is not this plan's.
+
+    Lets a subscription that already exists at Stripe be read back as "Starter,
+    month-to-month" rather than just "Starter" — so a screen, and a plan-change
+    decision, work off the rate the customer is actually on.
+    """
+    if not price_id:
+        return None
+    if plan.stripe_price_id_month_to_month == price_id:
+        return BillingCommitment.MONTH_TO_MONTH
+    if price_id in (plan.stripe_price_id_monthly, plan.stripe_price_id_annual):
+        return BillingCommitment.TERM
     return None
 
 
@@ -161,16 +192,47 @@ def require_purchasable(db: Session, platform_id: Optional[str],
     return plan
 
 
-def price_cents_for(plan: BrandBillingPlan, interval: str) -> Optional[int]:
+def price_cents_for(plan: BrandBillingPlan, interval: str,
+                    commitment: Optional[str] = None) -> Optional[int]:
+    """The configured amount for this (plan, interval, commitment).
+
+    `commitment` defaults to the TERM rate, which is what `monthly_cents` has
+    always held — so every existing caller resolves exactly what it did before
+    the commitment axis existed.
+
+    NO FALLING BACK BETWEEN COMMITMENTS. A month-to-month request against a
+    plan with no month-to-month price returns None, not the term rate. The term
+    rate is a discount earned by a commitment this customer did not make, and
+    handing it over on a missing-configuration technicality is a real revenue
+    leak that nobody would ever see in a log.
+    """
     if interval == BillingInterval.YEAR:
+        # Annual is a prepayment, which is itself a commitment; there is no
+        # separate no-commitment annual price and inventing one would be a
+        # pricing decision.
         return plan.annual_cents
+    if commitment == BillingCommitment.MONTH_TO_MONTH:
+        return plan.month_to_month_cents
     return plan.monthly_cents
 
 
-def stripe_price_id_for(plan: BrandBillingPlan, interval: str) -> Optional[str]:
+def stripe_price_id_for(plan: BrandBillingPlan, interval: str,
+                        commitment: Optional[str] = None) -> Optional[str]:
+    """The Stripe Price for this (plan, interval, commitment). Same rules."""
     if interval == BillingInterval.YEAR:
         return plan.stripe_price_id_annual
+    if commitment == BillingCommitment.MONTH_TO_MONTH:
+        return plan.stripe_price_id_month_to_month
     return plan.stripe_price_id_monthly
+
+
+def commitment_label(commitment: Optional[str], term_months: Optional[int] = None) -> str:
+    """How the commitment reads to a person, on a screen or an invoice line."""
+    if commitment == BillingCommitment.MONTH_TO_MONTH:
+        return "Month-to-month"
+    if term_months:
+        return "%d-month agreement" % int(term_months)
+    return "Term agreement"
 
 
 def features_for(plan: BrandBillingPlan) -> List[str]:
