@@ -496,6 +496,47 @@ def test_the_seed_is_idempotent(db_session):
         BrandBillingConfig.platform_id == brand.id).count() == 1
 
 
+def test_the_seed_carries_the_APPROVED_evosys_recurring_prices(db_session):
+    """The approved figures, pinned. September 2026: $500 / $1,000 / $2,000 per
+    month, replacing $497 / $997 / $1,997.
+
+    Pinned in a test rather than only in a comment because these are the
+    numbers that land on a customer's card. A refactor that reintroduces the
+    old figures is a silent pricing regression nobody would see until an
+    invoice, and this is the only thing in the repo that would notice.
+    """
+    brand = _platform(db_session)
+    evosys_billing_seed.seed(db_session, brand.id, apply=True)
+
+    expected = {"starter": 50000, "growth": 100000, "professional": 200000}
+    for key, cents in expected.items():
+        plan = billing_catalog.resolve_plan(db_session, brand.id, key)
+        assert plan is not None, key
+        assert plan.monthly_cents == cents, key
+        assert plan.is_purchasable is True, key
+
+    # Enterprise / Custom carries NO price. A default here would be an invented
+    # figure on a deal that is priced by negotiation, and `is_purchasable`
+    # False is what makes checkout refuse it with a reason instead of tripping
+    # over the NULL.
+    ent = billing_catalog.resolve_plan(db_session, brand.id, "enterprise")
+    assert ent.monthly_cents is None
+    assert ent.is_purchasable is False
+
+
+def test_no_plan_is_purchasable_until_its_stripe_price_is_recorded(db_session):
+    """Configured price, no Stripe object — deliberately, until TEST-mode
+    Stripe configuration exists. The catalogue states the amount; nothing can
+    charge it yet, and `deal_billing` says so by name rather than inventing a
+    price on the fly."""
+    brand = _platform(db_session)
+    evosys_billing_seed.seed(db_session, brand.id, apply=True)
+    for key in ("starter", "growth", "professional"):
+        plan = billing_catalog.resolve_plan(db_session, brand.id, key)
+        assert billing_catalog.price_cents_for(plan, "month") is not None
+        assert billing_catalog.stripe_price_id_for(plan, "month") is None
+
+
 def test_the_seed_never_writes_a_stripe_price_id(db_session):
     """Stripe ids are created in Stripe and recorded afterwards. A re-run that
     blanked the mapping would send checkout back to minting anonymous Prices
@@ -566,11 +607,19 @@ def test_the_seed_sets_no_annual_price(db_session):
 
 
 def test_the_seeded_prices_are_the_saas_prices_not_the_setup_fees(db_session):
-    """$497 / $997 / $1,997 a month. `brand_packages` sells the same three
-    names as $1,497 / $2,495 / $4,995 ONE-TIME, and nothing maps them."""
+    """$500 / $1,000 / $2,000 a MONTH. `brand_packages` sells the same three
+    names as $1,500 / $2,500 / $5,000 ONE-TIME, and nothing maps them.
+
+    The protection is unchanged by the September 2026 reprice: these two
+    catalogues use the same three words for two different economic objects, and
+    a setup fee that found its way into `monthly_cents` would bill a customer
+    their implementation fee every month.
+    """
     brand = _platform(db_session)
     evosys_billing_seed.seed(db_session, brand.id, apply=True)
     prices = {p.key: p.monthly_cents
               for p in billing_catalog.plans_for(db_session, brand.id)}
-    assert prices == {"starter": 49700, "growth": 99700,
-                      "professional": 199700, "enterprise": None}
+    assert prices == {"starter": 50000, "growth": 100000,
+                      "professional": 200000, "enterprise": None}
+    # And none of them is a setup fee.
+    assert set(prices.values()).isdisjoint({150000, 250000, 500000})

@@ -93,9 +93,12 @@ class BrandSalesCycle(Scenario):
         db.flush()
 
         for key, name, price, desc in (
-                ("starter", "Starter", 1497, None),
-                ("growth", "Growth", 2495, None),
-                ("professional", "Professional", 4995,
+                # One-time implementation fees, at the approved EvoSys Pro
+                # figures. A demo shown to a prospect must not quote a price
+                # the real catalogue no longer carries.
+                ("starter", "Starter", 1500, None),
+                ("growth", "Growth", 2500, None),
+                ("professional", "Professional", 5000,
                  "The full platform, configured for you.")):
             db.add(BrandPackage(
                 id=self.sid("pkg", key), platform_id=self.platform_id,

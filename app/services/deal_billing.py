@@ -64,6 +64,29 @@ those flows onto an object none of them can resolve. When a deal's negotiated
 MRR differs from the catalogue rate for the mapped plan, that is reported as
 `recurring_rate_differs_from_catalogue` — visible, refused, and somebody
 decides — rather than quietly billing the wrong one of the two.
+
+===========================================================================
+THE ONE EXCEPTION: A CUSTOM DEAL
+===========================================================================
+
+A Custom package's price is not in the catalogue — that is what the word
+means. So the rule above, applied to it, would refuse every custom deal
+forever: its rate can never equal a tier it was created to differ from.
+
+A custom recurring rate is therefore billed as an INLINE Stripe price at the
+deal's own figure — on the same footing as the setup fee above, and for the
+same reason: every path that can write a custom rate has already passed this
+platform's pricing authority. On the opportunity, `sales_router` judges the
+figures with `pricing_authority.evaluate()` before writing and routes a breach
+to a manager; on a proposal, only a manager can set one at all.
+
+What IS refused is a real signal rather than an absent one: a figure a manager
+DENIED, and a rate whose approval decision is still PENDING. See
+`custom_recurring_authority()`, which also records why demanding an approval
+row instead would make every genuine Custom deal permanently unbillable.
+
+This narrows nothing for standard tiers: a Starter, Growth or Professional
+deal still bills only against its brand's configured Stripe price.
 """
 
 from __future__ import annotations
@@ -90,6 +113,14 @@ B_NO_PRICE_ID = "mapped_plan_has_no_stripe_price_for_interval"
 B_RATE_MISMATCH = "recurring_rate_differs_from_catalogue"
 B_NOTHING_TO_CHARGE = "deal_has_nothing_to_charge"
 B_SUBSCRIPTION_EXISTS = "customer_already_has_a_subscription"
+B_CUSTOM_DENIED = "custom_recurring_rate_was_denied"
+B_CUSTOM_DECISION_PENDING = "custom_pricing_decision_still_pending"
+
+# HOW a recurring charge gets its amount. The router branches on this rather
+# than on "is `plan` None", so a future third mode has to declare itself here
+# instead of arriving as an absence somebody else's code reads as a default.
+PRICING_CATALOGUE = "catalogue_price"     # the brand's configured Stripe price
+PRICING_CUSTOM = "custom_approved"        # an inline price at an approved figure
 
 BLOCKER_TEXT = {
     B_PRICING_INCOMPLETE:
@@ -122,6 +153,13 @@ BLOCKER_TEXT = {
     B_SUBSCRIPTION_EXISTS:
         "This customer already has a subscription. Starting another checkout "
         "would bill them twice — change the existing plan instead.",
+    B_CUSTOM_DENIED:
+        "A manager denied this exact monthly rate. It must not be charged. "
+        "Agree a rate that was not refused, or have the decision revisited.",
+    B_CUSTOM_DECISION_PENDING:
+        "A custom pricing decision on this deal is still waiting on a manager. "
+        "The rate is not settled yet, so charging it now could bill the customer "
+        "an amount that is about to change.",
 }
 
 
@@ -178,6 +216,140 @@ def mapped_plan(db: Session, platform_id: Optional[str], package):
     if plan is None:
         return None, B_PLAN_UNAVAILABLE
     return plan, None
+
+
+def _custom_product_name(res: Dict[str, Any]) -> str:
+    """What the customer will see on the invoice line for a custom rate.
+
+    The sold package's own name where there is one, because that is the word
+    the customer's paperwork already uses. No amount and no unit basis go in
+    here: Stripe renders the amount itself, and a name that restates it becomes
+    wrong the moment the subscription is ever changed.
+    """
+    name = (res.get("package_name") or "").strip()
+    return "%s — monthly" % name if name else "Monthly subscription"
+
+
+def _request_monthly_cents(req) -> Optional[int]:
+    """What monthly figure a custom-deal request is asking for, in cents.
+
+    `requested_unit_price` x `requested_min_units` — the same arithmetic
+    `package_pricing.custom_rate()` uses to turn the agreement into a monthly
+    rate, so a request can be compared to a deal's MRR without either side
+    re-deriving it differently.
+    """
+    unit = getattr(req, "requested_unit_price", None)
+    if unit is None:
+        return None
+    units = getattr(req, "requested_min_units", None)
+    try:
+        units = int(units) if units is not None else 1
+    except (TypeError, ValueError):
+        units = 1
+    if units < 1:
+        units = 1
+    return _cents(Decimal(str(unit)) * Decimal(units))
+
+
+def custom_recurring_authority(db: Session, opp,
+                               mrr: Optional[Decimal]) -> Dict[str, Any]:
+    """On whose authority this custom monthly rate may be charged — or why not.
+
+    WHY THIS IS NOT "FIND AN APPROVAL, OR REFUSE"
+    ---------------------------------------------
+    That was the first version of this function, and it was wrong: it would
+    have made every real Custom deal permanently unbillable.
+
+    A custom-deal approval REQUEST only comes into existence when
+    `pricing_authority.evaluate()` returns NEEDS_APPROVAL, which requires a
+    catalogue rate to measure a discount against. The EvoSys "Multi-Tenant /
+    Custom" package has no monthly rate and no setup fee — that is the entire
+    point of it — so `discount_pct` is None, every component reports
+    `within: True`, the verdict is ALLOWED, and NO REQUEST IS EVER CREATED.
+    Demanding an approved request would therefore refuse the deal while making
+    the approval that would clear it impossible to obtain. A blocker nobody can
+    act on is worse than no check.
+
+    WHERE THE AUTHORITY ACTUALLY IS. Every path that writes a custom recurring
+    rate already goes through this platform's own pricing authority:
+
+      on the OPPORTUNITY — `sales_router` judges the proposed figures with
+      `pricing_authority.evaluate()` BEFORE writing, and writes only on
+      ALLOWED; a breach becomes a request that a manager decides, and
+      `approve_custom_deal()` does the writing with the manager's authority.
+
+      on a PROPOSAL — `proposal_service.apply_custom_rate()` requires
+      `can_override_price` (sales manager or god). A rep cannot set one, and no
+      route writes those columns straight from a request body.
+
+    So a custom rate that EXISTS has already passed the same gate the setup fee
+    passed — and this module already charges the setup fee on exactly that
+    reasoning (see the module docstring). Treating the recurring half
+    differently would not be stricter; it would just be inconsistent.
+
+    WHAT IS WORTH REFUSING, THEN. Two things that are real signals rather than
+    an absence of one:
+
+      a manager DENIED this exact figure. Whatever put it on the deal, a
+      refused amount must not reach a card.
+
+      a custom pricing decision is still PENDING on this deal. The rate is
+      under review; billing now can charge an amount that is about to change.
+
+    Both clear the moment a person decides, so neither is a dead end.
+    """
+    out: Dict[str, Any] = {"basis": None, "approval_id": None,
+                           "approved_at": None, "blocker": None,
+                           "blocker_extra": {}}
+    if mrr is None:
+        return out
+
+    from app.models.sales_models import (APPROVAL_APPROVED, APPROVAL_DENIED,
+                                         APPROVAL_PENDING,
+                                         PricingApprovalRequest)
+
+    want = _cents(mrr)
+    rows = (db.query(PricingApprovalRequest)
+            .filter(PricingApprovalRequest.opportunity_id == opp.id,
+                    PricingApprovalRequest.request_kind == "custom_deal")
+            .order_by(PricingApprovalRequest.requested_at.desc())
+            .all())
+
+    # Refused at this exact amount. Checked FIRST — a denial is the one signal
+    # that must not be overtaken by anything else on the deal.
+    for req in rows:
+        if (req.status == APPROVAL_DENIED
+                and _request_monthly_cents(req) == want):
+            out["blocker"] = B_CUSTOM_DENIED
+            out["blocker_extra"] = {"deal_cents": want,
+                                    "denied_request_id": req.id}
+            return out
+
+    # A question still open with a manager. At ANY figure: what is pending is
+    # the price, so "the deal already stands at something chargeable" is not a
+    # reason to charge it while somebody is deciding.
+    for req in rows:
+        if req.status == APPROVAL_PENDING:
+            out["blocker"] = B_CUSTOM_DECISION_PENDING
+            out["blocker_extra"] = {"pending_request_id": req.id,
+                                    "pending_cents": _request_monthly_cents(req),
+                                    "deal_cents": want}
+            return out
+
+    # A manager approved this figure explicitly. Reported because it is the
+    # strongest provenance there is, not because the charge depends on it.
+    for req in rows:
+        if (req.status == APPROVAL_APPROVED
+                and _request_monthly_cents(req) == want):
+            out["basis"] = "manager_approval"
+            out["approval_id"] = req.id
+            out["approved_at"] = req.decided_at
+            return out
+
+    # Set under the actor's own authority, which pricing_authority granted at
+    # the time it was written. The same standing as the setup fee.
+    out["basis"] = "pricing_authority"
+    return out
 
 
 def terms_for(db: Session, opp) -> Dict[str, Any]:
@@ -237,33 +409,91 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
 
     # ── the recurring half ────────────────────────────────────────────────
     if mrr is not None:
-        platform_id = billing_catalog.platform_id_for_org(db, org)
-        if not platform_id:
-            blockers.append(_blocker(B_NO_BRAND))
-        else:
-            plan, why = mapped_plan(db, platform_id, res["package"])
-            if why:
-                blockers.append(_blocker(
-                    why, package=res["package_name"],
-                    billing_plan_key=getattr(res["package"], "billing_plan_key", None)))
+        if res["is_custom_rate"]:
+            # A CUSTOM RATE IS BILLED AS AN INLINE RECURRING PRICE, at the
+            # deal's own agreed figure. It deliberately does NOT go through the
+            # catalogue: requiring a custom rate to equal one of the standard
+            # tiers would make custom deals unbillable, and matching it against
+            # the nearest tier would bill an amount nobody agreed to.
+            #
+            # The rate's authority — and the two things worth refusing — come
+            # from custom_recurring_authority(); read its docstring before
+            # tightening this, because the obvious tightening (demand an
+            # approved request) makes every real Custom deal unbillable.
+            auth = custom_recurring_authority(db, opp, mrr)
+            out["custom_pricing"] = {
+                "authority": auth["basis"],
+                "approval_id": auth["approval_id"],
+                "approved_at": auth["approved_at"],
+                # REPORTED BECAUSE IT IS TRUE, NOT DECIDED HERE.
+                #
+                # An inline price belongs to no catalogue plan, so the webhook
+                # correctly leaves `billing_plan_key` unset — and plan_limits
+                # then finds no plan and applies no ceilings (its documented
+                # behaviour: no plan means unlimited, never zero). A custom
+                # customer therefore runs without plan-derived feature limits.
+                #
+                # Which entitlements a custom deal should carry is a POLICY
+                # DECISION nobody has made, and guessing one here would either
+                # cap a customer at a tier they did not buy or bill them
+                # against a plan they are not paying for. So it is surfaced on
+                # the deal instead of quietly resolved.
+                "entitlement_plan_unset": True,
+                # Named where the sold package DOES map to a tier, so whoever
+                # decides that policy can see which tier was on the table. It
+                # is deliberately not applied: writing this key onto the org
+                # while the subscription runs on an inline price would leave
+                # every plan-change flow driving off a price the customer is
+                # not on, and would show them a catalogue rate they are not
+                # paying.
+                "mapped_plan_key": getattr(res["package"], "billing_plan_key", None),
+            }
+            if auth["blocker"]:
+                blockers.append(_blocker(auth["blocker"],
+                                         **auth["blocker_extra"]))
             else:
-                price_id = billing_catalog.stripe_price_id_for(plan, "month")
-                cat_cents = billing_catalog.price_cents_for(plan, "month")
-                out["plan"] = {"key": plan.key, "name": plan.name,
-                               "catalogue_cents": cat_cents,
-                               "stripe_price_configured": bool(price_id)}
-                if not price_id:
-                    blockers.append(_blocker(B_NO_PRICE_ID, plan=plan.key))
-                elif cat_cents is not None and _cents(mrr) != cat_cents:
-                    # Reported, never silently resolved either way.
+                out["charges"].append({
+                    "kind": "subscription",
+                    "pricing_mode": PRICING_CUSTOM,
+                    # No catalogue plan is involved, and saying so explicitly
+                    # keeps the webhook from mapping this org onto a tier.
+                    "plan": None,
+                    "interval": "month",
+                    "cents": _cents(mrr),
+                    "label": _custom_product_name(res),
+                    "authority": auth["basis"],
+                    "approval_id": auth["approval_id"],
+                    "stripe_price_id_configured": False})
+        else:
+            platform_id = billing_catalog.platform_id_for_org(db, org)
+            if not platform_id:
+                blockers.append(_blocker(B_NO_BRAND))
+            else:
+                plan, why = mapped_plan(db, platform_id, res["package"])
+                if why:
                     blockers.append(_blocker(
-                        B_RATE_MISMATCH, plan=plan.key,
-                        deal_cents=_cents(mrr), catalogue_cents=cat_cents))
+                        why, package=res["package_name"],
+                        billing_plan_key=getattr(res["package"], "billing_plan_key", None)))
                 else:
-                    out["charges"].append({
-                        "kind": "subscription", "plan": plan.key,
-                        "interval": "month", "cents": cat_cents,
-                        "stripe_price_id_configured": True})
+                    price_id = billing_catalog.stripe_price_id_for(plan, "month")
+                    cat_cents = billing_catalog.price_cents_for(plan, "month")
+                    out["plan"] = {"key": plan.key, "name": plan.name,
+                                   "catalogue_cents": cat_cents,
+                                   "stripe_price_configured": bool(price_id)}
+                    if not price_id:
+                        blockers.append(_blocker(B_NO_PRICE_ID, plan=plan.key))
+                    elif cat_cents is not None and _cents(mrr) != cat_cents:
+                        # Reported, never silently resolved either way.
+                        blockers.append(_blocker(
+                            B_RATE_MISMATCH, plan=plan.key,
+                            deal_cents=_cents(mrr), catalogue_cents=cat_cents))
+                    else:
+                        out["charges"].append({
+                            "kind": "subscription",
+                            "pricing_mode": PRICING_CATALOGUE,
+                            "plan": plan.key,
+                            "interval": "month", "cents": cat_cents,
+                            "stripe_price_id_configured": True})
 
         existing = (getattr(org, "billing_status", None) or "").lower()
         if getattr(org, "stripe_subscription_id", None):

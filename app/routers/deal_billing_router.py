@@ -134,22 +134,66 @@ def deal_billing_checkout(
     if terms.get("proposal_id"):
         meta["proposal_id"] = str(terms["proposal_id"])
     if sub:
-        meta["plan"] = sub["plan"]
+        # `plan` IS DELIBERATELY ABSENT FOR A CUSTOM DEAL. The webhook reads
+        # this key to decide which catalogue tier to stamp on the customer
+        # organization; a custom rate belongs to no tier, so naming one here
+        # would put the org on a plan it is not paying for. billing_webhook
+        # already handles the absence correctly — it logs and leaves
+        # `billing_plan_key` alone rather than guessing — which is exactly the
+        # behaviour a custom deal needs. `deal_kind` records what it is instead,
+        # so the trail is not merely a missing field.
+        if sub.get("pricing_mode") == deal_billing.PRICING_CUSTOM:
+            meta["deal_kind"] = "custom"
+            # What licensed this amount, in the session's own trail: a named
+            # manager approval where one exists, otherwise the pricing-authority
+            # grant the rate was written under. Never blank — "a custom price
+            # appeared" is not an answer anybody can audit.
+            if sub.get("authority"):
+                meta["pricing_authority"] = str(sub["authority"])
+            if sub.get("approval_id"):
+                meta["pricing_approval_id"] = str(sub["approval_id"])
+        else:
+            meta["plan"] = sub["plan"]
 
     currency = (getattr(org, "billing_currency", None) or "usd").lower()
 
     try:
         if sub:
-            from app.services import billing_catalog
-            platform_id = billing_catalog.platform_id_for_org(db, org)
-            plan = billing_catalog.resolve_plan(db, platform_id, sub["plan"])
-            price_id = billing_catalog.stripe_price_id_for(plan, "month")
+            if sub.get("pricing_mode") == deal_billing.PRICING_CUSTOM:
+                # AN INLINE RECURRING PRICE at the deal's agreed amount.
+                # `deal_billing.terms_for` — recomputed above in this same
+                # request, never taken from the caller — resolved and vetted
+                # that amount, so `sub["cents"]` is the deal's own figure and
+                # not anything the caller sent.
+                line_item = {
+                    "price_data": {
+                        "currency": currency,
+                        "product_data": {
+                            "name": sub.get("label") or "Monthly subscription"},
+                        "unit_amount": sub["cents"],
+                        # Without this the line is a one-off and the whole
+                        # session silently stops being a subscription.
+                        "recurring": {"interval": sub.get("interval") or "month"},
+                    },
+                    "quantity": 1,
+                }
+                # No `plan` here either: subscription metadata is what the
+                # webhook reads on renewals, so naming a tier here would
+                # mismap the org on every future invoice, not just the first.
+                sub_meta = dict(meta)
+            else:
+                from app.services import billing_catalog
+                platform_id = billing_catalog.platform_id_for_org(db, org)
+                plan = billing_catalog.resolve_plan(db, platform_id, sub["plan"])
+                price_id = billing_catalog.stripe_price_id_for(plan, "month")
+                line_item = {"price": price_id, "quantity": 1}
+                sub_meta = {**meta, "plan": sub["plan"]}
             kwargs = {
                 "customer": customer_id,
                 "mode": "subscription",
-                "line_items": [{"price": price_id, "quantity": 1}],
+                "line_items": [line_item],
                 "metadata": {**meta, "interval": "month"},
-                "subscription_data": {"metadata": {**meta, "plan": sub["plan"]}},
+                "subscription_data": {"metadata": sub_meta},
                 "success_url": "%s/billing?success=1" % base_url,
                 "cancel_url": "%s/billing?canceled=1" % base_url,
             }
@@ -196,7 +240,14 @@ def deal_billing_checkout(
                   {"opportunity_id": opp.id,
                    "proposal_id": terms.get("proposal_id"),
                    "setup_cents": (setup or {}).get("cents"),
-                   "plan": (sub or {}).get("plan")})
+                   "plan": (sub or {}).get("plan"),
+                   # A custom deal has no plan key, so without these the audit
+                   # row for the largest sales in the system would be the one
+                   # that says the least about what was charged.
+                   "pricing_mode": (sub or {}).get("pricing_mode"),
+                   "recurring_cents": (sub or {}).get("cents"),
+                   "pricing_authority": (sub or {}).get("authority"),
+                   "pricing_approval_id": (sub or {}).get("approval_id")})
     except Exception:
         log.exception("deal_billing: audit write failed")
 

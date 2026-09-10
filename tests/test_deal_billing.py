@@ -8,6 +8,7 @@ not refused anything.
 """
 
 import itertools
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -115,18 +116,27 @@ class TestTermsResolution:
 
     def test_a_negotiated_rate_that_differs_from_catalogue_is_refused_not_guessed(
             self, db_session, world):
-        """Charging either number silently would be wrong. Say so."""
+        """Charging either number silently would be wrong. Say so.
+
+        A CATALOGUE deal: the package carries the rate, the mapped plan
+        disagrees with it, and neither is quietly preferred. (The same figures
+        arrived at through a per-deal CUSTOM rate take the custom-approval
+        route instead — see TestCustomRecurring — because there the catalogue
+        rate is not what was sold.)
+        """
         world["pkg"].billing_plan_key = "growth"
-        world["opp"].custom_unit_price = Decimal("399.00")
-        world["opp"].custom_min_units = 1
+        world["plan"].monthly_cents = 60000          # catalogue moved under it
         db_session.commit()
         terms = deal_billing.terms_for(db_session, world["opp"])
         codes = {b["code"] for b in terms["blockers"]}
         assert deal_billing.B_RATE_MISMATCH in codes
         row = next(b for b in terms["blockers"]
                    if b["code"] == deal_billing.B_RATE_MISMATCH)
-        assert row["deal_cents"] == 39900
-        assert row["catalogue_cents"] == 50000
+        assert row["deal_cents"] == 50000            # 500.00 package rate
+        assert row["catalogue_cents"] == 60000
+        assert not terms.get("billable")
+        assert terms["charges"] == [] or all(
+            c["kind"] != "subscription" for c in terms["charges"])
 
     def test_a_deal_with_no_customer_org_cannot_be_billed(self, db_session, world):
         db_session.delete(world["impl"])
@@ -159,6 +169,352 @@ class TestTermsResolution:
         assert terms["setup_cents"] is None
         assert terms["recurring_cents"] is None
         assert terms["charges"] == []
+
+
+# ── a custom recurring rate ─────────────────────────────────────────────────
+
+def _approval(db, opp, brand, manager, *, unit, units=1, status="approved"):
+    """A custom-deal pricing approval request in a given state.
+
+    Written through the model rather than through approve_custom_deal() on
+    purpose: these tests are about what deal_billing will and will not BILL
+    given an approval row, and building the row directly is what lets a denied,
+    pending or wrong-amount row be tested at all.
+    """
+    from app.models.sales_models import PricingApprovalRequest
+    req = PricingApprovalRequest(
+        brand_sales_org_id=brand.id, opportunity_id=opp.id,
+        requested_by=manager.id, reason="Negotiated on the call.",
+        request_kind="custom_deal",
+        requested_unit_price=Decimal(str(unit)), requested_min_units=units,
+        requested_term_months=12, status=status,
+        decided_by=manager.id if status != "pending" else None,
+        decided_at=datetime.utcnow() if status != "pending" else None)
+    db.add(req)
+    db.commit()
+    return req
+
+
+class TestCustomRecurring:
+    """A custom rate is billable at the deal's agreed figure, not at a tier's.
+
+    The gate is NOT "an approved request exists". A custom-deal approval request
+    is only created when pricing_authority returns NEEDS_APPROVAL, which needs a
+    catalogue rate to measure against — and a Custom package has none, so the
+    verdict is ALLOWED and no request is ever created. Demanding one would
+    refuse every real Custom deal while making the approval that would clear it
+    impossible to obtain.
+
+    What is refused is a real signal: a DENIED figure, and a PENDING decision.
+    """
+
+    def _custom_deal(self, db, world, unit, units=1):
+        """A Won deal whose recurring rate is a per-deal custom figure."""
+        world["opp"].custom_unit_price = Decimal(str(unit))
+        world["opp"].custom_min_units = units
+        world["opp"].custom_term_months = 12
+        db.commit()
+
+    def test_a_custom_rate_with_no_approval_row_at_all_is_still_billable(
+            self, db_session, world):
+        """THE CASE THAT BREAKS A NAIVE APPROVAL CHECK, and the common one.
+
+        A true Custom package has no catalogue rate, so pricing_authority finds
+        no discount to measure, returns ALLOWED, and sales_router writes the rate
+        with no request created. There is no approval row and there never will
+        be. If this deal is not billable, custom deals do not work at all.
+        """
+        self._custom_deal(db_session, world, "250.00", units=15)
+        from app.models.sales_models import PricingApprovalRequest
+        assert db_session.query(PricingApprovalRequest).count() == 0
+
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["pricing_mode"] == deal_billing.PRICING_CUSTOM
+        assert sub["cents"] == 375000                    # $250 x 15
+        assert sub["plan"] is None                       # no tier is claimed
+        assert sub["stripe_price_id_configured"] is False
+        assert sub["authority"] == "pricing_authority"
+        assert terms["billable"] is True
+
+    def test_a_manager_approved_rate_records_the_approval(self, db_session, world):
+        """Where an approval DOES exist it is the strongest provenance there is,
+        so it is named on the charge — the audit trail from an invoice back to
+        the person who said yes."""
+        self._custom_deal(db_session, world, "1750.00")
+        req = _approval(db_session, world["opp"], world["brand"], world["god"],
+                        unit="1750.00")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["authority"] == "manager_approval"
+        assert sub["approval_id"] == req.id
+        assert terms["custom_pricing"]["authority"] == "manager_approval"
+
+    def test_it_does_NOT_have_to_equal_a_catalogue_price(self, db_session, world):
+        """The requirement Mike named: a custom rate must not be forced onto a
+        standard tier's figure to be chargeable."""
+        world["pkg"].billing_plan_key = "growth"      # catalogue is 500.00/mo
+        self._custom_deal(db_session, world, "1750.00")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        codes = {b["code"] for b in terms["blockers"]}
+        assert deal_billing.B_RATE_MISMATCH not in codes
+        assert terms["blockers"] == [], terms["blockers"]
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["cents"] == 175000
+        assert sub["cents"] != world["plan"].monthly_cents
+
+    def test_a_DENIED_figure_is_never_charged(self, db_session, world):
+        """A manager said no to this exact amount. However it got onto the deal,
+        it must not reach a card."""
+        self._custom_deal(db_session, world, "1750.00")
+        req = _approval(db_session, world["opp"], world["brand"], world["god"],
+                        unit="1750.00", status="denied")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        row = next(b for b in terms["blockers"]
+                   if b["code"] == deal_billing.B_CUSTOM_DENIED)
+        assert row["denied_request_id"] == req.id
+        assert row["deal_cents"] == 175000
+        assert not terms.get("billable")
+        assert all(c["kind"] != "subscription" for c in terms["charges"])
+
+    def test_a_denial_at_a_DIFFERENT_figure_does_not_block_this_one(
+            self, db_session, world):
+        """A refused $3,000 says nothing about an agreed $1,750. Blocking on any
+        denial anywhere would make one rejected ask poison the deal forever."""
+        self._custom_deal(db_session, world, "1750.00")
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="3000.00", status="denied")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+        assert any(c["kind"] == "subscription" for c in terms["charges"])
+
+    def test_a_PENDING_decision_holds_the_charge(self, db_session, world):
+        """Somebody is still deciding the price. Charging now can bill an amount
+        that is about to change — and the block clears either way once they
+        answer, so it is not a dead end."""
+        self._custom_deal(db_session, world, "1750.00")
+        req = _approval(db_session, world["opp"], world["brand"], world["god"],
+                        unit="2100.00", status="pending")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        row = next(b for b in terms["blockers"]
+                   if b["code"] == deal_billing.B_CUSTOM_DECISION_PENDING)
+        assert row["pending_request_id"] == req.id
+        assert row["pending_cents"] == 210000
+        assert row["deal_cents"] == 175000
+        assert all(c["kind"] != "subscription" for c in terms["charges"])
+
+    def test_a_pending_request_outranks_an_earlier_approval(
+            self, db_session, world):
+        """A renegotiation in flight means the settled figure is no longer
+        settled. The pending question wins."""
+        self._custom_deal(db_session, world, "1750.00")
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="1750.00", status="approved")
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="1200.00", status="pending")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert deal_billing.B_CUSTOM_DECISION_PENDING in {
+            b["code"] for b in terms["blockers"]}
+
+    def test_a_denial_outranks_an_approval_at_the_same_figure(
+            self, db_session, world):
+        """Contradictory decisions on one amount resolve to NOT CHARGING it.
+        The direction of that tie-break is the whole point."""
+        self._custom_deal(db_session, world, "1750.00")
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="1750.00", status="approved")
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="1750.00", status="denied")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert deal_billing.B_CUSTOM_DENIED in {
+            b["code"] for b in terms["blockers"]}
+        assert all(c["kind"] != "subscription" for c in terms["charges"])
+
+    def test_another_deals_denial_does_not_block_this_deal(
+            self, db_session, world):
+        """Decisions are per-deal. One customer's refused rate is not a bar on
+        another customer agreeing the same figure."""
+        other = Opportunity(company_name="Other Co", stage="won",
+                            brand_sales_org_id=world["brand"].id)
+        db_session.add(other)
+        db_session.commit()
+        _approval(db_session, other, world["brand"], world["god"],
+                  unit="1750.00", status="denied")
+        self._custom_deal(db_session, world, "1750.00")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+
+    def test_a_withdrawn_or_stale_request_neither_blocks_nor_licenses(
+            self, db_session, world):
+        """Neither is a decision about the money. They are closed questions."""
+        for status in ("withdrawn", "stale"):
+            _approval(db_session, world["opp"], world["brand"], world["god"],
+                      unit="1750.00", status=status)
+        self._custom_deal(db_session, world, "1750.00")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["blockers"] == [], terms["blockers"]
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["authority"] == "pricing_authority"
+
+    def test_a_custom_rate_snapshotted_on_a_PROPOSAL_is_billed_from_it(
+            self, db_session, world):
+        """deal_pricing prefers the sent proposal, and that is correct: the
+        document the customer holds is what they agreed to. A proposal's custom
+        rate can only be set by a manager (proposal_service.apply_custom_rate
+        requires can_override_price), so it carries the same authority."""
+        from app.models.models import Proposal
+
+        prop = Proposal(
+            opportunity_id=world["opp"].id, organization_id=world["org"].id,
+            proposal_number=_n("P"), version=1, title="Acme Power proposal",
+            created_by_id=world["rep"].id,
+            sent_at=datetime.utcnow(), withhold_pricing=False,
+            package_id=world["pkg"].id,
+            custom_unit_price=Decimal("1850.00"), custom_min_units=1,
+            custom_term_months=12, billing_option="monthly")
+        db_session.add(prop)
+        db_session.commit()
+
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["recurring_cents"] == 185000
+        assert terms["proposal_id"] == prop.id
+        sub = next(c for c in terms["charges"] if c["kind"] == "subscription")
+        assert sub["cents"] == 185000
+
+    def test_the_setup_fee_still_rides_the_same_deal(self, db_session, world):
+        """A custom recurring rate must not lose the one-time fee beside it."""
+        self._custom_deal(db_session, world, "1750.00")
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        kinds = {c["kind"] for c in terms["charges"]}
+        assert kinds == {"setup_fee", "subscription"}
+
+
+class TestCustomCheckoutComposition:
+    def _ready(self, db, world, unit="1750.00", units=1):
+        world["opp"].custom_unit_price = Decimal(unit)
+        world["opp"].custom_min_units = units
+        world["opp"].custom_term_months = 12
+        world["org"].stripe_customer_id = "cus_test123"
+        db.commit()
+        _approval(db, world["opp"], world["brand"], world["god"],
+                  unit=unit, units=units)
+
+    def _post(self, client, db, world):
+        with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
+             patch("app.routers.billing_router._stripe_client"), \
+             patch("app.routers.billing_router._get_or_create_customer",
+                   return_value="cus_test123"), \
+             patch("app.routers.billing_router._brand_base_url",
+                   return_value="https://brand.test"):
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db, world["god"]))
+        return r, create
+
+    def test_a_custom_rate_becomes_an_inline_RECURRING_price(
+            self, client, db_session, world):
+        """Without `recurring` the line is a one-off and the session silently
+        stops being a subscription — the customer pays once and never again."""
+        self._ready(db_session, world)
+        r, create = self._post(client, db_session, world)
+        assert r.status_code == 200, r.text
+        kw = create.call_args.kwargs
+        assert kw["mode"] == "subscription"
+        item = kw["line_items"][0]
+        assert "price" not in item                  # no catalogue price id
+        assert item["price_data"]["unit_amount"] == 175000
+        assert item["price_data"]["recurring"]["interval"] == "month"
+
+    def test_no_plan_is_named_in_metadata_so_the_webhook_maps_no_tier(
+            self, client, db_session, world):
+        """billing_webhook writes billing_plan_key from `plan` metadata. Naming
+        a tier for an inline price would put the org on a plan it is not paying
+        for — on the first invoice AND on every renewal."""
+        self._ready(db_session, world)
+        _r, create = self._post(client, db_session, world)
+        kw = create.call_args.kwargs
+        assert "plan" not in kw["metadata"]
+        assert "plan" not in kw["subscription_data"]["metadata"]
+        assert kw["metadata"]["deal_kind"] == "custom"
+        assert kw["metadata"]["opportunity_id"] == world["opp"].id
+
+    def test_what_licensed_the_amount_is_recorded_on_the_session(
+            self, client, db_session, world):
+        """A custom price with no provenance is a number nobody can audit back
+        to a decision."""
+        self._ready(db_session, world)
+        r, create = self._post(client, db_session, world)
+        meta = create.call_args.kwargs["metadata"]
+        assert meta["pricing_authority"] == "manager_approval"
+        assert meta["pricing_approval_id"]
+        sub = next(c for c in r.json()["charges"] if c["kind"] == "subscription")
+        assert sub["approval_id"]
+
+    def test_a_rate_set_without_an_approval_row_still_records_its_authority(
+            self, client, db_session, world):
+        """The common Custom case. `pricing_authority` is a real answer to "on
+        what basis", not a blank."""
+        world["opp"].custom_unit_price = Decimal("1750.00")
+        world["opp"].custom_min_units = 1
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        r, create = self._post(client, db_session, world)
+        assert r.status_code == 200, r.text
+        meta = create.call_args.kwargs["metadata"]
+        assert meta["pricing_authority"] == "pricing_authority"
+        assert "pricing_approval_id" not in meta
+        assert "plan" not in meta
+
+    def test_a_DENIED_rate_never_reaches_stripe(self, client, db_session, world):
+        """The assertion that matters: NOTHING was charged."""
+        world["opp"].custom_unit_price = Decimal("1750.00")
+        world["opp"].custom_min_units = 1
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="1750.00", status="denied")
+        with patch("stripe.checkout.Session.create") as create:
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 409
+        assert create.call_count == 0
+        codes = {b["code"] for b in r.json()["detail"]["blockers"]}
+        assert deal_billing.B_CUSTOM_DENIED in codes
+
+    def test_a_PENDING_decision_never_reaches_stripe(
+            self, client, db_session, world):
+        world["opp"].custom_unit_price = Decimal("1750.00")
+        world["opp"].custom_min_units = 1
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        _approval(db_session, world["opp"], world["brand"], world["god"],
+                  unit="1900.00", status="pending")
+        with patch("stripe.checkout.Session.create") as create:
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 409
+        assert create.call_count == 0
+        codes = {b["code"] for b in r.json()["detail"]["blockers"]}
+        assert deal_billing.B_CUSTOM_DECISION_PENDING in codes
+
+    def test_a_catalogue_deal_still_uses_the_configured_stripe_price(
+            self, client, db_session, world):
+        """The custom path must not have loosened the standard one: a Starter,
+        Growth or Professional deal still bills only against its brand's own
+        configured price id."""
+        world["pkg"].billing_plan_key = "growth"
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        r, create = self._post(client, db_session, world)
+        assert r.status_code == 200, r.text
+        item = create.call_args.kwargs["line_items"][0]
+        assert item["price"] == "price_growth_test"
+        assert "price_data" not in item
+        assert create.call_args.kwargs["metadata"]["plan"] == "growth"
 
 
 # ── authority ───────────────────────────────────────────────────────────────
@@ -310,7 +666,6 @@ class TestCheckoutComposition:
 
 class TestNoSecretLeak:
     def test_no_stripe_secret_appears_in_any_response(self, client, db_session, world):
-        self._marker = "sk_test_LEAKCANARY"
         world["pkg"].billing_plan_key = "growth"
         db_session.commit()
         r = client.get("/sales/opportunities/%s/billing" % world["opp"].id,

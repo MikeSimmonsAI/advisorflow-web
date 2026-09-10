@@ -49,15 +49,27 @@ log = logging.getLogger(__name__)
 # ── The decided customer SaaS subscription prices ─────────────────────────────
 #
 # THESE ARE THE MONTHLY SUBSCRIPTION PRICES, NOT THE DIRECT-SALE SETUP FEES.
-# The sales catalogue for the same three names is $1,497 / $2,495 / $4,995 as
-# ONE-TIME implementation fees and lives in `brand_packages`. Two different
-# economic objects; same three words. Nothing here reads or writes that table.
+# The sales catalogue for the same three names holds the ONE-TIME
+# implementation fees ($1,500 / $2,500 / $5,000 as approved) and lives in
+# `brand_packages`. Two different economic objects; same three words. Nothing
+# here reads or writes that table.
+#
+# APPROVED PRICING, SEPTEMBER 2026. The recurring figures below replace the
+# earlier $497 / $997 / $1,997. They are stated here — brand configuration a
+# God admin previews and applies — and nowhere in the billing engine, which
+# reads them back out of `brand_billing_plans` like any other brand's.
+#
+#   Starter        $1,500 setup   $500 / month
+#   Growth         $2,500 setup   $1,000 / month
+#   Professional   $5,000 setup   $2,000 / month
+#   Custom         approved amounts only, never a default — see
+#                  deal_billing.approved_custom_recurring()
 EVOSYS_PLANS = [
     {
         "key": "starter",
         "name": "Starter",
         "sort_order": 10,
-        "monthly_cents": 49700,          # $497 / month
+        "monthly_cents": 50000,          # $500 / month
         "max_leads": 2500,
         "max_users": 2,
         "is_purchasable": True,
@@ -71,7 +83,7 @@ EVOSYS_PLANS = [
         "key": "growth",
         "name": "Growth",
         "sort_order": 20,
-        "monthly_cents": 99700,          # $997 / month
+        "monthly_cents": 100000,         # $1,000 / month
         "max_leads": 5000,
         "max_users": 3,
         "is_purchasable": True,
@@ -86,7 +98,7 @@ EVOSYS_PLANS = [
         "key": "professional",
         "name": "Professional",
         "sort_order": 30,
-        "monthly_cents": 199700,         # $1,997 / month
+        "monthly_cents": 200000,         # $2,000 / month
         "max_leads": 7500,
         "max_users": 5,
         "is_purchasable": True,

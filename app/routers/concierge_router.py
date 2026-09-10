@@ -75,9 +75,9 @@ TONE AND STYLE:
 # BrandBillingPlan. We cache the blurb for 60 s to avoid a DB hit per message.
 
 _STATIC_PRICING_FALLBACK = """PRICING (annual contract):
-- Starter: $497/mo + $1,500 one-time onboarding. Up to 2,500 leads, 1-2 users. AI email only. No SMS or voice.
-- Growth: $997/mo + $2,500 one-time onboarding. Up to 5,000 leads, 1-3 users. Email + SMS 1,000/mo + AI voice 300 min/mo.
-- Professional: $1,997/mo + $5,000 one-time onboarding. Up to 7,500 leads, up to 5 users, up to 3 locations. SMS 3,000/mo, voice 750 min/mo. Priority support + 24-month price lock.
+- Starter: $500/mo + $1,500 one-time onboarding. Up to 2,500 leads, 1-2 users. AI email only. No SMS or voice.
+- Growth: $1,000/mo + $2,500 one-time onboarding. Up to 5,000 leads, 1-3 users. Email + SMS 1,000/mo + AI voice 300 min/mo.
+- Professional: $2,000/mo + $5,000 one-time onboarding. Up to 7,500 leads, up to 5 users, up to 3 locations. SMS 3,000/mo, voice 750 min/mo. Priority support + 24-month price lock.
 - Enterprise: Custom pricing + custom onboarding. Unlimited leads, users, locations. White-label available. Book a call to discuss.
 - Month-to-month adds 25% to monthly price.
 - Annual pay-in-full bonus: month 13 free + 24-month price lock guaranteed.

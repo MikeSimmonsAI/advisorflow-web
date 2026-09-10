@@ -101,6 +101,33 @@ export default function DealBillingPanel({ opp }) {
         </div>
       </div>
 
+      {/* A CUSTOM RATE SAYS SO, AND SAYS WHO APPROVED IT. Otherwise "Ready to
+          bill" on a bespoke monthly figure is indistinguishable from the same
+          words on a catalogue tier, and the one that needs a second pair of
+          eyes is the one that looks routine. */}
+      {data.custom_pricing && (
+        <div style={{ background: '#f5f3ff', border: '1px solid #c4b5fd',
+                      borderRadius: 8, padding: '9px 12px', marginBottom: 10 }}>
+          <b style={{ fontSize: 11, color: '#5b21b6' }}>
+            Custom monthly rate
+            {data.custom_pricing.authority === 'manager_approval'
+              ? ' · manager approved' : ''}
+          </b>
+          <div style={{ fontSize: 11, marginTop: 3, opacity: 0.85 }}>
+            Charged as a rate set for this deal, not a catalogue plan.
+            {data.custom_pricing.authority === 'manager_approval'
+              ? ' A manager approved this exact figure.'
+              : ' Set within the pricing authority of whoever agreed it.'}
+          </div>
+          {data.custom_pricing.entitlement_plan_unset && (
+            <div className="sw-subtle" style={{ fontSize: 10, marginTop: 5 }}>
+              This customer will not sit on a standard plan tier, so plan feature
+              limits are not applied to them.
+            </div>
+          )}
+        </div>
+      )}
+
       {blockers.map((b, i) => (
         <div key={i} style={{ ...BLOCK_STYLE, borderRadius: 8,
                               padding: '10px 12px', marginBottom: 8 }}>
