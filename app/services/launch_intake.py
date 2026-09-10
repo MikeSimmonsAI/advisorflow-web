@@ -93,7 +93,8 @@ STEP_SCHEMA: List[Dict[str, Any]] = [
             _f("employees", "Employees"),
             _f("territory", "Service territory"),
             _f("statesServed", "States served"),
-            _f("markets", "Utility markets / TDUs"),
+            _f("markets", "Markets or service areas",
+               help="The regions, territories or distribution areas you operate in."),
             _f("goLive", "Target go-live date", KIND_DATE),
             _f("additionalInfo", "Anything else we should know", KIND_TEXTAREA),
         ],
@@ -133,15 +134,31 @@ STEP_SCHEMA: List[Dict[str, Any]] = [
         ],
     },
     {
-        "key": "compare", "n": 4, "label": "ComparePower Integration",
-        "title": "ComparePower Integration",
-        "blurb": "Your ComparePower relationship and the people who own it. "
-                 "We handle the technical integration end to end.",
+        # LABELLED FOR EVERY BRAND, NOT FOR THE FIRST ONE.
+        #
+        # This step shipped as "ComparePower Integration" with fields named
+        # "ComparePower contact". ComparePower is a retail-electricity rate
+        # marketplace: it is the first customer's lead source, not the
+        # platform's. A fibre reseller, a funeral home or a benefits agency
+        # onboarding through this same engine was being asked about a company
+        # they have never heard of, which is the same white-label failure as
+        # showing them another brand's name.
+        #
+        # THE KEYS ARE UNCHANGED (`cpContact`, `cpEmail`, …) so no stored
+        # answer moves and no migration is needed. Only what a human reads
+        # changed, and it changed on the SERVER so the customer wizard, the
+        # staff review and the mobile app cannot drift into three vocabularies.
+        "key": "compare", "n": 4, "label": "Lead Sources",
+        "title": "Lead Sources & Integrations",
+        "blurb": "Where your enquiries come from today — the marketplaces, "
+                 "comparison sites and partners you work with, and who owns "
+                 "each relationship. We handle the technical integration.",
         "fields": [
-            _f("cpContact", "ComparePower contact", required=True),
-            _f("cpEmail", "Contact email", KIND_EMAIL),
-            _f("cpPhone", "Contact phone", KIND_PHONE),
-            _f("cpTech", "Technical contact"),
+            _f("cpContact", "Main lead source or partner", required=True,
+               help="The marketplace, comparison site or partner that sends you business."),
+            _f("cpEmail", "Partner contact email", KIND_EMAIL),
+            _f("cpPhone", "Partner contact phone", KIND_PHONE),
+            _f("cpTech", "Their technical contact"),
             _f("cpDocsUrl", "API documentation URL", KIND_URL),
             _f("cpSandbox", "Sandbox access", KIND_SELECT, options=[
                 {"value": "not_requested", "label": "Not requested"},
@@ -173,8 +190,8 @@ STEP_SCHEMA: List[Dict[str, Any]] = [
         ],
     },
     {
-        "key": "process", "n": 6, "label": "Customer Process",
-        "title": "Customer Process",
+        "key": "process", "n": 6, "label": "Workflow",
+        "title": "Your Customer Workflow",
         "blurb": "What happens after a customer gives you their information. This "
                  "is the most important section — it is what the automation is "
                  "built to reproduce.",
@@ -184,17 +201,18 @@ STEP_SCHEMA: List[Dict[str, Any]] = [
             _f("firstReceiver", "Who sees it first", required=True),
             _f("responseTime", "Target response time", KIND_SELECT, required=True, options=[
                 {"value": "minutes", "label": "Within minutes"},
-                {"value": "same_day", "label": "Same day"},
+                {"value": "hour", "label": "Within an hour"},
+                {"value": "same_day", "label": "Same business day"},
                 {"value": "next_day", "label": "Next business day"},
                 {"value": "varies", "label": "It varies"}]),
-            _f("rateReviewer", "Who reviews rates with the customer"),
-            _f("enrollmentHelper", "Who helps with enrolment"),
+            _f("rateReviewer", "Who reviews options or pricing with the customer"),
+            _f("enrollmentHelper", "Who helps the customer sign up"),
             _f("completionMarker", "How you know it is done", KIND_TEXTAREA),
             _f("noResponse", "What happens when they do not reply", KIND_TEXTAREA),
         ],
     },
     {
-        "key": "files", "n": 7, "label": "Files & Documents",
+        "key": "files", "n": 7, "label": "Documents",
         "title": "Files & Documents",
         "blurb": "The documents and samples we need in hand before the build starts.",
         # No text fields — this step's completion is measured in uploads.
@@ -202,8 +220,8 @@ STEP_SCHEMA: List[Dict[str, Any]] = [
         "requires_files": 1,
     },
     {
-        "key": "review", "n": 8, "label": "Review & Submit",
-        "title": "Review & Submit",
+        "key": "review", "n": 8, "label": "Launch",
+        "title": "Review & Launch",
         "blurb": "A last look at everything you have given us, then sign off and "
                  "hand it to the implementation team.",
         "fields": [

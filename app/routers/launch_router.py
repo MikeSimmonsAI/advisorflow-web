@@ -220,6 +220,28 @@ def my_step(step_key: str, request: Request,
     return launch_intake.read_step(db, impl.id, org_id, step_key)
 
 
+@router.get("/me/summary")
+def my_summary(request: Request,
+               db: Session = Depends(get_db),
+               user: User = Depends(get_current_user)) -> dict:
+    """Every step's answers at once, for the customer's own Review screen.
+
+    The wizard loads one step at a time, which is right for editing and wrong
+    for the final read-through: eight sequential requests to show one summary
+    is eight chances to half-render. This is the same `read_step` the wizard
+    already uses, looped — so secrets come back as `secrets_set` (key names,
+    never values) here exactly as they do everywhere else, and there is no
+    second serialiser to keep in step.
+
+    Same access rule as the rest of `/launch/me`: no org id is accepted, the
+    workspace comes from the session.
+    """
+    org_id = _caller_org_id(user, db, request)
+    impl = _impl_for_org(db, org_id)
+    return {"answers": {k: launch_intake.read_step(db, impl.id, org_id, k)
+                        for k in launch_intake.STEP_KEYS}}
+
+
 class StepSave(BaseModel):
     answers: Dict[str, Any] = {}
 
@@ -409,7 +431,28 @@ def staff_list(db: Session = Depends(get_db),
     who have begun is a list that hides the ones who never did, which are
     exactly the ones somebody needs to call.
     """
+    from app.services import implementation_service as impl_svc
+
     impls = db.query(Implementation).all()
+
+    # THE TWO PROGRESS CONCEPTS ARE BOTH REPORTED, AND SEPARATELY NAMED.
+    # A screen that shows "100%" without saying 100% of WHAT is the exact
+    # confusion this list caused: a customer at 8/8 intake sections and 0/8
+    # build milestones looked like a contradiction rather than like somebody
+    # who has done their homework before the team has started.
+    #
+    # Batched, not per-row: `completion_for_many` is one query for every
+    # implementation on the page.
+    impl_completion = impl_svc.completion_for_many(db, [i.id for i in impls])
+
+    # Brand names in one query too, so a list of fifty customers does not make
+    # fifty platform lookups to print a label.
+    plat_ids = {i.platform_id for i in impls if i.platform_id}
+    plat_names = {}
+    if plat_ids:
+        for p in db.query(Platform).filter(Platform.id.in_(plat_ids)).all():
+            plat_names[p.id] = p.name
+
     out = []
     for impl in impls:
         org = (db.query(Organization)
@@ -424,21 +467,63 @@ def staff_list(db: Session = Depends(get_db),
             intake_state = "in_progress"
         else:
             intake_state = "not_started"
+        c = impl_completion.get(impl.id) or {
+            "total": 0, "settled": 0, "percent": 0, "required_open": [], "blocked": []}
+
+        # WHAT IS ACTUALLY HOLDING THIS UP, separated into the two kinds that
+        # call for different responses. A blocker means somebody is stuck; a
+        # warning means somebody should look. Merging them is how a screen ends
+        # up with one amber box nobody reads.
+        blockers, warnings = [], []
+        if c["blocked"]:
+            blockers += ["Milestone blocked: %s" % m["label"] for m in c["blocked"]]
+        if impl.status == "blocked":
+            blockers.append(impl.blocker_note or "Implementation is blocked")
+        if intake_state == "submitted":
+            warnings.append("Intake submitted and waiting on review")
+        if intake_state == "not_started":
+            warnings.append("Customer has not started their intake")
+        if impl.owner_user_id is None:
+            warnings.append("No implementation owner assigned")
+        if impl.target_launch_date is None:
+            warnings.append("No target launch date set")
+
         out.append({
             "implementation_id": impl.id,
             "organization_id": impl.organization_id,
             "organization_name": org.name if org else None,
             "platform_id": impl.platform_id,
+            "brand_name": plat_names.get(impl.platform_id),
             "implementation_status": impl.status,
+            "implementation_owner_id": impl.owner_user_id,
+
+            # ── customer intake: the eight questionnaire sections ──────────
             "intake_state": intake_state,
+            "intake_pct": ov["overall_pct"],
+            "intake_complete_steps": ov["complete_steps"],
+            "intake_total_steps": ov["total_steps"],
+            # Kept under their original names too: other callers (and the
+            # mobile app) already read these, and renaming a field to improve a
+            # label is how you break a client to fix a screen.
             "overall_pct": ov["overall_pct"],
             "complete_steps": ov["complete_steps"],
             "total_steps": ov["total_steps"],
+
+            # ── implementation: the internal build milestones ──────────────
+            "implementation_pct": c["percent"],
+            "implementation_settled": c["settled"],
+            "implementation_total": c["total"],
+            "implementation_required_open": c["required_open"],
+
             "file_count": ov["file_count"],
             "target_launch_date": impl.target_launch_date.isoformat()
                                   if impl.target_launch_date else None,
             "submitted_at": sub.submitted_at.isoformat()
                             if sub and sub.submitted_at else None,
+            "reviewed_at": sub.reviewed_at.isoformat()
+                           if sub and sub.reviewed_at else None,
+            "blockers": blockers,
+            "warnings": warnings,
         })
     out.sort(key=lambda r: (r["intake_state"] != "submitted", r["organization_name"] or ""))
     return {"launches": out, "total": len(out)}

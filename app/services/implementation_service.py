@@ -107,6 +107,30 @@ def completion(db: Session, impl: Implementation) -> Dict[str, Any]:
     return _completion_from(milestones(db, impl))
 
 
+def completion_for_many(db: Session, impl_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """`completion()` for a whole list, in ONE query.
+
+    The Customer Launches screen shows implementation progress beside intake
+    progress for every customer at once. Calling `completion()` per row would
+    be one query per customer on a screen whose whole purpose is to show all of
+    them — the N+1 this codebase has removed twice already.
+
+    The arithmetic is `_completion_from`, unchanged and shared, so a batched
+    percentage and a single one cannot disagree.
+    """
+    if not impl_ids:
+        return {}
+    rows = (db.query(ImplementationMilestone)
+              .filter(ImplementationMilestone.implementation_id.in_(impl_ids))
+              .order_by(ImplementationMilestone.position,
+                        ImplementationMilestone.created_at)
+              .all())
+    grouped: Dict[str, List[ImplementationMilestone]] = {i: [] for i in impl_ids}
+    for m in rows:
+        grouped.setdefault(m.implementation_id, []).append(m)
+    return {impl_id: _completion_from(ms) for impl_id, ms in grouped.items()}
+
+
 def set_milestone(db: Session, impl: Implementation, actor: User, key: str,
                   new_status: Optional[str] = None,
                   notes: Optional[str] = None) -> ImplementationMilestone:

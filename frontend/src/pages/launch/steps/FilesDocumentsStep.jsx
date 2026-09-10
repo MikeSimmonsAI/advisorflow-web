@@ -37,12 +37,13 @@ export default function FilesDocumentsStep({ v, set, files, onUpload, onRemoveFi
         sub="What the build and the migration are shaped around.">
         <Field span={12} label="">
           <Uploads>
-            <Upload {...up} title="ComparePower documentation" note="API docs, agreements" />
+            <Upload {...up} title="Lead source / partner documentation" note="API docs, agreements" />
             <Upload {...up} title="Initial user list" note="Name, email, role" />
             <Upload {...up} title="Sample customer data" note="A handful of records, any format"
               tag="Required" />
             <Upload {...up} title="Sample lead data" note="Recent enquiries as they arrive today" />
-            <Upload {...up} title="Sample electricity bill" note="One redacted example" />
+            <Upload {...up} title="Sample customer statement or invoice"
+              note="One redacted example of what your customers receive today" />
           </Uploads>
         </Field>
       </Group>
@@ -52,7 +53,8 @@ export default function FilesDocumentsStep({ v, set, files, onUpload, onRemoveFi
         <Field span={12} label="">
           <Uploads>
             <Upload {...up} title="Privacy policy" note="Current published version" />
-            <Upload {...up} title="Terms & disclosures" note="Including any PUC-required language" />
+            <Upload {...up} title="Terms & disclosures"
+              note="Including any regulator-required language for your industry" />
             <Upload {...up} title="SMS / email consent language" note="How you capture opt-in today"
               tag="Required" />
           </Uploads>
@@ -64,7 +66,7 @@ export default function FilesDocumentsStep({ v, set, files, onUpload, onRemoveFi
           <Field label="Notes on what you have sent" span={12}>
             <Area rows={3} value={v.fileNotes}
               onChange={x => set('fileNotes', x)}
-              placeholder="Account numbers redacted from the bill sample; consent wording is being reviewed by counsel and lands next week…" />
+              placeholder="Account numbers redacted from the statement sample; consent wording is being reviewed by counsel and lands next week…" />
           </Field>
         </Fields>
       </Collapse>

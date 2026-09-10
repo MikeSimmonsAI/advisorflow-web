@@ -92,7 +92,7 @@ export default function CompanyInformationStep({ v, set }) {
       </Group>
 
       <Group title="Service Territory"
-        sub="Where you can actually sell. This drives which rates and plans your site is allowed to show a visitor.">
+        sub="Where you can actually sell. This drives what your site is allowed to show a visitor.">
         <Field label="Primary Service Territory" span={6} required>
           <Text value={v.territory} onChange={x => set('territory', x)} />
         </Field>
@@ -100,8 +100,8 @@ export default function CompanyInformationStep({ v, set }) {
           <Text value={v.statesServed} onChange={x => set('statesServed', x)}
             placeholder="TX, OK…" />
         </Field>
-        <Field label="Markets / Utility Areas" span={8}
-          hint="TDU or utility service areas you are certified in.">
+        <Field label="Markets or service areas" span={8}
+          hint="The regions, territories or distribution areas you operate in.">
           <Text value={v.markets} onChange={x => set('markets', x)} />
         </Field>
         <Field label="Target Go-Live Date" span={4} required>
@@ -113,7 +113,7 @@ export default function CompanyInformationStep({ v, set }) {
         meta="Certifications, filings, anything unusual">
         <Fields>
           <Field label="Anything else about the business we should know" span={12}
-            hint="Certificate numbers, PUC registration, franchise or affiliate arrangements, seasonal patterns.">
+            hint="Certificate or licence numbers, regulator registrations, franchise or affiliate arrangements, seasonal patterns.">
             <Area rows={4} value={v.additionalInfo}
               onChange={x => set('additionalInfo', x)}
               placeholder="Optional" />

@@ -48,8 +48,8 @@ export const ICONS = {
 export const DELIVERABLES = [
   { t: 'Modern customer website',
     d: 'Built to your brand, fast, and written for the customer you actually serve.' },
-  { t: 'ComparePower rate experience',
-    d: 'Live plans and rates presented inside your own site.' },
+  { t: 'Live partner data experience',
+    d: 'Your lead sources and partner feeds presented inside your own site.' },
   { t: 'Customer & lead capture',
     d: 'Every enquiry lands in one place with its full context attached.' },
   { t: 'Automated follow-up',

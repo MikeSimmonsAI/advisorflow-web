@@ -60,7 +60,7 @@ import WhatWeLaunch from './WhatWeLaunch'
 import CompanyInformationStep from './steps/CompanyInformationStep'
 import BrandingAssetsStep from './steps/BrandingAssetsStep'
 import WebsiteAccessStep from './steps/WebsiteAccessStep'
-import ComparePowerStep from './steps/ComparePowerStep'
+import LeadSourcesStep from './steps/LeadSourcesStep'
 import CurrentSystemsStep from './steps/CurrentSystemsStep'
 import CustomerProcessStep from './steps/CustomerProcessStep'
 import FilesDocumentsStep from './steps/FilesDocumentsStep'
@@ -70,7 +70,7 @@ const STEP_COMPONENTS = {
   company: CompanyInformationStep,
   branding: BrandingAssetsStep,
   website: WebsiteAccessStep,
-  compare: ComparePowerStep,
+  compare: LeadSourcesStep,
   systems: CurrentSystemsStep,
   process: CustomerProcessStep,
   files: FilesDocumentsStep,
@@ -267,6 +267,15 @@ export default function LaunchPad() {
   const next = steps[index + 1]
   const prev = steps[index - 1]
   const submitted = !!(launch.submission && !launch.submission.reviewed_at)
+  const reviewed = !!(launch.submission && launch.submission.reviewed_at)
+
+  // The one intake status the whole surface agrees on, derived from the same
+  // two facts the backend derives it from (a submission exists; it has been
+  // reviewed) plus progress. See present.js — the staff list uses the same
+  // vocabulary, so "Submitted — needs review" means one thing on this platform.
+  const intakeStatusKey = submitted ? 'submitted'
+    : reviewed ? 'reviewed'
+      : overall > 0 ? 'in_progress' : 'not_started'
 
   return (
     <div className="lp-scope" data-surface="launch">
@@ -278,18 +287,39 @@ export default function LaunchPad() {
         <div className="lp-body">
           <LaunchHeader brand={brand} customer={customer} />
 
+          {/* WHAT HAPPENS NEXT, not just that something happened. A locked
+              form with no explanation reads as a bug; a locked form that says
+              when it was sent, who has it and how it reopens reads as a
+              process. */}
           {submitted ? (
             <div className="lp-proto">
               <b>Submitted</b>
               <span>
-                Your intake is with the implementation team. They will reopen it
-                if anything needs changing.
+                Sent{launch.submission?.submitted_at
+                  ? ' on ' + new Date(launch.submission.submitted_at).toLocaleString()
+                  : ''}
+                {launch.submission?.signed_name
+                  ? ' by ' + launch.submission.signed_name : ''}.
+                {' '}Your {brand.name} implementation team has it and is reviewing
+                it now. Editing is locked while they do — they will reopen it if
+                anything needs changing, and you will be able to edit again
+                straight away.
+              </span>
+            </div>
+          ) : reviewed ? (
+            <div className="lp-proto">
+              <b>Reviewed</b>
+              <span>
+                Your {brand.name} team has reviewed your intake. You can still
+                make changes if anything needs correcting.
               </span>
             </div>
           ) : null}
 
           <main className="lp-main">
-            <LaunchHero brand={brand} customer={customer} />
+            <LaunchHero brand={brand} customer={customer}
+                        implementation={launch.implementation}
+                        state={intakeStatusKey} />
             <LaunchProgress phases={launch.lifecycle}
                             currentStatus={launch.implementation?.status}
                             intakePct={overall} />

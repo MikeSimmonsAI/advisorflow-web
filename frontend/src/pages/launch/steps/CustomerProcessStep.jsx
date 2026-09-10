@@ -20,7 +20,7 @@ const flowFor = name => ([
   { k: 'Stage 1', t: 'Customer submits information' },
   { k: 'Stage 2', t: (name || 'You') + ' receive' + (name ? 's' : '') + ' it' },
   { k: 'Stage 3', t: 'Team reviews / contacts customer' },
-  { k: 'Stage 4', t: 'Rate, plan or enrollment action' },
+  { k: 'Stage 4', t: 'Quote, booking or enrolment action' },
   { k: 'Stage 5', t: 'Follow-up and completion' },
 ])
 
@@ -82,10 +82,10 @@ export default function CustomerProcessStep({ v, set, customer }) {
           <Select value={v.responseTime} onChange={x => set('responseTime', x)}
             options={RESPONSE} />
         </Field>
-        <Field label="Who performs the rate / plan review" span={6} required>
+        <Field label="Who reviews options or pricing with the customer" span={6} required>
           <Text value={v.rateReviewer} onChange={x => set('rateReviewer', x)} />
         </Field>
-        <Field label="Who assists with enrollment" span={6} required>
+        <Field label="Who helps the customer sign up" span={6} required>
           <Text value={v.enrollmentHelper}
             onChange={x => set('enrollmentHelper', x)} />
         </Field>
@@ -94,7 +94,7 @@ export default function CustomerProcessStep({ v, set, customer }) {
       <Group title="Endings"
         sub="Both of them. The system needs to know when to stop as clearly as it knows when to start.">
         <Field label="What marks a customer complete?" span={12} required
-          hint="The specific event — enrollment confirmed, first bill issued, contract signed.">
+          hint="The specific event — signup confirmed, first invoice issued, contract signed.">
           <Area rows={3} value={v.completionMarker}
             onChange={x => set('completionMarker', x)} />
         </Field>

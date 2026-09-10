@@ -83,7 +83,7 @@ export default function BrandingAssetsStep({ v, set }) {
             <Upload title="Team & facility photos" note="Originals, not web-sized" />
             <Upload title="Brochures & print collateral" note="PDF or InDesign" />
             <Upload title="Customer testimonials" note="With permission to publish" />
-            <Upload title="Certifications & badges" note="PUC, BBB, awards" />
+            <Upload title="Certifications & badges" note="Licences, accreditations, awards" />
             <Upload title="Existing brand guide" note="If one exists" />
             <Upload title="Anything else" note="Video, ads, social artwork" />
           </Uploads>

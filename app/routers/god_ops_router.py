@@ -287,9 +287,47 @@ def implementation_detail(implementation_id: str,
                           db: Session = Depends(get_db),
                           user: User = Depends(require_god)):
     impl = impls.get_or_404(db, implementation_id)
+
+    # THE OTHER PROGRESS CONCEPT, ON THE SAME SCREEN AND SEPARATELY NAMED.
+    #
+    # This endpoint reported milestone completion and nothing else, so an
+    # operator looking at a customer who had answered all eight intake sections
+    # saw "0/8 milestones · 0%" with no sign the customer had done anything.
+    # Meanwhile Customer Launches showed that same customer at 100%. Two
+    # screens, two numbers, no shared vocabulary — which reads as the platform
+    # contradicting itself rather than as two different measurements.
+    #
+    # `launch_intake.overview` is the SAME function the customer's own wizard
+    # and the staff review call, so there is one arithmetic for intake
+    # completion on this platform and it is not this file's.
+    from app.services import launch_intake as _li
+    _ov = _li.overview(db, impl.id, impl.organization_id)
+    _sub = _li.latest_submission(db, impl.id, impl.organization_id)
+    if _sub is not None and _sub.reviewed_at is None:
+        _intake_state = "submitted"
+    elif _sub is not None:
+        _intake_state = "reviewed"
+    elif _ov["overall_pct"] > 0:
+        _intake_state = "in_progress"
+    else:
+        _intake_state = "not_started"
+
     return {
         "implementation": ops._implementation_row(db, impl),
         "completion": impls.completion(db, impl),
+        # Named `intake` rather than folded into `completion`: two keys, two
+        # meanings, and no caller can average them by accident.
+        "intake": {
+            "state": _intake_state,
+            "percent": _ov["overall_pct"],
+            "complete_steps": _ov["complete_steps"],
+            "total_steps": _ov["total_steps"],
+            "file_count": _ov["file_count"],
+            "submitted_at": _sub.submitted_at if _sub else None,
+            "reviewed_at": _sub.reviewed_at if _sub else None,
+            "signed_name": _sub.signed_name if _sub else None,
+            "outstanding": _li.submission_blockers(db, impl.id, impl.organization_id),
+        },
         "milestones": [{"id": m.id, "key": m.key, "label": m.label,
                         "description": m.description, "position": m.position,
                         "is_required": bool(m.is_required), "status": m.status,

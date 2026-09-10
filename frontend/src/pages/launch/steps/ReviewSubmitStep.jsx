@@ -17,8 +17,78 @@
  * show a green page beside a refusal, and the customer will be right to be
  * angry about it.
  */
-import { useState } from 'react'
-import { Group, Field, Text, Note, Ico } from '../LaunchUI'
+import { useEffect, useState } from 'react'
+import { Group, Field, Text, Note, Ico, Collapse } from '../LaunchUI'
+import { api } from '../../../api/client'
+import { buildSchemaIndex, presentAllSteps, SECRET_NOTE } from '../present'
+
+/**
+ * EVERYTHING THEY HAVE TOLD US, IN THEIR OWN LANGUAGE.
+ *
+ * A review step that only shows section percentages asks somebody to sign off
+ * on a number. This shows the actual answers — formatted through present.js,
+ * so a stored `sigAffirm: true` reads as "I confirm this information is
+ * accurate — Yes", a `not_requested` reads as "Not requested", and a saved
+ * credential reads as "Stored securely" because there is no value to read.
+ */
+function AnswerSummary() {
+  const [schema, setSchema] = useState(null)
+  const [answers, setAnswers] = useState(null)
+  const [err, setErr] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([api.get('/launch/config'), api.get('/launch/me/summary')])
+      .then(([cfg, sum]) => {
+        if (!alive) return
+        setSchema(buildSchemaIndex(cfg))
+        setAnswers(sum.answers || {})
+      })
+      .catch(e => { if (alive) setErr(e?.detail || 'Could not load your answers.') })
+    return () => { alive = false }
+  }, [])
+
+  if (err) return <p className="lp-hint">{err}</p>
+  if (!schema || !answers) return <p className="lp-hint">Loading your answers…</p>
+
+  const sections = presentAllSteps(schema, answers)
+    .filter(s => s.key !== 'review' && s.rows.length > 0)
+  const hasSecret = sections.some(s => s.rows.some(r => r.secure))
+
+  if (!sections.length) {
+    return <p className="lp-hint">Nothing has been filled in yet.</p>
+  }
+
+  return (
+    <>
+      {sections.map(s => (
+        <div key={s.key} style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em',
+                        textTransform: 'uppercase', color: '#8494ab',
+                        marginBottom: 8 }}>{s.label}</div>
+          <div style={{ display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))',
+                        gap: 12 }}>
+            {s.rows.map(row => (
+              <div key={row.key} style={{ gridColumn: row.long ? '1 / -1' : undefined }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em',
+                              textTransform: 'uppercase', color: '#a6b3c6' }}>
+                  {row.label}
+                </div>
+                <div style={{ fontSize: 13.5, marginTop: 3, color: '#141d31',
+                              whiteSpace: row.long ? 'pre-wrap' : 'normal',
+                              fontStyle: row.secure ? 'italic' : 'normal' }}>
+                  {row.value}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {hasSecret ? <p className="lp-hint">{SECRET_NOTE}</p> : null}
+    </>
+  )
+}
 
 export default function ReviewSubmitStep({
   v, set, steps, onGoTo, customer, blockers = [], onSubmit,
@@ -112,6 +182,11 @@ export default function ReviewSubmitStep({
           </div>
         </Field>
       </Group>
+
+      <Collapse title="Everything you have told us"
+                meta="Read it through before you sign" open>
+        <AnswerSummary />
+      </Collapse>
 
       <Group title="Acknowledgement"
         sub="Signed by someone authorised to confirm this information on behalf of the company.">

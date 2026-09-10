@@ -16,7 +16,125 @@ import {
   Panel, Empty, Fact, Bar, StatusBadge, money, when, whenExact,
   errText, errWarnings,
 } from './god/GodOpsShared'
+import { PROGRESS, intakeState } from './launch/present'
 import './god/GodOps.css'
+
+/**
+ * THE TWO PROGRESS CONCEPTS, SIDE BY SIDE AND NAMED.
+ *
+ * This screen used to report milestone completion alone, so a customer who had
+ * finished all eight intake sections appeared here as "0/8 · 0%" — while
+ * Customer Launches showed the same customer at 100%. Nothing was wrong with
+ * either number; there was simply no vocabulary saying they measure different
+ * things. Both now come from `present.js`, which is also what the customer's
+ * own wizard and the staff review use, so the same words appear everywhere.
+ */
+function ProgressPair({ intake, completion }) {
+  const i = intake || {}
+  const c = completion || {}
+  const st = intakeState(i.state)
+  const row = (concept, done, total, pct, extra) => {
+    const meta = PROGRESS[concept]
+    return (
+      <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.07em',
+                         textTransform: 'uppercase', color: 'var(--go-dim)' }}>
+            {meta.label}
+          </span>
+          <b style={{ fontSize: 13 }}>
+            {total ? `${done} of ${total} ${meta.unit}` : `no ${meta.unit} yet`}
+            {' · '}{pct}%
+          </b>
+        </div>
+        <Bar percent={pct} />
+        <div style={{ fontSize: 11, color: 'var(--go-dim)', marginTop: 4 }}>
+          {meta.meaning}
+        </div>
+        {extra}
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+      {row('intake', i.complete_steps, i.total_steps, i.percent ?? 0,
+        <div style={{ fontSize: 11, marginTop: 4 }}>
+          <b>{st.label}</b>
+          {i.signed_name ? ' · signed by ' + i.signed_name : ''}
+          {i.file_count ? ' · ' + i.file_count + ' file'
+            + (i.file_count === 1 ? '' : 's') : ''}
+        </div>)}
+      {row('implementation', c.settled, c.total, c.percent ?? 0, null)}
+    </div>
+  )
+}
+
+/**
+ * NEEDS ATTENTION, split into the two kinds that call for different responses.
+ *
+ * A blocker means the work has stopped and somebody is waiting. A warning means
+ * somebody should look before launch. The previous screen put every incomplete
+ * thing into one amber box, which is the reliable way to make people stop
+ * reading amber boxes.
+ */
+function NeedsAttention({ impl, completion, intake, warnings }) {
+  const blockers = []
+  const notes = []
+
+  if (impl.status === 'blocked') {
+    blockers.push(impl.blocker_note
+      ? 'Blocked: ' + impl.blocker_note
+      : 'Implementation is blocked and no reason was recorded')
+  }
+  for (const m of (completion?.blocked || [])) {
+    blockers.push('Milestone blocked: ' + m.label)
+  }
+
+  // launch_warnings is the SERVER's list and is the same one `launch()`
+  // refuses on. Rendering our own version here would be a second opinion about
+  // whether a customer may go live.
+  for (const w of (warnings || [])) notes.push(w)
+
+  if ((intake?.state) === 'submitted') {
+    notes.push('Customer intake is submitted and waiting on review')
+  }
+  if ((intake?.state) === 'not_started') {
+    notes.push('Customer has not started their intake')
+  }
+  if (!impl.target_launch_date) notes.push('No target launch date set')
+
+  if (!blockers.length && !notes.length) {
+    return (
+      <div className="go-body">
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--go-dim)' }}>
+          Nothing is blocking this launch and nothing needs a second look.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="go-body">
+      {blockers.length ? (
+        <div className="go-note err" style={{ marginBottom: notes.length ? 12 : 0 }}>
+          <strong>Blocking — work has stopped</strong>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {blockers.map((b, n) => <li key={n}>{b}</li>)}
+          </ul>
+        </div>
+      ) : null}
+      {notes.length ? (
+        <div className="go-note warn">
+          <strong>Worth a look before launch</strong>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {notes.map((w, n) => <li key={n}>{w}</li>)}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 export default function GodImplementationDetail() {
   const { implId } = useParams()
@@ -79,11 +197,30 @@ export default function GodImplementationDetail() {
         <div style={{ textAlign: 'right' }}>
           <StatusBadge status={i.status} />
           <div style={{ fontSize: 12, color: 'var(--go-dim)', marginTop: 6 }}>
-            {c.settled}/{c.total} milestones · {c.percent}%
+            {i.target_launch_date
+              ? 'Target launch ' + when(i.target_launch_date)
+              : 'No target launch date'}
           </div>
-          <Bar percent={c.percent} />
+          <div style={{ fontSize: 12, color: 'var(--go-dim)', marginTop: 2 }}>
+            Owner: {i.owner ? i.owner.name : 'unassigned'}
+          </div>
         </div>
       </div>
+
+      {/* THE BAR THAT USED TO BE HERE SAID ONLY "{settled}/{total} · {pct}%".
+          It was milestone completion, and it sat alone — which is how a
+          customer at 8/8 intake sections appeared on this page as 0%. Both
+          numbers now appear together, each saying what it counts. */}
+      <Panel title="Launch progress">
+        <div className="go-body">
+          <ProgressPair intake={d.intake} completion={c} />
+        </div>
+      </Panel>
+
+      <Panel title="Needs attention">
+        <NeedsAttention impl={i} completion={c} intake={d.intake}
+                        warnings={d.launch_warnings} />
+      </Panel>
 
       {err ? (
         <div className="go-note err">
