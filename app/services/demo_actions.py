@@ -307,10 +307,19 @@ def qualify_all(db, env, org, brand, user, params, scenario_key, step_key):
             # REPORTED, NEVER HIDDEN. The exclusion list is the part of this
             # that builds trust in the room.
             "excluded": excluded,
-            "narration": ("%d leads evaluated. %d need a person today. %d were "
-                          "excluded and every one of them says why."
+            # SAID IN FRONT OF A PROSPECT, so it has to agree with itself. "1
+            # were excluded" is the kind of sentence that makes a buyer wonder
+            # what else was not checked.
+            "narration": ("%d leads evaluated. %d %s a person today. %s"
                           % (len(leads), bands.get(BAND_URGENT, 0),
-                             len(excluded)))}
+                             "needs" if bands.get(BAND_URGENT, 0) == 1
+                             else "need",
+                             ("1 was excluded, and it says why."
+                              if len(excluded) == 1 else
+                              "None were excluded."
+                              if not excluded else
+                              "%d were excluded, and every one of them says "
+                              "why." % len(excluded))))}
 
 
 _FIRST_RESPONSE = (

@@ -580,6 +580,33 @@ def test_rebuild_restores_canonical_state(client, db_session, built):
         BookingLink.lead_id == lead.id).count() == 0
 
 
+def test_a_rebuild_does_not_erase_who_presented(client, db_session, built):
+    """The trail outlives the world it describes.
+
+    A rebuild happens weekly and the event log is the only answer to "who
+    demonstrated what, to whom, on Tuesday" — which is precisely the question
+    somebody asks after a presentation went sideways, by which time the world
+    has been rebuilt. Deleting the trail with the seed would make that
+    unanswerable by design.
+    """
+    p = _presenter(db_session, built["evo"], built["god"], admin=True)
+    _act(client, db_session, p, built["evo"], "send_sms", target="terrence")
+    before = db_session.query(DemoActionEvent).filter(
+        DemoActionEvent.action == "send_sms").count()
+    assert before >= 1
+
+    client.post("/demo-suite/%s/rebuild" % built["evo"].id,
+                headers=_h(db_session, p))
+    db_session.expire_all()
+    assert db_session.query(DemoActionEvent).filter(
+        DemoActionEvent.action == "send_sms").count() >= before
+    # Presenter progress DOES reset — a step counter pointing at a world that
+    # no longer exists is worse than an empty one.
+    from app.models.demo_suite_models import DemoSession
+    assert db_session.query(DemoSession).filter(
+        DemoSession.environment_id == built["env"].id).count() == 0
+
+
 def test_reset_never_touches_a_real_tenant(client, db_session, built):
     real_lead = Lead(organization_id=built["real"].id, first_name="Real",
                      last_name="Family", phone="+12145550000")

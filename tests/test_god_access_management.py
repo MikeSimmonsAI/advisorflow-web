@@ -464,6 +464,72 @@ def test_a_plan_that_fails_leaves_the_person_exactly_as_they_were(
                     Membership.is_active.is_(True)).count()) == 1
 
 
+def test_reinstating_access_somebody_used_to_have_actually_works(
+        client, db_session, world):
+    """THE BUG THAT ONLY CLICKING FOUND.
+
+    Adding a workspace membership to somebody who never had one worked;
+    RE-granting one to somebody whose membership had been revoked failed with
+    "the replacement access could not be verified, so nothing was removed" and
+    rolled the whole plan back.
+
+    `grant_workspace_membership` flushes on the branch that inserts a new row
+    and returns early — without flushing — on the branch that reactivates an
+    existing one. With autoflush off, the verification query that follows saw
+    the pre-change row.
+
+    So the one case the screen exists for — correcting somebody who has been
+    somewhere before — was the one case that did not work, and every test here
+    used a fresh scope and missed it. This is that case.
+    """
+    c = _christina(db_session, world)
+    org_id = world["evo_cust"].id
+
+    # Revoke it, exactly as a previous correction would have.
+    client.post("/god/access/users/%s/apply" % c.id, json={"operations": [
+        {"op": "remove_membership", "scope_type": SCOPE_CUSTOMER_ORG,
+         "scope_id": org_id}]}, headers=_h(db_session, world["god"]))
+    db_session.expire_all()
+    row = (db_session.query(Membership)
+           .filter(Membership.user_id == c.id,
+                   Membership.scope_type == SCOPE_CUSTOMER_ORG).first())
+    assert row.is_active is False
+
+    # Now put her back, in a different role.
+    r = client.post("/god/access/users/%s/apply" % c.id, json={"operations": [
+        {"op": "apply_template", "template": "workspace_user",
+         "scope_id": org_id}]}, headers=_h(db_session, world["god"]))
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    rows = (db_session.query(Membership)
+            .filter(Membership.user_id == c.id,
+                    Membership.scope_type == SCOPE_CUSTOMER_ORG).all())
+    # ONE row, reactivated and re-roled — not a second one beside the first.
+    assert len(rows) == 1
+    assert rows[0].is_active is True
+    assert rows[0].role == "advisor"
+
+
+def test_reinstating_an_executive_assignment_also_works(client, db_session,
+                                                        world):
+    """The same flush hazard on the executive-assignment branch."""
+    p = _user(db_session, role="advisor")
+    plan = {"operations": [
+        {"op": "add_membership", "scope_type": SCOPE_CUSTOMER_ORG,
+         "scope_id": world["evo_cust"].id, "role": ROLE_BRAND_EXECUTIVE}]}
+    h = _h(db_session, world["god"])
+    assert client.post("/god/access/users/%s/apply" % p.id, json=plan,
+                       headers=h).status_code == 200
+    client.post("/god/access/users/%s/apply" % p.id, json={"operations": [
+        {"op": "remove_membership", "scope_type": SCOPE_CUSTOMER_ORG,
+         "scope_id": world["evo_cust"].id, "role": ROLE_BRAND_EXECUTIVE}]},
+        headers=h)
+    r = client.post("/god/access/users/%s/apply" % p.id, json=plan, headers=h)
+    assert r.status_code == 200, r.text
+    fp = r.json()["footprint"]
+    assert [a["is_active"] for a in fp["executive_assignments"]] == [True]
+
+
 def test_removing_access_deactivates_rather_than_deletes(client, db_session,
                                                          world):
     c = _christina(db_session, world)

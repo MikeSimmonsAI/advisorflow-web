@@ -249,9 +249,23 @@ def _reset_statements(env: DemoEnvironment, org_id: str, brand_id: str
         ("DELETE FROM user_sessions WHERE user_id LIKE :p", {"p": p}),
         ("DELETE FROM users WHERE id LIKE :p", {"p": p}),
 
-        ("DELETE FROM demo_action_events WHERE environment_id = :e",
-         {"e": env.id}),
+        # PRESENTER SESSIONS RESET. Their step counters point at a world that
+        # no longer exists, and a progress bar measuring a demonstration that
+        # was deleted underneath it is worse than an empty one.
         ("DELETE FROM demo_sessions WHERE environment_id = :e", {"e": env.id}),
+
+        # `demo_action_events` IS DELIBERATELY NOT DELETED HERE.
+        #
+        # It was, in the first version of this, and live verification caught
+        # what that costs: a rebuild happens weekly and the trail is the only
+        # answer to "who demonstrated what, to whom, on Tuesday" — which is
+        # exactly the question somebody asks AFTER a presentation went sideways,
+        # by which time the world has usually been rebuilt.
+        #
+        # Keeping it is safe because it holds no foreign key into any seeded
+        # row: `target_id` is a plain string, so a row naming a lead that no
+        # longer exists is a historical fact rather than a dangling reference.
+        # The trail is per environment and is removed with the environment.
     ]
 
 

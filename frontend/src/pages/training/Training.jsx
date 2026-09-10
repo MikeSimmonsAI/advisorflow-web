@@ -50,7 +50,11 @@ function Body ({ text }) {
     <>
       {blocks.map((b, i) => {
         const lines = b.split('\n')
-        if (lines.every(l => l.trim().startsWith('*'))) {
+        // A BULLET IS `* ` — ASTERISK THEN SPACE. Matching a bare `*` made
+        // "**Reset your session** when you are done" — a paragraph that opens
+        // with bold — render as a bullet with a stray `**` hanging off it,
+        // which is exactly what the screen showed until somebody looked at it.
+        if (lines.every(l => /^\s*\*\s/.test(l) && !/^\s*\*\*/.test(l))) {
           return (
             <ul key={i} style={{ margin: '0 0 14px', paddingLeft: 20, lineHeight: 1.75 }}>
               {lines.map((l, j) => <li key={j}>{bold(l.replace(/^\s*\*\s?/, ''))}</li>)}

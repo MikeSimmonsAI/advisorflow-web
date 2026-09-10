@@ -855,12 +855,30 @@ def _grant_membership(db: Session, target: User, scope_type: str,
         executive_authority.assign(db, executive_user_id=target.id,
                                    organization_id=scope_id,
                                    granted_by_user_id=actor.id, commit=False)
+        # Same reason as the flush below: the reactivate branch of `assign`
+        # returns before flushing, and the verification that follows queries.
+        db.flush()
         return "executive_assignment"
     if scope_type == SCOPE_CUSTOMER_ORG:
         workspace_access.grant_workspace_membership(
             db, target.id, scope_id, role=role, granted_by=actor.id,
             commit=False)
         workspace_access.invalidate_workspace_memberships(target)
+        # FLUSHED HERE, AND THIS LINE IS LOAD-BEARING.
+        #
+        # `grant_workspace_membership` flushes on the branch that INSERTS a new
+        # membership and returns early — without flushing — on the branch that
+        # REACTIVATES an existing one. The session is created with
+        # autoflush=False, so on the reactivate branch the change was still
+        # pending in memory when `_verify_membership` issued its query, the
+        # query saw the old row, verification failed, and the whole plan rolled
+        # back with "the replacement access could not be verified".
+        #
+        # Which is to say: correcting somebody who had NEVER held access in
+        # that workspace worked, and correcting somebody who had — the entire
+        # point of the screen — did not. Caught by clicking the button, not by
+        # the tests, which is why there is now a test for it below.
+        db.flush()
         return "workspace_membership"
 
     # Brand-sales and platform scopes. Idempotent on (user, scope) WITHOUT the
