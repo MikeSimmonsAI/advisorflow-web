@@ -56,6 +56,7 @@ import LaunchProgress from './LaunchProgress'
 import OnboardingProgressPanel from './OnboardingProgressPanel'
 import OnboardingStepShell from './OnboardingStepShell'
 import WhatWeLaunch from './WhatWeLaunch'
+import DeliveryPanel from './DeliveryPanel'
 
 import CompanyInformationStep from './steps/CompanyInformationStep'
 import BrandingAssetsStep from './steps/BrandingAssetsStep'
@@ -358,6 +359,13 @@ export default function LaunchPad() {
                     readOnly={submitted}
                   />
                 </OnboardingStepShell>
+
+                {/* ABOVE the deliverables, deliberately. "What we will build"
+                    is the promise; this is what is actually happening and what
+                    the customer owes us today, and the live thing outranks the
+                    brochure once a launch is under way. It renders nothing at
+                    all until there is a programme to report. */}
+                <DeliveryPanel brand={brand} />
 
                 <WhatWeLaunch brand={brand} customer={customer} />
               </div>
