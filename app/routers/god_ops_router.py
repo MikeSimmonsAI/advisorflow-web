@@ -421,6 +421,71 @@ class PackagePricingRequest(BaseModel):
     setup_fee: Optional[float] = None
 
 
+class PackageBillingPlanRequest(BaseModel):
+    """Which billing plan a sold package puts the customer on.
+
+    `null` clears the mapping, which is a real state: a package that is a
+    one-time implementation with no subscription behind it should have no plan,
+    and clearing it must be expressible rather than requiring a guess.
+    """
+    billing_plan_key: Optional[str] = None
+
+
+@router.patch("/packages/{package_id}/billing-plan")
+def set_package_billing_plan(package_id: str, req: PackageBillingPlanRequest,
+                             db: Session = Depends(get_db),
+                             user: User = Depends(require_god)):
+    """Map a sold package to the recurring billing plan it should start.
+
+    THIS IS THE CONFIGURATION THAT MAKES THE MONEY PATH RUN. Until it is set,
+    `deal_billing` refuses to charge the recurring half of a deal and says
+    `package_not_mapped_to_billing_plan` — deliberately, because the alternative
+    is matching `BrandPackage.key` against `BrandBillingPlan.key` by
+    coincidence. Those are two vocabularies that share some words today and
+    would diverge the first time a brand renames a package.
+
+    THE KEY IS VALIDATED AGAINST THIS PACKAGE'S OWN BRAND. A plan belonging to
+    another platform resolves to nothing here, so one brand cannot be mapped
+    onto another brand's tier — which would bill a customer against a price
+    their own brand does not sell.
+    """
+    pkg = db.query(BrandPackage).filter(BrandPackage.id == package_id).first()
+    if pkg is None:
+        raise HTTPException(status_code=404, detail="Package not found.")
+
+    key = (req.billing_plan_key or "").strip() or None
+    before = pkg.billing_plan_key
+
+    if key is not None:
+        from app.services import billing_catalog
+        plan = billing_catalog.resolve_plan(db, pkg.platform_id, key)
+        if plan is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No billing plan %r exists for this package's brand. "
+                       "Create the plan in the brand's billing catalogue first."
+                       % key)
+
+    pkg.billing_plan_key = key
+    try:
+        # Same audit writer the rest of this router uses, so a mapping change
+        # sits in one trail with the pricing changes it affects.
+        log_action(db, None, user.id, "package.billing_plan_mapped",
+                   "brand_package", pkg.id,
+                   details={"package_key": pkg.key},
+                   platform_id=pkg.platform_id,
+                   before={"billing_plan_key": before},
+                   after={"billing_plan_key": key},
+                   commit=False)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "god_ops: could not audit package billing-plan mapping")
+    db.commit()
+    db.refresh(pkg)
+    return {"package_id": pkg.id, "package_key": pkg.key,
+            "billing_plan_key": pkg.billing_plan_key, "previous": before}
+
+
 @router.patch("/packages/{package_id}/pricing")
 def set_package_pricing(package_id: str, req: PackagePricingRequest,
                         db: Session = Depends(get_db),

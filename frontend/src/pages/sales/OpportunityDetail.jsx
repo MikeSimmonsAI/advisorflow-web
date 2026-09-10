@@ -18,6 +18,9 @@ import RescheduleDialog from './RescheduleDialog'
 import ProposalPanel from './ProposalPanel'
 import DemoSitesPanel from './DemoSitesPanel'
 import ClosingPanel from './ClosingPanel'
+// The money half of the same deal, beside the closing checklist rather than in
+// a screen the rep has to leave this one to reach.
+import DealBillingPanel from './DealBillingPanel'
 import ReassignControl from './ReassignControl'
 import {
   Card, Chip, Info, Empty, NotBuilt, ErrorBar,
@@ -948,6 +951,12 @@ export default function OpportunityDetail() {
               answer. */}
           <div style={{ marginBottom: 16 }}>
             <ClosingPanel opp={opp} />
+          </div>
+
+          {/* Directly beneath it: once the deal is closeable, "can we actually
+              collect the money" is the same question continued. */}
+          <div style={{ marginBottom: 16 }}>
+            <DealBillingPanel opp={opp} />
           </div>
 
           <Meetings opp={opp} saving={saving}

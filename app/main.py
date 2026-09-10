@@ -100,6 +100,8 @@ from app.routers.platform_context_router import router as platform_context_route
 # Customer provisioning: create, locate, staff, entitle, review, activate.
 from app.routers.customers_router import router as customers_router
 from app.routers.launch_router import router as launch_router
+# Deal → billing: the join between what was sold and what gets charged.
+from app.routers.deal_billing_router import router as deal_billing_router
 from app.routers.launch_router import god_router as launch_god_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
@@ -585,6 +587,11 @@ app.include_router(customers_router)          # Customer provisioning engine
 # NOT mounted under /onboarding: that prefix belongs to public self-serve
 # signup and has nothing to do with customer implementation despite the name.
 app.include_router(launch_router)             # /launch  — customer, session-scoped
+# Deal billing sits on the SALES surface: a rep closing a deal should not need
+# God Mode to see whether the money side is ready, or to send the customer a
+# link for the terms they negotiated. Guarded by require_sales_member plus a
+# per-record opportunity check inside the router.
+app.include_router(deal_billing_router)       # /sales/opportunities/{id}/billing
 app.include_router(launch_god_router)         # /god/launch — staff, god_admin only
 app.include_router(email_tracking_router)
 # Stripe billing: /billing/plans is public; subscription/checkout/portal are
