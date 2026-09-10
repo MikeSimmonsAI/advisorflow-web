@@ -301,13 +301,39 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
     if status:
         org.billing_status = status
     org.billing_cancel_at_period_end = bool(sub.get("cancel_at_period_end"))
-    period_end = _ts(sub.get("current_period_end"))
-    if period_end:
-        org.billing_current_period_end = period_end
     trial_end = _ts(sub.get("trial_end"))
     org.billing_trial_end = trial_end
 
     items = ((sub.get("items") or {}).get("data") or [])
+
+    # ══════════════════════════════════════════════════════════════════════
+    # WHEN THE NEXT BILL LANDS — READ FROM WHEREVER THIS API VERSION PUTS IT
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # Caught on the first real subscription test: an ACTIVE, correctly-charged
+    # subscription showed a blank "Next bill" everywhere. Nothing was broken at
+    # Stripe and nothing was broken in the webhook's plumbing — the field had
+    # MOVED. Stripe's 2025-03-31 API version removed `current_period_end` from
+    # the Subscription object and put a period on each subscription ITEM, since
+    # a multi-item subscription can have items on different periods.
+    #
+    # No `api_version` is pinned anywhere in this codebase, so the account's
+    # default version decides the shape and can change under us without a
+    # deploy. Reading one location and accepting NULL when it is absent is how
+    # a renewal date silently disappears from a billing screen. So: take the
+    # subscription's own field when this version still has it, otherwise the
+    # LATEST period end across the items — the furthest-out is when the
+    # subscription as a whole is next fully due, and for the single-item
+    # subscriptions this platform sells the two answers are identical.
+    period_end = _ts(sub.get("current_period_end"))
+    if period_end is None:
+        item_ends = [_ts((it or {}).get("current_period_end")) for it in items]
+        item_ends = [t for t in item_ends if t is not None]
+        if item_ends:
+            period_end = max(item_ends)
+    if period_end:
+        org.billing_current_period_end = period_end
+
     price_id = None
     if items:
         price = (items[0] or {}).get("price") or {}
@@ -360,6 +386,37 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
         previous = org.billing_plan_key
         org.billing_plan_key = resolved.key
         org.plan = resolved.key
+
+        # ── AND WHICH RATE OF THAT PLAN ───────────────────────────────────
+        #
+        # The same price that just told us the tier also tells us the
+        # commitment, and it is the only thing that can: Starter's committed
+        # $500/mo and month-to-month $597/mo are both the MONTH interval and
+        # differ only by Price. Resolving it here — in the one place that
+        # already trusts the price over metadata — means every reader can price
+        # the subscription at the rate the customer is genuinely on instead of
+        # falling through to the term rate and understating MRR by the size of
+        # a discount that was never earned.
+        #
+        # Only overwritten when the price actually resolves to one of this
+        # plan's commitments. A price we cannot classify leaves whatever was
+        # already known alone rather than blanking it, because "we stopped
+        # recognising the price" is not evidence the customer changed terms.
+        commitment = billing_catalog.commitment_for_price_id(resolved, price_id)
+        if commitment:
+            if (org.billing_commitment
+                    and org.billing_commitment != commitment):
+                log.info("billing_webhook: org %s moved from %s to %s on "
+                         "subscription %s", org.id, org.billing_commitment,
+                         commitment, sub.get("id"))
+            org.billing_commitment = commitment
+        elif price_id:
+            log.warning(
+                "billing_webhook: subscription %s is on price %s, which is "
+                "not one of plan %r's mapped prices - leaving the recorded "
+                "commitment (%r) unchanged for org %s",
+                sub.get("id"), price_id, resolved.key,
+                org.billing_commitment, org.id)
 
         # A PENDING CHANGE THAT HAS NOW LANDED IS NO LONGER PENDING.
         #

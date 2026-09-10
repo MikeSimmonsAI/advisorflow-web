@@ -313,10 +313,24 @@ def classify_change(db: Session, current_plan: Optional[BrandBillingPlan],
     return DOWNGRADE
 
 
-def _monthly_equivalent_cents(plan: BrandBillingPlan, interval: str) -> Optional[int]:
-    """Annual prices divided by 12 so tiers compare on the same axis."""
+def _monthly_equivalent_cents(plan: BrandBillingPlan, interval: str,
+                              commitment: Optional[str] = None) -> Optional[int]:
+    """Annual prices divided by 12 so tiers compare on the same axis.
+
+    `commitment` defaults to None, which `price_cents_for` reads as the TERM
+    rate — exactly what this returned before the argument existed. That default
+    is deliberate for `classify_change` above, which compares two TIERS and
+    must not call a customer's move an upgrade or a downgrade merely because
+    their commitment changed; the commitment axis is a pricing question, not a
+    tier question.
+
+    Callers reporting what a customer actually PAYS must pass it. Both rates of
+    a tier are the MONTH interval, so a reader that passes interval alone
+    reports every month-to-month customer at the discounted term rate.
+    """
+    cents = price_cents_for(plan, interval, commitment)
+    if cents is None:
+        return None
     if interval == BillingInterval.YEAR:
-        if plan.annual_cents is None:
-            return None
-        return plan.annual_cents // 12
-    return plan.monthly_cents
+        return cents // 12
+    return cents

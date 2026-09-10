@@ -364,8 +364,15 @@ export default function Billing() {
         </div>
 
         {/* WHAT THEY PAY AND SINCE WHEN. Both come from the server: the amount
-            is the catalogue's price for the plan and interval they are on, and
-            nothing on this page derives money any more. */}
+            is the catalogue's price for the plan, interval AND COMMITMENT they
+            are on, and nothing on this page derives money any more.
+
+            The commitment matters here more than anywhere else. A tier has two
+            monthly rates and both are the `month` interval, so this figure was
+            resolvable only to the committed-term price — meaning a
+            month-to-month customer read a number LOWER than their card is
+            charged, on their own billing screen. The label under it says which
+            terms produced the figure, so the two are never mistaken again. */}
         <div style={{ minWidth: 170 }}>
           <div style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>Recurring</div>
           <div style={{ fontSize: '22px', fontWeight: '700' }}>
@@ -374,6 +381,11 @@ export default function Billing() {
                   {currentInterval === 'year' ? '/yr' : '/mo'}</span></>
               : <span style={{ fontSize: 15, color: '#888' }}>Not priced</span>}
           </div>
+          {recurring && sub?.commitment_label && (
+            <div style={{ fontSize: '13px', color: '#888', marginTop: '4px' }}>
+              {sub.commitment_label}
+            </div>
+          )}
           {customerSince && (
             <div style={{ fontSize: '13px', color: '#888', marginTop: '8px' }}>
               Customer since {customerSince}

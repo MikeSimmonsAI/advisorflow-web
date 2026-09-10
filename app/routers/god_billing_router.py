@@ -237,14 +237,30 @@ def _config_out(cfg: Optional[BrandBillingConfig]) -> Optional[Dict[str, Any]]:
 
 
 def _monthly_equivalent_cents(plan: BrandBillingPlan,
-                              interval: Optional[str]) -> Optional[int]:
-    """One month of this plan at this interval, or None if it has no price.
+                              interval: Optional[str],
+                              commitment: Optional[str] = None) -> Optional[int]:
+    """One month of this plan at this interval and commitment, or None.
 
     Annual is divided by twelve, the same rule `billing_catalog.classify_change`
     compares tiers with, so an annual customer contributes one month of revenue
     to MRR rather than twelve.
+
+    THE COMMITMENT IS NOT OPTIONAL DETAIL — it is half the price. Starter is
+    $500/mo committed and $597/mo month-to-month, and both are the MONTH
+    interval, so passing interval alone made `price_cents_for` fall through to
+    its default and report every month-to-month customer at the discounted term
+    rate. Found on the first live subscription: Stripe charged $597, MRR said
+    $500.
+
+    A NULL commitment still means the term rate, and deliberately so. That is
+    the behaviour every caller had before this argument existed, it is what
+    `price_cents_for` documents as its default, and the alternative — treating
+    unknown as month-to-month — would inflate MRR on old rows instead. An
+    UNDERSTATED number that matches the previous behaviour is the safe side of
+    an unknown; the fix for the unknown is the webhook now recording it.
     """
-    cents = billing_catalog.price_cents_for(plan, interval or BillingInterval.MONTH)
+    cents = billing_catalog.price_cents_for(
+        plan, interval or BillingInterval.MONTH, commitment)
     if cents is None:
         return None
     if (interval or BillingInterval.MONTH) == BillingInterval.YEAR:
@@ -984,17 +1000,26 @@ def revenue(platform_id: Optional[str] = Query(None),
                 db, o.platform_id, key)
         plan = plan_cache[cache_key]
         interval = getattr(o, "stripe_plan_interval", None) or BillingInterval.MONTH
-        cents = _monthly_equivalent_cents(plan, interval) if plan else None
+        commitment = getattr(o, "billing_commitment", None)
+        cents = _monthly_equivalent_cents(plan, interval, commitment) if plan else None
         if cents is None:
             # Named, not silently dropped. An active subscription whose plan key
             # resolves to nothing in its brand's catalogue is a real problem —
             # the customer is being charged something this platform cannot
             # explain — and burying it inside a total is how it stays unnoticed.
+            #
+            # A plan that exists but has no price AT THIS COMMITMENT lands here
+            # too, and that is correct: `price_cents_for` refuses to fall back
+            # between commitments, so a month-to-month customer on a plan with
+            # no month-to-month price is named rather than quietly counted at
+            # the term rate they never agreed to.
             unpriced.append({"organization_id": o.id, "name": o.name,
                              "plan_key": key, "interval": interval,
+                             "commitment": commitment,
                              "reason": ("no such plan in this brand's catalogue"
                                         if plan is None else
-                                        "plan has no %s price configured" % interval)})
+                                        "plan has no %s price configured at %s"
+                                        % (interval, commitment or "the term rate"))})
             continue
         mrr_cents += cents
         priced += 1
@@ -1123,12 +1148,13 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
         plan_cache[cache_key] = billing_catalog.resolve_plan(db, o.platform_id, key)
     plan = plan_cache[cache_key]
     interval = getattr(o, "stripe_plan_interval", None) or BillingInterval.MONTH
+    commitment = getattr(o, "billing_commitment", None)
 
-    # MRR for THIS customer, priced from THEIR OWN brand's catalogue. None -
-    # never 0 - when the plan does not resolve, because "we cannot explain what
-    # this customer is paying" and "this customer pays nothing" are opposite
-    # facts that must not render identically.
-    mrr_cents = _monthly_equivalent_cents(plan, interval) if plan else None
+    # MRR for THIS customer, priced from THEIR OWN brand's catalogue at THEIR
+    # OWN commitment. None - never 0 - when the plan does not resolve, because
+    # "we cannot explain what this customer is paying" and "this customer pays
+    # nothing" are opposite facts that must not render identically.
+    mrr_cents = _monthly_equivalent_cents(plan, interval, commitment) if plan else None
 
     last_payment = (db.query(BillingPayment)
                     .filter(BillingPayment.organization_id == o.id)
@@ -1205,11 +1231,19 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
         "plan_name": getattr(plan, "name", None),
         "billing_status": status or None,
         "interval": interval,
+        # What the customer promised, not just how often they are charged.
+        # NULL means the subscription predates the column or its Stripe price
+        # is not in this brand's catalogue - the screen says "not recorded"
+        # rather than picking a rate on the customer's behalf.
+        "commitment": commitment,
+        "commitment_label": (billing_catalog.commitment_label(commitment)
+                             if commitment else None),
         "mrr_cents": mrr_cents,
         "mrr_unavailable_reason": (
             None if mrr_cents is not None else
             ("no such plan in this brand's catalogue" if plan is None
-             else "plan has no %s price configured" % interval)),
+             else "plan has no %s price configured at %s"
+                  % (interval, commitment or "the term rate"))),
         "currency": getattr(plan, "currency", None) or "usd",
         "current_period_end": getattr(o, "billing_current_period_end", None),
         "trial_end": getattr(o, "billing_trial_end", None),

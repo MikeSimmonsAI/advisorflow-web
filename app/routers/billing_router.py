@@ -251,6 +251,10 @@ def get_subscription(
         "stripe_customer_id": getattr(org, "stripe_customer_id", None),
         "stripe_subscription_id": getattr(org, "stripe_subscription_id", None),
         "stripe_plan_interval": getattr(org, "stripe_plan_interval", None) or "month",
+        # WHICH RATE, not just how often. Both of a tier's monthly rates are
+        # the `month` interval, so the interval alone cannot say whether this
+        # customer is on the committed price or the month-to-month one.
+        "billing_commitment": getattr(org, "billing_commitment", None),
         "plan_details": _plan_public(current_plan) if current_plan else None,
         # Read from the LOCAL MIRROR, which the webhook keeps current.
         #
@@ -282,9 +286,22 @@ def get_subscription(
     #
     # None where the plan carries no price for that interval, which the screen
     # must render as "not priced" rather than as free.
+    #
+    # AT THEIR OWN COMMITMENT. This is the customer's own screen, showing the
+    # customer their own recurring amount, so it is the very worst place to
+    # report the committed-term rate to somebody paying month-to-month — the
+    # figure would be lower than what their card is actually charged, which
+    # reads as either a billing error or a broken promise. Both monthly rates
+    # share the `month` interval, so the commitment is the only thing that
+    # tells them apart.
     result["recurring_cents"] = (
-        billing_catalog.price_cents_for(current_plan, result["stripe_plan_interval"])
+        billing_catalog.price_cents_for(current_plan,
+                                        result["stripe_plan_interval"],
+                                        result["billing_commitment"])
         if current_plan else None)
+    result["commitment_label"] = (
+        billing_catalog.commitment_label(result["billing_commitment"])
+        if result["billing_commitment"] else None)
     result["currency"] = getattr(current_plan, "currency", None) or "usd"
 
     # THE CARD ON FILE, AS A SUMMARY. Brand, last four, expiry - mirrored from

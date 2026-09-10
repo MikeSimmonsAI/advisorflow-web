@@ -181,6 +181,12 @@ COLUMNS_TO_ADD = [
     ("organizations", "stripe_customer_id", "VARCHAR"),
     ("organizations", "stripe_subscription_id", "VARCHAR"),
     ("organizations", "stripe_plan_interval", "VARCHAR"),
+    # WHICH RATE the subscription is on, not just how often it is charged.
+    # 'term' | 'month_to_month'. Nullable with no default on purpose: NULL
+    # means "not known for this subscription" (it predates the column, or its
+    # Stripe price is not in the brand's catalogue), which readers must be able
+    # to tell apart from a customer who genuinely is on the term rate.
+    ("organizations", "billing_commitment", "VARCHAR"),
     ("organizations", "billing_status", "VARCHAR"),
 
     # New billing state that the mirrored Stripe subscription needs a home for.

@@ -489,6 +489,31 @@ class Organization(Base):
     stripe_customer_id      = Column(String, nullable=True)
     stripe_subscription_id  = Column(String, nullable=True)
     stripe_plan_interval    = Column(String, nullable=True)  # 'month' | 'year'
+
+    # ── WHICH RATE, NOT JUST HOW OFTEN ─────────────────────────────────────
+    #
+    # INTERVAL IS NOT COMMITMENT, and storing only the interval loses real
+    # money on a screen. Starter sells at $500/mo on a committed term and
+    # $597/mo month-to-month. BOTH are the MONTH interval — they differ in what
+    # the customer promised, not in how often the card is charged. So
+    # `stripe_plan_interval` alone cannot tell the two apart, and every reader
+    # that priced a subscription from (plan, interval) silently fell through to
+    # `price_cents_for`'s default: the TERM rate.
+    #
+    # That is exactly backwards. It hands a month-to-month customer the
+    # discount they did not earn — in the REPORTING, not the charging. Stripe
+    # billed $597 correctly; MRR read $500. A number that is wrong by precisely
+    # the size of the term discount, on every month-to-month customer, is the
+    # kind of error that survives for years because it looks plausible.
+    #
+    # Written by the webhook from the Stripe PRICE the subscription is actually
+    # on, via billing_catalog.commitment_for_price_id — never inferred from
+    # what was quoted, because a quote is an intention and the price is a fact.
+    # NULL means a subscription that predates this column, or one whose price
+    # is not in the brand's catalogue; readers treat NULL as "unknown" and fall
+    # back to the previous behaviour rather than guessing.
+    billing_commitment      = Column(String, nullable=True)  # 'term' | 'month_to_month'
+
     billing_status          = Column(String, nullable=True)  # 'active' | 'past_due' | 'canceled' | 'trialing'
 
     billing_plan_key            = Column(String, nullable=True)
