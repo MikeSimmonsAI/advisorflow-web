@@ -125,6 +125,9 @@ export default function GodBillingOps() {
   // Which customer's refresh is in flight, and what the last one reported.
   const [resyncing, setResyncing] = useState(null);
   const [resyncNote, setResyncNote] = useState('');
+  // The differences a refresh WOULD make, waiting to be approved. Nothing has
+  // been written while this is set.
+  const [resyncPreview, setResyncPreview] = useState(null);
 
   useEffect(() => {
     api.get('/god/billing/brands')
@@ -167,31 +170,42 @@ export default function GodBillingOps() {
   // Nothing here writes to Stripe. It re-reads the subscription and re-applies
   // it through the same function the webhook uses, which is what makes it a
   // refresh rather than a correction.
+  // STEP 1 — look. Read-only; writes nothing here and nothing at Stripe.
+  //
+  // The differences are shown IN THE PAGE rather than in a `window.confirm`.
+  // A native dialog cannot render a field-by-field table, and an operator
+  // approving a change to a customer's commercial record from a wall of
+  // newline-joined text is approving something they have not really read —
+  // the same objection that took the confirm box off the customer's own
+  // billing screen.
   async function handleResync(row) {
-    setResyncNote(''); setResyncing(row.organization_id);
+    setResyncNote(''); setResyncPreview(null);
+    setResyncing(row.organization_id);
     try {
       const preview = await api.post(
         `/god/billing/customers/${row.organization_id}/resync`, { apply: false });
 
       if (!preview.changed?.length) {
         setResyncNote(`${row.name}: already matches Stripe — nothing to change.`);
-        setResyncing(null);
         return;
       }
+      setResyncPreview({ row, changed: preview.changed });
+    } catch (e) {
+      setResyncNote(`${row.name}: ${e?.detail || e?.message || 'could not read from Stripe. Nothing was changed.'}`);
+    } finally {
+      setResyncing(null);
+    }
+  }
 
-      const summary = preview.changed
-        .map(c => `${c.field}: ${c.from ?? '(not set)'} → ${c.to ?? '(not set)'}`)
-        .join('\n');
-      if (!window.confirm(
-        `Refresh ${row.name} from Stripe?\n\n${summary}\n\n` +
-        'This reads from Stripe and updates this platform\'s copy. ' +
-        'Nothing is written to Stripe and no money moves.')) {
-        setResyncing(null);
-        return;
-      }
-
+  // STEP 2 — apply, only what was shown, only when it is confirmed.
+  async function applyResync() {
+    if (!resyncPreview) return;
+    const { row } = resyncPreview;
+    setResyncing(row.organization_id);
+    try {
       const applied = await api.post(
         `/god/billing/customers/${row.organization_id}/resync`, { apply: true });
+      setResyncPreview(null);
       setResyncNote(
         `${row.name}: refreshed — ${applied.changed.length} field(s) updated from Stripe.`);
       await load();
@@ -332,6 +346,67 @@ export default function GodBillingOps() {
                         background: '#2fb6ff11',
                         borderBottom: '1px solid #2a2a4a' }}>
             {resyncNote}
+          </div>
+        )}
+
+        {/* WHAT A REFRESH WOULD CHANGE — shown before anything is written.
+            Field by field, old value to new value, so the operator approves
+            what they have actually read. */}
+        {resyncPreview && (
+          <div style={{ padding: '14px 20px', background: '#f59e0b0e',
+                        borderBottom: '1px solid #2a2a4a' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+              {resyncPreview.row.name} — {resyncPreview.changed.length} field(s)
+              differ from Stripe
+            </div>
+            <table style={{ fontSize: 12, borderCollapse: 'collapse',
+                            marginBottom: 12 }}>
+              <tbody>
+                {resyncPreview.changed.map(c => (
+                  <tr key={c.field}>
+                    <td style={{ padding: '3px 14px 3px 0', color: '#888' }}>
+                      {c.field}
+                    </td>
+                    <td style={{ padding: '3px 10px 3px 0', color: '#7a7a95' }}>
+                      {c.from ?? 'not set'}
+                    </td>
+                    <td style={{ padding: '3px 10px 3px 0', color: '#888' }}>→</td>
+                    <td style={{ padding: '3px 0', color: '#1ef0a8',
+                                 fontWeight: 600 }}>
+                      {c.to ?? 'not set'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
+              This updates this platform's copy from Stripe. Nothing is written
+              to Stripe and no money moves.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={applyResync}
+                disabled={Boolean(resyncing)}
+                style={{ background: '#1ef0a8', color: '#04120c', border: 'none',
+                         borderRadius: 6, padding: '6px 14px', fontSize: 12,
+                         fontWeight: 700,
+                         cursor: resyncing ? 'default' : 'pointer' }}
+              >
+                {resyncing ? 'Refreshing…' : 'Apply refresh'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setResyncPreview(null)}
+                disabled={Boolean(resyncing)}
+                style={{ background: 'transparent', color: '#aaa',
+                         border: '1px solid #2a2a4a', borderRadius: 6,
+                         padding: '6px 14px', fontSize: 12,
+                         cursor: resyncing ? 'default' : 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
