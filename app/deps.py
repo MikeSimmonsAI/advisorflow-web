@@ -38,18 +38,53 @@ _log = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./advisorflow.db")
 
 # ── Connection pool hardening ──────────────────────────────────────────────
-_is_sqlite = "sqlite" in DATABASE_URL
-_pool_kwargs = (
-    {"connect_args": {"check_same_thread": False}}
-    if _is_sqlite
-    else {
+# A PURE FUNCTION, CALLED ONCE, so the settings below can be asserted in tests
+# by calling it with a URL rather than by reloading this module. Reloading it
+# rebinds `engine` and `SessionLocal` while other modules still hold the old
+# objects, which quietly detaches half the test suite from its database — a
+# lesson learned by doing exactly that.
+def build_pool_kwargs(database_url: str) -> dict:
+    if "sqlite" in database_url:
+        return {"connect_args": {"check_same_thread": False}}
+    return {
         "pool_size": 5,
         "max_overflow": 10,
         "pool_timeout": 30,
         "pool_recycle": 1800,
         "pool_pre_ping": True,
+        # ══ AN ABANDONED TRANSACTION MUST NOT LIVE FOREVER ═══════════════
+        #
+        # THE OUTAGE THIS PREVENTS, in the exact form it took. A container
+        # was replaced mid-request. Its Postgres session was left `idle in
+        # transaction` on a SELECT against `organizations`, waiting on a
+        # client that no longer existed, holding ACCESS SHARE. Postgres has
+        # no reason to notice a dead TCP peer, so it held that lock for 69
+        # minutes. Every subsequent boot queued its
+        # `ALTER TABLE organizations` behind it, and once a DDL request is
+        # queued every ordinary SELECT queues behind THAT. Four boots
+        # deadlocked in a row, including a rollback to the previous known-
+        # good commit, and the platform was down until the session was
+        # terminated by hand.
+        #
+        # Postgres will now do that termination itself, in five minutes,
+        # without anyone being paged.
+        #
+        # WHY FIVE MINUTES AND NOT LESS. This kills a session that is inside
+        # a transaction and idle — which includes a request holding a
+        # transaction open across a slow external call (a Stripe round trip
+        # inside a checkout, for instance). Stripe's own client gives up
+        # around eighty seconds, so five minutes is roughly four times the
+        # slowest legitimate case and still turns a permanent outage into a
+        # blip. A transaction doing actual work is `active`, not idle, and is
+        # never affected.
+        "connect_args": {
+            "options": "-c idle_in_transaction_session_timeout=300000",
+        },
     }
-)
+
+
+_is_sqlite = "sqlite" in DATABASE_URL
+_pool_kwargs = build_pool_kwargs(DATABASE_URL)
 engine = create_engine(DATABASE_URL, **_pool_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

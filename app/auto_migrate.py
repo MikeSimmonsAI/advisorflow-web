@@ -38,8 +38,50 @@ dev/test environments stay consistent with production without needing
 a different code path.
 """
 
+import time as _time
+
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
+
+# ── How hard a column-add tries before it gives up ──────────────────────────
+# Bounded by construction: at most three attempts, each capped at a five-second
+# lock wait, with a short pause between. Worst case per column is a few seconds,
+# so the whole list cannot add more than a bounded amount to boot time no matter
+# how contended the database is. THAT BOUND IS THE POINT — an unbounded wait
+# here is what took the platform down.
+_COLUMN_ADD_ATTEMPTS = 3
+_COLUMN_ADD_RETRY_SECONDS = 1.0
+
+# Postgres SQLSTATEs worth trying again for. BOTH ARE TRANSIENT BY DEFINITION:
+# 55P03 lock_not_available is what `lock_timeout` raises, and 40P01
+# deadlock_detected resolves the moment the other party finishes.
+_RETRYABLE_SQLSTATES = {"55P03", "40P01"}
+
+
+def _is_lock_contention(exc) -> bool:
+    """Is this error worth a second attempt, or is retrying just sleeping?
+
+    RETRYING THE WRONG ERRORS IS ITS OWN BUG, and it bit immediately: on a
+    database where most tables do not exist yet — a fresh install, or any
+    test that creates one table — every column-add fails for a permanent
+    reason. Retrying each of several hundred of those with a pause between
+    turns a fast no-op into minutes of dead time at boot, which is the same
+    failure mode this whole change exists to remove, arrived at from the
+    other direction.
+
+    So: retry ONLY contention. A missing table, a bad definition, a
+    permission error — those are answers, not delays, and are taken at once.
+    """
+    code = getattr(getattr(exc, "orig", None), "pgcode", None)
+    if code in _RETRYABLE_SQLSTATES:
+        return True
+    if code:
+        # A SQLSTATE that is not retryable is a definite answer. Trust it
+        # rather than falling through to matching on message text.
+        return False
+    text_ = str(exc).lower()
+    return "lock timeout" in text_ or "could not obtain lock" in text_ \
+        or "deadlock detected" in text_
 
 # (table, column, full column definition) - every column ever added to
 # an EXISTING table that create_all() would never retroactively add to
@@ -1052,24 +1094,113 @@ def run_auto_migrations(engine) -> None:
                 conn.rollback()
                 print(f"[auto_migrate] Table create skipped: {e}")
 
+        # ══ ONE TRANSACTION PER COLUMN, AND A LOCK TIMEOUT ═══════════════
+        #
+        # THE OUTAGE THIS PREVENTS, which actually happened. A deploy adding
+        # nine columns to `implementations` hung at "Waiting for application
+        # startup" for fifteen minutes, never bound a port, and Render timed
+        # the deploy out and tore down the old instance. The API was down.
+        #
+        # ADD COLUMN needs an ACCESS EXCLUSIVE lock, which conflicts with the
+        # ACCESS SHARE every ordinary SELECT holds. During a deploy the OLD
+        # instance is still serving traffic by design, so the lock request
+        # queues — and with no timeout it queues FOREVER. Worse, running the
+        # whole list in one transaction meant every lock already taken was
+        # held while waiting for the next, so one contended table blocked the
+        # boot and locked the tables ahead of it.
+        #
+        # Three changes, all about failing fast rather than hanging:
+        #
+        #   lock_timeout — an ALTER that cannot get its lock in five seconds
+        #   raises instead of waiting. Booting without a column is recoverable;
+        #   a service that never starts is not.
+        #
+        #   commit per statement — locks are released as soon as each column
+        #   lands, so a contended table cannot hold anything else hostage,
+        #   and a failure cannot poison the transaction for the columns after
+        #   it.
+        #
+        #   a short bounded retry — contention during a deploy is usually the
+        #   OLD instance finishing a request, which takes moments. Three tries
+        #   over ~7 seconds converts almost every real-world collision into a
+        #   success, while still being bounded by construction.
+        #
+        # WHAT IS DELIBERATELY NOT DONE: waiting longer. A column that arrives
+        # one deploy later is a far smaller problem than a platform that is
+        # down, and the verification pass below makes the shortfall loud rather
+        # than silent.
+        #
+        # SQLite has no lock_timeout and no concurrent deploy; it is skipped.
+        skipped = []
         for table, column, definition in COLUMNS_TO_ADD:
-            try:
-                if is_sqlite:
-                    # SQLite doesn't support "IF NOT EXISTS" on ADD COLUMN -
-                    # check first, then add only if genuinely missing.
-                    existing_cols = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
-                    if column not in existing_cols:
-                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
-                else:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition};"))
-            except (OperationalError, ProgrammingError) as e:
-                # Logged, not raised - a single failed column-add (e.g.
-                # the table itself doesn't exist yet on a brand-new
-                # database, where create_all() just created it fresh
-                # with this column already included) should never crash
-                # the whole app on startup. Each statement is independent.
-                print(f"[auto_migrate] Skipped {table}.{column}: {e}")
-        conn.commit()
+            last_error = None
+            for attempt in range(_COLUMN_ADD_ATTEMPTS):
+                try:
+                    if is_sqlite:
+                        # SQLite doesn't support "IF NOT EXISTS" on ADD COLUMN -
+                        # check first, then add only if genuinely missing.
+                        existing_cols = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+                        if column not in existing_cols:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+                    else:
+                        # LOCAL, so it applies to this statement's transaction
+                        # only and never leaks into the pooled connection's later
+                        # use by request handlers.
+                        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition};"))
+                    conn.commit()
+                    last_error = None
+                    break
+                except (OperationalError, ProgrammingError) as e:
+                    # Logged, not raised - a single failed column-add (e.g.
+                    # the table itself doesn't exist yet on a brand-new
+                    # database, where create_all() just created it fresh
+                    # with this column already included, or the lock was not
+                    # available in time) should never crash the whole app on
+                    # startup. Each statement is independent.
+                    conn.rollback()
+                    last_error = e
+                    # Only contention is worth waiting on. Everything else is
+                    # a permanent answer and is taken immediately — see
+                    # `_is_lock_contention`.
+                    if not _is_lock_contention(e):
+                        break
+                    if attempt + 1 < _COLUMN_ADD_ATTEMPTS:
+                        _time.sleep(_COLUMN_ADD_RETRY_SECONDS)
+            if last_error is not None:
+                skipped.append((table, column, last_error))
+                print(f"[auto_migrate] Skipped {table}.{column}: {last_error}")
+
+        # ══ A SHORTFALL IS REPORTED, NOT SWALLOWED ═══════════════════════
+        #
+        # Skipping a column keeps the service up, which is the right trade —
+        # but a column the ORM selects and the database does not have breaks
+        # every query against that table. That has to be visible in the boot
+        # log as a named, severe condition rather than inferred later from a
+        # 500. Re-checked against the database rather than trusted from the
+        # loop, because "the statement raised" and "the column is missing"
+        # are not the same thing: a table that does not exist yet raises here
+        # and is not a problem at all.
+        if skipped and not is_sqlite:
+            still_missing = []
+            for table, column, _e in skipped:
+                try:
+                    present = conn.execute(text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = :t AND column_name = :c"
+                    ), {"t": table, "c": column}).scalar()
+                    if not present:
+                        still_missing.append(f"{table}.{column}")
+                except (OperationalError, ProgrammingError):
+                    conn.rollback()
+            if still_missing:
+                print("[auto_migrate] !! DEGRADED - %d column(s) could not be "
+                      "added and are still missing: %s"
+                      % (len(still_missing), ", ".join(still_missing)))
+                print("[auto_migrate] !! The service is UP. Queries touching "
+                      "those columns will fail until the next boot applies "
+                      "them. Check for a long-lived transaction holding a "
+                      "lock on the affected table(s).")
 
         if not is_sqlite:
             # Relax NOT NULL where the data model no longer requires it.
