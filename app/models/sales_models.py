@@ -427,6 +427,20 @@ class DiscoveryRecord(Base):
     demo_requirements     = Column(Text, nullable=True)
     opportunity_notes     = Column(Text, nullable=True)
 
+    # THE STRUCTURED ANSWER BEHIND THE PROSE. One nullable column, not fourteen.
+    #
+    # Every column above still holds the readable sentence and is still the
+    # thing provisioning, the demo carry-forward and proposals read. This holds
+    # the ticks that PRODUCED that sentence — so re-opening the form restores
+    # the seller's selections instead of trying to reverse-engineer them out of
+    # text — plus a `legacy` snapshot of any long-form note that was in a column
+    # before it was first answered structurally.
+    #
+    # JSON in a Text column rather than a JSON type on purpose: the shape is
+    # owned by app/services/discovery_schema.py, it is never queried by key,
+    # and SQLite (tests) and Postgres (production) must behave identically.
+    structured_json       = Column(Text, nullable=True)
+
     # The ordered field list the discovery form renders from. Adding a question
     # means adding a column above and a line here — never a migration to a
     # generic key/value bag, which would make discovery unqueryable.

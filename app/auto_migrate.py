@@ -614,6 +614,12 @@ COLUMNS_TO_ADD = [
     ("discovery_records", "automation_opportunities", "TEXT"),
     ("discovery_records", "desired_outcome",          "TEXT"),
     ("discovery_records", "demo_requirements",        "TEXT"),
+    # ── Seller Opportunity UX (Sep 10 2026) ────────────────────────────────
+    # The structured answers behind the prose. `discovery_records` predates
+    # create_all() in production, so this has to come through here. Nullable
+    # with no default: an existing discovery record is valid with it empty and
+    # simply reads as "answered in long form", which is exactly what it is.
+    ("discovery_records", "structured_json",          "TEXT"),
 
     # ── External calendar sync, Checkpoint 3 (Aug 25 2026) ─────────────────
     # sales_appointments and sales_appointment_participants were created by

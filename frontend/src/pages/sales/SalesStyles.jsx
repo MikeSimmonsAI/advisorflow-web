@@ -670,6 +670,149 @@ const CSS = `
 .sw-blank p{font-size:12px;color:var(--sw-ink2);margin:8px auto 0;max-width:52ch;
   line-height:1.65}
 
+/* ── THE SELLER'S OPPORTUNITY WORKSPACE ──────────────────────────────────────
+   WHAT THIS REPLACES. The Opportunity page used to render every panel it had,
+   open, at full height: fourteen empty discovery textareas, a five-field demo
+   work order, pricing, proposal, closing and billing, in one column. It was
+   several screens of empty boxes with no answer to "what do I do next".
+
+   THE RULES HERE ARE THE FIX.
+   - The command area at the top answers who / where / what next before any
+     scrolling, and carries exactly ONE primary button.
+   - A stage is a SECTION with a state. Done collapses to a summary line, the
+     current one is open, the ones ahead are closed but never locked.
+   - A choice is a chip, not a textarea. Free text is one line, and on most
+     questions it is not on screen until somebody asks for it.
+   Nothing below introduces a second visual language: every colour is an
+   existing token and every control reuses the workspace's own vocabulary. */
+
+/* the command area */
+.sw-cmd{background:var(--sw-surface);border:1px solid var(--sw-line);
+  border-radius:12px;box-shadow:var(--sw-shadow);padding:16px 18px}
+.sw-cmd-top{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;
+  justify-content:space-between}
+.sw-cmd-id{min-width:0;flex:1 1 320px}
+.sw-cmd-id h2{font-size:20px;margin:0;letter-spacing:-.01em}
+.sw-cmd-id p{font-size:11px;color:var(--sw-ink2);margin:4px 0 0}
+.sw-cmd-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  flex:0 0 auto}
+.sw-cmd-act .sw-select{width:auto}
+.sw-cmd-alerts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.sw-alert{font-size:10.5px;font-weight:700;border-radius:8px;padding:6px 10px;
+  border:1px solid var(--sw-warn-bd);background:var(--sw-warn-bg);
+  color:var(--sw-warn-fg)}
+.sw-alert.sw-red{border-color:var(--sw-bad-bd);background:var(--sw-bad-bg);
+  color:var(--sw-bad-fg)}
+.sw-cmd-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--sw-line2)}
+.sw-cmd-fact span{display:block;font-size:8.5px;letter-spacing:.08em;
+  color:var(--sw-ink3);font-weight:800}
+.sw-cmd-fact b{display:block;font-size:12px;margin-top:3px;word-break:break-word}
+.sw-cmd-fact.is-strong b{color:var(--sw-teal-deep)}
+[data-appearance="dark"] .sw-scope .sw-cmd-fact.is-strong b{color:var(--sw-teal2)}
+
+/* a stage, as a section that knows where the deal is */
+.sw-sec{background:var(--sw-surface);border:1px solid var(--sw-line);
+  border-radius:12px;box-shadow:var(--sw-shadow);margin-bottom:12px;
+  overflow:hidden}
+.sw-sec-h{display:flex;align-items:center;gap:12px;width:100%;
+  background:transparent;border:0;padding:13px 16px;cursor:pointer;
+  text-align:left;color:inherit}
+.sw-sec-h:hover{background:var(--sw-surface3)}
+.sw-sec-n{flex:0 0 auto;width:22px;height:22px;border-radius:50%;
+  display:grid;place-items:center;font-size:10px;font-weight:800;
+  background:var(--sw-neu-bg);color:var(--sw-neu-fg);
+  border:1px solid var(--sw-neu-bd)}
+.sw-sec-t{min-width:0;flex:1}
+.sw-sec-t b{display:block;font-size:12px;letter-spacing:.03em}
+.sw-sec-t small{display:block;font-size:10px;color:var(--sw-ink2);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sw-sec-caret{flex:0 0 auto;font-size:11px;color:var(--sw-ink3)}
+.sw-sec-b{padding:0 14px 14px}
+.sw-sec.is-done{border-left:3px solid var(--sw-green)}
+.sw-sec.is-done .sw-sec-n{background:var(--sw-ok-bg);color:var(--sw-ok-fg);
+  border-color:var(--sw-ok-bd)}
+.sw-sec.is-current{border-left:3px solid var(--sw-teal)}
+.sw-sec.is-current .sw-sec-n{background:var(--sw-accent-bg);
+  color:var(--sw-teal-deep);border-color:var(--sw-accent-bd)}
+.sw-sec.is-upcoming{border-left:3px solid var(--sw-line)}
+.sw-sec.is-upcoming .sw-sec-h{opacity:.78}
+.sw-sec.is-upcoming.is-open .sw-sec-h{opacity:1}
+/* A section's own card must not draw a second frame inside this one. */
+.sw-sec-b > .sw-card{border:0;box-shadow:none;border-radius:0}
+.sw-sec-b > .sw-card > .sw-card-h{padding-left:0;padding-right:0}
+.sw-sec-b > .sw-card > .sw-card-b{padding-left:0;padding-right:0;padding-bottom:0}
+
+/* one disclosure, used everywhere something is real but not wanted yet */
+.sw-disclose{margin-top:14px;border-top:1px solid var(--sw-line2);padding-top:10px}
+.sw-disclose > summary{cursor:pointer;font-size:10px;font-weight:800;
+  letter-spacing:.07em;color:var(--sw-ink2);text-transform:uppercase;
+  list-style:none}
+.sw-disclose > summary::-webkit-details-marker{display:none}
+.sw-disclose > summary:before{content:"▸ ";color:var(--sw-ink3)}
+.sw-disclose[open] > summary:before{content:"▾ "}
+.sw-disclose.is-flush{margin:0;padding:12px 16px;border-top:1px solid var(--sw-line2)}
+.sw-disclose.is-flush:first-child{border-top:0}
+
+/* progress on discovery */
+.sw-prog{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.sw-prog-bar{flex:1;height:5px;border-radius:99px;background:var(--sw-surface3);
+  border:1px solid var(--sw-line2);overflow:hidden;min-width:80px}
+.sw-prog-fill{height:100%;background:var(--sw-teal);transition:width .2s}
+.sw-prog-t{font-size:10px;color:var(--sw-ink2);flex:1 1 200px;min-width:0}
+
+/* a discovery group, and one question inside it */
+.sw-dgroup{margin-top:14px}
+.sw-dgroup + .sw-dgroup{border-top:1px solid var(--sw-line2);padding-top:6px}
+.sw-dgroup-h{font-size:9px;font-weight:800;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--sw-ink3);margin:8px 0 2px}
+.sw-dq{padding:9px 0;border-bottom:1px solid var(--sw-line2)}
+.sw-dq:last-child{border-bottom:0}
+.sw-dq-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.sw-dq-h label{font-size:10.5px;font-weight:700;color:var(--sw-ink);margin:0}
+.sw-dq-req{font-size:8.5px;font-weight:800;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--sw-warn-fg);background:var(--sw-warn-bg);
+  border:1px solid var(--sw-warn-bd);border-radius:99px;padding:1px 7px}
+.sw-dq-ok{margin-left:auto;color:var(--sw-ok-fg);font-size:11px;font-weight:800}
+
+/* THE CHIP THAT REPLACED A TEXTAREA */
+.sw-opts{display:flex;flex-wrap:wrap;gap:6px}
+.sw-opt{border:1px solid var(--sw-line);background:var(--sw-btn-bg);
+  color:var(--sw-ink2);border-radius:99px;padding:6px 11px;font-size:11px;
+  font-weight:600;cursor:pointer;line-height:1.2}
+.sw-opt:hover:not(:disabled){border-color:var(--sw-line-strong);color:var(--sw-ink)}
+.sw-opt.is-on{background:var(--sw-accent-bg);border-color:var(--sw-teal);
+  color:var(--sw-teal-deep);font-weight:700}
+[data-appearance="dark"] .sw-scope .sw-opt.is-on{color:var(--sw-teal2)}
+.sw-opt:disabled{opacity:.55;cursor:default}
+.sw-mini-input{margin-top:7px;max-width:420px}
+.sw-addnote{margin-top:7px;background:none;border:0;padding:0;cursor:pointer;
+  font-size:10px;font-weight:700;color:var(--sw-ink3)}
+.sw-addnote:hover{color:var(--sw-teal-deep);text-decoration:underline}
+
+/* the named parts of a composite question */
+.sw-parts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px}
+.sw-parts .sw-dfield label{display:block;font-size:9px;font-weight:800;
+  color:var(--sw-ink2);margin-bottom:4px;letter-spacing:.05em}
+
+/* long-form text that predates the structured form — kept, never in the way */
+.sw-legacy{margin-top:10px;border-left:2px solid var(--sw-line);padding-left:10px}
+.sw-legacy b{font-size:9px;letter-spacing:.06em;color:var(--sw-ink3);
+  text-transform:uppercase;display:block}
+.sw-legacy pre{margin:4px 0 0;font:inherit;font-size:11px;color:var(--sw-ink2);
+  white-space:pre-wrap;word-break:break-word;line-height:1.5}
+
+@media(max-width:1240px){
+  .sw-cmd-facts{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:820px){
+  .sw-cmd-facts{grid-template-columns:1fr}
+  .sw-cmd-act{width:100%}
+  .sw-cmd-act .sw-btn,.sw-cmd-act .sw-select{flex:1 1 auto}
+  .sw-parts{grid-template-columns:1fr}
+  .sw-sec-t small{white-space:normal}
+}
+
 @media(max-width:1100px){
   .sw-tiles{grid-template-columns:repeat(2,1fr)}
   .sw-cc-forecast{grid-template-columns:1fr}

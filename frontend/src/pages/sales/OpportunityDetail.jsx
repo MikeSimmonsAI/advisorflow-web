@@ -1,14 +1,31 @@
 /**
- * Opportunity Detail — the salesperson's working record for the deal.
+ * Opportunity Detail — a guided sales workspace, not a database editor.
  *
- * Not a contact card. This is where discovery is captured, the demo build is
- * tracked, the package is chosen, the value is derived (or overridden, with a
- * reason), the stage is moved, and the whole history is readable in one place.
+ * WHAT THIS PAGE USED TO BE. Every panel the deal has, open, at full height,
+ * in lifecycle order: fourteen empty discovery textareas, a five-field demo
+ * work order, the pricing card, the proposal builder, closing, billing. A rep
+ * opening a deal met a wall of empty boxes and had to work out for themselves
+ * what the next move was.
  *
- * Every write goes to the real API and the timeline reloads from the server —
- * the record on screen is always what the database actually holds.
+ * WHAT IT IS NOW. The same records, the same endpoints, the same authority —
+ * arranged so that the five questions a salesperson actually opens a deal to
+ * answer are answered before any scrolling:
+ *
+ *   who is this · where are we · what do I do next · what is missing ·
+ *   what comes after that
+ *
+ * The deal's own lifecycle drives it. `SECTION_FOR_STAGE` maps the EXISTING
+ * stages onto five sections; the one the deal is in is expanded, the ones
+ * behind it collapse to a summary line, the ones ahead sit closed but
+ * openable. Nothing here invents a second lifecycle, a second discovery
+ * engine, a second proposal system or a second billing model — DealBillingPanel,
+ * ProposalPanel, ClosingPanel, DemoSitesPanel and ApptSyncPanel are the same
+ * components doing the same work, put where a seller looks for them.
+ *
+ * Every write still goes to the real API and the record reloads from the
+ * server: what is on screen is what the database holds.
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
@@ -22,8 +39,11 @@ import ClosingPanel from './ClosingPanel'
 // a screen the rep has to leave this one to reach.
 import DealBillingPanel from './DealBillingPanel'
 import ReassignControl from './ReassignControl'
+import DiscoveryPanel from './DiscoveryPanel'
+import DemoPanel from './DemoPanel'
+import DealCommand, { StageSection, SECTION_FOR_STAGE, SECTION_ORDER } from './DealCommand'
 import {
-  Card, Chip, Info, Empty, NotBuilt, ErrorBar,
+  Card, Chip, Info, Empty, ErrorBar,
   money, dateTime, dueLabel, wallDateTime,
 } from './parts'
 import { BillingOptions } from './BillingOptions.jsx'
@@ -94,15 +114,6 @@ function Meetings({ opp, onFind, onConfirm, onCancel, onMove, saving }) {
     </Card>
   )
 }
-
-const DEMO_STATUSES = [
-  ['', '—'],
-  ['not_requested', 'Not requested'],
-  ['requested', 'Requested'],
-  ['in_progress', 'In progress'],
-  ['ready', 'Ready'],
-  ['delivered', 'Delivered'],
-]
 
 /* The deal's identity — who this is and how to reach them. Editable in place,
    because these get typed in a hurry at intake and corrected later: a prospect
@@ -183,8 +194,6 @@ function RecordIdentity({ opp, editing, saved, onSave, onSaved, onCancel }) {
           <Info label="TIMEZONE" value={opp.timezone} />
           <Info label="SALES OWNER" value={opp.owner_name} />
           <Info label="BRAND" value={opp.brand_sales_org?.name} />
-          <Info label="PACKAGE INTEREST" value={opp.package_interest?.name} />
-          <Info label="SELECTED PACKAGE" value={opp.selected_package?.name} />
           {/* `deal_value` IS NOT WHAT THE CUSTOMER WILL BE CHARGED, and shown
               here under that name it read exactly as if it were. On a live deal
               it sat at $1,497 — the legacy catalogue figure — three lines above
@@ -285,137 +294,6 @@ function Lifecycle({ opp }) {
   )
 }
 
-function Discovery({ opp, onSave, saving }) {
-  const [vals, setVals] = useState({})
-  const [dirty, setDirty] = useState(false)
-
-  useEffect(() => {
-    const seed = {}
-    ;(opp.discovery_fields || []).forEach(f => {
-      seed[f.key] = (opp.discovery && opp.discovery[f.key]) || ''
-    })
-    setVals(seed)
-    setDirty(false)
-  }, [opp.id, opp.discovery])
-
-  function set(k, v) { setVals(s => ({ ...s, [k]: v })); setDirty(true) }
-
-  const completed = opp.discovery?.completed_at
-
-  return (
-    <Card
-      title="DISCOVERY"
-      sub={completed
-        ? 'Completed ' + dateTime(completed)
-            + (opp.discovery.completed_by_name ? ' by ' + opp.discovery.completed_by_name : '')
-        : 'Structured, because these answers feed the demo build'}
-      right={completed ? <Chip tone="green">Complete</Chip> : <Chip tone="amber">In progress</Chip>}
-    >
-      {(opp.discovery_fields || []).map(f => (
-        <div className="sw-field" key={f.key}>
-          <label>{f.label.toUpperCase()}</label>
-          {f.key === 'team_size'
-            ? <input className="sw-input" value={vals[f.key] || ''}
-                     onChange={e => set(f.key, e.target.value)} />
-            : <textarea className="sw-textarea" value={vals[f.key] || ''}
-                        onChange={e => set(f.key, e.target.value)} />}
-        </div>
-      ))}
-      <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end' }}>
-        <button className="sw-btn" disabled={!dirty || saving}
-                onClick={() => onSave(vals, false)}>
-          {saving ? 'Saving…' : 'Save discovery'}
-        </button>
-        {!completed && (
-          <button className="sw-btn sw-primary" disabled={saving}
-                  onClick={() => onSave(vals, true)}>
-            Save &amp; mark complete
-          </button>
-        )}
-      </div>
-    </Card>
-  )
-}
-
-function DemoBuild({ opp, team, onPatch, saving }) {
-  const d = opp.demo || {}
-  const [form, setForm] = useState({})
-  useEffect(() => {
-    setForm({
-      demo_status: d.status || '',
-      demo_owner_user_id: d.owner_user_id || '',
-      demo_due_at: d.due_at ? String(d.due_at).slice(0, 10) : '',
-      demo_requirements: d.requirements || '',
-      demo_url: d.url || '',
-      demo_notes: d.notes || '',
-    })
-  }, [opp.id, d.status, d.owner_user_id, d.due_at, d.requirements, d.url, d.notes])
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
-
-  function save() {
-    const body = { ...form }
-    body.demo_due_at = form.demo_due_at ? new Date(form.demo_due_at).toISOString() : null
-    if (!body.demo_status) delete body.demo_status
-    if (!body.demo_owner_user_id) body.demo_owner_user_id = null
-    onPatch(body)
-  }
-
-  return (
-    <Card title="DEMO BUILD"
-          sub="See whether your demo is being built without asking anyone"
-          right={d.status ? <Chip tone={d.status === 'ready' ? 'green' : 'amber'}>{d.status}</Chip> : null}>
-      <div className="sw-grid-even">
-        <div className="sw-field">
-          <label>STATUS</label>
-          <select className="sw-select" value={form.demo_status || ''}
-                  onChange={e => set('demo_status', e.target.value)}>
-            {DEMO_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
-        <div className="sw-field">
-          <label>BUILDER</label>
-          <select className="sw-select" value={form.demo_owner_user_id || ''}
-                  onChange={e => set('demo_owner_user_id', e.target.value)}>
-            <option value="">Unassigned</option>
-            {team.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
-          </select>
-        </div>
-        <div className="sw-field">
-          <label>TARGET COMPLETION</label>
-          <input className="sw-input" type="date" value={form.demo_due_at || ''}
-                 onChange={e => set('demo_due_at', e.target.value)} />
-        </div>
-        <div className="sw-field">
-          <label>DEMO URL</label>
-          <input className="sw-input" value={form.demo_url || ''}
-                 placeholder="set when the environment exists"
-                 onChange={e => set('demo_url', e.target.value)} />
-        </div>
-      </div>
-      <div className="sw-field">
-        <label>REQUIREMENTS</label>
-        <textarea className="sw-textarea" value={form.demo_requirements || ''}
-                  onChange={e => set('demo_requirements', e.target.value)} />
-      </div>
-      <div className="sw-field">
-        <label>INTERNAL NOTES</label>
-        <textarea className="sw-textarea" value={form.demo_notes || ''}
-                  onChange={e => set('demo_notes', e.target.value)} />
-      </div>
-      <div className="sw-subtle sw-mt">
-        Requested {d.requested_at ? dateTime(d.requested_at) : '—'}
-        {d.ready_at ? ' · Ready ' + dateTime(d.ready_at) : ''}
-      </div>
-      <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end' }}>
-        <button className="sw-btn sw-primary" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save demo build'}
-        </button>
-      </div>
-    </Card>
-  )
-}
-
 function PackageDeal({ opp, packages, onPatch, saving }) {
   const [pkgId, setPkgId] = useState(opp.selected_package_id || '')
   const [interestId, setInterestId] = useState(opp.package_interest_id || '')
@@ -453,10 +331,10 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
   const pending = opp.pending_pricing_approval
 
   return (
-    <Card title={isCustom ? 'CUSTOM DEAL' : 'STANDARD PACKAGE'}
+    <Card title={isCustom ? 'CUSTOM DEAL' : 'PACKAGE & TERMS'}
           sub={isCustom
             ? 'Negotiated pricing for this deal only — the catalogue is unchanged'
-            : 'Approved catalogue pricing and terms'}>
+            : 'What they are being sold, and on what terms'}>
 
       {/* WHICH MODE THIS DEAL IS IN, said once and plainly. A salesperson
           should never have to infer from a populated field whether they are
@@ -560,10 +438,8 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
           the value of a $7,997 contract. The commercial summary above is the
           headline now; this stays because pipeline reporting still reads the
           column, and it says what it means. */}
-      <details style={{ marginTop: 14 }}>
-        <summary className="sw-subtle" style={{ cursor: 'pointer' }}>
-          Legacy deal value (one-time figure used by pipeline reporting)
-        </summary>
+      <details className="sw-disclose">
+        <summary>Legacy deal value (one-time figure used by pipeline reporting)</summary>
         <div className="sw-field" style={{ marginTop: 10 }}>
           <label>ONE-TIME DEAL VALUE {derived != null && (
             <span style={{ fontWeight: 400 }}>(derived {money(derived)})</span>
@@ -575,20 +451,28 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
             contract value is in the summary above.
           </div>
         </div>
-      </details>
-
-      {needsReason && (
-        <div className="sw-field">
-          <label>OVERRIDE REASON (REQUIRED)</label>
-          <input className="sw-input" value={reason} onChange={e => setReason(e.target.value)}
-                 placeholder="Why is this different from the package price?" />
-          {!opp.can_override_value && (
-            <div className="sw-subtle" style={{ marginTop: 6 }}>
-              Only a sales manager can override the derived value.
-            </div>
-          )}
+        {needsReason && (
+          <div className="sw-field">
+            <label>OVERRIDE REASON (REQUIRED)</label>
+            <input className="sw-input" value={reason} onChange={e => setReason(e.target.value)}
+                   placeholder="Why is this different from the package price?" />
+            {!opp.can_override_value && (
+              <div className="sw-subtle" style={{ marginTop: 6 }}>
+                Only a sales manager can override the derived value.
+              </div>
+            )}
+          </div>
+        )}
+        <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end' }}>
+          <button className="sw-btn" disabled={saving || (needsReason && !reason.trim())}
+                  onClick={() => onPatch({
+                    deal_value: value === '' ? null : Number(value),
+                    deal_value_override_reason: reason.trim() || undefined,
+                  })}>
+            {saving ? 'Saving…' : 'Save value'}
+          </button>
         </div>
-      )}
+      </details>
 
       {opp.deal_value_override && (
         <div className="sw-notbuilt sw-mt">
@@ -600,16 +484,6 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
           </p>
         </div>
       )}
-
-      <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end' }}>
-        <button className="sw-btn sw-primary" disabled={saving || (needsReason && !reason.trim())}
-                onClick={() => onPatch({
-                  deal_value: value === '' ? null : Number(value),
-                  deal_value_override_reason: reason.trim() || undefined,
-                })}>
-          {saving ? 'Saving…' : 'Save value'}
-        </button>
-      </div>
 
       {/* Projected compensation on this deal. Absent — not zero — for anyone
           not permitted to see it; the server sends null and this renders
@@ -696,6 +570,14 @@ export default function OpportunityDetail() {
   // id because the reschedule dialog needs its participants and duration to run
   // the same shared-availability search the original booking used.
   const [moving, setMoving] = useState(null)
+  // The closing projection, fetched ONCE here and handed to ClosingPanel rather
+  // than fetched twice: the command area needs the proposal state to decide
+  // what the next action is, and that is the same call.
+  const [closing, setClosing] = useState(null)
+  // Which stage sections are expanded. Seeded from the deal's own stage.
+  const [open, setOpen] = useState([])
+  // The deal whose stage last decided which section is open.
+  const seededOpen = useRef(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -709,7 +591,13 @@ export default function OpportunityDetail() {
     } finally { setLoading(false) }
   }, [oppId])
 
+  const loadClosing = useCallback(async () => {
+    try { setClosing(await api.get('/sales/opportunities/' + oppId + '/closing')) }
+    catch { setClosing(null) }
+  }, [oppId])
+
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadClosing() }, [loadClosing])
   // Checkpoint 6 §15 — what happened after Won. A coarse, read-only projection
   // assembled server-side; this component never sees tenant data and could not
   // display it if it wanted to. Failing quietly is right: an opportunity that
@@ -728,10 +616,37 @@ export default function OpportunityDetail() {
       .then(setPostWon).catch(() => setPostWon(null))
   }, [oppId])
 
+  // Open the section the deal is actually in — once per DEAL. Re-opening it on
+  // every refresh would slam a section shut under someone's cursor; keying the
+  // seed on the id rather than on "have I run yet" is what makes navigating
+  // from one deal to the next open the right section for the NEW one, instead
+  // of inheriting whatever was open on the last one.
+  const currentSection = opp ? (SECTION_FOR_STAGE[opp.stage] || 'discovery') : null
+  useEffect(() => {
+    if (!opp || seededOpen.current === opp.id) return
+    seededOpen.current = opp.id
+    setOpen([SECTION_FOR_STAGE[opp.stage] || 'discovery'])
+  }, [opp])
+
+  function toggle(id) {
+    setOpen(o => (o.indexOf(id) === -1 ? o.concat([id]) : o.filter(x => x !== id)))
+  }
+
+  function openSection(id) {
+    setOpen(o => (o.indexOf(id) === -1 ? o.concat([id]) : o))
+    // Let the section render before scrolling to it.
+    setTimeout(() => {
+      const el = document.getElementById('sec-' + id)
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 30)
+  }
+
   async function patch(body) {
     setSaving(true); setError(null)
-    try { setOpp(await api.patch('/sales/opportunities/' + oppId, body)) }
-    catch (e) { setError(e.message || 'Save failed.') }
+    try {
+      setOpp(await api.patch('/sales/opportunities/' + oppId, body))
+      loadClosing()
+    } catch (e) { setError(e.message || 'Save failed.') }
     finally { setSaving(false) }
   }
 
@@ -744,10 +659,12 @@ export default function OpportunityDetail() {
     finally { setSaving(false) }
   }
 
-  async function saveDiscovery(vals, complete) {
+  async function saveDiscovery(structured, complete) {
     setSaving(true); setError(null)
-    try { setOpp(await api.put('/sales/opportunities/' + oppId + '/discovery',
-                               { ...vals, mark_complete: !!complete })) }
+    try {
+      setOpp(await api.put('/sales/opportunities/' + oppId + '/discovery',
+                           { structured, mark_complete: !!complete }))
+    }
     catch (e) { setError(e.message || 'Save failed.') }
     finally { setSaving(false) }
   }
@@ -779,6 +696,34 @@ export default function OpportunityDetail() {
     finally { setSaving(false) }
   }
 
+  /* One dispatcher for the command area, so "what the next action is" is
+     decided in one place (DealCommand.primaryAction) and DONE in one place. */
+  function onAction(a) {
+    if (!a) return
+    if (a.type === 'stage') { patch({ stage: a.stage }); openSection(SECTION_FOR_STAGE[a.stage] || 'discovery'); return }
+    if (a.type === 'open') { openSection(a.section); return }
+    if (a.type === 'meeting') { setFinding(true) }
+  }
+
+  const alerts = useMemo(() => {
+    if (!opp) return []
+    const out = []
+    if (opp.attention) out.push({ tone: 'amber', text: opp.attention })
+    const warn = (closing && closing.warnings || []).filter(w => w.level)
+    const red = warn.filter(w => w.level === 'red').length
+    if (warn.length) {
+      out.push({ tone: red ? 'red' : 'amber',
+                 text: warn.length + ' to deal with before this closes' })
+    }
+    const p = opp.discovery && opp.discovery.progress
+    if (p && !p.complete && SECTION_FOR_STAGE[opp.stage] === 'discovery') {
+      out.push({ tone: 'amber',
+                 text: 'Discovery ' + p.answered + '/' + p.required + ' — '
+                       + (p.missing || []).slice(0, 3).map(m => m.label).join(', ') })
+    }
+    return out.slice(0, 3)
+  }, [opp, closing])
+
   if (loading && !opp) {
     return <SalesShell title="Opportunity"><div className="sw-subtle">Loading…</div></SalesShell>
   }
@@ -796,6 +741,45 @@ export default function OpportunityDetail() {
   }
 
   const due = dueLabel(opp.next_action_due_at)
+  const d = opp.demo || {}
+  const disc = opp.discovery || {}
+  const prog = disc.progress || { answered: 0, required: 0, complete: false }
+  const prop = closing && closing.proposal
+  const curIdx = SECTION_ORDER.indexOf(currentSection)
+  const stateOf = id => {
+    const i = SECTION_ORDER.indexOf(id)
+    if (i < curIdx) return 'done'
+    if (i === curIdx) return 'current'
+    return 'upcoming'
+  }
+  const isOpen = id => open.indexOf(id) !== -1
+
+  const nextMeetingLabel = (opp.appointments || []).length
+    ? wallDateTime(opp.appointments[0].starts_at_local || opp.appointments[0].starts_at)
+      + ' · ' + (opp.appointments[0].meeting_type || 'Meeting')
+    : 'Nothing booked'
+
+  const demoSummary = d.status
+    ? [d.status.replace('_', ' '), d.owner_name, d.due_at ? 'due ' + dateTime(d.due_at) : null]
+        .filter(Boolean).join(' · ')
+    : 'Not requested'
+
+  const proposalSummary = prop
+    ? [prop.proposal_number, prop.status_label,
+       prop.amount != null ? money(prop.amount) : null].filter(Boolean).join(' · ')
+    : (opp.selected_package ? opp.selected_package.name + ' · no proposal yet'
+                            : 'No package selected')
+
+  const closingSummary = closing
+    ? ((closing.warnings || []).filter(w => w.level).length
+        ? (closing.warnings || []).filter(w => w.level).length + ' to deal with'
+        : 'Nothing outstanding')
+    : 'Loading…'
+
+  const billingSummary = opp.customer_organization_id
+    ? 'Customer provisioned · setup and subscription'
+    : (opp.status === 'won' ? 'Won — awaiting provisioning'
+                            : 'Setup fee and subscription are billed separately')
 
   return (
     <SalesShell
@@ -804,56 +788,23 @@ export default function OpportunityDetail() {
       actions={
         <>
           <button className="sw-btn" onClick={() => nav('/sales/pipeline')}>← Pipeline</button>
-          <button className="sw-btn" onClick={load} disabled={loading}>Refresh</button>
-          <button className="sw-btn sw-primary" onClick={() => setFinding(true)}>
-            Find Team Time
+          <button className="sw-btn" onClick={() => { load(); loadClosing() }} disabled={loading}>
+            Refresh
           </button>
         </>
       }
     >
       <ErrorBar error={error} onRetry={load} />
 
-      {postWon && postWon.provisioned ? (
-        <div className="sw-card" style={{ marginBottom: 14 }}>
-          <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase',
-                       letterSpacing: '.6px' }}>After the sale</h3>
-          <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', fontSize: 13 }}>
-            <div><strong>{postWon.customer_organization_name}</strong>
-              <div className="sw-subtle">Customer organisation</div></div>
-            <div><strong>{postWon.status_label}</strong>
-              <div className="sw-subtle">Status</div></div>
-            <div><strong>{postWon.implementation_owner || 'unassigned'}</strong>
-              <div className="sw-subtle">Implementation owner</div></div>
-            <div><strong>{postWon.percent_complete}%</strong>
-              <div className="sw-subtle">Onboarding complete</div></div>
-            <div><strong>{postWon.is_live
-              ? 'Live'
-              : (postWon.target_launch_date
-                 ? new Date(postWon.target_launch_date).toLocaleDateString()
-                 : 'not set')}</strong>
-              <div className="sw-subtle">{postWon.is_live ? 'Launched' : 'Target launch'}</div></div>
-          </div>
-          {postWon.is_blocked ? (
-            <p className="sw-subtle" style={{ marginBottom: 0 }}>
-              This implementation is currently blocked. The implementation owner has the detail.
-            </p>
-          ) : null}
-          <div style={{ marginTop: 12 }}>
-            <button className="sw-btn sw-primary" onClick={() => nav('/sales/onboarding')}>
-              View all implementations →
-            </button>
-          </div>
-        </div>
-      ) : postWon && postWon.is_won ? (
-        <div className="sw-card" style={{ marginBottom: 14 }}>
-          <h3 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase',
-                       letterSpacing: '.6px' }}>After the sale</h3>
-          <p className="sw-subtle" style={{ margin: 0 }}>
-            Won — awaiting provisioning. A customer organisation is created
-            deliberately, not automatically.
-          </p>
-        </div>
-      ) : null}
+      <DealCommand
+        opp={opp}
+        closing={closing}
+        nextMeeting={nextMeetingLabel}
+        alerts={alerts}
+        saving={saving}
+        onAction={onAction}
+        stageControl={<StageMover opp={opp} onMove={s => patch({ stage: s })} saving={saving} />}
+      />
 
       {finding && (
         <FindTeamTime
@@ -863,28 +814,123 @@ export default function OpportunityDetail() {
         />
       )}
 
-      <div className="sw-card">
-        <div className="sw-card-b sw-head">
-          <div>
-            <div className="sw-chips" style={{ marginBottom: 8 }}>
-              <Chip tone="green">{opp.stage_label}</Chip>
-              {opp.owner_name && <Chip>Owner: {opp.owner_name}</Chip>}
-              {opp.attention && <Chip tone="amber">{opp.attention}</Chip>}
-              {opp.days_in_stage != null && <Chip>{opp.days_in_stage}d in stage</Chip>}
-            </div>
-            <h2>{opp.company_name}</h2>
-            <p>{[opp.contact_name, opp.industry, opp.source].filter(Boolean).join(' · ')}</p>
-          </div>
-          <div className="sw-chips">
-            <StageMover opp={opp} onMove={s => patch({ stage: s })} saving={saving} />
-          </div>
-        </div>
-      </div>
-
       <div className="sw-mt sw-grid2">
         <div>
+          {/* ── THE DEAL, IN THE ORDER IT IS ACTUALLY SOLD ────────────────── */}
+
+          <StageSection
+            id="discovery" step={1} title="DISCOVERY" state={stateOf('discovery')}
+            open={isOpen('discovery')} onToggle={toggle}
+            summary={disc.completed_at
+              ? 'Completed ' + dateTime(disc.completed_at)
+              : prog.answered + '/' + prog.required + ' captured'}
+            badge={<Chip tone={prog.complete ? 'green' : (prog.answered ? 'amber' : null)}>
+              {prog.answered}/{prog.required}
+            </Chip>}
+          >
+            <DiscoveryPanel opp={opp} onSave={saveDiscovery} saving={saving} />
+          </StageSection>
+
+          <StageSection
+            id="demo" step={2} title="DEMO" state={stateOf('demo')}
+            open={isOpen('demo')} onToggle={toggle}
+            summary={demoSummary}
+            badge={d.status === 'ready' || d.status === 'delivered'
+              ? <Chip tone="green">Ready</Chip>
+              : (d.status ? <Chip tone="amber">{d.status.replace('_', ' ')}</Chip> : null)}
+          >
+            <DemoPanel opp={opp} team={team} onPatch={patch} saving={saving}
+                       onRequest={() => patch({ stage: 'demo_build' })} />
+            {/* Directly under the demo panel, because publishing the demo is
+                the step that panel has been tracking. Publishing a platform
+                walkthrough fills in DEMO URL and flips the status to ready on
+                the server, so `load` refreshes the panel above. */}
+            <div className="sw-mt"><DemoSitesPanel opp={opp} onChanged={load} /></div>
+          </StageSection>
+
+          <StageSection
+            id="proposal" step={3} title="PROPOSAL" state={stateOf('proposal')}
+            open={isOpen('proposal')} onToggle={toggle}
+            summary={proposalSummary}
+            badge={prop ? <Chip tone={prop.status === 'accepted' ? 'green' : 'amber'}>
+              {prop.status_label}</Chip> : null}
+          >
+            <PackageDeal opp={opp} packages={packages} onPatch={patch} saving={saving} />
+            <div className="sw-mt">
+              <ProposalPanel opp={opp} packages={packages}
+                             onChanged={() => { load(); loadClosing() }} />
+            </div>
+          </StageSection>
+
+          <StageSection
+            id="closing" step={4} title="CLOSING" state={stateOf('closing')}
+            open={isOpen('closing')} onToggle={toggle}
+            summary={closingSummary}
+            badge={closing && (closing.warnings || []).filter(w => w.level).length
+              ? <Chip tone="amber">
+                  {(closing.warnings || []).filter(w => w.level).length}
+                </Chip>
+              : <Chip tone="green">Clear</Chip>}
+          >
+            <ClosingPanel opp={opp} data={closing} />
+          </StageSection>
+
+          <StageSection
+            id="billing" step={5} title="BILLING & HANDOFF" state={stateOf('billing')}
+            open={isOpen('billing')} onToggle={toggle}
+            summary={billingSummary}
+          >
+            {/* THE BILLING ENGINE IS NOT TOUCHED HERE. Setup / implementation
+                and the monthly subscription remain two separate obligations,
+                resolved and rendered by DealBillingPanel exactly as it does
+                everywhere else. This section only decides WHERE it appears. */}
+            <DealBillingPanel opp={opp} />
+
+            {postWon && postWon.provisioned ? (
+              <Card title="AFTER THE SALE" sub="What happened once this was won">
+                <div className="sw-infogrid">
+                  <Info label="CUSTOMER ORGANISATION"
+                        value={postWon.customer_organization_name} />
+                  <Info label="STATUS" value={postWon.status_label} />
+                  <Info label="IMPLEMENTATION OWNER"
+                        value={postWon.implementation_owner || 'unassigned'} />
+                  <Info label="ONBOARDING" value={postWon.percent_complete + '%'} />
+                  <Info label={postWon.is_live ? 'LAUNCHED' : 'TARGET LAUNCH'}
+                        value={postWon.is_live
+                          ? 'Live'
+                          : (postWon.target_launch_date
+                             ? new Date(postWon.target_launch_date).toLocaleDateString()
+                             : 'not set')} />
+                </div>
+                {postWon.is_blocked ? (
+                  <p className="sw-subtle" style={{ margin: '10px 0 0' }}>
+                    This implementation is currently blocked. The implementation
+                    owner has the detail.
+                  </p>
+                ) : null}
+                <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end' }}>
+                  <button className="sw-btn sw-primary" onClick={() => nav('/sales/onboarding')}>
+                    View all implementations →
+                  </button>
+                </div>
+              </Card>
+            ) : postWon && postWon.is_won ? (
+              <Card title="AFTER THE SALE">
+                <p className="sw-subtle" style={{ margin: 0 }}>
+                  Won — awaiting provisioning. A customer organisation is created
+                  deliberately, not automatically.
+                </p>
+              </Card>
+            ) : null}
+          </StageSection>
+        </div>
+
+        {/* ── THE RAIL ──────────────────────────────────────────────────────
+            Who they are, when you are seeing them, and what you owe them next.
+            Everything historical is one click away rather than on the page. */}
+        <div>
           <Card
-            title="RECORD"
+            title="CUSTOMER"
             /* The reassign control sits on the header of the card that already
                shows SALES OWNER, so the fact and the action are in one place.
                `can_reassign` is the server's own per-record answer; the button
@@ -939,70 +985,17 @@ export default function OpportunityDetail() {
           </Card>
 
           <div className="sw-mt">
-            <Card title="LIFECYCLE" sub="One continuous record — never re-created to change stage">
-              <Lifecycle opp={opp} />
-              {opp.customer_organization_id
-                ? <div className="sw-subtle sw-mt" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span>Customer organization provisioned.</span>
-                    <button className="sw-btn" style={{ padding: '2px 10px', fontSize: 12 }}
-                            onClick={() => nav('/sales/onboarding')}>
-                      View onboarding →
-                    </button>
-                  </div>
-                : <div className="sw-subtle sw-mt">
-                    No customer organization yet — provisioning happens when the deal is Won.
-                  </div>}
-            </Card>
+            <Meetings opp={opp} saving={saving}
+                      onFind={() => setFinding(true)}
+                      onConfirm={confirmAppt} onCancel={cancelAppt}
+                      onMove={setMoving} />
           </div>
-
-          <div className="sw-mt"><Discovery opp={opp} onSave={saveDiscovery} saving={saving} /></div>
-          <div className="sw-mt"><DemoBuild opp={opp} team={team} onPatch={patch} saving={saving} /></div>
-          {/* Directly under the demo build panel, because publishing the demo
-              is the step that panel has been tracking. Publishing a platform
-              walkthrough fills in DEMO URL and flips the status to ready on
-              the server, so `load` refreshes the panel above rather than
-              leaving it stale. */}
-          <div className="sw-mt"><DemoSitesPanel opp={opp} onChanged={load} /></div>
-          <div className="sw-mt">
-            <PackageDeal opp={opp} packages={packages} onPatch={patch} saving={saving} />
-          </div>
-          {/* Checkpoint 4. Sits in the main column, after discovery/demo/package
-              — the order a deal actually moves through. */}
-          <div className="sw-mt">
-            <ProposalPanel opp={opp} packages={packages} onChanged={load} />
-          </div>
-        </div>
-
-        <div>
-          {/* First in the right column: once a proposal exists, "what is
-              stopping this closing" is the question a rep opens the deal to
-              answer. */}
-          <div style={{ marginBottom: 16 }}>
-            <ClosingPanel opp={opp} />
-          </div>
-
-          {/* Directly beneath it: once the deal is closeable, "can we actually
-              collect the money" is the same question continued. */}
-          <div style={{ marginBottom: 16 }}>
-            <DealBillingPanel opp={opp} />
-          </div>
-
-          <Meetings opp={opp} saving={saving}
-                    onFind={() => setFinding(true)}
-                    onConfirm={confirmAppt} onCancel={cancelAppt}
-                    onMove={setMoving} />
 
           {moving && (
             <RescheduleDialog appt={moving}
                               onClose={() => setMoving(null)}
                               onDone={load} />
           )}
-
-          {/* Checkpoint 3: this was a NotBuilt placeholder. It is now real —
-              every state below comes from an actual provider call. */}
-          <div className="sw-mt">
-            <ApptSyncPanel opp={opp} onChanged={load} />
-          </div>
 
           <div className="sw-mt">
             <Card title="ADD TO TIMELINE" sub="Logged against this record, permanently">
@@ -1018,25 +1011,46 @@ export default function OpportunityDetail() {
             </Card>
           </div>
 
-          <div className="sw-mt">
-            <Card title="ACTIVITY" sub="Append-only — corrections are new entries" bodyless>
+          {/* History and calendar plumbing: real, kept, and not in the way. */}
+          <div className="sw-card sw-mt">
+            <details className="sw-disclose is-flush">
+              <summary>Activity ({(opp.timeline || []).length})</summary>
               {opp.timeline?.length
-                ? <div className="sw-card-b">
-                    <div className="sw-timeline">
-                      {opp.timeline.map(e => (
-                        <div className="sw-event" key={e.id}>
-                          <b>{e.summary}</b>
-                          <p>
-                            {dateTime(e.occurred_at)}
-                            {e.actor_name ? ' · ' + e.actor_name : ''}
-                            {e.detail ? ' · ' + e.detail : ''}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
+                ? <div className="sw-timeline" style={{ marginTop: 12 }}>
+                    {opp.timeline.map(e => (
+                      <div className="sw-event" key={e.id}>
+                        <b>{e.summary}</b>
+                        <p>
+                          {dateTime(e.occurred_at)}
+                          {e.actor_name ? ' · ' + e.actor_name : ''}
+                          {e.detail ? ' · ' + e.detail : ''}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                : <Empty title="No activity yet" />}
-            </Card>
+                : <p className="sw-subtle" style={{ marginTop: 10 }}>No activity yet.</p>}
+            </details>
+            <details className="sw-disclose is-flush">
+              <summary>Lifecycle</summary>
+              <div style={{ marginTop: 12 }}><Lifecycle opp={opp} /></div>
+              {opp.customer_organization_id
+                ? <div className="sw-subtle sw-mt" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span>Customer organization provisioned.</span>
+                    <button className="sw-btn" style={{ padding: '2px 10px', fontSize: 12 }}
+                            onClick={() => nav('/sales/onboarding')}>
+                      View onboarding →
+                    </button>
+                  </div>
+                : <div className="sw-subtle sw-mt">
+                    No customer organization yet — provisioning happens when the deal is Won.
+                  </div>}
+            </details>
+            <details className="sw-disclose is-flush">
+              <summary>Calendar sync</summary>
+              <div style={{ marginTop: 12 }}>
+                <ApptSyncPanel opp={opp} onChanged={load} />
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -1051,7 +1065,7 @@ function StageMover({ opp, onMove, saving }) {
     api.get('/sales/me').then(me => setStages(me.stages || [])).catch(() => setStages([]))
   }, [])
   return (
-    <select className="sw-select" style={{ width: 200 }} value={opp.stage}
+    <select className="sw-select" style={{ width: 180 }} value={opp.stage}
             disabled={saving || !stages.length}
             onChange={e => onMove(e.target.value)}>
       {stages.length

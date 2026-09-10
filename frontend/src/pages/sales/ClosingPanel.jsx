@@ -33,17 +33,25 @@ const WARN_STYLE = {
   amber: { background: '#fff6e9', border: '1px solid #f2d5aa', color: '#9e6722' },
 }
 
-export default function ClosingPanel({ opp }) {
-  const [data, setData] = useState(null)
+/* `data` is optional. The Opportunity page already fetches this projection to
+   decide what the deal's next action is, so it hands the same payload down
+   rather than making the page ask twice for an answer it has. Anywhere else
+   this panel is used on its own, it still fetches for itself. */
+export default function ClosingPanel({ opp, data: given }) {
+  const [fetched, setFetched] = useState(null)
   const [error, setError] = useState(null)
+  // The parent's copy wins the moment it exists. Until then — and if the
+  // parent's own fetch failed — this panel still answers for itself rather
+  // than sitting on "Loading…" forever waiting for a payload that never comes.
+  const data = (given && typeof given === 'object') ? given : fetched
 
   const load = useCallback(async () => {
     setError(null)
-    try { setData(await api.get('/sales/opportunities/' + opp.id + '/closing')) }
+    try { setFetched(await api.get('/sales/opportunities/' + opp.id + '/closing')) }
     catch (e) { setError(e.message || 'Could not load the closing view.') }
   }, [opp.id])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { if (!given) load() }, [load, given])
 
   if (!data) {
     return <Card title="CLOSING"><div className="sw-subtle">Loading…</div></Card>

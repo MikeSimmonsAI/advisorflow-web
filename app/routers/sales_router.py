@@ -60,6 +60,10 @@ from app.services import pricing_authority as _authority
 from app.services import pricing_approvals as _pricing_approvals
 from app.services import compensation as _comp
 from app.services import pipeline_projection as _projection
+# Seller discovery as structured answers. A PRESENTATION adapter over the
+# DiscoveryRecord columns that already exist — not a second discovery engine,
+# and not a per-question column. See app/services/discovery_schema.py.
+from app.services import discovery_schema as _discovery
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -644,6 +648,12 @@ class DiscoveryPatch(BaseModel):
     desired_outcome: Optional[str] = None
     demo_requirements: Optional[str] = None
     opportunity_notes: Optional[str] = None
+    # THE STRUCTURED ANSWERS. `{field_key: {options, other, note, parts}}`.
+    # Sent INSTEAD of the long-form string for any field the seller answered
+    # with the structured controls; the server renders it into that field's
+    # existing Text column, so a client may still send either shape and the
+    # two never disagree about what the column holds.
+    structured: Optional[dict] = None
     mark_complete: bool = False
 
 
@@ -1027,6 +1037,15 @@ def get_opportunity(opp_id: str,
         k: None for k, _ in DiscoveryRecord.FIELDS}
     discovery["completed_at"] = disc.completed_at if disc else None
     discovery["completed_by_name"] = _user_name(db, disc.completed_by) if disc else None
+    # The structured side of the same answers, plus whatever long-form text was
+    # captured before structured discovery existed. Both are sent every time:
+    # the panel draws the controls from `structured` and shows `legacy` under a
+    # collapsed "Previous / detailed notes", so an old deal loses nothing.
+    _disc_state = _discovery.load(getattr(disc, "structured_json", None) if disc else None)
+    discovery["structured"] = _disc_state["fields"]
+    discovery["legacy"] = _disc_state["legacy"]
+    discovery["progress"] = _discovery.progress(
+        _disc_state["fields"], {k: discovery.get(k) for k, _ in DiscoveryRecord.FIELDS})
 
     events = (db.query(OpportunityEvent)
               .filter(OpportunityEvent.opportunity_id == opp.id)
@@ -1110,6 +1129,23 @@ def get_opportunity(opp_id: str,
         "customer_organization_id": opp.customer_organization_id,
         "discovery": discovery,
         "discovery_fields": [{"key": k, "label": lbl} for k, lbl in DiscoveryRecord.FIELDS],
+        # The controls the seller gets, served rather than hardcoded in the
+        # browser — the same rule that makes `/sales/me` send the stage list.
+        "discovery_schema": _discovery.schema_payload(),
+        # ── WHO MAY DRIVE THE DEMO BUILD ────────────────────────────────────
+        # A salesperson sees the demo's OUTCOME: status, who is building it,
+        # when it is due, the link. The operational controls behind it — the
+        # requirements work order, the internal build notes, reassigning the
+        # builder, declaring it ready — belong to whoever is actually building
+        # it and to the manager who answers for it.
+        #
+        # The screen hides those for everybody else, and this is the server's
+        # own answer rather than the browser's guess. PATCH is still gated by
+        # `assert_can_edit_opportunity` regardless of what this says, so a
+        # hidden control is a courtesy, not the access control.
+        "can_manage_demo": bool(
+            is_sales_manager(user, db, opp.brand_sales_org_id)
+            or (opp.demo_owner_user_id and opp.demo_owner_user_id == user.id)),
         "timeline": [{
             "id": e.id, "event_type": e.event_type, "summary": e.summary,
             "detail": e.detail, "occurred_at": e.occurred_at,
@@ -1479,6 +1515,33 @@ def upsert_discovery(opp_id: str, body: DiscoveryPatch,
         if key in data:
             v = data[key]
             setattr(disc, key, (v.strip() or None) if isinstance(v, str) else v)
+
+    # ── the structured answers ──────────────────────────────────────────────
+    # Sanitised against the schema (a browser does not get to invent option
+    # values), merged into the side-car, and RENDERED into the same Text
+    # columns the long-form form always wrote. Nothing downstream — the demo
+    # requirements carry-forward, provisioning's discovery summary, proposals —
+    # learns that anything changed, because from their side nothing did.
+    #
+    # Whatever prose was in a column before its first structured answer is
+    # snapshotted into `legacy` by `apply`, so a rep's earlier long-form note
+    # is preserved rather than replaced.
+    if "structured" in data and data["structured"] is not None:
+        incoming = _discovery.sanitize(data["structured"])
+        if incoming:
+            state = _discovery.load(getattr(disc, "structured_json", None))
+            current_text = {k: getattr(disc, k, None)
+                            for k, _ in DiscoveryRecord.FIELDS}
+            state = _discovery.apply(state, incoming, current_text)
+            disc.structured_json = _discovery.dump(state)
+            for key in incoming:
+                # Only fields `apply` actually accepted — an empty answer to an
+                # untouched question is ignored there, and must not null the
+                # column here either.
+                if key not in state["fields"]:
+                    continue
+                rendered = _discovery.render(key, state["fields"][key])
+                setattr(disc, key, rendered or None)
 
     if body.mark_complete and not disc.completed_at:
         disc.completed_at = datetime.utcnow()
