@@ -42,6 +42,18 @@ EXEMPT = {
     "services/demo_scenarios/brand_sales.py": "demo fixture builder; creates platform-scope users with organization_id=None",
     "services/demo_scenarios/customer_reactivation.py": "demo fixture builder",
 
+    # THE DEMO SUITE'S SEEDER. Same category as the two fixture builders above,
+    # and the reason is worth stating rather than inheriting: the tenants it
+    # writes into are flagged `is_demo`, have no plan, no subscription and no
+    # Stripe customer, and nobody is ever billed for a seat in them. Counting a
+    # fictional advisor against a plan limit would be counting a seat that does
+    # not exist against a plan that does not exist.
+    #
+    # It is NOT an exemption for demo ACTIONS: `demo_actions.py` creates no
+    # User and no Lead, deliberately — a presenter can move a deal, send a
+    # simulated message and book an appointment, and cannot conjure a person.
+    "services/demo_environment.py": "Demo Suite seeder; writes only into is_demo tenants, which have no plan and no billable seats",
+
     # Brand-sales staff live at SCOPE_BRAND_SALES_ORG with organization_id
     # NULL. They are not seats in any customer's plan.
     "services/sales_staff.py": "brand sales-org staff; organization_id is NULL, not a customer seat",
