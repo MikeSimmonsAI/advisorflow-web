@@ -122,6 +122,9 @@ export default function GodBillingOps() {
   const [events, setEvents] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  // Which customer's refresh is in flight, and what the last one reported.
+  const [resyncing, setResyncing] = useState(null);
+  const [resyncNote, setResyncNote] = useState('');
 
   useEffect(() => {
     api.get('/god/billing/brands')
@@ -153,6 +156,51 @@ export default function GodBillingOps() {
   }, [platformId, filter, q]);
 
   useEffect(() => { setLoading(true); load().finally(() => setLoading(false)); }, [load]);
+
+  // ── REFRESH ONE CUSTOMER'S MIRROR FROM STRIPE ──────────────────────────
+  //
+  // PREVIEW FIRST, ALWAYS. The dry run reports what would change and writes
+  // nothing, so the reflex of clicking a new button on a billing screen is to
+  // look rather than to alter a customer's commercial record. Only a listed
+  // difference the operator then confirms is applied.
+  //
+  // Nothing here writes to Stripe. It re-reads the subscription and re-applies
+  // it through the same function the webhook uses, which is what makes it a
+  // refresh rather than a correction.
+  async function handleResync(row) {
+    setResyncNote(''); setResyncing(row.organization_id);
+    try {
+      const preview = await api.post(
+        `/god/billing/customers/${row.organization_id}/resync`, { apply: false });
+
+      if (!preview.changed?.length) {
+        setResyncNote(`${row.name}: already matches Stripe — nothing to change.`);
+        setResyncing(null);
+        return;
+      }
+
+      const summary = preview.changed
+        .map(c => `${c.field}: ${c.from ?? '(not set)'} → ${c.to ?? '(not set)'}`)
+        .join('\n');
+      if (!window.confirm(
+        `Refresh ${row.name} from Stripe?\n\n${summary}\n\n` +
+        'This reads from Stripe and updates this platform\'s copy. ' +
+        'Nothing is written to Stripe and no money moves.')) {
+        setResyncing(null);
+        return;
+      }
+
+      const applied = await api.post(
+        `/god/billing/customers/${row.organization_id}/resync`, { apply: true });
+      setResyncNote(
+        `${row.name}: refreshed — ${applied.changed.length} field(s) updated from Stripe.`);
+      await load();
+    } catch (e) {
+      setResyncNote(`${row.name}: ${e?.detail || e?.message || 'refresh failed. Nothing was changed.'}`);
+    } finally {
+      setResyncing(null);
+    }
+  }
 
   const mrr = revenue?.mrr;
   const collected = revenue?.collected_30d;
@@ -278,6 +326,14 @@ export default function GodBillingOps() {
               : 'No priced subscriptions in view'}
           </div>
         </div>
+
+        {resyncNote && (
+          <div style={{ padding: '10px 20px', fontSize: 13, color: '#2fb6ff',
+                        background: '#2fb6ff11',
+                        borderBottom: '1px solid #2a2a4a' }}>
+            {resyncNote}
+          </div>
+        )}
 
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>Loading…</div>
@@ -431,6 +487,26 @@ export default function GodBillingOps() {
                         )}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {/* Offered only where there is a subscription to
+                            re-read. On a customer who has never subscribed the
+                            endpoint refuses, and a button that always errors
+                            teaches an operator to ignore the errors. */}
+                        {c.has_subscription && (
+                          <button
+                            type="button"
+                            onClick={() => handleResync(c)}
+                            disabled={resyncing === c.organization_id}
+                            title="Re-read this subscription from Stripe and refresh this platform's copy. Nothing is written to Stripe."
+                            style={{ background: 'transparent', color: '#7a7a95',
+                                     border: '1px solid #2a2a4a', borderRadius: 6,
+                                     padding: '4px 10px', fontSize: 12,
+                                     marginRight: 10,
+                                     cursor: resyncing === c.organization_id
+                                       ? 'default' : 'pointer' }}
+                          >
+                            {resyncing === c.organization_id ? 'Checking…' : 'Refresh'}
+                          </button>
+                        )}
                         <Link to={`/god/customers/${c.organization_id}/360`}
                           style={{ color: '#2fb6ff', textDecoration: 'none', fontWeight: 600 }}>
                           360 →

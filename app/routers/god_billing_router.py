@@ -1423,3 +1423,67 @@ def billing_events(organization_id: Optional[str] = Query(None),
             "time — that is the idempotency ledger working, not a lost payment."
         ),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# REFRESH ONE CUSTOMER'S SUBSCRIPTION MIRROR FROM STRIPE
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ResyncIn(BaseModel):
+    # Same preview-then-apply shape as brand provisioning: `apply` is false by
+    # default, so the reflex action of an operator poking a new button is to
+    # SEE what would change rather than to change it.
+    apply: bool = False
+
+
+@router.post("/customers/{organization_id}/resync")
+def resync_customer(organization_id: str, body: ResyncIn = ResyncIn(),
+                    db: Session = Depends(get_db),
+                    user: User = Depends(require_god)):
+    """Re-read this customer's subscription from Stripe and refresh the mirror.
+
+    STRIPE REMAINS AUTHORITATIVE — that is the entire point. This writes
+    NOTHING to Stripe: it retrieves the subscription and hands it to the same
+    `apply_subscription` a webhook would, so the local copy is refreshed from
+    the original rather than corrected by hand.
+
+    IT EXISTS BECAUSE A WEBHOOK IS DELIVERED ONCE. It was handled by whatever
+    code was deployed at that moment, and three ordinary things leave the
+    mirror stale afterwards with nothing to fix them: a column added after the
+    event arrived, a field Stripe moved between API versions, and a delivery
+    that failed while the endpoint was misconfigured. All three happened on
+    this platform inside one afternoon. In every case the money at Stripe is
+    right and the local copy is behind, and the honest repair is to ask Stripe
+    again — not to type the answer in.
+
+    The response says exactly which fields moved, so a refresh leaves the same
+    kind of trail the webhook does.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="No such organization.")
+
+    from app.services import billing_resync
+
+    try:
+        result = billing_resync.resync_subscription(
+            db, org, dry_run=not body.apply)
+    except billing_resync.ResyncRefused as exc:
+        # 409: understood and refused on a precondition, not a failure.
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    if not body.apply:
+        return result
+
+    # Audited like any other write to a customer's commercial record. The
+    # before/after carries only the mirrored billing fields the service names —
+    # public Stripe ids and plan state, never a key, a card or a payload.
+    _audit(db, user, "billing.subscription_resynced", "organization",
+           organization_id,
+           before={"changed_from": {c["field"]: c["from"]
+                                    for c in result["changed"]}},
+           after={"changed_to": {c["field"]: c["to"]
+                                 for c in result["changed"]}})
+    db.commit()
+    return result
