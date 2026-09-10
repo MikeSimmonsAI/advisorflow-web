@@ -38,6 +38,7 @@ import {
 } from '../../src/components/ui';
 import { nameOf, relativeOf } from '../../src/format';
 import { palette } from '../../src/theme/tokens';
+import { rowKey } from '../../src/keys';
 
 type Rec = Record<string, unknown>;
 
@@ -120,7 +121,7 @@ export default function AdvisorHome() {
           <SectionHeader title="Needs you now" />
           {actions.map((a, i) => (
             <AttentionItem
-              key={i}
+              key={rowKey([], i)}
               title={a.title}
               why={a.why}
               action="Open"
@@ -150,7 +151,7 @@ export default function AdvisorHome() {
           <SectionHeader title={`Needs review · ${toReview.length}`} />
           {toReview.slice(0, 8).map((l, i) => (
             <Row
-              key={String(pick(l, 'id') ?? i)}
+              key={rowKey([pick(l, 'id')], i)}
               title={nameOf(l, 'Lead')}
               subtitle={String(pick(l, 'reason', 'status', 'classification') ?? '') || null}
               meta={relativeOf(pick(l, 'last_contacted_at', 'updated_at', 'created_at'))}

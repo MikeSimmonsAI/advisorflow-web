@@ -22,6 +22,8 @@ import { ActivityItem, FilterChips, SectionRetry, Skeleton } from '../../src/com
 import {
   Card, EmptyState, Screen, ScreenTitle, SectionHeader,
 } from '../../src/components/ui';
+import { auditEventLabel, humanText } from '../../src/vocab';
+import { rowKey } from '../../src/keys';
 
 type Entry = Record<string, unknown>;
 
@@ -114,9 +116,14 @@ export default function OwnerActivity() {
               const orgId = pick(e, 'organization_id', 'target_organization_id');
               return (
                 <ActivityItem
-                  key={String(pick(e, 'id') ?? `${group.day}-${i}`)}
-                  title={String(pick(e, 'summary', 'action', 'event_type', 'label')
-                    ?? 'Platform change')}
+                  key={rowKey([pick(e, 'id'), group.day], i)}
+                  // `summary` and `label` are written for a person; `action`
+                  // and `event_type` are audit-log codes ("customer.created"),
+                  // so they go through the label table rather than onto the
+                  // screen as themselves.
+                  title={humanText(
+                    String(pick(e, 'summary', 'label') ?? ''),
+                    auditEventLabel(String(pick(e, 'action', 'event_type') ?? '')))}
                   detail={[
                     pick(e, 'organization_name', 'target_name'),
                     pick(e, 'actor_name', 'actor_email'),

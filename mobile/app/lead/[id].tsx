@@ -28,6 +28,7 @@ import { ContactActions } from '../../src/components/ContactActions';
 import { nameOf, relativeOf } from '../../src/format';
 import { palette, radius, space, type as typography, HIT_SIZE } from '../../src/theme/tokens';
 import type { Lead } from '../../src/api/types';
+import { rowKey } from '../../src/keys';
 
 export default function LeadDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -120,7 +121,7 @@ export default function LeadDetail() {
       ) : null}
       {events.slice(0, 40).map((e, i) => (
         <Row
-          key={String(e.id ?? i)}
+          key={rowKey([e.id], i)}
           title={String(e.title ?? e.type ?? e.event ?? 'Activity')}
           subtitle={typeof e.body === 'string' ? e.body
             : typeof e.message === 'string' ? e.message

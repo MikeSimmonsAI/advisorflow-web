@@ -30,6 +30,7 @@ import {
 import { relativeOf } from '../../src/format';
 import { palette, space, type as typography } from '../../src/theme/tokens';
 import type { Proposal } from '../../src/api/types';
+import { rowKey } from '../../src/keys';
 
 export default function ProposalDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -113,7 +114,7 @@ export default function ProposalDetail() {
       <SectionHeader title="What the customer sees" />
       {blocks.length ? (
         blocks.map((b, i) => (
-          <Card key={String(b.id ?? i)}>
+          <Card key={rowKey([b.id], i)}>
             <Text style={styles.blockTitle}>
               {String(b.title ?? b.heading ?? b.type ?? `Section ${i + 1}`)}
             </Text>
@@ -183,7 +184,7 @@ export default function ProposalDetail() {
           <SectionHeader title="Activity" />
           {events.slice(0, 12).map((e, i) => (
             <Row
-              key={String(e.id ?? i)}
+              key={rowKey([e.id], i)}
               title={String(e.event ?? e.type ?? 'Event')}
               meta={relativeOf(e.created_at ?? e.occurred_at)}
             />

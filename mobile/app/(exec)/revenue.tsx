@@ -29,6 +29,7 @@ import {
 } from '../../src/components/ui';
 import { palette, type as typography } from '../../src/theme/tokens';
 import type { ExecutiveOrg } from '../../src/api/types';
+import { rowKey } from '../../src/keys';
 
 export default function ExecutiveRevenue() {
   const refresh = useScopedRefresh();
@@ -86,7 +87,7 @@ export default function ExecutiveRevenue() {
       ) : null}
       {exceptions.map((e, i) => (
         <Row
-          key={String(e.organization_id ?? e.id ?? i)}
+          key={rowKey([e.organization_id ?? e.id], i)}
           title={String(e.organization_name ?? e.name ?? 'Organization')}
           subtitle={typeof e.reason === 'string' ? e.reason : null}
           accent={palette.warning}

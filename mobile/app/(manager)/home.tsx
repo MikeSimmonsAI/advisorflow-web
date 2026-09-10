@@ -7,11 +7,26 @@
  * appear in Team Today and be missing from the rep rollup drawn a second later.
  * This screen honours that and does not go and fetch the pieces separately.
  *
- * Its real shape is:
+ * WHAT PASS 2 FIXED HERE, and why each was the same mistake:
  *
- *     team · team_today · attention { items, total, red, by_kind, by_owner }
- *     approvals { pending, pending_count, recent } · closing_pipeline
- *     reps · proposal_queues
+ *   1. DUPLICATE KEYS. Attention rows were keyed on `opportunity_id`, and the
+ *      server raises one row PER PROBLEM. A deal with an overdue action and a
+ *      failed video produced two rows with one key — React warned, and then
+ *      reconciled them as a single row.
+ *
+ *   2. RAW ENUMS ON SCREEN. The card read `pick(a, 'reason', 'kind', ...)`.
+ *      There is no `reason` field, so it fell through to `kind` and printed
+ *      "video_failed" under the word "Deal". The server was already sending
+ *      `title: "Video meeting failed"`, `detail`, `action` and `company` — the
+ *      screen simply never asked for them.
+ *
+ *   3. FOUR CARDS SAYING "Appointment / —". `team_today` is
+ *      `{people: [...]}`, not a list of meetings, so `asList`'s last-resort
+ *      "first array property" returned the TEAM MEMBERS and drew one
+ *      appointment card per person.
+ *
+ * All three are now decided in `src/manager/present.ts`, which is pure and
+ * tested against the payload shapes the routers actually return.
  *
  * A MANAGER IS NOT A SMALL OWNER. Nothing here is platform-wide: every figure
  * is this brand's, resolved by `require_sales_manager` against a membership. A
@@ -33,6 +48,9 @@ import {
   EmptyState, Pill, Row, Screen, ScreenTitle, SectionHeader,
 } from '../../src/components/ui';
 import { nameOf, relativeOf, timeOf } from '../../src/format';
+import { attentionCards, meetingCards, repCards } from '../../src/manager/present';
+import { rowKey } from '../../src/keys';
+import { CONFIRMATION_LABELS } from '../../src/vocab';
 import { palette } from '../../src/theme/tokens';
 
 type Rec = Record<string, unknown>;
@@ -52,10 +70,12 @@ export default function ManagerToday() {
   const approvalsPending = numField(q, 'approvals.pending_count');
   const teamSize = numField(q, 'team.length');
 
-  const teamToday = asList<Rec>(pick(payload, 'team_today'), 'items', 'appointments');
-  const attentionItems = asList<Rec>(pick(payload, 'attention.items'), 'items');
+  // `team_today` is an OBJECT with a `people` array, so it is read by path
+  // rather than handed to asList — see present.ts.
+  const meetings = meetingCards(pick<Rec>(payload, 'team_today'));
+  const attention = attentionCards(asList<Rec>(pick(payload, 'attention.items'), 'items'));
   const pendingApprovals = asList<Rec>(pick(payload, 'approvals.pending'), 'items');
-  const reps = asList<Rec>(pick(payload, 'reps'), 'items');
+  const reps = repCards(asList<Rec>(pick(payload, 'reps'), 'items'));
   const closing = asList<Rec>(pick(payload, 'closing_pipeline'), 'items', 'deals');
 
   const team = asList<Rec>(pick(payload, 'team'), 'items');
@@ -93,7 +113,7 @@ export default function ManagerToday() {
         />
         <Metric
           label="Meetings today"
-          field={{ state: teamToday.length ? 'ready' : 'zero', value: teamToday.length }}
+          field={{ state: meetings.length ? 'ready' : 'zero', value: meetings.length }}
         />
       </MetricGrid>
 
@@ -103,11 +123,12 @@ export default function ManagerToday() {
           <SectionHeader title={`Waiting on you · ${pendingApprovals.length}`} />
           {pendingApprovals.slice(0, 5).map((a, i) => (
             <AttentionItem
-              key={String(pick(a, 'id') ?? i)}
-              title={String(pick(a, 'opportunity_name', 'company_name', 'title')
-                ?? 'Pricing request')}
+              key={rowKey([pick(a, 'id'), pick(a, 'opportunity_id')], i)}
+              subject={String(pick(a, 'company_name', 'opportunity_name') ?? '') || null}
+              title="Pricing approval requested"
               why={String(pick(a, 'reason', 'summary', 'detail') ?? '') || null}
-              action="Decide"
+              who={String(pick(a, 'requested_by_name', 'requester_name') ?? '') || null}
+              action="Review and decide"
               tone="danger"
               onPress={() => router.push('/(manager)/approvals' as never)}
             />
@@ -116,42 +137,52 @@ export default function ManagerToday() {
       ) : null}
 
       {/* ── EXCEPTIONS THE SERVER RAISED ──────────────────────────────────── */}
-      {attentionItems.length ? (
+      {attention.length ? (
         <>
-          <SectionHeader title={`Needs intervention · ${attentionItems.length}`} />
-          {attentionItems.slice(0, 8).map((a, i) => (
+          <SectionHeader title={`Needs intervention · ${attention.length}`} />
+          {attention.slice(0, 8).map((a) => (
             <AttentionItem
-              key={String(pick(a, 'id', 'opportunity_id') ?? i)}
-              title={nameOf(a, 'Deal')}
-              why={String(pick(a, 'reason', 'kind', 'detail') ?? '') || null}
-              action="Open the deal"
-              tone={pick(a, 'severity') === 'red' ? 'danger' : 'warning'}
-              onPress={() => {
-                const id = pick(a, 'opportunity_id', 'id');
-                if (id) router.push(`/opportunity/${String(id)}` as never);
-              }}
+              key={a.key}
+              subject={a.subject}
+              title={a.title}
+              why={a.why}
+              who={a.who}
+              action={a.action ?? 'Open the deal'}
+              tone={a.urgent ? 'danger' : 'warning'}
+              onPress={a.opportunityId
+                ? () => router.push(`/opportunity/${a.opportunityId}` as never)
+                : undefined}
             />
           ))}
         </>
       ) : null}
 
       {/* ── TEAM TODAY ────────────────────────────────────────────────────── */}
-      {teamToday.length ? (
+      {meetings.length ? (
         <>
-          <SectionHeader title={`Team today · ${teamToday.length}`} />
-          {teamToday.map((a, i) => (
+          <SectionHeader title={`Team today · ${meetings.length}`} />
+          {meetings.map((m) => (
             <Row
-              key={String(pick(a, 'id') ?? i)}
-              title={String(pick(a, 'title', 'meeting_type') ?? 'Appointment')}
-              subtitle={[pick(a, 'owner_name', 'salesperson_name'),
-                         pick(a, 'prospect_name', 'company_name')]
+              key={m.key}
+              title={m.title}
+              subtitle={[m.subject, m.attendees.join(', ') || null]
                 .filter(Boolean).join(' · ') || null}
-              meta={timeOf(pick(a, 'starts_at'))}
-              accent={palette.accent}
-              onPress={() => {
-                const id = pick(a, 'id', 'appointment_id');
-                if (id) router.push(`/appointment/${String(id)}` as never);
-              }}
+              meta={[
+                timeOf(m.startsAt),
+                m.durationMinutes ? `${m.durationMinutes} min` : null,
+              ].filter(Boolean).join(' · ')}
+              accent={m.videoNeedsAttention ? palette.danger : palette.accent}
+              onPress={m.appointmentId
+                ? () => router.push(`/appointment/${m.appointmentId}` as never)
+                : undefined}
+              right={m.videoNeedsAttention
+                ? <Pill label="Video problem" tone="danger" />
+                : m.confirmationStatus && m.confirmationStatus !== 'confirmed'
+                  ? <Pill
+                      label={CONFIRMATION_LABELS[m.confirmationStatus] ?? 'Unconfirmed'}
+                      tone="warning"
+                    />
+                  : <Pill label="Confirmed" tone="positive" />}
             />
           ))}
         </>
@@ -163,7 +194,7 @@ export default function ManagerToday() {
           <SectionHeader title="Closing soon" />
           {closing.slice(0, 6).map((d, i) => (
             <Row
-              key={String(pick(d, 'opportunity_id', 'id') ?? i)}
+              key={rowKey([pick(d, 'opportunity_id'), pick(d, 'id')], i)}
               title={nameOf(d, 'Deal')}
               subtitle={String(pick(d, 'owner_name', 'salesperson_name') ?? '') || null}
               meta={relativeOf(pick(d, 'expected_close_date', 'close_date'))}
@@ -171,8 +202,8 @@ export default function ManagerToday() {
                 const id = pick(d, 'opportunity_id', 'id');
                 if (id) router.push(`/opportunity/${String(id)}` as never);
               }}
-              right={pick(d, 'amount') != null
-                ? <Pill label={asMoney(pick(d, 'amount'))} tone="accent" />
+              right={pick(d, 'amount', 'deal_value') != null
+                ? <Pill label={asMoney(pick(d, 'amount', 'deal_value'))} tone="accent" />
                 : undefined}
             />
           ))}
@@ -183,20 +214,24 @@ export default function ManagerToday() {
       {reps.length ? (
         <>
           <SectionHeader title="Team activity" />
-          {reps.map((r, i) => (
+          {reps.map((r) => (
             <Row
-              key={String(pick(r, 'user_id', 'id') ?? i)}
-              title={String(pick(r, 'name', 'full_name') ?? 'Salesperson')}
-              subtitle={`${pick(r, 'open_deals') ?? 0} open`}
-              meta={relativeOf(pick(r, 'last_activity_at', 'generated_at'))}
+              key={r.key}
+              title={r.name}
+              subtitle={[
+                r.openDeals !== null ? `${r.openDeals} open` : null,
+                r.needsAttention ? `${r.needsAttention} need attention` : null,
+                r.meetingsToday ? `${r.meetingsToday} today` : null,
+              ].filter(Boolean).join(' · ') || r.role}
+              meta={r.lastActivity}
               onPress={() => router.push('/(manager)/team' as never)}
             />
           ))}
         </>
       ) : null}
 
-      {!q.isLoading && !pendingApprovals.length && !attentionItems.length
-        && !teamToday.length ? (
+      {!q.isLoading && !pendingApprovals.length && !attention.length
+        && !meetings.length ? (
         <EmptyState
           title="Quiet day"
           body="No approvals waiting, nothing flagged for intervention, and no team meetings scheduled today."

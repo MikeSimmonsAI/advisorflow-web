@@ -37,6 +37,7 @@ import {
   Card, EmptyState, Pill, Screen, ScreenTitle, SectionHeader, SeverityPill,
 } from '../../src/components/ui';
 import { relativeOf } from '../../src/format';
+import { rowKey } from '../../src/keys';
 
 function money(v: number | string): string {
   const n = Number(v);
@@ -166,7 +167,7 @@ export default function CustomerDetail() {
         <>
           <SectionHeader title="Needs attention" />
           {attention.map((a, i) => (
-            <AttentionItem key={i} title={a.title} why={a.why} tone={a.tone ?? 'warning'} />
+            <AttentionItem key={rowKey([], i)} title={a.title} why={a.why} tone={a.tone ?? 'warning'} />
           ))}
         </>
       ) : null}
@@ -189,7 +190,7 @@ export default function CustomerDetail() {
         <Card>
           {(events.value ?? []).slice(0, 12).map((e, i) => (
             <ActivityItem
-              key={String(pick(e, 'id') ?? i)}
+              key={rowKey([pick(e, 'id')], i)}
               title={String(pick(e, 'summary', 'event', 'event_type', 'type') ?? 'Event')}
               detail={String(pick(e, 'detail', 'reason', 'note') ?? '') || null}
               when={relativeOf(pick(e, 'occurred_at', 'created_at'))}

@@ -28,6 +28,7 @@ import {
 } from '../../src/components/ui';
 import { relativeOf } from '../../src/format';
 import { palette, type as typography } from '../../src/theme/tokens';
+import { rowKey } from '../../src/keys';
 
 export default function OrgDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -97,7 +98,7 @@ export default function OrgDetail() {
       ) : null}
       {signals.map((s, i) => (
         <Row
-          key={String(s.key ?? i)}
+          key={rowKey([s.key], i)}
           title={String(s.label ?? s.title ?? s.metric ?? 'Signal')}
           subtitle={typeof s.summary === 'string' ? s.summary
             : typeof s.description === 'string' ? s.description : null}

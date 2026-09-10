@@ -26,6 +26,7 @@ import {
 } from '../../src/components/ui';
 import { dayOf, relativeOf } from '../../src/format';
 import { palette, space, type as typography } from '../../src/theme/tokens';
+import { rowKey } from '../../src/keys';
 
 export default function Compensation() {
   const refresh = useScopedRefresh();
@@ -86,7 +87,7 @@ export default function Compensation() {
         const status = String(e.status ?? e.state ?? '');
         return (
           <Row
-            key={String(e.id ?? i)}
+            key={rowKey([e.id], i)}
             title={String(e.opportunity_name ?? e.description ?? 'Commission')}
             subtitle={typeof e.compensation_kind === 'string' ? e.compensation_kind : null}
             meta={e.created_at ? `${dayOf(e.created_at)} · ${relativeOf(e.created_at)}` : null}

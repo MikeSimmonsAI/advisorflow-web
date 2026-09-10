@@ -7,32 +7,55 @@
  * computed on a phone would be a second forecast, and the two would disagree in
  * the exact meeting where it mattered.
  *
- * Stages are rendered in the canonical order from `OPPORTUNITY_STAGES` so the
- * shape of the funnel reads the same here as on the desktop.
+ * TWO DEFECTS FIXED IN PASS 2, both from asking the payload for keys it does
+ * not have:
+ *
+ *   "BY STAGE" WAS EMPTY. The screen read `by_stage` / `stages`. The projection
+ *   payload has neither. It has `deals`, each carrying `stage` and
+ *   `fixed_contract_value`, so the grouping is done in `manager/present.ts`
+ *   from the same rows the headline total is summed from — a breakdown whose
+ *   parts do not add up to the number above it is worse than no breakdown.
+ *
+ *   "WEIGHTED —". The screen read `weighted_value` / `totals.weighted` /
+ *   `projected_value`; the field is `weighted_pipeline_value`, and it is null
+ *   BY DESIGN when nobody has configured stage probabilities (zero would read
+ *   as "this pipeline is worth nothing"). A dash says the same nothing. It now
+ *   says which of the two situations this is.
+ *
+ * Deal rows were also keyed on `d.id`, which the projection row does not carry;
+ * every row was keyed "undefined". They key on `opportunity_id` now.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { router } from 'expo-router';
 
 import { manager } from '../../src/api/endpoints';
 import {
-  asCount, asList, asMoney, pick, useScopedQuery, useScopedRefresh,
+  asList, asMoney, pick, useScopedQuery, useScopedRefresh,
 } from '../../src/hooks/useApi';
 import { useActiveExperience } from '../../src/experience/ExperienceContext';
 import {
   Card, EmptyState, ErrorState, KeyValue, Loading, Pill, Row, Screen,
   ScreenTitle, SectionHeader,
 } from '../../src/components/ui';
-import { nameOf } from '../../src/format';
-import { OPEN_STAGES, stageLabel } from '../../src/vocab';
+import {
+  pipelineDealCards, stageGroups, weightedDisplay,
+} from '../../src/manager/present';
+import { OPEN_STAGES } from '../../src/vocab';
 import { palette, space, type as typography } from '../../src/theme/tokens';
-import type { Opportunity } from '../../src/api/types';
+
+type Rec = Record<string, unknown>;
 
 export default function Pipeline() {
   const exp = useActiveExperience();
   const brand = exp.brandSalesOrgId;
   const refresh = useScopedRefresh();
+  // TAPPING A STAGE FILTERS THE LIST BELOW IT. The alternative considered was
+  // a route with a `stage` query parameter, which would have been a button
+  // that navigates to the screen you are already on — a dead control dressed
+  // as a live one.
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
 
   const query = useScopedQuery(['manager', 'pipeline', brand],
     () => manager.pipeline({ brand_sales_org_id: brand, include_deals: true }));
@@ -40,13 +63,17 @@ export default function Pipeline() {
   if (query.isLoading) return <Screen><Loading label="Loading pipeline" /></Screen>;
   if (query.isError) return <Screen><ErrorState error={query.error} onRetry={refresh} /></Screen>;
 
-  const data = query.data ?? {};
-  const byStage = (pick<Record<string, unknown>>(data, 'by_stage', 'stages') ?? {}) as
-    Record<string, unknown>;
-  const deals = asList<Opportunity>(pick(data, 'deals', 'opportunities'), 'deals', 'items');
+  const data = (query.data ?? {}) as Rec;
+  const rawDeals = asList<Rec>(pick(data, 'deals'), 'deals', 'items');
+  const groups = stageGroups(rawDeals, OPEN_STAGES);
+  const allDeals = pipelineDealCards(rawDeals);
+  const deals = stageFilter
+    ? pipelineDealCards(rawDeals.filter((d) => d.stage === stageFilter))
+    : allDeals;
 
-  const total = pick(data, 'total_value', 'totals.value', 'pipeline_value');
-  const weighted = pick(data, 'weighted_value', 'totals.weighted', 'projected_value');
+  const total = pick(data, 'pipeline_total_fixed_contract_value', 'pipeline_value');
+  const weighted = weightedDisplay(data);
+  const incomplete = Number(pick(data, 'pricing_incomplete_count') ?? 0);
 
   return (
     <Screen refreshing={query.isFetching} onRefresh={refresh}>
@@ -54,39 +81,64 @@ export default function Pipeline() {
 
       <Card>
         <KeyValue label="Open pipeline" value={asMoney(total)} />
-        <KeyValue label="Weighted" value={asMoney(weighted)} />
-        <Text style={styles.note}>
-          Weighted uses the platform&apos;s stage probabilities. Nothing on this
-          screen is calculated on the phone.
-        </Text>
+        {/* NEVER AN UNEXPLAINED DASH. Either the server produced a weighted
+            figure, or it said it could not — and the reason goes on screen. */}
+        <KeyValue
+          label="Weighted"
+          value={weighted.value !== null
+            ? asMoney(weighted.value)
+            : 'Not configured'}
+        />
+        <Text style={styles.note}>{weighted.note}</Text>
+        {incomplete > 0 ? (
+          <Text style={styles.warn}>
+            {incomplete === 1
+              ? '1 deal has incomplete pricing, so its recurring value is excluded. '
+              : `${incomplete} deals have incomplete pricing, so their recurring value is excluded. `}
+            The total above is a floor, not a ceiling.
+          </Text>
+        ) : null}
       </Card>
 
-      <SectionHeader title="By stage" />
-      {OPEN_STAGES.map((stage) => {
-        const entry = byStage[stage] as Record<string, unknown> | number | undefined;
-        if (entry === undefined) return null;
-        const count = typeof entry === 'number' ? entry : asCount(pick(entry, 'count'));
-        const value = typeof entry === 'number' ? undefined : pick(entry, 'value', 'total');
-        return (
-          <Row
-            key={stage}
-            title={stageLabel(stage)}
-            meta={`${count} ${count === 1 ? 'deal' : 'deals'}`}
-            right={value != null ? <Pill label={asMoney(value)} tone="accent" /> : undefined}
-          />
-        );
-      })}
+      {groups.length ? (
+        <>
+          <SectionHeader title="By stage" />
+          {groups.map((g) => (
+            <Row
+              key={g.key}
+              title={g.label}
+              subtitle={stageFilter === g.stage ? 'Showing only these deals' : null}
+              meta={`${g.count} ${g.count === 1 ? 'deal' : 'deals'}`}
+              accent={stageFilter === g.stage ? palette.accent : undefined}
+              onPress={() => setStageFilter(stageFilter === g.stage ? null : g.stage)}
+              right={<Pill label={asMoney(g.value)} tone="accent" />}
+            />
+          ))}
+        </>
+      ) : null}
 
       {deals.length ? (
         <>
-          <SectionHeader title={`Deals · ${deals.length}`} />
+          <SectionHeader
+            title={stageFilter
+              ? `Deals · ${deals.length} · tap the stage again to clear`
+              : `Deals · ${deals.length}`}
+          />
           {deals.slice(0, 40).map((d) => (
             <Row
-              key={String(d.id)}
-              title={nameOf(d, 'Opportunity')}
-              subtitle={[stageLabel(d.stage), d.owner_name].filter(Boolean).join(' · ') || null}
-              onPress={() => router.push(`/opportunity/${d.id}` as never)}
-              right={d.amount != null ? <Pill label={asMoney(d.amount)} tone="accent" /> : undefined}
+              key={d.key}
+              title={d.company}
+              subtitle={[
+                d.stage,
+                d.probabilityPct !== null ? `${d.probabilityPct}% likely` : null,
+                d.incompleteReason,
+              ].filter(Boolean).join(' · ') || null}
+              onPress={d.opportunityId
+                ? () => router.push(`/opportunity/${d.opportunityId}` as never)
+                : undefined}
+              right={d.value !== null
+                ? <Pill label={asMoney(d.value)} tone="accent" />
+                : undefined}
             />
           ))}
         </>
@@ -99,4 +151,5 @@ export default function Pipeline() {
 
 const styles = StyleSheet.create({
   note: { ...typography.caption, color: palette.textFaint, marginTop: space.sm },
+  warn: { ...typography.caption, color: palette.warning, marginTop: space.sm },
 });

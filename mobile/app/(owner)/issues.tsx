@@ -27,6 +27,7 @@ import {
 import { relativeOf } from '../../src/format';
 import { palette, type as typography } from '../../src/theme/tokens';
 import type { OwnerQueue } from '../../src/api/types';
+import { rowKey } from '../../src/keys';
 
 export default function OwnerIssues() {
   const refresh = useScopedRefresh();
@@ -65,7 +66,7 @@ export default function OwnerIssues() {
           <SectionHeader title="Exception queues" />
           {queueRows.map((q, i) => (
             <Row
-              key={String(q.key ?? i)}
+              key={rowKey([q.key], i)}
               title={String(q.label ?? q.title ?? q.key ?? 'Queue')}
               subtitle={typeof q.description === 'string' ? q.description : null}
               meta={`${asCount(q.count)} waiting`}
@@ -81,7 +82,7 @@ export default function OwnerIssues() {
           <SectionHeader title={`Blocked implementations · ${blockedRows.length}`} />
           {blockedRows.map((r, i) => (
             <Row
-              key={String(r.id ?? i)}
+              key={rowKey([r.id], i)}
               title={String(r.organization_name ?? r.customer_name ?? 'Implementation')}
               subtitle={typeof r.blocked_reason === 'string' ? r.blocked_reason
                 : typeof r.status === 'string' ? r.status : null}
@@ -97,7 +98,7 @@ export default function OwnerIssues() {
           <SectionHeader title={`Overdue implementations · ${overdueRows.length}`} />
           {overdueRows.map((r, i) => (
             <Row
-              key={String(r.id ?? i)}
+              key={rowKey([r.id], i)}
               title={String(r.organization_name ?? r.customer_name ?? 'Implementation')}
               subtitle={typeof r.status === 'string' ? r.status : null}
               meta={r.due_at ? `Due ${relativeOf(r.due_at)}` : null}

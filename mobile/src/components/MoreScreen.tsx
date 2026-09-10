@@ -124,28 +124,33 @@ export function MoreScreen() {
         onPress={() => router.push('/sessions' as never)}
       />
 
+      {/* MORE IS NOT A DIAGNOSTICS PAGE.
+          This card used to print the runtime's developer explanation verbatim —
+          "Expo Go cannot receive push notifications. Everything else works
+          here — install the Android preview build to test notifications." That
+          is a note from one engineer to another, sitting in a product screen,
+          telling the person to install a different build of the app they are
+          already holding.
+          The rule now: state the CONDITION in two or three words, and offer an
+          ACTION only where the person can actually resolve it. The runtime
+          still carries its full reason — the tests read it, and it is the right
+          thing to log — it just does not get rendered at somebody. */}
       <Card>
         <KeyValue
-          label="Push notifications"
-          value={!push.supported ? 'Not available here'
-            : pushEnabled === null ? 'Unknown'
-              : pushEnabled ? 'On for this account' : 'Not switched on yet'}
+          label="Notifications"
+          value={!push.supported ? 'Not available on this device'
+            : pushEnabled === null ? 'Unavailable'
+              : pushEnabled ? 'On' : 'Not configured'}
         />
-        {/* The runtime reason comes first: "not available here" without the
-            because is the kind of line that gets reported as a bug. */}
-        {push.reason ? <Text style={styles.note}>{push.reason}</Text> : null}
         <KeyValue
           label="Photo attachments"
-          value={uploads === null ? 'Unknown'
-            : uploads.durable ? 'Available' : 'Unavailable'}
+          value={uploads === null ? 'Unavailable'
+            : uploads.durable ? 'Available' : 'Not configured'}
         />
-        {uploads && !uploads.durable && uploads.reason ? (
-          <Text style={styles.note}>{uploads.reason}</Text>
-        ) : null}
         {!isFullyLogged ? (
           <Text style={styles.note}>
-            Calls and texts are placed by your phone. EvoSys Pro records that
-            they happened against the deal, not what was said.
+            Calls and texts are placed by your phone. Only the fact that they
+            happened is recorded against the deal, never what was said.
           </Text>
         ) : null}
       </Card>

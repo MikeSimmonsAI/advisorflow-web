@@ -22,6 +22,7 @@ import {
 } from '../../src/components/ui';
 import { addDays, dayOf, isoDate, timeOf } from '../../src/format';
 import { palette, space } from '../../src/theme/tokens';
+import { rowKey } from '../../src/keys';
 
 export default function AdvisorCalendar() {
   const exp = useActiveExperience();
@@ -64,7 +65,7 @@ export default function AdvisorCalendar() {
           <SectionHeader title={day} />
           {items.map((e, i) => (
             <Row
-              key={String(e.id ?? i)}
+              key={rowKey([e.id], i)}
               title={String(e.title ?? e.summary ?? e.lead_name ?? 'Appointment')}
               subtitle={typeof e.location === 'string' ? e.location : null}
               meta={timeOf(e.starts_at ?? e.start ?? e.scheduled_at)}

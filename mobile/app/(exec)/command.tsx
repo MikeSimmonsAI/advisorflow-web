@@ -37,6 +37,7 @@ import {
   EmptyState, Row, Screen, ScreenTitle, SectionHeader,
 } from '../../src/components/ui';
 import { palette } from '../../src/theme/tokens';
+import { rowKey } from '../../src/keys';
 
 type Rec = Record<string, unknown>;
 
@@ -98,7 +99,7 @@ export default function ExecutiveCommand() {
 
       {attention.map((a, i) => (
         <AttentionItem
-          key={String(pick(a, 'id') ?? i)}
+          key={rowKey([pick(a, 'id')], i)}
           title={String(pick(a, 'name', 'organization_name') ?? 'Organization')}
           why={String(pick(a, 'reason', 'health_label', 'detail') ?? '') || null}
           action="Open organization"

@@ -114,10 +114,17 @@ export function SectionRetry({ show, onRetry, note }: {
  * cannot say what tapping it does, it is activity, not attention.
  */
 export function AttentionItem({
-  title, why, tone = 'warning', action, onPress, count,
+  title, subject, why, who, tone = 'warning', action, onPress, count,
 }: {
+  /** WHAT HAPPENED — the headline, in words. */
   title: string;
+  /** WHICH deal or customer it happened to. Drawn above the headline, small,
+   *  because a manager scans for the company name first and the problem
+   *  second. */
+  subject?: string | null;
   why?: string | null;
+  /** WHO owns it and HOW URGENT — one line, already assembled by the screen. */
+  who?: string | null;
   tone?: PillTone;
   action?: string;
   onPress?: () => void;
@@ -134,8 +141,12 @@ export function AttentionItem({
                                pressed && onPress ? { opacity: 0.7 } : null]}
     >
       <View style={styles.attentionMain}>
+        {subject ? (
+          <Text style={styles.attentionSubject} numberOfLines={1}>{subject}</Text>
+        ) : null}
         <Text style={styles.attentionTitle} numberOfLines={2}>{title}</Text>
         {why ? <Text style={styles.attentionWhy} numberOfLines={3}>{why}</Text> : null}
+        {who ? <Text style={styles.attentionWho} numberOfLines={1}>{who}</Text> : null}
         {action ? <Text style={[styles.attentionAction, { color: accent }]}>{action}</Text> : null}
       </View>
       {count !== undefined ? (
@@ -247,8 +258,10 @@ const styles = StyleSheet.create({
     paddingVertical: space.md, paddingHorizontal: space.lg,
   },
   attentionMain: { flex: 1, gap: 3 },
+  attentionSubject: { ...typography.micro, color: palette.textFaint },
   attentionTitle: { ...typography.bodyStrong, color: palette.text },
   attentionWhy: { ...typography.caption, color: palette.textMuted },
+  attentionWho: { ...typography.caption, color: palette.textFaint },
   attentionAction: { ...typography.micro, marginTop: 2 },
   attentionCount: { minWidth: 34, alignItems: 'flex-end' },
   attentionCountText: { ...typography.display, fontSize: 22, lineHeight: 26 },

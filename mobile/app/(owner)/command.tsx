@@ -52,6 +52,7 @@ import {
 } from '../../src/components/ui';
 import { normaliseSeverity } from '../../src/vocab';
 import { palette } from '../../src/theme/tokens';
+import { rowKey } from '../../src/keys';
 
 type HealthSection = {
   key?: string; label?: string; severity?: string; status?: string;
@@ -161,7 +162,7 @@ export default function OwnerCommand() {
 
       {unhealthy.map((s, i) => (
         <AttentionItem
-          key={String(s.key ?? i)}
+          key={rowKey([s.key], i)}
           title={String(s.label ?? s.key ?? 'Platform check')}
           why={s.headline ?? s.detail ?? s.needs ?? null}
           tone={normaliseSeverity(String(s.severity ?? s.status ?? '')) === 'action_required'
@@ -195,7 +196,7 @@ export default function OwnerCommand() {
           <SectionHeader title={`Implementations · ${openImpls.length}`} />
           {openImpls.slice(0, 5).map((im, i) => (
             <Row
-              key={String(pick(im, 'id') ?? i)}
+              key={rowKey([pick(im, 'id')], i)}
               title={String(pick(im, 'organization_name', 'customer_name', 'company_name',
                                  'name') ?? 'Implementation')}
               subtitle={String(pick(im, 'status_label', 'status') ?? '')}

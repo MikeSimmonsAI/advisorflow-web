@@ -49,6 +49,7 @@ import {
 import { nameOf, relativeOf, timeOf, isoDate } from '../../src/format';
 import { palette } from '../../src/theme/tokens';
 import type { Appointment } from '../../src/api/types';
+import { rowKey } from '../../src/keys';
 
 type Rec = Record<string, unknown>;
 
@@ -221,7 +222,7 @@ export default function MyDay() {
           <SectionHeader title={`Needs action · ${dealsNeedingAction.length}`} />
           {dealsNeedingAction.map((d, i) => (
             <Row
-              key={String(pick(d, 'opportunity_id', 'id') ?? i)}
+              key={rowKey([pick(d, 'opportunity_id', 'id')], i)}
               title={nameOf(d, 'Opportunity')}
               subtitle={String(pick(d, 'reason', 'next_step', 'detail') ?? '') || null}
               meta={relativeOf(pick(d, 'stage_changed_at', 'updated_at'))}
@@ -272,7 +273,7 @@ export default function MyDay() {
           <Card>
             {recent.slice(0, 8).map((r, i) => (
               <ActivityItem
-                key={String(pick(r, 'id') ?? i)}
+                key={rowKey([pick(r, 'id')], i)}
                 title={String(pick(r, 'summary', 'event_type') ?? 'Activity')}
                 detail={String(pick(r, 'detail') ?? '') || null}
                 when={relativeOf(pick(r, 'occurred_at', 'created_at'))}
