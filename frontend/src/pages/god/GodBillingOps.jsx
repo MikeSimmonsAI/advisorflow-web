@@ -318,6 +318,18 @@ export default function GodBillingOps() {
                       </td>
                       <td style={{ padding: '12px' }}>
                         {c.plan_name || c.plan_key || '—'}
+                        {/* WHICH RATE, under the tier name. A Starter row
+                            reading $500 and a Starter row reading $597 are
+                            both correct and differ only by commitment, so a
+                            column that shows the tier alone makes one of them
+                            look like a mistake. Absent when the subscription
+                            predates the column — "not recorded" is honest,
+                            naming a commitment nobody stored would not be. */}
+                        {c.commitment_label && (
+                          <div style={{ fontSize: 11, color: '#7a7a95', marginTop: 2 }}>
+                            {c.commitment_label}
+                          </div>
+                        )}
                         {c.pending_plan && (
                           <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 2 }}>
                             → {c.pending_plan}{when(c.pending_effective_at)

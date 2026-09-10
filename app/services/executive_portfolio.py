@@ -547,10 +547,17 @@ def _money(db: Session, orgs: Iterable[Organization]) -> Dict[str, Dict[str, Any
                 cache[ck] = None
         plan = cache[ck]
         interval = getattr(o, "stripe_plan_interval", None) or BillingInterval.MONTH
+        # The commitment, not just the interval. An executive's portfolio MRR
+        # is a revenue figure, so it has to be the rate the customer is on -
+        # both of a tier's monthly rates share the MONTH interval, and pricing
+        # from interval alone quietly reported every month-to-month customer at
+        # the committed-term discount.
+        commitment = getattr(o, "billing_commitment", None)
         cents = None
         if plan is not None:
             try:
-                cents = billing_catalog._monthly_equivalent_cents(plan, interval)
+                cents = billing_catalog._monthly_equivalent_cents(
+                    plan, interval, commitment)
             except Exception:                            # pragma: no cover
                 cents = None
         out[o.id] = {

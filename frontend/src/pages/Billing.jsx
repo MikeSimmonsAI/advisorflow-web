@@ -58,6 +58,127 @@ const OCCUPIED_STATUSES = [
   'trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused',
 ];
 
+const COMMITMENT_LABEL = {
+  month_to_month: 'Month-to-month',
+  term_agreement: 'Term agreement',
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE PLAN CHANGE DIALOG — replacing window.confirm()
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The browser's own confirm box was doing the work of a billing confirmation.
+// It could show one string of text, it could not show a price, and everything
+// it DID say about proration and timing was written into the sentence rather
+// than read from the server — so it stated the EvoSys policy to every brand,
+// whatever each brand had actually configured.
+//
+// This shows the customer what changes and what it costs, side by side, and
+// every line of it comes from data the server sent. Where a figure is not
+// authoritative it is not shown: Stripe computes the exact proration at the
+// moment of the change, and a number this page invented would be a quote the
+// customer's card is not going to match.
+function PlanChangeDialog({ open, change, busy, error, onConfirm, onCancel }) {
+  if (!open || !change) return null;
+
+  const { fromName, toName, fromAmount, toAmount, intervalLabel,
+          commitmentLabel, commitmentChanging, timingText, prorationText,
+          actionLabel } = change;
+
+  const Row = ({ label, children }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16,
+                  padding: '10px 0', borderBottom: '1px solid #2a2a4a',
+                  fontSize: 14 }}>
+      <span style={{ color: '#888' }}>{label}</span>
+      <span style={{ fontWeight: 600, textAlign: 'right' }}>{children}</span>
+    </div>
+  );
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm plan change"
+      onClick={busy ? undefined : onCancel}
+      style={{ position: 'fixed', inset: 0, background: '#000000aa',
+               display: 'flex', alignItems: 'center', justifyContent: 'center',
+               padding: 16, zIndex: 1000 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: '#14142b', border: '1px solid #2a2a4a',
+                 borderRadius: 12, padding: '24px', width: '100%',
+                 maxWidth: 460, maxHeight: '90vh', overflowY: 'auto',
+                 boxShadow: '0 18px 60px #0009' }}
+      >
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>
+          Confirm your plan change
+        </h2>
+        <p style={{ color: '#888', fontSize: 13, margin: '0 0 18px' }}>
+          Nothing changes until you confirm.
+        </p>
+
+        <Row label="Current plan">{fromName}</Row>
+        <Row label="New plan">{toName}</Row>
+        <Row label="Current amount">{fromAmount || '—'}</Row>
+        <Row label="New amount">{toAmount || '—'}</Row>
+        <Row label="Billing frequency">{intervalLabel}</Row>
+        <Row label="Commitment">
+          {commitmentLabel || 'Not recorded'}
+          {commitmentChanging && (
+            <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600,
+                          marginTop: 2 }}>
+              This change also changes your commitment
+            </div>
+          )}
+        </Row>
+        <Row label="Takes effect">{timingText}</Row>
+
+        {prorationText && (
+          <p style={{ color: '#888', fontSize: 13, margin: '16px 0 0',
+                      lineHeight: 1.5 }}>
+            {prorationText}
+          </p>
+        )}
+
+        {error && (
+          <div style={{ background: '#ef444422', border: '1px solid #ef4444',
+                        color: '#ef4444', borderRadius: 8, padding: '10px 12px',
+                        fontSize: 13, marginTop: 16 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end',
+                      marginTop: 22, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            style={{ background: 'transparent', color: '#aaa',
+                     border: '1px solid #2a2a4a', borderRadius: 8,
+                     padding: '10px 18px', fontSize: 14,
+                     cursor: busy ? 'default' : 'pointer' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            style={{ background: busy ? '#1ef0a855' : '#1ef0a8', color: '#04120c',
+                     border: 'none', borderRadius: 8, padding: '10px 20px',
+                     fontSize: 14, fontWeight: 700,
+                     cursor: busy ? 'default' : 'pointer' }}
+          >
+            {busy ? 'Working…' : actionLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function money(cents, currency) {
   if (cents === null || cents === undefined) return null;
   const amount = cents / 100;
@@ -80,6 +201,15 @@ function when(value) {
   });
 }
 
+// A recurring amount with its period attached. "$597" and "$597/mo" are the
+// same number and different facts, and a confirmation dialog comparing two
+// plans is precisely where the period must not be left to inference.
+function fmtRate(cents, currency, interval) {
+  const amount = money(cents, currency);
+  if (!amount) return null;
+  return amount + (interval === 'year' ? '/yr' : '/mo');
+}
+
 const CARD = {
   background: '#1a1a2e', border: '1px solid #2a2a4a',
   borderRadius: '12px', padding: '24px',
@@ -94,6 +224,13 @@ export default function Billing() {
   const [err, setErr] = useState('');
   const [errStatus, setErrStatus] = useState(null);
   const [notice, setNotice] = useState('');
+  // The plan change the customer is being ASKED about — null when no dialog is
+  // open. Kept separate from `actionLoading` because they answer different
+  // questions: one is "which button is spinning", the other is "what exactly
+  // has this customer been shown and not yet agreed to".
+  const [pendingChange, setPendingChange] = useState(null);
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [changeError, setChangeError] = useState('');
   const [searchParams] = useSearchParams();
 
   const success = searchParams.get('success') === '1';
@@ -173,23 +310,76 @@ export default function Billing() {
   // plan card used to be a live "Select Plan" that called checkout, which
   // created a SECOND Stripe subscription without cancelling the first. A
   // customer on Starter who clicked Growth was billed for both, every month.
+  //
+  // ── STEP 1: ASK THE SERVER WHAT WOULD HAPPEN ──────────────────────────
+  //
+  // This replaces a `window.confirm` whose sentence was written here in the
+  // browser. That sentence stated the EvoSys upgrade/downgrade policy to every
+  // brand on the platform regardless of what each brand had configured, showed
+  // no price at all, and — because it ran before any server call — could
+  // cheerfully describe a change the server was about to refuse.
+  //
+  // Nothing is changed by opening the dialog. The preview is read-only and
+  // touches neither the database nor Stripe.
   async function handleChangePlan(planKey, planName) {
     setErr(''); setErrStatus(null); setNotice('');
-    const label = interval === 'year' ? 'annual' : 'monthly';
-    if (!window.confirm(
-      `Change your subscription to ${planName} (${label})?\n\n` +
-      'An upgrade takes effect immediately and is charged pro rata. A downgrade ' +
-      'takes effect at the end of the period you have already paid for.')) return;
+    setChangeError('');
     setActionLoading(planKey);
     try {
-      const r = await api.post('/billing/change-plan', { plan: planKey, interval });
+      const p = await api.post('/billing/change-plan/preview',
+                               { plan: planKey, interval });
+      setPendingChange({
+        planKey,
+        planName,
+        fromName: p.from_plan_name || p.from_plan_key || 'your current plan',
+        toName: p.to_plan_name || planName,
+        fromAmount: fmtRate(p.from_cents, p.currency, p.interval),
+        toAmount: fmtRate(p.to_cents, p.currency, p.interval),
+        intervalLabel: p.interval === 'year' ? 'Billed yearly' : 'Billed monthly',
+        commitmentLabel: p.commitment_label
+          || COMMITMENT_LABEL[p.commitment] || null,
+        commitmentChanging: Boolean(p.commitment_changed),
+        timingText: p.effective_at
+          ? `${p.effective} (${when(p.effective_at)})`
+          : (p.effective || 'immediately'),
+        prorationText: p.proration_note || '',
+        actionLabel: p.direction === 'downgrade'
+          ? 'Confirm change' : 'Confirm upgrade',
+      });
+      setActionLoading(null);
+    } catch (e) {
+      // A refusal at preview time is the honest moment to show it — before the
+      // customer has agreed to anything.
+      fail(e);
+    }
+  }
+
+  // ── STEP 2: APPLY IT, AND SAY NOTHING UNTIL THE SERVER HAS ────────────
+  async function confirmChangePlan() {
+    if (!pendingChange) return;
+    setChangeError('');
+    setChangeBusy(true);
+    try {
+      const r = await api.post('/billing/change-plan', {
+        plan: pendingChange.planKey, interval,
+      });
+      // Only now, with the server's own answer in hand.
+      setChangeBusy(false);
+      setPendingChange(null);
       setNotice(
         r.pending_plan
-          ? `Change accepted. You keep your current plan until the end of this billing period, then move to ${planName}.`
+          ? `Change accepted. You keep your current plan until the end of this billing period, then move to ${pendingChange.planName}.`
           : `Change applied ${r.effective || 'immediately'}.`);
       await load();
       setActionLoading(null);
-    } catch (e) { fail(e); }
+    } catch (e) {
+      // The dialog STAYS OPEN and shows why. Closing it and dropping a message
+      // on the page behind would read like the change went through.
+      setChangeBusy(false);
+      setChangeError(
+        (e && (e.detail || e.message)) ||
+        'The change could not be applied. Nothing was charged.');
+    }
   }
 
   async function handlePortal() {
@@ -281,6 +471,21 @@ export default function Billing() {
 
   return (
     <div style={{ padding: '32px', maxWidth: '960px', margin: '0 auto' }}>
+      <PlanChangeDialog
+        open={Boolean(pendingChange)}
+        change={pendingChange}
+        busy={changeBusy}
+        error={changeError}
+        onConfirm={confirmChangePlan}
+        onCancel={() => {
+          // A cancelled dialog must leave nothing behind — no spinner on a
+          // plan card, no half-set error, and above all no change.
+          if (changeBusy) return;
+          setPendingChange(null);
+          setChangeError('');
+          setActionLoading(null);
+        }}
+      />
       <h1 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '8px' }}>Billing & Plan</h1>
       <p style={{ color: '#aaa', marginBottom: '32px' }}>Manage your subscription and see what you have been charged.</p>
 
@@ -364,8 +569,15 @@ export default function Billing() {
         </div>
 
         {/* WHAT THEY PAY AND SINCE WHEN. Both come from the server: the amount
-            is the catalogue's price for the plan and interval they are on, and
-            nothing on this page derives money any more. */}
+            is the catalogue's price for the plan, interval AND COMMITMENT they
+            are on, and nothing on this page derives money any more.
+
+            The commitment matters here more than anywhere else. A tier has two
+            monthly rates and both are the `month` interval, so this figure was
+            resolvable only to the committed-term price — meaning a
+            month-to-month customer read a number LOWER than their card is
+            charged, on their own billing screen. The label under it says which
+            terms produced the figure, so the two are never mistaken again. */}
         <div style={{ minWidth: 170 }}>
           <div style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>Recurring</div>
           <div style={{ fontSize: '22px', fontWeight: '700' }}>
@@ -374,6 +586,11 @@ export default function Billing() {
                   {currentInterval === 'year' ? '/yr' : '/mo'}</span></>
               : <span style={{ fontSize: 15, color: '#888' }}>Not priced</span>}
           </div>
+          {recurring && sub?.commitment_label && (
+            <div style={{ fontSize: '13px', color: '#888', marginTop: '4px' }}>
+              {sub.commitment_label}
+            </div>
+          )}
           {customerSince && (
             <div style={{ fontSize: '13px', color: '#888', marginTop: '8px' }}>
               Customer since {customerSince}

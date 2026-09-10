@@ -225,11 +225,20 @@ def test_billing_routes_refuse_an_anonymous_caller(client, db_session, brand):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_checkout_request_model_has_no_price_field():
-    """A field that does not exist cannot be tampered with. The request carries
-    a plan key and an interval, and nothing else."""
+    """A field that does not exist cannot be tampered with.
+
+    The request carries SELECTORS ONLY — which plan, how often, and on what
+    commitment — and never an amount. `commitment` joined `interval` when a
+    live month-to-month customer was found to have been upgraded onto a
+    committed-term price: it names WHICH of a tier's two configured rates
+    applies, exactly as `interval` names which period. The money is still
+    resolved server-side from the brand's catalogue, and an unrecognised
+    commitment is refused by `require_purchasable` rather than priced.
+    """
     fields = set(CheckoutRequest.model_fields)
-    assert fields == {"plan", "interval"}
-    assert set(ChangePlanRequest.model_fields) == {"plan", "interval"}
+    assert fields == {"plan", "interval", "commitment"}
+    assert set(ChangePlanRequest.model_fields) == {"plan", "interval",
+                                                   "commitment"}
     for forbidden in ("price", "amount", "unit_amount", "price_id",
                       "stripe_price_id", "currency", "org_id", "customer"):
         assert forbidden not in fields

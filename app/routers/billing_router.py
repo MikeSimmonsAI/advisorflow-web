@@ -27,8 +27,9 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user
 from app.models.models import User, Organization
 from app.models.billing_models import (BillingInterval, BillingInvoice,
-                                       BillingPayment, ChangeTiming,
-                                       ProrationBehavior, SubscriptionStatus)
+                                       BillingPayment, BillingCommitment,
+                                       ChangeTiming, ProrationBehavior,
+                                       SubscriptionStatus)
 from app.services.capabilities import require_capability
 from app.services import (billing_catalog, billing_policy, billing_schedule,
                           billing_webhook)
@@ -66,7 +67,8 @@ def _audit(db: Session, org: Organization, user: User, action: str, details: dic
         logger.exception("billing: audit write failed for %s", action)
 
 
-def _price_payload_for(plan, interval: str, db: Session, org: Organization) -> dict:
+def _price_payload_for(plan, interval: str, db: Session, org: Organization,
+                       commitment: Optional[str] = None) -> dict:
     """The Stripe price for this plan, PREFERRING A REAL PRICE OBJECT.
 
     When the brand's catalogue carries a Stripe price id, that id is used. The
@@ -79,15 +81,23 @@ def _price_payload_for(plan, interval: str, db: Session, org: Organization) -> d
     created yet, so a new brand is not blocked on that setup step. It is a
     fallback, not the design.
     """
-    price_id = billing_catalog.stripe_price_id_for(plan, interval)
+    price_id = billing_catalog.stripe_price_id_for(plan, interval, commitment)
     if price_id:
         return {"price": price_id}
 
-    cents = billing_catalog.price_cents_for(plan, interval)
+    cents = billing_catalog.price_cents_for(plan, interval, commitment)
     if cents is None:
+        # NEVER the other commitment's price. Falling back would charge a
+        # month-to-month customer the committed-term rate, which is a discount
+        # they did not earn and a term they did not agree to — the exact
+        # substitution `price_cents_for` refuses, refused again here so the
+        # inline fallback cannot reintroduce it.
         raise HTTPException(
             status_code=400,
-            detail="Plan %r has no %s price configured." % (plan.key, interval))
+            detail="Plan %r has no %s price configured at %s."
+                   % (plan.key, interval,
+                      billing_catalog.commitment_label(commitment).lower()
+                      if commitment else "the committed-term rate"))
 
     # The product NAME comes from the brand, not from a hardcoded string. It is
     # what appears on the customer's card statement and receipt, and it was
@@ -105,8 +115,9 @@ def _price_payload_for(plan, interval: str, db: Session, org: Organization) -> d
     }
 
 
-def _line_item_for(plan, interval: str, db: Session, org: Organization) -> dict:
-    payload = _price_payload_for(plan, interval, db, org)
+def _line_item_for(plan, interval: str, db: Session, org: Organization,
+                   commitment: Optional[str] = None) -> dict:
+    payload = _price_payload_for(plan, interval, db, org, commitment)
     return {**payload, "quantity": 1}
 
 
@@ -251,6 +262,10 @@ def get_subscription(
         "stripe_customer_id": getattr(org, "stripe_customer_id", None),
         "stripe_subscription_id": getattr(org, "stripe_subscription_id", None),
         "stripe_plan_interval": getattr(org, "stripe_plan_interval", None) or "month",
+        # WHICH RATE, not just how often. Both of a tier's monthly rates are
+        # the `month` interval, so the interval alone cannot say whether this
+        # customer is on the committed price or the month-to-month one.
+        "billing_commitment": getattr(org, "billing_commitment", None),
         "plan_details": _plan_public(current_plan) if current_plan else None,
         # Read from the LOCAL MIRROR, which the webhook keeps current.
         #
@@ -282,9 +297,22 @@ def get_subscription(
     #
     # None where the plan carries no price for that interval, which the screen
     # must render as "not priced" rather than as free.
+    #
+    # AT THEIR OWN COMMITMENT. This is the customer's own screen, showing the
+    # customer their own recurring amount, so it is the very worst place to
+    # report the committed-term rate to somebody paying month-to-month — the
+    # figure would be lower than what their card is actually charged, which
+    # reads as either a billing error or a broken promise. Both monthly rates
+    # share the `month` interval, so the commitment is the only thing that
+    # tells them apart.
     result["recurring_cents"] = (
-        billing_catalog.price_cents_for(current_plan, result["stripe_plan_interval"])
+        billing_catalog.price_cents_for(current_plan,
+                                        result["stripe_plan_interval"],
+                                        result["billing_commitment"])
         if current_plan else None)
+    result["commitment_label"] = (
+        billing_catalog.commitment_label(result["billing_commitment"])
+        if result["billing_commitment"] else None)
     result["currency"] = getattr(current_plan, "currency", None) or "usd"
 
     # THE CARD ON FILE, AS A SUMMARY. Brand, last four, expiry - mirrored from
@@ -332,12 +360,25 @@ def get_subscription(
 
 
 def _plan_public(plan) -> dict:
-    """What a customer may see about a plan. No Stripe ids, no internals."""
+    """What a customer may see about a plan. No Stripe ids, no internals.
+
+    BOTH MONTHLY RATES, because a tier genuinely has two and showing only one
+    of them is how a screen advertises a discount without its condition.
+    `monthly_cents` is the COMMITTED-TERM rate — the lower one, earned by
+    agreeing to a term — and `month_to_month_cents` is the no-commitment rate.
+    A plan card that showed only `monthly_cents` quoted the discount to
+    everybody and mentioned the commitment to nobody.
+
+    Either may be NULL: a tier configured at only one commitment is a real and
+    valid configuration, and the screen must render the missing one as
+    unavailable rather than substituting the other.
+    """
     return {
         "key": plan.key,
         "name": plan.name,
         "description": plan.description,
         "monthly_cents": plan.monthly_cents,
+        "month_to_month_cents": getattr(plan, "month_to_month_cents", None),
         "annual_cents": plan.annual_cents,
         "currency": plan.currency,
         "max_leads": plan.max_leads,
@@ -353,6 +394,11 @@ def _plan_public(plan) -> dict:
 class CheckoutRequest(BaseModel):
     plan: str
     interval: str = "month"  # month | year
+    # WHICH RATE THEY ARE BUYING. See the note in create_checkout: omitted
+    # resolves to the committed-term rate, which is what this endpoint has
+    # always done, and which is a live commercial question rather than a
+    # settled one.
+    commitment: Optional[str] = None
 
 
 @router.post("/checkout")
@@ -395,8 +441,27 @@ def create_checkout(
             status_code=409,
             detail="This organization is not attached to a brand, so no plan "
                    "catalogue applies. Contact support.")
+    #
+    # ⚠ WHICH COMMITMENT A SELF-SERVE PURCHASE GETS IS AN OPEN COMMERCIAL
+    #   QUESTION, DELIBERATELY LEFT AS IT WAS.
+    #
+    #   Omitting `commitment` resolves to the committed-term rate — the LOWER
+    #   of the two, earned by agreeing to a term. So a customer clicking a plan
+    #   card today buys the discounted rate and, implicitly, the commitment
+    #   behind it, without ever being shown a term to accept.
+    #
+    #   That is not a bug this endpoint may quietly fix. Defaulting the other
+    #   way would raise every self-serve price by the term discount, and no
+    #   brand configuration exists that says which is intended —
+    #   `PricingPolicy.min_term_months` governs what a SELLER may negotiate,
+    #   not what self-serve sells. Inventing an answer here would be inventing
+    #   commercial policy. The parameter is plumbed through so the choice can
+    #   be made explicitly and shown to the customer; the DEFAULT is unchanged
+    #   and is flagged for a decision.
+    commitment = req.commitment
     try:
-        plan = billing_catalog.require_purchasable(db, platform_id, req.plan, req.interval)
+        plan = billing_catalog.require_purchasable(
+            db, platform_id, req.plan, req.interval, commitment)
     except billing_catalog.PlanNotAvailable as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -417,10 +482,13 @@ def create_checkout(
     # their software really belongs to. Their own brand's domain first.
     base_url = _brand_base_url(db, org)
 
-    line_item = _line_item_for(plan, req.interval, db, org)
+    line_item = _line_item_for(plan, req.interval, db, org, commitment)
 
     trial_days = billing_policy.trial_days(db, platform_id)
-    subscription_data = {"metadata": {"org_id": org.id, "plan": plan.key}}
+    sub_meta = {"org_id": org.id, "plan": plan.key}
+    if commitment:
+        sub_meta["commitment"] = commitment
+    subscription_data = {"metadata": sub_meta}
     if trial_days:
         subscription_data["trial_period_days"] = trial_days
 
@@ -428,13 +496,20 @@ def create_checkout(
         customer=customer_id,
         mode="subscription",
         line_items=[line_item],
-        metadata={"org_id": org.id, "plan": plan.key, "interval": req.interval},
+        metadata={"org_id": org.id, "plan": plan.key, "interval": req.interval,
+                  "commitment": commitment or ""},
         subscription_data=subscription_data,
-        success_url=f"{base_url}/billing?success=1",
+        # `part=subscription` so the confirmation page can say WHAT was bought.
+        # Without it this landed on the neutral "Payment received" wording — 
+        # true, but needlessly vague about a subscription the customer just
+        # started. The seller-driven links have carried `part` since the setup
+        # and subscription obligations were split; this one was missed.
+        success_url=f"{base_url}/billing?success=1&part=subscription",
         cancel_url=f"{base_url}/billing?canceled=1",
     )
     _audit(db, org, current_user, "billing.checkout_started",
-           {"plan": plan.key, "interval": req.interval})
+           {"plan": plan.key, "interval": req.interval,
+            "commitment": commitment})
     return {"checkout_url": session.url}
 
 
@@ -444,6 +519,210 @@ def create_checkout(
 class ChangePlanRequest(BaseModel):
     plan: str
     interval: str = "month"
+    # WHICH RATE THEY MOVE TO. Omitted means KEEP THE ONE THEY ARE ON, which is
+    # the only safe default: a plan change is a request to change the TIER, and
+    # silently changing the commitment as well would put a customer onto a term
+    # obligation they never agreed to.
+    #
+    # THIS IS NOT HYPOTHETICAL. Before this field existed, the price was
+    # resolved from (plan, interval) alone, which falls through to the
+    # committed-term rate — so a live month-to-month Starter customer who
+    # upgraded landed on "Growth — Committed term". They asked for a bigger
+    # tier and received a contract.
+    commitment: Optional[str] = None
+
+
+def _resolve_change(db: Session, org: Organization, req: "ChangePlanRequest") -> dict:
+    """Everything about a requested plan change EXCEPT performing it.
+
+    THE PREVIEW AND THE CHANGE MUST NOT BE TWO OPINIONS. A confirmation dialog
+    that computes the direction, the price or the timing separately from the
+    endpoint that applies them will eventually describe one change and perform
+    another — and a customer who was shown "takes effect at the end of your
+    period" and then charged today has been misled by the screen, not by
+    Stripe. So both call this, and the description is a projection of the
+    decision rather than a second copy of it.
+
+    Raises HTTPException for every refusal, so the preview refuses for exactly
+    the reasons the change would.
+    """
+    sub_id = getattr(org, "stripe_subscription_id", None)
+    if not sub_id:
+        raise HTTPException(
+            status_code=409,
+            detail="No active subscription to change. Choose a plan to get "
+                   "started.")
+
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # A PLAN CHANGE CHANGES THE PLAN. IT DOES NOT CHANGE THE DEAL.
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # The commitment carries over from the subscription they already have
+    # unless the request names a different one explicitly. Resolving the price
+    # from (plan, interval) alone — which is what this did — falls through to
+    # `price_cents_for`'s committed-term default, so upgrading a month-to-month
+    # customer moved them onto a TERM AGREEMENT. That is not a pricing detail:
+    # it is a multi-month obligation created by a click that said "upgrade".
+    #
+    # NULL current commitment means the subscription predates the column. The
+    # fallback is the term rate, which is exactly what this endpoint did
+    # before, so an old subscription behaves as it always has rather than
+    # changing price on its next plan change.
+    current_commitment = getattr(org, "billing_commitment", None)
+    commitment = req.commitment or current_commitment
+    commitment_changed = bool(
+        req.commitment and current_commitment
+        and req.commitment != current_commitment)
+
+    try:
+        target = billing_catalog.require_purchasable(
+            db, platform_id, req.plan, req.interval, commitment)
+    except billing_catalog.PlanNotAvailable as exc:
+        # 409, not 400: for the common cause — the target tier has no price
+        # mapped at this customer's commitment — the REQUEST is fine and the
+        # CONFIGURATION is missing. Refusing is required; the alternative is
+        # the term-rate fallback this whole block exists to prevent.
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    current = billing_catalog.resolve_plan(
+        db, platform_id, getattr(org, "billing_plan_key", None) or org.plan)
+    current_interval = getattr(org, "stripe_plan_interval", None)
+
+    direction = billing_catalog.classify_change(
+        db, current, current_interval, target, req.interval)
+
+    # SAME TIER, DIFFERENT COMMITMENT IS STILL A CHANGE.
+    #
+    # `classify_change` compares TIERS, on one consistent axis, and is right to
+    # — it must not call a move an upgrade merely because the commitment moved.
+    # But that means a customer switching Starter month-to-month to Starter on
+    # a term comes back LATERAL, and would be told they are already on it while
+    # their rate changes by a hundred dollars.
+    #
+    # The direction follows the rule this module already applies to the annual
+    # interval, for the same reason: taking on a commitment is committing more,
+    # and dropping one is reducing commitment. So it is not a new policy, it is
+    # the existing one applied to the other axis of the same decision — and the
+    # brand's configured timing and proration still decide what happens when.
+    if direction == billing_catalog.LATERAL and commitment_changed:
+        direction = (billing_catalog.UPGRADE
+                     if req.commitment == BillingCommitment.TERM
+                     else billing_catalog.DOWNGRADE)
+
+    if direction == billing_catalog.LATERAL:
+        raise HTTPException(
+            status_code=400,
+            detail="That is the plan and billing period you are already on.")
+
+    behavior = billing_policy.change_behavior(db, platform_id, direction)
+    if not behavior["configured"]:
+        # POLICY REQUIRED. Refusing is the honest answer: the alternative is
+        # to invent a timing, and the two options differ by real money.
+        raise HTTPException(
+            status_code=409,
+            detail="No %s policy is configured for this brand, so the change "
+                   "cannot be applied. An administrator must set the plan "
+                   "change timing and proration behaviour first."
+                   % direction)
+
+    return {
+        "sub_id": sub_id,
+        "platform_id": platform_id,
+        "target": target,
+        "current": current,
+        "current_interval": current_interval,
+        "current_commitment": current_commitment,
+        "commitment": commitment,
+        "commitment_changed": commitment_changed,
+        "direction": direction,
+        "behavior": behavior,
+    }
+
+
+@router.post("/change-plan/preview")
+def preview_change_plan(
+    req: ChangePlanRequest,
+    current_user: User = Depends(_require_admin),
+    db: Session = Depends(get_db),
+):
+    """What WOULD happen, described from the brand's own configuration.
+
+    Read-only. Touches neither this database nor Stripe, so a customer opening
+    a confirmation dialog and closing it again has changed nothing.
+
+    This exists because the confirmation the customer used to see was a
+    `window.confirm` whose text was written into the browser: it stated the
+    EvoSys upgrade-and-downgrade policy to every brand on the platform,
+    regardless of what each brand had configured, and it could not show a
+    price at all. Every line here is resolved server-side by the same function
+    the real change uses.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    r = _resolve_change(db, org, req)
+    target, current = r["target"], r["current"]
+    commitment = r["commitment"]
+    deferred = r["behavior"]["timing"] == ChangeTiming.PERIOD_END
+
+    # WHAT THEY PAY NOW, AND WHAT THEY WOULD PAY. Both resolved from the
+    # catalogue at each side's own commitment, so a month-to-month customer is
+    # not quoted a committed-term figure they are not on.
+    from_cents = (billing_catalog.price_cents_for(
+        current, r["current_interval"] or BillingInterval.MONTH,
+        r["current_commitment"]) if current else None)
+    to_cents = billing_catalog.price_cents_for(target, req.interval, commitment)
+
+    return {
+        "direction": r["direction"],
+        "timing": r["behavior"]["timing"],
+        "proration": r["behavior"]["proration"],
+        "from_plan_key": getattr(current, "key", None),
+        "from_plan_name": getattr(current, "name", None),
+        "from_cents": from_cents,
+        "to_plan_key": target.key,
+        "to_plan_name": target.name,
+        "to_cents": to_cents,
+        "currency": getattr(target, "currency", None) or "usd",
+        "interval": req.interval,
+        "commitment": commitment,
+        "commitment_label": (billing_catalog.commitment_label(commitment)
+                             if commitment else None),
+        "commitment_changed": r["commitment_changed"],
+        # WHEN, in the brand's terms rather than the browser's.
+        "effective": ("at the end of your current billing period"
+                      if deferred else "immediately"),
+        "effective_at": (getattr(org, "billing_current_period_end", None)
+                         if deferred else None),
+        # WHAT IT DOES TO THE MONEY, stated only as far as it is knowable here.
+        # The exact prorated figure is computed by Stripe at the moment of the
+        # change, from the time left in the period; quoting a number this side
+        # would be a promise the customer's next invoice may not keep.
+        "proration_note": _proration_note(r["behavior"], deferred),
+    }
+
+
+def _proration_note(behavior: dict, deferred: bool) -> str:
+    """The money consequence in plain words, from the configured behaviour."""
+    if deferred:
+        return ("You keep everything you have already paid for until the end "
+                "of this billing period. Nothing is charged today and nothing "
+                "is refunded.")
+    proration = behavior.get("proration")
+    if proration == ProrationBehavior.NONE:
+        return ("The change applies straight away. Your next invoice is "
+                "unchanged for the current period.")
+    if proration == ProrationBehavior.ALWAYS_INVOICE:
+        return ("The change applies straight away and the difference for the "
+                "rest of this period is invoiced now. The exact amount is "
+                "calculated by the payment processor from the time remaining.")
+    return ("The change applies straight away. The difference for the rest of "
+            "this period appears on your next invoice — the exact amount is "
+            "calculated by the payment processor from the time remaining.")
 
 
 @router.post("/change-plan")
@@ -470,41 +749,17 @@ def change_plan(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    sub_id = getattr(org, "stripe_subscription_id", None)
-    if not sub_id:
-        raise HTTPException(
-            status_code=409,
-            detail="No active subscription to change. Choose a plan to get "
-                   "started.")
-
-    platform_id = billing_catalog.platform_id_for_org(db, org)
-    try:
-        target = billing_catalog.require_purchasable(db, platform_id, req.plan, req.interval)
-    except billing_catalog.PlanNotAvailable as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    current = billing_catalog.resolve_plan(
-        db, platform_id, getattr(org, "billing_plan_key", None) or org.plan)
-    current_interval = getattr(org, "stripe_plan_interval", None)
-
-    direction = billing_catalog.classify_change(
-        db, current, current_interval, target, req.interval)
-
-    if direction == billing_catalog.LATERAL:
-        raise HTTPException(
-            status_code=400,
-            detail="That is the plan and billing period you are already on.")
-
-    behavior = billing_policy.change_behavior(db, platform_id, direction)
-    if not behavior["configured"]:
-        # POLICY REQUIRED. Refusing is the honest answer: the alternative is
-        # to invent a timing, and the two options differ by real money.
-        raise HTTPException(
-            status_code=409,
-            detail="No %s policy is configured for this brand, so the change "
-                   "cannot be applied. An administrator must set the plan "
-                   "change timing and proration behaviour first."
-                   % direction)
+    # THE SAME RESOLUTION THE PREVIEW SHOWED. Sharing it is what guarantees the
+    # dialog the customer agreed to and the change that is applied are the same
+    # decision, refused for the same reasons and priced the same way.
+    r = _resolve_change(db, org, req)
+    sub_id = r["sub_id"]
+    target = r["target"]
+    current_commitment = r["current_commitment"]
+    commitment = r["commitment"]
+    commitment_changed = r["commitment_changed"]
+    direction = r["direction"]
+    behavior = r["behavior"]
 
     _stripe_client()
     try:
@@ -529,7 +784,8 @@ def change_plan(
         # effect IMMEDIATELY, so the customer lost the tier they had already
         # paid for and received no credit for the difference. Less product,
         # same money. See billing_schedule.py for the full account.
-        target_price_id = billing_catalog.stripe_price_id_for(target, req.interval)
+        target_price_id = billing_catalog.stripe_price_id_for(
+            target, req.interval, commitment)
         try:
             outcome = billing_schedule.schedule_change_at_period_end(
                 sub_id,
@@ -558,7 +814,7 @@ def change_plan(
     else:
         # UPGRADE - immediate, prorated. The customer asked for more and gets
         # it now; Stripe charges the difference for the remainder of the period.
-        new_item = _price_payload_for(target, req.interval, db, org)
+        new_item = _price_payload_for(target, req.interval, db, org, commitment)
         try:
             stripe.Subscription.modify(
                 sub_id,
@@ -591,6 +847,8 @@ def change_plan(
         "from": getattr(org, "billing_plan_key", None) or org.plan,
         "to": target.key,
         "interval": req.interval,
+        "commitment_from": current_commitment,
+        "commitment_to": commitment,
         "direction": direction,
         "timing": behavior["timing"],
         "proration": proration_applied,
@@ -609,6 +867,13 @@ def change_plan(
         # What they keep until then. Stated explicitly so the screen does not
         # have to infer that a downgrade is not yet in force.
         "current_plan": getattr(org, "billing_plan_key", None) or org.plan,
+        # The commitment this change lands on, and whether it moved. A screen
+        # that reported only the tier could show "Growth" for a change that
+        # also put the customer under a term agreement.
+        "commitment": commitment,
+        "commitment_changed": commitment_changed,
+        "commitment_label": (billing_catalog.commitment_label(commitment)
+                             if commitment else None),
     }
 
 
