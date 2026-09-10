@@ -512,7 +512,7 @@ class Organization(Base):
     # NULL means a subscription that predates this column, or one whose price
     # is not in the brand's catalogue; readers treat NULL as "unknown" and fall
     # back to the previous behaviour rather than guessing.
-    billing_commitment      = Column(String, nullable=True)  # 'term' | 'month_to_month'
+    billing_commitment      = Column(String, nullable=True)  # BillingCommitment.ALL
 
     billing_status          = Column(String, nullable=True)  # 'active' | 'past_due' | 'canceled' | 'trialing'
 

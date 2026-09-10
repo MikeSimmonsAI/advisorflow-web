@@ -162,9 +162,10 @@ def commitment_for_price_id(plan: BrandBillingPlan,
 
 
 def require_purchasable(db: Session, platform_id: Optional[str],
-                        key: Optional[str], interval: str) -> BrandBillingPlan:
+                        key: Optional[str], interval: str,
+                        commitment: Optional[str] = None) -> BrandBillingPlan:
     """The checkout gate. Raises PlanNotAvailable unless this exact
-    (brand, plan, interval) is something a customer may actually buy.
+    (brand, plan, interval, commitment) is something a customer may buy.
 
     THIS IS THE PRICE-TAMPERING DEFENCE. The request names a plan; this
     function decides whether that plan exists FOR THIS BRAND, is active, is
@@ -172,9 +173,19 @@ def require_purchasable(db: Session, platform_id: Optional[str],
     plan key belonging to a different brand resolves to nothing here, so one
     brand's customer cannot buy another brand's tier - and cannot discover
     that it exists.
+
+    THE COMMITMENT IS PART OF THE GATE, not decoration on it. A tier can be
+    mapped at one commitment and not the other, and the rule everywhere else
+    in this module is that commitments never fall back to one another. If the
+    gate ignored the commitment, a plan change to a tier with no
+    month-to-month price would pass the check and then quietly move the
+    customer onto the committed-term price - a contractual obligation nobody
+    agreed to, arrived at by a missing-configuration technicality.
     """
     if interval not in BillingInterval.ALL:
         raise PlanNotAvailable("Unknown billing interval: %r" % (interval,))
+    if commitment is not None and commitment not in BillingCommitment.ALL:
+        raise PlanNotAvailable("Unknown commitment: %r" % (commitment,))
 
     plan = resolve_plan(db, platform_id, key)
     if plan is None:
@@ -186,9 +197,12 @@ def require_purchasable(db: Session, platform_id: Optional[str],
         raise PlanNotAvailable(
             "Plan %r is not available for self-service purchase." % (key,))
 
-    if price_cents_for(plan, interval) is None and stripe_price_id_for(plan, interval) is None:
+    if (price_cents_for(plan, interval, commitment) is None
+            and stripe_price_id_for(plan, interval, commitment) is None):
         raise PlanNotAvailable(
-            "Plan %r has no %s price configured." % (key, interval))
+            "Plan %r has no %s price configured at %s."
+            % (key, interval, commitment_label(commitment).lower()
+               if commitment else "the committed-term rate"))
     return plan
 
 
