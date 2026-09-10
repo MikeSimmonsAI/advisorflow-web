@@ -294,6 +294,15 @@ export default function GodUsers() {
                     </td>
                     <td>
                       <div className="gm-acts">
+                        {/* MANAGE ACCESS is available for EVERY row, including
+                            the operator's own, because reading a footprint is
+                            a read — and an owner who cannot see their own
+                            contexts is the one person who most needs to. The
+                            server refuses the writes that would matter. */}
+                        <button className="gm-act gm-primary"
+                                onClick={() => navigate('/god/access/' + u.id)}>
+                          MANAGE ACCESS
+                        </button>
                         {me && me.email === u.email ? (
                           <span style={{ color: T.ghost, fontSize: 8.5 }}>
                             your own account

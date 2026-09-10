@@ -134,6 +134,12 @@ const NAV = [
     hint: 'Live tenant environments — enter one as its brand or customer' },
   { label: 'Users & Identity', path: '/god/users-all',        icon: 'users',
     hint: 'One row per human, every context they hold' },
+  { label: 'Manage Access',    path: '/god/access',           icon: 'shield',
+    hint: 'Open a person: brands, workspaces, demo, training — corrected in place' },
+  { label: 'Demo Suite',       path: '/god/demo-suite',       icon: 'monitor',
+    hint: "Each brand's demonstration environment, and who has presented" },
+  { label: 'Training',         path: '/god/training',         icon: 'flag',
+    hint: 'Who has been asked to learn what, and where they stopped' },
   // Implementations moved here from OPERATIONS: it is the handoff that follows
   // a won customer, so it belongs beside the customer, not beside a scraper.
   { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',

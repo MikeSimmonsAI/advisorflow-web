@@ -159,6 +159,17 @@ import GodRevenueHistory from './pages/god/GodRevenueHistory'
 import RoadmapBoard from './pages/god/RoadmapBoard'
 import GodLaunches from './pages/god/GodLaunches'
 import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
+// GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
+// place. Registered BEFORE the /god/* catch-all below, or it would silently
+// render the Command Center instead.
+import GodAccess from './pages/god/GodAccess'
+import GodDemoSuite from './pages/god/GodDemoSuite'
+import GodTraining from './pages/god/GodTraining'
+// The PRESENTER's Demo Suite and the learner's Training. Both are ordinary
+// authenticated routes: the entitlement is resolved on the server per brand,
+// because hiding a route is not access control.
+import DemoSuite from './pages/demo/DemoSuite'
+import Training from './pages/training/Training'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -711,6 +722,28 @@ export default function App() {
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />} />
+        {/* THE DEMO SUITE — the presenter's surface.
+
+            NOT gated here beyond authentication, and that is deliberate. The
+            entitlement is `demo_suite` over a PARTICULAR BRAND, which is a
+            path parameter: a route-level guard could only ever answer "does
+            this person hold it somewhere", which is a different question and
+            the wrong one. Every endpoint behind this screen resolves the real
+            answer per request, and the screen renders whatever the server says
+            they may present — including, correctly, nothing.
+
+            Registered on its own prefix rather than under /demo, which belongs
+            to the APP_ENV=demo console above. */}
+        <Route path="/demo-suite" element={
+          isAuthenticated() ? <DemoSuite /> : <Navigate to="/login" replace />} />
+        <Route path="/demo-suite/:platformId" element={
+          isAuthenticated() ? <DemoSuite /> : <Navigate to="/login" replace />} />
+        {/* TRAINING. The subject is always the caller — there is no user id in
+            this screen or in the endpoints behind it. */}
+        <Route path="/training" element={
+          isAuthenticated() ? <Training /> : <Navigate to="/login" replace />} />
+        <Route path="/training/:pathKey" element={
+          isAuthenticated() ? <Training /> : <Navigate to="/login" replace />} />
         {/* Demo Console. Registered in every build; the page itself asks the
             backend which environment answered and renders a plain "not
             available" panel outside the demo — and every control endpoint it
@@ -956,6 +989,14 @@ export default function App() {
         <Route path="/god/launches"              element={<GodRoute><GodModeLayout><GodLaunches /></GodModeLayout></GodRoute>} />
         {/* GOD-08: maintenance ops (booking cleanup, phone audit) */}
         <Route path="/god/maintenance"           element={<GodRoute><GodModeLayout><GodMaintenanceOps /></GodModeLayout></GodRoute>} />
+        {/* MANAGE ACCESS, THE DEMO SUITE AND TRAINING — all three registered
+            BEFORE the /god/* catch-all, or they would silently render the
+            Command Center. `/god/access` with no id is the person picker;
+            `/god/access/:userId` is one person's whole footprint. */}
+        <Route path="/god/access"                element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
+        <Route path="/god/access/:userId"        element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
+        <Route path="/god/demo-suite"            element={<GodRoute><GodModeLayout><GodDemoSuite /></GodModeLayout></GodRoute>} />
+        <Route path="/god/training"              element={<GodRoute><GodModeLayout><GodTraining /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}
