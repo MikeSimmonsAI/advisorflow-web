@@ -39,7 +39,7 @@ const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL
 const config: ExpoConfig = {
   name: 'EvoSys Pro',
   slug: 'evosyspro-mobile',
-  version: '1.0.0',
+  version: '1.0.1',
   orientation: 'portrait',
   scheme: 'evosyspro',
   // No `newArchEnabled`: the New Architecture is the default and the only
@@ -69,6 +69,14 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'live.evosyspro.mobile',
+    // EXPLICIT, AND BUMPED PER PREVIEW. `eas.json` sets
+    // `appVersionSource: "local"`, so EAS reads this rather than tracking a
+    // remote counter — and with it unset every build shipped as versionCode 1.
+    // Android refuses to install an APK over one with the same versionCode, so
+    // the previous preview could only be installed by uninstalling the old app
+    // first, which also threw away the signed-in session. Raise this with each
+    // preview handed to somebody.
+    versionCode: 2,
     adaptiveIcon: { backgroundColor: '#040812' },
     intentFilters: [
       {
