@@ -99,6 +99,32 @@ export default function Billing() {
   const success = searchParams.get('success') === '1';
   const canceled = searchParams.get('canceled') === '1';
 
+  // ══ WHICH OBLIGATION DID THEY JUST PAY? ═══════════════════════════════
+  //
+  // THE FALSE CLAIM THIS FIXES, caught on the first real TEST payment. A
+  // customer paid a $1,500 ONE-TIME implementation fee and this page told
+  // them "Subscription activated! Your plan is now live." No subscription
+  // existed, none was created, and none was going to be — the banner keyed
+  // off `success=1` alone and assumed every checkout was a subscription.
+  //
+  // That is the same class of error as the $3,500 combined charge: the
+  // billing engine kept the two obligations separate and the screen merged
+  // them back together. The customer's own receipt page is the worst place
+  // to be wrong about what they bought.
+  //
+  // The return URL has carried `part` since the split shipped. It is read
+  // here rather than inferred. An unrecognised or absent `part` gets neutral
+  // wording that claims nothing specific, because the honest failure of a
+  // confirmation message is vagueness, not a confident wrong answer.
+  const part = searchParams.get('part');
+  const successMessage =
+    part === 'setup'
+      ? '✅ Setup fee paid. Thank you — your onboarding and build are covered. '
+        + 'This was a one-time charge; it does not start a subscription.'
+      : part === 'subscription'
+        ? '✅ Subscription started! Your plan is now live.'
+        : '✅ Payment received. Thank you.';
+
   const load = useCallback(async () => {
     // Both reads, both allowed to fail independently. A subscription that will
     // not load must not hide the catalogue, and vice versa — a page that shows
@@ -260,7 +286,7 @@ export default function Billing() {
 
       {success && (
         <div style={{ background: '#1ef0a820', border: '1px solid #1ef0a8', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#1ef0a8', fontWeight: '600' }}>
-          ✅ Subscription activated! Your plan is now live.
+          {successMessage}
         </div>
       )}
       {canceled && (

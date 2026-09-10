@@ -156,5 +156,69 @@ Michael's Brand Executive context.
 
 ---
 
-*Last updated: 2026-09-03 — added Section 2 (God Root Authority) per approved
-implementation of god root authority correction.*
+## SECTION 6 — OPEN ENGINEERING PUNCH LIST
+
+Carried deliberately, with the reason. An item here is a decision to defer,
+not a thing that was forgotten — each says what it costs to leave and what
+would make it urgent.
+
+### P2 — Consolidate migrations onto Alembic
+
+**State:** Alembic exists with six revisions. The live schema is at 369
+columns, carried there by `app/auto_migrate.py`. `alembic upgrade head` against
+production today would do almost nothing.
+
+**Why it is not done:** autogenerating one catch-up revision against a live
+schema is a `drop_column` generator. Anything the models no longer mention —
+`deal_value`, kept on purpose — becomes a drop nobody reviews carefully at
+deploy time. Trading a startup hang for a data-loss risk is not an
+improvement.
+
+**What was done instead (2026-09-10):** the ORDER was fixed.
+`python -m app.migrate` runs as the backend's `preDeployCommand`, so
+migrations run and can fail the deploy BEFORE the app starts. The engine
+underneath is still `auto_migrate`. Swapping it for Alembic is now a change
+to one function, with the deploy gate already in place.
+
+**Cost of leaving it:** no reviewable migration history, no down-migrations,
+and schema drift between environments stays invisible until something breaks.
+
+**What makes it urgent:** a second engineer, a second environment that must
+match production exactly, or the first time a column needs to be REMOVED
+rather than added.
+
+### P3 — `booking_links` index warnings on every boot
+
+**State:** every startup logs two failures —
+`ix_booking_links_organization_id` and `ix_booking_links_slug` — because
+`booking_links` has neither an `organization_id` nor a `slug` column.
+
+**Why it is not done:** harmless today. The indexes are skipped, the table
+works, nothing depends on them. Fixing it means deciding whether the columns
+should exist (a schema question) or the index entries should go (a cleanup
+question), and that is a real decision, not a typo.
+
+**Cost of leaving it:** two red lines per boot in the same log where genuine
+migration failures now appear. Noise next to signal is how the real one gets
+skimmed past.
+
+**What makes it urgent:** any work on booking links, or the first time
+somebody misses a real failure because they had learned to ignore these.
+
+### P3 — Blueprint sync must stay the source of truth for the deploy gate
+
+**State:** `preDeployCommand` and `SKIP_STARTUP_MIGRATIONS` live in
+`render.yaml` and reached production through a Blueprint sync.
+
+**Risk:** editing the service in the Render UI instead of the file can drift
+the gate away from the repo, and the failure is silent — migrations quietly
+return to running during boot.
+
+**Check:** `GET /god/ops/diagnostics/database` reports the last migration's
+outcome and elapsed time; a deploy log without `==> Pre-deploy complete!`
+means the gate did not run.
+
+---
+
+*Last updated: 2026-09-10 — added Section 6 (Open Engineering Punch List)
+when the database hardening phase was closed.*
