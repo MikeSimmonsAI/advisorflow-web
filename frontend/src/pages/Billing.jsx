@@ -231,6 +231,13 @@ export default function Billing() {
   const [pendingChange, setPendingChange] = useState(null);
   const [changeBusy, setChangeBusy] = useState(false);
   const [changeError, setChangeError] = useState('');
+  // WHICH RATE THE CUSTOMER HAS CHOSEN. Month-to-month by default because it
+  // is the option that creates no obligation — the safe side of a choice this
+  // page must never make silently. `termAck` is the explicit acknowledgment a
+  // committed term requires, and it resets whenever the choice changes so an
+  // old tick can never carry over onto a new decision.
+  const [commitment, setCommitment] = useState('month_to_month');
+  const [termAck, setTermAck] = useState(false);
   const [searchParams] = useSearchParams();
 
   const success = searchParams.get('success') === '1';
@@ -298,8 +305,11 @@ export default function Billing() {
     setErr(''); setErrStatus(null); setNotice('');
     setActionLoading(planKey);
     try {
-      // PLAN KEY AND INTERVAL. NOTHING ELSE. No price, no Stripe price id.
-      const result = await api.post('/billing/checkout', { plan: planKey, interval });
+      // SELECTORS ONLY: which plan, how often, on what commitment. No price
+      // and no Stripe price id — the server resolves the money from the
+      // brand's own catalogue, and refuses a commitment it cannot price.
+      const result = await api.post('/billing/checkout',
+        { plan: planKey, interval, commitment: interval === 'month' ? commitment : null });
       window.location.href = result.checkout_url;
     } catch (e) { fail(e); }
   }
@@ -327,7 +337,8 @@ export default function Billing() {
     setActionLoading(planKey);
     try {
       const p = await api.post('/billing/change-plan/preview',
-                               { plan: planKey, interval });
+                               { plan: planKey, interval,
+                                 commitment: interval === 'month' ? commitment : null });
       setPendingChange({
         planKey,
         planName,
@@ -362,6 +373,7 @@ export default function Billing() {
     try {
       const r = await api.post('/billing/change-plan', {
         plan: pendingChange.planKey, interval,
+        commitment: interval === 'month' ? commitment : null,
       });
       // Only now, with the server's own answer in hand.
       setChangeBusy(false);
@@ -415,6 +427,13 @@ export default function Billing() {
   const currentKey = sub?.plan || catalog?.current_plan || 'trial';
   const billingStatus = (sub?.billing_status || 'trialing').toLowerCase();
   const currentInterval = sub?.stripe_plan_interval || catalog?.current_interval || 'month';
+  const currentCommitment = sub?.billing_commitment || null;
+
+  // A committed term needs the acknowledgment ticked before any button that
+  // would create one is live. Month-to-month creates no obligation, so it
+  // needs nothing; the annual interval is its own prepayment and is unaffected.
+  const commitmentBlocked =
+    interval === 'month' && commitment === 'term_agreement' && !termAck;
 
   // WHETHER A SUBSCRIPTION ALREADY EXISTS DECIDES WHICH ENDPOINT THIS PAGE MAY
   // CALL. Same test the server applies, so the button drawn is the operation
@@ -464,6 +483,21 @@ export default function Billing() {
   useEffect(() => {
     if (sub?.stripe_plan_interval) setInterval(sub.stripe_plan_interval);
   }, [sub?.stripe_plan_interval]);
+
+  // AN EXISTING CUSTOMER STARTS ON THE COMMITMENT THEY ARE ALREADY ON.
+  //
+  // Otherwise opening this page would preselect month-to-month for somebody on
+  // a term, and every plan card would quietly be offering to change their
+  // terms as well as their tier. They may still change it deliberately — that
+  // is what the control is for — but the screen must open showing the truth
+  // rather than a proposal. A customer with no subscription keeps the
+  // no-obligation default.
+  useEffect(() => {
+    if (sub?.billing_commitment) {
+      setCommitment(sub.billing_commitment);
+      setTermAck(false);
+    }
+  }, [sub?.billing_commitment]);
 
   if (loading) return (
     <div style={{ padding: '40px', color: '#aaa', textAlign: 'center' }}>Loading billing info…</div>
@@ -759,16 +793,100 @@ export default function Billing() {
             </div>
           )}
 
+          {/* ══ THE COMMITMENT IS CHOSEN, NEVER ASSUMED ═══════════════════
+              A tier has two monthly rates. The committed-term rate is LOWER
+              because it is earned by promising a term, and both are billed
+              monthly — so nothing about the interval says which was bought.
+              This page used to show only the term rate and send no commitment
+              at all, which meant a customer clicked a price and received a
+              multi-month obligation nobody had shown them.
+
+              Month-to-month is preselected because it creates no obligation.
+              Moving to the term rate reveals an acknowledgment that must be
+              ticked: a promise nobody was asked to make is not a promise. */}
+          {interval === 'month' && (
+            <div style={{ ...CARD, marginBottom: '24px', padding: '20px' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+                Choose your billing commitment
+              </div>
+              <div style={{ color: '#888', fontSize: 13, marginBottom: 14 }}>
+                This decides your monthly rate. You can see both below.
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {[
+                  { key: 'month_to_month', label: 'Month-to-month',
+                    note: 'No commitment · standard rate' },
+                  { key: 'term_agreement', label: 'Committed term',
+                    note: 'Lower rate · runs for the agreed term' },
+                ].map(opt => {
+                  const on = commitment === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => { setCommitment(opt.key); setTermAck(false); }}
+                      style={{ flex: '1 1 220px', textAlign: 'left',
+                               background: on ? 'rgba(47,182,255,0.10)' : 'transparent',
+                               border: `1px solid ${on ? '#2fb6ff' : '#2a2a4a'}`,
+                               borderRadius: 8, padding: '12px 14px',
+                               color: '#e8e8f0', cursor: 'pointer' }}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>
+                        {on ? '● ' : '○ '}{opt.label}
+                      </div>
+                      <div style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+                        {opt.note}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {commitment === 'term_agreement' && (
+                <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
+                                marginTop: 14, fontSize: 13, color: '#f59e0b',
+                                cursor: 'pointer', lineHeight: 1.5 }}>
+                  <input
+                    type="checkbox"
+                    checked={termAck}
+                    onChange={e => setTermAck(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    I understand the committed-term rate is a term agreement:
+                    it is billed monthly at the lower rate for the agreed term,
+                    and it is not a month-to-month plan.
+                  </span>
+                </label>
+              )}
+            </div>
+          )}
+
           {/* ── Plan cards ─────────────────────────────────────────────── */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px', marginBottom: '40px' }}>
             {plans.map(plan => {
               const isCurrent = plan.key === currentKey;
-              const isCurrentExactly = isCurrent && currentInterval === interval;
+              const isCurrentExactly = isCurrent && currentInterval === interval
+                && (!currentCommitment || currentCommitment === commitment);
               // DISPLAY ONLY, AND NEVER DERIVED. The annual figure is whatever
               // the catalogue holds; this page no longer invents one from the
               // monthly price.
-              const cents = interval === 'year' ? plan.annual_cents : plan.monthly_cents;
+              //
+              // FAIL CLOSED ON THE COMMITMENT. `commitments` lists only the
+              // rates this tier is actually configured at, so a tier with no
+              // month-to-month price shows as unavailable at that commitment
+              // rather than falling back to the term price. The server refuses
+              // the same combination, so the two never disagree.
+              const offer = interval === 'month'
+                ? (plan.commitments || []).find(c => c.key === commitment)
+                : null;
+              const cents = interval === 'year'
+                ? plan.annual_cents
+                : (offer ? offer.monthly_cents : null);
               const priced = cents !== null && cents !== undefined;
+              const otherOffer = interval === 'month'
+                ? (plan.commitments || []).find(c => c.key !== commitment)
+                : null;
               const accent = isCurrent ? '#1ef0a8' : '#2fb6ff';
               const busy = actionLoading === plan.key;
 
@@ -784,8 +902,16 @@ export default function Billing() {
               const currentCents = (() => {
                 const cp = planFor(currentKey);
                 if (!cp) return null;
-                const c = currentInterval === 'year' ? cp.annual_cents : cp.monthly_cents;
-                return (c === null || c === undefined)
+                // AT THEIR OWN COMMITMENT, so the up/down label compares the
+                // rate they actually pay rather than the term rate they may
+                // not be on.
+                const cur = currentInterval === 'year'
+                  ? cp.annual_cents
+                  : ((cp.commitments || []).find(
+                      x => x.key === (currentCommitment || 'term_agreement'))
+                     || {}).monthly_cents;
+                const c = (cur === null || cur === undefined) ? null : cur;
+                return c === null
                   ? null : (currentInterval === 'year' ? c / 12 : c);
               })();
               const thisMonthly = (cents === null || cents === undefined)
@@ -802,10 +928,25 @@ export default function Billing() {
               if (isCurrentExactly) { label = 'Current plan'; disabled = true; }
               else if (isPending) { label = 'Scheduled'; disabled = true; }
               else if (!plan.is_purchasable) { label = 'Contact sales'; }
-              else if (!priced) { label = `No ${interval === 'year' ? 'annual' : 'monthly'} price`; disabled = true; }
+              // FAIL CLOSED. A tier with no price at the CHOSEN commitment is
+              // not offered at the other one — the whole point of the choice.
+              else if (!priced) {
+                label = interval === 'year'
+                  ? 'No annual price'
+                  : `Not offered ${commitment === 'term_agreement'
+                      ? 'on a term' : 'month-to-month'}`;
+                disabled = true;
+              }
               else if (hasSubscription && direction === 'upgrade') { label = 'Upgrade'; }
               else if (hasSubscription && direction === 'downgrade') { label = 'Schedule downgrade'; }
               else if (hasSubscription && direction === 'lateral') { label = 'Switch'; }
+              // The acknowledgment gates every button that would create a term
+              // agreement — including the one on the plan they are already on
+              // at the other rate.
+              if (commitmentBlocked && !disabled) {
+                label = 'Confirm the term above';
+                disabled = true;
+              }
               if (busy) label = 'Working…';
 
               return (
@@ -826,6 +967,21 @@ export default function Billing() {
                           {plan.is_purchasable ? 'No price set' : 'Custom pricing'}
                         </span>}
                   </div>
+                  {/* WHICH RATE THIS IS, and what the other one costs. Naming
+                      the commitment under the figure is what stops a price
+                      from being read as "the" price — and showing the
+                      alternative makes the trade visible instead of hidden
+                      behind a toggle the customer may not have noticed. */}
+                  {interval === 'month' && priced && (
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>
+                      {COMMITMENT_LABEL[commitment]}
+                      {otherOffer && otherOffer.monthly_cents !== null
+                        && otherOffer.monthly_cents !== undefined && (
+                        <> · {COMMITMENT_LABEL[otherOffer.key]} is{' '}
+                          {money(otherOffer.monthly_cents, plan.currency)}/mo</>
+                      )}
+                    </div>
+                  )}
                   {plan.description && (
                     <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>{plan.description}</div>
                   )}
