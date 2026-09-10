@@ -16,7 +16,7 @@ import {
   Panel, Empty, Fact, Bar, StatusBadge, money, when, whenExact,
   errText, errWarnings,
 } from './god/GodOpsShared'
-import { PROGRESS, intakeState } from './launch/present'
+import { PROGRESS, intakeState, eventPhrase } from './launch/present'
 import './god/GodOps.css'
 
 /**
@@ -508,7 +508,7 @@ export default function GodImplementationDetail() {
           <ul className="go-tl">
             {d.timeline.map(t => (
               <li key={t.id}>
-                <span>{t.action.replace(/_/g, ' ')}</span>
+                <span>{eventPhrase(t)}</span>
                 {' — '}<span className="who">{t.actor || 'system'}</span>
                 <div className="when">{whenExact(t.at)}{t.note ? ' · ' + t.note : ''}</div>
               </li>

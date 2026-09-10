@@ -420,3 +420,114 @@ class TestTheWizardScreensAreWhiteLabelToo:
         assert "brand." in sidebar, "the rail footer must read the brand object"
         hero = _rendered_source(_WIZARD_DIR / "LaunchHero.jsx")
         assert "brand." in hero, "the hero must read the brand object"
+
+
+# ── history ─────────────────────────────────────────────────────────────────
+#
+# The implementation history is read from the audit log, and the intake wrote
+# nothing to it. A staff member looking at "what happened with this customer"
+# could see a milestone ticked but not the customer submitting the intake or a
+# reviewer reopening it — the two events people actually ask about.
+
+
+class TestHistoryRecordsTheIntakeLifecycle:
+
+    def _submit(self, client, db_session, world):
+        impl, org = world["impl_a"], world["org_a"]
+        _complete(db_session, impl, org)
+        h = _h(db_session, world["admin_a"])
+        client.post("/launch/me/files", headers=h,
+                    files={"file": ("a.txt", b"hello", "text/plain")},
+                    data={"step_key": "files"})
+        r = client.post("/launch/me/submit", headers=h)
+        assert r.status_code == 200, r.text
+        return h
+
+    def _actions(self, client, db_session, world):
+        r = client.get("/god/ops/implementations/" + world["impl_a"].id,
+                       headers=_h(db_session, world["god"]))
+        assert r.status_code == 200, r.text
+        return [e["action"] for e in r.json().get("timeline") or []]
+
+    def test_submitting_appears_in_the_history(self, client, db_session, world):
+        self._submit(client, db_session, world)
+        assert "launch_intake_submitted" in self._actions(client, db_session, world)
+
+    def test_review_records_both_the_review_and_the_reopen(
+            self, client, db_session, world):
+        self._submit(client, db_session, world)
+        rev = client.post("/god/launch/" + world["org_a"].id + "/review",
+                          headers=_h(db_session, world["god"]), json={})
+        assert rev.status_code == 200, rev.text
+        actions = self._actions(client, db_session, world)
+        # Reviewing also reopens. A reader should not have to know that.
+        assert "launch_intake_reviewed" in actions
+        assert "launch_intake_reopened" in actions
+
+    def test_history_entries_carry_an_actor_and_a_time(
+            self, client, db_session, world):
+        self._submit(client, db_session, world)
+        r = client.get("/god/ops/implementations/" + world["impl_a"].id,
+                       headers=_h(db_session, world["god"]))
+        rows = [e for e in r.json()["timeline"]
+                if e["action"] == "launch_intake_submitted"]
+        assert rows, "the submission is in the history"
+        assert rows[0]["at"], "with a timestamp"
+        assert rows[0]["actor"], "and a named actor, not an anonymous blob"
+
+    def test_no_credential_reaches_the_history(self, client, db_session, world):
+        """_complete() stores "x-secret" in every secret field."""
+        self._submit(client, db_session, world)
+        r = client.get("/god/ops/implementations/" + world["impl_a"].id,
+                       headers=_h(db_session, world["god"]))
+        assert "x-secret" not in r.text
+
+
+class TestEveryHistoryCodeHasAPhrase:
+    """The screen renders `action` through present.js, not with a regex."""
+
+    # Codes this surface can emit, from the routers and services that write
+    # them with target_type "implementation" / "implementation_milestone" /
+    # "customer_activation" — the three the timeline query filters on.
+    EMITTED = [
+        "launch_intake_submitted", "launch_intake_reviewed",
+        "launch_intake_reopened",
+        "implementation_milestone_added", "implementation_milestone_changed",
+        "implementation_owner_assigned", "customer_marked_live",
+        "billing_configuration_changed",
+        "customer_admin_invite_revoked", "customer_admin_activated",
+    ]
+
+    def test_present_js_has_a_human_phrase_for_each(self):
+        src = (_WIZARD_DIR / "present.js").read_text(encoding="utf-8")
+        block = src.split("const EVENT_LABELS", 1)
+        assert len(block) == 2, "present.js still declares EVENT_LABELS"
+        body = block[1].split("}", 1)[0]
+        missing = [c for c in self.EMITTED if (c + ":") not in body]
+        assert not missing, (
+            "these audit codes would render as raw text in History: %s"
+            % ", ".join(missing))
+
+    def test_every_phrase_reads_as_a_sentence(self):
+        """Not the raw code, and not an all-lower-case fragment.
+
+        `customer_provisioned` -> "Customer provisioned" is a legitimate
+        phrase that happens to share the code's words, so the rule is about
+        SHAPE: it must be written for a reader (capitalised, no underscores),
+        never the identifier passed through str.replace.
+        """
+        src = (_WIZARD_DIR / "present.js").read_text(encoding="utf-8")
+        body = src.split("const EVENT_LABELS", 1)[1].split("}", 1)[0]
+        seen = 0
+        for line in body.splitlines():
+            if ":" not in line or line.strip().startswith("//"):
+                continue
+            key, _, val = line.partition(":")
+            key, val = key.strip(), val.strip().rstrip(",").strip("'\"")
+            if not key or not val:
+                continue
+            seen += 1
+            assert "_" not in val, "%s still shows an identifier" % key
+            assert val[0].isupper(), "%s is not written for a reader" % key
+            assert val != key, "%s is its own label" % key
+        assert seen >= 10, "the label table was parsed, not skipped"

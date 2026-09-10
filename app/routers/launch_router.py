@@ -51,8 +51,35 @@ from app.models.implementation_models import Implementation
 from app.models.launch_intake_models import LaunchIntakeFile
 from app.models.models import Organization, Platform, User
 from app.services import launch_intake
+from app.routers.audit_log_router import log_action
 
 log = logging.getLogger("launch_router")
+
+
+def _intake_audit(db: Session, impl: Implementation, actor_id: str, action: str,
+                  *, details: Any = None, note: Optional[str] = None) -> None:
+    """Record an intake lifecycle event on the SAME audit log everything else uses.
+
+    The implementation history is read from the audit log (§38) and filtered to
+    target_type "implementation", so before this the staff timeline could show
+    a milestone being ticked but never showed the customer submitting their
+    intake or a reviewer reopening it — the two events people actually ask
+    about. This adds rows to the existing table through the existing helper; it
+    introduces no second activity store, and a failure to audit must never turn
+    a successful submission into a failed one.
+    """
+    try:
+        log_action(
+            db, impl.organization_id, actor_id,
+            action=action,
+            target_type="implementation",
+            target_id=impl.id,
+            platform_id=impl.platform_id,
+            brand_sales_org_id=impl.brand_sales_org_id,
+            details=details, note=note,
+        )
+    except Exception:                                   # pragma: no cover
+        log.warning("intake audit failed for %s/%s", impl.id, action, exc_info=True)
 
 router = APIRouter(prefix="/launch", tags=["Launch Engine"])
 god_router = APIRouter(prefix="/god/launch", tags=["Launch Engine - Staff"])
@@ -303,6 +330,9 @@ def submit_my_launch(request: Request,
     if impl.status in (IMPL_NOT_STARTED, None):
         impl.status = IMPL_CONFIGURATION
     impl.last_activity_at = datetime.utcnow()
+    _intake_audit(db, impl, user.id, "launch_intake_submitted",
+                  details={"submission_id": sub.id,
+                           "signed_name": sub.signed_name})
     db.commit()
 
     return {"submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
@@ -580,5 +610,12 @@ def staff_review(organization_id: str, body: ReviewBody,
     sub.reviewed_by = actor.id
     sub.review_note = (body.note or None)
     impl.last_activity_at = datetime.utcnow()
+    # One staff action with two consequences, so it is audited as both: the
+    # review happened, and the intake became editable again. A reader of the
+    # history should not have to know that "reviewed" implies "reopened".
+    _intake_audit(db, impl, actor.id, "launch_intake_reviewed",
+                  details={"submission_id": sub.id}, note=sub.review_note)
+    _intake_audit(db, impl, actor.id, "launch_intake_reopened",
+                  details={"submission_id": sub.id})
     db.commit()
     return {"reviewed_at": sub.reviewed_at.isoformat(), "id": sub.id}

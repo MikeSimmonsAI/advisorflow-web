@@ -253,3 +253,67 @@ export function progressPhrase(concept, done, total, pct) {
   if (total === null || total === undefined) return `${pct}% ${c.unit} complete`
   return `${done} of ${total} ${c.unit} · ${pct}%`
 }
+
+
+/* ── history ────────────────────────────────────────────────────────────────
+   The implementation history is read from the audit log, whose `action` is a
+   machine code. The screen used to render it with the underscores swapped for
+   spaces, which produced lines like "implementation milestone changed — Mike"
+   and "customer admin invite revoked — Mike": readable in the sense that they
+   are words, unreadable in the sense that nobody can tell what happened.
+
+   Unknown codes still degrade to the old behaviour rather than being hidden,
+   because a history that silently drops events is worse than one that shows a
+   code. Anything added here should read as a sentence a person would say. */
+
+const EVENT_LABELS = {
+  // provisioning
+  customer_provisioned: 'Customer provisioned',
+  customer_created: 'Customer created',
+  customer_location_created: 'Customer location added',
+  customer_user_added: 'Customer user added',
+  customer_admin_created: 'Customer administrator created',
+  customer_admin_invited: 'Customer administrator invited',
+  customer_admin_activated: 'Customer administrator activated their account',
+  customer_admin_invite_revoked: 'Customer administrator invite revoked',
+  customer_activated: 'Customer activated',
+  customer_deactivated: 'Customer deactivated',
+
+  // the intake
+  launch_intake_started: 'Intake started',
+  launch_intake_submitted: 'Intake submitted by the customer',
+  launch_intake_reviewed: 'Staff reviewed the intake',
+  launch_intake_reopened: 'Intake reopened for edits',
+
+  // the build
+  implementation_owner_assigned: 'Implementation owner changed',
+  implementation_milestone_added: 'Milestone added',
+  implementation_milestone_changed: 'Milestone updated',
+  implementation_status_changed: 'Implementation status changed',
+  billing_configuration_changed: 'Billing details changed',
+  customer_marked_ready: 'Customer marked ready for launch',
+  customer_marked_live: 'Customer marked live',
+}
+
+/**
+ * One history row as a sentence.
+ *
+ * `details` carries the milestone label for milestone events, so "Milestone
+ * updated" becomes "Milestone updated — Kickoff call" without the reader
+ * having to open anything.
+ */
+export function eventPhrase(entry) {
+  const e = entry || {}
+  const base = EVENT_LABELS[e.action]
+    || String(e.action || 'Activity').replace(/[_.]/g, ' ')
+  const d = e.details || {}
+  const subject = d.label || d.milestone_label || d.key || null
+  if (!subject) return base
+  if (e.action === 'implementation_milestone_changed'
+      || e.action === 'implementation_milestone_added') {
+    const status = (e.after && e.after.status) || null
+    return status ? `${base} — ${subject} → ${humanise(status)}`
+                  : `${base} — ${subject}`
+  }
+  return `${base} — ${subject}`
+}
