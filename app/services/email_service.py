@@ -256,6 +256,15 @@ def send_email(
 def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     """Sends one email to a lead and logs it. Raises ValueError if the lead
     may not be emailed."""
+    # ── THE DEMONSTRATION BOUNDARY ──────────────────────────────────────────
+    # Before the compliance gate, because compliance answers questions about a
+    # real family's real consent and this asks whether there is a real family
+    # at all. The Demo Suite writes its own simulated `EmailMessage` row and
+    # never calls this function; a demo lead arriving here is a bug, and a bug
+    # on a send path must refuse rather than deliver.
+    from app.services.sms_service import _demo_send_guard
+    _demo_send_guard(db, lead, "email")
+
     # THE COMPLIANCE GATE, and it is the SAME one the auto-send queue runs.
     #
     # This function used to check two things itself - a missing address and a

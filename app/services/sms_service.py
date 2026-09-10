@@ -475,6 +475,29 @@ def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> 
     return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url)
 
 
+def _demo_send_guard(db: Session, lead: Lead, channel: str) -> None:
+    """Refuse to place a real provider call for a demonstration tenant.
+
+    ONE QUERY, ON THE LEAD'S OWN ORGANIZATION. Not on the advisor's: a
+    god_admin operating inside a customer has `organization_id = None`, and
+    reading the sender's tenancy would answer the wrong question for exactly
+    the caller most able to cause damage. The lead is the thing that would be
+    contacted, so the lead's organization is the thing that decides.
+
+    Raises `DemoBoundaryViolation`, which is a RuntimeError — deliberately NOT
+    an HTTPException, because this function is also reached from the cadence
+    and auto-send loops, where a 404 is not an answer to anybody.
+    """
+    from app.models.models import Organization
+    from app.services import demo_guard
+
+    org_id = getattr(lead, "organization_id", None)
+    if not org_id:
+        return
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    demo_guard.block_if_demo(org, channel)
+
+
 def send_sms(
     db: Session,
     advisor: User,
@@ -488,6 +511,16 @@ def send_sms(
     at the Twilio phone number / messaging service level, not per-message -
     that's configured once via configure_caller_id_name() below.
     """
+    # ── THE DEMONSTRATION BOUNDARY ──────────────────────────────────────────
+    # FIRST, before DNC, before capacity, before suppression — because those
+    # three are questions about a real customer's real contact, and this one
+    # asks whether there is a real customer at all. The Demo Suite writes its
+    # own simulated `Message` row and never reaches this function; anything
+    # that DOES arrive here carrying a demo lead is a bug, and the correct
+    # behaviour for a bug on a send path is to refuse loudly rather than to
+    # place the call and find out afterwards.
+    _demo_send_guard(db, lead, "SMS")
+
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
@@ -582,6 +615,9 @@ def send_mms(
     media_url must be a publicly accessible URL (e.g. uploaded to S3 or Cloudinary).
     Twilio A2P 10DLC approval is required for MMS just like SMS.
     """
+    # The demonstration boundary, first, for the same reason as in send_sms.
+    _demo_send_guard(db, lead, "MMS")
+
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")
 

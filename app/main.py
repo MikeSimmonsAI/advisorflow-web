@@ -88,6 +88,21 @@ from app.routers.god_pricing_router import router as god_pricing_router
 # key on the same three words: that one configures what a SALESPERSON earns on
 # a one-time package, this one configures what a CUSTOMER pays every month.
 from app.routers.god_billing_router import router as god_billing_router
+# GOD MODE -> MANAGE ACCESS. One person, every context, corrected in place.
+# Separate module from god_router deliberately: these are the platform's
+# identity-provisioning routes and burying them at the bottom of 2,500 lines of
+# diagnostics would hide the most consequential surface on the control plane.
+from app.routers.god_access_router import router as god_access_router
+# THE DEMO SUITE. Two routers: the presenter's, gated by the `demo_suite`
+# capability over a brand, and the owner's, for building the environments.
+# NOT mounted under /demo - that prefix belongs to the APP_ENV=demo deployment
+# and every one of its routes 404s outside it, deliberately.
+from app.routers.demo_suite_router import router as demo_suite_router
+from app.routers.demo_suite_router import god_router as god_demo_suite_router
+# TRAINING. The learner's routes take no user id at all - the subject is always
+# the caller - and the owner's routes assign and report readiness.
+from app.routers.training_router import router as training_router
+from app.routers.training_router import god_router as god_training_router
 from app.routers.customer_lifecycle_router import router as customer_360_router
 # Compensation Command Center — what the pricing/comp rules PRODUCED, and the
 # settlement of it. Deliberately a separate module from god_pricing_router:
@@ -579,6 +594,15 @@ app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
 app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billing policy + revenue — god_admin only
+app.include_router(god_access_router)    # /god/access — Manage Access: footprint, preview, apply, audit. god_admin only
+app.include_router(god_demo_suite_router)  # /god/demo-suite — build and reset brands' demonstration environments
+app.include_router(god_training_router)  # /god/training — assign training, readiness report. god_admin only
+# The presenter's Demo Suite. Gated by the `demo_suite` capability over the
+# brand being presented, resolved per request inside the router — NOT by a role
+# and NOT by a router-level dependency, because the brand is a path parameter
+# and the answer differs per brand for the same caller.
+app.include_router(demo_suite_router)    # /demo-suite
+app.include_router(training_router)      # /training — the learner's own path
 app.include_router(customer_360_router)  # Customer 360 + customer lifecycle — god_admin only
 app.include_router(compensation_router)  # Compensation Command Center + ledger + settlement
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection

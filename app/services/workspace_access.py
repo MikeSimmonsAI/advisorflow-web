@@ -403,6 +403,57 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # home is still theirs.
         default = {"type": "legacy_tenant", "path": "/"}
 
+    # ── ENTITLEMENTS AND READINESS — the same truth, for web and for mobile ──
+    #
+    # ADDED AS SEPARATE TOP-LEVEL KEYS, NEVER INTO `contexts`. The mobile
+    # application resolves which tab set to render by walking `contexts`, so an
+    # entry appended there would change what the phone renders for people whose
+    # authority has not changed at all. A new key is additive by construction:
+    # a client that does not know about it is unaffected, and one that does gets
+    # the answer from the server rather than deciding for itself.
+    #
+    # DEMO ENTITLEMENT IS NOT A CONTEXT for the same reason it is not a role.
+    # It does not put anybody anywhere — it says which brand's demonstration
+    # they may drive. Modelling it as a context would have made it look like a
+    # place to be, which is exactly the confusion the entitlement exists to
+    # avoid.
+    demo_contexts: List[Dict[str, Any]] = []
+    try:
+        from app.services import demo_access
+        for entry in demo_access.entitlement_summary(db, user)["brands"]:
+            demo_contexts.append({
+                "type": "demo",
+                "label": "%s Demo Suite" % entry["platform_name"],
+                "platform_id": entry["platform_id"],
+                "platform_name": entry["platform_name"],
+                "may_present": entry["may_present"],
+                "may_admin": entry["may_admin"],
+                "path": "/demo-suite/%s" % entry["platform_id"],
+            })
+    except Exception:                                    # pragma: no cover
+        # Entitlement reporting must never be able to break sign-in. A client
+        # that gets no demo list shows no demo button, which is the safe shape
+        # of this failure.
+        _log.warning("could not resolve demo entitlement for %s",
+                     getattr(user, "id", None), exc_info=True)
+
+    training: Dict[str, Any] = {"assigned": 0, "complete": 0, "paths": []}
+    try:
+        from app.services import training_service
+        rows = [t for t in training_service.for_user(db, user) if t["is_active"]]
+        training = {
+            "assigned": len(rows),
+            "complete": sum(1 for t in rows if t["status"] == "complete"),
+            "paths": [{"path_key": t["path_key"], "name": t["name"],
+                       "status": t["status"],
+                       "completed_steps": t["completed_steps"],
+                       "total_steps": t["total_steps"],
+                       "due_at": t["due_at"]} for t in rows],
+        }
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve training for %s",
+                     getattr(user, "id", None), exc_info=True)
+
     return {
         "contexts": contexts + executive,
         "platform_contexts": platform,
@@ -411,6 +462,10 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         "has_back_office": bool(platform),
         "workspace_count": len(workspaces),
         "default_context": default,
+        # Entitlements and readiness. Not contexts, and deliberately named so.
+        "demo_contexts": demo_contexts,
+        "has_demo_access": bool(demo_contexts),
+        "training": training,
     }
 
 

@@ -152,9 +152,18 @@ def portfolio_authority(db: Session, user: User,
     if is_owner(user):
         # THE OWNER'S ESTATE, narrowed to the brand they selected — the same
         # single-platform isolation every other executive query has.
+        #
+        # DEMONSTRATION TENANTS ARE EXCLUDED. A brand's demo workspace is a
+        # real organization row under the real platform (that is what makes the
+        # demo wear the brand's own configuration), so without this filter it
+        # would appear in the owner's portfolio and be counted in the brand's
+        # customer numbers. Real reporting must never have to filter demo rows
+        # out of its own figures — the same rule the demo event log states
+        # about analytics.
         ids = [r[0] for r in
                db.query(Organization.id)
-               .filter(Organization.platform_id == platform_id).all()]
+               .filter(Organization.platform_id == platform_id,
+                       Organization.is_demo.isnot(True)).all()]
         return {"org_ids": sorted(ids), "source": SOURCE_OWNER,
                 "is_owner_view": True}
 
@@ -175,7 +184,11 @@ def portfolio_authority(db: Session, user: User,
                    Membership.scope_type == SCOPE_CUSTOMER_ORG,
                    Membership.role == ROLE_BRAND_EXECUTIVE,
                    Membership.is_active.is_(True),
-                   Organization.platform_id == platform_id)
+                   Organization.platform_id == platform_id,
+                   # A demonstration tenant is not a customer anybody can be
+                   # assigned. Filtered here as well as in the owner branch so
+                   # a hand-written assignment row cannot smuggle one in.
+                   Organization.is_demo.isnot(True))
            .all()]
     if not ids:
         # AN EMPTY PORTFOLIO IS A REAL, EXPLAINABLE STATE, not an error and
@@ -209,12 +222,20 @@ def may_view_org(db: Session, user: User, platform_id: str,
 # ── assignment, for the owner's management screen ───────────────────────────
 
 def assign(db: Session, *, executive_user_id: str, organization_id: str,
-           granted_by_user_id: Optional[str]) -> Dict[str, Any]:
+           granted_by_user_id: Optional[str],
+           commit: bool = True) -> Dict[str, Any]:
     """Give one executive one organization. Idempotent.
 
     Reactivates a previously revoked row rather than writing a second one, so
     the assignment history stays a single readable thread per (person,
     organization) instead of a pile of duplicates.
+
+    `commit=False` is for a caller that is already inside a transaction which
+    must succeed or fail as one unit — the Manage Access change plan applies
+    several kinds of access together and a half-applied plan is the one outcome
+    it exists to prevent. The default stays True so no existing call site
+    changes behaviour. Same shape, and the same reasoning, as the `commit`
+    argument on `log_action`.
     """
     existing = (db.query(Membership)
                 .filter(Membership.user_id == executive_user_id,
@@ -227,7 +248,7 @@ def assign(db: Session, *, executive_user_id: str, organization_id: str,
             return {"status": "already_assigned", "membership_id": existing.id}
         existing.is_active = True
         existing.granted_by = granted_by_user_id
-        db.commit()
+        db.commit() if commit else db.flush()
         return {"status": "reassigned", "membership_id": existing.id}
 
     mem = Membership(user_id=executive_user_id,
@@ -237,12 +258,12 @@ def assign(db: Session, *, executive_user_id: str, organization_id: str,
                      is_active=True,
                      granted_by=granted_by_user_id)
     db.add(mem)
-    db.commit()
+    db.commit() if commit else db.flush()
     return {"status": "assigned", "membership_id": mem.id}
 
 
 def unassign(db: Session, *, executive_user_id: str,
-             organization_id: str) -> Dict[str, Any]:
+             organization_id: str, commit: bool = True) -> Dict[str, Any]:
     """Take one organization away. DEACTIVATES, never deletes.
 
     The row stays so the history of who was given what, by whom and when
@@ -262,5 +283,5 @@ def unassign(db: Session, *, executive_user_id: str,
     if mem is None:
         return {"status": "not_assigned"}
     mem.is_active = False
-    db.commit()
+    db.commit() if commit else db.flush()
     return {"status": "unassigned", "membership_id": mem.id}

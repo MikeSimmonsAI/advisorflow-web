@@ -871,6 +871,22 @@ COLUMNS_TO_ADD = [
     # customer is then one deliberate flip by an operator who has checked.
     ("organizations", "crm_inbound_secure_required",
      "BOOLEAN NOT NULL DEFAULT FALSE"),
+
+    # ── Demo Suite tenancy flags (2026-09-10) ───────────────────────────────
+    #
+    # NOT NULL DEFAULT FALSE, and both halves matter. FALSE because every row
+    # that exists when this column lands is a real tenant and must stay one;
+    # NOT NULL because these two columns are read by a REFUSAL — the outbound
+    # send guard asks "is this a demo organization?" and a NULL answer to that
+    # question is not one a send path should have to interpret.
+    #
+    # `organizations` is a CORE table, so a lock this cannot beat fails the
+    # deploy loudly rather than starting degraded. That is the correct
+    # direction here: a platform running without `is_demo` would answer False
+    # for the demo tenants as well, and False is the answer that lets a demo
+    # organization reach Twilio.
+    ("organizations", "is_demo", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("brand_sales_orgs", "is_demo", "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

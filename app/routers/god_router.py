@@ -138,6 +138,27 @@ def _compute_health_score(
     return max(0, min(100, score))
 
 
+def _as_datetime(value):
+    """A naive datetime, or None. Accepts what raw SQL actually hands back.
+
+    Postgres returns a datetime from `MAX(timestamp)`; SQLite returns the
+    stored ISO string. A helper rather than two inline branches because the
+    same value is consumed twice in `_enrich_org` and only one of the two uses
+    had been defended — which is how the customer list came to raise
+    `'str' object has no attribute 'isoformat'` on a SQLite database.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo is not None else value
+
+
 def _enrich_org(db: Session, org: Organization) -> dict:
     """Build the full God Mode intelligence record for one org."""
     cutoff_30 = datetime.utcnow() - timedelta(days=30)
@@ -168,10 +189,19 @@ def _enrich_org(db: Session, org: Organization) -> dict:
         last_login_at = None
     candidates = [t for t in [last_msg_at, last_login_at] if t is not None]
     last_activity = max(candidates) if candidates else None
+
+    # A RAW SQL MAX() DOES NOT ALWAYS COME BACK AS A DATETIME. Postgres returns
+    # a datetime here; SQLite returns the stored ISO string. Both later uses
+    # then called a datetime method on it — `.replace(tzinfo=None)` and
+    # `.isoformat()` — so on SQLite the whole customer list 500'd on a single
+    # unparsed value. Normalised ONCE, here, so neither use can be got wrong
+    # again, and an unreadable value degrades to "no activity recorded" rather
+    # than failing the list.
+    last_activity = _as_datetime(last_activity)
+
     days_since = None
-    if last_activity:
-        la = last_activity.replace(tzinfo=None) if hasattr(last_activity, 'replace') and last_activity.tzinfo else last_activity
-        days_since = (datetime.utcnow() - la).total_seconds() / 86400
+    if last_activity is not None:
+        days_since = (datetime.utcnow() - last_activity).total_seconds() / 86400
     health_score = _compute_health_score(
         is_active=org.is_active, lead_count=lead_count, advisor_count=advisor_count,
         messages_30d=int(messages_30d), days_since_activity=days_since,
@@ -311,7 +341,11 @@ def god_create_user(body: UserCreate, god: User = Depends(require_god), db: Sess
 @router.get("/stats")
 def god_stats(god: User = Depends(require_god), db: Session = Depends(get_db)):
     total_leads  = _safe_count(db, Lead)
-    total_orgs   = _safe_count(db, Organization)
+    # Demonstration tenants are excluded from the platform's own numbers. A
+    # count that includes them tells the owner they have one more customer than
+    # they have, which is the one direction a customer count must never be
+    # wrong in.
+    total_orgs   = _safe_count(db, Organization, [Organization.is_demo.isnot(True)])
     total_users  = _safe_count(db, User)
     total_admins = _safe_count(db, User, [User.role.in_(["org_admin","super_admin","god_admin"])])
     cutoff = datetime.utcnow() - timedelta(days=30)
@@ -319,7 +353,9 @@ def god_stats(god: User = Depends(require_god), db: Session = Depends(get_db)):
     try:
         platform_rows = db.execute(text("""
             SELECT p.name, p.slug, COUNT(DISTINCT o.id) AS org_count
-            FROM platforms p LEFT JOIN organizations o ON o.platform_id = p.id
+            FROM platforms p LEFT JOIN organizations o
+              ON o.platform_id = p.id
+             AND (o.is_demo IS NULL OR o.is_demo = FALSE)
             GROUP BY p.id, p.name, p.slug ORDER BY p.name
         """)).fetchall()
         platforms = [{"name": r[0], "slug": r[1], "org_count": r[2]} for r in platform_rows]
@@ -797,12 +833,21 @@ def god_orgs(
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     health: Optional[str] = Query(None),
+    include_demo: bool = Query(False),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     god: User = Depends(require_god),
     db: Session = Depends(get_db),
 ):
+    # DEMONSTRATION TENANTS ARE NOT CUSTOMERS. A brand's demo workspace is a
+    # real organization row under the real platform — that is what makes the
+    # demonstration wear the brand's own configuration — so it would otherwise
+    # sit in the customer list beside paying customers and be counted with
+    # them. `include_demo=true` is there for the one screen that genuinely
+    # wants to see them: God Mode → Demo Suite.
     q = db.query(Organization)
+    if not include_demo:
+        q = q.filter(Organization.is_demo.isnot(True))
     if platform_slug:
         q = q.filter(Organization.platform_id.in_(
             db.execute(text("SELECT id FROM platforms WHERE slug = :slug"), {"slug": platform_slug}).scalars().all()

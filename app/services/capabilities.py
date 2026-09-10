@@ -182,6 +182,34 @@ CAPABILITIES: Dict[str, Capability] = dict([
          why="Administrative housekeeping Ã¢â‚¬â€ archive batches, purge old staging "
              "data. Separate from commit so batch management does not require "
              "commit authority."),
+    # ── Demo Suite entitlement (platform-scoped) ────────────────────────────
+    #
+    # DEMO ACCESS IS NOT GOD ACCESS, AND IT IS NOT CUSTOMER ACCESS. It is the
+    # right to stand in a brand's isolated demonstration environment and drive
+    # it in front of a prospect. It is registered here, in the ONE capability
+    # registry, rather than as a boolean on `users`, because a boolean on the
+    # user row has no scope: it would say "may demo" without saying WHOSE
+    # product, and a BookaBoost presenter would silently be able to open the
+    # EvoSys Pro demo.
+    #
+    # Non-delegable: a customer organization can never be permitted to
+    # self-manage who presents the product that is being sold to it. Granting
+    # it is a God operation, always.
+    _cap("demo_suite",
+         "Demo Suite — present the product in a safe demonstration environment",
+         requires_feature=None, delegable=False,
+         why="The right to run a demonstration of a brand's product against "
+             "seeded fictional data. It carries no authority over any real "
+             "customer, no platform administration, and no God function — a "
+             "salesperson who can demo still cannot see a customer's leads."),
+    _cap("demo_admin",
+         "Demo environment administration — rebuild, reset and reseed",
+         requires_feature=None, delegable=False,
+         why="Rebuilding a brand's demonstration environment deletes and "
+             "recreates its seeded records. Separate from `demo_suite` so a "
+             "presenter can run a demo, and reset their own session, without "
+             "being able to rebuild the environment other presenters are "
+             "standing in."),
 ])
 
 # ONE NAME PER PERMISSION.
@@ -514,6 +542,173 @@ def set_brand_grants(db: Session, target: User, brand_sales_org_id: str,
         note="Brand-scoped capability grant.",
         commit=False,
     )
+    return wanted
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PLATFORM-SCOPED CAPABILITIES
+#
+# THE THIRD SCOPE, ADDED THE SAME WAY THE SECOND ONE WAS. `Membership` and
+# `UserCapabilityGrant` have carried a three-value scope vocabulary — platform,
+# brand_sales_org, customer_org — since the sales models were written. Brand
+# scope was wired up when compensation authority needed it. This wires up the
+# remaining one, for exactly the same reason and with exactly the same shape:
+# a capability that belongs to a BRAND'S PRODUCT rather than to one sales team
+# or one customer tenant.
+#
+# The Demo Suite is that kind of authority. A person presenting EvoSys Pro may
+# be a brand-sales rep, a sales manager, an executive holding a platform-scoped
+# grant, or an implementation engineer who belongs to no sales org at all.
+# Scoping the entitlement to the BrandSalesOrg would have excluded three of
+# those four, and scoping it to a customer organization is meaningless — the
+# demo has no customer. The Platform is the thing all four have in common and
+# the thing the demo is branded as, so the Platform is the scope.
+#
+# A GRANT THAT CANNOT TAKE EFFECT IS STILL REFUSED, exactly as at brand scope:
+# only capabilities something actually reads at platform scope may be written
+# there. See `set_platform_grants`.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# The capabilities that MEAN something at platform scope. Short on purpose:
+# this list is the promise that a grant written here is a grant something
+# enforces.
+PLATFORM_SCOPED_CAPABILITIES = ("demo_suite", "demo_admin")
+
+
+def platform_grants_for(db: Session, user_id: str, platform_id: str) -> List[str]:
+    """Capability keys actively granted to this user OVER THIS PLATFORM.
+
+    Matches on the (scope_type, scope_id) pair, so a grant for another brand,
+    a brand-sales grant or a customer-org grant matches nothing here. That is
+    the security property, so it is a filter rather than a convention.
+    """
+    if not user_id or not platform_id:
+        return []
+    rows = (db.query(UserCapabilityGrant)
+            .filter(UserCapabilityGrant.user_id == user_id,
+                    UserCapabilityGrant.scope_type == SCOPE_PLATFORM,
+                    UserCapabilityGrant.scope_id == platform_id,
+                    UserCapabilityGrant.is_active.is_(True))
+            .all())
+    return sorted({r.capability for r in rows if r.capability in CAPABILITIES})
+
+
+def has_platform_capability(db: Session, user: User, platform_id: str,
+                            key: str) -> bool:
+    """Does this user hold this capability over this brand's platform?
+
+    god_admin is true everywhere, as at every other gate here — the owner does
+    not hold grants, they precede them. Everybody else needs the matching row
+    for the matching platform.
+
+    NOTE WHAT THIS DOES NOT CONSULT. Not `users.role`, not sales membership,
+    not executive assignment. Holding `demo_suite` over EvoSys Pro makes
+    somebody able to present EvoSys Pro and nothing else: not an executive,
+    not able to enter a customer workspace, not able to see another brand's
+    demo, and emphatically not a platform owner.
+    """
+    if user is None:
+        return False
+    if is_god(user):
+        return True
+    if not platform_id:
+        return False
+    return key in platform_grants_for(db, user.id, platform_id)
+
+
+def platforms_with_capability(db: Session, user: User, key: str) -> List[str]:
+    """Every platform over which this user holds this capability.
+
+    Returns ONLY platforms named by a real grant row. There is no wildcard:
+    god_admin is handled by the caller, because a function that answered "all
+    platforms" from inside a per-platform lookup would hide the difference
+    between root authority and a grant.
+    """
+    if user is None or is_god(user):
+        return []
+    rows = (db.query(UserCapabilityGrant)
+            .filter(UserCapabilityGrant.user_id == user.id,
+                    UserCapabilityGrant.scope_type == SCOPE_PLATFORM,
+                    UserCapabilityGrant.capability == key,
+                    UserCapabilityGrant.scope_id.isnot(None),
+                    UserCapabilityGrant.is_active.is_(True))
+            .all())
+    return sorted({r.scope_id for r in rows})
+
+
+def set_platform_grants(db: Session, target: User, platform_id: str,
+                        platform_name: Optional[str], actor: User,
+                        keys: Optional[List[str]],
+                        commit: bool = False) -> List[str]:
+    """Replace one person's capability grants over one platform.
+
+    Revocation DEACTIVATES rather than deletes, the same as both other scopes,
+    so "who could present this product in June" stays answerable after the
+    person has left.
+    """
+    from app.routers.audit_log_router import log_action
+
+    if is_god(target):
+        raise HTTPException(
+            status_code=400,
+            detail="The platform owner already holds every capability and is "
+                   "not granted them per-brand.")
+
+    wanted = normalize_capability_keys(keys)
+    bad = [k for k in wanted if k not in PLATFORM_SCOPED_CAPABILITIES]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail="%s cannot be granted over a platform — nothing enforces it "
+                   "at that scope. Platform-scoped capabilities are: %s."
+                   % (", ".join(bad), ", ".join(PLATFORM_SCOPED_CAPABILITIES)))
+
+    before = platform_grants_for(db, target.id, platform_id)
+
+    existing = (db.query(UserCapabilityGrant)
+                .filter(UserCapabilityGrant.user_id == target.id,
+                        UserCapabilityGrant.scope_type == SCOPE_PLATFORM,
+                        UserCapabilityGrant.scope_id == platform_id)
+                .all())
+    by_key = {r.capability: r for r in existing}
+
+    for key in wanted:
+        row = by_key.get(key)
+        if row is None:
+            db.add(UserCapabilityGrant(
+                user_id=target.id,
+                scope_type=SCOPE_PLATFORM,
+                scope_id=platform_id,
+                # DELIBERATELY NULL. A platform grant has no customer tenant,
+                # and writing one here would make it visible to the
+                # customer-org read path — the cross-scope leak the brand-scope
+                # work already had to close once.
+                organization_id=None,
+                capability=key, is_active=True, granted_by=actor.id))
+        else:
+            row.is_active = True
+            row.granted_by = actor.id
+    for key, row in by_key.items():
+        if key not in wanted:
+            row.is_active = False
+
+    db.flush()
+    log_action(
+        db, None, actor.id,
+        action="platform.capabilities_set", target_type="user",
+        target_id=target.id,
+        before={"capabilities": before,
+                "scope_type": SCOPE_PLATFORM,
+                "scope_id": platform_id},
+        after={"capabilities": wanted,
+               "scope_type": SCOPE_PLATFORM,
+               "scope_id": platform_id,
+               "platform_name": platform_name},
+        note="Platform-scoped capability grant.",
+        commit=False,
+    )
+    if commit:
+        db.commit()
     return wanted
 
 

@@ -250,6 +250,24 @@ class Organization(Base):
     # find their staff locked out.
     is_active = Column(Boolean, default=True)
 
+    # ── IS THIS A DEMONSTRATION TENANT? ──────────────────────────────────
+    #
+    # FALSE for every organization that has ever existed, and false rather than
+    # nullable-unknown on purpose: "we are not sure whether this is a real
+    # customer" must never be a state an outbound send path has to interpret.
+    # A NULL reads as False everywhere it is consulted.
+    #
+    # It is ONLY EVER THE BASIS OF A REFUSAL, never of a permission:
+    #   * demo_guard refuses a Demo Suite write against an organization where
+    #     this is false;
+    #   * sms_service and email_service refuse to send for an organization
+    #     where this is true.
+    # Ordinary tenancy does the isolation — a demo lead is invisible to a real
+    # customer for the same reason one customer's leads are invisible to
+    # another. This flag adds the two refusals that tenancy alone cannot make.
+    is_demo = Column(Boolean, nullable=False, default=False,
+                     server_default="0")
+
     # THE COMMERCIAL FACT, which is a different question from the line above.
     # `is_active` cannot distinguish "paused this week" from "left us in March",
     # and before this column nothing could. A cancelled customer whose workspace

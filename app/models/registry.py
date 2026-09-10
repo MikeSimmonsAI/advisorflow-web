@@ -260,3 +260,17 @@ import app.models.device_models  # noqa: F401  (imported for side effects)
 # import the table is never created and job persistence silently has nowhere to
 # write — jobs appear to enqueue but leave no durable record.
 import app.models.job_models  # noqa: F401  (imported for side effects)
+
+# ── Demo Suite (demo_environments / demo_sessions / demo_action_events) ─────
+# Same Base, same reason as every line above. This is NOT the APP_ENV=demo box's
+# `demo_models` — see app/models/demo_suite_models.py for why the two exist side
+# by side. Without this import the three tables are never created, and the
+# failure is the quiet kind: God Mode would offer to build a brand's demo
+# environment and the build would fail on first write with a missing table.
+import app.models.demo_suite_models  # noqa: F401  (imported for side effects)
+# Training and readiness (training_assignments / training_step_progress). Same
+# Base, same reason. A missing table here reads as "nobody has been assigned
+# any training", which is indistinguishable from the truth on a fresh install
+# and is exactly the quiet wrong answer the qualification_rules comment above
+# records. Do not remove this line.
+import app.models.training_models  # noqa: F401  (imported for side effects)

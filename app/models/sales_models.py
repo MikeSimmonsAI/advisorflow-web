@@ -129,6 +129,14 @@ class BrandSalesOrg(Base):
     slug        = Column(String, nullable=False, unique=True)
     timezone    = Column(String, default="America/Chicago")  # default only; per-user wins
     is_active   = Column(Boolean, default=True, nullable=False)
+
+    # The sales-side half of a brand's demonstration environment. Same rule as
+    # `Organization.is_demo`: false for every row that has ever existed, and
+    # only ever the basis of a REFUSAL — a Demo Suite write is refused unless
+    # this is true, and nothing is granted because it is.
+    is_demo     = Column(Boolean, nullable=False, default=False,
+                         server_default="0")
+
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
