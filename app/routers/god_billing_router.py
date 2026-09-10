@@ -1170,6 +1170,12 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
         log.debug("god_billing: could not resolve commercial source for %s", o.id)
 
     implementation_status = None
+    # THE SETUP FEE IS THE OTHER HALF OF THIS CUSTOMER'S MONEY, and until now
+    # this roster could not see it at all: every column here describes the
+    # subscription. A customer paying $1,000/mo whose $2,500 implementation fee
+    # was never collected looked identical to one who paid it — which is the
+    # combined-charge blind spot showing up in finance's own list.
+    setup_fee = None
     try:
         from app.models.implementation_models import Implementation
         impl = (db.query(Implementation)
@@ -1177,6 +1183,16 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
                 .order_by(Implementation.created_at.desc())
                 .first())
         implementation_status = getattr(impl, "status", None)
+        if impl is not None:
+            setup_fee = {
+                # not_sent | checkout_pending | paid | failed
+                "status": getattr(impl, "setup_payment_status", None) or "not_sent",
+                "paid_cents": getattr(impl, "setup_paid_cents", None),
+                "paid_at": getattr(impl, "setup_paid_at", None),
+                # Present so a finance user can reopen the exact page that was
+                # sent rather than asking the rep to generate another one.
+                "checkout_url": getattr(impl, "setup_checkout_url", None),
+            }
     except Exception:                                    # pragma: no cover
         pass
 
@@ -1208,6 +1224,10 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
         "invoice_count": invoice_count,
         "held_lead_count": held,
         "implementation_status": implementation_status,
+        # None means no implementation record exists to carry a setup fee —
+        # deliberately not a fabricated "not_sent", which would claim a bill
+        # that was never owed.
+        "setup_fee": setup_fee,
         "commercial_source": source,
         "customer_since": getattr(o, "created_at", None),
     }

@@ -514,17 +514,32 @@ def handle_event(db: Session, event: dict) -> dict:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _handle_checkout_completed(db: Session, org: Organization, obj: dict) -> None:
-    """A checkout finished. Records ids only.
+    """A checkout finished.
 
-    Deliberately does NOT mark anything paid. The subscription and invoice
-    events carry the authoritative state, and they arrive for renewals too, so
-    letting them own it means one code path rather than two that must agree.
+    FOR A SUBSCRIPTION, records ids only and deliberately does NOT mark
+    anything paid: the subscription and invoice events carry the authoritative
+    state, and they arrive for renewals too, so letting them own it means one
+    code path rather than two that must agree.
+
+    FOR A ONE-TIME SETUP PAYMENT there is no invoice event and no subscription
+    event — `mode="payment"` produces neither — so this IS the authoritative
+    moment, and it is handled explicitly below rather than falling through and
+    leaving the money invisible.
     """
     if obj.get("customer") and not org.stripe_customer_id:
         org.stripe_customer_id = obj.get("customer")
     sub_id = obj.get("subscription")
     if sub_id:
         org.stripe_subscription_id = sub_id
+
+    # ══ THE ONE-TIME SETUP PAYMENT ══════════════════════════════════════
+    # Routed on `mode`, corroborated by `metadata.part`. A payment-mode session
+    # cannot start a subscription and must never touch subscription state; a
+    # subscription-mode session must never mark the setup fee paid. That
+    # separation is the whole point of splitting the two checkouts.
+    if (obj.get("mode") or "") == "payment":
+        _handle_setup_payment(db, org, obj)
+        return
 
     meta_plan = (obj.get("metadata") or {}).get("plan")
     meta_interval = (obj.get("metadata") or {}).get("interval")
@@ -537,6 +552,103 @@ def _handle_checkout_completed(db: Session, org: Organization, obj: dict) -> Non
             org.plan = resolved.key
     if meta_interval in ("month", "year"):
         org.stripe_plan_interval = meta_interval
+
+
+def _handle_setup_payment(db: Session, org: Organization, obj: dict) -> None:
+    """The one-time implementation fee arrived. Setup state only.
+
+    ═══════════════════════════════════════════════════════════════════════
+    WHAT THIS MUST NOT DO
+    ═══════════════════════════════════════════════════════════════════════
+    Not start a subscription. Not set `billing_status`. Not stamp a plan on the
+    organization. A customer who pays to be implemented has bought exactly one
+    thing, and inferring a subscription from it would put them on a plan they
+    are not paying for and would make the Billing screen claim recurring
+    revenue that does not exist.
+
+    IDEMPOTENT THROUGH THE SAME CONSTRAINT EVERY OTHER PAYMENT USES.
+    `BillingPayment.collection_reference` is unique, so a replayed
+    `checkout.session.completed` — Stripe retries, and a person can re-send one
+    from the dashboard — finds the row already there and banks nothing twice.
+    The event-level dedupe upstream catches the common case; this catches the
+    case where the SAME payment arrives under a different event id.
+
+    UNPAID SESSIONS ARE NOT PAYMENTS. `payment_status` is checked explicitly:
+    a completed session can be `unpaid` (an async method still clearing), and
+    treating "the customer finished the form" as "the money arrived" is the
+    exact error this whole split exists to prevent.
+    """
+    from app.models.billing_models import BillingPayment
+    from app.models.implementation_models import Implementation
+
+    meta = obj.get("metadata") or {}
+    opportunity_id = meta.get("opportunity_id")
+
+    impl = None
+    if opportunity_id:
+        impl = (db.query(Implementation)
+                .filter(Implementation.opportunity_id == opportunity_id)
+                .order_by(Implementation.created_at.desc())
+                .first())
+    if impl is None:
+        impl = (db.query(Implementation)
+                .filter(Implementation.organization_id == org.id)
+                .order_by(Implementation.created_at.desc())
+                .first())
+
+    payment_status = (obj.get("payment_status") or "").lower()
+    if payment_status not in ("paid", "no_payment_required"):
+        # Recorded as still pending rather than silently ignored: a session
+        # that completed without paying is a thing somebody needs to see.
+        if impl is not None and impl.setup_payment_status != "paid":
+            impl.setup_payment_status = "checkout_pending"
+        log.info("setup payment session %s completed but payment_status=%s",
+                 obj.get("id"), payment_status or "unknown")
+        return
+
+    pi = obj.get("payment_intent")
+    # The payment intent is the money. The session id is the fallback so a
+    # session without one still dedupes against itself rather than banking
+    # twice.
+    reference = "stripe_pi:%s" % pi if pi else "stripe_cs:%s" % obj.get("id")
+
+    existing = (db.query(BillingPayment)
+                .filter(BillingPayment.collection_reference == reference)
+                .first())
+
+    amount = obj.get("amount_total")
+    if existing is None:
+        db.add(BillingPayment(
+            organization_id=org.id,
+            platform_id=getattr(org, "platform_id", None),
+            collection_reference=reference,
+            stripe_payment_intent_id=pi,
+            currency=(obj.get("currency") or "usd"),
+            amount_cents=amount or 0,
+            # NOT a subscription payment. `is_initial` distinguishes a first
+            # subscription invoice from a renewal for compensation purposes,
+            # and a setup fee is neither.
+            is_initial=False,
+            opportunity_id=opportunity_id,
+            collected_at=datetime.utcnow(),
+            # COMPENSATION IS NOT DECIDED HERE. Whether an implementation fee
+            # earns commission is a compensation-policy question with its own
+            # engine and its own rules; recording the money is this function's
+            # whole job. The reason is stated rather than left blank so an
+            # unpaid commission cannot be mistaken for a bug.
+            earned_compensation=False,
+            compensation_skipped_reason=(
+                "One-time setup fee. Compensation on implementation fees is a "
+                "policy decision and is not configured."),
+        ))
+
+    if impl is not None:
+        impl.setup_payment_status = "paid"
+        impl.setup_payment_intent_id = pi
+        impl.setup_paid_cents = amount
+        impl.setup_paid_at = datetime.utcnow()
+        if obj.get("id"):
+            impl.setup_checkout_session_id = obj.get("id")
 
 
 def _handle_subscription_deleted(db: Session, org: Organization, obj: dict) -> None:

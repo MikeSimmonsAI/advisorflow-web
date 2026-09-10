@@ -379,7 +379,7 @@ class TestCommitmentResolution:
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
         assert r.status_code == 200, r.text
         kw = create.call_args.kwargs
@@ -387,26 +387,32 @@ class TestCommitmentResolution:
         assert kw["metadata"]["plan"] == "growth"
         assert kw["metadata"]["commitment"] == "month_to_month"
 
-    def test_the_setup_fee_is_a_LINE_ITEM_not_add_invoice_items(
+    def test_the_setup_fee_NEVER_rides_the_subscription_session(
             self, client, db_session, world):
-        """THE BUG THIS PINS, found by the first real Stripe TEST checkout.
+        """THE PRODUCT DECISION THIS PINS, made after reading the live page.
 
-        The setup fee was sent as `subscription_data.add_invoice_items`, which
-        belongs to the Subscriptions API and is not a parameter of a Checkout
-        Session. Stripe rejected every call outright:
+        Two defects lived here in sequence and this test has now guarded both.
+
+        The first was mechanical: the setup fee was sent as
+        `subscription_data.add_invoice_items`, which belongs to the
+        Subscriptions API and is not a parameter of a Checkout Session. Stripe
+        rejected every call outright —
 
             Received unknown parameter: subscription_data[add_invoice_items]
 
-        No test caught it because every test here mocks
-        `stripe.checkout.Session.create` and therefore validates nothing about
-        the arguments Stripe would accept — the mock happily records a kwarg
-        the real API refuses. So this test asserts the SHAPE instead: a
-        non-recurring line item on a `mode="subscription"` session, which is
-        how Stripe charges a one-off alongside a subscription on the first
-        invoice.
+        — and no test caught it, because every test here mocks
+        `stripe.checkout.Session.create`, which records any kwarg happily. It
+        was 'fixed' by moving the fee to a second non-recurring line item on
+        the SAME session, which Stripe does accept.
 
-        Both EvoSys tiers with a setup fee — Starter and Growth — were
-        completely unbillable until this was fixed.
+        The second was commercial, and worse. That fix made Growth quote
+        $2,500 setup + $1,000 first month as one $3,500 charge on one page. A
+        combined charge cannot be tracked, reconciled, refunded or chased by
+        half, and a customer who has paid to be implemented but not started
+        their subscription — a normal, common state — becomes unrepresentable.
+
+        So the subscription session now carries the subscription and NOTHING
+        else. The fee has its own session, its own link and its own status.
         """
         self._tier(db_session, world, "growth", commitment="term_agreement")
         world["org"].stripe_customer_id = "cus_test123"
@@ -418,7 +424,8 @@ class TestCommitmentResolution:
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription"
+                % world["opp"].id,
                 headers=_h(db_session, world["god"]))
         assert r.status_code == 200, r.text
         kw = create.call_args.kwargs
@@ -426,14 +433,15 @@ class TestCommitmentResolution:
         # The parameter Stripe refuses must never be sent again.
         assert "add_invoice_items" not in kw.get("subscription_data", {})
 
-        # One session, two lines: the subscription and the one-off.
-        assert len(kw["line_items"]) == 2
-        assert kw["line_items"][0]["price"] == "price_growth_term"
-        fee = kw["line_items"][1]
-        assert "recurring" not in fee["price_data"], \
-            "the implementation fee must not recur"
-        assert fee["price_data"]["unit_amount"] == 250000
+        # ONE line. The recurring one. Nothing else may be attached to it —
+        # any second line here is the $3,500 page coming back.
         assert kw["mode"] == "subscription"
+        assert len(kw["line_items"]) == 1, \
+            "the subscription session must carry the subscription alone"
+        assert kw["line_items"][0]["price"] == "price_growth_term"
+        assert not any("price_data" in li for li in kw["line_items"]), \
+            "a one-off price_data line on the subscription session is the "\
+            "combined charge"
 
     def test_a_deal_with_no_setup_fee_sends_one_line_item(
             self, client, db_session, world):
@@ -451,7 +459,7 @@ class TestCommitmentResolution:
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
         assert r.status_code == 200, r.text
         assert len(create.call_args.kwargs["line_items"]) == 1
@@ -929,7 +937,7 @@ class TestCustomCheckoutComposition:
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                 headers=_h(db, world["god"]))
         return r, create
 
@@ -969,8 +977,14 @@ class TestCustomCheckoutComposition:
         meta = create.call_args.kwargs["metadata"]
         assert meta["pricing_authority"] == "manager_approval"
         assert meta["pricing_approval_id"]
-        sub = next(c for c in r.json()["charges"] if c["kind"] == "subscription")
-        assert sub["approval_id"]
+        # ONE SESSION BILLS ONE OBLIGATION, so the response returns the single
+        # charge it created rather than the deal's whole charge list. Returning
+        # every charge here is how a caller renders "you are collecting $3,500"
+        # over a $2,500 setup link.
+        body = r.json()
+        assert body["part"] == "subscription"
+        assert body["charge"]["kind"] == "subscription"
+        assert body["charge"]["approval_id"]
 
     def test_a_rate_set_without_an_approval_row_still_records_its_authority(
             self, client, db_session, world):
@@ -997,7 +1011,7 @@ class TestCustomCheckoutComposition:
                   unit="1750.00", status="denied")
         with patch("stripe.checkout.Session.create") as create:
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
         assert r.status_code == 409
         assert create.call_count == 0
@@ -1014,7 +1028,7 @@ class TestCustomCheckoutComposition:
                   unit="1900.00", status="pending")
         with patch("stripe.checkout.Session.create") as create:
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
         assert r.status_code == 409
         assert create.call_count == 0
@@ -1044,7 +1058,7 @@ class TestAuthority:
         oid = world["opp"].id
         assert client.get("/sales/opportunities/%s/billing" % oid
                           ).status_code in (401, 403)
-        assert client.post("/sales/opportunities/%s/billing/checkout" % oid
+        assert client.post("/sales/opportunities/%s/billing/checkout?part=setup" % oid
                            ).status_code in (401, 403)
 
     def test_an_unknown_opportunity_is_404(self, client, db_session, world):
@@ -1081,7 +1095,7 @@ class TestCheckoutRefusesSafely:
         """The assertion that matters: NOTHING was charged."""
         with patch("stripe.checkout.Session.create") as create:
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
             assert r.status_code == 409
             assert create.call_count == 0
@@ -1095,7 +1109,7 @@ class TestCheckoutRefusesSafely:
         db_session.commit()
         with patch("stripe.checkout.Session.create") as create:
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=setup" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
             assert r.status_code == 409
             assert create.call_count == 0
@@ -1105,6 +1119,10 @@ class TestCheckoutRefusesSafely:
 
 class _Sess:
     url = "https://checkout.stripe.test/session_123"
+    # The router records the session id against the obligation it bills, so a
+    # seller can reopen the exact page that was sent. A stub without one would
+    # pass every assertion here while the real route raised AttributeError.
+    id = "cs_test_session_123"
 
 
 class TestCheckoutComposition:
@@ -1113,9 +1131,7 @@ class TestCheckoutComposition:
         world["org"].stripe_customer_id = "cus_test123"
         db.commit()
 
-    def test_setup_plus_subscription_is_ONE_session(self, client, db_session, world):
-        """Two links is one link the customer does not pay."""
-        self._ready(db_session, world)
+    def _post(self, client, db, world, part):
         with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
              patch("app.routers.billing_router._stripe_client"), \
              patch("app.routers.billing_router._get_or_create_customer",
@@ -1123,30 +1139,56 @@ class TestCheckoutComposition:
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
-                headers=_h(db_session, world["god"]))
-        assert r.status_code == 200, r.text
-        assert create.call_count == 1
-        kw = create.call_args.kwargs
-        assert kw["mode"] == "subscription"
-        assert kw["line_items"][0]["price"] == "price_growth_term_test"
-        # The setup fee rides the first invoice rather than a second session.
-        #
-        # THIS ASSERTION USED TO READ `subscription_data["add_invoice_items"]`
-        # AND IT PINNED A BUG. That parameter is not part of the Checkout
-        # Session API — Stripe rejected every real call with "Received unknown
-        # parameter: subscription_data[add_invoice_items]" — but because
-        # `Session.create` is mocked here, the mock recorded the kwarg happily
-        # and the test went green against something that could never work. A
-        # test can only pin the shape it is given; making that shape wrong made
-        # the test worse than absent, because it defended the defect.
-        #
-        # The working shape is a second, NON-RECURRING line item: Stripe puts
-        # it on the first invoice of the subscription.
-        assert "add_invoice_items" not in kw["subscription_data"]
-        fee = kw["line_items"][1]
+                "/sales/opportunities/%s/billing/checkout?part=%s"
+                % (world["opp"].id, part),
+                headers=_h(db, world["god"]))
+        return r, create
+
+    def test_setup_and_subscription_are_TWO_sessions(
+            self, client, db_session, world):
+        """The correction. One page cannot be two bills.
+
+        This test replaces `test_setup_plus_subscription_is_ONE_session`, which
+        asserted the opposite and was right about the mechanics and wrong about
+        the product: it made Growth a single $3,500 charge. Setup and
+        subscription are separate obligations with separate money, separate
+        lifecycles and separate answers to "has this been collected?", so they
+        get separate Stripe objects.
+        """
+        self._ready(db_session, world)
+
+        r_sub, create_sub = self._post(client, db_session, world, "subscription")
+        assert r_sub.status_code == 200, r_sub.text
+        assert create_sub.call_count == 1
+        sub_kw = create_sub.call_args.kwargs
+        assert sub_kw["mode"] == "subscription"
+        assert len(sub_kw["line_items"]) == 1
+        assert sub_kw["line_items"][0]["price"] == "price_growth_term_test"
+        assert sub_kw["metadata"]["part"] == "subscription"
+
+        r_setup, create_setup = self._post(client, db_session, world, "setup")
+        assert r_setup.status_code == 200, r_setup.text
+        setup_kw = create_setup.call_args.kwargs
+        # A ONE-TIME FEE IS A PAYMENT, NOT A SUBSCRIPTION. `mode` is what
+        # decides whether Stripe ever charges this customer again.
+        assert setup_kw["mode"] == "payment"
+        assert len(setup_kw["line_items"]) == 1
+        fee = setup_kw["line_items"][0]
         assert fee["price_data"]["unit_amount"] == 250000
         assert "recurring" not in fee["price_data"]
+        assert setup_kw["metadata"]["part"] == "setup"
+
+        # THE TWO SESSIONS MUST NOT SHARE A PLAN. `plan` metadata is what moves
+        # the customer onto a catalogue tier; on a setup session it would put
+        # them on a plan the moment they paid an implementation fee, with no
+        # subscription existing at all.
+        assert "plan" not in setup_kw["metadata"]
+        assert sub_kw["metadata"]["plan"] == "growth"
+
+        # And the two responses name which bill they are, so a caller cannot
+        # mistake one link for the other.
+        assert r_sub.json()["part"] == "subscription"
+        assert r_setup.json()["part"] == "setup"
 
     def test_the_deal_trail_is_carried_in_metadata(self, client, db_session, world):
         """Without this the webhook cannot connect money back to what was sold."""
@@ -1157,7 +1199,7 @@ class TestCheckoutComposition:
                    return_value="cus_test123"), \
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
-            client.post("/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+            client.post("/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                         headers=_h(db_session, world["god"]))
         meta = create.call_args.kwargs["metadata"]
         assert meta["org_id"] == world["org"].id
@@ -1181,7 +1223,7 @@ class TestCheckoutComposition:
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
             r = client.post(
-                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                "/sales/opportunities/%s/billing/checkout?part=setup" % world["opp"].id,
                 headers=_h(db_session, world["god"]))
         assert r.status_code == 200, r.text
         assert create.call_args.kwargs["mode"] == "payment"
@@ -1197,7 +1239,7 @@ class TestCheckoutComposition:
                    return_value="cus_test123"), \
              patch("app.routers.billing_router._brand_base_url",
                    return_value="https://brand.test"):
-            client.post("/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+            client.post("/sales/opportunities/%s/billing/checkout?part=subscription" % world["opp"].id,
                         headers=_h(db_session, world["god"]))
         assert db_session.query(BillingPayment).count() == before
 
@@ -1370,3 +1412,342 @@ class TestPackageBillingPlanMapping:
                 seen[(method, getattr(route, "path", None))] += 1
         assert seen[("PATCH", "/god/ops/packages/{package_id}/pricing")] == 1
         assert seen[("PATCH", "/god/ops/packages/{package_id}/billing-plan")] == 1
+
+
+# ── TWO BILLS, INDEPENDENTLY TRACKED ────────────────────────────────────────
+
+class TestTheTwoObligationsAreIndependent:
+    """The correction Mike asked for, pinned end to end.
+
+    ═══════════════════════════════════════════════════════════════════════
+    WHAT WENT WRONG, IN THE CUSTOMER'S OWN WORDS
+    ═══════════════════════════════════════════════════════════════════════
+    A Growth deal's Stripe Checkout page read: $2,500 setup + $1,000
+    subscription = $3,500 due today. One page, one amount, one payment status.
+
+    That is not a presentation bug. It makes three ordinary situations
+    impossible to represent at all:
+
+      * setup paid, subscription not started (the customer is being built)
+      * subscription running, setup fee still outstanding
+      * either one refunded, chased or re-sent without touching the other
+
+    So: two Stripe objects, two links, two statuses, no ordering rule — because
+    no configured policy anywhere says one must precede the other, and the UI
+    is not the place to invent terms the business never agreed.
+    """
+
+    def _ready(self, db, world):
+        world["pkg"].billing_plan_key = "growth"
+        world["org"].stripe_customer_id = "cus_test123"
+        db.commit()
+
+    def _create(self, client, db, world, part):
+        with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
+             patch("app.routers.billing_router._stripe_client"), \
+             patch("app.routers.billing_router._get_or_create_customer",
+                   return_value="cus_test123"), \
+             patch("app.routers.billing_router._brand_base_url",
+                   return_value="https://brand.test"):
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout?part=%s"
+                % (world["opp"].id, part),
+                headers=_h(db, world["god"]))
+        return r, create
+
+    # ── the parameter itself ────────────────────────────────────────────
+
+    def test_a_checkout_with_no_part_is_REFUSED_not_guessed(
+            self, client, db_session, world):
+        """No default, and deliberately so.
+
+        A default would silently reinstate the combined bill the first time a
+        caller forgot the parameter — and the caller that forgets is the one
+        that was written before the split existed.
+        """
+        self._ready(db_session, world)
+        with patch("stripe.checkout.Session.create") as create:
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 422
+        assert create.call_count == 0
+
+    def test_an_invented_part_is_refused(self, client, db_session, world):
+        self._ready(db_session, world)
+        with patch("stripe.checkout.Session.create") as create:
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout?part=both"
+                % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 422
+        assert create.call_count == 0
+
+    def test_billing_a_half_the_deal_does_not_have_is_refused(
+            self, client, db_session, world):
+        """Asking for a setup fee on a deal with none must not quietly become
+        a subscription — that is how somebody collecting an implementation fee
+        starts a customer's recurring billing by accident."""
+        world["pkg"].billing_plan_key = "growth"
+        world["pkg"].price = None
+        world["pkg"].setup_fee = None
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        with patch("stripe.checkout.Session.create") as create:
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout?part=setup"
+                % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 409, r.text
+        assert create.call_count == 0
+        assert "setup" in r.json()["detail"]["message"].lower()
+        # AND IT IS REFUSED BEFORE STRIPE IS TOUCHED. This asserted 503 for a
+        # while: the caller error was reported as "the payment processor is
+        # unavailable" because the client was constructed first. Worse,
+        # `_get_or_create_customer` writes — a request that is about to be
+        # refused was creating a Stripe customer on the way to refusing it.
+        assert r.json()["detail"]["part"] == "setup"
+
+    # ── creating one does not touch the other ───────────────────────────
+
+    def test_creating_a_checkout_marks_NOTHING_paid(
+            self, client, db_session, world):
+        """A link is not money. Only a verified webhook says otherwise."""
+        self._ready(db_session, world)
+        for part in ("setup", "subscription"):
+            r, _ = self._create(client, db_session, world, part)
+            assert r.status_code == 200, r.text
+        db_session.refresh(world["impl"])
+        db_session.refresh(world["org"])
+        assert world["impl"].setup_payment_status == "checkout_pending"
+        assert world["impl"].setup_paid_at is None
+        assert world["impl"].setup_paid_cents is None
+        # No subscription was started by creating a page for one.
+        assert world["org"].billing_status in (None, "")
+        assert world["org"].stripe_subscription_id is None
+
+    def test_opening_the_setup_checkout_does_not_start_the_subscription(
+            self, client, db_session, world):
+        self._ready(db_session, world)
+        r, create = self._create(client, db_session, world, "setup")
+        assert r.status_code == 200, r.text
+        assert create.call_args.kwargs["mode"] == "payment"
+        db_session.refresh(world["impl"])
+        db_session.refresh(world["org"])
+        assert world["impl"].subscription_checkout_session_id is None
+        assert world["impl"].subscription_checkout_url is None
+        assert world["org"].billing_plan_key in (None, "")
+
+    def test_opening_the_subscription_checkout_does_not_mark_setup_paid(
+            self, client, db_session, world):
+        self._ready(db_session, world)
+        r, _ = self._create(client, db_session, world, "subscription")
+        assert r.status_code == 200, r.text
+        db_session.refresh(world["impl"])
+        assert world["impl"].setup_payment_status in (None, "not_sent")
+        assert world["impl"].setup_checkout_url is None
+
+    # ── the link survives the response ──────────────────────────────────
+
+    def test_the_link_is_recorded_so_nobody_hunts_browser_history(
+            self, client, db_session, world):
+        """THE UX DEFECT THIS FIXES. The only copy of a customer's payment page
+        used to be the HTTP response — recoverable from Chrome history, or by
+        generating a second page and giving the customer two ways to pay one
+        bill. It is now stored against the obligation it bills."""
+        self._ready(db_session, world)
+        self._create(client, db_session, world, "setup")
+        self._create(client, db_session, world, "subscription")
+        db_session.refresh(world["impl"])
+        assert world["impl"].setup_checkout_url == _Sess.url
+        assert world["impl"].setup_checkout_session_id == _Sess.id
+        assert world["impl"].subscription_checkout_url == _Sess.url
+        assert world["impl"].subscription_checkout_session_id == _Sess.id
+
+        # And the seller's own screen reads it back without a second call.
+        r = client.get("/sales/opportunities/%s/billing" % world["opp"].id,
+                       headers=_h(db_session, world["god"]))
+        state = r.json()["state"]
+        assert state["setup"]["checkout_url"] == _Sess.url
+        assert state["subscription"]["checkout_url"] == _Sess.url
+
+    # ── two statuses, never one ─────────────────────────────────────────
+
+    def test_billing_state_reports_the_two_halves_separately(
+            self, db_session, world):
+        """A single 'paid' flag cannot answer which half arrived."""
+        state = deal_billing.billing_state(db_session, world["opp"])
+        assert set(state) == {"setup", "subscription"}
+        assert state["setup"]["status"] == "not_sent"
+        # NULL, not "inactive": no subscription has ever existed, which is not
+        # the same as one that stopped.
+        assert state["subscription"]["status"] in (None, "")
+
+    def test_a_paid_setup_fee_leaves_the_subscription_untouched(
+            self, db_session, world):
+        world["impl"].setup_payment_status = "paid"
+        world["impl"].setup_paid_cents = 250000
+        world["impl"].setup_paid_at = datetime.utcnow()
+        db_session.commit()
+        state = deal_billing.billing_state(db_session, world["opp"])
+        assert state["setup"]["status"] == "paid"
+        assert state["setup"]["paid_cents"] == 250000
+        assert state["subscription"]["status"] in (None, "")
+
+    def test_an_active_subscription_leaves_the_setup_fee_outstanding(
+            self, db_session, world):
+        """The state the combined charge could not express."""
+        world["org"].billing_status = "active"
+        world["org"].stripe_subscription_id = "sub_test_1"
+        db_session.commit()
+        state = deal_billing.billing_state(db_session, world["opp"])
+        assert state["subscription"]["status"] == "active"
+        assert state["setup"]["status"] == "not_sent"
+
+    # ── a blocker blocks only what it is about ──────────────────────────
+
+    def test_an_existing_subscription_does_not_block_the_setup_fee(
+            self, client, db_session, world):
+        """The coupling, moved into readiness, would be the same bug.
+
+        "This customer already has a subscription" is a real reason not to
+        start a second one. It is not a reason their implementation fee cannot
+        be collected.
+        """
+        self._ready(db_session, world)
+        world["org"].billing_status = "active"
+        world["org"].stripe_subscription_id = "sub_test_1"
+        db_session.commit()
+
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        codes = {b["code"] for b in terms["blockers"]}
+        assert deal_billing.B_SUBSCRIPTION_EXISTS in codes
+        assert terms["billable_parts"]["setup"] is True
+        assert terms["billable_parts"]["subscription"] is False
+
+        r, create = self._create(client, db_session, world, "setup")
+        assert r.status_code == 200, r.text
+        assert create.call_args.kwargs["mode"] == "payment"
+
+        r2, create2 = self._create(client, db_session, world, "subscription")
+        assert r2.status_code == 409
+        assert create2.call_count == 0
+
+    def test_an_unscoped_blocker_still_stops_BOTH(self, client, db_session, world):
+        """Not-won is about the deal, not about one of its bills. A blocker
+        with no declared scope must fail closed."""
+        self._ready(db_session, world)
+        world["opp"].stage = "closing"
+        world["opp"].status = "open"
+        db_session.commit()
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert terms["billable_parts"] == {"setup": False, "subscription": False}
+        for part in ("setup", "subscription"):
+            with patch("stripe.checkout.Session.create") as create:
+                r = client.post(
+                    "/sales/opportunities/%s/billing/checkout?part=%s"
+                    % (world["opp"].id, part),
+                    headers=_h(db_session, world["god"]))
+            assert r.status_code == 409, part
+            assert create.call_count == 0
+
+
+class TestTheSetupWebhookTouchesSetupOnly:
+    """The webhook is the ONLY thing that says money arrived — for one half."""
+
+    def _event(self, world, *, event_id, payment_status="paid",
+               amount=250000, pi="pi_test_1", mode="payment"):
+        return {
+            "id": event_id,
+            "type": "checkout.session.completed",
+            "data": {"object": {
+                "id": "cs_test_setup_1",
+                "object": "checkout.session",
+                "mode": mode,
+                "customer": "cus_test123",
+                "payment_status": payment_status,
+                "payment_intent": pi,
+                "amount_total": amount,
+                "currency": "usd",
+                "metadata": {"org_id": world["org"].id,
+                             "opportunity_id": world["opp"].id,
+                             "source": "deal_billing",
+                             "part": "setup"},
+            }},
+        }
+
+    def _fire(self, db, event):
+        from app.services import billing_webhook
+        return billing_webhook.handle_event(db, event)
+
+    def test_a_paid_setup_session_marks_the_setup_fee_paid(
+            self, db_session, world):
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        self._fire(db_session, self._event(world, event_id="evt_setup_1"))
+        db_session.refresh(world["impl"])
+        assert world["impl"].setup_payment_status == "paid"
+        assert world["impl"].setup_paid_cents == 250000
+        assert world["impl"].setup_payment_intent_id == "pi_test_1"
+        assert world["impl"].setup_paid_at is not None
+
+    def test_it_starts_no_subscription_and_stamps_no_plan(
+            self, db_session, world):
+        """A customer who paid to be implemented has bought exactly ONE thing.
+
+        Inferring a subscription from a setup payment would put them on a plan
+        they are not paying for and would make the Billing screen report
+        recurring revenue that does not exist.
+        """
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        self._fire(db_session, self._event(world, event_id="evt_setup_2"))
+        db_session.refresh(world["org"])
+        assert world["org"].stripe_subscription_id is None
+        assert world["org"].billing_status in (None, "")
+        assert world["org"].billing_plan_key in (None, "")
+
+    def test_an_unpaid_completed_session_is_not_a_payment(
+            self, db_session, world):
+        """"The customer finished the form" is not "the money arrived"."""
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        self._fire(db_session, self._event(world, event_id="evt_setup_3",
+                                           payment_status="unpaid"))
+        db_session.refresh(world["impl"])
+        assert world["impl"].setup_payment_status == "checkout_pending"
+        assert world["impl"].setup_paid_at is None
+
+    def test_the_same_payment_arriving_twice_banks_once(
+            self, db_session, world):
+        """Stripe retries, and a person can re-send an event from the
+        dashboard. The event-level dedupe catches the identical event; this
+        catches the SAME payment under a different event id."""
+        from app.models.billing_models import BillingPayment
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        self._fire(db_session, self._event(world, event_id="evt_setup_4a"))
+        self._fire(db_session, self._event(world, event_id="evt_setup_4b"))
+        rows = (db_session.query(BillingPayment)
+                .filter(BillingPayment.collection_reference == "stripe_pi:pi_test_1")
+                .all())
+        assert len(rows) == 1
+        assert rows[0].amount_cents == 250000
+        # A setup fee is neither a first subscription payment nor a renewal,
+        # and the reason no commission was earned is stated rather than blank.
+        assert rows[0].is_initial is False
+        assert rows[0].earned_compensation is False
+        assert rows[0].compensation_skipped_reason
+
+    def test_a_subscription_checkout_never_marks_the_setup_fee_paid(
+            self, db_session, world):
+        """The mirror of the rule above, from the other side."""
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        ev = self._event(world, event_id="evt_sub_1", mode="subscription")
+        ev["data"]["object"]["subscription"] = "sub_test_9"
+        ev["data"]["object"]["metadata"]["part"] = "subscription"
+        self._fire(db_session, ev)
+        db_session.refresh(world["impl"])
+        assert world["impl"].setup_payment_status in (None, "not_sent")
+        assert world["impl"].setup_paid_at is None

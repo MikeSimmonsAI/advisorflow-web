@@ -184,6 +184,40 @@ class Implementation(Base):
     billing_notes = Column(Text, nullable=True)
     external_billing_ref = Column(String, nullable=True)
 
+    # ══ WHAT WAS ACTUALLY COLLECTED — two obligations, tracked separately ══
+    #
+    # THE ONE-TIME SETUP FEE AND THE MONTHLY SUBSCRIPTION ARE TWO BILLS.
+    # They were briefly combined into a single Checkout Session — one $3,500
+    # charge for Growth — and that is wrong as a product, not just as a
+    # presentation: a customer who has paid to be implemented but has not yet
+    # started their subscription is a real and common state, and so is the
+    # reverse. Collapsing them into one "paid" flag makes both invisible.
+    #
+    # The fields above this block are the INTENT agreed in the sale. These are
+    # the OUTCOME, and only a verified Stripe webhook writes them. Creating a
+    # checkout writes `..._checkout_*` and nothing else — a session that exists
+    # is not money that arrived.
+    #
+    # The subscription's own authoritative state stays where it already lives,
+    # on `Organization` (billing_status, stripe_subscription_id, plan). It is
+    # not duplicated here; only the checkout SESSION is recorded, so a seller
+    # can reopen or resend the link they generated without hunting for it.
+
+    # not_sent | checkout_pending | paid | failed
+    setup_payment_status = Column(String, default="not_sent", nullable=True)
+    setup_checkout_session_id = Column(String, nullable=True, index=True)
+    setup_checkout_url = Column(Text, nullable=True)
+    setup_payment_intent_id = Column(String, nullable=True, index=True)
+    setup_paid_cents = Column(Integer, nullable=True)
+    setup_paid_at = Column(DateTime, nullable=True)
+
+    # The subscription checkout LINK only. Whether the subscription is live is
+    # answered by Organization.billing_status, which the subscription and
+    # invoice webhooks own.
+    subscription_checkout_session_id = Column(String, nullable=True, index=True)
+    subscription_checkout_url = Column(Text, nullable=True)
+    subscription_checkout_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow,

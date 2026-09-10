@@ -39,6 +39,17 @@ const STATUS_COLORS = {
   canceled: '#ef4444', incomplete_expired: '#ef4444',
 };
 
+// THE SETUP FEE IS THE OTHER HALF OF A CUSTOMER'S MONEY. Every other column
+// on this roster describes the subscription, so a customer paying $1,000/mo
+// whose $2,500 implementation fee was never collected read exactly like one
+// who had paid it. Shown as its own column because it is its own bill.
+const SETUP_TONE = {
+  paid: ['#1ef0a8', 'Paid'],
+  checkout_pending: ['#f59e0b', 'Sent'],
+  not_sent: ['#7a7a95', 'Not sent'],
+  failed: ['#ef4444', 'Failed'],
+};
+
 // Label, and the one-line explanation of what the filter is actually asking.
 // Written as the operator's question, not as Stripe's vocabulary.
 const FILTER_TABS = [
@@ -282,6 +293,7 @@ export default function GodBillingOps() {
                   <th style={{ padding: '10px 16px' }}>Customer</th>
                   <th style={{ padding: '10px 12px' }}>Plan</th>
                   <th style={{ padding: '10px 12px' }}>Status</th>
+                  <th style={{ padding: '10px 12px' }}>Setup fee</th>
                   <th style={{ padding: '10px 12px', textAlign: 'right' }}>MRR</th>
                   <th style={{ padding: '10px 12px' }}>Next bill</th>
                   <th style={{ padding: '10px 12px' }}>Card</th>
@@ -323,6 +335,38 @@ export default function GodBillingOps() {
                                        whiteSpace: 'nowrap' }}>
                           {(c.billing_status || 'none').replace(/_/g, ' ')}
                         </span>
+                      </td>
+                      {/* NO IMPLEMENTATION RECORD MEANS NO SETUP FEE IS OWED,
+                          which is not the same as one that has not been sent.
+                          A dash, never a fabricated "Not sent". */}
+                      <td style={{ padding: '12px' }}>
+                        {(() => {
+                          if (!c.setup_fee) {
+                            return <span style={{ color: '#555' }}>—</span>;
+                          }
+                          const [tone, label] =
+                            SETUP_TONE[c.setup_fee.status]
+                            || ['#7a7a95', String(c.setup_fee.status)];
+                          return (
+                            <>
+                              <span style={{ background: `${tone}22`, color: tone,
+                                             border: `1px solid ${tone}55`,
+                                             borderRadius: 20, padding: '2px 10px',
+                                             fontSize: 12, fontWeight: 600,
+                                             whiteSpace: 'nowrap' }}>
+                                {label}
+                              </span>
+                              {c.setup_fee.paid_cents ? (
+                                <div style={{ fontSize: 11, color: '#7a7a95',
+                                              marginTop: 2 }}>
+                                  {money(c.setup_fee.paid_cents, c.currency)}
+                                  {when(c.setup_fee.paid_at)
+                                    ? ` · ${when(c.setup_fee.paid_at)}` : ''}
+                                </div>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '12px', textAlign: 'right',
                                    fontVariantNumeric: 'tabular-nums' }}>

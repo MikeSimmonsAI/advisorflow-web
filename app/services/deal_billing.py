@@ -172,8 +172,49 @@ def _cents(amount: Optional[Decimal]) -> Optional[int]:
     return int((amount * 100).quantize(Decimal("1")))
 
 
+# ── which obligation a blocker actually blocks ──────────────────────────────
+# The setup fee and the subscription are collected separately, so a reason that
+# only concerns one of them must not hold the other hostage. "This customer
+# already has a subscription" is a real reason not to start a second one; it is
+# not a reason the implementation fee cannot be collected. Blocking both on it
+# is the same coupling that produced one combined charge, moved into readiness.
+#
+# Anything NOT listed here blocks BOTH, on purpose: a new blocker is assumed to
+# be about the deal as a whole until somebody decides otherwise. Failing closed
+# is the right default when the question is whether to charge someone.
+BOTH_PARTS = ("setup", "subscription")
+SUBSCRIPTION_ONLY = ("subscription",)
+
+BLOCKER_SCOPE = {
+    # All of these are about the recurring half's plumbing — a plan mapping, a
+    # Stripe price, a rate comparison, an existing subscription. None of them
+    # says anything about whether the one-time fee is agreed or collectable.
+    B_NO_BRAND: SUBSCRIPTION_ONLY,
+    B_PACKAGE_UNMAPPED: SUBSCRIPTION_ONLY,
+    B_PLAN_UNAVAILABLE: SUBSCRIPTION_ONLY,
+    B_NO_PRICE_ID: SUBSCRIPTION_ONLY,
+    B_RATE_MISMATCH: SUBSCRIPTION_ONLY,
+    B_SUBSCRIPTION_EXISTS: SUBSCRIPTION_ONLY,
+    # The custom-pricing approvals are decisions about the MONTHLY figure
+    # specifically — `_custom_authority` compares monthly cents and nothing
+    # else — so an unsettled one does not make the setup fee unsettled.
+    B_CUSTOM_DENIED: SUBSCRIPTION_ONLY,
+    B_CUSTOM_DECISION_PENDING: SUBSCRIPTION_ONLY,
+}
+
+
+def blocks_part(blocker: Dict[str, Any], part: str) -> bool:
+    """Does this blocker stand in the way of billing `part`?"""
+    return part in blocker.get("applies_to", BOTH_PARTS)
+
+
+def blockers_for_part(blockers, part: str):
+    return [b for b in blockers if blocks_part(b, part)]
+
+
 def _blocker(code: str, **extra) -> Dict[str, Any]:
-    row = {"code": code, "message": BLOCKER_TEXT.get(code, code)}
+    row = {"code": code, "message": BLOCKER_TEXT.get(code, code),
+           "applies_to": list(BLOCKER_SCOPE.get(code, BOTH_PARTS))}
     row.update(extra)
     return row
 
@@ -200,6 +241,67 @@ def customer_org_for(db: Session, opp) -> Optional[Any]:
     if not org_id:
         return None
     return db.query(Organization).filter(Organization.id == org_id).first()
+
+
+def implementation_for(db: Session, opp) -> Optional[Any]:
+    """The Implementation row this deal produced, or None.
+
+    The setup fee's payment state lives on it, because the implementation IS
+    what the setup fee pays for. Resolved by the same join `customer_org_for`
+    uses, so the two cannot disagree about which record a deal became.
+    """
+    from app.models.implementation_models import Implementation
+    return (db.query(Implementation)
+            .filter(Implementation.opportunity_id == opp.id)
+            .order_by(Implementation.created_at.desc())
+            .first())
+
+
+def billing_state(db: Session, opp) -> dict:
+    """The TWO obligations and where each one stands. Never one merged status.
+
+    ═══════════════════════════════════════════════════════════════════════
+    A SINGLE "paid" FLAG CANNOT ANSWER THIS QUESTION
+    ═══════════════════════════════════════════════════════════════════════
+    A customer who has paid to be implemented but not started their
+    subscription is a normal state. So is one whose subscription is running
+    while the implementation fee is still outstanding. Collapsing them loses
+    both, and it is what let a $3,500 combined charge look reasonable.
+
+    SETUP reads from the Implementation, which only the webhook marks paid.
+    SUBSCRIPTION reads from the Organization, where the subscription and
+    invoice webhooks already keep the authoritative state — it is not copied,
+    because a copy is a second answer that goes stale.
+    """
+    impl = implementation_for(db, opp)
+    org = customer_org_for(db, opp)
+
+    setup_status = getattr(impl, "setup_payment_status", None) or "not_sent"
+    sub_status = getattr(org, "billing_status", None)
+
+    return {
+        "setup": {
+            # not_sent | checkout_pending | paid | failed
+            "status": setup_status,
+            "checkout_url": getattr(impl, "setup_checkout_url", None),
+            "checkout_session_id": getattr(impl, "setup_checkout_session_id", None),
+            "payment_intent_id": getattr(impl, "setup_payment_intent_id", None),
+            "paid_cents": getattr(impl, "setup_paid_cents", None),
+            "paid_at": getattr(impl, "setup_paid_at", None),
+        },
+        "subscription": {
+            # NULL means no subscription has ever existed — deliberately not
+            # "inactive", which would read as one that stopped.
+            "status": sub_status,
+            "stripe_subscription_id": getattr(org, "stripe_subscription_id", None),
+            "plan_key": getattr(org, "billing_plan_key", None),
+            "current_period_end": getattr(org, "billing_current_period_end", None),
+            "checkout_url": getattr(impl, "subscription_checkout_url", None),
+            "checkout_session_id": getattr(
+                impl, "subscription_checkout_session_id", None),
+            "checkout_at": getattr(impl, "subscription_checkout_at", None),
+        },
+    }
 
 
 def mapped_plan(db: Session, platform_id: Optional[str], package):
@@ -419,6 +521,14 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
         "stripe_customer_exists": False,
         "charges": [],
         "blockers": blockers,
+        # DEFAULTS THAT SURVIVE AN EARLY RETURN. Two paths below bail out as
+        # soon as there is nothing to charge, and a caller that reads
+        # `billable_parts["setup"]` must get False there rather than a
+        # KeyError — an exception on a money screen renders as a blank panel,
+        # which reads as "fine" to whoever is looking at it.
+        "billable": False,
+        "billable_parts": {"setup": False, "subscription": False},
+        "state": None,
     }
 
     if not res["pricing_complete"] and setup is None and mrr is None:
@@ -584,4 +694,31 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
                                "label": "Implementation fee"})
 
     out["billable"] = bool(out["charges"]) and not blockers
+
+    # ── readiness, PER OBLIGATION ─────────────────────────────────────────
+    # `billable` is the whole-deal answer and stays exactly as it was, because
+    # other callers read it. But the two halves are collected separately, so
+    # each needs its own answer: a customer who already has a subscription can
+    # still be sent an implementation-fee page, and a plan whose Stripe price
+    # is missing does not make the setup fee uncollectable.
+    _kinds = {c["kind"] for c in out["charges"]}
+    out["billable_parts"] = {
+        "setup": ("setup_fee" in _kinds
+                  and not blockers_for_part(blockers, "setup")),
+        "subscription": ("subscription" in _kinds
+                         and not blockers_for_part(blockers, "subscription")),
+    }
+
+    # ── where each obligation actually stands ─────────────────────────────
+    # Attached to the same payload the seller's panel already reads, so the
+    # screen showing WHAT would be charged is the screen showing WHAT HAS BEEN.
+    # A second endpoint for the state would be a second round trip and a second
+    # moment, and the two could disagree on screen.
+    try:
+        out["state"] = billing_state(db, opp)
+    except Exception:                                   # pragma: no cover
+        # Readiness must still render if the state read fails; a panel that
+        # goes blank tells a rep less than one that shows the terms.
+        log.exception("deal_billing: could not resolve billing state")
+        out["state"] = None
     return out

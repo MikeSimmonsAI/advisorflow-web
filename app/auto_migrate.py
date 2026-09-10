@@ -262,6 +262,18 @@ COLUMNS_TO_ADD = [
     ("proposals", "contract_term_months", "INTEGER"),
     ("implementations", "billing_option", "VARCHAR"),
     ("implementations", "contract_term_months", "INTEGER"),
+    # The setup fee and the subscription are two separate obligations with two
+    # separate Stripe objects and two separate states. Only a verified webhook
+    # writes the paid columns; creating a checkout writes the session ones.
+    ("implementations", "setup_payment_status", "VARCHAR DEFAULT 'not_sent'"),
+    ("implementations", "setup_checkout_session_id", "VARCHAR"),
+    ("implementations", "setup_checkout_url", "TEXT"),
+    ("implementations", "setup_payment_intent_id", "VARCHAR"),
+    ("implementations", "setup_paid_cents", "INTEGER"),
+    ("implementations", "setup_paid_at", "TIMESTAMP"),
+    ("implementations", "subscription_checkout_session_id", "VARCHAR"),
+    ("implementations", "subscription_checkout_url", "TEXT"),
+    ("implementations", "subscription_checkout_at", "TIMESTAMP"),
     ("users", "microsoft_oauth_refresh_token_encrypted", "VARCHAR"),
     ("users", "microsoft_email_address", "VARCHAR"),
     ("users", "microsoft_365_connected", "BOOLEAN DEFAULT FALSE"),
