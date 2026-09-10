@@ -2151,6 +2151,111 @@ def zoom_diagnostics(
             "explanation": explanation}
 
 
+@router.post("/zoom-diagnostics/test-meeting")
+def zoom_test_meeting(
+    _god: User = Depends(require_god),
+) -> dict:
+    """Create a real Zoom meeting through the real provider, then delete it.
+
+    WHY A ROUND TRIP AND NOT JUST A TOKEN. A token proves the app is activated
+    and the credentials pair. `GET /users/me` proves a read scope. Neither
+    proves the one thing the product actually needs, which is `meeting:write` —
+    a Server-to-Server app can hold a valid token and still be unable to create
+    a single room. The only honest test of "can we book a Zoom meeting" is to
+    book one.
+
+    IT USES `ZoomProvider`, deliberately — the same class the appointment
+    system calls, constructed the same way, resolving the same credentials.
+    A bespoke httpx call here would test my test rather than the integration.
+
+    IT CREATES NO BUSINESS RECORD. No appointment, no opportunity, no
+    notification, nothing written to our database at all. The meeting is placed
+    a day out, titled as a diagnostic, and deleted in the same request; the
+    delete result is reported rather than assumed, and a failed delete says so
+    loudly so a stray room is never left quietly on somebody's calendar.
+    """
+    from datetime import timedelta
+
+    from app.services.meeting_providers.base import MeetingRequest
+    from app.services.meeting_providers.zoom import ZoomProvider
+
+    provider = ZoomProvider(config=None)   # env-var path, as production uses
+    ready, why = provider.is_ready()
+    if not ready:
+        return {"ok": False, "stage": "not_configured", "reason": why}
+
+    starts = datetime.utcnow().replace(microsecond=0) + timedelta(days=1)
+    req = MeetingRequest(
+        topic="AdvisorFlow integration self-test — safe to ignore",
+        starts_at=starts,
+        duration_minutes=15,
+        timezone="UTC",
+        agenda="Automated verification that Zoom meeting creation works. "
+               "This meeting is deleted immediately after it is created.",
+    )
+
+    created = provider.create_meeting(req)
+    out: dict = {
+        "create": {
+            "ok": created.ok,
+            "provider_meeting_id": created.provider_meeting_id,
+            "join_url": created.join_url,
+            "has_passcode": bool(created.passcode),
+            "error_code": created.error_code,
+            "error_message": created.error_message,
+        },
+        "starts_at_utc": starts.isoformat() + "Z",
+    }
+    if not created.ok:
+        out["ok"] = False
+        out["stage"] = "create_failed"
+        # `scope` here is the provider's own classification and is the answer to
+        # "is meeting:write missing", which a token request cannot tell you.
+        out["verdict"] = ("missing_meeting_write_scope"
+                          if created.error_code == "scope" else "create_error")
+        return out
+
+    # INDEPENDENT CONFIRMATION. The create response is Zoom telling us what it
+    # did; a fresh GET is Zoom telling us what it HAS. They are different
+    # claims, and only the second one proves the room exists.
+    exists_before = None
+    try:
+        import httpx as _httpx
+        token, _err = provider._access_token()
+        if token:
+            g = _httpx.get(
+                "https://api.zoom.us/v2/meetings/%s" % created.provider_meeting_id,
+                headers={"Authorization": "Bearer " + token}, timeout=20.0)
+            exists_before = g.status_code
+    except Exception as exc:  # noqa: BLE001
+        exists_before = "check_failed: %s" % type(exc).__name__
+    out["verified_present_status"] = exists_before
+
+    cancelled = provider.cancel_meeting(created.provider_meeting_id)
+    out["cleanup"] = {"ok": cancelled.ok, "error_code": cancelled.error_code,
+                      "error_message": cancelled.error_message}
+
+    exists_after = None
+    try:
+        import httpx as _httpx
+        token, _err = provider._access_token()
+        if token:
+            g = _httpx.get(
+                "https://api.zoom.us/v2/meetings/%s" % created.provider_meeting_id,
+                headers={"Authorization": "Bearer " + token}, timeout=20.0)
+            exists_after = g.status_code   # 404 once genuinely deleted
+    except Exception as exc:  # noqa: BLE001
+        exists_after = "check_failed: %s" % type(exc).__name__
+    out["verified_absent_status"] = exists_after
+
+    out["ok"] = bool(created.ok and cancelled.ok)
+    out["verdict"] = ("ok" if out["ok"] else "created_but_cleanup_failed")
+    if not cancelled.ok:
+        out["warning"] = ("The test meeting was created but NOT deleted. Remove "
+                          "meeting %s from Zoom by hand." % created.provider_meeting_id)
+    return out
+
+
 # ── GOD-10: Job-run ledger ───────────────────────────────────────────────────
 #
 # DEAD SECOND COPIES. Both paths below were already registered earlier in this
