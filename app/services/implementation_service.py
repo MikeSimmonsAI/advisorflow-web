@@ -307,6 +307,27 @@ def launch_warnings(db: Session, impl: Implementation) -> List[str]:
               .filter(User.organization_id == impl.organization_id,
                       User.is_active.is_(True)).first()):
         w.append("The customer has no active user account yet.")
+
+    # THE GO-LIVE GATE, FOLDED IN RATHER THAN BOLTED ON.
+    #
+    # `launch_delivery.readiness()` answers the twelve questions §19 asks -
+    # intake, files, access, build, integrations, testing, training, blockers
+    # and the two signatures - against the brand's own template. Its failures
+    # belong HERE, in the list `launch()` already makes an actor acknowledge,
+    # rather than in a second refusal somewhere else: one gate, one
+    # confirmation, one audit entry recording what was overridden.
+    #
+    # Imported inside the function because launch_delivery reads this module's
+    # `completion()`, and a module-level import either way would be a cycle.
+    #
+    # It must never be able to BLOCK a launch by failing: a readiness
+    # computation that raises would make Live unreachable for every customer,
+    # which is a far worse outcome than a missing warning line.
+    try:
+        from app.services import launch_delivery
+        w.extend(launch_delivery.readiness_warnings(db, impl))
+    except Exception:                                    # pragma: no cover
+        w.append("Launch readiness could not be checked - review it by hand.")
     return w
 
 

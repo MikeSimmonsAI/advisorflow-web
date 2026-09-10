@@ -30,6 +30,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { api, API_BASE } from '../../api/client'
+import GodLaunchDelivery from './GodLaunchDelivery'
 import {
   PROGRESS, buildSchemaIndex, intakeState, presentAllSteps, SECRET_NOTE,
 } from '../launch/present'
@@ -360,6 +361,15 @@ export default function GodLaunches() {
  * reviewer should read Company before Signature every time.
  */
 function LaunchReview({ detail, schema, busy, onReviewed }) {
+  // TWO TABS, AND DELIVERY IS FIRST.
+  //
+  // The intake is what the customer gave us and it is read once. The delivery
+  // programme is what we owe them and it is read every day. Stacking both on
+  // one page made the daily thing sit under eight sections of somebody's
+  // answers, so opening a launch to see what was outstanding meant scrolling
+  // past a form. The default tab is the question staff actually arrive with.
+  const [tab, setTab] = useState('delivery')
+
   if (detail.loading) return <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading…</p>
   if (detail.error) return <p style={{ color: '#dc2626', fontSize: 13 }}>{detail.error}</p>
   if (!schema) return <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading the form…</p>
@@ -398,6 +408,23 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
         <a href={'/god/customers/' + detail.orgId} style={{ fontSize: 12 }}>View customer</a>
       </div>
 
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {[['delivery', 'Delivery & go-live'], ['intake', "Customer's answers"]]
+          .map(([key, text]) => (
+            <button key={key} onClick={() => setTab(key)} style={{
+              fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 999,
+              cursor: 'pointer',
+              border: '1px solid ' + (tab === key ? '#3b82f6' : 'var(--god-border, #e5e7eb)'),
+              background: tab === key ? '#3b82f6' : 'var(--god-card, #fff)',
+              color: tab === key ? '#fff' : 'var(--god-text, #1f2937)',
+            }}>{text}</button>
+          ))}
+      </div>
+
+      {tab === 'delivery' ? <GodLaunchDelivery orgId={detail.orgId} /> : null}
+
+      {tab === 'intake' ? (
+        <>
       {detail.blockers?.length ? (
         <div style={{ background: '#fffbeb', border: '1px solid #fcd34d',
                       borderRadius: 8, padding: 12, marginBottom: 14,
@@ -474,6 +501,8 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
             </span>
           </div>
         ))}
+        </>
+      ) : null}
     </div>
   )
 }
