@@ -387,6 +387,75 @@ class TestCommitmentResolution:
         assert kw["metadata"]["plan"] == "growth"
         assert kw["metadata"]["commitment"] == "month_to_month"
 
+    def test_the_setup_fee_is_a_LINE_ITEM_not_add_invoice_items(
+            self, client, db_session, world):
+        """THE BUG THIS PINS, found by the first real Stripe TEST checkout.
+
+        The setup fee was sent as `subscription_data.add_invoice_items`, which
+        belongs to the Subscriptions API and is not a parameter of a Checkout
+        Session. Stripe rejected every call outright:
+
+            Received unknown parameter: subscription_data[add_invoice_items]
+
+        No test caught it because every test here mocks
+        `stripe.checkout.Session.create` and therefore validates nothing about
+        the arguments Stripe would accept — the mock happily records a kwarg
+        the real API refuses. So this test asserts the SHAPE instead: a
+        non-recurring line item on a `mode="subscription"` session, which is
+        how Stripe charges a one-off alongside a subscription on the first
+        invoice.
+
+        Both EvoSys tiers with a setup fee — Starter and Growth — were
+        completely unbillable until this was fixed.
+        """
+        self._tier(db_session, world, "growth", commitment="term_agreement")
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
+             patch("app.routers.billing_router._stripe_client"), \
+             patch("app.routers.billing_router._get_or_create_customer",
+                   return_value="cus_test123"), \
+             patch("app.routers.billing_router._brand_base_url",
+                   return_value="https://brand.test"):
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 200, r.text
+        kw = create.call_args.kwargs
+
+        # The parameter Stripe refuses must never be sent again.
+        assert "add_invoice_items" not in kw.get("subscription_data", {})
+
+        # One session, two lines: the subscription and the one-off.
+        assert len(kw["line_items"]) == 2
+        assert kw["line_items"][0]["price"] == "price_growth_term"
+        fee = kw["line_items"][1]
+        assert "recurring" not in fee["price_data"], \
+            "the implementation fee must not recur"
+        assert fee["price_data"]["unit_amount"] == 250000
+        assert kw["mode"] == "subscription"
+
+    def test_a_deal_with_no_setup_fee_sends_one_line_item(
+            self, client, db_session, world):
+        """The fee is appended only where the deal has one."""
+        _plan, pkg = self._tier(db_session, world, "growth",
+                                commitment="term_agreement")
+        pkg.setup_fee = None
+        pkg.price = None
+        world["org"].stripe_customer_id = "cus_test123"
+        db_session.commit()
+        with patch("stripe.checkout.Session.create", return_value=_Sess()) as create, \
+             patch("app.routers.billing_router._stripe_client"), \
+             patch("app.routers.billing_router._get_or_create_customer",
+                   return_value="cus_test123"), \
+             patch("app.routers.billing_router._brand_base_url",
+                   return_value="https://brand.test"):
+            r = client.post(
+                "/sales/opportunities/%s/billing/checkout" % world["opp"].id,
+                headers=_h(db_session, world["god"]))
+        assert r.status_code == 200, r.text
+        assert len(create.call_args.kwargs["line_items"]) == 1
+
     def test_a_missing_month_to_month_price_REFUSES_rather_than_falling_back(
             self, db_session, world):
         """THE REVENUE LEAK THIS PREVENTS. With no month-to-month price
@@ -1062,8 +1131,22 @@ class TestCheckoutComposition:
         assert kw["mode"] == "subscription"
         assert kw["line_items"][0]["price"] == "price_growth_term_test"
         # The setup fee rides the first invoice rather than a second session.
-        items = kw["subscription_data"]["add_invoice_items"]
-        assert items[0]["price_data"]["unit_amount"] == 250000
+        #
+        # THIS ASSERTION USED TO READ `subscription_data["add_invoice_items"]`
+        # AND IT PINNED A BUG. That parameter is not part of the Checkout
+        # Session API — Stripe rejected every real call with "Received unknown
+        # parameter: subscription_data[add_invoice_items]" — but because
+        # `Session.create` is mocked here, the mock recorded the kwarg happily
+        # and the test went green against something that could never work. A
+        # test can only pin the shape it is given; making that shape wrong made
+        # the test worse than absent, because it defended the defect.
+        #
+        # The working shape is a second, NON-RECURRING line item: Stripe puts
+        # it on the first invoice of the subscription.
+        assert "add_invoice_items" not in kw["subscription_data"]
+        fee = kw["line_items"][1]
+        assert fee["price_data"]["unit_amount"] == 250000
+        assert "recurring" not in fee["price_data"]
 
     def test_the_deal_trail_is_carried_in_metadata(self, client, db_session, world):
         """Without this the webhook cannot connect money back to what was sold."""

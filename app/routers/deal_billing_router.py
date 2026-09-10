@@ -208,15 +208,29 @@ def deal_billing_checkout(
                 "cancel_url": "%s/billing?canceled=1" % base_url,
             }
             if setup:
-                # THE STRIPE-SANCTIONED WAY to put a one-off charge on the first
-                # invoice of a subscription. Not a second session, not a second
-                # payment the customer has to remember.
-                kwargs["subscription_data"]["add_invoice_items"] = [{
+                # ONE SESSION, TWO LINE ITEMS. A non-recurring line item in a
+                # `mode="subscription"` session is charged on the FIRST invoice
+                # alongside the subscription — which is what a setup fee is.
+                # Not a second session, not a second payment the customer has
+                # to remember.
+                #
+                # THIS WAS `subscription_data.add_invoice_items` AND IT DID NOT
+                # WORK. That parameter belongs to the Subscriptions API, not to
+                # Checkout Sessions, and Stripe rejected every single call:
+                #   "Received unknown parameter:
+                #    subscription_data[add_invoice_items]"
+                # Nothing caught it because no test reaches Stripe and no
+                # checkout had ever been attempted against a mapped price —
+                # until the first live TEST run, which failed on both deals.
+                # Every deal with a setup fee was unbillable, and the two that
+                # matter most commercially (Starter and Growth, which both
+                # carry one) were exactly the ones affected.
+                kwargs["line_items"].append({
                     "price_data": {"currency": currency,
                                    "product_data": {"name": "Implementation fee"},
                                    "unit_amount": setup["cents"]},
                     "quantity": 1,
-                }]
+                })
             session = stripe.checkout.Session.create(**kwargs)
         else:
             session = stripe.checkout.Session.create(
