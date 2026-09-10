@@ -2047,6 +2047,11 @@ def zoom_diagnostics(
         "token_obtained": bool(body.get("access_token")),
         "expires_in": body.get("expires_in"),
         "granted_scope_count": len((body.get("scope") or "").split()) if body.get("scope") else None,
+        # THE GRANT LIST ITSELF. Not a secret — it is the set of permissions the
+        # app holds, and without it "add the missing scope" is advice nobody can
+        # act on precisely. A count told us five scopes existed while the app
+        # still could not delete a meeting; the names say which five.
+        "granted_scopes": sorted((body.get("scope") or "").split()) or None,
     }
 
     if r.status_code == 200 and body.get("access_token"):
@@ -2231,6 +2236,16 @@ def zoom_test_meeting(
         exists_before = "check_failed: %s" % type(exc).__name__
     out["verified_present_status"] = exists_before
 
+    # RESCHEDULE IS A PRODUCTION PATH TOO. An appointment moved by a rep calls
+    # update_meeting, which needs its own scope. Testing only create would let a
+    # reschedule fail silently in front of a customer later.
+    moved = MeetingRequest(
+        topic=req.topic, starts_at=starts + timedelta(hours=1),
+        duration_minutes=30, timezone="UTC", agenda=req.agenda)
+    updated = provider.update_meeting(created.provider_meeting_id, moved)
+    out["reschedule"] = {"ok": updated.ok, "error_code": updated.error_code,
+                         "error_message": updated.error_message}
+
     cancelled = provider.cancel_meeting(created.provider_meeting_id)
     out["cleanup"] = {"ok": cancelled.ok, "error_code": cancelled.error_code,
                       "error_message": cancelled.error_message}
@@ -2248,12 +2263,58 @@ def zoom_test_meeting(
         exists_after = "check_failed: %s" % type(exc).__name__
     out["verified_absent_status"] = exists_after
 
-    out["ok"] = bool(created.ok and cancelled.ok)
-    out["verdict"] = ("ok" if out["ok"] else "created_but_cleanup_failed")
-    if not cancelled.ok:
+    out["ok"] = bool(created.ok and updated.ok and cancelled.ok)
+    if out["ok"]:
+        out["verdict"] = "ok"
+    elif not cancelled.ok:
+        out["verdict"] = "created_but_cleanup_failed"
         out["warning"] = ("The test meeting was created but NOT deleted. Remove "
-                          "meeting %s from Zoom by hand." % created.provider_meeting_id)
+                          "meeting %s from Zoom by hand, or grant the delete "
+                          "scope and re-run this check."
+                          % created.provider_meeting_id)
+    else:
+        out["verdict"] = "reschedule_failed"
     return out
+
+
+@router.delete("/zoom-diagnostics/meeting/{meeting_id}")
+def zoom_delete_meeting(
+    meeting_id: str,
+    _god: User = Depends(require_god),
+) -> dict:
+    """Remove one Zoom meeting by id, through the real provider.
+
+    EXISTS BECAUSE A TEST THAT CANNOT CLEAN UP AFTER ITSELF LEAVES LITTER. The
+    round-trip check above created a meeting and then discovered the app held no
+    delete scope, so the room stayed live on the account. Once the scope is
+    granted, that specific meeting still has to be removed, and asking somebody
+    to hunt it down in the Zoom UI is a worse answer than one call.
+
+    Deliberately not a general-purpose Zoom admin tool: god only, one id, and it
+    reports Zoom's own answer rather than claiming success.
+    """
+    from app.services.meeting_providers.zoom import ZoomProvider
+
+    provider = ZoomProvider(config=None)
+    ready, why = provider.is_ready()
+    if not ready:
+        return {"ok": False, "reason": why}
+
+    res = provider.cancel_meeting(meeting_id)
+    still_there = None
+    try:
+        import httpx as _httpx
+        token, _err = provider._access_token()
+        if token:
+            g = _httpx.get("https://api.zoom.us/v2/meetings/%s" % meeting_id,
+                           headers={"Authorization": "Bearer " + token}, timeout=20.0)
+            still_there = g.status_code   # 404 = gone
+    except Exception as exc:  # noqa: BLE001
+        still_there = "check_failed: %s" % type(exc).__name__
+
+    return {"ok": res.ok, "meeting_id": meeting_id,
+            "error_code": res.error_code, "error_message": res.error_message,
+            "verified_status_after": still_there}
 
 
 # ── GOD-10: Job-run ledger ───────────────────────────────────────────────────
