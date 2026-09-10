@@ -366,6 +366,10 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "opportunity_id": opp.id,
         "stage": getattr(opp, "stage", None),
+        # Both, because they legitimately differ: a provisioned customer is
+        # status Won at stage Onboarding, and a screen that shows only the stage
+        # makes the Won check look wrong when it is right.
+        "status": getattr(opp, "status", None),
         "pricing_source": res["source_label"],
         "structure": res["structure"],
         "structure_label": res["structure_label"],
@@ -395,8 +399,33 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
         blockers.append(_blocker(B_NOTHING_TO_CHARGE))
         return out
 
-    if (getattr(opp, "stage", None) or "").lower() != "won":
-        blockers.append(_blocker(B_NOT_WON))
+    # WON IS `status`, NOT `stage`, AND THE DIFFERENCE WAS A HARD BLOCKER.
+    #
+    # This read `opp.stage` and, in the flow it exists to serve, NOTHING COULD
+    # EVER BE BILLED. `provisioning.provision_customer` moves the deal to
+    # STAGE_ONBOARDING at the moment it creates the customer organization, and
+    # says so in as many words: "status stays 'won' and won_at is untouched:
+    # this deal was won, and every Won metric in the codebase filters on
+    # status." So billing required a customer organization (which only
+    # provisioning creates) AND a stage of "won" (which provisioning
+    # immediately ends) — two conditions the normal path cannot satisfy at the
+    # same time. Live verification is what found it; the unit tests all set
+    # stage and status together and never saw it.
+    #
+    # `status` is also what `compensation.earn()` checks. Billing and
+    # compensation reading the same field is the point: the payment this module
+    # produces is what compensation is calculated from, and two subsystems with
+    # two definitions of Won would eventually disagree about one deal.
+    #
+    # `stage` is deliberately NOT accepted as a fallback. `status` is NOT NULL
+    # on the model, so there is no legacy row with nothing to read — and a
+    # fallback would reintroduce exactly the thing this comment is about: a
+    # second definition of Won, under which a deal parked at stage "won" with
+    # status "open" is chargeable but earns nobody a commission.
+    _status = (getattr(opp, "status", None) or "").lower()
+    if _status != "won":
+        blockers.append(_blocker(B_NOT_WON, status=_status or None,
+                                 stage=(getattr(opp, "stage", None) or None)))
 
     org = customer_org_for(db, opp)
     if org is None:

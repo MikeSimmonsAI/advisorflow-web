@@ -55,8 +55,11 @@ def world(db_session):
     db_session.add(org)
     db_session.commit()
 
+    # BOTH, because a real Won deal has both — and because the two drift apart
+    # on purpose once the customer is provisioned. See
+    # test_a_PROVISIONED_customer_is_still_Won.
     opp = Opportunity(company_name="Acme Power", brand_sales_org_id=brand.id,
-                      stage="won", selected_package_id=pkg.id,
+                      stage="won", status="won", selected_package_id=pkg.id,
                       billing_option="monthly")
     db_session.add(opp)
     db_session.commit()
@@ -147,9 +150,74 @@ class TestTermsResolution:
     def test_a_deal_that_is_not_won_is_blocked(self, db_session, world):
         world["pkg"].billing_plan_key = "growth"
         world["opp"].stage = "demo_proposal"
+        world["opp"].status = "open"
         db_session.commit()
         terms = deal_billing.terms_for(db_session, world["opp"])
         assert deal_billing.B_NOT_WON in {b["code"] for b in terms["blockers"]}
+
+    def test_a_PROVISIONED_customer_is_still_Won(self, db_session, world):
+        """THE BUG LIVE VERIFICATION FOUND, and the reason it was invisible here.
+
+        `provisioning.provision_customer` creates the customer organization AND
+        moves the deal to stage 'onboarding', keeping status 'won' — its own
+        comment says every Won metric filters on status. This module checked
+        `stage`, so it demanded a customer organization (which only provisioning
+        creates) and a stage of 'won' (which provisioning immediately ends).
+        Nothing could ever be billed through the intended flow.
+
+        Every earlier test set stage and status together, which is exactly why
+        none of them caught it. This one reproduces the real post-provisioning
+        shape.
+        """
+        world["pkg"].billing_plan_key = "growth"
+        world["opp"].stage = "onboarding"        # provisioning moved it
+        world["opp"].status = "won"              # ...and left this alone
+        db_session.commit()
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert deal_billing.B_NOT_WON not in {b["code"] for b in terms["blockers"]}
+        assert terms["blockers"] == [], terms["blockers"]
+        assert terms["billable"] is True
+
+    def test_a_won_STAGE_alone_is_not_enough(self, db_session, world):
+        """The other half of the fix, and the reason `stage` is not a fallback.
+
+        A deal parked at stage 'won' whose status is still open must not be
+        chargeable — compensation.earn() refuses it, so billing that would
+        charge a customer nobody gets paid on.
+        """
+        world["pkg"].billing_plan_key = "growth"
+        world["opp"].stage = "won"
+        world["opp"].status = "open"
+        db_session.commit()
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        row = next(b for b in terms["blockers"]
+                   if b["code"] == deal_billing.B_NOT_WON)
+        assert row["status"] == "open"
+        assert row["stage"] == "won"          # says both, so it reads as sense
+        assert not terms.get("billable")
+
+    def test_billing_and_compensation_agree_about_what_Won_MEANS(
+            self, db_session, world):
+        """Two definitions of Won in one money path is how a customer gets
+        charged for a deal nobody gets paid on, or the reverse.
+
+        `compensation.earn()` refuses on `status`. So must this.
+        """
+        from app.services import compensation as comp
+
+        world["pkg"].billing_plan_key = "growth"
+        world["opp"].stage = "won"               # stage says yes...
+        world["opp"].status = "open"             # ...status says no
+        db_session.commit()
+
+        with pytest.raises(comp.NotEarnable):
+            comp.earn(db_session, world["opp"], collection_reference="pi_x",
+                      collected_amount=Decimal("100.00"))
+        # And billing must not be readier than payroll on the same deal: the one
+        # thing that must never happen is charging a deal compensation refuses.
+        terms = deal_billing.terms_for(db_session, world["opp"])
+        assert isinstance(terms["blockers"], list)
+        assert terms["status"] == "open"
 
     def test_money_never_becomes_a_float(self, db_session, world):
         world["pkg"].billing_plan_key = "growth"
@@ -571,6 +639,7 @@ class TestCheckoutRefusesSafely:
     def test_a_not_won_deal_never_reaches_stripe(self, client, db_session, world):
         world["pkg"].billing_plan_key = "growth"
         world["opp"].stage = "closing"
+        world["opp"].status = "open"
         db_session.commit()
         with patch("stripe.checkout.Session.create") as create:
             r = client.post(
