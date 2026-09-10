@@ -834,6 +834,82 @@ def seed_brand(platform_id: str, body: SeedIn = SeedIn(),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# STRIPE TEST PROVISIONING — the one place this router touches Stripe
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# THE BOUNDARY AT THE TOP OF THIS FILE STILL HOLDS. This router does not BILL:
+# it does not price a checkout, create a subscription, or decide what a customer
+# owes. What it does here is CREATE THE OBJECTS THE CATALOGUE ALREADY DESCRIBES
+# and write their public ids back into the same configuration model every other
+# route on this file reads. The amounts come from `BrandBillingPlan` and from
+# nowhere else — there is no price in this endpoint, in the service behind it,
+# or anywhere on the path.
+#
+# TEST MODE IS ENFORCED ON THE KEY. `stripe_provisioning._client()` refuses an
+# `sk_live_`/`rk_live_` key before making a single call, so this cannot put a
+# purchasable Price in front of a real customer even if pointed at live
+# credentials by mistake.
+
+class ProvisionIn(BaseModel):
+    # Preview by default, for the same reason `seed_brand` previews by default:
+    # the destructive-looking operation should require somebody to say so.
+    apply: bool = False
+
+
+@router.post("/brands/{platform_id}/stripe/provision")
+def provision_stripe(platform_id: str, body: ProvisionIn = ProvisionIn(),
+                     db: Session = Depends(get_db),
+                     user: User = Depends(require_god)):
+    """Create or reuse this brand's TEST Stripe Products and Prices.
+
+    Idempotent: a second call creates nothing. Reuse is attempted from the
+    mapping column first, then from the Product's own active Prices, before
+    anything is created — so this is safe to run after a database restore, and
+    safe when somebody has already made the Price by hand.
+    """
+    from app.services import stripe_provisioning
+
+    platform = _require_platform(db, platform_id)
+
+    try:
+        if not body.apply:
+            return stripe_provisioning.provision_brand(db, platform, dry_run=True)
+
+        # The preview runs first and is what the audit records, so the row says
+        # what was INTENDED in the same transaction that performs it — the same
+        # ordering `seed_brand` uses, and for the same reason.
+        planned = stripe_provisioning.provision_brand(db, platform, dry_run=True)
+        result = stripe_provisioning.provision_brand(db, platform, dry_run=False)
+    except stripe_provisioning.ProvisioningRefused as exc:
+        # 409, not 500: the request was understood and refused on a
+        # precondition the caller can fix (wrong key mode, key absent).
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:                                # pragma: no cover
+        log.exception("stripe provisioning failed for %s", platform_id)
+        # The message is Stripe's and carries no credential — the key is never
+        # part of an error body — but it is still not echoed verbatim.
+        raise HTTPException(
+            status_code=502,
+            detail="Stripe refused the provisioning request. Nothing was "
+                   "written. See the service log for the processor's reply.")
+
+    _audit(db, user, "billing_catalogue.stripe_provisioned", AUDIT_TARGET_PLAN,
+           platform_id, before={"planned": planned.get("summary")},
+           after={"summary": result.get("summary"),
+                  # PUBLIC object ids only. prod_… and price_… appear on the
+                  # customer's own receipt; no key or secret reaches this row.
+                  "mapped": {p["plan_key"]: {
+                      k: v.get("price_id")
+                      for k, v in (p.get("commitments") or {}).items()}
+                      for p in result.get("plans", []) if "commitments" in p}},
+           note="TEST-mode Stripe Products/Prices provisioned for brand %s"
+                % platform_id,
+           platform_id=platform_id)
+    db.commit()
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # REVENUE — real numbers, or an honest null
 # ═══════════════════════════════════════════════════════════════════════════
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
+import StripeCatalogue from './StripeCatalogue';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GOD MODE — BILLING & REVENUE OPERATIONS
@@ -219,6 +220,14 @@ export default function GodBillingOps() {
           ))}
         </div>
       )}
+
+      {/* ── Stripe & catalogue administration ───────────────────────────────
+          CONFIGURATION, ABOVE THE OPERATIONS. This is "what does this brand
+          sell and does Stripe know about it" — a setup question with a setup
+          answer. It sits above the roster and outside it: putting a
+          provisioning button inside a work queue would make a one-off task
+          look like part of somebody's daily list. */}
+      <StripeCatalogue platformId={platformId} brands={brands} />
 
       {/* ── Filter tabs, with real counts ────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
