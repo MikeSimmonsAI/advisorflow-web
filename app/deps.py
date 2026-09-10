@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine
+from sqlalchemy import text as _sa_text
 from sqlalchemy.orm import sessionmaker, Session
 
 
@@ -91,8 +92,36 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
+# ── How long ONE HTTP REQUEST may hold the database ─────────────────────────
+# Deliberately applied HERE and not on the engine. `get_db` is the FastAPI
+# dependency, so it covers web requests and nothing else; every background job
+# (`run_cadence_job`, `run_email_poller`, `run_ai_conversation_job`) builds its
+# session from `SessionLocal` directly and is therefore untouched.
+#
+# THAT DISTINCTION IS THE WHOLE POINT. A global `statement_timeout` would be
+# the easy version and would eventually kill a legitimate bulk import or a
+# long report mid-flight — "do not break known long-running legitimate work"
+# means not guessing at their runtime from a config file. A web request has a
+# known ceiling: nothing a person is waiting on should run for half a minute,
+# and anything that does is already a failure the user has given up on.
+REQUEST_STATEMENT_TIMEOUT_MS = int(
+    os.environ.get("REQUEST_STATEMENT_TIMEOUT_MS", "30000"))
+
+
 def get_db():
     db = SessionLocal()
+    if not _is_sqlite and REQUEST_STATEMENT_TIMEOUT_MS > 0:
+        try:
+            # SET does not accept bind parameters, so the value is inlined —
+            # safe because it went through int() above and can only be an
+            # integer by the time it gets here.
+            db.execute(_sa_text(
+                "SET statement_timeout = %d" % REQUEST_STATEMENT_TIMEOUT_MS))
+        except Exception:                                   # noqa: BLE001
+            # Best effort. A database that will not accept a session setting
+            # has larger problems, and refusing to serve the request over it
+            # would turn a warning into an outage.
+            _log.debug("could not apply request statement_timeout", exc_info=True)
     try:
         yield db
     finally:

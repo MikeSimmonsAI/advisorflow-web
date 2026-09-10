@@ -69,7 +69,16 @@ class TestALockedTableCannotHangTheBoot:
         with patch.object(auto_migrate, "text",
                           side_effect=_every_alter_is_locked), \
              patch.object(auto_migrate, "_COLUMN_ADD_RETRY_SECONDS", 0):
-            run_auto_migrations(engine)   # must return, must not raise
+            try:
+                run_auto_migrations(engine)
+            except auto_migrate.RequiredSchemaMissing:
+                # ADDED WHEN THE REQUIRED-SCHEMA GATE LANDED. `users` is a
+                # core table, so a lock that stops its columns landing SHOULD
+                # refuse the boot — that is the gate working, and this test
+                # is about the OTHER property: that the answer arrives fast
+                # instead of being waited for. Both outcomes are bounded;
+                # neither is a hang.
+                pass
         elapsed = time.monotonic() - started
 
         # Bounded in practice, not just in principle. With the retry pause
@@ -91,14 +100,17 @@ class TestALockedTableCannotHangTheBoot:
             conn.execute(text("CREATE TABLE users (id TEXT PRIMARY KEY)"))
             conn.commit()
 
-        target = next(c for c in COLUMNS_TO_ADD if c[0] == "users")
+        # A NON-CORE table, so this test stays about retry behaviour and does
+        # not also trip the required-schema gate.
+        target = next(c for c in COLUMNS_TO_ADD
+                      if c[0] not in auto_migrate.CORE_TABLES)
         original = auto_migrate.text
         attempts = {"n": 0}
 
         def _permanent_failure(sql, *a, **k):
             if isinstance(sql, str) and ("ADD COLUMN %s" % target[1]) in sql:
                 attempts["n"] += 1
-                raise OperationalError(sql, {}, Exception("no such table: users"))
+                raise OperationalError(sql, {}, Exception("syntax error"))
             return original(sql, *a, **k)
 
         with patch.object(auto_migrate, "text", side_effect=_permanent_failure):
@@ -172,7 +184,14 @@ class TestALockedTableCannotHangTheBoot:
 
         with patch.object(auto_migrate, "text", side_effect=_fail_only_the_first), \
              patch.object(auto_migrate, "_COLUMN_ADD_RETRY_SECONDS", 0):
-            run_auto_migrations(engine)
+            try:
+                run_auto_migrations(engine)
+            except auto_migrate.RequiredSchemaMissing:
+                # The blocked column is on `users`, a core table, so the gate
+                # correctly refuses the boot. It raises at the END, after the
+                # whole list has been attempted — which is precisely what lets
+                # the assertions below still be true.
+                pass
 
         with engine.connect() as conn:
             cols = {r[1] for r in conn.execute(

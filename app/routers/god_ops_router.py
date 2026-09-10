@@ -1331,3 +1331,64 @@ def god_appointment_list(
 ):
     """Upcoming scheduled appointments."""
     return ops.appointment_list(db, brand_id=brand_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DATABASE HEALTH — the signals that were invisible during the lock outage
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/diagnostics/database")
+def database_health_diagnostic(user: User = Depends(require_god)):
+    """Lock, transaction and migration health. READ-ONLY.
+
+    ═══════════════════════════════════════════════════════════════════════
+    WHY THIS ENDPOINT EXISTS
+    ═══════════════════════════════════════════════════════════════════════
+    A session sat idle inside a transaction holding a lock on
+    `organizations`. Startup schema changes queued behind it, four boots
+    deadlocked, and the platform was down for over an hour. Every number
+    needed to see it coming was in `pg_stat_activity` the entire time and
+    nothing surfaced any of it — the first evidence anyone had was a service
+    that would not start.
+
+    It lives here, on the existing God ops diagnostics surface beside the
+    Zoom, SMS and user-access diagnostics, rather than in a new health system:
+    a second diagnostics stack is a second thing to remember to look at.
+
+    NOTHING HERE MODIFIES ANYTHING. No session is terminated, no query is
+    cancelled, no lock is broken. It reports, and a person decides. Query
+    text is deliberately never returned — it can carry customer data — so
+    contention is reported by TABLE, which is what makes it actionable.
+    """
+    from app.auto_migrate import CORE_TABLES, LAST_RUN
+    from app.deps import engine
+    from app.services import db_health
+
+    report = db_health.inspect(engine)
+
+    # The migration record is read from process memory, not a table, so it
+    # still answers when the database is the unwell thing.
+    report["last_migration"] = dict(LAST_RUN)
+    report["core_tables"] = sorted(CORE_TABLES)
+
+    # ONE VERDICT, SO A GLANCE IS ENOUGH. "blockers" already names each
+    # condition and what to do about it; this says whether anything needs
+    # doing at all.
+    if not report["reachable"]:
+        report["verdict"] = "unreachable"
+    elif LAST_RUN.get("missing_required"):
+        report["verdict"] = "required_schema_missing"
+    elif report["blockers"]:
+        report["verdict"] = "attention"
+    elif LAST_RUN.get("missing_optional"):
+        report["verdict"] = "degraded"
+    else:
+        report["verdict"] = "ok"
+
+    report["explanation"] = (
+        "Read-only. Idle-in-transaction sessions and lock waits are reported "
+        "by count, age and table — never by query text, which can contain "
+        "customer data. This endpoint never terminates a session: clearing a "
+        "stuck transaction is a deliberate human action, on evidence."
+    )
+    return report

@@ -26,6 +26,24 @@ services:
     runtime: python
     plan: starter
     buildCommand: "pip install -r requirements.txt"
+    # ── THE MIGRATION GATE ──────────────────────────────────────────────────
+    # MIGRATION STEP → MIGRATION SUCCESS → APP START.
+    #
+    # Render runs preDeployCommand after the build and BEFORE the new instance
+    # is started or the old one retired. A non-zero exit aborts the deploy with
+    # the healthy previous version still serving.
+    #
+    # THE OUTAGE THIS ORDERING PREVENTS. Schema changes used to run inside the
+    # web app's startup handler, so the only way to discover the database could
+    # not take a change was to try to boot — and the answer arrived as fifteen
+    # minutes of "Waiting for application startup" followed by Render tearing
+    # down the last working instance. Now the same failure is a failed deploy
+    # and a log line, with production untouched.
+    #
+    # `app/migrate.py` preflights first (read-only: idle-in-transaction
+    # sessions, lock waits, connection pressure) and refuses rather than
+    # clearing the way for itself. It never terminates a session.
+    preDeployCommand: "python -m app.migrate"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     # ── BUILD FILTER ────────────────────────────────────────────────────────
     # In August, 455 commits landed on main and 113 of them touched
@@ -291,3 +309,14 @@ services:
         value: https://advisorflow-backend.onrender.com
       - key: TWILIO_AUTH_TOKEN
         sync: false
+      # ── THIS SERVICE MUST NOT CHANGE THE SCHEMA ─────────────────────────
+      # advisorflow-voice runs the SAME `app.main:app` as the backend, which
+      # means it has been running the same startup DDL — a second process
+      # issuing ALTER TABLE against the same tables, on its own deploy
+      # schedule. Two writers of the same schema is how two boots end up
+      # queued on one lock.
+      #
+      # Exactly one service owns migrations: advisorflow-backend, through its
+      # preDeployCommand. This one reads.
+      - key: SKIP_STARTUP_MIGRATIONS
+        value: "1"

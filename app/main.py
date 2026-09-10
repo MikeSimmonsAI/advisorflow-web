@@ -787,8 +787,47 @@ async def on_startup():
     Base.metadata.create_all(bind=engine)
 
     # 2. Safe column/enum migrations (idempotent — no-ops if already applied)
-    from app.auto_migrate import run_auto_migrations
-    run_auto_migrations(engine)
+    #
+    # ══ THIS IS NOW THE BACKSTOP, NOT THE MIGRATION STRATEGY ══════════════
+    #
+    # `python -m app.migrate` runs as the service's preDeployCommand and owns
+    # schema changes: it preflights, migrates, and fails the DEPLOY if the
+    # database cannot take the change — before this process exists and before
+    # the healthy old instance is retired. By the time startup gets here the
+    # work is normally already done and every statement below is a no-op.
+    #
+    # It still runs, on purpose, for the environments that have no pre-deploy
+    # step: local development, the test suite, and any service started without
+    # one. Removing it would make a missing preDeployCommand fail silently as
+    # a missing column hours later.
+    #
+    # SKIP_STARTUP_MIGRATIONS exists for processes that must never migrate —
+    # `advisorflow-voice` runs this same ASGI app and has no business changing
+    # the schema. It defaults to OFF so a service that is not configured keeps
+    # today's behaviour rather than quietly skipping migrations it needed.
+    import logging as _logging
+    import os as _os
+    from app.auto_migrate import RequiredSchemaMissing, run_auto_migrations
+    if _os.environ.get("SKIP_STARTUP_MIGRATIONS", "").strip().lower() in (
+            "1", "true", "yes"):
+        _logging.getLogger(__name__).info(
+            "SKIP_STARTUP_MIGRATIONS is set — this process will not change the "
+            "schema. The pre-deploy migration step owns it.")
+    else:
+        try:
+            run_auto_migrations(engine)
+        except RequiredSchemaMissing as _schema_error:
+            # DIE, IMMEDIATELY AND VISIBLY. A column missing from `users` or
+            # `organizations` means every authenticated request 500s while
+            # /health cheerfully reports "ok" — the process is running, after
+            # all. Refusing to start is the only honest answer, and it puts
+            # the reason in the deploy log instead of in a customer's face.
+            #
+            # Raising also stops the pile-up: a process that exits cannot sit
+            # in "Waiting for application startup" adding another lock waiter
+            # for every retry.
+            _logging.getLogger(__name__).critical("%s", _schema_error)
+            raise
 
     # 2a-pre. CRM CONNECTION SECRETS — encrypt any plaintext api_key_encrypted /
     #         webhook_secret rows left over from before crm_secrets.py existed.

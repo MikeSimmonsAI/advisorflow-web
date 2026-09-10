@@ -39,6 +39,8 @@ a different code path.
 """
 
 import time as _time
+from datetime import datetime as _datetime
+from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -56,6 +58,69 @@ _COLUMN_ADD_RETRY_SECONDS = 1.0
 # 55P03 lock_not_available is what `lock_timeout` raises, and 40P01
 # deadlock_detected resolves the moment the other party finishes.
 _RETRYABLE_SQLSTATES = {"55P03", "40P01"}
+
+# ── WHICH MISSING COLUMNS ARE WORTH REFUSING TO START OVER ──────────────────
+# Item 3 of the hardening brief asks whether the app can safely continue
+# without a column that could not be added. The honest answer differs by
+# table, and the difference is REACHABILITY.
+#
+# A missing column on `billing_payments` breaks the billing screen. Bad, but
+# the other ninety per cent of the product still works, the log says exactly
+# what is missing, and the next boot fixes it. Starting is better than not.
+#
+# A missing column on `users`, `organizations` or `platforms` is different:
+# every authenticated request loads a user and resolves a tenant, so the app
+# would answer 500 to essentially everything while reporting itself healthy.
+# Serving a platform that cannot authenticate anyone is worse than not
+# starting, and — this is the part that matters — it is worse than saying so.
+#
+# So: core tables fail fast and loudly; everything else degrades and reports.
+# This is deliberately a SMALL set. Making it large would rebuild the outage
+# it exists to prevent, because then any contended table stops the platform.
+CORE_TABLES = frozenset({"users", "organizations", "platforms"})
+
+# The outcome of the last run, for the God diagnostic to read. A plain dict
+# rather than a table: this has to be readable even when the database is the
+# thing that is unwell.
+LAST_RUN: Dict[str, Any] = {
+    "ran_at": None, "elapsed_seconds": None, "columns_checked": 0,
+    "skipped": [], "missing_required": [], "missing_optional": [],
+    "outcome": "never_run",
+}
+
+
+class RequiredSchemaMissing(RuntimeError):
+    """A column on a core table could not be added, so the app must not serve.
+
+    Raised out of `run_auto_migrations` and deliberately NOT caught by the
+    startup handler: an unhandled exception there kills the process quickly
+    and visibly, which is exactly the behaviour wanted. Catching it would
+    reproduce the failure this whole change exists to remove — a process that
+    is technically alive and cannot do its job.
+    """
+
+    def __init__(self, columns):
+        self.columns = list(columns)
+        super().__init__(
+            "Required schema is missing and the application will not start: %s. "
+            "These columns are on core tables (%s), so every authenticated "
+            "request would fail. The usual cause is a lock held by a "
+            "long-lived transaction — check for idle-in-transaction sessions, "
+            "resolve them deliberately, and redeploy."
+            % (", ".join(self.columns), ", ".join(sorted(CORE_TABLES))))
+
+
+def _safe_error(exc) -> str:
+    """A one-line error summary with no room for a connection string.
+
+    SQLAlchemy's `str(e)` includes the statement and can include connection
+    details. Only the driver's own short message and SQLSTATE are reported.
+    """
+    code = getattr(getattr(exc, "orig", None), "pgcode", None)
+    orig = getattr(exc, "orig", None)
+    msg = str(orig) if orig is not None else str(exc)
+    msg = " ".join(msg.split())[:160]
+    return "%s%s" % (("[%s] " % code) if code else "", msg)
 
 
 def _is_lock_contention(exc) -> bool:
@@ -80,8 +145,11 @@ def _is_lock_contention(exc) -> bool:
         # rather than falling through to matching on message text.
         return False
     text_ = str(exc).lower()
+    # "database is locked" is SQLite's version of the same condition, and it
+    # is genuinely transient — the other writer commits and the lock clears.
     return "lock timeout" in text_ or "could not obtain lock" in text_ \
-        or "deadlock detected" in text_
+        or "deadlock detected" in text_ or "database is locked" in text_ \
+        or "database table is locked" in text_
 
 # (table, column, full column definition) - every column ever added to
 # an EXISTING table that create_all() would never retroactively add to
@@ -1082,6 +1150,7 @@ def run_auto_migrations(engine) -> None:
     every statement is a no-op if already applied.
     """
     is_sqlite = str(engine.url).startswith("sqlite")
+    _started = _time.monotonic()
 
     with engine.connect() as conn:
         # Create any new whole tables first (before column adds, since COLUMNS_TO_ADD
@@ -1181,26 +1250,63 @@ def run_auto_migrations(engine) -> None:
         # loop, because "the statement raised" and "the column is missing"
         # are not the same thing: a table that does not exist yet raises here
         # and is not a problem at all.
-        if skipped and not is_sqlite:
-            still_missing = []
+        missing_required: List[str] = []
+        missing_optional: List[str] = []
+        if skipped:
+            # BOTH BACKENDS, DELIBERATELY. This check used to be Postgres-only,
+            # which meant the one guard that decides whether the app may serve
+            # was the one thing that could never be exercised outside
+            # production. A safety net nobody can test is a safety net nobody
+            # should trust.
             for table, column, _e in skipped:
                 try:
-                    present = conn.execute(text(
-                        "SELECT 1 FROM information_schema.columns "
-                        "WHERE table_name = :t AND column_name = :c"
-                    ), {"t": table, "c": column}).scalar()
-                    if not present:
-                        still_missing.append(f"{table}.{column}")
+                    if is_sqlite:
+                        cols = conn.execute(
+                            text("PRAGMA table_info(%s)" % table)).fetchall()
+                        # AN ABSENT TABLE IS NOT AN ABSENT COLUMN, and PRAGMA
+                        # does not distinguish them: it returns zero rows for
+                        # both. Without this check every column of every table
+                        # that does not exist yet — which on a fresh database
+                        # is all of them — was reported as missing, and three
+                        # of those tables are core, so a first boot would
+                        # refuse to start. Caught by these tests, not by
+                        # production, which is the point of testing the guard.
+                        table_exists = bool(cols)
+                        present = any(r[1] == column for r in cols)
+                    else:
+                        table_exists = bool(conn.execute(text(
+                            "SELECT 1 FROM information_schema.tables "
+                            "WHERE table_name = :t"), {"t": table}).scalar())
+                        present = bool(conn.execute(text(
+                            "SELECT 1 FROM information_schema.columns "
+                            "WHERE table_name = :t AND column_name = :c"
+                        ), {"t": table, "c": column}).scalar())
+                    if table_exists and not present:
+                        (missing_required if table in CORE_TABLES
+                         else missing_optional).append("%s.%s" % (table, column))
                 except (OperationalError, ProgrammingError):
+                    # Could not ask. Not a missing column as far as anyone
+                    # here can tell, and not worth refusing to start over.
                     conn.rollback()
-            if still_missing:
-                print("[auto_migrate] !! DEGRADED - %d column(s) could not be "
-                      "added and are still missing: %s"
-                      % (len(still_missing), ", ".join(still_missing)))
-                print("[auto_migrate] !! The service is UP. Queries touching "
-                      "those columns will fail until the next boot applies "
-                      "them. Check for a long-lived transaction holding a "
-                      "lock on the affected table(s).")
+
+            # ONE LINE PER FAILURE, NAMING THE STATEMENT AND WHY. The outage
+            # was diagnosed from `pg_stat_activity`, not from these logs,
+            # because these logs said nothing. Each line now carries the
+            # table, the column and the lock condition — never the error's
+            # full text, which can echo a connection string.
+            for table, column, err in skipped:
+                print("[auto_migrate] LOCK/ERROR on ALTER TABLE %s ADD COLUMN "
+                      "%s — %s (contention=%s)"
+                      % (table, column, _safe_error(err),
+                         _is_lock_contention(err)))
+            if missing_optional:
+                print("[auto_migrate] !! DEGRADED - %d non-core column(s) still "
+                      "missing: %s" % (len(missing_optional),
+                                       ", ".join(missing_optional)))
+                print("[auto_migrate] !! The service is STARTING ANYWAY. "
+                      "Queries touching those columns will fail until a later "
+                      "boot applies them. Check for a long-lived transaction "
+                      "holding a lock on the affected table(s).")
 
         if not is_sqlite:
             # Relax NOT NULL where the data model no longer requires it.
@@ -1305,7 +1411,37 @@ def run_auto_migrations(engine) -> None:
                 conn.rollback()
                 print(f"[auto_migrate] Index skipped: {e}")
 
-    print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values, {len(INDEXES_TO_CREATE)} indexes checked).")
+    _elapsed = round(_time.monotonic() - _started, 2)
+    print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values, {len(INDEXES_TO_CREATE)} indexes checked) in {_elapsed}s.")
+
+    # ══ THE OUTCOME IS RECORDED, AND SOMETIMES FATAL ═════════════════════
+    #
+    # ELAPSED TIME IS LOGGED because "did the migration step take four
+    # seconds or four minutes" was the single most useful number during the
+    # outage and nothing was recording it.
+    LAST_RUN.update({
+        "ran_at": _datetime.utcnow().isoformat() + "Z",
+        "elapsed_seconds": _elapsed,
+        "columns_checked": len(COLUMNS_TO_ADD),
+        "skipped": ["%s.%s" % (t, c) for t, c, _e in skipped],
+        "missing_required": missing_required,
+        "missing_optional": missing_optional,
+        "outcome": ("failed_required" if missing_required
+                    else "degraded" if missing_optional else "ok"),
+    })
+
+    if missing_required:
+        # FAIL FAST, LOUDLY, AND WITHOUT WAITING. A platform whose `users` or
+        # `organizations` table is missing a column the ORM selects answers
+        # 500 to every authenticated request — while its health endpoint says
+        # "ok", because the process is running. Refusing to start is the only
+        # honest outcome, and it is also the one that shows up in the deploy
+        # log instead of in a customer's face.
+        #
+        # This raises rather than looping or sleeping: no endless "Waiting for
+        # application startup", no queue of boots each adding another lock
+        # waiter to the pile.
+        raise RequiredSchemaMissing(missing_required)
 
     # ── Platform seed ─────────────────────────────────────────────────────────
     # Idempotent: ON CONFLICT (slug) DO NOTHING — safe to run on every boot.
