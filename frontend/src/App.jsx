@@ -158,6 +158,8 @@ import GodVoiceConfig from './pages/god/GodVoiceConfig'
 import GodRevenueHistory from './pages/god/GodRevenueHistory'
 import RoadmapBoard from './pages/god/RoadmapBoard'
 import GodLaunches from './pages/god/GodLaunches'
+import HelpSupport from './pages/HelpSupport'
+import GodSupport from './pages/god/GodSupport'
 import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
 // place. Registered BEFORE the /god/* catch-all below, or it would silently
@@ -813,6 +815,11 @@ export default function App() {
         <Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
         <Route path="/audit-log" element={<ProtectedRoute requireAdmin><AuditLog /></ProtectedRoute>} />
         <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
+        {/* Help & Support. Deliberately NOT behind requireAdmin or a feature
+            gate: the person who notices the product is broken is whoever was
+            using it, and a customer whose plan is missing a flag must still
+            be able to tell us. */}
+        <Route path="/help" element={<ProtectedRoute><HelpSupport /></ProtectedRoute>} />
         <Route path="/lead-cleanup" element={<ProtectedRoute requireAdmin><LeadCleanup /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute requireAdmin><Templates /></ProtectedRoute>} />
@@ -1003,6 +1010,9 @@ export default function App() {
         <Route path="/god/access/:userId"        element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
         <Route path="/god/demo-suite"            element={<GodRoute><GodModeLayout><GodDemoSuite /></GodModeLayout></GodRoute>} />
         <Route path="/god/training"              element={<GodRoute><GodModeLayout><GodTraining /></GodModeLayout></GodRoute>} />
+        {/* Support Intelligence. MUST stay above the /god/* catch-all below,
+            or it silently renders the Command Center instead. */}
+        <Route path="/god/support"               element={<GodRoute><GodModeLayout><GodSupport /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

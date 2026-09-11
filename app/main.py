@@ -146,6 +146,11 @@ from app.routers import qualification_router  # noqa: E402
 from app.routers.executive_router import router as executive_router
 # Executive Workspace — deal-room content for customer organizations.
 from app.routers.exec_workspace_router import router as exec_workspace_router
+# Support Intelligence — the customer's Help & Support surface and the God
+# support command centre. Both consume the SAME engine (diagnostics, fixer,
+# ticketing, SLA, correlation); the brand supplies only the name on the front.
+from app.routers.support_router import router as support_router
+from app.routers.god_support_router import router as god_support_router
 # Mobile device support: push registration and the upload capability probe.
 # Additive only — it adds routes under /me and changes none.
 from app.routers.device_router import router as device_router
@@ -682,12 +687,79 @@ app.include_router(qualification_router.router)
 # guards everything else. No tenant data; no cross-brand visibility.
 app.include_router(executive_router)
 app.include_router(exec_workspace_router)
+# Support Intelligence.
+#
+# TWO ROUTERS, TWO AUTHORITIES, ONE ENGINE.
+#
+# `support_router` (/support) is the CUSTOMER surface: Ask [Brand], tickets,
+# system status, help centre, support plan. Every route answers for the
+# caller's own organization and none of them accepts an organization id, so
+# the tenant boundary is a property of the signatures rather than of a filter
+# each route remembers.
+#
+# `god_support_router` (/god/support) EXTENDS GOD MODE — it is not a second
+# root. Its two guards come from the existing capability system: a
+# brand-scoped support operator runs a queue, and god_admin alone changes
+# platform configuration or approves a remediation.
+#
+# Deliberately NOT behind require_feature(): a customer whose plan does not
+# include a feature flag must still be able to tell us the product is broken.
+# Support entitlement is answered per package inside the router, which is a
+# different question from whether a route may be reached at all.
+app.include_router(support_router)
+app.include_router(god_support_router)
 # Mobile device support (/me/devices, /me/uploads). Registered last, so its
 # routes cannot shadow anything and its absence cannot break anything.
 app.include_router(device_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
+
+async def _support_intelligence_loop():
+    """Support Intelligence's own pass. Runs every 6 hours.
+
+    WHY NOT ONCE A DAY, FOR A "DAILY" BRIEF. Three of the four things this
+    does are not daily work at all: refreshing cached SLA states keeps the
+    "at risk" filter honest, correlation is how a cross-brand outage gets
+    noticed EARLY, and the candidate scan feeds the same screen. Only the
+    brief itself is per-day, and regenerating it is idempotent by (date,
+    platform) — a brief written at 06:00 and again at 18:00 describes the
+    whole day rather than leaving two contradictory rows.
+
+    So the cadence is set by the fastest thing in the list, not the slowest.
+    Waiting until midnight to notice that eleven organizations lost calendar
+    sync at nine in the morning is not intelligence.
+
+    Failures are logged and the loop continues, exactly like every other loop
+    here: a support brief that did not generate must never take the web
+    process down with it.
+    """
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("support_intelligence")
+    await asyncio.sleep(180)  # let the app settle before the first heavy pass
+    while True:
+        try:
+            async with record_job_run(JobName.SUPPORT_INTELLIGENCE,
+                                      db_factory=SessionLocal) as _m:
+                from app.services import support_brief
+                db = SessionLocal()
+                try:
+                    result = support_brief.run_daily_intelligence(db)
+                    _m["briefs"] = len(result.get("briefs", []))
+                    _m["incidents_opened"] = len(
+                        (result.get("correlation") or {}).get("incidents_opened", []))
+                    _m["candidates"] = len(
+                        (result.get("learning") or {}).get("candidates", []))
+                finally:
+                    db.close()
+        except Exception as exc:                               # noqa: BLE001
+            _logger.warning("support_intelligence loop error: %s", exc,
+                            exc_info=True)
+        await asyncio.sleep(6 * 3600)
+
 
 async def _review_request_loop():
     """Send Google review request SMS after appointments end. Runs every 30 min."""
@@ -1148,6 +1220,7 @@ async def on_startup():
     asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
     asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
     asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
+    asyncio.create_task(_support_intelligence_loop())  # support brief — every 6 hr
 
 
 def _build_metadata() -> dict:

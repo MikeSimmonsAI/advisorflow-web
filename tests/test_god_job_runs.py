@@ -396,8 +396,17 @@ class TestGodJobRunsEndpoints:
             app.dependency_overrides.clear()
 
     def test_latest_all_healthy_true(self, engine, db_session):
-        # All three have success as latest
-        for name in [JobName.CADENCE_LOOP, JobName.AI_CONVERSATION, JobName.REVIEW_REQUEST]:
+        # EVERY LOOP THE LEDGER KNOWS ABOUT, not a hand-written three.
+        #
+        # This used to name the three loops that existed when it was written,
+        # so adding a fourth (support_intelligence_loop) made "all healthy"
+        # false while the test still claimed to be seeding all of them. That
+        # is the right ANSWER from the endpoint — a loop that has never run is
+        # not healthy — and the wrong fixture. Reading LOOP_JOB_NAMES means
+        # the next loop added is covered here automatically, which is the
+        # whole reason those constants exist.
+        from app.models.job_models import LOOP_JOB_NAMES
+        for name in LOOP_JOB_NAMES:
             db_session.add(JobRun(
                 job_name=name,
                 started_at=datetime.now(timezone.utc),

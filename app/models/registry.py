@@ -130,6 +130,17 @@ import app.models.billing_models  # noqa: F401  (imported for side effects)
 # Same Base, same reason. Without this import those three tables are never created
 # and every workspace endpoint fails with a missing-table error on first use.
 import app.models.exec_workspace_models  # noqa: F401  (imported for side effects)
+# Support Intelligence (support_tickets / _messages / _events / _attachments,
+# support_conversations / _turns, support_diagnostic_runs, support_fix_runs,
+# support_fix_policies, support_issue_signatures, support_incidents / _links,
+# support_entitlement_configs, support_brand_settings, support_service_offerings,
+# support_assistance_entries, support_knowledge_articles / _candidates,
+# support_daily_briefs). Same Base, same reason, and this module is the ONLY
+# owner of those tables - none of them appear in auto_migrate's
+# TABLES_TO_CREATE, because two owners is how crm_contacts drifted. Dropping
+# this line makes every support table silently never appear, which the support
+# product would report as "no tickets" rather than as an error.
+import app.models.support_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -288,3 +299,8 @@ import app.models.demo_suite_models  # noqa: F401  (imported for side effects)
 # and is exactly the quiet wrong answer the qualification_rules comment above
 # records. Do not remove this line.
 import app.models.training_models  # noqa: F401  (imported for side effects)
+# Support Intelligence — the SECOND copy of this line, and it has to be here.
+# This file contains the whole module twice (a merge artifact recorded in the
+# launch_intake_models comment above); an import added to only one copy looks
+# correct in a diff and half-works. Same tables, same reason as the first copy.
+import app.models.support_models  # noqa: F401  (imported for side effects)

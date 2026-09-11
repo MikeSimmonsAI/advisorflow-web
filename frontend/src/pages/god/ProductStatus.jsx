@@ -45,6 +45,12 @@ export const MODULES = [
   // misleading as a nav item that claims something works when it does not —
   // it is the same lie pointing the other way.
   { key: 'billing',   label: 'Billing & Revenue', live: true, to: '/god/billing',         group: 'PLATFORM' },
+  // Support Intelligence. live:true because /god/support is a registered
+  // route backed by real endpoints — the queue, the repair registry, the
+  // incident correlation and the daily brief all read and write. The same
+  // rule the comment above states: a board that omits a shipped capability
+  // is the same lie as one that claims an unshipped one.
+  { key: 'support',   label: 'Support',           live: true, to: '/god/support',         group: 'PLATFORM' },
 
   // GOD-04: roadmap items (live: false) removed from this list.
   // platformRoadmap.json is the authoritative source for feature status.
