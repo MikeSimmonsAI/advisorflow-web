@@ -8,10 +8,29 @@
  *
  * Search and notifications are prototype furniture: present so the finished
  * shape can be judged, inert because there is nothing to search or notify.
+ *
+ * ===========================================================================
+ * THERE IS NOT ALWAYS A PERSON
+ * ===========================================================================
+ *
+ * This read `customer.user.name` unconditionally, and `customer.user` is NULL
+ * on every internal preview — deliberately so, because the preview must not
+ * paint the OPERATOR's name and initials into the customer's own avatar. The
+ * result was a TypeError during render, which unmounted the entire React tree
+ * and left the page completely blank: no header, no banner, no error, just the
+ * background colour. A real customer's onboarding could not be previewed at
+ * all, and the failure said nothing about itself.
+ *
+ * So the person block renders only when there IS a person. When there is not,
+ * the bar names the ORGANIZATION and says plainly that nobody is signed in,
+ * rather than inventing a plausible-looking name to fill the space — a fake
+ * identity in the customer's own header is exactly what the preview exists to
+ * avoid.
  */
 import { Mark, Ico } from './LaunchUI'
 
-export default function LaunchHeader({ brand, customer }) {
+export default function LaunchHeader({ brand, customer, preview = false }) {
+  const person = (customer && customer.user) || null
   return (
     <header className="lp-top">
       <button type="button" className="lp-eco" disabled>
@@ -37,10 +56,18 @@ export default function LaunchHeader({ brand, customer }) {
 
       <div className="lp-user">
         <div className="lp-un">
-          <b>{customer.user.name}</b>
-          <span>{customer.name}</span>
+          <b>{person ? person.name : (customer ? customer.name : '')}</b>
+          <span>
+            {person ? customer.name
+              : preview ? 'Nobody is signed in — preview'
+                : 'Not signed in'}
+          </span>
         </div>
-        <div className="lp-avatar" aria-hidden="true">{customer.user.initials}</div>
+        {/* The customer's own mark when there is no person, never an invented
+            set of initials for somebody who is not here. */}
+        <div className="lp-avatar" aria-hidden="true">
+          {person ? person.initials : ((customer && customer.short) || '—')}
+        </div>
       </div>
     </header>
   )

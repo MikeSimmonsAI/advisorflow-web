@@ -338,7 +338,7 @@ export default function LaunchPad() {
           onToggle={() => setRailOpen(o => !o)} onSelect={() => setRailOpen(false)} />
 
         <div className="lp-body">
-          <LaunchHeader brand={brand} customer={customer} />
+          <LaunchHeader brand={brand} customer={customer} preview={preview} />
 
           {/* WHAT HAPPENS NEXT, not just that something happened. A locked
               form with no explanation reads as a bug; a locked form that says

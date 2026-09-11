@@ -21,6 +21,7 @@ import PortalViewer from './pages/portal/PortalViewer'
 // behaviour anywhere. Whether Stage 2 puts an invitation token in front of it
 // is a Stage 2 decision and nothing here presumes an answer.
 import LaunchPad from './pages/launch/LaunchPad'
+import LaunchBoundary from './pages/launch/LaunchBoundary'
 // CUSTOM COMMERCIAL AGREEMENTS. Two screens, two payloads, and deliberately
 // not one screen with a permission flag: `/commercial` renders the customer's
 // own plain-language view of their arrangement, and the console renders the
@@ -802,11 +803,19 @@ export default function App() {
             either, because the implementation staff who actually run these
             launches are brand staff. */}
         <Route path="/launch/preview/:organizationId"
-               element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
+               element={<LaunchRoute><LaunchBoundary
+                   backTo="/god/launches" backLabel="Back to Customer Launches"
+                   title="This preview could not be displayed"
+                   detail="The customer's onboarding loaded but could not finish drawing. Nothing was changed, saved or sent, and the customer was not contacted."
+                 ><LaunchPad /></LaunchBoundary></LaunchRoute>} />
         <Route path="/launch/preview/:organizationId/:stepKey"
-               element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
-        <Route path="/launch" element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
-        <Route path="/launch/:stepKey" element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
+               element={<LaunchRoute><LaunchBoundary
+                   backTo="/god/launches" backLabel="Back to Customer Launches"
+                   title="This preview could not be displayed"
+                   detail="The customer's onboarding loaded but could not finish drawing. Nothing was changed, saved or sent, and the customer was not contacted."
+                 ><LaunchPad /></LaunchBoundary></LaunchRoute>} />
+        <Route path="/launch" element={<LaunchRoute><LaunchBoundary><LaunchPad /></LaunchBoundary></LaunchRoute>} />
+        <Route path="/launch/:stepKey" element={<LaunchRoute><LaunchBoundary><LaunchPad /></LaunchBoundary></LaunchRoute>} />
         {/* The family's booking and feedback pages, on the customer's own
             branded host. These are the routes the public-identity resolver
             has been emitting; they reuse the existing booking/survey

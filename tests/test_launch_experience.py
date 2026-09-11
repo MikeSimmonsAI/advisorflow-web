@@ -423,6 +423,34 @@ class TestPreviewChangesNothing:
                           headers=_h(db_session, world["god"])).json()
         assert world["god"].email not in _blob(body.get("customer") or {})
 
+    def test_there_is_no_person_in_a_preview_and_the_payload_says_so(
+            self, client, db_session, world):
+        """THE CONTRACT THE BLANK PAGE BROKE.
+
+        `customer.user` is NULL in a preview, deliberately — the operator is
+        not the customer and must not appear in their avatar. The shell read
+        `customer.user.name` unconditionally, threw during render, and React
+        unmounted the whole tree: the page became the background colour and
+        nothing else. This pins the null so the contract is explicit rather
+        than incidental.
+        """
+        body = client.get("/launch-experience/preview/" + world["energy"].id,
+                          headers=_h(db_session, world["god"])).json()
+        assert "user" in body["customer"]
+        assert body["customer"]["user"] is None
+        # The organization is still named — a preview identifies the customer,
+        # it just does not invent a person.
+        assert body["customer"]["name"] == "Northwind Utility"
+        assert body["customer"]["short"]
+
+    def test_the_customers_own_page_does_have_a_person(self, client,
+                                                       db_session, world):
+        """The other half: null is the PREVIEW's answer, not everyone's."""
+        body = client.get("/launch-experience/me",
+                          headers=_h(db_session, world["customer"])).json()
+        assert body["customer"]["user"] is not None
+        assert body["customer"]["user"]["name"]
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. WHO MAY PREVIEW, AND WHOSE
@@ -627,6 +655,7 @@ APPROVED_SHELL_PARTS = [
     "LaunchHero.jsx", "LaunchSidebar.jsx", "LaunchHeader.jsx",
     "LaunchProgress.jsx", "OnboardingProgressPanel.jsx",
     "OnboardingStepShell.jsx", "LaunchFooter.jsx", "PreviewBanner.jsx",
+    "LaunchBoundary.jsx",
 ]
 FRONTEND = (pathlib.Path(__file__).resolve().parents[1]
             / "frontend" / "src" / "pages" / "launch")
@@ -669,6 +698,52 @@ class TestTheApprovedDesign:
                      "OnboardingProgressPanel.jsx", "LaunchFooter.jsx"):
             src = (FRONTEND / name).read_text(encoding="utf-8")
             assert "presentation" in src, name
+
+    def test_nothing_dereferences_the_signed_in_person_unguarded(self):
+        """THE BLANK PAGE, AS A RULE INSTEAD OF A MEMORY.
+
+        `customer.user` is null on every preview. One unguarded
+        `customer.user.name` threw during render and blanked the entire page.
+        Any component that reaches through `.user` without a guard reintroduces
+        exactly that failure, so none may.
+        """
+        offenders = []
+        for path in sorted(FRONTEND.rglob("*.jsx")):
+            src = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"customer\.user\.", src):
+                line_start = src.rfind("\n", 0, m.start()) + 1
+                line = src[line_start:src.find("\n", m.start())]
+                stripped = line.strip()
+                # Prose ABOUT the bug is not the bug. The comments in
+                # LaunchHeader and LaunchBoundary quote the offending
+                # expression on purpose, so that the next reader knows what
+                # went wrong; only real code counts.
+                if stripped.startswith(("*", "//", "/*")):
+                    continue
+                # `person ? person.name : …` and `customer.user?.x` are guarded;
+                # a bare `customer.user.x` is not.
+                if "?." not in line and "customer.user &&" not in line:
+                    offenders.append("%s: %s" % (path.name, stripped))
+        assert offenders == [], offenders
+
+    def test_a_launch_screen_can_never_fail_as_a_blank_page(self):
+        """FAIL VISIBLE. A render that throws must produce an error card with a
+        retry and a way back — never the background colour and nothing else."""
+        assert (FRONTEND / "LaunchBoundary.jsx").exists()
+        boundary = (FRONTEND / "LaunchBoundary.jsx").read_text(encoding="utf-8")
+        # A real error boundary, not a component that merely looks like one.
+        assert "getDerivedStateFromError" in boundary
+        assert "componentDidCatch" in boundary
+        assert "Try again" in boundary
+        # And it must not print the error itself onto a customer-facing page.
+        assert "this.state.error" not in boundary
+
+        app = (FRONTEND.parents[1] / "App.jsx").read_text(encoding="utf-8")
+        # Every launch route is wrapped, the preview ones included.
+        for route in ('path="/launch"', 'path="/launch/:stepKey"',
+                      'path="/launch/preview/:organizationId"'):
+            idx = app.index(route)
+            assert "LaunchBoundary" in app[idx:idx + 600], route
 
     def test_the_preview_turns_every_write_off(self):
         """Read the component, because this is the property a future edit is
