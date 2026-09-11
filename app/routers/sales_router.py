@@ -38,7 +38,7 @@ from app.models.sales_models import (
     STAGE_PROSPECT, STAGE_CONTACTED, STAGE_DISCOVERY, STAGE_DEMO_BUILD,
     STAGE_PROPOSAL, STAGE_CLOSING, STAGE_WON, STAGE_ONBOARDING, STAGE_LIVE,
     STAGE_LOST, DEMO_REQUESTED, DEMO_READY, DEMO_IN_PROGRESS, DEMO_DELIVERED,
-    DEMO_NOT_REQUESTED,
+    DEMO_NOT_REQUESTED, demo_is_outstanding,
 )
 from app.models.scheduling_models import (
     SalesAppointment, AppointmentParticipant, MeetingType,
@@ -782,9 +782,10 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     needs_action = [o for o in open_opps if _attention(o)]
     needs_action.sort(key=lambda o: (o.next_action_due_at or datetime.max))
 
-    demos_to_build = [o for o in open_opps
-                      if o.stage == STAGE_DEMO_BUILD
-                      or o.demo_status in (DEMO_REQUESTED, "in_progress")]
+    # THE shared rule, not a copy of it — see `demo_is_outstanding`. This line
+    # and the manager rollup's used to be two hand-written predicates and they
+    # disagreed on screen.
+    demos_to_build = [o for o in open_opps if demo_is_outstanding(o)]
     demos_to_build.sort(key=lambda o: (o.demo_due_at or datetime.max))
 
     month_start = datetime(now.year, now.month, 1)
@@ -1621,7 +1622,9 @@ def reassign(opp_id: str, body: ReassignRequest,
 # for this list in `my-day` — target date, soonest first — and `_attention`
 # supplies the one reason a job is shouting, exactly as it does on every card.
 
-DEMO_QUEUE_STATUSES = (DEMO_REQUESTED, DEMO_IN_PROGRESS)
+# The membership rule lives in the model as `demo_is_outstanding`, so the
+# queue, My Day and the manager rollup all ask the same question. There is
+# deliberately no local copy of it here.
 
 _DEMO_STATUS_LABELS = {
     DEMO_NOT_REQUESTED: "Not requested",
@@ -1702,9 +1705,7 @@ def demo_queue(brand_sales_org_id: Optional[str] = Query(None),
     # already did its job.
     opps = base.filter(Opportunity.status == "open").all()
 
-    outstanding = [o for o in opps
-                   if o.stage == STAGE_DEMO_BUILD
-                   or (o.demo_status in DEMO_QUEUE_STATUSES)]
+    outstanding = [o for o in opps if demo_is_outstanding(o)]
     outstanding_ids = {o.id for o in outstanding}
     done = [o for o in opps
             if o.id not in outstanding_ids

@@ -134,8 +134,8 @@ export default function DemoQueue() {
       </div>
 
       {(s.by_builder || []).length ? (
-        <Card title="WHO IS CARRYING WHAT"
-              sub="The same split as Demos / Proposals, from these rows rather than a second count"
+        <Card title="WHO IS BUILDING WHAT"
+              sub="By builder, from these rows. Salespeople counts the same work by sales owner, which is a different question."
               bodyless>
           <div className="sw-card-b">
             <div className="sw-pnums"

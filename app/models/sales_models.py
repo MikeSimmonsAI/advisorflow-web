@@ -273,6 +273,40 @@ DEMO_DELIVERED     = "delivered"
 DEMO_STATUSES = (DEMO_NOT_REQUESTED, DEMO_REQUESTED, DEMO_IN_PROGRESS,
                  DEMO_READY, DEMO_DELIVERED)
 
+# Statuses that mean a demo is still owed to somebody.
+DEMO_OUTSTANDING_STATUSES = (DEMO_REQUESTED, DEMO_IN_PROGRESS)
+
+
+def demo_is_outstanding(opp) -> bool:
+    """Is a demo still owed on this deal? THE one answer to that question.
+
+    WHY THIS IS A FUNCTION AND NOT A LINE IN TWO FILES.
+    ---------------------------------------------------
+    It was a line in two files, and they disagreed. `my-day` counted "stage is
+    Demo Build OR the demo is requested/in progress"; the manager rollup
+    counted "stage is Demo Build" alone. In production that put 3 on one screen
+    and 2 on another, both labelled "Demos to build", both correct by their own
+    rule and both visible to the same manager on the same afternoon. The deal
+    between them was a demo requested while the deal was still at Prospect —
+    which is an ordinary thing for a seller to do and not a reason to be
+    invisible to the person staffing the work.
+
+    Stage alone is not enough because a demo can be asked for before the deal
+    moves; status alone is not enough because a deal moved to Demo Build before
+    `demo_status` existed carries no status at all. So it is both, and it is
+    here, where every caller can reach it, rather than copied.
+
+    Takes the opportunity rather than the columns so a caller cannot supply
+    half of it. Reads only the row's own fields — no session, no query.
+    """
+    if getattr(opp, "status", None) in ("won", "lost"):
+        # A demo on a closed deal is not outstanding work: a won deal's demo
+        # did its job, and a lost deal's will never be built.
+        return False
+    if getattr(opp, "stage", None) == STAGE_DEMO_BUILD:
+        return True
+    return getattr(opp, "demo_status", None) in DEMO_OUTSTANDING_STATUSES
+
 
 class Opportunity(Base):
     """One continuous commercial record: prospect → discovery → demo → won →

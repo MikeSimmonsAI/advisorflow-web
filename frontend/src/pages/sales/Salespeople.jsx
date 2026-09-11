@@ -177,7 +177,14 @@ export default function Salespeople() {
                 <Info label="Pipeline" value={money(p.pipeline_value || 0)} />
                 <Info label="Today" value={p.meetings_today ?? 0} />
                 <Info label="Overdue" value={p.overdue_actions ?? 0} />
-                <Info label="Demos" value={p.demos_to_build ?? 0} />
+                {/* SAID PRECISELY, because a different screen shows the same
+                    work split a different way. This is demos outstanding on
+                    THEIR DEALS — a rep rollup is by sales owner. Demos to
+                    Build splits the identical work by BUILDER, which is
+                    routinely a different person. Same rule, two questions,
+                    and neither labelled so it could be mistaken for the
+                    other. */}
+                <Info label="Demos on their deals" value={p.demos_to_build ?? 0} />
                 <Info label="To send" value={p.proposals_awaiting_send ?? 0} />
               </div>
 

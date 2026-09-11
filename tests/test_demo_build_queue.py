@@ -503,3 +503,99 @@ class TestTheHandoffReadsOnce:
         row = next(h for h in body["discovery"]["handoff"]
                    if h["key"] == "lead_sources")
         assert "buy lists twice a year" in (row["value"] or "")
+
+
+class TestOneRuleEverywhere:
+    """Three surfaces said "Demos to build" and two of them meant it differently.
+
+    `/sales/my-day` and `/sales/demo-queue` counted "stage is Demo Build OR the
+    demo is requested / in progress". The manager rollup behind
+    `/sales/proposals` and `/sales/salespeople` counted stage alone. In
+    production that was 3 on one screen and 2 on another, in the same minute,
+    to the same manager. The deal between them was a demo requested before the
+    deal left Prospect — an ordinary thing for a seller to do.
+    """
+
+    def _requested_at_prospect(self, db, brand, owner):
+        """The exact shape that used to be counted by one surface and not the
+        other: demo requested, deal still at Prospect."""
+        o = _opp(db, brand, owner, company="Asked Early Co", stage=STAGE_PROSPECT)
+        o.demo_status = DEMO_REQUESTED
+        db.commit()
+        return o
+
+    def test_a_demo_requested_before_the_stage_moved_counts_everywhere(
+            self, client, db_session, brand, manager, rep):
+        in_stage = _opp(db_session, brand, rep, company="In Stage Co",
+                        stage=STAGE_DISCOVERY)
+        _request_demo(client, db_session, rep, in_stage)
+        self._requested_at_prospect(db_session, brand, rep)
+
+        h = _h(manager, db_session)
+        queue = client.get("/sales/demo-queue?brand_sales_org_id=" + brand.id,
+                           headers=h).json()
+        day = client.get("/sales/my-day?brand_sales_org_id=" + brand.id,
+                         headers=h).json()
+        overview = client.get("/sales/manager/overview?brand_sales_org_id=" + brand.id,
+                              headers=h).json()
+        rollup = sum(r.get("demos_to_build") or 0 for r in overview["reps"])
+
+        assert queue["summary"]["total"] == 2
+        assert day["metrics"]["demos_to_build"] == 2
+        assert rollup == 2, (
+            "the manager rollup disagrees with the queue: %s vs %s"
+            % (rollup, queue["summary"]["total"]))
+
+    def test_the_three_surfaces_agree_on_an_empty_brand(
+            self, client, db_session, brand, manager, rep):
+        _opp(db_session, brand, rep, company="No Demo Co", stage=STAGE_DISCOVERY)
+        h = _h(manager, db_session)
+        queue = client.get("/sales/demo-queue?brand_sales_org_id=" + brand.id,
+                           headers=h).json()
+        day = client.get("/sales/my-day?brand_sales_org_id=" + brand.id,
+                         headers=h).json()
+        overview = client.get("/sales/manager/overview?brand_sales_org_id=" + brand.id,
+                              headers=h).json()
+        assert queue["summary"]["total"] == 0
+        assert day["metrics"]["demos_to_build"] == 0
+        assert sum(r.get("demos_to_build") or 0 for r in overview["reps"]) == 0
+
+    def test_a_closed_deal_is_outstanding_to_nobody(
+            self, client, db_session, brand, manager, rep):
+        """Won or lost, the demo is not work any longer — on every surface."""
+        from app.models.sales_models import demo_is_outstanding
+        o = _opp(db_session, brand, rep, company="Closed Co", stage=STAGE_DEMO_BUILD)
+        o.demo_status = DEMO_REQUESTED
+        db_session.commit()
+        assert demo_is_outstanding(o) is True
+
+        o.status = "won"
+        db_session.commit()
+        assert demo_is_outstanding(o) is False
+
+        h = _h(manager, db_session)
+        queue = client.get("/sales/demo-queue?brand_sales_org_id=" + brand.id,
+                           headers=h).json()
+        overview = client.get("/sales/manager/overview?brand_sales_org_id=" + brand.id,
+                              headers=h).json()
+        assert queue["summary"]["total"] == 0
+        assert sum(r.get("demos_to_build") or 0 for r in overview["reps"]) == 0
+
+    def test_the_rule_lives_in_one_place(self):
+        """A guard, because the drift came from two hand-written copies.
+
+        If a surface needs this question answered, it imports the function. A
+        second inline predicate is how 3 and 2 happened the first time.
+        """
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        for rel in ("app/routers/sales_router.py",
+                    "app/services/manager_workspace.py"):
+            text = (root / rel).read_text(encoding="utf-8")
+            body = "\n".join(line for line in text.splitlines()
+                             if not line.strip().startswith("#"))
+            assert "demo_is_outstanding" in body, rel
+            # The old hand-written shape, in code rather than in a comment.
+            assert 'demo_status in (DEMO_REQUESTED' not in body, rel
+            assert 'o.stage == STAGE_DEMO_BUILD\n' not in body.replace(
+                "if opp.stage == STAGE_DEMO_BUILD", ""), rel

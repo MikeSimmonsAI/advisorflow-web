@@ -137,15 +137,18 @@ export default function TeamProposals() {
     ? (rows || []).filter(r => r.owner_user_id === ownerFilter)
     : (rows || []))
 
-  // Demos are an opportunity stage, not a proposal. Sourced from the rollup the
-  // overview already computes rather than reconstructed here.
-  // Prefer the demo queue's own rows. The rep rollup stays as the fallback
-  // for the moment the queue read fails — a screen that has the count and
-  // cannot fetch the list should still show the count rather than zero.
+  // Demos are an opportunity stage, not a proposal — so they come from the
+  // pipeline, through the demo queue, which is the one place that decides what
+  // "outstanding" means (`demo_is_outstanding`). The rollup's per-rep number
+  // now applies the same rule, so the total below agrees with it whichever way
+  // it is reached.
   const demoJobs = (demoQ && demoQ.jobs) || []
-  const demoOwners = (demoQ && demoQ.summary && demoQ.summary.by_builder)
-    || reps.filter(r => r.demos_to_build > 0)
-       .map(r => ({ user_id: r.user_id, name: r.name, count: r.demos_to_build }))
+  // ONLY from the queue. The rep rollup splits the same demos by SALES OWNER,
+  // so using it as a fallback under a tile labelled "by builder" would print a
+  // wrong label rather than a missing one — which is the failure this whole
+  // pass is about. If the queue read fails, the tiles are absent and the note
+  // below says so.
+  const demoOwners = (demoQ && demoQ.summary && demoQ.summary.by_builder) || []
   const totalDemos = (demoQ && demoQ.summary)
     ? demoQ.summary.total
     : reps.reduce((n, r) => n + (r.demos_to_build || 0), 0)
@@ -226,12 +229,17 @@ export default function TeamProposals() {
         <div className="sw-card-b">
           {totalDemos === 0 ? (
             <Empty title="No demos waiting">
-              Nobody on the team has a deal sitting in demo build.
+              Nobody on the team has a demo outstanding — no deal in Demo
+              Build, and no demo requested on a deal that has not moved yet.
             </Empty>
           ) : (
             <>
-              {/* Per builder, from the queue's own rows. Clicking one filters
-                  the list below rather than only dimming a number. */}
+              {/* PER BUILDER — said on the tile, because Salespeople shows the
+                  same work per SALES OWNER and the two are routinely different
+                  people. Both read the queue's rule; only the split differs. */}
+              <div className="sw-subtle" style={{ marginBottom: 6 }}>
+                By builder — Salespeople counts the same demos by sales owner.
+              </div>
               <div className="sw-pnums" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))' }}>
                 {demoOwners.map(r => {
                   const key = r.user_id || 'unassigned'

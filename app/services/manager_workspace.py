@@ -47,6 +47,7 @@ from app.models.sales_models import (
     ROLE_SALES_MANAGER, ROLE_SALES_REP, SCOPE_BRAND_SALES_ORG,
     STAGE_CLOSING, STAGE_PROPOSAL, STAGE_WON, STAGE_LOST, STAGE_LIVE,
     STAGE_ONBOARDING, STAGE_DEMO_BUILD, STAGE_DISCOVERY, STAGE_LABELS,
+    demo_is_outstanding,
 )
 from app.models.scheduling_models import (
     SalesAppointment, AppointmentParticipant, MeetingType, APPT_CANCELLED,
@@ -576,7 +577,19 @@ def rep_rollup(db: Session, members: List[dict], opps: List[Opportunity],
         overdue = sum(1 for o in mine
                       if o.next_action_due_at and o.next_action_due_at < now
                       and o.stage not in _CLOSED_STAGES)
-        demos = sum(1 for o in mine if o.stage == STAGE_DEMO_BUILD)
+        # THE SAME RULE THE DEMO QUEUE USES, and it was not before.
+        #
+        # This counted `stage == Demo Build` alone while `/sales/my-day` and
+        # `/sales/demo-queue` counted stage OR a requested/in-progress demo.
+        # A manager could see "Demos to build 2" here and "3" on the queue in
+        # the same minute, both labelled the same thing. The deal between them
+        # was a demo requested before the deal left Prospect.
+        #
+        # Note what this number still is, and what the queue's is not: this is
+        # per SALES OWNER, because that is what a rep rollup is. The queue
+        # splits the same work per BUILDER. Both are wanted; they are labelled
+        # separately on screen so neither is read as the other.
+        demos = sum(1 for o in mine if demo_is_outstanding(o))
         awaiting_send = 0
         awaiting_customer = 0
         for o in mine:
