@@ -321,11 +321,69 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
     # default version decides the shape and can change under us without a
     # deploy. Reading one location and accepting NULL when it is absent is how
     # a renewal date silently disappears from a billing screen. So: take the
-    # subscription's own field when this version still has it, otherwise the
-    # LATEST period end across the items — the furthest-out is when the
-    # subscription as a whole is next fully due, and for the single-item
-    # subscriptions this platform sells the two answers are identical.
+    # subscription's own field when this version still has it, otherwise read
+    # it from the item — which item, and why it matters, is settled next.
+
+    # ══════════════════════════════════════════════════════════════════════
+    # WHICH ITEM IS THE PLAN — because a subscription now has several
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # This read `items[0]` and nothing else, which was correct for exactly as
+    # long as every subscription had exactly one item. A recurring add-on is an
+    # ITEM on the customer's existing subscription — that is the whole design,
+    # and the alternative was a second subscription — so the moment anybody
+    # bought one there were two, and STRIPE DOES NOT PROMISE AN ORDER.
+    #
+    # With the add-on first, `items[0]` would have meant: the interval read
+    # from the add-on (an annual customer with a monthly add-on shown as
+    # monthly), the price resolving to no plan, and the commitment left
+    # unresolved — so a scheduled downgrade landing without `plan` metadata,
+    # which is the case the price-first resolution was built for, would have
+    # silently failed to sync.
+    #
+    # So the plan item is the one whose price this brand's catalogue
+    # recognises, whatever position it sits in. Only if NONE resolve does this
+    # fall back to the first item, which preserves the old behaviour for the
+    # case it was right for: a Custom deal billed against an inline price that
+    # is deliberately in no catalogue.
+    from app.services import billing_catalog
+    platform_id = getattr(org, "platform_id", None)
+
+    def _price_of(item):
+        price = (item or {}).get("price") or {}
+        return price if isinstance(price, dict) else {}
+
+    plan_item = None
+    resolved = None
+    for it in items:
+        pid = _price_of(it).get("id")
+        if not pid:
+            continue
+        candidate = billing_catalog.resolve_plan_by_price_id(db, platform_id, pid)
+        if candidate is not None:
+            plan_item, resolved = it, candidate
+            break
+    if plan_item is None and items:
+        plan_item = items[0]
+
+    price_id = _price_of(plan_item).get("id") if plan_item else None
+    interval = (_price_of(plan_item).get("recurring") or {}).get("interval")
+    if interval:
+        org.stripe_plan_interval = interval
+
+    # WHEN THE NEXT BILL LANDS. The PLAN item's period is the answer whenever
+    # this version puts the period on items and we know which item is the plan:
+    # an add-on added mid-period can carry its own dates, and taking the
+    # furthest-out across everything would push the renewal date out by
+    # whatever the newest add-on happens to say. `max()` remains the fallback
+    # for a subscription whose plan item we could not identify.
     period_end = _ts(sub.get("current_period_end"))
+    if period_end is None and resolved is not None:
+        # Only when the plan item was IDENTIFIED by its price. A `plan_item`
+        # that is merely the first of several unrecognised ones is not a plan
+        # item, and trusting its dates would be the arbitrary reading this
+        # change exists to remove.
+        period_end = _ts((plan_item or {}).get("current_period_end"))
     if period_end is None:
         item_ends = [_ts((it or {}).get("current_period_end")) for it in items]
         item_ends = [t for t in item_ends if t is not None]
@@ -333,15 +391,6 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
             period_end = max(item_ends)
     if period_end:
         org.billing_current_period_end = period_end
-
-    price_id = None
-    if items:
-        price = (items[0] or {}).get("price") or {}
-        recurring = price.get("recurring") or {}
-        interval = recurring.get("interval")
-        if interval:
-            org.stripe_plan_interval = interval
-        price_id = price.get("id") if isinstance(price, dict) else None
 
     # ══════════════════════════════════════════════════════════════════════
     # THE PLAN IS RESOLVED FROM THE STRIPE PRICE ID FIRST. METADATA IS A
@@ -364,13 +413,9 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
     # Either way the answer is validated against THIS BRAND's catalogue before
     # anything is written, so an unrecognised value is ignored rather than
     # stored.
-    resolved = None
-    from app.services import billing_catalog
-    platform_id = getattr(org, "platform_id", None)
-
-    if price_id:
-        resolved = billing_catalog.resolve_plan_by_price_id(db, platform_id, price_id)
-
+    # `resolved` is already the plan whose price we matched above, if any — the
+    # search for the plan ITEM and the resolution of the PLAN are the same
+    # question asked once, rather than twice with a chance of disagreeing.
     if resolved is None:
         meta_plan = (sub.get("metadata") or {}).get("plan")
         if meta_plan:
@@ -615,7 +660,23 @@ def _handle_checkout_completed(db: Session, org: Organization, obj: dict) -> Non
     # subscription-mode session must never mark the setup fee paid. That
     # separation is the whole point of splitting the two checkouts.
     if (obj.get("mode") or "") == "payment":
-        _handle_setup_payment(db, org, obj)
+        # ══ WHICH one-time obligation did this settle? ═══════════════════
+        #
+        # There are now two payment-mode shapes, and they must not be
+        # confused: the implementation SETUP FEE, and a one-time CATALOGUE
+        # purchase (a migration, a training session, custom work). Routed on
+        # `metadata.purpose`, which the catalogue checkout sets explicitly.
+        #
+        # Absent means setup, which is correct for every session created
+        # before the catalogue existed — those carry no purpose and are
+        # setup fees by construction. A catalogue purchase must never mark the
+        # setup fee paid, and a setup fee must never be recorded as a
+        # purchase: "an add-on purchase must not mark Setup paid" is a rule,
+        # not a preference.
+        if (obj.get("metadata") or {}).get("purpose") == "catalog_purchase":
+            _handle_catalog_purchase_payment(db, org, obj)
+        else:
+            _handle_setup_payment(db, org, obj)
         return
 
     meta_plan = (obj.get("metadata") or {}).get("plan")
@@ -728,6 +789,73 @@ def _handle_setup_payment(db: Session, org: Organization, obj: dict) -> None:
             impl.setup_checkout_session_id = obj.get("id")
 
 
+def _handle_catalog_purchase_payment(db: Session, org: Organization,
+                                     obj: dict) -> None:
+    """A one-time CATALOGUE purchase was paid. Purchase and payment only.
+
+    ═══════════════════════════════════════════════════════════════════════
+    WHAT THIS MUST NOT DO — the same list the setup fee carries, for the
+    same reason, plus one more.
+    ═══════════════════════════════════════════════════════════════════════
+    Not start a subscription. Not set `billing_status`. Not stamp a plan on
+    the organization. AND NOT MARK THE SETUP FEE PAID: a customer who bought a
+    data migration has not paid their implementation fee, and crediting one
+    obligation with another's money is the defect the whole separation exists
+    to prevent.
+
+    UNPAID SESSIONS ARE NOT PAYMENTS. `payment_status` is checked before
+    anything is banked — a completed session can be `unpaid` while an async
+    method clears, and "they finished the form" is not "the money arrived".
+
+    IDEMPOTENT TWICE OVER: the purchase row refuses to move out of PAID a
+    second time, and `BillingPayment.collection_reference` is unique. A Stripe
+    retry, or somebody resending the event from the dashboard, banks nothing
+    twice from either direction.
+    """
+    from app.models.billing_models import BillingPayment
+    from app.services import catalog_purchase
+
+    payment_status = (obj.get("payment_status") or "").lower()
+    if payment_status not in ("paid", "no_payment_required"):
+        log.info("catalog purchase session %s completed but payment_status=%s",
+                 obj.get("id"), payment_status or "unknown")
+        return
+
+    purchase = catalog_purchase.mark_one_time_paid(db, org, obj)
+    if purchase is None:
+        return
+
+    pi = obj.get("payment_intent")
+    reference = "stripe_pi:%s" % pi if pi else "stripe_cs:%s" % obj.get("id")
+    existing = (db.query(BillingPayment)
+                .filter(BillingPayment.collection_reference == reference)
+                .first())
+    if existing is not None:
+        return
+
+    db.add(BillingPayment(
+        organization_id=org.id,
+        platform_id=getattr(org, "platform_id", None),
+        collection_reference=reference,
+        stripe_payment_intent_id=pi,
+        currency=(obj.get("currency") or purchase.currency or "usd"),
+        amount_cents=obj.get("amount_total") or 0,
+        # Neither a first subscription invoice nor a renewal. `is_initial`
+        # exists to tell those two apart for compensation, and a one-time
+        # service is a third thing.
+        is_initial=False,
+        collected_at=datetime.utcnow(),
+        # COMPENSATION IS NOT DECIDED HERE. Whether selling a service earns
+        # commission is a policy question with its own engine; recording the
+        # money is this function's whole job. The reason is stated so an
+        # unpaid commission cannot be mistaken for a bug.
+        earned_compensation=False,
+        compensation_skipped_reason=(
+            "One-time catalogue purchase (%s). Compensation on services is a "
+            "policy decision and is not configured." % purchase.item_key),
+    ))
+
+
 def _handle_subscription_deleted(db: Session, org: Organization, obj: dict) -> None:
     """The subscription ended. CANCELLATION IS NOT DELETION.
 
@@ -742,6 +870,35 @@ def _handle_subscription_deleted(db: Session, org: Organization, obj: dict) -> N
     org.stripe_subscription_id = None
     org.billing_cancel_at_period_end = False
     org.billing_pending_plan_key = None
+    org.billing_pending_commitment = None
+
+    # ══ THE ADD-ONS WENT WITH IT ════════════════════════════════════════
+    #
+    # A recurring add-on is an ITEM on this subscription, so Stripe deleted it
+    # along with the subscription and is billing for none of them. Rows left
+    # ACTIVE would then claim the customer pays for something nobody is
+    # charging them for — and, worse, would keep GRANTING the capacity those
+    # add-ons bought, because `plan_limits` counts live purchases. A cancelled
+    # customer holding five purchased seats forever is not a policy anyone
+    # chose.
+    #
+    # ONE-TIME PURCHASES ARE UNTOUCHED. A migration somebody paid for was
+    # delivered and settled; ending a subscription does not unbuy it.
+    from app.models.catalog_models import CatalogItemKind as _Kind
+    from app.models.purchase_models import CatalogPurchase as _Purchase
+    from app.models.purchase_models import PurchaseStatus as _PStatus
+    _ended = (db.query(_Purchase)
+              .filter(_Purchase.organization_id == org.id,
+                      _Purchase.kind == _Kind.RECURRING_ADDON,
+                      _Purchase.status == _PStatus.ACTIVE)
+              .all())
+    for _p in _ended:
+        _p.status = _PStatus.CANCELED
+        _p.canceled_at = datetime.utcnow()
+    if _ended:
+        log.info("billing_webhook: subscription ended for %s - closed %d "
+                 "recurring add-on(s) that went with it", org.id, len(_ended))
+
     # `plan` and `billing_plan_key` are deliberately LEFT AS THEY WERE. What
     # they bought is a historical fact, and entitlement decisions are made from
     # billing_status by a policy that is currently unset - not by silently

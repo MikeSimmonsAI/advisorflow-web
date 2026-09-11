@@ -927,6 +927,152 @@ def change_plan(
     return apply_change(db, org, req, actor=current_user)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# THE CATALOGUE: ADD-ONS AND ONE-TIME SERVICES
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/catalog")
+def get_catalog(current_user: User = Depends(_require_admin),
+                db: Session = Depends(get_db)):
+    """What this customer can buy, and what they already hold.
+
+    Two lists, because they answer different questions: "what am I paying for"
+    and "what else is available". Merging them would make a screen where the
+    customer has to work out which is which.
+
+    Only SELF-SERVICE items appear here. A brand may sell something through a
+    person without putting it behind a button, and the difference is a
+    deliberate configuration rather than an oversight.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    from app.services import brand_catalog, catalog_purchase
+    from app.models.purchase_models import PurchaseStatus
+
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+    held = catalog_purchase.purchases_for(db, org)
+
+    # Already held, so not offered again. Buying a second copy of the same
+    # add-on bills twice for one thing.
+    held_keys = {p.item_key for p in held
+                 if p.status == PurchaseStatus.ACTIVE}
+
+    available = [brand_catalog.public_out(i)
+                 for i in brand_catalog.items_for(db, platform_id)
+                 if i.self_service and brand_catalog.is_sellable(i)
+                 and i.key not in held_keys]
+
+    return {
+        "available": available,
+        "mine": [catalog_purchase.purchase_out(p) for p in held],
+        # Stated by the server so the screen does not have to infer why an
+        # add-on cannot be bought. An add-on attaches to a subscription; with
+        # none, there is nothing to attach it to.
+        "can_buy_addons": bool(
+            getattr(org, "stripe_subscription_id", None)
+            and (getattr(org, "billing_status", None) or "").lower()
+            in SubscriptionStatus.OCCUPIED),
+        "currency": "usd",
+    }
+
+
+class PurchaseRequest(BaseModel):
+    """Selectors only, exactly like checkout and change-plan.
+
+    No amount. A customer naming their own price is the tampering this
+    codebase already closed on the plan catalogue, and an add-on is no
+    different.
+    """
+    item: str
+    quantity: int = 1
+
+
+@router.post("/catalog/purchase")
+def purchase_catalog_item(req: PurchaseRequest,
+                          current_user: User = Depends(_require_admin),
+                          db: Session = Depends(get_db)):
+    """Buy a catalogue item. The KIND decides what actually happens.
+
+    A recurring add-on is added to the existing subscription as an ITEM and is
+    live immediately. A one-time service returns a checkout URL and stays
+    PENDING until the webhook confirms the money — the customer has not paid
+    by opening a link.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    from app.models.catalog_models import CatalogItemKind
+    from app.services import brand_catalog, catalog_purchase
+
+    platform_id = billing_catalog.platform_id_for_org(db, org)
+    try:
+        item = brand_catalog.require_purchasable(db, platform_id, req.item)
+    except brand_catalog.ItemNotAvailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        if item.kind == CatalogItemKind.RECURRING_ADDON:
+            purchase = catalog_purchase.add_recurring_addon(
+                db, org, item, quantity=req.quantity, actor=current_user)
+        else:
+            purchase = catalog_purchase.start_one_time_checkout(
+                db, org, item, quantity=req.quantity, actor=current_user)
+    except catalog_purchase.PurchaseRefused as exc:
+        # 409: understood, and refused on the customer's own state — no
+        # subscription to attach to, or they already hold it.
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    _audit(db, org, current_user, "billing.catalog_purchased",
+           {"item": item.key, "kind": item.kind, "quantity": req.quantity,
+            "amount_cents": purchase.amount_cents, "status": purchase.status})
+    db.commit()
+    return catalog_purchase.purchase_out(purchase)
+
+
+@router.post("/catalog/purchase/{purchase_id}/remove")
+def remove_catalog_item(purchase_id: str,
+                        current_user: User = Depends(_require_admin),
+                        db: Session = Depends(get_db)):
+    """Take a recurring add-on off the subscription.
+
+    REMOVES ONE ITEM, NEVER THE SUBSCRIPTION. A customer dropping an add-on
+    has not asked to stop being a customer, and the two are different Stripe
+    calls so they cannot be confused.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    from app.models.purchase_models import CatalogPurchase
+    from app.services import catalog_purchase
+
+    purchase = (db.query(CatalogPurchase)
+                .filter(CatalogPurchase.id == purchase_id,
+                        # TENANT SCOPE IN THE QUERY, not in a check after it.
+                        # A purchase id from another customer resolves to
+                        # nothing rather than to a 403 that confirms it exists.
+                        CatalogPurchase.organization_id == org.id)
+                .first())
+    if purchase is None:
+        raise HTTPException(status_code=404, detail="No such purchase.")
+
+    try:
+        purchase = catalog_purchase.remove_recurring_addon(db, org, purchase)
+    except catalog_purchase.PurchaseRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    _audit(db, org, current_user, "billing.catalog_removed",
+           {"item": purchase.item_key, "purchase_id": purchase.id})
+    db.commit()
+    return catalog_purchase.purchase_out(purchase)
+
+
 @router.post("/cancel-pending-change")
 def cancel_pending_change(
     current_user: User = Depends(_require_admin),

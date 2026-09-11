@@ -169,7 +169,9 @@ def create_item(platform_id: str, body: CatalogItemIn,
     _require_platform(db, platform_id)
 
     problems = brand_catalog.validate(body.kind, body.pricing_mode,
-                                      body.amount_cents, body.billing_interval)
+                                      body.amount_cents, body.billing_interval,
+                                      body.entitlement_key,
+                                      body.entitlement_value)
     if problems:
         # 422 rather than 400: the request was understood and is internally
         # inconsistent. The message lists EVERY problem, so the operator is
@@ -236,9 +238,12 @@ def update_item(platform_id: str, item_id: str, body: CatalogItemPatch,
     merged_mode = data.get("pricing_mode", item.pricing_mode)
     merged_amount = data.get("amount_cents", item.amount_cents)
     merged_interval = data.get("billing_interval", item.billing_interval)
+    merged_ent_key = data.get("entitlement_key", item.entitlement_key)
+    merged_ent_value = data.get("entitlement_value", item.entitlement_value)
 
     problems = brand_catalog.validate(merged_kind, merged_mode, merged_amount,
-                                      merged_interval)
+                                      merged_interval, merged_ent_key,
+                                      merged_ent_value)
     if problems:
         raise HTTPException(status_code=422, detail=" ".join(problems))
 

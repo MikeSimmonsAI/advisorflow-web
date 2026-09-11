@@ -133,6 +133,7 @@ import LeadScraper from './pages/LeadScraper'
 import ImportBatches from './pages/ImportBatches'
 import ImportBatchReview from './pages/ImportBatchReview'
 import MyDay from './pages/sales/MyDay'
+import SellCatalogue from './pages/sales/SellCatalogue'
 import MyPipeline from './pages/sales/MyPipeline'
 import ManagerCommand from './pages/sales/ManagerCommand'
 // Compensation Command Center (management) and My Compensation (a rep's own).
@@ -773,6 +774,11 @@ export default function App() {
         <Route path="/sales/prospects" element={<SalesRoute><Prospects /></SalesRoute>} />
         <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />
         <Route path="/sales/onboarding" element={<SalesRoute><SalesImplementations /></SalesRoute>} />
+        {/* Selling an add-on or a service to a customer they already sold.
+            SalesRoute is convenience only: /sales/catalog/* re-checks that
+            this seller sells for this customer's brand, so typing another
+            brand's org id gets a 404 rather than a screen. */}
+        <Route path="/sales/customers/:orgId/catalogue" element={<SalesRoute><SellCatalogue /></SalesRoute>} />
         <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
         <Route path="/sales/team" element={<SalesRoute><TeamAvailability /></SalesRoute>} />
 

@@ -752,6 +752,20 @@ export default function GodBillingOps() {
                         {c.mrr_cents === null || c.mrr_cents === undefined
                           ? <NoSource reason={c.mrr_unavailable_reason} />
                           : money(c.mrr_cents, c.currency)}
+                        {/* The plan figure stays the plan figure, with the
+                            add-ons named beneath it. One blended number would
+                            show a Growth customer an MRR no Growth price
+                            explains, and the first question anybody asks of a
+                            surprising figure is what it is made of. */}
+                        {c.addons_mrr_cents > 0 && c.mrr_cents != null ? (
+                          <div style={{ fontSize: 11, color: '#1ef0a8' }}
+                               title="Recurring add-ons on this subscription">
+                            + {money(c.addons_mrr_cents, c.currency)} add-ons
+                            <div style={{ color: '#888' }}>
+                              = {money(c.total_mrr_cents, c.currency)}
+                            </div>
+                          </div>
+                        ) : null}
                       </td>
                       <td style={{ padding: '12px', color: '#bbb' }}>
                         {when(c.current_period_end) || '—'}

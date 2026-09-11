@@ -190,6 +190,18 @@ export default function SalesImplementations() {
                             Open deal
                           </button>
                         ) : null}
+                        {/* Selling more to a customer you already sold. Only
+                            once they are a real organisation — before
+                            provisioning there is no account to attach
+                            anything to. */}
+                        {r.customer_organization_id ? (
+                          <button className="sw-btn" style={{ marginLeft: 6 }}
+                                  onClick={() => nav('/sales/customers/'
+                                                     + r.customer_organization_id
+                                                     + '/catalogue')}>
+                            Sell add-ons
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}

@@ -133,6 +133,12 @@ import app.models.billing_models  # noqa: F401  (imported for side effects)
 # that has configured nothing, so the failure looks like normal emptiness.
 # Added to BOTH blocks in this file, per the merge-artifact note above.
 import app.models.catalog_models  # noqa: F401  (imported for side effects)
+# What customers have BOUGHT from that catalogue - catalog_purchases. Same
+# Base, same reason, and the consequence of dropping it is money-shaped: the
+# add-on and one-time purchase rows are the only local record that a customer
+# owes or has paid for something beyond their plan, and a missing table would
+# make every purchase listing read empty rather than fail.
+import app.models.purchase_models  # noqa: F401  (imported for side effects)
 # Executive Workspace deal-room tables (exec_workspace_items / _files / _versions).
 # Same Base, same reason. Without this import those three tables are never created
 # and every workspace endpoint fails with a missing-table error on first use.
@@ -283,6 +289,12 @@ import app.models.billing_models  # noqa: F401  (imported for side effects)
 # that has configured nothing, so the failure looks like normal emptiness.
 # Added to BOTH blocks in this file, per the merge-artifact note above.
 import app.models.catalog_models  # noqa: F401  (imported for side effects)
+# What customers have BOUGHT from that catalogue - catalog_purchases. Same
+# Base, same reason, and the consequence of dropping it is money-shaped: the
+# add-on and one-time purchase rows are the only local record that a customer
+# owes or has paid for something beyond their plan, and a missing table would
+# make every purchase listing read empty rather than fail.
+import app.models.purchase_models  # noqa: F401  (imported for side effects)
 # Per-device authentication sessions (user_sessions). Same Base, same reason,
 # and the consequence of dropping this line is the sharpest on the list: with
 # no table, `session_service.find_by_jti` raises on EVERY authenticated

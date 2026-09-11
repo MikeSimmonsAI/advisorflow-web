@@ -215,6 +215,48 @@ def _snapshot_unlimited(snapshot) -> list:
     return [k for k in val if isinstance(k, str)] if isinstance(val, list) else []
 
 
+# ── Capacity the customer BOUGHT on top of their plan ───────────────────────
+#
+# The dimensions a catalogue add-on may grant. A brand configuring "Additional
+# Users" names one of these, and anything else is refused at configuration time
+# rather than sold: capacity keyed to a name nothing reads is a customer paying
+# monthly for a limit that never moves, and neither they nor the brand would
+# see it until somebody hit the ceiling they had already paid to raise.
+#
+# Deliberately the enforceable set, not every column a plan has. A key belongs
+# here once `limit_for` actually applies it.
+GRANTABLE_DIMENSIONS = (LIMIT_USERS, LIMIT_LEADS)
+
+
+def purchased_capacity(db: Session, org: Optional[Organization], key: str) -> int:
+    """How much of `key` this customer has BOUGHT beyond their plan.
+
+    Add-ons are a real commercial obligation — the customer is being billed for
+    them every month — so the capacity they buy has to reach the same guard
+    that refuses the eleventh user. Selling "5 additional users" and then
+    refusing the sixth user is not a policy choice; it is the platform taking
+    money for something it then withholds.
+
+    Only LIVE purchases count. `catalog_purchase.entitlement_totals` owns that
+    rule, and it is asked rather than reimplemented so there is one answer to
+    "what has this customer actually paid for".
+
+    Never raises. A capacity lookup that fails must not take down user creation
+    for every customer on the platform, and falling back to the plan's own
+    ceiling is the conservative direction: it refuses a little too much rather
+    than granting capacity nobody bought.
+    """
+    if org is None:
+        return 0
+    try:
+        from app.services import catalog_purchase
+        return int(catalog_purchase.entitlement_totals(db, org).get(key, 0) or 0)
+    except Exception:                                    # pragma: no cover
+        log.warning("plan_limits: could not read purchased capacity for %s",
+                    getattr(org, "id", None), exc_info=True)
+        return 0
+
+
 def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[int]:
     """The configured ceiling, or None for unlimited / unconfigured.
 
@@ -225,6 +267,8 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
          Without this step such a customer has no ceiling on anything, which is
          the one category of customer whose terms were individually negotiated
          and so the last place an accidental "unlimited" belongs.
+      3. PLUS ANY CAPACITY THEY HAVE BOUGHT. An add-on raises the ceiling it
+         names; it never lowers one and never creates one.
 
     NULL still returns None at both levels, and that is deliberate: this
     function answers "what is the ceiling", and it must not start refusing
@@ -232,6 +276,10 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
     *agreed unlimited* or *nobody has decided* is a different question, and
     `entitlement_state()` is where it gets a truthful answer rather than being
     collapsed into an enforcement decision nobody made.
+
+    AND THAT IS WHY BOUGHT CAPACITY IS ADDED ONLY TO A REAL CEILING. Against
+    an unlimited dimension there is nothing to raise, and turning None into a
+    number would invent a cap out of a purchase meant to remove one.
     """
     plan = effective_plan(db, org)
     source = plan
@@ -246,7 +294,9 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
         value = int(value)
     except (TypeError, ValueError):
         return None
-    return value if value > 0 else None
+    if value <= 0:
+        return None
+    return value + purchased_capacity(db, org, key)
 
 
 # Every ceiling a snapshot can record. Named here so `entitlement_state` reports
@@ -288,6 +338,21 @@ def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
                 "agreed_unlimited": [], "policy_required": True,
                 "explanation": "No organization."}
 
+    # WHAT THEY BOUGHT ON TOP, reported alongside whatever the base is.
+    # `limits` stays the base ceiling and `effective_limits` is what actually
+    # gets enforced, rather than one blended number: a support question is
+    # usually "why can they add eleven users on a ten-user plan", and the
+    # answer is only legible if the tier's own figure is still visible next to
+    # the purchase that raised it.
+    bought = {k: purchased_capacity(db, org, k) for k in GRANTABLE_DIMENSIONS}
+    bought = {k: v for k, v in bought.items() if v}
+
+    def _effective(limits: dict) -> dict:
+        # None stays None. There is nothing to raise about an unlimited
+        # dimension, and a number here would invent a cap.
+        return {k: (None if v is None else int(v) + bought.get(k, 0))
+                for k, v in limits.items()}
+
     plan = effective_plan(db, org)
     if plan is not None:
         limits = {k: getattr(plan, k, None) for k in ("max_leads", "max_users")}
@@ -295,12 +360,18 @@ def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
             "source": ENTITLEMENT_CATALOGUE,
             "plan_key": plan.key,
             "limits": limits,
+            "purchased_capacity": bought,
+            "effective_limits": _effective(limits),
             # A catalogue tier's NULL genuinely is "unlimited" — it is the
             # brand's own published rate card, and the brand decided.
             "unset_dimensions": [],
             "agreed_unlimited": [k for k, v in limits.items() if v is None],
             "policy_required": False,
-            "explanation": "On the %s tier; its published ceilings apply." % plan.key,
+            "explanation": ("On the %s tier; its published ceilings apply."
+                            % plan.key)
+            + (" Plus purchased capacity: %s."
+               % ", ".join("%s +%d" % (k, v) for k, v in sorted(bought.items()))
+               if bought else ""),
         }
 
     snap = current_snapshot(db, org)
@@ -309,6 +380,8 @@ def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
             "source": ENTITLEMENT_NONE,
             "plan_key": None,
             "limits": {},
+            "purchased_capacity": bought,
+            "effective_limits": {},
             "unset_dimensions": list(SNAPSHOT_DIMENSIONS),
             "agreed_unlimited": [],
             "policy_required": True,
@@ -329,6 +402,8 @@ def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
         "snapshot_id": snap.id,
         "opportunity_id": snap.opportunity_id,
         "limits": limits,
+        "purchased_capacity": bought,
+        "effective_limits": _effective(limits),
         "unset_dimensions": unset,
         "agreed_unlimited": unlimited,
         "policy_required": bool(unset),

@@ -53,12 +53,19 @@ class ItemNotAvailable(RuntimeError):
 
 def validate(kind: Optional[str], pricing_mode: Optional[str],
              amount_cents: Optional[int],
-             billing_interval: Optional[str]) -> List[str]:
+             billing_interval: Optional[str],
+             entitlement_key: Optional[str] = None,
+             entitlement_value: Optional[int] = None) -> List[str]:
     """Every reason this combination could not be a coherent catalogue item.
 
     Returns a list rather than raising on the first, so somebody configuring an
     item is told everything wrong with it at once instead of discovering the
     problems one save at a time.
+
+    THE ENTITLEMENT PAIR IS CHECKED HERE because the alternative is discovering
+    it from a customer. An item that claims to grant capacity under a name
+    nothing enforces sells fine, bills fine, and does nothing — and the person
+    who finds out is the customer who paid to raise a ceiling and then hit it.
     """
     problems: List[str] = []
 
@@ -89,6 +96,39 @@ def validate(kind: Optional[str], pricing_mode: Optional[str],
                 "A one-time item must not have a billing interval. An "
                 "interval is what turns a single charge into a subscription.")
 
+    problems.extend(_entitlement_problems(entitlement_key, entitlement_value))
+    return problems
+
+
+def _entitlement_problems(key: Optional[str],
+                          value: Optional[int]) -> List[str]:
+    """Whether this item's capacity grant is one the platform can honour.
+
+    Granting nothing is a perfectly good configuration — training, a migration,
+    priority support — so BOTH being empty is silence. What is refused is a
+    half-stated grant, or one keyed to a dimension nothing enforces.
+    """
+    from app.services.plan_limits import GRANTABLE_DIMENSIONS
+
+    problems: List[str] = []
+    if not key and value is None:
+        return problems
+
+    if key and value is None:
+        problems.append(
+            "This item says it grants %r but not how much. A grant with no "
+            "amount raises nothing." % key)
+    if value is not None and not key:
+        problems.append(
+            "This item grants an amount but names no limit, so nothing would "
+            "change when somebody buys it.")
+    if value is not None and value <= 0:
+        problems.append("A grant must be a positive amount.")
+    if key and key not in GRANTABLE_DIMENSIONS:
+        problems.append(
+            "%r is not a limit this platform enforces, so buying this item "
+            "would change nothing. Enforced limits: %s."
+            % (key, ", ".join(GRANTABLE_DIMENSIONS)))
     return problems
 
 
@@ -101,7 +141,8 @@ def is_sellable(item: BrandCatalogItem) -> bool:
     if not item.is_active:
         return False
     if validate(item.kind, item.pricing_mode, item.amount_cents,
-                item.billing_interval):
+                item.billing_interval, item.entitlement_key,
+                item.entitlement_value):
         return False
     if item.pricing_mode == CatalogPricingMode.FIXED:
         return item.amount_cents is not None
@@ -117,7 +158,8 @@ def _explain_unsellable(item: BrandCatalogItem) -> str:
     if not item.is_active:
         return "%r is not active." % item.key
     problems = validate(item.kind, item.pricing_mode, item.amount_cents,
-                        item.billing_interval)
+                        item.billing_interval, item.entitlement_key,
+                        item.entitlement_value)
     if problems:
         return "%r is misconfigured: %s" % (item.key, " ".join(problems))
     if (item.pricing_mode == CatalogPricingMode.FIXED
