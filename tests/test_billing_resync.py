@@ -53,6 +53,10 @@ class _Org:
     billing_trial_end = None
     billing_cancel_at_period_end = False
     billing_pending_plan_key = None
+    # The rate a scheduled change lands on. Present here because the stub has
+    # to model every field the resync mirrors — a stub missing one makes the
+    # dry-run test fail on the stub rather than on the behaviour.
+    billing_pending_commitment = None
     billing_pending_effective_at = None
     stripe_schedule_id = None
 

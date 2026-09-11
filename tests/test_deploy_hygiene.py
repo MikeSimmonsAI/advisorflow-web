@@ -101,6 +101,19 @@ def test_no_live_shaped_credential_is_tracked():
     buffer and a transcript. `scan()` never returns the token at all, which is
     what makes that guarantee structural rather than a promise.
     """
+    # NO FILE IS EXEMPT FROM THIS SWEEP - NOT EVEN THIS ONE.
+    #
+    # An earlier fix skipped this module and `scripts/_secret_audit.py`
+    # wholesale, because the sibling test has to hold a value the scanner
+    # really does classify as live and the sweep kept finding it. The reasoning
+    # was right - a permanently red gate is one people learn to ignore - but
+    # two whole exempt files is a wide hole in exactly the two places somebody
+    # debugging a credential problem would paste a real key.
+    #
+    # It is not needed any more. The fabricated samples are assembled at
+    # runtime (see _FAKE_A / _FAKE_B), so no physical line in this file matches
+    # a pattern at all, and the one remaining exclusion is per-line and has to
+    # be typed on purpose. Nothing here is skipped by path.
     paths = [os.path.join(REPO, p) for p in _tracked()]
     findings = _secret_audit.scan([p for p in paths if os.path.isfile(p)])
     live = ["%s:%d (%s)" % (os.path.relpath(f[0], REPO), f[1], f[2])
@@ -378,3 +391,31 @@ def test_the_audit_never_prints_the_credential(tmp_path):
     assert secret[4:16] not in combined, "the audit printed part of the credential"
     assert "LIVE-SHAPED" in combined and "planted.env" in combined, \
         "it must still say what it found and where"
+
+
+def test_no_file_is_exempt_from_the_audit_by_path(tmp_path):
+    """THE EXEMPTION BY FILE PATH IS GONE, AND MUST STAY GONE.
+
+    An earlier fix gave `scripts/_secret_audit.py` and this file a blanket
+    pass, so the sweep would stop reporting the fabricated sample this file has
+    to contain. The motivation was sound - `deploy.bat` runs the audit as a
+    gate, and a gate that refuses every deploy over its own fixture gets
+    switched off - but the cure was two entirely unscanned files, and they are
+    the two a person debugging a credential problem is most likely to paste a
+    real key into.
+
+    The samples are assembled at runtime now, so there is nothing to exempt.
+    This asserts the hole did not come back: a live-shaped key written into a
+    file named exactly like either of them is still caught.
+    """
+    assert not hasattr(_secret_audit, "is_self_fixture"), (
+        "the whole-file exemption is back. Fabricated samples should be "
+        "assembled at runtime, or marked per line with `secret-audit: fixture`")
+
+    for name in ("_secret_audit.py", "test_deploy_hygiene.py"):
+        planted = tmp_path / name
+        planted.write_text("KEY = '%s'\n" % _FAKE_B, encoding="utf-8")
+        out = subprocess.run([sys.executable, AUDIT, str(planted)], cwd=REPO,
+                             capture_output=True, text=True)
+        assert out.returncode == 1, \
+            "a live-shaped key in a file named %s was not reported" % name

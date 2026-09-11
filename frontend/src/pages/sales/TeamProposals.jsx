@@ -71,6 +71,24 @@ export default function TeamProposals() {
   const [loading, setLoading] = useState(true)
   const [ownerFilter, setOwnerFilter] = useState('')
 
+  // THE DEMO QUEUE IS ITS OWN READ, AND THAT IS THE FIX.
+  //
+  // The manager overview carries `reps[].demos_to_build` — one integer each.
+  // That is why this screen could show "Demos to build — 3" and nothing
+  // behind it: there were no rows to render. `/sales/demo-queue` returns the
+  // individual jobs, so the count and the list now come from the same rows and
+  // cannot disagree.
+  //
+  // It is loaded SEPARATELY rather than folded into the overview: a failure to
+  // read the demo queue must not blank the proposal queues, and vice versa.
+  const [demoQ, setDemoQ] = useState(null)
+  // ITS OWN FILTER, not the rep filter above. `ownerFilter` narrows the
+  // PROPOSAL queues by the deal's sales owner; a demo is filtered by its
+  // BUILDER, and they are routinely different people. Sharing one piece of
+  // state would have made picking a builder silently empty the proposal
+  // queues — and "Unassigned" is not a user id at all.
+  const [demoBuilder, setDemoBuilder] = useState('')
+
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
@@ -78,6 +96,11 @@ export default function TeamProposals() {
     } catch (e) {
       setError(e.message || 'Could not load the proposal queues.')
     } finally { setLoading(false) }
+    try {
+      setDemoQ(await api.get('/sales/demo-queue'))
+    } catch {
+      setDemoQ(null)
+    }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -116,10 +139,16 @@ export default function TeamProposals() {
 
   // Demos are an opportunity stage, not a proposal. Sourced from the rollup the
   // overview already computes rather than reconstructed here.
-  const demoOwners = reps.filter(r => r.demos_to_build > 0)
-  const demoItems = attention.filter(i => i.kind === 'demo_overdue'
-    || /demo/i.test(i.title || ''))
-  const totalDemos = reps.reduce((n, r) => n + (r.demos_to_build || 0), 0)
+  // Prefer the demo queue's own rows. The rep rollup stays as the fallback
+  // for the moment the queue read fails — a screen that has the count and
+  // cannot fetch the list should still show the count rather than zero.
+  const demoJobs = (demoQ && demoQ.jobs) || []
+  const demoOwners = (demoQ && demoQ.summary && demoQ.summary.by_builder)
+    || reps.filter(r => r.demos_to_build > 0)
+       .map(r => ({ user_id: r.user_id, name: r.name, count: r.demos_to_build }))
+  const totalDemos = (demoQ && demoQ.summary)
+    ? demoQ.summary.total
+    : reps.reduce((n, r) => n + (r.demos_to_build || 0), 0)
 
   const approvals = data.approvals || { pending: [], pending_count: 0 }
   const filterName = ownerFilter
@@ -146,8 +175,11 @@ export default function TeamProposals() {
       <ErrorBar error={error} onRetry={load} />
 
       <div className="sw-metrics">
+        {/* CLICKABLE, because it is a queue. It was a dead number for as long
+            as there was nothing behind it to open. */}
         <Metric label="Demos to build" value={totalDemos} attn={totalDemos > 0}
-                sub={demoOwners.length ? `${demoOwners.length} rep${demoOwners.length === 1 ? '' : 's'}` : 'none open'} />
+                sub={totalDemos ? 'open the queue' : 'none open'}
+                onClick={() => nav('/sales/demos')} />
         <Metric label="Needs follow-up" value={counts.follow_up_required || 0}
                 attn={(counts.follow_up_required || 0) > 0}
                 sub="declined, expired, unopened" />
@@ -187,6 +219,9 @@ export default function TeamProposals() {
 
       <Card title="DEMOS TO BUILD"
             sub="A demo is a stage on the deal, not a proposal — so this comes from the pipeline, not the proposal queues."
+            right={<button className="sw-btn" onClick={() => nav('/sales/demos')}>
+              Open the queue
+            </button>}
             bodyless>
         <div className="sw-card-b">
           {totalDemos === 0 ? (
@@ -195,36 +230,66 @@ export default function TeamProposals() {
             </Empty>
           ) : (
             <>
+              {/* Per builder, from the queue's own rows. Clicking one filters
+                  the list below rather than only dimming a number. */}
               <div className="sw-pnums" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))' }}>
-                {demoOwners
-                  .filter(r => !ownerFilter || r.user_id === ownerFilter)
-                  .map(r => (
-                    <button key={r.user_id} className="sw-info"
-                            style={{ cursor: 'pointer', textAlign: 'left' }}
-                            onClick={() => setOwnerFilter(
-                              ownerFilter === r.user_id ? '' : r.user_id)}>
-                      <span>{r.name}</span>
-                      <b>{r.demos_to_build} to build</b>
+                {demoOwners.map(r => {
+                  const key = r.user_id || 'unassigned'
+                  const on = demoBuilder === key
+                  return (
+                    <button key={key} className="sw-info"
+                            style={{ cursor: 'pointer', textAlign: 'left',
+                                     outline: on ? '2px solid #3b82f6' : 'none' }}
+                            onClick={() => setDemoBuilder(on ? '' : key)}>
+                      <span>{r.name || 'Unassigned'}</span>
+                      <b>{r.count} to build</b>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* THE JOBS THEMSELVES. This is what was missing: the count went
+                  up and there was nothing to open. Each row goes straight into
+                  the build workspace for that deal. */}
+              <div className="sw-mt">
+                {demoJobs
+                  .filter(j => !demoBuilder
+                    || (demoBuilder === 'unassigned'
+                        ? !j.builder_user_id
+                        : j.builder_user_id === demoBuilder))
+                  .map(j => (
+                    <button key={j.opportunity_id} className="sw-qrow"
+                            onClick={() => nav('/sales/demo-build/' + j.opportunity_id)}>
+                      <span>
+                        <b>{j.company_name}</b>
+                        <span className="sw-why">
+                          {['Builder: ' + (j.builder_name || 'Unassigned'),
+                            j.due_at ? 'target ' + dateTime(j.due_at) : 'no target set',
+                            j.discovery_required
+                              ? j.discovery_answered + '/' + j.discovery_required + ' discovery'
+                              : null,
+                          ].filter(Boolean).join(' · ')}
+                        </span>
+                        <span className="sw-who">
+                          {j.contact_name ? j.contact_name + ' · ' : ''}
+                          Sales owner: {j.sales_owner_name || 'Unassigned'}
+                        </span>
+                      </span>
+                      <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {j.overdue ? <Chip tone="red">Past due</Chip> : null}
+                        <Chip tone={j.demo_status === 'ready' ? 'green' : 'amber'}>
+                          {j.demo_status_label}
+                        </Chip>
+                      </span>
                     </button>
                   ))}
+                {demoJobs.length === 0 ? (
+                  <p className="sw-subtle" style={{ margin: 0 }}>
+                    The queue could not be loaded just now, so only the counts
+                    above are shown. Refresh to try again.
+                  </p>
+                ) : null}
               </div>
-              {demoItems.length ? (
-                <div className="sw-mt">
-                  {demoItems
-                    .filter(i => !ownerFilter || i.owner_user_id === ownerFilter)
-                    .map((i, n) => (
-                      <button key={i.opportunity_id + '-' + n} className="sw-qrow"
-                              onClick={() => open(i.opportunity_id)}>
-                        <span>
-                          <b>{i.company}</b>
-                          <span className="sw-why">{i.detail || i.title}</span>
-                          <span className="sw-who">{i.owner_name}</span>
-                        </span>
-                        <Chip tone={i.level}>{i.title}</Chip>
-                      </button>
-                    ))}
-                </div>
-              ) : null}
             </>
           )}
         </div>

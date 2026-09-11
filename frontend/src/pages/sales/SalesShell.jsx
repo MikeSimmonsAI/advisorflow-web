@@ -39,6 +39,11 @@ const NAV = [
   { to: '/sales/pipeline',     label: 'My Pipeline',       icon: '⇢', countKey: 'active_opportunities' },
   { to: '/sales/prospects',    label: 'Prospects',         icon: '◇' },
   { to: '/sales/availability', label: 'My Availability',   icon: '◷' },
+  // DEMOS TO BUILD is MY WORK, not a manager screen. `/sales/demo-queue`
+  // scopes to the caller's own book exactly as the pipeline does, so a rep
+  // sees the demos on their deals and a manager sees the brand's — the same
+  // list, narrowed by the same rule, rather than two screens.
+  { to: '/sales/demos',        label: 'Demos to Build',   icon: '▣' },
   { to: '/sales/onboarding',   label: 'Sold / Onboarding', icon: '✓' },
   // A rep's OWN compensation, scoped by their token server-side. It belongs in
   // My Work rather than under the manager group: what you have earned is your

@@ -196,6 +196,10 @@ COLUMNS_TO_ADD = [
     ("organizations", "billing_current_period_end", "TIMESTAMP"),
     ("organizations", "billing_cancel_at_period_end", "BOOLEAN DEFAULT FALSE"),
     ("organizations", "billing_pending_plan_key", "VARCHAR"),
+    # Which RATE the pending change lands on. Without it a commitment-only
+    # downgrade has a pending plan key identical to the current one, and the
+    # next subscription event clears the markers as though it had landed.
+    ("organizations", "billing_pending_commitment", "VARCHAR"),
     ("organizations", "billing_trial_end", "TIMESTAMP"),
     # A scheduled downgrade: when it lands, and the Stripe Subscription
     # Schedule performing it. Kept so a repeated request updates one schedule

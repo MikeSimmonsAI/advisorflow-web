@@ -823,6 +823,11 @@ def apply_change(db: Session, org: Organization, req: "ChangePlanRequest",
         # advances does the webhook move it.
         org.stripe_schedule_id = outcome["schedule_id"]
         org.billing_pending_plan_key = target.key
+        # AND THE RATE IT LANDS ON. A commitment-only change has a pending
+        # plan key identical to the current one, so without this the next
+        # subscription event reads the change as already landed and clears the
+        # markers while Stripe's schedule is still waiting to run.
+        org.billing_pending_commitment = commitment
         org.billing_pending_effective_at = (
             outcome["effective_at"] or getattr(org, "billing_current_period_end", None))
         effective_text = "at the end of your current billing period"
@@ -852,6 +857,7 @@ def apply_change(db: Session, org: Organization, req: "ChangePlanRequest",
             billing_schedule.release(org.stripe_schedule_id)
             org.stripe_schedule_id = None
         org.billing_pending_plan_key = None
+        org.billing_pending_commitment = None
         org.billing_pending_effective_at = None
         effective_text = "immediately"
         proration_applied = behavior["proration"]

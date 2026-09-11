@@ -85,6 +85,27 @@ def _is_repeated_unit(body):
     return False
 
 
+# ── NO FILE IS EXEMPT BY PATH, AND THAT IS DELIBERATE ──────────────────────
+#
+# There was a `SELF_FIXTURES` list here that skipped this file and
+# `tests/test_deploy_hygiene.py` entirely. It was solving a real problem: the
+# test has to hold a value this scanner classifies as live, or it cannot show
+# the scanner catches anything, and the repo-wide sweep then found that
+# fabricated string and exited 1 on a clean tree - every time. `deploy.bat`
+# runs this file AS A GATE, so the deploy refused over its own fixture, and a
+# gate that blocks every deploy is a gate somebody deletes.
+#
+# The diagnosis was right and the cure was too wide. Two entirely unscanned
+# files is a hole in exactly the two places a person debugging a credential
+# problem would paste a real key - and neither would ever be reported.
+#
+# So the fixtures moved instead of the scanner: the test assembles its samples
+# at runtime (`"rnd" + "_" + ...`), which no pattern here can match, and a
+# value that genuinely must sit in a file as a literal carries a per-line
+# `secret-audit: fixture` marker. Both are narrower than a file, both are
+# visible in a diff, and nothing is skipped by path any more.
+
+
 def tracked_files():
     out = subprocess.run(["git", "ls-files"], capture_output=True, text=True)
     return [p for p in out.stdout.splitlines() if p.strip()]

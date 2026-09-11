@@ -66,7 +66,13 @@ export function primaryAction(opp, closing) {
     if (demo.status === 'ready' || demo.status === 'delivered') {
       return { label: 'Move to proposal', action: { type: 'stage', stage: 'demo_proposal' } }
     }
-    return { label: 'Open demo build', action: { type: 'open', section: 'demo' } }
+    // A ROUTE, NOT A SECTION. This used to expand the DEMO section on the page
+    // the reader was already looking at, which is a disclosure rather than a
+    // destination — "open demo build" scrolled you 200px and changed nothing.
+    // It now goes where the work is actually done, which is the same place the
+    // Demos to build queue sends you.
+    return { label: 'Open demo build',
+             action: { type: 'route', to: '/sales/demo-build/' + opp.id } }
   }
   if (stage === 'demo_proposal') {
     if (!prop) return { label: 'Prepare proposal', action: { type: 'open', section: 'proposal' } }

@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import StripeCatalogue from './StripeCatalogue';
+// The brand's OTHER catalogue: recurring add-ons and one-time services. A
+// separate component from StripeCatalogue because they configure two different
+// commercial objects — that one is the subscription tiers, this one is
+// everything sold alongside them.
+import BrandCatalogue from './BrandCatalogue';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GOD MODE — BILLING & REVENUE OPERATIONS
@@ -383,6 +388,13 @@ export default function GodBillingOps() {
           look like part of somebody's daily list. */}
       <StripeCatalogue platformId={platformId} brands={brands} />
 
+      {/* Everything sold ALONGSIDE the tiers. Directly below the tier
+          catalogue because they are two halves of one question — what does
+          this brand sell — and separated because they are different objects
+          with different rules: a tier is what the customer IS, an add-on is
+          something they also have. */}
+      <BrandCatalogue platformId={platformId} />
+
       {/* ── Filter tabs, with real counts ────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
         {FILTER_TABS.map(([key, label]) => {
@@ -676,9 +688,18 @@ export default function GodBillingOps() {
                             {c.commitment_label}
                           </div>
                         )}
+                        {/* A scheduled change names the RATE as well as the
+                            tier. A commitment-only downgrade has a pending
+                            plan identical to the current one, so "→ growth"
+                            on a Growth customer read as a change to nothing. */}
                         {c.pending_plan && (
                           <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 2 }}>
-                            → {c.pending_plan}{when(c.pending_effective_at)
+                            → {c.pending_plan === (c.plan_key || c.plan_name)
+                                 && c.pending_commitment_label
+                                 ? c.pending_commitment_label
+                                 : `${c.pending_plan}${c.pending_commitment_label
+                                      ? ` · ${c.pending_commitment_label}` : ''}`}
+                            {when(c.pending_effective_at)
                               ? ` ${when(c.pending_effective_at)}` : ''}
                           </div>
                         )}

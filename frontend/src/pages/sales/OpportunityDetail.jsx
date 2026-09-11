@@ -702,6 +702,11 @@ export default function OpportunityDetail() {
     if (!a) return
     if (a.type === 'stage') { patch({ stage: a.stage }); openSection(SECTION_FOR_STAGE[a.stage] || 'discovery'); return }
     if (a.type === 'open') { openSection(a.section); return }
+    // Some next actions are a different SCREEN, not a section of this one —
+    // the demo build is the first. Routing is handled here for the same reason
+    // every other action is: one dispatcher, so no component has to know how
+    // navigation works on this page.
+    if (a.type === 'route') { nav(a.to); return }
     if (a.type === 'meeting') { setFinding(true) }
   }
 

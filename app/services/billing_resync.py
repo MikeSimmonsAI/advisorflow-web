@@ -70,6 +70,7 @@ MIRRORED_FIELDS = (
     "billing_cancel_at_period_end",
     "billing_trial_end",
     "billing_pending_plan_key",
+    "billing_pending_commitment",
     "billing_pending_effective_at",
     "stripe_schedule_id",
 )
