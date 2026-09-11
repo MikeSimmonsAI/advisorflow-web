@@ -286,6 +286,38 @@
   color: var(--gm-text);
 }
 
+/* ── NATIVE CONTROLS, AND THE TWO TENANT RULES THAT REACHED PAST THE SHELL ──
+   Found by sweeping every God route in production and measuring the computed
+   background of every element, rather than by looking at screenshots.
+
+   `index.css` carries two rules that are not scoped to anything:
+
+       select        { color-scheme: dark; }
+       select option { background: var(--bg-panel); }
+
+   A bare TYPE selector beats inheritance, so `color-scheme: light` on
+   `.gm-shell` did not reach the <select> elements inside it — they rendered as
+   Chrome's dark widget, rgb(59,59,59), on a white God form. And `--bg-panel` is
+   a TENANT token, which God Mode deliberately does not declare, so every
+   unclassed <option> in the control plane picked up the tenant's dark panel:
+   nine God screens were opening a near-black dropdown list over a light page.
+   That is the exact "dark dropdown menu" on Mike's list, and no amount of
+   tokenising God Mode's own files could have fixed it — the rule was never in
+   them.
+
+   One class plus one type out-ranks a bare type, so these settle it by
+   specificity rather than by import order. */
+.gm-shell select,
+.gm-shell option,
+.gm-shell input,
+.gm-shell textarea {
+  color-scheme: light;
+}
+.gm-shell option {
+  background-color: var(--gm-field);
+  color: var(--gm-field-fg);
+}
+
 /* Keyboard focus, everywhere in the control plane. God Mode is built almost
    entirely out of <button> — health tiles, stat cards, table rows, jump links —
    on screens that suspend customers and settle payments. Focus is never
