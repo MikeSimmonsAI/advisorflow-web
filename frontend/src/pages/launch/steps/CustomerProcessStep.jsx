@@ -13,9 +13,9 @@
 import { Group, Field, Text, Area, Select, Note, Ico, Fields, Collapse }
   from '../LaunchUI'
 
-// The customer's own name, not a literal. This read "Atlantis receives it" —
-// which is correct for exactly one customer and wrong, visibly and
-// embarrassingly, for every other one that ever opens this screen.
+// The customer's own name, not a literal. This stage used to name one real
+// company in the string — correct for exactly that customer and wrong,
+// visibly and embarrassingly, for every other one that ever opens this screen.
 const flowFor = name => ([
   { k: 'Stage 1', t: 'Customer submits information' },
   { k: 'Stage 2', t: (name || 'You') + ' receive' + (name ? 's' : '') + ' it' },

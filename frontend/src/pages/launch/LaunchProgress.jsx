@@ -5,8 +5,8 @@
  *
  *   THIS (top)          where the whole IMPLEMENTATION stands — intake,
  *                       access, build, integrations, test, training, launch.
- *                       Seven phases, most of them EvoSys Pro's work, not the
- *                       customer's.
+ *                       Seven phases, most of them the delivering brand's
+ *                       work, not the customer's.
  *
  *   The right panel     how far the customer is through the INTAKE FORM.
  *                       Eight sections, all of them theirs.
@@ -15,14 +15,22 @@
  * form and roughly 3% through their implementation. Showing one number for
  * both would be wrong in whichever direction it was rounded, and it is the
  * reason this reads as a programme rather than a wizard.
+ *
+ * THE LABELS ARE CONFIGURATION. `phases` is the configured journey when the
+ * customer's experience resolves one, and the lifecycle otherwise. The STATES
+ * come from the implementation either way — a stage is "in progress" because
+ * the record says so, never because the label was written that way — so a
+ * brand renaming a stage for one industry changes the words and nothing else.
+ * `sublabel` is where that renaming actually lands (a customer's own system
+ * named under the stage that connects it), and it renders only when set.
  */
-export default function LaunchProgress({ phases, intakePct }) {
+export default function LaunchProgress({ phases, intakePct, title }) {
   const doneCount = phases.filter(p => p.state === 'done').length
   const current = phases.find(p => p.state === 'now')
   return (
     <section className="lp-phases">
       <div className="lp-phases-h">
-        <h2>Implementation Lifecycle</h2>
+        <h2>{title || 'Implementation Lifecycle'}</h2>
         <span>
           {current
             ? <>Currently in <b style={{ color: 'var(--lp-gold2)' }}>
@@ -37,6 +45,7 @@ export default function LaunchProgress({ phases, intakePct }) {
               {p.state === 'done' ? '✓' : i + 1}
             </span>
             <span className="lp-plabel">{p.label}</span>
+            {p.sublabel ? <span className="lp-psub">{p.sublabel}</span> : null}
             <span className="lp-pstate">
               {p.state === 'done' ? 'Complete'
                 : p.state === 'now' ? 'In progress' : 'Upcoming'}

@@ -126,6 +126,11 @@ from app.routers.launch_router import router as launch_router
 # workflow existed be recorded honestly. T2 stays authoritative commerce; this
 # references it and never restates it.
 from app.routers.commercial_router import router as commercial_router
+# The customer launch experience: the configuration behind the branded
+# onboarding shell, and the internal read-only preview of it. One shell at the
+# platform layer, configured per industry, per brand and per customer — never a
+# page per customer.
+from app.routers.launch_experience_router import router as launch_experience_router
 # Deal → billing: the join between what was sold and what gets charged.
 from app.routers.deal_billing_router import router as deal_billing_router
 # Seller-assisted catalogue sales. Sits on the SALES surface for the same
@@ -688,6 +693,7 @@ app.include_router(customers_router)          # Customer provisioning engine
 # is what it serves: a customer whose commercial structure is still being
 # negotiated has to be able to onboard anyway.
 app.include_router(commercial_router)         # /commercial - custom agreements, terms, overrides
+app.include_router(launch_experience_router)  # /launch-experience - the branded onboarding shell
 # Launch Engine — the customer's onboarding intake, and the staff view of it.
 # NOT mounted under /onboarding: that prefix belongs to public self-serve
 # signup and has nothing to do with customer implementation despite the name.

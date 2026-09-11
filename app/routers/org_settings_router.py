@@ -362,12 +362,16 @@ def get_default_tiers():
 
 
 @router.get("/industries")
-def list_industries() -> dict:
+def list_industries(user: User = Depends(get_current_user)) -> dict:
     """Every business type a customer can be, and what each one starts with.
 
     The settings screen and the customer-creation screen both read this, so
     neither of them carries its own list — which is how the lists drifted apart
     in the first place.
+
+    BEHIND AUTH even though it holds no customer data: it is a precise list of
+    the verticals this platform is built for, which is competitive information
+    and costs nothing to keep private. Same reasoning as `/launch/config`.
     """
     return {"industries": industry_templates.choices(),
             "generic_key": industry_templates.GENERIC_KEY}

@@ -2,26 +2,36 @@
  * LaunchHero — the customer's welcome.
  *
  * ===========================================================================
- * TWO THINGS THIS FIXES
+ * EVERY WORD AND EVERY PICTURE HERE IS CONFIGURATION
  * ===========================================================================
  *
- * 1. THE COPY NAMED A THIRD PARTY. It read "…your ComparePower relationship…"
- *    in the customer-facing paragraph. ComparePower is one vertical's rate
- *    marketplace. A fibre reseller, a funeral home or a benefits agency
- *    onboarding through this same engine was welcomed by a sentence about a
- *    company they have never heard of — the same white-label failure as
- *    showing them another brand's name, just less obvious.
+ * The eyebrow, the title, the subtitle, the paragraph, the hero image, the
+ * customer's own logo artwork and the line they describe themselves with all
+ * arrive in `experience.presentation`, resolved on the server from four
+ * layers: platform default, industry template, white-label brand, and this
+ * customer. None of it is typed into this file.
  *
- *    The paragraph now describes the SHAPE of what is asked for, and the
- *    specifics live in the steps, where the server's schema supplies them.
+ * That is not tidiness. The alternative — a hero written for the first
+ * customer — is a second customer with somebody else's imagery and a third
+ * customer who needs a release.
+ *
+ * WHAT THIS FILE STILL DECIDES: the arrangement. Where the identity sits,
+ * what overlaps the image, how it collapses on a narrow screen. Configuration
+ * supplies content; the shell supplies the design, and a brand cannot
+ * accidentally rearrange the page by editing a settings row.
+ *
+ * ===========================================================================
+ * TWO EARLIER BUGS, KEPT FIXED
+ * ===========================================================================
+ *
+ * 1. THE COPY NAMED A THIRD PARTY. The customer-facing paragraph referred by
+ *    name to one vertical's rate marketplace — a system one customer in one
+ *    industry uses, shown to every customer of every industry. The paragraph
+ *    is now the configured intro, and any specific system is named only where
+ *    the server's schema names it, for the customers it applies to.
  *
  * 2. THE TARGET DATE NEVER RENDERED. It read `customer.targetGoLive`;
- *    GET /launch/me returns the date on `implementation.target_launch_date`.
- *    The chip was therefore always absent, silently — the same class of
- *    wrong-field-name bug as the zeros on the owner dashboard.
- *
- * The brand leads, because the customer bought from the brand. AdvisorFlow is
- * credited once, in the rail footer, and never here.
+ *    GET /launch/me returns it on `implementation.target_launch_date`.
  */
 import { Mark } from './LaunchUI'
 import { intakeState } from './present'
@@ -34,37 +44,70 @@ function dateLabel(iso) {
     { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
-export default function LaunchHero({ brand, customer, implementation, state }) {
+export default function LaunchHero({ brand, customer, implementation, state,
+                                     presentation = {} }) {
   const golive = dateLabel(implementation && implementation.target_launch_date)
   const st = intakeState(state)
 
+  const p = presentation || {}
+  const title = p.title || customer.name
+  const heroImage = p.hero_image_url || null
+  const heroLogo = p.hero_logo_url || customer.logoUrl || null
+  const tagline = p.customer_tagline || null
+
+  const cls = 'lp-hero'
+    + (heroImage ? ' lp-hero--media' : '')
+    + (p.hero_overlay ? ' lp-ov-' + p.hero_overlay : ' lp-ov-deep')
+
   return (
-    <section className="lp-hero">
-      <div className="lp-hero-top">
-        <div className="lp-hero-id">
-          <Mark src={customer.logoUrl} label={customer.name} size="l" />
-          <div>
-            <p className="lp-eyebrow">Welcome to {brand.name}</p>
-            <h1>{customer.name}</h1>
-            <p className="lp-h2">Let’s get your business ready to launch</p>
+    <section className={cls}>
+      {heroImage ? (
+        <div className="lp-hero-bg" aria-hidden="true">
+          <img src={heroImage} alt="" />
+          <span className="lp-hero-scrim" />
+        </div>
+      ) : null}
+
+      <div className="lp-hero-in">
+        <div className="lp-hero-top">
+          <div className="lp-hero-id">
+            {heroImage ? null : <Mark src={heroLogo} label={customer.name} size="l" />}
+            <div className="lp-hero-words">
+              <p className="lp-eyebrow">
+                {p.eyebrow || ('Welcome to ' + brand.name)}
+              </p>
+              <h1>{title}</h1>
+              {p.subtitle ? <p className="lp-h2">{p.subtitle}</p> : null}
+              {p.intro ? <p className="lp-hero-intro">{p.intro}</p> : null}
+            </div>
           </div>
+
+          {/* The customer's own mark, at hero scale, over their own image.
+              Only when there is an image to put it on — floating a logo over
+              flat navy looks like a placeholder, because it is one. */}
+          {heroImage && heroLogo ? (
+            <div className="lp-hero-art">
+              <img src={heroLogo} alt={customer.name} />
+              {tagline ? <p className="lp-hero-quote">{tagline}</p> : null}
+            </div>
+          ) : null}
         </div>
 
-        <div className="lp-hero-side">
+        <div className="lp-hero-chips">
           <span className="lp-chip">{st.label}</span>
           {golive ? <span className="lp-chip blue">Target launch · {golive}</span> : null}
           <span className="lp-poweredby">Delivered by {brand.name}</span>
         </div>
-      </div>
 
-      <p>
-        {st.customer} This short guided process collects what {brand.name} needs
-        to build, integrate, test and launch your system — your company details,
-        your brand, where your website and domain live, where your enquiries come
-        from, the tools your team uses today, and what happens after a customer
-        reaches you. Work through it in any order, save whenever you like, and
-        come back to finish. Nothing is sent until you sign off at the end.
-      </p>
+        {!p.intro ? (
+          <p className="lp-hero-intro">
+            {st.customer} This short guided process collects what {brand.name}
+            {' '}needs to build, integrate, test and launch your system. Work
+            through it in any order, save whenever you like, and come back to
+            finish. Nothing is sent until you sign off at the end.
+          </p>
+        ) : null}
+      </div>
     </section>
   )
 }

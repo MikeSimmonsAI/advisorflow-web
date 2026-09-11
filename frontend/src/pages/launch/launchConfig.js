@@ -40,6 +40,11 @@ export const ICONS = {
   doc:     'M6 2h8l4 4v16H6V2Zm7 1.5V7h3.5L13 3.5Z',
   phone:   'M6.6 3h3l1.5 4-2 1.5a12 12 0 0 0 5.4 5.4l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A17 17 0 0 1 4.6 5.2 2 2 0 0 1 6.6 3Z',
   mail:    'M3 5h18v14H3V5Zm2 2v.4l7 4.4 7-4.4V7H5Z',
+  // The help affordance in the rail and on the support card. A speech bubble
+  // rather than a lifebuoy: the customer is being offered a conversation with
+  // their implementation team, not rescue from a system that failed them.
+  chat:    'M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+  download: 'M12 3v10.2l3.6-3.6 1.4 1.4-6 6-6-6 1.4-1.4 3.6 3.6V3h2ZM4 19h16v2H4v-2Z',
 }
 
 /* ── WHAT THE BRAND WILL LAUNCH ───────────────────────────────────────────

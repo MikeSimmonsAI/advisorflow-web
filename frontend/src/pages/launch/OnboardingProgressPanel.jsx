@@ -1,11 +1,27 @@
 /**
  * OnboardingProgressPanel — the right rail.
  *
- * Three cards, in the order somebody stuck in a long form needs them: how far
- * am I, who do I ask, and is there something I can read offline.
+ * Four cards, in the order somebody stuck in a long form needs them: how far
+ * am I, who do I ask, is there something I can read offline, and — last,
+ * because it is decoration rather than help — the line the brand chose to
+ * leave them with.
  *
- * The ring is drawn with two SVG circles rather than a library — one
- * dependency avoided for one shape, and it inherits the surface tokens.
+ * The ring is drawn with two SVG circles rather than a library: one dependency
+ * avoided for one shape, and it inherits the surface tokens.
+ *
+ * ===========================================================================
+ * THE PERCENTAGE IS NOT A GUESS AND NOT A PAGE COUNT
+ * ===========================================================================
+ *
+ * `overallPct` comes from the server's intake overview, which counts REQUIRED
+ * FIELDS ACTUALLY ANSWERED across the stored sections. A customer who clicks
+ * through every step without typing sees 0%, because they have done nothing.
+ * A ring driven by which screens somebody visited is a progress bar that lies
+ * to the one person it is meant to orient.
+ *
+ * THE GUIDE CARD IS EITHER A DOCUMENT OR AN HONEST ABSENCE. When the brand
+ * has configured a URL it is a real download; when it has not, the card says
+ * the checklist is not published yet rather than offering a link that 404s.
  */
 import { Ico } from './LaunchUI'
 
@@ -32,8 +48,14 @@ function Ring({ pct }) {
 }
 
 export default function OnboardingProgressPanel({ steps, activeKey, onSelect,
-                                                  overallPct, brand }) {
+                                                  overallPct, brand,
+                                                  presentation = {} }) {
   const done = steps.filter(s => s.pct >= 100).length
+  const p = presentation || {}
+  const help = p.help || {}
+  const guide = p.guide || {}
+  const quote = p.quote || null
+
   return (
     <>
       <div className="lp-scard">
@@ -72,35 +94,60 @@ export default function OnboardingProgressPanel({ steps, activeKey, onSelect,
       </div>
 
       <div className="lp-scard">
-        <div className="lp-scard-h"><h3>Need Help?</h3></div>
+        <div className="lp-scard-h"><h3>{help.title || 'Need Help?'}</h3></div>
         <div className="lp-scard-b lp-help">
           <p>
-            Your {brand.name} implementation team is on this account. Ask us
-            anything — including which of these answers you can safely skip
-            for now.
+            {help.body || ('Your ' + brand.name + ' implementation team is on '
+              + 'this account. Ask us anything — including which of these '
+              + 'answers you can safely skip for now.')}
           </p>
-          <div className="lp-hrow">
-            <Ico name="mail" size={15} />{brand.supportEmail}
-          </div>
-          <div className="lp-hrow">
-            <Ico name="phone" size={15} />{brand.supportPhone}
-          </div>
+          {brand.supportEmail ? (
+            <div className="lp-hrow">
+              <Ico name="mail" size={15} />{brand.supportEmail}
+            </div>
+          ) : null}
+          {brand.supportPhone ? (
+            <div className="lp-hrow">
+              <Ico name="phone" size={15} />{brand.supportPhone}
+            </div>
+          ) : null}
+          {brand.supportEmail ? (
+            <a className="lp-btn primary lp-cta"
+               href={'mailto:' + brand.supportEmail}>
+              {help.cta_label || ('Contact ' + brand.name)}
+            </a>
+          ) : null}
         </div>
       </div>
 
       <div className="lp-scard">
-        <div className="lp-scard-h"><h3>Onboarding Guide</h3></div>
-        {/* STAGE 1: no document behind this yet. It is the card's shape and
-            placement being judged, not a download. */}
-        <button type="button" className="lp-guide" disabled>
-          <span className="lp-gi"><Ico name="doc" size={17} /></span>
-          <span>
-            <b>Onboarding checklist (PDF)</b>
-            <span>Everything asked for here, in one printable list you can
-              hand around your team.</span>
-          </span>
-        </button>
+        <div className="lp-scard-h"><h3>{guide.title || 'Download Guide'}</h3></div>
+        <div className="lp-scard-b">
+          <p className="lp-gbody">
+            {guide.body || ('Need a copy of the required information and files? '
+              + 'Download the onboarding checklist.')}
+          </p>
+          {guide.url ? (
+            <a className="lp-btn primary lp-cta" href={guide.url}
+               target="_blank" rel="noopener noreferrer">
+              <Ico name="download" size={15} />
+              {guide.cta_label || 'Download PDF'}
+            </a>
+          ) : (
+            <p className="lp-gnone">
+              Your {brand.name} team has not published a checklist for this
+              launch yet. Everything asked for is on these screens.
+            </p>
+          )}
+        </div>
       </div>
+
+      {quote && quote.text ? (
+        <div className="lp-quote">
+          <p>“{quote.text}”</p>
+          {quote.attribution ? <span>{quote.attribution}</span> : null}
+        </div>
+      ) : null}
     </>
   )
 }

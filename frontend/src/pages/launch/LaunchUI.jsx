@@ -31,9 +31,9 @@ export function Ico({ name, size = 16, stroke = false }) {
  *
  * NO GENERATED LOGO. If `logoUrl` is absent this renders initials on a
  * gold-hairline plate — a placeholder that is obviously a placeholder. An
- * invented Atlantis logo baked into the bundle would be mistaken for the real
- * one and then have to be found and removed later. When the real asset
- * arrives, set logoUrl and nothing around this moves.
+ * invented logo for a real company, baked into the bundle, would be mistaken
+ * for that company's own and then have to be found and removed later. When
+ * the real asset arrives, set logoUrl and nothing around this moves.
  */
 export function Mark({ src, label, size = 'm' }) {
   const initials = (label || '?')

@@ -104,7 +104,9 @@ const CSS = `
   padding:20px 14px 16px;background:
     radial-gradient(560px 300px at 20% -10%,rgba(226,192,120,.09),transparent 65%),
     linear-gradient(180deg,var(--lp-navy) 0%,var(--lp-void) 100%);
-  border-right:1px solid var(--lp-line)}
+  border-right:1px solid var(--lp-line);
+  /* the containing block and the clip for an optional rail image */
+  overflow:hidden}
 .lp-railbrand{display:flex;align-items:center;gap:11px;padding:2px 8px 18px;
   border-bottom:1px solid var(--lp-line);margin-bottom:14px}
 .lp-railbrand .lp-bn{min-width:0}
@@ -566,6 +568,127 @@ select.lp-in{appearance:none;cursor:pointer;
   font-weight:650;color:var(--lp-good);background:var(--lp-good-bg);
   border:1px solid var(--lp-good-bd);border-radius:999px;padding:6px 13px}
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE CONFIGURED SHELL
+   ═══════════════════════════════════════════════════════════════════════════
+   Everything below draws content the server resolved per brand, per industry
+   and per customer. It is written so that NOTHING IS REQUIRED: a customer with
+   no imagery, no tagline, no guide and no quote gets the same finished page
+   with fewer elements on it, because each of these blocks renders only when
+   its configuration exists. A design that collapses into an empty box the
+   moment a settings row is missing is a design that will be seen empty.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── hero with customer imagery ─────────────────────────────────────────── */
+.lp-hero--media{padding:0;min-height:300px;display:flex;align-items:stretch}
+.lp-hero-bg{position:absolute;inset:0;z-index:0}
+.lp-hero-bg img{width:100%;height:100%;object-fit:cover;display:block}
+/* THE SCRIM IS NOT DECORATION. White text over an arbitrary customer
+   photograph is unreadable at some point for every photograph; the scrim is
+   what makes the contrast a property of the shell rather than a property of
+   whichever image somebody uploaded. */
+.lp-hero-scrim{position:absolute;inset:0;display:block}
+.lp-ov-deep .lp-hero-scrim{background:
+  linear-gradient(100deg,rgba(8,16,28,.94) 0%,rgba(8,16,28,.82) 42%,
+    rgba(8,16,28,.44) 74%,rgba(8,16,28,.30) 100%)}
+.lp-ov-soft .lp-hero-scrim{background:
+  linear-gradient(100deg,rgba(8,16,28,.82) 0%,rgba(8,16,28,.58) 48%,
+    rgba(8,16,28,.24) 100%)}
+.lp-ov-none .lp-hero-scrim{background:
+  linear-gradient(100deg,rgba(8,16,28,.55) 0%,rgba(8,16,28,.18) 60%,
+    transparent 100%)}
+.lp-hero-in{position:relative;z-index:1;width:100%}
+.lp-hero--media .lp-hero-in{padding:30px 32px}
+.lp-hero-words{min-width:0}
+.lp-hero-intro{margin:13px 0 0;font-size:13.5px;line-height:1.68;
+  color:var(--lp-ink2);max-width:70ch}
+.lp-hero--media .lp-hero-intro{color:rgba(233,240,250,.88)}
+
+/* The customer's own mark over their own image, with the line they describe
+   themselves with. Sized to read as identity, not as a favicon. */
+.lp-hero-art{margin-left:auto;flex:0 0 auto;display:flex;flex-direction:column;
+  align-items:center;gap:10px;max-width:260px;text-align:center}
+.lp-hero-art img{max-width:230px;max-height:104px;object-fit:contain;
+  display:block;filter:drop-shadow(0 6px 18px rgba(0,0,0,.45))}
+.lp-hero-quote{margin:0;font-size:11.5px;font-weight:600;line-height:1.5;
+  letter-spacing:.02em;color:var(--lp-gold2)}
+.lp-hero-chips{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:18px}
+.lp-hero-chips .lp-poweredby{margin-left:auto}
+
+/* ── per-stage sublabel on the journey tracker ──────────────────────────── */
+.lp-psub{margin-top:2px;font-size:10px;font-weight:600;line-height:1.3;
+  color:var(--lp-ink4);max-width:13ch}
+.lp-phase.now .lp-psub{color:var(--lp-gold2)}
+
+/* ── rail artwork, help card and tagline ────────────────────────────────── */
+.lp-rail-art{position:absolute;inset:0;z-index:0;overflow:hidden}
+.lp-rail-art img{width:100%;height:100%;object-fit:cover;display:block}
+.lp-rail-scrim{position:absolute;inset:0;display:block;background:
+  linear-gradient(180deg,rgba(8,16,28,.90) 0%,rgba(8,16,28,.95) 55%,
+    var(--lp-void) 100%)}
+.lp-rail-in{position:relative;z-index:1;display:flex;flex-direction:column;
+  flex:1 1 auto;min-height:0}
+.lp-railhelp{display:flex;align-items:center;gap:10px;margin-top:16px;
+  padding:11px 12px;border-radius:11px;cursor:default;
+  background:linear-gradient(140deg,var(--lp-gold-bg),transparent 82%);
+  border:1px solid var(--lp-gold-bd)}
+.lp-rh-ico{flex:0 0 26px;height:26px;display:grid;place-items:center;
+  border-radius:8px;background:var(--lp-navy3);color:var(--lp-gold2)}
+.lp-rh-words{min-width:0;flex:1 1 auto}
+.lp-rh-words b{display:block;font-size:12px;font-weight:700;color:var(--lp-ink)}
+.lp-rh-words span{display:block;margin-top:2px;font-size:10.5px;
+  line-height:1.45;color:var(--lp-ink3)}
+.lp-rh-caret{flex:0 0 auto;color:var(--lp-gold2);font-size:17px;line-height:1}
+.lp-rail-tag{display:flex;flex-direction:column;gap:3px;padding:0 10px 12px}
+.lp-rail-tag span{font-size:9px;font-weight:800;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--lp-ink4)}
+
+/* ── side cards: full-width action, guide body, honest absence, quote ───── */
+.lp-cta{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;margin-top:12px;text-decoration:none}
+.lp-gbody{margin:0;font-size:12px;line-height:1.6;color:var(--lp-cink2)}
+.lp-gnone{margin:12px 0 0;font-size:11.5px;line-height:1.55;
+  color:var(--lp-cink3);border-top:1px dashed var(--lp-cline2);padding-top:10px}
+.lp-quote{border:1px solid var(--lp-gold-bd);border-radius:var(--lp-r2);
+  padding:16px 18px;background:linear-gradient(150deg,var(--lp-gold-bg),
+    transparent 85%)}
+.lp-quote p{margin:0;font-size:13px;line-height:1.6;font-style:italic;
+  color:var(--lp-ink2)}
+.lp-quote span{display:block;margin-top:9px;font-size:9.5px;font-weight:800;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--lp-gold)}
+
+/* ── footer ─────────────────────────────────────────────────────────────── */
+.lp-foot{margin-top:auto;display:flex;align-items:center;gap:18px;
+  flex-wrap:wrap;padding:20px 26px 26px;border-top:1px solid var(--lp-line)}
+.lp-foot-brand{display:flex;align-items:center;gap:11px;min-width:0}
+.lp-foot-brand b{display:block;font-size:12.5px;font-weight:650;
+  color:var(--lp-ink2);line-height:1.25}
+.lp-foot-brand span span{display:block;margin-top:2px;font-size:10.5px;
+  color:var(--lp-ink4)}
+.lp-foot-links{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  margin-left:auto}
+.lp-foot-links a,.lp-foot-links span{font-size:11.5px;color:var(--lp-ink3);
+  text-decoration:none}
+.lp-foot-links a:hover{color:var(--lp-gold2)}
+.lp-foot-links span{color:var(--lp-ink4)}
+.lp-foot-note{width:100%;margin:0;font-size:10.5px;color:var(--lp-ink4)}
+
+/* ── internal preview strip ─────────────────────────────────────────────── */
+/* LOUD ON PURPOSE. See PreviewBanner.jsx — the failure mode of a subtle
+   indicator is an operator believing a customer has seen this page. */
+.lp-preview{position:sticky;top:0;z-index:60;display:flex;align-items:center;
+  gap:12px;flex-wrap:wrap;padding:9px 18px;
+  background:linear-gradient(90deg,#6d28d9,#4c1d95);
+  border-bottom:1px solid rgba(196,181,253,.5);color:#f5f3ff}
+.lp-preview-tag{flex:0 0 auto;font-size:9px;font-weight:800;letter-spacing:.18em;
+  text-transform:uppercase;border-radius:999px;padding:4px 10px;
+  background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32)}
+.lp-preview-words{min-width:0;flex:1 1 320px;font-size:11.5px;line-height:1.5}
+.lp-preview-words b{font-weight:700}
+.lp-preview-words span{opacity:.92}
+.lp-preview-by{flex:0 0 auto;font-size:10.5px;opacity:.85;white-space:nowrap}
+
 /* ── mobile rail ────────────────────────────────────────────────────────── */
 .lp-railtoggle{display:none}
 
@@ -592,9 +715,27 @@ select.lp-in{appearance:none;cursor:pointer;
   .lp-top{padding:10px 16px}
   .lp-search{max-width:none}
   .lp-user .lp-un{display:none}
+  /* The rail is a horizontal strip here; its artwork and tagline belong to
+     the tall version and would crop to a smear. */
+  .lp-rail-art,.lp-rail-tag{display:none}
+  .lp-railhelp{display:none}
+  .lp-rail.open .lp-railhelp{display:flex}
+  .lp-foot{padding:18px 16px 24px}
 }
 @media(max-width:720px){
   .lp-hero{padding:24px 20px}
+  .lp-hero--media{padding:0}
+  .lp-hero--media .lp-hero-in{padding:24px 20px}
+  /* THE IDENTITY STACKS, IT DOES NOT SHRINK. A logo scaled to fit beside a
+     heading on a phone is a logo nobody can read. */
+  .lp-hero-art{margin:16px 0 0;max-width:none;align-items:flex-start;
+    text-align:left}
+  .lp-hero-art img{max-width:190px;max-height:78px}
+  .lp-hero-chips .lp-poweredby{margin-left:0;width:100%}
+  .lp-foot{flex-direction:column;align-items:flex-start;gap:12px}
+  .lp-foot-links{margin-left:0}
+  .lp-preview{padding:8px 14px}
+  .lp-preview-by{display:none}
   .lp-hero h1{font-size:25px}
   .lp-hero-side{margin-left:0;align-items:flex-start;flex-direction:row;
     flex-wrap:wrap}

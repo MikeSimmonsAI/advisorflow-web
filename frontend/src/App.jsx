@@ -769,10 +769,36 @@ export default function App() {
             An unknown stepKey falls back to the first step inside LaunchPad
             rather than 404-ing a customer mid-onboarding.
 
-            NO ORGANIZATION ID IN EITHER ROUTE, and there never will be. The
-            customer's workspace is resolved from the session on the server; a
-            /launch/:orgId route would be a customer-enumeration endpoint
-            wearing a feature's clothes. */}
+            NO ORGANIZATION ID ON EITHER CUSTOMER ROUTE, and there never will
+            be. The customer's workspace is resolved from the session on the
+            server; a /launch/:orgId route would be a customer-enumeration
+            endpoint wearing a feature's clothes. The staff preview below is
+            the one route that names an organization, and it answers to a
+            different endpoint with its own staff scoping — it is not this
+            route with an id bolted on. */}
+        {/* THE INTERNAL PREVIEW — registered BEFORE `/launch/:stepKey`, and
+            the only launch route that carries an organization id.
+
+            It is the same component and the same design: an operator must see
+            exactly what the customer will see, so a second "staff rendering"
+            of onboarding is precisely what this must not be. What differs is
+            the endpoint behind it (`/launch-experience/preview/{id}`, which
+            composes read-only), a banner saying nobody has been invited, and
+            every write in the component turned off.
+
+            IT IS GUARDED THE SAME WAY EVERY OTHER LAUNCH ROUTE IS: this is a
+            redirect for anonymous visitors, not authorization. WHO may preview
+            WHICH customer is decided server-side — god, or staff of the brand
+            that owns the customer — and an id outside the caller's reach 404s
+            rather than confirming it exists. It is deliberately NOT wrapped in
+            GodModeLayout: God chrome around the customer's page would defeat
+            the one thing the preview is for, and it is not gated on god
+            either, because the implementation staff who actually run these
+            launches are brand staff. */}
+        <Route path="/launch/preview/:organizationId"
+               element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
+        <Route path="/launch/preview/:organizationId/:stepKey"
+               element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
         <Route path="/launch" element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
         <Route path="/launch/:stepKey" element={<LaunchRoute><LaunchPad /></LaunchRoute>} />
         {/* The family's booking and feedback pages, on the customer's own

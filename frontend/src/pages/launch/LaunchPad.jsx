@@ -52,6 +52,8 @@ import LaunchStyles from './LaunchStyles'
 import LaunchSidebar from './LaunchSidebar'
 import LaunchHeader from './LaunchHeader'
 import LaunchHero from './LaunchHero'
+import LaunchFooter from './LaunchFooter'
+import PreviewBanner from './PreviewBanner'
 import LaunchProgress from './LaunchProgress'
 import OnboardingProgressPanel from './OnboardingProgressPanel'
 import OnboardingStepShell from './OnboardingStepShell'
@@ -91,8 +93,19 @@ function Centered({ children }) {
 }
 
 export default function LaunchPad() {
-  const { stepKey } = useParams()
+  const { stepKey, organizationId } = useParams()
   const navigate = useNavigate()
+
+  // PREVIEW IS THE SAME COMPONENT, FED A DIFFERENT ENDPOINT.
+  //
+  // Not a copy of this screen with the writes removed — a copy would drift,
+  // and the whole point of the preview is that an operator sees exactly what
+  // the customer will see. The server composes both from one function; this
+  // chooses which one to ask, and turns every write off.
+  const preview = !!organizationId
+  const source = preview
+    ? '/launch-experience/preview/' + encodeURIComponent(organizationId)
+    : '/launch-experience/me'
 
   const [launch, setLaunch] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
@@ -120,26 +133,37 @@ export default function LaunchPad() {
   const dirtyRef = useRef(false)
 
   const reloadLaunch = useCallback(async () => {
-    const d = await api.get('/launch/me')
+    const d = await api.get(source)
     setLaunch(d)
     return d
-  }, [])
+  }, [source])
 
   useEffect(() => {
     let alive = true
     setLoading(true)
-    api.get('/launch/me')
+    api.get(source)
       .then(d => { if (alive) { setLaunch(d); setLoadErr(null) } })
       .catch(e => { if (alive) setLoadErr(e?.detail || 'Could not load your launch.') })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [])
+  }, [source])
 
   // Load the active step's saved answers. This is what makes refresh and
   // "come back tomorrow" work — the server is the only source of truth, so a
   // reload is a fetch rather than a recovery.
   useEffect(() => {
     if (!launch) return undefined
+    // A PREVIEW READS NO CUSTOMER ANSWERS. The step endpoint is the
+    // customer's own, session-scoped, and reaching another organization's
+    // answers through it is not something this screen should be able to do.
+    // The preview renders the real schema with empty fields and says so.
+    if (preview) {
+      setAnswers({})
+      setSecretsSet([])
+      setStepMeta(null)
+      dirtyRef.current = false
+      return undefined
+    }
     let alive = true
     setSaved(false)
     setSaveErr(null)
@@ -153,13 +177,14 @@ export default function LaunchPad() {
       })
       .catch(e => { if (alive) setSaveErr(e?.detail || 'Could not load this section.') })
     return () => { alive = false }
-  }, [active, launch])
+  }, [active, launch, preview])
 
   const loadFiles = useCallback(() => {
+    if (preview) { setFiles([]); return }
     api.get('/launch/me/files')
       .then(d => setFiles(d.files || []))
       .catch(() => setFiles([]))
-  }, [])
+  }, [preview])
 
   useEffect(() => { if (launch) loadFiles() }, [launch, loadFiles])
 
@@ -184,6 +209,11 @@ export default function LaunchPad() {
   }, [])
 
   const persist = useCallback(async () => {
+    // THE ONE PLACE A PREVIEW COULD HAVE WRITTEN, AND IT DOES NOT.
+    // The server would refuse anyway — the step endpoint is session-scoped to
+    // the caller's own workspace — but a screen that attempts a write it knows
+    // is wrong is a screen somebody will later "fix" by widening the endpoint.
+    if (preview) return false
     setSaving(true)
     setSaveErr(null)
     try {
@@ -209,13 +239,18 @@ export default function LaunchPad() {
     } finally {
       setSaving(false)
     }
-  }, [active, answers, reloadLaunch])
+  }, [active, answers, reloadLaunch, preview])
 
   const goTo = useCallback(key => {
-    navigate('/launch/' + key)
+    // A preview keeps its own URL shape, so stepping through the journey
+    // inside a preview does not bounce the operator into the customer route
+    // (which resolves THEIR workspace, not the customer's).
+    navigate(preview
+      ? '/launch/preview/' + encodeURIComponent(organizationId) + '/' + key
+      : '/launch/' + key)
     setRailOpen(false)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0 })
-  }, [navigate])
+  }, [navigate, preview, organizationId])
 
   const saveAndGo = useCallback(async key => {
     const ok = await persist()
@@ -223,6 +258,10 @@ export default function LaunchPad() {
   }, [persist, goTo])
 
   const uploadFile = useCallback(async (file, label) => {
+    // A PREVIEW UPLOADS NOTHING. The route is session-scoped, so the file
+    // would land in the OPERATOR's workspace, not the customer's — a preview
+    // that quietly creates a document somewhere is not a preview.
+    if (preview) return null
     const fd = new FormData()
     fd.append('file', file)
     fd.append('step_key', 'files')
@@ -231,20 +270,25 @@ export default function LaunchPad() {
     loadFiles()
     reloadLaunch()
     return row
-  }, [loadFiles, reloadLaunch])
+  }, [loadFiles, reloadLaunch, preview])
 
   const removeFile = useCallback(async id => {
+    if (preview) return
     await api.delete('/launch/me/files/' + id)
     loadFiles()
     reloadLaunch()
-  }, [loadFiles, reloadLaunch])
+  }, [loadFiles, reloadLaunch, preview])
 
   const submit = useCallback(async () => {
+    // SUBMISSION IS THE CUSTOMER'S SIGNATURE. A preview must never produce
+    // one: it would put a completion event, a timestamp and a name against a
+    // customer who has not opened the page.
+    if (preview) return null
     await persist()
     const res = await api.post('/launch/me/submit', {})
     await reloadLaunch()
     return res
-  }, [persist, reloadLaunch])
+  }, [persist, reloadLaunch, preview])
 
   if (loading) {
     return <Centered><p style={{ color: '#64748b' }}>Loading your launch…</p></Centered>
@@ -264,6 +308,12 @@ export default function LaunchPad() {
   const brand = launch.brand
   const customer = launch.customer
   const overall = launch.overview.overall_pct
+  // PRESENTATION IS CONFIGURATION, NOT CODE. Everything below reads it and
+  // nothing below knows which customer it belongs to — the layer that decided
+  // this copy, this logo and this imagery is on the server, resolved from
+  // platform → industry → brand → organization.
+  const presentation = launch.experience?.presentation || {}
+  const journey = launch.experience?.journey || null
   const StepBody = STEP_COMPONENTS[active]
   const next = steps[index + 1]
   const prev = steps[index - 1]
@@ -281,8 +331,10 @@ export default function LaunchPad() {
   return (
     <div className="lp-scope" data-surface="launch">
       <LaunchStyles />
+      {preview ? <PreviewBanner context={launch.preview_context} /> : null}
       <div className="lp-shell">
         <LaunchSidebar brand={brand} active="onboarding" open={railOpen}
+          presentation={presentation}
           onToggle={() => setRailOpen(o => !o)} onSelect={() => setRailOpen(false)} />
 
         <div className="lp-body">
@@ -320,8 +372,12 @@ export default function LaunchPad() {
           <main className="lp-main">
             <LaunchHero brand={brand} customer={customer}
                         implementation={launch.implementation}
-                        state={intakeStatusKey} />
-            <LaunchProgress phases={launch.lifecycle}
+                        state={intakeStatusKey}
+                        presentation={presentation} />
+            {/* The configured journey when the customer's experience resolves
+                one; the platform lifecycle otherwise. Same states either way. */}
+            <LaunchProgress phases={journey || launch.lifecycle}
+                            title={presentation.journey_title}
                             currentStatus={launch.implementation?.status}
                             intakePct={overall} />
 
@@ -356,7 +412,8 @@ export default function LaunchPad() {
                     blockers={launch.blockers}
                     overview={launch.overview}
                     submission={launch.submission}
-                    readOnly={submitted}
+                    readOnly={submitted || preview}
+                    preview={preview}
                   />
                 </OnboardingStepShell>
 
@@ -365,9 +422,12 @@ export default function LaunchPad() {
                     the customer owes us today, and the live thing outranks the
                     brochure once a launch is under way. It renders nothing at
                     all until there is a programme to report. */}
-                <DeliveryPanel brand={brand} />
+                <DeliveryPanel brand={brand}
+                               data={preview ? (launch.delivery ?? null) : null}
+                               readOnly={preview} />
 
-                <WhatWeLaunch brand={brand} customer={customer} />
+                <WhatWeLaunch brand={brand} customer={customer}
+                              presentation={presentation} />
               </div>
 
               <aside className="lp-side">
@@ -377,10 +437,13 @@ export default function LaunchPad() {
                   onSelect={goTo}
                   overallPct={overall}
                   brand={brand}
+                  presentation={presentation}
                 />
               </aside>
             </div>
           </main>
+
+          <LaunchFooter brand={brand} presentation={presentation} />
         </div>
       </div>
     </div>

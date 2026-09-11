@@ -61,20 +61,34 @@ function Row({ status, children, right }) {
   )
 }
 
-export default function DeliveryPanel({ brand }) {
-  const [d, setD] = useState(null)
+/**
+ * `data` / `readOnly` exist for the internal preview, and for nothing else.
+ *
+ * The fetch below is session-scoped: inside a preview it would answer with the
+ * OPERATOR's delivery state and paint their integrations into a customer's
+ * page. So the preview hands the already-composed customer view down as
+ * `data`, this component renders that instead of asking, and `readOnly` takes
+ * the buttons away — a preview must not be able to approve anything on a
+ * customer's behalf.
+ */
+export default function DeliveryPanel({ brand, data = null, readOnly = false }) {
+  const [fetched, setFetched] = useState(null)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
+  const supplied = data !== null
+  const d = supplied ? data : fetched
 
   const load = useCallback(() => {
+    if (supplied) return
     api.get('/launch/me/delivery')
-      .then(setD)
-      .catch(() => setD(null))
-  }, [])
+      .then(setFetched)
+      .catch(() => setFetched(null))
+  }, [supplied])
 
   useEffect(load, [load])
 
   const act = useCallback(async (id, path) => {
+    if (readOnly) return
     setBusy(id)
     setError(null)
     try {
@@ -85,7 +99,7 @@ export default function DeliveryPanel({ brand }) {
     } finally {
       setBusy(null)
     }
-  }, [load])
+  }, [load, readOnly])
 
   // Nothing to say yet: no programme has been set up for this customer. An
   // empty panel is better than a panel of zeroes implying nothing will happen.

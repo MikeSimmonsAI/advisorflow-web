@@ -328,6 +328,33 @@ export default function GodLaunches() {
                           color: 'var(--god-text, var(--gm-blue))', fontWeight: 600 }}>
                   {isOpen ? 'Close' : 'Review'}
                 </button>
+                {/* SEE IT BEFORE THEY DO.
+                    "Review" reads the customer's answers; this opens the
+                    customer's own onboarding experience exactly as they will
+                    receive it — their branding, their imagery, their journey,
+                    their real progress — so nobody has to invite somebody in
+                    order to find out what the invitation leads to.
+
+                    It opens in a new tab on purpose: the customer shell is a
+                    full-page brand surface, and navigating God Mode into it
+                    would leave an operator stranded outside the console they
+                    were working in.
+
+                    NOTHING IS SENT AND NOTHING IS CREATED BY CLICKING THIS.
+                    See launch_experience_router.preview_experience — the read
+                    is composed by the same read-only function behind the
+                    customer's own page, and the only thing it writes is the
+                    audit note that somebody looked. */}
+                <a href={'/launch/preview/' + encodeURIComponent(r.organization_id)}
+                   target="_blank" rel="noopener noreferrer"
+                   style={{
+                     fontSize: 12, padding: '7px 14px', borderRadius: 8,
+                     border: '1px solid var(--god-border, var(--gm-card-line))',
+                     background: 'var(--god-card, var(--gm-panel))',
+                     color: 'var(--god-text, var(--gm-blue))', fontWeight: 600,
+                     textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                  Preview their onboarding
+                </a>
               </div>
             </div>
 

@@ -210,6 +210,12 @@ import app.models.ai_deployment_models  # noqa: F401  (side effects)
 # appear, and an agreement that cannot be stored becomes an onboarding that
 # cannot start. Same reason, same consequence, as every import above it.
 import app.models.commercial_models  # noqa: F401  (imported for side effects)
+# The customer launch experience — the configuration layers behind the branded
+# onboarding shell. Dropping this line means the table never appears, every
+# customer falls back to the platform default presentation, and a brand's or a
+# customer's own configuration silently cannot be stored. Added to BOTH blocks
+# in this file, per the merge-artefact note above.
+import app.models.launch_experience_models  # noqa: F401  (side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -409,3 +415,9 @@ import app.models.ai_deployment_models  # noqa: F401  (side effects)
 # appear, and an agreement that cannot be stored becomes an onboarding that
 # cannot start. Same reason, same consequence, as every import above it.
 import app.models.commercial_models  # noqa: F401  (imported for side effects)
+# The customer launch experience — the configuration layers behind the branded
+# onboarding shell. Dropping this line means the table never appears, every
+# customer falls back to the platform default presentation, and a brand's or a
+# customer's own configuration silently cannot be stored. Added to BOTH blocks
+# in this file, per the merge-artefact note above.
+import app.models.launch_experience_models  # noqa: F401  (side effects)

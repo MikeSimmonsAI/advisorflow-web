@@ -39,6 +39,7 @@ registry.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
 # ── shared vocabulary ───────────────────────────────────────────────────────
@@ -225,6 +226,54 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
              "kind": "select",
              "options": ["Supplier residual", "Flat fee", "Both", "Other"]},
         ],
+        # ── the launch experience this industry starts from ──────────────────
+        #
+        # Journey labels and extra questions only. No customer's name, logo,
+        # imagery or tagline is here — those belong to an organization-scope
+        # row, because they are facts about one company rather than about an
+        # industry. See app/services/launch_experience.py.
+        "experience": {
+            "journey": [
+                {"key": "intake", "label": "Complete", "sublabel": "Intake"},
+                {"key": "access", "label": "Provide",
+                 "sublabel": "Access & Files"},
+                {"key": "build", "label": "{brand}", "sublabel": "Builds"},
+                {"key": "integrations", "label": "Integrations",
+                 "sublabel": "Rate & Supplier Systems"},
+                {"key": "review", "label": "Review & Test", "sublabel": ""},
+                {"key": "training", "label": "Training", "sublabel": ""},
+                {"key": "golive", "label": "Go Live", "sublabel": ""},
+            ],
+            "form": {
+                "sections": [
+                    {
+                        "step": "company",
+                        "key": "energy_profile",
+                        "title": "Energy Business Profile",
+                        "blurb": "How your energy business is set up, so the "
+                                 "system speaks about rates and contracts the "
+                                 "way you do.",
+                        "fields": [
+                            {"key": "segments_served",
+                             "label": "Lines of business",
+                             "kind": "multiselect", "required": True,
+                             "options": ["Residential", "Commercial / B2B"]},
+                            {"key": "markets_served",
+                             "label": "Markets / utility areas served",
+                             "kind": "text", "required": False,
+                             "help": "For example the utilities or delivery "
+                                     "areas your customers sit in."},
+                            {"key": "supplier_panel",
+                             "label": "Suppliers you place business with",
+                             "kind": "textarea", "required": False},
+                            {"key": "contract_terms_offered",
+                             "label": "Contract terms you typically offer",
+                             "kind": "text", "required": False},
+                        ],
+                    },
+                ],
+            },
+        },
     },
 
     "roofing": {
@@ -559,6 +608,16 @@ def vocabulary(industry: Optional[str]) -> Dict[str, str]:
 
 def onboarding_questions(industry: Optional[str]) -> List[Dict[str, Any]]:
     return [dict(q) for q in resolve(industry)["onboarding_questions"]]
+
+
+def experience(industry: Optional[str]) -> Dict[str, Any]:
+    """This industry's starting launch-experience configuration, if it has one.
+
+    Returns an empty dict for an industry that has not been given one — the
+    platform default then stands, which is the correct outcome: a neutral
+    professional onboarding, never another vertical's.
+    """
+    return copy.deepcopy(resolve(industry).get("experience") or {})
 
 
 def tier_definition_key(industry: Optional[str]) -> str:
