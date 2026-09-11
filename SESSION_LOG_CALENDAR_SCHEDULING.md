@@ -239,12 +239,14 @@ Declared after, they resolve as `appt_id="pending-outcome"` and 404. Guarded by
 
 ## 6. Tests
 
-115 new tests in three files:
+102 new tests in three files. The count is what pytest COLLECTS, not what
+`def test_` greps to — the attack file's parameterised route sweep expands one
+definition into several cases:
 
 - `tests/test_calendar_scheduling_smoke.py` (13) — the new routes are reachable
   and return the shape the screens read, including on an EMPTY brand, which is
   the state every new brand starts in.
-- `tests/test_calendar_scheduling.py` (60) — intersection, work hours, lunch,
+- `tests/test_calendar_scheduling.py` (47) — intersection, work hours, lunch,
   PTO, buffers, notice, external busy, the outcome lifecycle, reconciliation,
   concurrency, DST (spring forward AND fall back), cross-zone participants,
   privacy, tenancy, and the mobile contract.
