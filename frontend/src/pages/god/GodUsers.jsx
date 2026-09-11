@@ -285,7 +285,10 @@ function IdentityRow({
               MANAGE ACCESS
             </button>
             {isMe
-              ? <span className="gm-idself" title="Your own account">YOUR ACCOUNT</span>
+              ? <span className="gm-idself"
+                      title="Your own account. Deactivation and password reset are not offered on it.">
+                  YOU
+                </span>
               : <button className={'gm-act ' + (u.is_active ? 'gm-danger' : '')}
                         disabled={busy} onClick={() => onAskToggle(u)}>
                   {busy ? '…' : (u.is_active ? 'DEACTIVATE' : 'REACTIVATE')}
