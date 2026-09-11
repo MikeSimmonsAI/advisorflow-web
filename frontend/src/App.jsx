@@ -21,6 +21,13 @@ import PortalViewer from './pages/portal/PortalViewer'
 // behaviour anywhere. Whether Stage 2 puts an invitation token in front of it
 // is a Stage 2 decision and nothing here presumes an answer.
 import LaunchPad from './pages/launch/LaunchPad'
+// CUSTOM COMMERCIAL AGREEMENTS. Two screens, two payloads, and deliberately
+// not one screen with a permission flag: `/commercial` renders the customer's
+// own plain-language view of their arrangement, and the console renders the
+// internal one. The customer's page cannot leak a percentage because the
+// response it reads does not contain one.
+import MyCommercial from './pages/commercial/MyCommercial'
+import CommercialConsole from './pages/commercial/CommercialConsole'
 // Family-facing pages on the organization's own branded domain. The
 // public-identity resolver emits https://<branded-host>/book/:token and
 // /survey/:token; without these two routes those links 404.
@@ -778,6 +785,19 @@ export default function App() {
             the backend HTML page — this one just lives on the brand's host so
             the prospect is not emailed an infrastructure URL. */}
         <Route path="/appointments/confirm/:token" element={<AppointmentConfirmPage />} />
+        {/* ── CUSTOM COMMERCIAL AGREEMENTS ──
+            NO ORGANIZATION ID ON THE CUSTOMER ROUTE, for the same reason the
+            Launch Pad takes none: what is behind it is the commercial terms of
+            a deal, and an /commercial/:orgId route would be a contract-terms
+            enumeration endpoint with a UUID for a lock. The org comes from the
+            session on the server.
+
+            The console DOES take an id, because that is its job — and the
+            server 404s (never 403s) on an agreement outside the caller's
+            brand, so the id cannot be used to discover which ones exist. */}
+        <Route path="/commercial" element={<ProtectedRoute><MyCommercial /></ProtectedRoute>} />
+        <Route path="/commercial/agreements/:agreementId"
+          element={<ProtectedRoute><CommercialConsole /></ProtectedRoute>} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />
         <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
