@@ -78,7 +78,7 @@ export default function CustomerCreate() {
             script.
           </p>
         </div>
-        <button className="go-btn" onClick={() => nav('/god/platform')}>Cancel</button>
+        <button className="go-btn ghost" onClick={() => nav('/god/platform')}>Cancel</button>
       </div>
 
       {err && <div className="go-err">{err}</div>}
@@ -86,11 +86,11 @@ export default function CustomerCreate() {
       <section className="go-card go-pad">
         <h2 className="go-h2">Company</h2>
 
-        <label className="go-label">Company name</label>
+        <label className="go-label">Company name <Req /></label>
         <input className="go-input" value={f.name} onChange={set('name')}
                placeholder="e.g. Riverside Memorial" />
 
-        <label className="go-label">Brand</label>
+        <label className="go-label">Brand <Req /></label>
         <select className="go-input" value={f.platform_id} onChange={set('platform_id')}>
           <option value="">Select a brand…</option>
           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -145,12 +145,31 @@ export default function CustomerCreate() {
         <input className="go-input" value={f.loc_phone} onChange={set('loc_phone')} />
       </section>
 
-      <div className="go-actions">
+      <div className="go-actions" style={{ alignItems: 'center' }}>
+        {!ready && !busy && (
+          <span className="go-hint" style={{ margin: 0 }}>
+            {!f.name.trim() && !f.platform_id
+              ? 'Add a company name and choose a brand to continue.'
+              : !f.name.trim() ? 'Add a company name to continue.'
+              : 'Choose a brand to continue.'}
+          </span>
+        )}
         <button className="go-btn go-btn-primary" disabled={!ready || busy}
                 onClick={submit}>
           {busy ? 'Creating…' : 'Create customer'}
         </button>
       </div>
     </div>
+  )
+}
+
+/** The required marker. Colour is reinforcement — the asterisk and the
+ *  accessible word are what carry it, so "required" survives for anyone who
+ *  cannot separate the red from the grey. */
+function Req() {
+  return (
+    <span style={{ color: 'var(--gm-red)', fontWeight: 700 }}>
+      *<span className="gm-sr"> (required)</span>
+    </span>
   )
 }

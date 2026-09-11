@@ -314,6 +314,11 @@ table.gm-table th{
 table.gm-table td{padding:11px 12px;border-bottom:1px solid var(--gm-row-line);vertical-align:middle;color:var(--gm-text)}
 table.gm-table tbody tr:hover td{background:var(--gm-row-hover-flat)}
 table.gm-table td.gm-num,table.gm-table th.gm-num{text-align:right;font-variant-numeric:tabular-nums}
+/* The name column does not get squeezed. Without a floor it compressed until
+   "Restland Cemetery and Funeral Home" wrapped onto three lines, which turns a
+   scannable table into a wall - the table scrolls sideways instead, which is
+   what .gm-tablewrap is for. */
+table.gm-table th:first-child,table.gm-table td:first-child{min-width:214px}
 .gm-orgname{color:var(--gm-head);font-weight:650;font-size:13px}
 .gm-orgsub{color:var(--gm-dim);font-size:11px;margin-top:2px}
 .gm-group td{background:var(--gm-row-lvl0);color:var(--gm-blue);font-weight:700;font-size:13px;

@@ -402,14 +402,15 @@ function BookingCleanupTab() {
       {/* ── confirmation dialog ── */}
       {phase === CLEANUP_CONFIRM && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'var(--gm-panel)',
+          position: 'fixed', inset: 0, background: 'var(--gm-scrim)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 9999,
         }}>
           <div style={{
-            background: 'var(--surface, var(--gm-panel))', borderRadius: 10,
+            background: 'var(--gm-panel)', borderRadius: 'var(--gm-radius)',
+            border: '1px solid var(--gm-card-line)',
             padding: 28, maxWidth: 520, width: '90%',
-            boxShadow: '0 8px 32px var(--gm-shadow-card)',
+            boxShadow: 'var(--gm-shadow-modal)',
           }}>
             <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 12, color: 'var(--gm-red)' }}>
               Apply booking cleanup?
