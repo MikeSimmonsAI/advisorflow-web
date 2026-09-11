@@ -114,6 +114,33 @@ EXEMPT = {
     # rather than growing a second set.
     "services/ai_deployment/simulation.py": "synthetic deployment proof; writes only into is_demo tenants it creates itself, with unroutable addresses, inside a savepoint on the one path production runs it",
 
+    # T9's MANAGEMENT proof, and exempt on the same terms as T8's above rather
+    # than on looser ones.
+    #
+    # `_contacts` is the only place in `services/workforce_intelligence/` that
+    # constructs anything, and it constructs Leads and nothing else - no User,
+    # no Organization, no Platform. It cannot be pointed at a paying customer:
+    # the organization it writes into is loaded by `_scenario` from the
+    # `t8-proof-` slug T8's own simulation created and flagged `is_demo`, and
+    # there is no argument on any function in this module that accepts an
+    # organization. Every contact carries a 555-01xx number from the reserved
+    # fiction block and an `example.invalid` address, so none of them is a
+    # person anybody can reach, and the God route that runs it is a POST behind
+    # `require_god`.
+    #
+    # WHY NOT CALL plan_limits ANYWAY. Because the answer would be wrong in
+    # both directions: a synthetic tenant has no plan worth counting against,
+    # and counting thirty-two fictional contacts into a real ceiling would be a
+    # proof that consumed a customer's capacity. The guard is the right
+    # question for arrivals; these are not arrivals.
+    #
+    # It is NOT an exemption for T9. Nothing else in
+    # services/workforce_intelligence/ constructs a User or a Lead - the layer
+    # reads authoritative records and writes its own management state - and
+    # tests/test_ai_workforce_intelligence_security.py asserts that directly,
+    # excluding only this module for this reason.
+    "services/workforce_intelligence/proof.py": "synthetic management proof; writes only Leads, only into the is_demo tenants T8's simulation creates, with unroutable addresses, behind require_god",
+
     # Brand-sales staff live at SCOPE_BRAND_SALES_ORG with organization_id
     # NULL. They are not seats in any customer's plan.
     "services/sales_staff.py": "brand sales-org staff; organization_id is NULL, not a customer seat",

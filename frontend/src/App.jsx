@@ -236,6 +236,12 @@ import GodWorkforce from './pages/god/GodWorkforce'
 // GodWorkforce is: a route added after it renders the Command Center and looks
 // like a broken link rather than a routing mistake.
 import AIWorkforce from './pages/AIWorkforce'
+// T9 — AI Workforce Command. The management surface above T6/T7/T8: what
+// needs a person, what each employee produced, what is failing and what it is
+// costing. It reads their authoritative records and delegates every action
+// back to the layer that owns it.
+import AIWorkforceCommand from './pages/AIWorkforceCommand'
+import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 import GodAIWorkforceBuilder from './pages/god/GodAIWorkforceBuilder'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
@@ -959,6 +965,16 @@ export default function App() {
             the workspace from the caller's own context, so a bookmarked URL
             cannot point at another customer's workforce. */}
         <Route path="/ai-workforce" element={<ProtectedRoute requireAdmin><AIWorkforce /></ProtectedRoute>} />
+        {/* AI WORKFORCE COMMAND (T9) — the MANAGEMENT layer above T6/T7/T8.
+            Not requireAdmin: this is where a manager sees what needs a person
+            and clears it, and the read routes behind it are scoped to the
+            caller's own workspace by their signatures. The routes that change
+            anything carry require_not_observation on the server, so an
+            executive observing a customer read-only can look and cannot act.
+            The detail route is registered after the list route so the list is
+            not read as an employee id. */}
+        <Route path="/ai-workforce-command" element={<ProtectedRoute><AIWorkforceCommand /></ProtectedRoute>} />
+        <Route path="/ai-workforce-command/:employeeId" element={<ProtectedRoute><AIWorkforceEmployee /></ProtectedRoute>} />
         {/* NOT requireAdmin. app/routers/availability_router.py scopes every
             endpoint to the calling advisor (_assert_can_read_advisor,
             _resolve_advisor) and requires no admin role — this is where an
