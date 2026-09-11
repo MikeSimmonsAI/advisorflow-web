@@ -550,6 +550,25 @@ class Organization(Base):
     # somebody paid for, or hide a change they already made.
     billing_pending_plan_key    = Column(String, nullable=True)
 
+    # ── AND WHICH RATE THE PENDING CHANGE LANDS ON ────────────────────────
+    #
+    # A TIER KEY ALONE CANNOT DESCRIBE A SCHEDULED CHANGE, because a change
+    # can move the commitment without moving the tier: Growth committed-term
+    # to Growth month-to-month is a real, scheduled, price-changing move whose
+    # `billing_pending_plan_key` is "growth" — exactly what the customer is
+    # already on.
+    #
+    # That collision had teeth. `apply_subscription` clears the pending markers
+    # when the subscription arrives on the pending plan, which is how a landed
+    # change stops being pending. With only the tier to compare, the VERY NEXT
+    # subscription.updated cleared them — so this platform forgot a downgrade
+    # that Stripe still had scheduled, and nothing would have said so until the
+    # customer's rate changed on its own.
+    #
+    # NULL means a pending change that predates this column, or one where only
+    # the tier moves. Readers compare it only when it is set.
+    billing_pending_commitment  = Column(String, nullable=True)
+
     # WHEN the pending change actually takes effect, and the Stripe object that
     # will perform it.
     #

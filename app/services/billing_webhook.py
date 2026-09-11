@@ -425,10 +425,30 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
         # the markers here - rather than on a timer, or on the customer next
         # loading the page - is what keeps "what plan am I on" answerable from
         # one place.
-        if org.billing_pending_plan_key and org.billing_pending_plan_key == resolved.key:
-            log.info("billing_webhook: scheduled change to %s is now in effect "
-                     "for org %s (was %s)", resolved.key, org.id, previous)
+        # THE COMMITMENT IS PART OF "HAS IT LANDED", not a detail of it.
+        #
+        # Comparing the tier alone was wrong in a way that quietly lost a
+        # scheduled change. A commitment-only downgrade — Growth committed-term
+        # to Growth month-to-month — has a pending plan key of "growth", which
+        # is what the customer is ALREADY on. So the very next
+        # subscription.updated matched, cleared the markers and dropped the
+        # schedule id, and this platform forgot a change Stripe still had
+        # scheduled. Nothing would have said so until the rate moved on its own.
+        #
+        # A pending commitment is compared only when one was recorded, so a
+        # pending change written before that column existed still lands the way
+        # it always did.
+        _pending_commitment = getattr(org, "billing_pending_commitment", None)
+        _commitment_landed = (_pending_commitment is None
+                              or _pending_commitment == commitment)
+        if (org.billing_pending_plan_key
+                and org.billing_pending_plan_key == resolved.key
+                and _commitment_landed):
+            log.info("billing_webhook: scheduled change to %s (%s) is now in "
+                     "effect for org %s (was %s)", resolved.key,
+                     _pending_commitment or "same commitment", org.id, previous)
             org.billing_pending_plan_key = None
+            org.billing_pending_commitment = None
             org.billing_pending_effective_at = None
             org.stripe_schedule_id = None
 

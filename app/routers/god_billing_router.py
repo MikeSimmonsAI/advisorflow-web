@@ -1248,6 +1248,14 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
         "current_period_end": getattr(o, "billing_current_period_end", None),
         "trial_end": getattr(o, "billing_trial_end", None),
         "pending_plan": getattr(o, "billing_pending_plan_key", None),
+        # The rate the pending change lands on. A commitment-only change has a
+        # pending plan identical to the current one, so a screen showing the
+        # tier alone would render "→ growth" to a customer already on Growth.
+        "pending_commitment": getattr(o, "billing_pending_commitment", None),
+        "pending_commitment_label": (
+            billing_catalog.commitment_label(
+                getattr(o, "billing_pending_commitment", None))
+            if getattr(o, "billing_pending_commitment", None) else None),
         "pending_effective_at": getattr(o, "billing_pending_effective_at", None),
         "cancel_at_period_end": bool(getattr(o, "billing_cancel_at_period_end", False)),
         "card_last4": getattr(o, "billing_card_last4", None),

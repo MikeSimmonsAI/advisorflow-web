@@ -88,6 +88,11 @@ from app.routers.god_pricing_router import router as god_pricing_router
 # key on the same three words: that one configures what a SALESPERSON earns on
 # a one-time package, this one configures what a CUSTOMER pays every month.
 from app.routers.god_billing_router import router as god_billing_router
+# The brand CATALOGUE: recurring add-ons and one-time products/services — what
+# a brand sells ALONGSIDE the subscription. Separate from god_billing_router
+# because a tier is what the customer IS and an add-on is something they also
+# have, and collapsing the two would let an add-on be bought as a base plan.
+from app.routers.god_catalog_router import router as god_catalog_router
 # GOD MODE -> MANAGE ACCESS. One person, every context, corrected in place.
 # Separate module from god_router deliberately: these are the platform's
 # identity-provisioning routes and burying them at the bottom of 2,500 lines of
@@ -602,6 +607,7 @@ app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
 app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billing policy + revenue — god_admin only
+app.include_router(god_catalog_router)   # Brand catalogue: recurring add-ons + one-time products/services — god_admin only
 app.include_router(god_access_router)    # /god/access — Manage Access: footprint, preview, apply, audit. god_admin only
 app.include_router(god_demo_suite_router)  # /god/demo-suite — build and reset brands' demonstration environments
 app.include_router(god_training_router)  # /god/training — assign training, readiness report. god_admin only
