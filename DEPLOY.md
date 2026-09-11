@@ -1,5 +1,12 @@
 # AdvisorFlow Web — Phase 1 Deployment Guide
 
+> **Deploying, rather than reading about what was built?**
+> See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** — the `RENDER_API_KEY`
+> environment variable, what each deploy script is allowed to stage, and the
+> credential gate that runs before anything is committed.
+>
+> This file is the feature history. That one is the procedure.
+
 ## What's built (Phase 1 + 2 + early Phase 3, tested and working)
 
 - **Multi-tenant auth** — login, JWT tokens, roles (advisor / org_admin / super_admin)

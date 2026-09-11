@@ -19,7 +19,9 @@
 
 param(
     [string]$Message = "",
-    [switch]$SkipSmoke
+    [switch]$SkipSmoke,
+    # Stage files git does not yet track. OFF by default - see step 1.
+    [switch]$IncludeNew
 )
 
 $ErrorActionPreference = "Continue"
@@ -59,10 +61,65 @@ Write-Host ""
 
 Set-Location $REPO
 
+# -- Step 0: Refuse to ship a credential ---------------------------------------
+# BEFORE anything is staged, so the answer to "did we just commit a key" is
+# never "yes, and it is already on GitHub". The audit reports shape and
+# location and never prints the value.
+Write-Host "[0/6] Credential audit..."
+& python "$REPO\scripts\_secret_audit.py"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "REFUSING TO DEPLOY: a live-shaped credential is in a tracked file."
+    Write-Host "Move it to an environment variable, remove it from the file, and"
+    Write-Host "ROTATE it - removing it from HEAD does not revoke it."
+    exit 1
+}
+Write-Host "  Clean"
+
 # -- Step 1: Save any uncommitted work on the current branch -------------------
 Write-Host "[1/6] Saving current work..."
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
-git add -A
+
+# `git add -u`, NOT `git add -A`.
+#
+# -u stages modifications and deletions of files git ALREADY TRACKS. It cannot
+# pick up an untracked file, and that is the point: -A swept the entire working
+# tree into a deploy commit - another worktree's work-in-progress, throwaway
+# probe databases, scratch output, and any file that happened to hold a
+# credential. The .gitignore already carries a comment about `.probe_*.db`
+# being committed by exactly this mechanism, which is the tell that it had
+# already happened at least once.
+#
+# The auto-save safety net this step exists for is UNHARMED: every file you
+# have edited is still saved and still deploys. What changed is that a file
+# git has never seen now requires somebody to add it on purpose.
+git add -u
+
+# A NEW FILE STOPS THE DEPLOY RATHER THAN BEING SILENTLY LEFT BEHIND.
+#
+# The alternative - warn and carry on - is the failure this script's own header
+# warns about in another form: shipping stale code while reporting success. A
+# new router that never reaches production is not a smaller bug than a new
+# scratch file that does.
+$untracked = git ls-files --others --exclude-standard
+if ($untracked) {
+    if ($IncludeNew) {
+        Write-Host "  Adding new files (-IncludeNew):"
+        $untracked | ForEach-Object { Write-Host "    + $_"; git add -- $_ }
+    } else {
+        Write-Host ""
+        Write-Host "  These files are not tracked by git and will NOT deploy:"
+        $untracked | ForEach-Object { Write-Host "    ? $_" }
+        Write-Host ""
+        Write-Host "  If they belong in this deploy:   git add <path>"
+        Write-Host "  If they are scratch:             add them to .gitignore"
+        Write-Host "  If they all belong:              .\deploy.ps1 -IncludeNew"
+        Write-Host ""
+        Write-Host "REFUSING TO DEPLOY with unreviewed files in the tree."
+        exit 1
+    }
+}
+
 $staged = git diff --cached --name-only
 # Remembered so step 5 can give this commit the real message. The auto-save is
 # a SAFETY NET, not a description of the work, and it was quietly becoming the
@@ -333,8 +390,12 @@ Write-Host "  Build OK"
 
 # -- Step 5: Commit dist + push, then VERIFY the push contains our work ---------
 Write-Host "[5/6] Pushing to GitHub..."
+# `-f` because frontend/dist is gitignored and is deliberately shipped; `-u`
+# for everything else, for the reason given in step 1. Anything new was either
+# added by hand or by -IncludeNew before we got here, so nothing legitimate is
+# missed and nothing unreviewed is swept in.
 git add -f frontend/dist
-git add -A
+git add -u
 $staged2 = git diff --cached --name-only
 # THE MESSAGE GOES THROUGH A FILE, NOT THROUGH -m.
 #
