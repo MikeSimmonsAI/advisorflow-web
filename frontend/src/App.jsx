@@ -166,10 +166,31 @@ import RoadmapBoard from './pages/god/RoadmapBoard'
 import GodLaunches from './pages/god/GodLaunches'
 import HelpSupport from './pages/HelpSupport'
 import GodSupport from './pages/god/GodSupport'
+// AI OPERATIONS. The platform-level view of the AI workforce — the dark-launch
+// state, the supervisor read for one customer, inbound nobody could place, and
+// the synthetic proofs. Registered BEFORE the God catch-all route below.
+//
+// THE WILDCARD IS SPELLED OUT IN WORDS ON PURPOSE. `scripts/
+// smoke_platform_frontend.py` strips block comments with a non-greedy
+// /* ... */ regex BEFORE it strips line comments, so a `//` line that
+// contains the two characters that open a block comment silently swallows
+// every line up to the next close — which deleted `<ContextBanner />` from
+// what that gate was reading and failed it. Inside a `{/* ... */}` block the
+// same characters are harmless, which is why the route comment below may
+// write the path out in full and this one may not.
+import GodAIOperations from './pages/god/GodAIOperations'
 import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
-// place. Registered BEFORE the /god/* catch-all below, or it would silently
+// place. Registered BEFORE the God catch-all route below, or it would silently
 // render the Command Center instead.
+//
+// THE WILDCARD USED TO BE SPELLED OUT HERE and it was breaking GATE 29. See
+// the note on the AI Operations import above: a `//` line containing the two
+// characters that open a block comment makes that gate's comment stripper
+// swallow everything up to the next close — in this case the entire
+// ProtectedRoute body, so `scripts/smoke_platform_frontend.py` could not see
+// `<ContextBanner />` and reported the banner as missing from every tenant
+// screen. The banner was always there; the gate was reading a hole.
 import GodAccess from './pages/god/GodAccess'
 // ADD A PERSON. The front door for seating somebody - email first, existing
 // identity reused, brand seat and/or customer workspace granted in one act.
@@ -188,8 +209,14 @@ import Training from './pages/training/Training'
 import AITeam from './pages/AITeam'
 import AIEmployeeDetail from './pages/AIEmployeeDetail'
 // GOD MODE -> AI WORKFORCE. Platform capability: the job library, the tool
-// registry, activation staging and the kill switch. Registered BEFORE the
-// /god/* catch-all below, or it would silently render the Command Center.
+// registry, activation staging, the kill switch, brand offerings, evaluation
+// and simulation. Registered BEFORE the God catch-all route below, or it
+// would silently render the Command Center.
+//
+// The wildcard is written in words here for the reason set out at length
+// above the GodAIOperations import: a line comment containing the two
+// characters that open a block comment makes GATE 29's stripper swallow every
+// line to the next close, and it fails a check about something else entirely.
 import GodWorkforce from './pages/god/GodWorkforce'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
@@ -1048,11 +1075,19 @@ export default function App() {
         {/* Support Intelligence. MUST stay above the /god/* catch-all below,
             or it silently renders the Command Center instead. */}
         <Route path="/god/support"               element={<GodRoute><GodModeLayout><GodSupport /></GodModeLayout></GodRoute>} />
-        {/* AI WORKFORCE. MUST stay above the /god/* catch-all below, or it
-            silently renders the Command Center instead. GodRoute here is
-            convenience only — every endpoint behind it is require_god, so a
-            typed URL is refused by the server, not by a missing link. */}
+        {/* AI WORKFORCE (T6) — who the AI employees are, what they may do and
+            whether they may run. MUST stay above the /god/* catch-all below,
+            or it silently renders the Command Center instead. GodRoute here
+            is convenience only — every endpoint behind it is require_god, so
+            a typed URL is refused by the server, not by a missing link. */}
         <Route path="/god/workforce"             element={<GodRoute><GodModeLayout><GodWorkforce /></GodModeLayout></GodRoute>} />
+        {/* AI OPERATIONS (T7) — how an authorized employee reaches the world.
+            A SEPARATE SCREEN FROM THE ONE ABOVE ON PURPOSE: one answers "what
+            is this employee allowed to be", the other "what did it actually
+            do, and what stopped it". Folding them together would put a
+            configuration control and an incident read on one page and make
+            both harder to trust. Same catch-all rule as Support above. */}
+        <Route path="/god/ai-operations"         element={<GodRoute><GodModeLayout><GodAIOperations /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

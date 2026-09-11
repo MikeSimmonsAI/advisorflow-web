@@ -154,6 +154,15 @@ import app.models.exec_workspace_models  # noqa: F401  (imported for side effect
 # this line makes every support table silently never appear, which the support
 # product would report as "no tickets" rather than as an error.
 import app.models.support_models  # noqa: F401  (imported for side effects)
+# AI Workforce Operations (ai_conversation_threads / ai_communications /
+# ai_communication_events / ai_inbound_events / ai_scheduled_actions /
+# ai_human_ownership / ai_ops_actions / ai_ops_audit / ai_ops_counters).
+# Same Base, same reason. Dropping this line is the worst kind of quiet on
+# this list: with no tables the operations layer's idempotency keys, its
+# human-ownership rows and its audit have nowhere to write, so the FIRST
+# failure would be a duplicate send rather than an error. Added to BOTH
+# blocks in this file, per the merge-artifact note above.
+import app.models.ai_operations_models  # noqa: F401  (imported for side effects)
 # OAuth authorization transactions (oauth_auth_transactions). Same Base, same
 # reason, and the consequence of dropping this line is a security one rather
 # than a cosmetic one: without the table, `oauth_state_service.issue_state`
@@ -357,6 +366,10 @@ import app.models.training_models  # noqa: F401  (imported for side effects)
 # launch_intake_models comment above); an import added to only one copy looks
 # correct in a diff and half-works. Same tables, same reason as the first copy.
 import app.models.support_models  # noqa: F401  (imported for side effects)
+# AI Workforce Operations — the SECOND copy of this line, for the same reason
+# the support line above has two. Same tables, same consequence if dropped:
+# no idempotency ledger, no ownership rows, no operational audit.
+import app.models.ai_operations_models  # noqa: F401  (imported for side effects)
 # OAuth authorization transactions — the SECOND copy of this line, same tables
 # and same reason as the first. See the note on that copy for what breaks if it
 # is dropped.

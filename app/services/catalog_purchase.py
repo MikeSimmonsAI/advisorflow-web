@@ -338,6 +338,49 @@ def remove_recurring_addon(db: Session, org: Organization,
     return purchase
 
 
+def withdraw_pending(db: Session, org: Organization,
+                     purchase: CatalogPurchase) -> CatalogPurchase:
+    """Take back an unpaid checkout. Nothing was charged, so nothing is refunded.
+
+    A pending purchase is a link somebody was sent and has not paid. Leaving it
+    outstanding is not harmless: the link keeps working, so a service quoted in
+    error can still be paid for days later by a customer who never heard it was
+    withdrawn.
+
+    THE SESSION IS EXPIRED AT STRIPE, not merely marked cancelled here. A row
+    that says "withdrawn" beside a link that still takes money is the worst of
+    both records. An expiry Stripe refuses is logged and the local withdrawal
+    still stands — a session that cannot be expired is usually one that already
+    expired.
+
+    REFUSES A PAID PURCHASE. Money that arrived is a different conversation
+    (a refund), with different authority, and quietly flipping a paid row to
+    cancelled would hide it.
+    """
+    if purchase.organization_id != org.id:
+        raise PurchaseRefused("That purchase belongs to another customer.")
+    if purchase.status != PurchaseStatus.PENDING:
+        raise PurchaseRefused(
+            "That purchase is %s, so there is no unpaid checkout to withdraw."
+            % purchase.status)
+
+    if purchase.stripe_checkout_session_id:
+        stripe = _stripe()
+        try:
+            stripe.checkout.Session.expire(purchase.stripe_checkout_session_id)
+        except Exception as exc:
+            log.info("catalog_purchase: could not expire session %s (%s) - "
+                     "recording the withdrawal locally anyway",
+                     purchase.stripe_checkout_session_id, exc)
+
+    purchase.status = PurchaseStatus.CANCELED
+    purchase.canceled_at = datetime.utcnow()
+    purchase.checkout_url = None          # the link is no longer a link
+    db.commit()
+    db.refresh(purchase)
+    return purchase
+
+
 def start_one_time_checkout(db: Session, org: Organization,
                             item: BrandCatalogItem, *, quantity: int = 1,
                             amount_cents: Optional[int] = None,

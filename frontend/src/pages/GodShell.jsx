@@ -206,14 +206,30 @@ const NAV = [
   // Its own group, above SECURITY & PLATFORM, because during the dark launch
   // the question it answers — how many AI employees on this platform could
   // actually reach a person right now — is the one somebody should be able to
-  // find without hunting. It administers PLATFORM CAPABILITY only: the job
-  // library, the tool registry, activation staging and the kill switch. Each
-  // customer's own configuration stays on the customer's screen, because a
-  // second place to edit one setting is a second place for it to be wrong.
+  // find without hunting.
+  //
+  // TWO ENTRIES, AND THEY ARE NOT THE SAME SCREEN. AI Workforce is the
+  // authority layer: who an employee is, which tools it holds, what stage it
+  // is at, and the kill switch. AI Operations is the reach layer: what was
+  // actually attempted, which provider answered, and what refused. One is a
+  // configuration question and one is an incident question, and a single page
+  // holding both would be a page where nobody trusts either half.
+  //
+  // ONE group, not two. Both landed here within hours of each other and the
+  // merge produced two sections with the same heading — which reads as the
+  // rail being broken rather than as two related screens.
+  //
+  // Neither administers a customer's own business configuration; that stays
+  // on the customer's screen, because a second place to edit one setting is a
+  // second place for it to be wrong.
   { group: 'AI WORKFORCE' },
   { label: 'AI Workforce',     path: '/god/workforce',         icon: 'cpu',
     hint: 'Job library, tool gateway, activation staging, kill switch, '
         + 'evaluation and simulation' },
+  { label: 'AI Operations',    path: '/god/ai-operations',     icon: 'activity',
+    hint: 'Dark-launch state, provider resolution per channel, one '
+        + 'customer’s supervisor read, unattributable inbound, and the '
+        + 'synthetic proofs' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SECURITY & PLATFORM
@@ -259,6 +275,7 @@ const NAV = [
   { label: 'Support',            path: '/god/support',               icon: 'message',
     hint: 'Every brand’s queue, what the platform repaired by itself, '
         + 'cross-brand incidents, and the daily brief' },
+
 ]
 
 function LiveClock() {

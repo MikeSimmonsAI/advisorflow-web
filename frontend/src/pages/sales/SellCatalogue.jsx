@@ -104,6 +104,22 @@ export default function SellCatalogue() {
     } finally { setBusy(null) }
   }
 
+  async function cancel(purchase) {
+    setBusy(purchase.id); setNotice(null);
+    try {
+      const r = await api.post('/sales/catalog/purchases/' + purchase.id + '/cancel');
+      setNotice({
+        tone: 'good',
+        text: r.is_recurring
+          ? `${r.item_name} removed from their subscription. Their plan is untouched.`
+          : `${r.item_name} withdrawn. The payment link no longer works.`,
+      });
+      await load();
+    } catch (e) {
+      setNotice({ tone: 'bad', text: errText(e) });
+    } finally { setBusy(null); }
+  }
+
   async function resend(purchase) {
     setBusy(purchase.id); setNotice(null)
     try {
@@ -199,6 +215,18 @@ export default function SellCatalogue() {
                             <button className="sw-tiny" disabled={busy === p.id}
                                     onClick={() => resend(p)}>
                               Get payment link
+                            </button>
+                          ) : null}
+                          {/* Unmaking a sale. Only what can be unmade without
+                              a refund: an unpaid link, or an add-on that has
+                              not been invoiced as used. Paid money is a
+                              refund conversation and the server refuses it
+                              here. */}
+                          {p.status === 'pending' || p.removable ? (
+                            <button className="sw-tiny" style={{ marginLeft: 6 }}
+                                    disabled={busy === p.id}
+                                    onClick={() => cancel(p)}>
+                              {p.status === 'pending' ? 'Withdraw' : 'Remove'}
                             </button>
                           ) : null}
                         </td>

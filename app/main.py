@@ -185,6 +185,20 @@ from app.routers.device_router import router as device_router
 # than meet a 402 on the page that would tell them.
 from app.routers.workforce_router import router as workforce_router
 from app.routers.god_workforce_router import router as god_workforce_router
+# AI Workforce Operations (T7) — the customer's operational console and the
+# God-only platform state. Read-and-control only: there is no route here that
+# makes an AI employee send anything, and every capability it exposes is
+# disabled by default (AI_OPERATIONS_ENABLED unset).
+#
+# T7 SITS ON TOP OF THE ENGINE ABOVE, it does not compete with it. T6 decides
+# who an employee is, what it may do and whether it may run; T7 is how an
+# authorized employee reaches the world. Every workforce concept crosses into
+# T7 through app/services/ai_operations/contracts.py, which until this commit
+# resolved those imports to a DECLARED fallback because T6 was not on main
+# yet. Both layers are now present, so that boundary loads the real thing —
+# which is the arrangement T7 was written for, not a new one.
+from app.routers.ai_operations_router import god_router as ai_operations_god_router
+from app.routers.ai_operations_router import router as ai_operations_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -744,10 +758,26 @@ app.include_router(god_support_router)
 # Mobile device support (/me/devices, /me/uploads). Registered last, so its
 # routes cannot shadow anything and its absence cannot break anything.
 app.include_router(device_router)
-# AI Workforce. `/god/workforce` is registered BEFORE `/workforce` only for
-# readability — the prefixes do not overlap, and neither can shadow the other.
+# AI Workforce (T6) — the authority layer. `/god/workforce` is registered
+# BEFORE `/workforce` only for readability; the prefixes do not overlap, and
+# neither can shadow the other. Registered before T7 below for the same
+# reason: it is the layer T7 asks.
 app.include_router(god_workforce_router)
 app.include_router(workforce_router)
+# AI Workforce Operations (T7).
+#
+# TWO ROUTERS, TWO AUTHORITIES, ONE ENGINE — the same shape as Support
+# Intelligence above. `/ai-operations` answers only for the caller's own
+# organization (no route on it accepts an organization id), and
+# `/god/ai-operations` extends God Mode with the three genuinely
+# platform-level things: the dark-launch state, inbound events that could not
+# be attributed to any tenant, and the synthetic proofs.
+#
+# Deliberately NOT behind require_feature(): these routes STOP AI work as
+# well as observe it, and a customer whose plan flag lapsed must not thereby
+# lose the ability to stop an AI employee that is already running.
+app.include_router(ai_operations_router)
+app.include_router(ai_operations_god_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
