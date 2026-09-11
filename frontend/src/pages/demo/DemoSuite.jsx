@@ -28,7 +28,7 @@
  * model; the surface is built for presenting.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import DemoStyles from './DemoStyles'
 
@@ -536,7 +536,7 @@ function LaunchPanel ({ data, onExplain }) {
 
 function Coach ({ collapsed, setCollapsed, scenarios, scenarioKey, setScenarioKey,
                   session, busy, onRunStep, onMarkStep, onResetSession, onExplain,
-                  onGoToPanel }) {
+                  onGoToPanel, mode }) {
   const [openStep, setOpenStep] = useState(null)
 
   const steps = session?.steps || []
@@ -547,17 +547,11 @@ function Coach ({ collapsed, setCollapsed, scenarios, scenarioKey, setScenarioKe
 
   useEffect(() => { setOpenStep(null) }, [scenarioKey])
 
-  if (collapsed) {
-    return (
-      <aside className="ds-coach collapsed">
-        <button className="ds-btn small" title="Open the presenter coach"
-                onClick={() => setCollapsed(false)}
-                style={{ writingMode: 'vertical-rl', padding: '14px 6px' }}>
-          COACH
-        </button>
-      </aside>
-    )
-  }
+  // HIDDEN MEANS GONE, not narrowed to a 52px strip that says COACH down the
+  // side of a shared screen. The prospect is looking at this monitor; a rail
+  // labelled with an internal tool is the thing we are hiding. SHOW COACH
+  // lives in the top bar, which is always there, so nothing is stranded.
+  if (collapsed) return null
 
   const done = steps.filter(s => s.done).length
 
@@ -566,7 +560,7 @@ function Coach ({ collapsed, setCollapsed, scenarios, scenarioKey, setScenarioKe
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1, color: 'var(--ds-ghost)', fontSize: 10,
                       letterSpacing: '.16em', textTransform: 'uppercase' }}>
-          Presenter coach
+          {mode === 'practice' ? 'Practice notes' : 'Presenter coach'}
         </div>
         <button className="ds-btn small ghost" onClick={() => setCollapsed(true)}
                 title="Give the prospect a clean screen">HIDE</button>
@@ -721,6 +715,24 @@ function Coach ({ collapsed, setCollapsed, scenarios, scenarioKey, setScenarioKe
 export default function DemoSuite () {
   const { platformId } = useParams()
   const navigate = useNavigate()
+  const [search] = useSearchParams()
+
+  /* ── WHERE DID THIS PERSON COME FROM, AND WHAT ARE THEY DOING? ──────────
+     Two query parameters, and NEITHER of them is a destination.
+
+     `mode`        practice | present — which of the two jobs this is
+     `opportunity` a deal id, which the SERVER authorises before it tells us
+                   anything about it or builds a return path from it
+
+     There is deliberately no `?return=`. A return URL in a query string is an
+     open redirect with a friendly name: whatever the link says is where the
+     person lands, and links travel. So `/demo-suite/{brand}/context` takes the
+     id, checks the caller may see that deal, checks it belongs to THIS brand,
+     and composes the in-app path itself. Nothing the browser sends is ever
+     echoed back as somewhere to go. */
+  const mode = search.get('mode') === 'practice' ? 'practice' : 'present'
+  const opportunityId = search.get('opportunity') || ''
+  const [ctx, setCtx] = useState(null)
 
   const [access, setAccess] = useState(null)
   const [world, setWorld] = useState(null)
@@ -746,6 +758,28 @@ export default function DemoSuite () {
       .catch(e => { if (!cancelled) setErr(e?.message || 'Could not check your access.') })
     return () => { cancelled = true }
   }, [])
+
+  /* The presentation context, and with it the one place EXIT DEMO can go.
+     Falls back to the library on anything the server will not vouch for — an
+     unknown id, somebody else's deal, another brand's deal. */
+  useEffect(() => {
+    if (!platformId) { setCtx(null); return undefined }
+    let cancelled = false
+    api.get('/demo-suite/' + platformId + '/context'
+            + (opportunityId ? '?opportunity=' + encodeURIComponent(opportunityId) : ''))
+      .then(c => { if (!cancelled) setCtx(c) })
+      .catch(() => {
+        if (!cancelled) {
+          setCtx({ return_href: '/demo-suite', return_label: 'Demo Suite',
+                   origin: 'library', opportunity_id: null })
+        }
+      })
+    return () => { cancelled = true }
+  }, [platformId, opportunityId])
+
+  const exitDemo = useCallback(() => {
+    navigate(ctx?.return_href || '/demo-suite')
+  }, [navigate, ctx])
 
   const loadWorld = useCallback(async () => {
     if (!platformId) { setLoading(false); return }
@@ -854,6 +888,10 @@ export default function DemoSuite () {
       <div className="ds-scope">
         <DemoStyles />
         <div style={{ maxWidth: 760, margin: '0 auto', padding: '60px 24px' }}>
+          {/* The Suite is a full-page shell with no sales sidebar, so the way
+              back has to be on the page. */}
+          <button className="ds-btn small ghost" style={{ marginBottom: 18 }}
+                  onClick={() => navigate('/sales')}>← SALES WORKSPACE</button>
           <h1 className="ds-title">Demo Suite</h1>
           <p className="ds-sub">
             Choose the brand you are presenting. Everything inside is seeded
@@ -868,31 +906,71 @@ export default function DemoSuite () {
               owner grants it from God Mode → Manage Access.
             </div>
           )}
-          <div style={{ marginTop: 24 }}>
+          {/* TWO JOBS, NAMED, because they are not the same afternoon.
+              PRESENT is a prospect on the other side of the screen. PRACTICE
+              is learning the run-through with nobody watching. The brand and
+              the environment are identical; what differs is who is looking,
+              and that changes what should be on screen. */}
+          <div style={{ marginTop: 28 }}>
             {access?.brands.map(b => (
-              <button key={b.platform_id} className="ds-row"
-                      onClick={() => navigate('/demo-suite/' + b.platform_id)}>
-                <span className={'ds-pill ' + (b.environment_ready ? 'ok' : 'warm')}>
-                  {b.environment_ready ? 'ready' : b.environment_status}
-                </span>
-                <span>
-                  <div className="name">{b.platform_name}</div>
-                  <div className="meta">
-                    {b.environment_ready
-                      ? 'Seeded and ready to present'
-                      : 'The environment has not been built yet'}
-                    {b.may_admin ? ' · you can rebuild it' : ''}
-                  </div>
-                </span>
-              </button>
+              <div key={b.platform_id} className="ds-card" style={{ marginBottom: 14 }}>
+                <div className="ds-card-head">
+                  <h3 className="ds-card-title">{b.platform_name}</h3>
+                  <span className={'ds-pill ' + (b.environment_ready ? 'ok' : 'warm')}>
+                    {b.environment_ready ? 'ready' : b.environment_status}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                </div>
+                <p className="ds-sub" style={{ margin: '0 0 14px' }}>
+                  {b.environment_ready
+                    ? 'Seeded and ready. Nothing inside reaches a real customer.'
+                    : 'The environment has not been built yet, so there is nothing to show.'}
+                  {b.may_admin ? ' You can rebuild it from inside.' : ''}
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="ds-btn primary" disabled={!b.environment_ready}
+                          onClick={() => navigate('/demo-suite/' + b.platform_id
+                                                  + '?mode=present')}>
+                    PRESENT A DEMO
+                  </button>
+                  <button className="ds-btn" disabled={!b.environment_ready}
+                          onClick={() => navigate('/demo-suite/' + b.platform_id
+                                                  + '?mode=practice')}>
+                    PRACTICE
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--ds-ghost)', margin: '12px 0 0',
+                            lineHeight: 1.6 }}>
+                  <b style={{ color: 'var(--ds-dim)' }}>Present</b> is for a
+                  meeting — the coach is there and you can hide it before you
+                  share your screen.{' '}
+                  <b style={{ color: 'var(--ds-dim)' }}>Practice</b> is for
+                  learning the run-through, with every note on show and a
+                  restart when you want to go again.
+                </p>
+              </div>
             ))}
           </div>
+
+          <p style={{ fontSize: 11.5, color: 'var(--ds-ghost)', marginTop: 18,
+                      lineHeight: 1.7 }}>
+            To present a particular deal, open the opportunity and use{' '}
+            <b style={{ color: 'var(--ds-dim)' }}>Run demo</b> — the prospect's
+            name comes with you, and leaving brings you back to the deal.
+          </p>
         </div>
       </div>
     )
   }
 
   const panels = world?.panels
+  // PRESENTATION PROGRESS, and nothing else. `done` counts coach steps the
+  // presenter has walked through. It is not a claim that a demo was delivered,
+  // that a deal moved, or that anything was sent — see the completion card.
+  const stepsTotal = session?.steps?.length || 0
+  const stepsDone = (session?.steps || []).filter(s => s.done).length
+  const finished = stepsTotal > 0 && stepsDone === stepsTotal
+
   const grouped = PANELS.reduce((acc, p) => {
     (acc[p.group] = acc[p.group] || []).push(p); return acc
   }, {})
@@ -904,7 +982,9 @@ export default function DemoSuite () {
         <aside className={'ds-rail' + (railOpen ? ' open' : '')}>
           <div className="ds-brand">
             <div className="ds-brand-name">{world?.brand?.name || 'Demo Suite'}</div>
-            <div className="ds-brand-sub">Demonstration</div>
+            <div className="ds-brand-sub">
+              {mode === 'practice' ? 'Practice run' : 'Demonstration'}
+            </div>
           </div>
           {Object.entries(grouped).map(([group, items]) => (
             <div key={group}>
@@ -920,6 +1000,13 @@ export default function DemoSuite () {
             </div>
           ))}
           <div style={{ flex: 1 }} />
+          {/* EXIT is in the rail as well as the top bar. The rail is where a
+              presenter's eye already is between panels, and "how do I get out
+              of this" should never need hunting for. */}
+          <button className="ds-nav" onClick={exitDemo}>
+            <span className="ds-nav-dot" />
+            <span>Exit demo{ctx?.origin === 'opportunity' ? ' → the deal' : ''}</span>
+          </button>
           <button className="ds-nav" onClick={() => navigate('/demo-suite')}>
             <span className="ds-nav-dot" />
             <span>Change brand</span>
@@ -943,10 +1030,63 @@ export default function DemoSuite () {
               </p>
             </div>
             <span style={{ flex: 1 }} />
+
+            {/* ── WHICH JOB IS THIS? ──────────────────────────────────────
+                Said on every screen, because "am I practising or is a
+                prospect watching this" is the question that decides whether
+                the coach should be visible at all. */}
+            <span className={'ds-pill ' + (mode === 'practice' ? 'warm' : 'ok')}
+                  title={mode === 'practice'
+                    ? 'Nobody is watching — every coaching note is on show'
+                    : 'Presenting. Hide the coach before you share your screen.'}>
+              {mode === 'practice' ? 'PRACTICE' : 'PRESENTING'}
+            </span>
+
+            {/* SHOW / HIDE COACH lives HERE, not only inside the coach.
+                A control that disappears with the thing it controls is a
+                control you cannot use to bring it back. */}
+            <button className="ds-btn ghost small"
+                    onClick={() => setCollapsed(c => !c)}
+                    title={collapsed
+                      ? 'Bring the presenter notes back'
+                      : 'Give the prospect a clean screen'}>
+              {collapsed ? 'SHOW COACH' : 'HIDE COACH'}
+            </button>
+
             <button className="ds-btn ghost small" onClick={loadWorld} disabled={busy}>
               REFRESH
             </button>
+
+            {/* EXIT DEMO — the way out, in the same place on every screen.
+                Browser Back is not a product workflow. Where it goes was
+                decided by the server (see the context effect above); this
+                button never composes a destination of its own. */}
+            <button className="ds-btn small" onClick={exitDemo}
+                    title={'Leave the demonstration and return to '
+                           + (ctx?.return_label || 'the Demo Suite')}>
+              EXIT DEMO
+            </button>
           </div>
+
+          {/* WHO IS ON THE OTHER SIDE OF THE SCREEN, when we know. Launched
+              from a deal, the Suite says whose deal it is — so a presenter
+              with three tabs open is never one glance from naming the wrong
+              company out loud. */}
+          {ctx?.opportunity_id && (
+            <div className="ds-ok" style={{ marginBottom: 14, display: 'flex',
+                                            gap: 10, flexWrap: 'wrap',
+                                            alignItems: 'center' }}>
+              <span style={{ flex: 1 }}>
+                Presenting to <b>{ctx.company_name}</b>
+                {ctx.contact_name ? ' · ' + ctx.contact_name : ''}
+                {ctx.owner_name ? ' · ' + ctx.owner_name : ''}
+                {' — '}nothing you do in here touches that deal.
+              </span>
+              <button className="ds-btn small ghost" onClick={exitDemo}>
+                BACK TO THE DEAL
+              </button>
+            </div>
+          )}
 
           <div className="ds-banner">
             Demonstration environment — seeded fictional records. Nothing here
@@ -959,6 +1099,58 @@ export default function DemoSuite () {
             <div className="ds-ok" style={{ marginBottom: 14, display: 'flex', gap: 10 }}>
               <span style={{ flex: 1 }}>{flash}</span>
               <button className="ds-btn small ghost" onClick={() => setFlash('')}>DISMISS</button>
+            </div>
+          )}
+
+          {/* ── DEMO COMPLETE ───────────────────────────────────────────
+              The end of the run-through used to be the last panel and a line
+              of closing script in a sidebar that may well be hidden. A
+              presenter finishing a meeting was left on a screen with nowhere
+              to go.
+
+              WHAT THIS DOES NOT DO, deliberately: it does not advance the
+              deal, does not record a demo as delivered, does not publish
+              anything and does not book anything. Seven coach steps being
+              ticked is presentation progress. Whether the demonstration went
+              well is a judgement a person makes, on the deal, through the
+              actions that already exist there. */}
+          {finished && (
+            <div className="ds-card" style={{ marginBottom: 16,
+                                              borderColor: 'var(--ds-teal)' }}>
+              <div className="ds-card-head">
+                <h3 className="ds-card-title">Demo complete</h3>
+                <span className="ds-pill ok">{stepsDone} of {stepsTotal}</span>
+                <span style={{ flex: 1 }} />
+              </div>
+              <p className="ds-sub" style={{ margin: '0 0 6px' }}>
+                You have walked the whole run-through
+                {session?.scenario?.name ? ' for ' + session.scenario.name : ''}.
+                This is your own step counter — nothing about the deal has
+                changed, and nothing has been sent.
+              </p>
+              {session?.scenario?.closing && (
+                <div className="ds-say" style={{ margin: '10px 0 14px' }}>
+                  “{session.scenario.closing}”
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="ds-btn primary" onClick={exitDemo}>
+                  {ctx?.opportunity_id
+                    ? 'RETURN TO ' + (ctx.company_name || 'THE DEAL').toUpperCase()
+                    : 'RETURN TO DEMO SUITE'}
+                </button>
+                <button className="ds-btn" onClick={resetSession} disabled={busy}>
+                  RUN IT AGAIN
+                </button>
+              </div>
+              {ctx?.opportunity_id ? (
+                <p style={{ fontSize: 11.5, color: 'var(--ds-ghost)',
+                            margin: '12px 0 0', lineHeight: 1.6 }}>
+                  Booking the next meeting, moving the stage and recording what
+                  happened are all on the deal — that is the screen that owns
+                  them, and this one deliberately does not.
+                </p>
+              ) : null}
             </div>
           )}
 
@@ -997,7 +1189,7 @@ export default function DemoSuite () {
                setScenarioKey={setScenarioKey} session={session} busy={busy}
                onRunStep={runStep} onMarkStep={markStep}
                onResetSession={resetSession} onExplain={openHelp}
-               onGoToPanel={setPanel} />
+               onGoToPanel={setPanel} mode={mode} />
       </div>
 
       {help && (

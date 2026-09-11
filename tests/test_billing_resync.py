@@ -238,3 +238,119 @@ class TestItRefusesRatherThanInvents:
         for forbidden in ("name", "id", "platform_id", "owner_user_id",
                           "is_active", "created_at"):
             assert forbidden not in billing_resync.MIRRORED_FIELDS
+
+
+class TestItReportsWhatStripeStillHasBooked:
+    """NO WEBHOOK CARRIES A SCHEDULE.
+
+    A deferred plan change lives on a Subscription Schedule, and the payloads
+    this platform handles say nothing about its phases. So the question an
+    operator asks precisely when a scheduled downgrade looks wrong — "is it
+    still there?" — had no answer inside the product at all, and the refresh
+    button answered it with "already matches Stripe", which is true of the
+    mirrored columns and beside the point.
+    """
+
+    @pytest.fixture
+    def with_schedule(self, monkeypatch):
+        import stripe
+
+        def _install(schedule):
+            def _retrieve(schedule_id, **kw):
+                if schedule is None:
+                    raise RuntimeError("no such schedule")
+                return schedule
+            monkeypatch.setattr(stripe.SubscriptionSchedule, "retrieve",
+                                _retrieve)
+        return _install
+
+    def _sub_with(self, schedule_id):
+        sub = _stripe_sub()
+        sub["schedule"] = schedule_id
+        return sub
+
+    def _schedule(self, *, current_end=1_800_000_000,
+                  next_start=1_800_000_000, price="price_m2m"):
+        return {
+            "id": "sub_sched_1", "status": "active",
+            "current_phase": {"start_date": 1, "end_date": current_end},
+            "phases": [
+                {"start_date": 1, "items": [{"price": "price_term"}]},
+                {"start_date": next_start, "items": [{"price": price}]},
+            ],
+        }
+
+    def test_no_schedule_is_reported_as_none_booked(self, stripe_returning):
+        stripe_returning(_stripe_sub())
+        out = billing_resync.resync_subscription(_Db(), _Org(), dry_run=True)
+
+        assert out["schedule"]["known"] is True
+        assert out["schedule"]["has_schedule"] is False
+        assert out["schedule"]["next_phase"] is None
+
+    def test_a_booked_change_is_reported(self, stripe_returning, with_schedule):
+        stripe_returning(self._sub_with("sub_sched_1"))
+        with_schedule(self._schedule())
+
+        out = billing_resync.resync_subscription(_Db(), _Org(), dry_run=True)
+        assert out["schedule"]["has_schedule"] is True
+        assert out["schedule"]["next_phase"]["price_ids"] == ["price_m2m"]
+
+    def test_a_schedule_stripe_will_not_return_is_unknown_not_absent(
+            self, stripe_returning, with_schedule):
+        """"Stripe has no scheduled change" and "we could not ask" are
+        opposite facts. Rendering them the same is how somebody concludes a
+        customer's downgrade was lost when it was not."""
+        stripe_returning(self._sub_with("sub_sched_1"))
+        with_schedule(None)
+
+        out = billing_resync.resync_subscription(_Db(), _Org(), dry_run=True)
+        assert out["schedule"]["known"] is False
+        assert out["schedule"]["has_schedule"] is None
+
+    def test_stripe_holding_a_change_this_platform_lost_is_named(
+            self, stripe_returning, with_schedule):
+        """THE LIVE FAILURE. The mirrored columns matched perfectly while
+        Stripe still had a downgrade booked that no screen was showing."""
+        stripe_returning(self._sub_with("sub_sched_1"))
+        with_schedule(self._schedule())
+
+        org = _Org()
+        org.billing_pending_plan_key = None      # the platform lost it
+
+        out = billing_resync.resync_subscription(_Db(), org, dry_run=True)
+        assert out["disagreement"]
+        assert "not showing" in out["disagreement"]
+
+    def test_a_pending_change_stripe_does_not_have_is_named(
+            self, stripe_returning):
+        """The opposite direction, and worse for the customer: a date they
+        were given on which nothing will happen."""
+        stripe_returning(_stripe_sub())
+
+        org = _Org()
+        org.billing_pending_plan_key = "starter"
+
+        out = billing_resync.resync_subscription(_Db(), org, dry_run=True)
+        assert out["disagreement"]
+        assert "nothing will happen" in out["disagreement"]
+
+    def test_agreement_reports_no_disagreement(self, stripe_returning,
+                                               with_schedule):
+        stripe_returning(self._sub_with("sub_sched_1"))
+        with_schedule(self._schedule())
+
+        org = _Org()
+        org.billing_pending_plan_key = "starter"
+
+        out = billing_resync.resync_subscription(_Db(), org, dry_run=True)
+        assert out["disagreement"] is None
+
+    def test_reading_a_schedule_writes_nothing(self, stripe_returning,
+                                               with_schedule):
+        stripe_returning(self._sub_with("sub_sched_1"))
+        with_schedule(self._schedule())
+
+        db = _Db()
+        billing_resync.resync_subscription(db, _Org(), dry_run=True)
+        assert db.committed is False

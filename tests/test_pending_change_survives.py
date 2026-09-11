@@ -26,6 +26,8 @@ and nothing would have said so until the customer's rate moved on its own.
 The fix: record the pending COMMITMENT too, and treat a change as landed only
 when the tier AND the rate both match.
 """
+from datetime import datetime
+
 import pytest
 
 from app.models.billing_models import (BillingCommitment, BrandBillingPlan)
@@ -175,3 +177,91 @@ class TestTheScheduledChangeIsRecordedInFull:
         from app.services import billing_resync
 
         assert "billing_pending_commitment" in billing_resync.MIRRORED_FIELDS
+
+
+class TestAChangeDatedInTheFutureHasNotLanded:
+    """FOUND LIVE, NOT REASONED ABOUT.
+
+    A customer had a commitment-only downgrade scheduled for October. In
+    September an ADD-ON was attached to their subscription, Stripe sent the
+    resulting `customer.subscription.updated` on the unchanged plan, and the
+    pending markers were cleared — the platform forgot a change Stripe still
+    had booked, and nothing would have said so until the rate failed to move.
+
+    Every guard in front of it was reasonable and none of them caught it: the
+    pending tier matched because a commitment-only change never changes the
+    tier, and the pending commitment was NULL because it was recorded before
+    that column existed — which is exactly the case the NULL escape hatch was
+    written to be kind to.
+
+    The date is the guard that cannot be argued with. A change booked for
+    October has not happened in September.
+    """
+
+    FUTURE = datetime(2027, 1, 1, 12, 0, 0)
+    PAST = datetime(2020, 1, 1, 12, 0, 0)
+
+    def _org_with_pending(self, *, commitment=None, effective_at=None):
+        org = _Org()
+        org.billing_plan_key = "growth"
+        org.plan = "growth"
+        org.billing_commitment = BillingCommitment.TERM
+        org.billing_pending_plan_key = "growth"
+        org.billing_pending_commitment = commitment
+        org.billing_pending_effective_at = effective_at
+        org.stripe_schedule_id = "sub_sched_1"
+        return org
+
+    def test_an_unrelated_event_does_not_clear_a_future_change(self, apply):
+        """The live failure, exactly: an add-on attached mid-period."""
+        org = self._org_with_pending(effective_at=self.FUTURE)
+        apply(None, org, _sub("price_growth_term"))
+
+        assert org.billing_pending_plan_key == "growth"
+        assert org.billing_pending_effective_at == self.FUTURE
+        assert org.stripe_schedule_id == "sub_sched_1"
+
+    def test_it_holds_even_with_no_recorded_commitment(self, apply):
+        """The NULL commitment is what let it through before."""
+        org = self._org_with_pending(commitment=None,
+                                     effective_at=self.FUTURE)
+        apply(None, org, _sub("price_growth_term"))
+        assert org.billing_pending_plan_key == "growth"
+
+    def test_the_target_actually_arriving_early_does_clear_it(self, apply):
+        """THE OTHER HALF, and why the date is not the whole rule.
+
+        If the subscription genuinely MOVES onto the pending target - the
+        schedule fires early, or somebody applies the change by hand - the
+        change has happened, whatever date was written down. Holding the
+        marker would leave every screen announcing a change the customer
+        already has.
+        """
+        org = self._org_with_pending(
+            commitment=BillingCommitment.MONTH_TO_MONTH,
+            effective_at=self.FUTURE)
+        apply(None, org, _sub("price_growth_m2m"))
+
+        assert org.billing_commitment == BillingCommitment.MONTH_TO_MONTH
+        assert org.billing_pending_plan_key is None
+        assert org.stripe_schedule_id is None
+
+    def test_a_change_whose_date_has_passed_still_clears(self, apply):
+        """The guard must not strand a change that genuinely landed."""
+        org = self._org_with_pending(
+            commitment=BillingCommitment.MONTH_TO_MONTH,
+            effective_at=self.PAST)
+        apply(None, org, _sub("price_growth_m2m"))
+
+        assert org.billing_pending_plan_key is None
+        assert org.billing_pending_commitment is None
+        assert org.billing_pending_effective_at is None
+        assert org.stripe_schedule_id is None
+
+    def test_a_change_with_no_date_still_clears_when_it_matches(self, apply):
+        """Older rows carry no effective date; they keep the previous rule."""
+        org = self._org_with_pending(
+            commitment=BillingCommitment.MONTH_TO_MONTH, effective_at=None)
+        apply(None, org, _sub("price_growth_m2m"))
+
+        assert org.billing_pending_plan_key is None

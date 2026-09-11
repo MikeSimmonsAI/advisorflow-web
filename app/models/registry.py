@@ -163,6 +163,15 @@ import app.models.support_models  # noqa: F401  (imported for side effects)
 # failure would be a duplicate send rather than an error. Added to BOTH
 # blocks in this file, per the merge-artifact note above.
 import app.models.ai_operations_models  # noqa: F401  (imported for side effects)
+# OAuth authorization transactions (oauth_auth_transactions). Same Base, same
+# reason, and the consequence of dropping this line is a security one rather
+# than a cosmetic one: without the table, `oauth_state_service.issue_state`
+# raises on the first connect attempt and the Google/Microsoft flows stop
+# working entirely. That is loud, which is the right failure — the shape to
+# NEVER accept is anyone "fixing" it by reading the user id out of the raw
+# `state` again. Added to BOTH blocks in this file, per the merge-artifact
+# note above.
+import app.models.oauth_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -343,3 +352,7 @@ import app.models.support_models  # noqa: F401  (imported for side effects)
 # the support line above has two. Same tables, same consequence if dropped:
 # no idempotency ledger, no ownership rows, no operational audit.
 import app.models.ai_operations_models  # noqa: F401  (imported for side effects)
+# OAuth authorization transactions — the SECOND copy of this line, same tables
+# and same reason as the first. See the note on that copy for what breaks if it
+# is dropped.
+import app.models.oauth_models  # noqa: F401  (imported for side effects)

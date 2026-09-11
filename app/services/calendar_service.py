@@ -59,18 +59,24 @@ def get_oauth_flow() -> Flow:
     return Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=GOOGLE_REDIRECT_URI)
 
 
-def get_authorization_url(advisor_user_id: str) -> str:
+def get_authorization_url(state: str) -> str:
     """
     Step 1 of OAuth: returns the URL the advisor visits to grant calendar
-    access. `state` carries the advisor's user_id so the callback knows
-    whose account to attach the token to.
+    access.
+
+    `state` IS NOT A USER ID. It used to be, and the callback trusted it, which
+    let a valid authorization be redirected into someone else's account. It is
+    now an opaque single-use handle minted by
+    `app/services/oauth_state_service.issue_state` — this function's only job is
+    to carry it to Google unchanged. Callers must not pass a user id, an email,
+    or anything else the callback would have to interpret.
     """
     flow = get_oauth_flow()
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",  # force refresh_token issuance even on repeat connects
-        state=advisor_user_id,
+        state=state,
     )
     return auth_url
 

@@ -34,6 +34,39 @@ JWT_SECRET = _jwt_secret
 JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRY_HOURS = 24  # 24-hour lifetime; frontend refreshes every 30 min while active
 
+# ── A TOKEN MUST SAY WHAT IT IS FOR ─────────────────────────────────────────
+#
+# THE DEFECT THIS CLOSES. This service is not the only thing in the app that
+# signs an HS256 JWT. `app/routers/setup_router.py` mints an integration setup
+# token so an advisor can connect Google or Microsoft from an emailed link
+# without logging in, and it used to fall back to JWT_SECRET when SECRET_KEY
+# was unset — which is how production ran. Two different credentials, one
+# signing key, and nothing on either side that said which was which.
+#
+# `decode_access_token` verified the signature and returned the claims. The
+# setup token carries `sub`, so `deps.get_current_user` loaded that user and
+# served the request. It carries no `jti`, so the session block was skipped
+# entirely and the token kept working after every session had been revoked. A
+# 48-hour link meant for "connect your calendar" was a 48-hour bearer
+# credential for the whole API.
+#
+# TWO INDEPENDENT REFUSALS, because either alone is one mistake away from
+# reopening it:
+#
+#   1. PURPOSE. Every access token now carries purpose="access", and decoding
+#      refuses anything else — including a token with no purpose claim at all,
+#      which is what every non-access token this codebase has ever minted looks
+#      like. Fail closed, not fail open-on-absence.
+#   2. KEY SEPARATION. setup_router now derives its own signing key (see
+#      `setup_router.SETUP_SIGNING_KEY`), so a setup token no longer verifies
+#      here at all.
+#
+# WHAT THIS COSTS. Access tokens minted before this deploy have no `purpose`
+# and are refused, so everyone signs in again once. That is the correct price:
+# the alternative is accepting purpose-less tokens for a grace period, which is
+# precisely the hole, kept open on a timer.
+ACCESS_TOKEN_PURPOSE = "access"
+
 
 def hash_password(plain_password: str) -> str:
     return bcrypt.hashpw(plain_password.encode(), bcrypt.gensalt()).decode()
@@ -102,18 +135,36 @@ def create_access_token(user: User, db: Session, *, request=None,
         "org_id": user.organization_id,
         "role": user.role,
         "jti": jti,
+        # See ACCESS_TOKEN_PURPOSE above. This claim is what makes this token
+        # distinguishable from every other HS256 JWT the platform mints.
+        "purpose": ACCESS_TOKEN_PURPOSE,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRY_HOURS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict:
+    """Decode a token that is being presented AS AN ACCESS TOKEN.
+
+    A valid signature is not an answer to "may this authenticate a user". The
+    purpose check below is, and it is deliberately positive: the claim must be
+    present and must equal ACCESS_TOKEN_PURPOSE. A missing claim is refused
+    rather than waved through, because every token this codebase signs for some
+    OTHER job has no purpose claim of its own to fail on.
+
+    Every refusal says "Invalid token" and nothing more. Which claim was wrong
+    is not information a caller presenting the wrong credential has earned.
+    """
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
         raise ValueError("Token has expired")
     except jwt.InvalidTokenError:
         raise ValueError("Invalid token")
+
+    if payload.get("purpose") != ACCESS_TOKEN_PURPOSE:
+        raise ValueError("Invalid token")
+    return payload
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:

@@ -218,7 +218,9 @@ def provision_brand_catalog(db: Session, platform: Platform, *,
 
         problems = brand_catalog.validate(item.kind, item.pricing_mode,
                                           item.amount_cents,
-                                          item.billing_interval)
+                                          item.billing_interval,
+                                          item.entitlement_key,
+                                          item.entitlement_value)
         if problems:
             row.update(skipped=True, reason=" ".join(problems))
             skipped += 1
@@ -234,8 +236,16 @@ def provision_brand_catalog(db: Session, platform: Platform, *,
             if price["id"]:
                 item.stripe_price_id = price["id"]
 
-        created_products += 1 if product["action"] == "created" else 0
-        created_prices += 1 if price["action"] == "created" else 0
+        # A DRY RUN COUNTS WHAT IT WOULD CREATE. Counting only "created" made
+        # the preview's own header contradict its own rows: every line said
+        # "would create" while the summary above them said zero products and
+        # zero prices. An operator reads the summary, and a summary that says
+        # nothing will happen is the one thing that would stop them looking at
+        # the list underneath it.
+        created_products += 1 if product["action"] in ("created",
+                                                       "would_create") else 0
+        created_prices += 1 if price["action"] in ("created",
+                                                   "would_create") else 0
         reused += 1 if price["action"].startswith("reused") else 0
 
         row.update(skipped=False,

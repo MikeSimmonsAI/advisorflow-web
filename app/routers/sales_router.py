@@ -184,6 +184,27 @@ def _resolve_context(user: User, db: Session, brand_sales_org_id: Optional[str] 
     return org
 
 
+def _may_present_demo(db: Session, user: User, platform) -> bool:
+    """May this person present this brand's Demo Suite?
+
+    Delegated, never decided here. `demo_access.may_present` reads the
+    `demo_suite` capability grant, which is the same row the Suite's own routes
+    check — so a nav item that appears and a route that refuses cannot come
+    apart. Imported inside the function because the demo services import the
+    sales models, and a module-level import either way is a cycle.
+
+    Never raises: a nav flag that throws takes the whole workspace down with
+    it, and the honest answer to "we could not tell" is "do not offer it".
+    """
+    if platform is None:
+        return False
+    try:
+        from app.services import demo_access
+        return bool(demo_access.may_present(db, user, platform.id))
+    except Exception:                                     # pragma: no cover
+        return False
+
+
 def _scoped_opportunities(user: User, db: Session, org: BrandSalesOrg):
     """Base query honouring the record-level rule, applied in SQL rather than
     filtered in Python after the fact."""
@@ -722,6 +743,21 @@ def sales_me(brand_sales_org_id: Optional[str] = Query(None),
             "view_team_pipeline": manager,
             "reassign_opportunity": manager,
             "override_deal_value": manager,
+            # DEMO SUITE, ANSWERED BY THE CAPABILITY REGISTRY — not by role.
+            #
+            # The Suite has been reachable only by typing /demo-suite, because
+            # nothing in the sales navigation knew whether this person may
+            # present. That is what this line is for, and it is deliberately
+            # NOT a new permission: `demo_access.may_present` resolves the same
+            # `demo_suite` capability grant the Suite's own routes check, so a
+            # visible nav item and an open door can never disagree.
+            "present_demo": _may_present_demo(db, user, platform),
+        },
+        # Where the nav item points. Absent platform means no brand in context,
+        # which is a reason to show nothing rather than a reason to guess one.
+        "demo_suite": {
+            "available": _may_present_demo(db, user, platform),
+            "platform_id": platform.id if platform else None,
         },
         "stages": [{"key": s, "label": STAGE_LABELS[s]} for s in OPPORTUNITY_STAGES],
         # Scheduling is LIVE as of Checkpoint 2 — see /sales/availability/* and
@@ -1769,6 +1805,63 @@ def demo_queue(brand_sales_org_id: Optional[str] = Query(None),
         },
         "jobs": [_demo_job(o, names, disc_progress, now) for o in shown],
         "can_manage": is_sales_manager(user, db, org.id),
+    }
+
+
+@router.get("/opportunities/{opp_id}/demo-launch")
+def demo_launch(opp_id: str,
+                user: User = Depends(require_sales_member),
+                db: Session = Depends(get_db)):
+    """Can this deal be presented from, and with what?
+
+    ===================================================================
+    WHY THE SERVER ANSWERS THIS AND NOT THE BROWSER
+    ===================================================================
+
+    A RUN DEMO button on an opportunity needs three facts: which brand's
+    demonstration environment to open, whether this person may present it, and
+    what to call the prospect on screen. Every one of those is a server fact.
+    A browser that worked them out would be a browser deciding its own
+    entitlement and naming its own tenant.
+
+    `_load` applies the opportunity's own view authority first, so a deal in
+    another rep's book or another brand is a 404 here exactly as it is
+    everywhere else. Only then is the demo capability consulted, and it is the
+    same `demo_suite` grant the Suite's routes check.
+
+    `return_to` IS BUILT HERE, from the id we just authorised. Nothing the
+    caller sends is ever echoed into it — see the module note on the demo
+    context endpoint for why an in-app return target is constructed rather
+    than accepted.
+    """
+    opp = _load(opp_id, user, db)
+    org = db.query(BrandSalesOrg).filter(
+        BrandSalesOrg.id == opp.brand_sales_org_id).first()
+    platform = None
+    if org is not None and org.platform_id:
+        platform = db.query(Platform).filter(Platform.id == org.platform_id).first()
+
+    may = _may_present_demo(db, user, platform)
+    if platform is None:
+        reason = "This deal's brand has no platform, so there is no demonstration to open."
+    elif not may:
+        reason = ("You do not have Demo Suite access for %s. The platform "
+                  "owner grants it from God Mode → Manage Access." % platform.name)
+    else:
+        reason = None
+
+    return {
+        "eligible": bool(may and platform is not None),
+        "reason": reason,
+        "platform_id": platform.id if platform else None,
+        "brand_name": platform.name if platform else None,
+        "opportunity_id": opp.id,
+        "company_name": opp.company_name,
+        "contact_name": opp.contact_name,
+        "owner_name": _user_name(db, opp.owner_user_id),
+        "stage_label": STAGE_LABELS.get(opp.stage, opp.stage),
+        # The one place this URL is composed.
+        "return_to": "/sales/opportunities/%s" % opp.id,
     }
 
 
