@@ -196,11 +196,26 @@ export default function GodBillingOps() {
       const preview = await api.post(
         `/god/billing/customers/${row.organization_id}/resync`, { apply: false });
 
+      // A DISAGREEMENT IS NOT "NOTHING TO CHANGE". The mirrored columns can
+      // match Stripe perfectly while Stripe still holds a scheduled change
+      // this platform is not showing — which is exactly the case somebody
+      // presses this button to investigate, and reporting it as "nothing to
+      // change" is how they conclude the opposite of the truth.
+      const sched = preview.schedule || {};
+      const booked = sched.next_phase
+        ? ` Stripe has a change booked${sched.next_phase.starts_at
+            ? ' for ' + when(sched.next_phase.starts_at * 1000) : ''}.`
+        : (sched.known === false ? ' Stripe would not say what is booked.' : '');
+
       if (!preview.changed?.length) {
-        setResyncNote(`${row.name}: already matches Stripe — nothing to change.`);
+        setResyncNote(
+          `${row.name}: already matches Stripe — nothing to change.`
+          + booked
+          + (preview.disagreement ? ' ' + preview.disagreement : ''));
         return;
       }
-      setResyncPreview({ row, changed: preview.changed });
+      setResyncPreview({ row, changed: preview.changed,
+                         disagreement: preview.disagreement, schedule: sched });
     } catch (e) {
       setResyncNote(`${row.name}: ${e?.detail || e?.message || 'could not read from Stripe. Nothing was changed.'}`);
     } finally {

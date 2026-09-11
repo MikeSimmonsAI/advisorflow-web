@@ -249,3 +249,53 @@ class TestWhatReachesStripe:
         md = catalog_provisioning._item_metadata(_item())
         assert "catalog_key" in md
         assert "plan_key" not in md
+
+
+class TestThePreviewCountsWhatItWouldCreate:
+    """FOUND ON A LIVE SCREEN. Two brand-new items, both listed as "would
+    create", under a header reading "Would create 0 product(s) and 0 price(s)".
+
+    The summary is what an operator actually reads, and a summary saying
+    nothing will happen is the one thing that stops them reading the rows that
+    say otherwise.
+    """
+
+    def test_a_dry_run_counts_the_items_it_would_create(self, provision):
+        items = [_item(key="a"),
+                 _item(key="b", kind=CatalogItemKind.ONE_TIME,
+                       billing_interval=None)]
+        result, _fake = provision(items, dry_run=True)
+
+        would = [r for r in result["items"]
+                 if not r.get("skipped")
+                 and r["price"]["action"] == "would_create"]
+        assert len(would) == 2
+        assert result["summary"]["prices_created"] == 2
+        assert result["summary"]["products_created"] == 2
+
+    def test_the_summary_agrees_with_the_rows(self, provision):
+        items = [_item(key="a"), _item(key="unpriced", amount_cents=None)]
+        result, _fake = provision(items, dry_run=True)
+
+        assert result["summary"]["skipped"] == 1
+        assert result["summary"]["considered"] == len(result["items"]) == 2
+
+    def test_a_dry_run_still_creates_nothing_at_stripe(self, provision):
+        result, fake = provision([_item()], dry_run=True)
+
+        assert result["dry_run"] is True
+        assert fake.created_prices == []
+        assert fake.created_products == []
+
+    def test_an_unenforceable_grant_is_skipped_rather_than_sold(self,
+                                                               provision):
+        """An item claiming capacity nothing enforces would bill fine and do
+        nothing. It is not given a Stripe price."""
+        item = _item(key="mystery", entitlement_key="sms_credits",
+                     entitlement_value=1000)
+        result, fake = provision([item])
+
+        row = result["items"][0]
+        assert row["skipped"] is True
+        assert "not a limit this platform enforces" in row["reason"]
+        assert fake.created_prices == []
