@@ -21,32 +21,41 @@ import { api } from '../../api/client'
 import { enterCustomer } from './enterCustomer'
 import { enterBrand } from './enterBrand'
 
+// THESE ARE GOD TOKENS, NOT TENANT TOKENS.
+//
+// This screen used to paint from `--bg-panel`, `--text-primary`,
+// `--border-subtle` and friends. Those are the TENANT/white-label palette, which
+// God Mode deliberately does not declare - so inside the light control plane
+// they resolved to whatever the owner's tenant preference happened to be, and
+// the owner's is dark. Workspaces was the last screen still rendering navy
+// panels on a white page, and it was invisible to a search for hex literals
+// because every value here was already a variable. It was the wrong variable.
 const S = {
   wrap:   { padding: '28px 32px 60px', maxWidth: 1180, margin: '0 auto' },
   h1:     { fontSize: 24, fontWeight: 700, margin: '0 0 6px', letterSpacing: '-0.01em' },
-  sub:    { color: 'var(--text-secondary)', fontSize: 14, margin: '0 0 26px', maxWidth: '70ch' },
+  sub:    { color: 'var(--gm-dim)', fontSize: 14, margin: '0 0 26px', maxWidth: '70ch' },
   grid:   { display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))' },
-  card:   { background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)',
+  card:   { background: 'var(--gm-panel)', border: '1px solid var(--gm-card-line)',
             borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   head:   { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px',
-            borderBottom: '1px solid var(--border-subtle)' },
+            borderBottom: '1px solid var(--gm-card-line)' },
   mark:   { width: 40, height: 40, borderRadius: 9, display: 'grid', placeItems: 'center',
             fontWeight: 700, fontSize: 15, color: 'var(--gm-head)', flex: 'none' },
   name:   { fontWeight: 700, fontSize: 16, lineHeight: 1.2 },
-  slug:   { fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'ui-monospace, monospace' },
+  slug:   { fontSize: 11, color: 'var(--gm-ghost)', fontFamily: 'ui-monospace, monospace' },
   body:   { padding: '12px 18px 16px', display: 'flex', flexDirection: 'column', gap: 10 },
   label:  { fontSize: 10, letterSpacing: '0.09em', textTransform: 'uppercase',
-            color: 'var(--text-tertiary)', fontWeight: 600 },
+            color: 'var(--gm-ghost)', fontWeight: 600 },
   row:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: 10, padding: '9px 11px', borderRadius: 8,
-            border: '1px solid var(--border-subtle)', background: 'var(--bg-field-soft)' },
+            border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel-2)' },
   rowName:{ fontSize: 13, fontWeight: 600 },
-  rowMeta:{ fontSize: 11, color: 'var(--text-tertiary)' },
+  rowMeta:{ fontSize: 11, color: 'var(--gm-ghost)' },
   btn:    { fontSize: 12, fontWeight: 600, padding: '5px 11px', borderRadius: 6,
-            border: '1px solid var(--border-strong)', background: 'transparent',
-            color: 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' },
-  empty:  { fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic', padding: '4px 2px' },
-  err:    { color: 'var(--signal-red)', fontSize: 13, margin: '10px 0' },
+            border: '1px solid var(--gm-btn-line)', background: 'transparent',
+            color: 'var(--gm-head)', cursor: 'pointer', whiteSpace: 'nowrap' },
+  empty:  { fontSize: 12, color: 'var(--gm-ghost)', fontStyle: 'italic', padding: '4px 2px' },
+  err:    { color: 'var(--gm-red)', fontSize: 13, margin: '10px 0' },
 }
 
 export default function Workspaces() {
