@@ -63,8 +63,28 @@ def test_no_live_shaped_credential_is_tracked():
     a failing test that prints a secret copies it into CI output, a terminal
     buffer and a transcript.
     """
+    # THE SCANNER'S OWN PROOF IS NOT A LEAK.
+    #
+    # `test_a_real_looking_key_is_reported_as_live` has to contain a
+    # live-SHAPED sample, or it cannot show the scanner catches anything. The
+    # repo-wide sweep below then finds it and reports this file — so the gate
+    # fails permanently, on a fabricated string, and a permanently red gate is
+    # one people learn to ignore. That is strictly worse than no gate.
+    #
+    # Excluded by resolving THIS module's own path rather than by naming it,
+    # so a rename cannot silently re-break it. Nothing else is exempt, and the
+    # sample is still asserted LIVE-SHAPED by the unit test above — the
+    # coverage is unchanged, only the self-reference is dropped.
+    #
+    # (Same failure mode as the destructive-token scan that matched its own
+    # docstring: a scanner that reads the file it is defined in will find
+    # itself.)
+    own_file = os.path.relpath(os.path.abspath(__file__), REPO).replace("\\", "/")
+
     findings = []
     for path in _tracked():
+        if path.replace("\\", "/") == own_file:
+            continue
         full = os.path.join(REPO, path)
         if not os.path.isfile(full):
             continue
