@@ -461,7 +461,20 @@ table.gm-table tbody tr.gm-group:hover td{background:var(--gm-row-lvl0)}
      - Below the widths where everything fits, columns drop in order of
        importance and what they carried reappears under the name. USER, STATUS
        and ACTIONS never drop. */
-table.gm-table.gm-idtable{table-layout:fixed;min-width:1180px}
+/* THE NUMBERS BELOW WERE MEASURED, NOT CHOSEN. Every one is the width the
+   control actually occupies in Inter at the size this table uses, read off the
+   deployed bundle in a real browser, plus a few pixels:
+
+     SUPER ADMIN pill 94 · CONTROL PLANE pill 110 · 3 ACCESS ROLES 111 ·
+     NO MEMBERSHIPS 117 · PENDING SETUP badge 93 · a date 51 ·
+     MANAGE ACCESS 115 + DEACTIVATE 87 + the overflow 25 + gaps 8 = 235
+
+   A first pass guessed 240 for ACTIONS from a machine where Inter had not
+   loaded and the fallback font was narrower. On production the overflow button
+   then sat 15px outside its own cell and was clipped by it — an action made
+   unreachable by a font, which is exactly the failure this work exists to end.
+   If a label here changes, re-measure; do not adjust by eye. */
+table.gm-table.gm-idtable{table-layout:fixed;min-width:1210px}
 /* box-sizing:border-box is load-bearing, not tidiness. Without it a column's
    width is its CONTENT box and the 20px of padding lands on top, so every
    budget below would silently be 20px bigger than it reads and the floors that
@@ -480,16 +493,16 @@ table.gm-table.gm-idtable td:first-child{min-width:0}
    dead strip the frozen ACTIONS cell no longer reaches the edge of. So the
    non-USER budgets are summed into --gm-idfixed, restated at each breakpoint
    as columns drop, and USER takes the rest. --gm-idfixed and the table's
-   min-width are the same number plus 210 — change one, change both. */
-.gm-idtable{--gm-idfixed:970px}
+   min-width are the same number plus 200 — change one, change both. */
+.gm-idtable{--gm-idfixed:1010px}
 .gm-idtable .c-user{width:calc(100% - var(--gm-idfixed))}
-.gm-idtable .c-role{width:110px}
+.gm-idtable .c-role{width:120px}
 .gm-idtable .c-brand{width:118px}
-.gm-idtable .c-org{width:150px}
-.gm-idtable .c-access{width:140px}
-.gm-idtable .c-last{width:100px}
-.gm-idtable .c-status{width:112px}
-.gm-idtable .c-act{width:240px}
+.gm-idtable .c-org{width:136px}
+.gm-idtable .c-access{width:142px}
+.gm-idtable .c-last{width:108px}
+.gm-idtable .c-status{width:118px}
+.gm-idtable .c-act{width:268px}
 
 /* Frozen identity and frozen actions. Both need an opaque fill of their own —
    a transparent sticky cell shows the scrolled row through it. */
@@ -528,8 +541,9 @@ table.gm-table.gm-idtable tbody tr:hover td.c-act{background:var(--gm-row-hover-
 .gm-idaccess.none{cursor:default;background:var(--gm-pill-off-bg);
   border-color:var(--gm-pill-off-bd);color:var(--gm-pill-off-fg)}
 
-.gm-idtable td.c-act .gm-acts{justify-content:flex-start;flex-wrap:nowrap;gap:5px}
-.gm-idtable td.c-act .gm-act{padding:6px 9px;font-size:11px}
+.gm-idtable td.c-act .gm-acts{justify-content:flex-start;flex-wrap:nowrap;gap:4px}
+.gm-idtable td.c-act .gm-act{padding:6px 8px;font-size:11px}
+.gm-idtable td.c-act .gm-act.gm-ghost{padding:6px 6px}
 .gm-idself{flex:none;color:var(--gm-dim);font-size:10px;font-weight:600;letter-spacing:.05em;
   white-space:nowrap}
 /* The overflow menu is positioned against the VIEWPORT, not the cell: the table
@@ -570,36 +584,36 @@ table.gm-table.gm-idtable tbody tr.gm-iddetail:hover>td{background:var(--gm-pane
    selector. A two-class ".gm-idtable .c-brand" loses to it, and a
    "collapsed" column then keeps its 20px of padding: five of those is a
    hundred pixels of nothing, and every floor below is wrong by that much. */
-@media(max-width:1490px){
+@media(max-width:1520px){
   table.gm-table.gm-idtable th.c-brand,table.gm-table.gm-idtable td.c-brand{
     width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
-  table.gm-table.gm-idtable{min-width:1062px}
-  .gm-idtable{--gm-idfixed:852px}
+  table.gm-table.gm-idtable{min-width:1092px}
+  .gm-idtable{--gm-idfixed:892px}
   .gm-idtable .gm-idmeta{display:block}
 }
-@media(max-width:1370px){
+@media(max-width:1400px){
   table.gm-table.gm-idtable th.c-last,table.gm-table.gm-idtable td.c-last{
     width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
-  table.gm-table.gm-idtable{min-width:962px}
-  .gm-idtable{--gm-idfixed:752px}
+  table.gm-table.gm-idtable{min-width:984px}
+  .gm-idtable{--gm-idfixed:784px}
 }
-@media(max-width:1270px){
+@media(max-width:1290px){
   table.gm-table.gm-idtable th.c-org,table.gm-table.gm-idtable td.c-org{
     width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
-  table.gm-table.gm-idtable{min-width:812px}
-  .gm-idtable{--gm-idfixed:602px}
+  table.gm-table.gm-idtable{min-width:848px}
+  .gm-idtable{--gm-idfixed:648px}
 }
-@media(max-width:1120px){
+@media(max-width:1175px){
   table.gm-table.gm-idtable th.c-role,table.gm-table.gm-idtable td.c-role{
     width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
-  table.gm-table.gm-idtable{min-width:702px}
-  .gm-idtable{--gm-idfixed:492px}
+  table.gm-table.gm-idtable{min-width:728px}
+  .gm-idtable{--gm-idfixed:528px}
 }
-@media(max-width:1010px){
+@media(max-width:1050px){
   table.gm-table.gm-idtable th.c-access,table.gm-table.gm-idtable td.c-access{
     width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
-  table.gm-table.gm-idtable{min-width:562px}
-  .gm-idtable{--gm-idfixed:352px}
+  table.gm-table.gm-idtable{min-width:586px}
+  .gm-idtable{--gm-idfixed:386px}
 }
 
 /* ── responsive ────────────────────────────────────────────────────────────
