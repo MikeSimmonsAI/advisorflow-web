@@ -237,8 +237,10 @@ export default function MyDay() {
                 attn={!!m.follow_ups_due} sub="today or overdue" />
         <Metric label="NEEDS ACTION" value={m.needs_action ?? '—'}
                 attn={!!m.needs_action} />
+        {/* Clickable: this number has a queue behind it now. */}
         <Metric label="DEMOS TO BUILD" value={m.demos_to_build ?? '—'}
-                attn={!!m.demos_to_build} />
+                attn={!!m.demos_to_build} sub="open the queue"
+                onClick={() => nav('/sales/demos')} />
         <Metric label="WON THIS MONTH" value={m.won_this_month ?? '—'}
                 sub={m.won_value_this_month ? money(m.won_value_this_month) + ' booked' : null} />
         <Metric label="APPOINTMENTS TODAY" value={m.appointments_today ?? '—'}
@@ -277,7 +279,10 @@ export default function MyDay() {
             <Card title="DEMOS TO BUILD" sub="So you never have to ask whether yours is started" bodyless>
               {data?.demos_to_build?.length
                 ? data.demos_to_build.map(o =>
-                    <OppRow key={o.id} opp={o} onOpen={open}
+                    /* Straight into the build, not into the deal record. This
+                       card is about work to do, and the work has a workspace. */
+                    <OppRow key={o.id} opp={o}
+                            onOpen={id => nav('/sales/demo-build/' + id)}
                             note={(o.demo_status || 'requested')
                                   + (o.demo_due_at ? ' · due ' + dateTime(o.demo_due_at) : '')} />)
                 : <Empty title="No demos in the queue">

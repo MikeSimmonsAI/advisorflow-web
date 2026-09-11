@@ -21,7 +21,7 @@ WHAT THIS MODULE MUST NEVER DO
 """
 from datetime import datetime, timedelta, date
 from decimal import Decimal, InvalidOperation
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -37,7 +37,8 @@ from app.models.sales_models import (
     OPPORTUNITY_STAGES, ALL_STAGES, STAGE_LABELS, DEMO_STATUSES,
     STAGE_PROSPECT, STAGE_CONTACTED, STAGE_DISCOVERY, STAGE_DEMO_BUILD,
     STAGE_PROPOSAL, STAGE_CLOSING, STAGE_WON, STAGE_ONBOARDING, STAGE_LIVE,
-    STAGE_LOST, DEMO_REQUESTED, DEMO_READY,
+    STAGE_LOST, DEMO_REQUESTED, DEMO_READY, DEMO_IN_PROGRESS, DEMO_DELIVERED,
+    DEMO_NOT_REQUESTED,
 )
 from app.models.scheduling_models import (
     SalesAppointment, AppointmentParticipant, MeetingType,
@@ -1598,6 +1599,314 @@ def reassign(opp_id: str, body: ReassignRequest,
            "Reassigned: %s → %s" % (old_name, new_owner.full_name))
     db.commit()
     return get_opportunity(opp.id, user, db)
+
+
+# ══ DEMOS TO BUILD — the work queue, not the count ══════════════════════════
+#
+# WHAT WAS WRONG, AND IT WAS NOT A UI BUG.
+#
+# "Demos to build — 3" and "Mike Simmons — 2 to build" on /sales/proposals are
+# assembled from `manager_workspace`'s per-rep rollup, which carries ONE
+# INTEGER per rep. There was no endpoint anywhere that returned the individual
+# demo jobs for a brand, so the queue could not have listed them however the
+# screen was written. Discovery → Request Demo → count goes up → dead end.
+#
+# So this is the missing read: the same opportunities `my-day` already counts,
+# returned as JOBS. It introduces no new model, no new status vocabulary and no
+# second notion of what a demo is — every field below is a column that already
+# existed on Opportunity, and the membership rule is `_scoped_opportunities`,
+# unchanged, so a rep sees their book and a manager sees the brand.
+#
+# NO NEW PRIORITY CONCEPT. The ordering is the one the platform already uses
+# for this list in `my-day` — target date, soonest first — and `_attention`
+# supplies the one reason a job is shouting, exactly as it does on every card.
+
+DEMO_QUEUE_STATUSES = (DEMO_REQUESTED, DEMO_IN_PROGRESS)
+
+_DEMO_STATUS_LABELS = {
+    DEMO_NOT_REQUESTED: "Not requested",
+    DEMO_REQUESTED: "Requested",
+    DEMO_IN_PROGRESS: "In progress",
+    DEMO_READY: "Ready",
+    DEMO_DELIVERED: "Delivered",
+}
+
+
+def _demo_job(opp: Opportunity, names: dict, disc_progress: dict,
+              now: datetime) -> dict:
+    """One demo build, as the person who has to build it needs to see it."""
+    status = opp.demo_status or (DEMO_REQUESTED if opp.stage == STAGE_DEMO_BUILD
+                                 else DEMO_NOT_REQUESTED)
+    prog = disc_progress.get(opp.id) or {"answered": 0, "required": 0,
+                                         "complete": False}
+    return {
+        "opportunity_id": opp.id,
+        "company_name": opp.company_name,
+        "contact_name": opp.contact_name,
+        "email": opp.email,
+        "phone": opp.phone,
+        "industry": opp.industry,
+        "stage": opp.stage,
+        "stage_label": STAGE_LABELS.get(opp.stage, opp.stage),
+
+        # The seller who owns the relationship, and the builder who owns the
+        # work. Two different people on purpose — see `assign_owner` in
+        # implementation_service for the same distinction after the sale.
+        "sales_owner_user_id": opp.owner_user_id,
+        "sales_owner_name": names.get(opp.owner_user_id),
+        "builder_user_id": opp.demo_owner_user_id,
+        "builder_name": names.get(opp.demo_owner_user_id),
+
+        "demo_status": status,
+        "demo_status_label": _DEMO_STATUS_LABELS.get(status, status),
+        "requested_at": opp.demo_requested_at,
+        "due_at": opp.demo_due_at,
+        "ready_at": opp.demo_ready_at,
+        "overdue": bool(opp.demo_due_at and opp.demo_due_at < now
+                        and status not in (DEMO_READY, DEMO_DELIVERED)),
+        "demo_url": opp.demo_url,
+
+        # THE HANDOFF, ANSWERED HERE SO THE QUEUE CAN SAY IT.
+        # A job whose discovery is incomplete is a job that will bounce back,
+        # and the builder should see that before opening it rather than after.
+        "requirements_captured": bool((opp.demo_requirements or "").strip()),
+        "discovery_answered": prog.get("answered", 0),
+        "discovery_required": prog.get("required", 0),
+        "discovery_complete": bool(prog.get("complete")),
+        "discovery_completed_at": opp.discovery_completed_at,
+
+        "attention": _attention(opp),
+        "last_activity_at": opp.stage_changed_at or opp.updated_at or opp.created_at,
+    }
+
+
+@router.get("/demo-queue")
+def demo_queue(brand_sales_org_id: Optional[str] = Query(None),
+               builder: Optional[str] = Query(
+                   None, description="a user id, 'me', or 'unassigned'"),
+               include_done: bool = Query(False),
+               user: User = Depends(require_sales_member),
+               db: Session = Depends(get_db)):
+    """Every demo waiting to be built, as individual openable jobs.
+
+    `include_done` adds the ones already Ready or Delivered, so somebody can
+    find the demo they published last week without leaving the queue. They are
+    NOT counted in `summary.total`, which stays the number of outstanding
+    builds — the figure the screen has always shown.
+    """
+    org = _resolve_context(user, db, brand_sales_org_id)
+    now = datetime.utcnow()
+
+    base = _scoped_opportunities(user, db, org)
+    # Open deals only. A demo on a lost deal is not work; a demo on a won deal
+    # already did its job.
+    opps = base.filter(Opportunity.status == "open").all()
+
+    outstanding = [o for o in opps
+                   if o.stage == STAGE_DEMO_BUILD
+                   or (o.demo_status in DEMO_QUEUE_STATUSES)]
+    outstanding_ids = {o.id for o in outstanding}
+    done = [o for o in opps
+            if o.id not in outstanding_ids
+            and o.demo_status in (DEMO_READY, DEMO_DELIVERED)]
+
+    # Ordering: the platform's existing one for this list. Soonest target
+    # first, then oldest request — a job with no date sorts last rather than
+    # first, because "no target" is not "due now".
+    outstanding.sort(key=lambda o: (o.demo_due_at or datetime.max,
+                                    o.demo_requested_at or datetime.max))
+    done.sort(key=lambda o: (o.demo_ready_at or datetime.min), reverse=True)
+
+    shown = outstanding + (done if include_done else [])
+
+    if builder == "unassigned":
+        shown = [o for o in shown if not o.demo_owner_user_id]
+    elif builder == "me":
+        shown = [o for o in shown if o.demo_owner_user_id == user.id]
+    elif builder:
+        shown = [o for o in shown if o.demo_owner_user_id == builder]
+
+    # Names and discovery progress for the whole page, in two queries rather
+    # than two per row.
+    names = _name_map(db, [o.owner_user_id for o in shown]
+                      + [o.demo_owner_user_id for o in shown])
+    disc_progress = {}
+    ids = [o.id for o in shown]
+    if ids:
+        for d in (db.query(DiscoveryRecord)
+                  .filter(DiscoveryRecord.opportunity_id.in_(ids)).all()):
+            state = _discovery.load(getattr(d, "structured_json", None))
+            legacy = {k: getattr(d, k, None) for k, _ in DiscoveryRecord.FIELDS}
+            disc_progress[d.opportunity_id] = _discovery.progress(
+                state["fields"], legacy)
+
+    # WHO IS CARRYING WHAT. The same per-builder split /sales/proposals shows
+    # as "<name> — N to build", derived from these rows rather than from a
+    # second aggregate that could disagree with them.
+    by_builder = {}
+    for o in outstanding:
+        key = o.demo_owner_user_id or ""
+        by_builder.setdefault(key, 0)
+        by_builder[key] += 1
+    builder_names = _name_map(db, [k for k in by_builder if k])
+
+    return {
+        "brand_sales_org": {"id": org.id, "name": org.name},
+        "summary": {
+            "total": len(outstanding),
+            "unassigned": sum(1 for o in outstanding if not o.demo_owner_user_id),
+            "overdue": sum(1 for o in outstanding
+                           if o.demo_due_at and o.demo_due_at < now),
+            "no_target": sum(1 for o in outstanding if not o.demo_due_at),
+            "mine": sum(1 for o in outstanding
+                        if o.demo_owner_user_id == user.id),
+            "by_builder": sorted(
+                [{"user_id": k or None,
+                  "name": builder_names.get(k) if k else "Unassigned",
+                  "count": v} for k, v in by_builder.items()],
+                key=lambda r: (-r["count"], r["name"] or "")),
+        },
+        "jobs": [_demo_job(o, names, disc_progress, now) for o in shown],
+        "can_manage": is_sales_manager(user, db, org.id),
+    }
+
+
+@router.get("/opportunities/{opp_id}/demo-build")
+def demo_build_workspace(opp_id: str,
+                         user: User = Depends(require_sales_member),
+                         db: Session = Depends(get_db)):
+    """One demo build, with discovery already turned into a brief.
+
+    ===================================================================
+    THE BUILDER DOES NOT RE-ASK WHAT THE SELLER ALREADY ASKED
+    ===================================================================
+
+    Lead sources, current outreach, tools, follow-up process, pain, goals,
+    appointment handling, automation requirements, integrations and the demo
+    requirements are all captured in discovery, on the call, by the person who
+    was in the room. Asking for them again on a build form is asking the
+    company to collect the same facts twice and then reconcile two answers.
+
+    So `handoff` below is discovery RENDERED — `discovery_schema.render()`,
+    which already exists and is already how a structured answer becomes a
+    sentence. It runs on the SERVER for the same reason the intake schema does:
+    the vocabulary must not be reimplemented in a browser where it can drift
+    from the one the seller answered against.
+
+    Legacy long-form text (deals captured before structured discovery) is
+    included under the same labels, so an old deal hands off as completely as
+    a new one rather than appearing blank.
+
+    This endpoint adds no field to any model and no second notion of what a
+    demo is. It is a READ, assembled from `Opportunity.demo_*` and
+    `DiscoveryRecord`, both of which already existed.
+    """
+    opp = _load(opp_id, user, db)
+    org = db.query(BrandSalesOrg).filter(
+        BrandSalesOrg.id == opp.brand_sales_org_id).first()
+
+    disc = db.query(DiscoveryRecord).filter(
+        DiscoveryRecord.opportunity_id == opp.id).first()
+    state = _discovery.load(getattr(disc, "structured_json", None) if disc else None)
+    legacy_text = {k: (getattr(disc, k, None) if disc else None)
+                   for k, _ in DiscoveryRecord.FIELDS}
+    field_labels = dict(DiscoveryRecord.FIELDS)
+
+    handoff: List[Dict[str, Any]] = []
+    seen = set()
+    for spec in _discovery.schema_payload():
+        key = spec["key"]
+        seen.add(key)
+        rendered = _discovery.render(key, (state["fields"] or {}).get(key))
+        text = (legacy_text.get(key) or "").strip() if legacy_text.get(key) else ""
+        # Both, when both exist: the structured answer is the checklist and the
+        # long-form note is what the seller actually heard. Dropping either one
+        # loses something the builder needs.
+        value = "\n".join([v for v in (rendered, text) if v]) or None
+        handoff.append({
+            "key": key,
+            "label": spec.get("label") or field_labels.get(key, key),
+            "group": spec.get("group"),
+            "required": bool(spec.get("required")),
+            "value": value,
+        })
+    # Anything discovery stored that the current schema no longer asks about.
+    # Kept rather than hidden — a question retired last month is still the best
+    # information this deal has.
+    for key, label in DiscoveryRecord.FIELDS:
+        if key in seen:
+            continue
+        text = (legacy_text.get(key) or "").strip() if legacy_text.get(key) else ""
+        if text:
+            handoff.append({"key": key, "label": label, "group": "Earlier notes",
+                            "required": False, "value": text})
+
+    progress = _discovery.progress(state["fields"], legacy_text)
+
+    team = []
+    if org is not None:
+        rows = (db.query(User, Membership)
+                .join(Membership, Membership.user_id == User.id)
+                .filter(Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                        Membership.scope_id == org.id,
+                        Membership.is_active.is_(True),
+                        User.is_active.is_(True))
+                .order_by(User.full_name.asc()).all())
+        team = [{"id": u.id, "full_name": u.full_name, "role": m.role}
+                for u, m in rows]
+
+    status = opp.demo_status or (DEMO_REQUESTED if opp.stage == STAGE_DEMO_BUILD
+                                 else DEMO_NOT_REQUESTED)
+    return {
+        "opportunity": {
+            "id": opp.id,
+            "company_name": opp.company_name,
+            "contact_name": opp.contact_name,
+            "email": opp.email,
+            "phone": opp.phone,
+            "website": opp.website,
+            "industry": opp.industry,
+            "timezone": opp.timezone,
+            "stage": opp.stage,
+            "stage_label": STAGE_LABELS.get(opp.stage, opp.stage),
+            "status": opp.status,
+            "owner_user_id": opp.owner_user_id,
+            "owner_name": _user_name(db, opp.owner_user_id),
+            "brand_sales_org_id": opp.brand_sales_org_id,
+            "brand_name": org.name if org else None,
+        },
+        "demo": {
+            "status": status,
+            "status_label": _DEMO_STATUS_LABELS.get(status, status),
+            "owner_user_id": opp.demo_owner_user_id,
+            "owner_name": _user_name(db, opp.demo_owner_user_id),
+            "requested_at": opp.demo_requested_at,
+            "due_at": opp.demo_due_at,
+            "ready_at": opp.demo_ready_at,
+            "requirements": opp.demo_requirements,
+            "url": opp.demo_url,
+            "notes": opp.demo_notes,
+            "overdue": bool(opp.demo_due_at
+                            and opp.demo_due_at < datetime.utcnow()
+                            and status not in (DEMO_READY, DEMO_DELIVERED)),
+        },
+        "discovery": {
+            "completed_at": disc.completed_at if disc else None,
+            "completed_by_name": _user_name(db, disc.completed_by) if disc else None,
+            "progress": progress,
+            "handoff": handoff,
+        },
+        # The same server-side answer the deal screen uses, so a control is
+        # hidden in exactly the same circumstances on both. PATCH remains
+        # gated by `assert_can_edit_opportunity` either way.
+        "can_manage_demo": bool(
+            is_sales_manager(user, db, opp.brand_sales_org_id)
+            or (opp.demo_owner_user_id and opp.demo_owner_user_id == user.id)),
+        "can_reassign": is_sales_manager(user, db, opp.brand_sales_org_id),
+        "team": team,
+        "statuses": [{"value": s, "label": _DEMO_STATUS_LABELS.get(s, s)}
+                     for s in DEMO_STATUSES],
+    }
 
 
 @router.get("/team")

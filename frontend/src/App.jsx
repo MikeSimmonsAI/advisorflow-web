@@ -145,6 +145,11 @@ import MyAvailability from './pages/sales/MyAvailability'
 import TeamAvailability from './pages/sales/TeamAvailability'
 import TeamCalendar from './pages/sales/TeamCalendar'
 import TeamProposals from './pages/sales/TeamProposals'
+// DEMOS TO BUILD — the queue, and the workspace a job opens into. Both are
+// Sales Workspace pages: a demo is a stage on an opportunity, so the work of
+// building one belongs beside the deal rather than in God Mode.
+import DemoQueue from './pages/sales/DemoQueue'
+import DemoBuild from './pages/sales/DemoBuild'
 import Salespeople from './pages/sales/Salespeople'
 import Prospects from './pages/sales/Prospects'
 import GodUsers from './pages/god/GodUsers'
@@ -789,6 +794,13 @@ export default function App() {
         <Route path="/sales/calendar" element={<SalesRoute><TeamCalendar /></SalesRoute>} />
         <Route path="/sales/team-pipeline" element={<SalesRoute><MyPipeline scope="team" /></SalesRoute>} />
         <Route path="/sales/proposals" element={<SalesRoute><TeamProposals /></SalesRoute>} />
+        {/* The demo queue and the build workspace. `/sales/demos` is the list
+            of individual jobs behind the "Demos to build" count;
+            `/sales/demo-build/:oppId` is where one of them is actually built.
+            Same record and same authority as the deal — a demo is a stage on
+            the opportunity, not a thing of its own. */}
+        <Route path="/sales/demos" element={<SalesRoute><DemoQueue /></SalesRoute>} />
+        <Route path="/sales/demo-build/:oppId" element={<SalesRoute><DemoBuild /></SalesRoute>} />
         <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
