@@ -1,4 +1,4 @@
-import re
+﻿import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from app.models.models import User
 from app.utils.crypto import encrypt_value
 from app.routers.audit_log_router import log_action
 
-# Only http/https URLs are safe to store — javascript:, data:, vbscript: etc.
+# Only http/https URLs are safe to store â€” javascript:, data:, vbscript: etc.
 # are blocked to prevent stored-XSS via social-link or booking-page fields.
 _SAFE_URL_SCHEMES = ("http://", "https://")
 
@@ -284,13 +284,13 @@ def admin_assign_twilio(
     current_user: User = Depends(require_tenant_context),
 ):
     """
-    Org admin endpoint — assign a Twilio phone number to any advisor
+    Org admin endpoint â€” assign a Twilio phone number to any advisor
     in the same org. This unblocks cadence for advisors who haven't
     set up their own Twilio credentials.
 
     If twilio_account_sid and twilio_auth_token are provided they are
     used for that advisor's account. If omitted, only the phone number
-    is updated — useful when all advisors share one Twilio account but
+    is updated â€” useful when all advisors share one Twilio account but
     have different phone numbers.
     """
     if current_user.role not in ('org_admin', 'super_admin', 'god_admin'):
@@ -361,7 +361,7 @@ def update_social_links(
     current_user: User = Depends(require_tenant_user),
 ):
     """
-    DEPRECATED — social links have moved to the org level (PATCH /org-settings/social-links).
+    DEPRECATED â€” social links have moved to the org level (PATCH /org-settings/social-links).
     The org-level links are what gets pushed out in surveys and outreach.
     This advisor-level endpoint is kept for backwards compatibility but is no longer
     wired up in the frontend Settings page. Will be removed in a future cleanup.
@@ -375,7 +375,7 @@ def update_social_links(
 
 
 class ProfilePhotoRequest(BaseModel):
-    # base64 data URL from the browser — e.g. "data:image/jpeg;base64,/9j/..."
+    # base64 data URL from the browser â€” e.g. "data:image/jpeg;base64,/9j/..."
     # The frontend encodes it via FileReader.readAsDataURL() so no multipart
     # upload is needed. Max size enforced in frontend (< 2MB before encoding).
     photo_data_url: str
@@ -393,13 +393,13 @@ def update_profile_photo(
     The data URL is served directly as the <img> src everywhere the avatar appears.
     """
     # Enforce a strict MIME allowlist (jpeg/png/gif/webp only).
-    # Rejecting image/svg+xml prevents stored XSS — SVG can embed <script>.
+    # Rejecting image/svg+xml prevents stored XSS â€” SVG can embed <script>.
     if not _SAFE_PHOTO_MIME_RE.match(req.photo_data_url):
         raise HTTPException(
             status_code=400,
             detail="photo_data_url must be a valid JPEG, PNG, GIF, or WebP data URL."
         )
-    # Rough size guard — base64 of a ~9MB file is ~12MB of text; frontend
+    # Rough size guard â€” base64 of a ~9MB file is ~12MB of text; frontend
     # compresses to 900px max at 85% quality, so real payloads are tiny.
     if len(req.photo_data_url) > 12_000_000:
         raise HTTPException(status_code=400, detail="Photo too large. Please use an image under 9MB.")
@@ -420,7 +420,7 @@ def delete_profile_photo(
     return {"success": True}
 
 
-# ── Booking settings — any advisor can configure their own schedule ────────────
+# â”€â”€ Booking settings â€” any advisor can configure their own schedule â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BookingSettingsRequest(BaseModel):
     appt_duration_minutes: Optional[int] = None
@@ -442,15 +442,15 @@ def update_booking_settings(
     """Advisors update their own booking / scheduling preferences."""
     if req.appt_duration_minutes is not None:
         if req.appt_duration_minutes < 5 or req.appt_duration_minutes > 480:
-            raise HTTPException(status_code=400, detail="appt_duration_minutes must be 5–480.")
+            raise HTTPException(status_code=400, detail="appt_duration_minutes must be 5â€“480.")
         current_user.appt_duration_minutes = req.appt_duration_minutes
     if req.buffer_minutes is not None:
         if req.buffer_minutes < 0 or req.buffer_minutes > 120:
-            raise HTTPException(status_code=400, detail="buffer_minutes must be 0–120.")
+            raise HTTPException(status_code=400, detail="buffer_minutes must be 0â€“120.")
         current_user.buffer_minutes = req.buffer_minutes
     if req.max_bookings_per_day is not None:
         if req.max_bookings_per_day < 1 or req.max_bookings_per_day > 50:
-            raise HTTPException(status_code=400, detail="max_bookings_per_day must be 1–50.")
+            raise HTTPException(status_code=400, detail="max_bookings_per_day must be 1â€“50.")
         current_user.max_bookings_per_day = req.max_bookings_per_day
     if req.available_start_time is not None:
         current_user.available_start_time = req.available_start_time
@@ -467,7 +467,7 @@ def update_booking_settings(
     return {"success": True}
 
 
-# ── Admin: full profile setup for any team member ─────────────────────────────
+# â”€â”€ Admin: full profile setup for any team member â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class AdminProfileRequest(BaseModel):
     full_name: Optional[str] = None
@@ -480,7 +480,7 @@ class AdminProfileRequest(BaseModel):
     twilio_phone_number: Optional[str] = None
     twilio_caller_id_name: Optional[str] = None
     twilio_account_sid: Optional[str] = None
-    twilio_auth_token: Optional[str] = None   # plaintext — encrypted before storage
+    twilio_auth_token: Optional[str] = None   # plaintext â€” encrypted before storage
 
 
 @router.patch("/admin/profile/{user_id}")
@@ -491,7 +491,7 @@ def admin_update_profile(
     current_user: User = Depends(require_tenant_context),
 ):
     """
-    Org admin / super admin endpoint — set up any team member's full profile
+    Org admin / super admin endpoint â€” set up any team member's full profile
     without that advisor needing to log in first. Covers name, photo, booking
     page, notification preferences, and Twilio phone assignment.
     Super admins can update users in any org; org admins are restricted to
@@ -602,104 +602,28 @@ def admin_get_profile(
     }
 
 
-# ── Per-org appointment types ────────────────────────────────────────────────
+# â”€â”€ Per-org appointment types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-_UNIVERSAL_APPT_TYPES = [
-    "General Consultation",
-    "New Web Lead",
-    "Walk-In",
-    "Phone Call",
-    "Video Call",
-    "Referral Appointment",
-    "Follow-Up Appointment",
-]
+# THE APPOINTMENT VOCABULARY COMES FROM THE INDUSTRY REGISTRY.
+#
+# This map was declared here, and it was one of three industry maps in the
+# codebase. Its fallback was the funeral list, so a customer whose industry
+# this map did not recognise was shown "At-Need Arrangement Conference" and
+# "Pre-Need Planning Consultation" on the day their workspace was created.
+#
+# The names below are kept because other modules and tests import them; the
+# data now lives in app/services/industry_templates.py, and an unrecognised
+# industry resolves to a neutral service-business list.
+from app.services import industry_templates
+from app.services.industry_templates import (  # noqa: F401  (re-export)
+    INDUSTRY_APPT_TYPES,
+    UNIVERSAL_APPOINTMENT_TYPES as _UNIVERSAL_APPT_TYPES,
+)
 
-INDUSTRY_APPT_TYPES: dict = {
-    "funeral": _UNIVERSAL_APPT_TYPES + [
-        "Pre-Need Planning Consultation",
-        "Pre-Planning Consultation",
-        "At-Need Arrangement Conference",
-        "Immediate Need Consultation",
-        "Urgent Arrangement Consultation",
-        "Family File Review",
-        "Property Ownership Review",
-        "Property Transfer Appointment",
-        "Cemetery Property Consultation",
-        "Marker & Memorial Consultation",
-        "Memorial Planning Consultation",
-        "Memorial Flower Review",
-        "Contract Review Appointment",
-        "Family Services Appointment",
-        "Family Services Consultation",
-        "New Family Consultation",
-        "Insurance & Benefits Review",
-        "Veterans Benefits Consultation",
-    ],
-    "fiber": _UNIVERSAL_APPT_TYPES + [
-        "New Service Consultation",
-        "Installation Appointment",
-        "Service Upgrade Consultation",
-        "Billing Review",
-        "Tech Support Visit",
-        "Door-to-Door Canvass",
-        "Business Account Consultation",
-        "Contract Renewal",
-        "Equipment Swap",
-        "Cancellation Retention Call",
-    ],
-    "roofing": _UNIVERSAL_APPT_TYPES + [
-        "Estimate Appointment",
-        "Roof Inspection",
-        "Storm Damage Assessment",
-        "Contract Signing",
-        "Material Selection Meeting",
-        "Project Walkthrough",
-        "Insurance Claim Review",
-        "Post-Job Inspection",
-    ],
-    "insurance": _UNIVERSAL_APPT_TYPES + [
-        "New Policy Consultation",
-        "Benefits & Coverage Consultation",
-        "Policy Review",
-        "Annual Review",
-        "Insurance & Benefits Review",
-        "Life Insurance Consultation",
-        "Medicare Review",
-        "Veterans Benefits Consultation",
-        "Claims Assistance",
-        "Policy Renewal",
-    ],
-    "real_estate": _UNIVERSAL_APPT_TYPES + [
-        "Buyer Consultation",
-        "Seller Consultation",
-        "Home Showing",
-        "Offer Review",
-        "Contract Signing",
-        "Closing Walkthrough",
-        "Market Analysis Review",
-        "Investment Property Consultation",
-    ],
-    "dental": _UNIVERSAL_APPT_TYPES + [
-        "New Patient Exam",
-        "Routine Cleaning",
-        "Consultation",
-        "Treatment Plan Review",
-        "Cosmetic Consultation",
-        "Orthodontic Consultation",
-        "Emergency Visit",
-        "Follow-Up Appointment",
-    ],
-    "custom": _UNIVERSAL_APPT_TYPES + [
-        "Discovery Call",
-        "Strategy Session",
-        "Onboarding Meeting",
-        "Check-In",
-        "Demo",
-    ],
-}
+# Kept for callers that import it. NOT a funeral list any more: an unknown
+# industry is a generic service business, not somebody else's vertical.
+DEFAULT_APPT_TYPES = industry_templates.appointment_types(None)
 
-# Fallback used when org industry is unknown
-DEFAULT_APPT_TYPES = INDUSTRY_APPT_TYPES["funeral"]
 
 
 def _resolve_appt_org(current_user: User, org_id: Optional[str], db) -> "Organization":
@@ -734,9 +658,15 @@ def get_appointment_types(
                 return {"appointment_types": types, "is_custom": True}
         except Exception:
             pass
-    industry = (org.industry or "funeral") if org else "funeral"
-    defaults = INDUSTRY_APPT_TYPES.get(industry, INDUSTRY_APPT_TYPES["funeral"])
-    return {"appointment_types": defaults, "is_custom": False}
+    # No funeral fallback, and no KeyError on an industry this map has never
+    # seen: the registry resolves an unknown industry to a neutral list and
+    # says so, so the screen can tell the customer these are generic defaults
+    # rather than a decision somebody made about their business.
+    industry = getattr(org, "industry", None) if org else None
+    return {"appointment_types": industry_templates.appointment_types(industry),
+            "is_custom": False,
+            "industry": industry_templates.normalize(industry),
+            "industry_matched": industry_templates.is_known(industry)}
 
 
 class ApptTypesRequest(BaseModel):
@@ -784,6 +714,8 @@ def reset_appointment_types(
     if org:
         org.appointment_types = None
         db.commit()
-    industry = (org.industry or "funeral") if org else "funeral"
-    defaults = INDUSTRY_APPT_TYPES.get(industry, INDUSTRY_APPT_TYPES["funeral"])
-    return {"appointment_types": defaults, "is_custom": False}
+    industry = getattr(org, "industry", None) if org else None
+    return {"appointment_types": industry_templates.appointment_types(industry),
+            "is_custom": False,
+            "industry": industry_templates.normalize(industry),
+            "industry_matched": industry_templates.is_known(industry)}

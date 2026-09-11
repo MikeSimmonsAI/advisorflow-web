@@ -43,14 +43,58 @@ def test_seeding_is_idempotent_does_not_create_duplicates(db_session, sample_org
 
 
 def test_seeding_a_brand_new_org_with_no_tiers_creates_real_rows(db_session):
+    """An org that states no industry gets NEUTRAL tiers, not funeral ones.
+
+    This test asserted 8 rows, which was the funeral set, because
+    `seed_default_tier_definitions` defaulted its industry argument to
+    "funeral". That default is what put Pre-Need, At-Need and Imminent into a
+    brand-new customer in an unrelated business on the day its workspace was
+    created. The assertion below is the corrected contract: rows are created,
+    and none of them carry another vertical's vocabulary.
+    """
     new_org = Organization(name="Brand New Org", slug="brand-new-org-test", plan="trial")
     db_session.add(new_org)
     db_session.commit()
 
     created = seed_default_tier_definitions(db_session, new_org.id)
 
-    assert len(created) == 8
+    assert created, "a new org must still be seeded with a usable tier set"
     assert list_tier_definitions(db_session, new_org.id) != []
+
+    keys = {row.tier_key for row in created}
+    for funeral_only in ("pre_need", "at_need", "imminent", "contract_sold"):
+        assert funeral_only not in keys, (
+            "an org with no stated industry was seeded with funeral tiers")
+
+
+def test_seeding_an_org_that_states_its_industry_gets_that_industrys_tiers(db_session):
+    new_org = Organization(name="Energy Co", slug="energy-co-test", plan="trial",
+                           industry="energy")
+    db_session.add(new_org)
+    db_session.commit()
+
+    created = seed_default_tier_definitions(db_session, new_org.id,
+                                            industry=new_org.industry)
+
+    keys = {row.tier_key for row in created}
+    assert "rate_review" in keys
+    assert "renewal_due" in keys
+    assert "pre_need" not in keys
+
+
+def test_a_funeral_org_still_gets_funeral_tiers(db_session):
+    """The fix removes a FALLBACK, not an industry. A funeral home that says so
+    keeps every tier it has always had."""
+    new_org = Organization(name="Memorial Co", slug="memorial-co-test",
+                           plan="trial", industry="funeral")
+    db_session.add(new_org)
+    db_session.commit()
+
+    created = seed_default_tier_definitions(db_session, new_org.id,
+                                            industry=new_org.industry)
+
+    keys = {row.tier_key for row in created}
+    assert {"pre_need", "at_need", "imminent", "contract_sold"} <= keys
 
 
 def test_pre_need_tier_matches_original_hardcoded_values_exactly(db_session, sample_org):

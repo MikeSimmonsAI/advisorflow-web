@@ -296,7 +296,50 @@ REAL_ESTATE_DEFAULT_TIERS = [
 
 # Map industry values → their tier set. Fall back to SALES_DEFAULT_TIERS for
 # any industry not explicitly listed here — it's generic enough to work.
+ENERGY_DEFAULT_TIERS = [
+    {
+        "tier_key": "new_inquiry", "tier_label": "New Inquiry", "sort_order": 0,
+        "track_key": "energy_intro", "track_label": "Energy Intro",
+        "ai_tone_context": "New energy inquiry. Offer a no-obligation review of "
+                           "their current rate and usage.",
+    },
+    {
+        "tier_key": "rate_review", "tier_label": "Rate Review", "sort_order": 1,
+        "track_key": "energy_review", "track_label": "Rate Review",
+        "ai_tone_context": "Reviewing their current supplier, rate and usage. "
+                           "Ask for a recent bill; never quote a rate you do "
+                           "not have.",
+    },
+    {
+        "tier_key": "proposal_sent", "tier_label": "Proposal Sent",
+        "sort_order": 2,
+        "track_key": "energy_proposal", "track_label": "Proposal Follow-up",
+        "ai_tone_context": "Supplier options are with them. Follow up on the "
+                           "comparison, answer term and rate-type questions.",
+    },
+    {
+        "tier_key": "contract_signed", "tier_label": "Contract Signed",
+        "sort_order": 3,
+        "track_key": "energy_enrolled", "track_label": "Enrollment Confirmation",
+        "ai_tone_context": "Enrolled with a supplier. Confirm start date and "
+                           "what changes on their bill.",
+    },
+    {
+        "tier_key": "renewal_due", "tier_label": "Renewal Due", "sort_order": 4,
+        "track_key": "energy_renewal", "track_label": "Renewal Outreach",
+        "ai_tone_context": "Their contract is ending. Offer a renewal review "
+                           "before it rolls to a variable rate.",
+    },
+]
+
 INDUSTRY_TIER_SETS = {
+    # Energy / procurement. Added with the industry-template registry: the
+    # first energy customer was landing on the sales default because no set
+    # existed, which is how a rate-review business ended up with generic
+    # closer vocabulary.
+    "energy": ENERGY_DEFAULT_TIERS,
+    "energy_procurement": ENERGY_DEFAULT_TIERS,
+    "utilities": ENERGY_DEFAULT_TIERS,
     "fiber": FIBER_DEFAULT_TIERS,
     "fiber_internet": FIBER_DEFAULT_TIERS,
     "door_to_door": FIBER_DEFAULT_TIERS,
@@ -329,13 +372,31 @@ INDUSTRY_TIER_SETS = {
 
 
 def get_tier_set_for_industry(industry: str) -> list:
-    """Returns the appropriate default tier set for the given industry string."""
-    if not industry:
-        return RESTLAND_DEFAULT_TIERS
-    key = industry.lower().strip().replace("-", "_").replace(" ", "_")
+    """The default tier set for an industry.
+
+    AN UNKNOWN INDUSTRY IS NOT A FUNERAL HOME. This used to return the funeral
+    set for an empty industry, which is how a brand-new customer in an
+    unrelated business opened its settings and found Pre-Need, At-Need and
+    Imminent waiting for it. An empty or unrecognised industry now resolves
+    through the industry-template registry, whose fallback is a neutral
+    service-business set.
+
+    Imported inside the function because `industry_templates` is a higher-level
+    module that may itself want tier data; this keeps the dependency one-way at
+    import time.
+    """
+    from app.services import industry_templates
+
+    key = (industry or "").lower().strip().replace("-", "_").replace(" ", "_")
     if key in ("funeral", "cemetery", "funeral_cemetery"):
         return RESTLAND_DEFAULT_TIERS
-    return INDUSTRY_TIER_SETS.get(key, SALES_DEFAULT_TIERS)
+    if key in INDUSTRY_TIER_SETS:
+        return INDUSTRY_TIER_SETS[key]
+
+    resolved = industry_templates.tier_definition_key(industry)
+    if resolved in ("funeral", "cemetery", "funeral_cemetery"):
+        return RESTLAND_DEFAULT_TIERS
+    return INDUSTRY_TIER_SETS.get(resolved, SALES_DEFAULT_TIERS)
 
 
 def clear_and_reseed_tier_definitions(db: Session, organization_id: str, industry: str) -> list[TierDefinition]:
@@ -446,13 +507,19 @@ RESTLAND_DEFAULT_TIERS = [
 ]
 
 
-def seed_default_tier_definitions(db: Session, organization_id: str, industry: str = "funeral") -> list[TierDefinition]:
+def seed_default_tier_definitions(db: Session, organization_id: str, industry: str = None) -> list[TierDefinition]:
     """
-    Creates Restland's default 8 tier definitions for one organization.
+    Creates the industry-appropriate default tier definitions for one org.
+
     Idempotent - if this org already has any tier_definitions rows at
     all, does nothing and returns the empty list, so calling this
     defensively on every org-creation path is always safe and never
     creates duplicates.
+
+    THE DEFAULT INDUSTRY IS NO LONGER "funeral". It was, and callers that
+    omitted it — which is most of them — silently gave every new customer a
+    funeral home's vocabulary. Omitting it now resolves through the industry
+    template registry to a neutral service-business set.
     """
     existing_count = db.query(TierDefinition).filter(TierDefinition.organization_id == organization_id).count()
     if existing_count > 0:

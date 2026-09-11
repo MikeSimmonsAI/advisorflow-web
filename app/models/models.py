@@ -300,7 +300,11 @@ class Organization(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     # White label / branding
-    brand_name = Column(String, nullable=True)            # overrides "BookaBoost" in UI
+    # The CUSTOMER'S own display name. It does NOT replace the white-label
+    # brand above it — that identity is resolved from `platform_id`. The
+    # comment here used to name one brand as the thing this overrides, which
+    # is how one brand's name ended up on another brand's settings page.
+    brand_name = Column(String, nullable=True)            # customer display name
     brand_logo_url = Column(String, nullable=True)        # URL to org logo
     brand_color_primary = Column(String, nullable=True)   # hex e.g. "#2fb6ff"
     brand_color_accent = Column(String, nullable=True)    # hex e.g. "#1ef0a8"
@@ -308,7 +312,17 @@ class Organization(Base):
     tagline = Column(String, nullable=True)               # short tagline shown in UI
     support_email = Column(String, nullable=True)         # support contact shown in app
     email_sender_name = Column(String, nullable=True)     # "From" name on outbound emails
-    industry = Column(String, default="funeral")          # funeral, roofing, insurance, etc.
+    # THE DEFAULT WAS "funeral", AND THAT IS WHERE THE LEAK STARTED.
+    #
+    # Every code path that created an Organization without naming a business
+    # type produced a row claiming to be a funeral home, and the three places
+    # that read this column then handed that customer another vertical's lead
+    # tiers, appointment types and AI vocabulary. The default is now the
+    # neutral key from app/services/industry_templates.py; a funeral home says
+    # so explicitly, like every other industry does.
+    #
+    # Existing rows are untouched: a column default applies to inserts only.
+    industry = Column(String, default="generic")          # see industry_templates
 
     # Org contact details — shown on public booking pages instead of hardcoded values
     org_address = Column(String, nullable=True)
