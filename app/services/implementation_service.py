@@ -505,6 +505,11 @@ def _sales_projection_row(impl, org, owner, c, opp, sold_by, pkg) -> Dict[str, A
     return {
         "implementation_id": impl.id,
         "opportunity_id": impl.opportunity_id,
+        # The id, not only the name: a rep selling an add-on to an existing
+        # customer needs something to address them by, and the alternative is
+        # a screen that matches on a display name. Reading it grants nothing —
+        # /sales/catalog re-checks that this seller sells for this brand.
+        "customer_organization_id": org.id if org else None,
         "customer_organization_name": org.name if org else None,
         "company_name": opp.company_name if opp else None,
         "sold_by_user_id": impl.sold_by_user_id,

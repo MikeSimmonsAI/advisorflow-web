@@ -122,6 +122,11 @@ from app.routers.customers_router import router as customers_router
 from app.routers.launch_router import router as launch_router
 # Deal → billing: the join between what was sold and what gets charged.
 from app.routers.deal_billing_router import router as deal_billing_router
+# Seller-assisted catalogue sales. Sits on the SALES surface for the same
+# reason deal billing does: a rep selling an add-on should not need God Mode.
+# It runs the same catalog_purchase engine the customer's own Billing page
+# uses, so a seller cannot produce an outcome the customer could not.
+from app.routers.sales_catalog_router import router as sales_catalog_router
 from app.routers.launch_router import god_router as launch_god_router
 # Per-brand launch programme. Addressed by BRAND, not by customer, which is
 # why it is its own router rather than another path under /god/launch.
@@ -630,6 +635,7 @@ app.include_router(launch_router)             # /launch  — customer, session-s
 # link for the terms they negotiated. Guarded by require_sales_member plus a
 # per-record opportunity check inside the router.
 app.include_router(deal_billing_router)       # /sales/opportunities/{id}/billing
+app.include_router(sales_catalog_router)      # /sales/catalog — seller-assisted add-ons and services
 app.include_router(launch_god_router)         # /god/launch — staff, god_admin only
 app.include_router(launch_template_router)    # /god/launch-templates/{brand}
 app.include_router(email_tracking_router)

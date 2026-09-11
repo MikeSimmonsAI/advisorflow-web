@@ -103,6 +103,91 @@ def help_one(key: str, _: User = Depends(get_current_user)):
     return topic
 
 
+@router.get("/{platform_id}/context")
+def presentation_context(platform_id: str,
+                         opportunity: Optional[str] = Query(None),
+                         db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """Who am I presenting to, and where does EXIT DEMO take me?
+
+    ===================================================================
+    THERE IS NO RETURN URL PARAMETER, ON PURPOSE
+    ===================================================================
+
+    The obvious way to build "come back where you started" is a `?return=`
+    query string. That is an open redirect with a helpful name: whatever the
+    link contains is where the person lands, and a link is the easiest thing
+    in the world to send somebody.
+
+    So the browser sends a KIND and an ID, never a destination, and this
+    endpoint composes the destination itself from a fixed set of in-app paths.
+    There is no input that reaches `return_href`.
+
+    The opportunity id IS accepted — and is authorised here before a single
+    fact about it is returned. `_load` applies the same record-level rule the
+    rest of the sales workspace applies, so another rep's deal or another
+    brand's deal resolves to nothing. A caller who supplies one they may not
+    see does not get an error that confirms it exists; they get the library,
+    which is where somebody with no valid origin belongs anyway.
+
+    A deal on a DIFFERENT brand from the one being presented is also refused:
+    presenting EvoSys Pro's environment while the header names a BookaBoost
+    prospect would be a cross-brand claim on screen, and the screen is the
+    thing a customer is looking at.
+    """
+    demo_access.assert_may_present(db, user, platform_id)
+
+    fallback = {
+        "opportunity_id": None,
+        "company_name": None,
+        "contact_name": None,
+        "owner_name": None,
+        "return_href": "/demo-suite",
+        "return_label": "Demo Suite",
+        "origin": "library",
+    }
+    if not opportunity:
+        return fallback
+
+    # Imported here rather than at module scope: the sales router imports the
+    # demo services for its own nav flag, and a module-level import both ways
+    # is a cycle.
+    from app.models.sales_models import BrandSalesOrg, Opportunity
+    from app.services.sales_access import assert_can_view_opportunity
+
+    opp = (db.query(Opportunity)
+           .filter(Opportunity.id == opportunity).first())
+    if opp is None:
+        return fallback
+    try:
+        assert_can_view_opportunity(user, opp, db)
+    except Exception:
+        # Not theirs to see. Fall back silently — a refusal here would tell a
+        # caller that the id they guessed is real.
+        return fallback
+
+    bso = (db.query(BrandSalesOrg)
+           .filter(BrandSalesOrg.id == opp.brand_sales_org_id).first())
+    if bso is None or bso.platform_id != platform_id:
+        return fallback
+
+    owner = None
+    if opp.owner_user_id:
+        u = db.query(User).filter(User.id == opp.owner_user_id).first()
+        owner = u.full_name if u else None
+
+    return {
+        "opportunity_id": opp.id,
+        "company_name": opp.company_name,
+        "contact_name": opp.contact_name,
+        "owner_name": owner,
+        # Composed here, from an id this request has already authorised.
+        "return_href": "/sales/opportunities/%s" % opp.id,
+        "return_label": opp.company_name or "the opportunity",
+        "origin": "opportunity",
+    }
+
+
 @router.get("/{platform_id}/world")
 def world(platform_id: str, lead: Optional[str] = Query(None),
           db: Session = Depends(get_db),

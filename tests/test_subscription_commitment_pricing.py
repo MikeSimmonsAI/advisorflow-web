@@ -314,8 +314,16 @@ class TestTheNextBillDateSurvivesTheApiVersion:
             "an active subscription must never show a blank next-bill date "
             "merely because Stripe moved the field onto the item")
 
-    def test_the_furthest_out_item_period_wins(self, monkeypatch):
-        """A multi-item subscription is next FULLY due at its latest period."""
+    def test_the_plan_items_period_wins_over_an_addons(self, monkeypatch):
+        """THE PLAN ITEM DECIDES THE RENEWAL DATE.
+
+        This used to take the furthest-out period across every item, which was
+        a reasonable reading of "next fully due" while every subscription had
+        exactly one item. Add-ons made it wrong: an add-on attached mid-period
+        can carry its own dates, and taking the maximum would push the
+        customer's renewal date out by whatever the newest add-on happened to
+        say — a date somebody plans cash against, moved by a $25 line item.
+        """
         from app.services.billing_webhook import _ts
 
         org, plan = _Org(), _starter()
@@ -323,6 +331,27 @@ class TestTheNextBillDateSurvivesTheApiVersion:
         sub["items"]["data"].append(
             {"price": {"id": "price_addon", "recurring": {"interval": "month"}},
              "current_period_end": self.WHEN + 86400})
+
+        _apply(monkeypatch, org, sub, plan)
+
+        assert org.billing_current_period_end == _ts(self.WHEN)
+
+    def test_an_unidentifiable_plan_still_falls_back_to_the_latest(
+            self, monkeypatch):
+        """A Custom deal bills against an inline price that is in no
+        catalogue, so no item resolves. The old rule is still the best
+        available answer there."""
+        from app.services.billing_webhook import _ts
+
+        org, plan = _Org(), _starter()
+        sub = {"id": "sub_test", "status": "active", "metadata": {},
+               "items": {"data": [
+                   {"price": {"id": "price_inline_a",
+                              "recurring": {"interval": "month"}},
+                    "current_period_end": self.WHEN},
+                   {"price": {"id": "price_inline_b",
+                              "recurring": {"interval": "month"}},
+                    "current_period_end": self.WHEN + 86400}]}}
 
         _apply(monkeypatch, org, sub, plan)
 
@@ -335,3 +364,72 @@ class TestTheNextBillDateSurvivesTheApiVersion:
         _apply(monkeypatch, org, _sub("price_m2m"), plan)
 
         assert org.billing_current_period_end is None
+
+
+class TestTheAddOnItemIsNotMistakenForThePlan:
+    """A recurring add-on is an ITEM on the same subscription — that is the
+    design, and the alternative was a second subscription. So a subscription
+    has several items now, and STRIPE DOES NOT PROMISE AN ORDER.
+
+    Reading `items[0]` meant: the interval taken from whatever happened to be
+    first, the price resolving to no plan, and the commitment left unresolved.
+    That last one matters most — a scheduled downgrade landing without `plan`
+    metadata is exactly the case price-first resolution exists for, and it
+    would have silently failed to sync.
+    """
+
+    def _with_addon_first(self, plan_price):
+        return {
+            "id": "sub_test", "status": "active", "metadata": {},
+            "items": {"data": [
+                {"price": {"id": "price_addon_users",
+                           "recurring": {"interval": "month"}}},
+                {"price": {"id": plan_price,
+                           "recurring": {"interval": "month"}}},
+            ]},
+        }
+
+    def test_the_plan_resolves_when_the_addon_is_listed_first(self, monkeypatch):
+        org, plan = _Org(), _starter()
+        _apply(monkeypatch, org, self._with_addon_first("price_m2m"), plan)
+
+        assert org.billing_plan_key == "starter"
+
+    def test_the_commitment_resolves_when_the_addon_is_listed_first(
+            self, monkeypatch):
+        """The one that costs money: month-to-month read as a term agreement
+        understates MRR by the size of a discount nobody earned."""
+        org, plan = _Org(), _starter()
+        _apply(monkeypatch, org, self._with_addon_first("price_m2m"), plan)
+
+        assert org.billing_commitment == BillingCommitment.MONTH_TO_MONTH
+
+    def test_the_interval_comes_from_the_plan_not_the_addon(self, monkeypatch):
+        """An annual customer with a monthly add-on is still annual."""
+        org, plan = _Org(), _starter()
+        sub = {
+            "id": "sub_test", "status": "active", "metadata": {},
+            "items": {"data": [
+                {"price": {"id": "price_addon_users",
+                           "recurring": {"interval": "month"}}},
+                {"price": {"id": "price_term",
+                           "recurring": {"interval": "year"}}},
+            ]},
+        }
+        _apply(monkeypatch, org, sub, plan)
+
+        assert org.stripe_plan_interval == "year"
+
+    def test_an_unmapped_price_alone_still_falls_back_to_metadata(
+            self, monkeypatch):
+        """No item resolves, so the old behaviour stands: metadata decides,
+        validated against this brand's catalogue."""
+        org, plan = _Org(), _starter()
+        sub = {"id": "sub_test", "status": "active",
+               "metadata": {"plan": "starter"},
+               "items": {"data": [
+                   {"price": {"id": "price_inline_custom",
+                              "recurring": {"interval": "month"}}}]}}
+
+        _apply(monkeypatch, org, sub, plan)
+        assert org.billing_plan_key == "starter"

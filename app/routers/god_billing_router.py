@@ -268,6 +268,45 @@ def _monthly_equivalent_cents(plan: BrandBillingPlan,
     return cents
 
 
+def _addons_monthly_cents(db: Session, org) -> int:
+    """One month of this customer's LIVE recurring add-ons.
+
+    Every revenue figure on this screen used to describe the plan and only the
+    plan. That was complete while the plan was the only recurring thing a
+    customer could be charged for; a customer paying $1,000 for Growth plus
+    $250 of add-ons now reads as $1,000, and the missing quarter is invisible
+    on exactly the screen finance totals from.
+
+    KEPT APART FROM THE PLAN FIGURE by every caller. "What tier are they on"
+    and "what do they pay us" are different questions, and one blended number
+    answers the second by destroying the first — a Growth customer would show
+    an MRR no Growth price explains.
+
+    MONTHLY ADD-ONS ONLY. A yearly add-on's monthly equivalent is a conversion
+    nobody has specified and the platform sells none today; counting one at
+    face value would overstate MRR twelvefold, so it is excluded and said so
+    rather than guessed at.
+
+    Never raises. A revenue tile is not worth a 500 on the whole screen.
+    """
+    total = 0
+    try:
+        from app.models.catalog_models import CatalogItemKind as _Kind
+        from app.models.purchase_models import CatalogPurchase as _Purchase
+        from app.models.purchase_models import PurchaseStatus as _PStatus
+        for p in (db.query(_Purchase)
+                  .filter(_Purchase.organization_id == org.id,
+                          _Purchase.kind == _Kind.RECURRING_ADDON,
+                          _Purchase.status == _PStatus.ACTIVE).all()):
+            if (p.billing_interval or BillingInterval.MONTH) != BillingInterval.MONTH:
+                continue
+            total += int(p.amount_cents or 0) * int(p.quantity or 1)
+    except Exception:                                    # pragma: no cover
+        log.debug("god_billing: could not total add-ons for %s",
+                  getattr(org, "id", None))
+    return total
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # WHICH BRANDS ARE ACTUALLY CONFIGURED
 # ═══════════════════════════════════════════════════════════════════════════
@@ -988,6 +1027,7 @@ def revenue(platform_id: Optional[str] = Query(None),
     # forecast becomes a fiction.
     plan_cache: Dict[Any, Any] = {}
     mrr_cents = 0
+    addons_cents = 0
     priced = 0
     unpriced: List[Dict[str, Any]] = []
     currencies = set()
@@ -1025,6 +1065,17 @@ def revenue(platform_id: Optional[str] = Query(None),
         priced += 1
         currencies.add((plan.currency or "usd").lower())
 
+        # AND THEIR RECURRING ADD-ONS. Real money, billed every month on the
+        # same subscription, and until now absent from the platform's own MRR
+        # figure — a tile that understates revenue is a different kind of wrong
+        # from one that overstates it, but it is still wrong.
+        #
+        # Counted only for a customer whose PLAN priced, matching the roster
+        # rule: add-ons belonging to an unexplainable plan would make the total
+        # silently cover a customer the `unpriced_organizations` list still
+        # names as missing.
+        addons_cents += _addons_monthly_cents(db, o)
+
     if not with_subscription:
         # Nothing has a subscription at all. That is "no source", not "$0 of
         # revenue" — the two look identical on a tile and mean opposite things.
@@ -1040,7 +1091,12 @@ def revenue(platform_id: Optional[str] = Query(None),
             unpriced_organizations=unpriced)
     else:
         mrr = {
-            "value_cents": mrr_cents,
+            "value_cents": mrr_cents + addons_cents,
+            # Apart as well as together: a tier total and a revenue total
+            # answer different questions, and one blended figure answers the
+            # second by destroying the first.
+            "plan_value_cents": mrr_cents,
+            "addons_value_cents": addons_cents,
             "no_source": None,
             "currency": (sorted(currencies)[0] if len(currencies) == 1
                          else ("mixed" if currencies else "usd")),
@@ -1052,7 +1108,10 @@ def revenue(platform_id: Optional[str] = Query(None),
             "unpriced_organizations": unpriced,
             "basis": ("Sum of each ACTIVE organization's current plan reduced "
                       "to one month; annual prices are divided by twelve. "
-                      "Trialing organizations are excluded."),
+                      "Trialing organizations are excluded. Monthly recurring "
+                      "add-ons on those customers are included and reported "
+                      "separately; add-ons on any other interval are excluded "
+                      "because no conversion has been decided for them."),
         }
 
     # ── Collected in the last 30 days ─────────────────────────────────────
@@ -1156,6 +1215,10 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
     # nothing" are opposite facts that must not render identically.
     mrr_cents = _monthly_equivalent_cents(plan, interval, commitment) if plan else None
 
+    # AND THE ADD-ONS, WHICH ARE ALSO RECURRING REVENUE. Reported separately
+    # from `mrr_cents` — see `_addons_monthly_cents`.
+    addons_mrr_cents = _addons_monthly_cents(db, o)
+
     last_payment = (db.query(BillingPayment)
                     .filter(BillingPayment.organization_id == o.id)
                     .order_by(BillingPayment.collected_at.desc().nullslast())
@@ -1239,6 +1302,12 @@ def _customer_row(db: Session, o: Organization, plan_cache: dict) -> Dict[str, A
         "commitment_label": (billing_catalog.commitment_label(commitment)
                              if commitment else None),
         "mrr_cents": mrr_cents,
+        # Recurring add-ons, kept apart from the plan figure. `total_mrr_cents`
+        # is None whenever the plan could not be priced: "$250 of add-ons on a
+        # plan we cannot explain" must not render as a $250 customer.
+        "addons_mrr_cents": addons_mrr_cents,
+        "total_mrr_cents": (None if mrr_cents is None
+                            else mrr_cents + addons_mrr_cents),
         "mrr_unavailable_reason": (
             None if mrr_cents is not None else
             ("no such plan in this brand's catalogue" if plan is None
@@ -1342,6 +1411,12 @@ def billing_customers(platform_id: Optional[str] = Query(None),
     counts = {f: sum(1 for r in rows if _matches_filter(r, f)) for f in FILTERS}
 
     priced = [r["mrr_cents"] for r in matched if r["mrr_cents"] is not None]
+    # ADD-ONS COUNT TOWARDS THE VISIBLE TOTAL, and only for rows whose plan
+    # could be priced — the same rule the per-row total follows. Adding an
+    # add-on belonging to an unpriceable plan would quietly make the total
+    # cover customers the "unpriced" count still says are missing.
+    addons = sum(r.get("addons_mrr_cents") or 0 for r in matched
+                 if r["mrr_cents"] is not None)
     return {
         "customers": matched,
         "counts": counts,
@@ -1351,14 +1426,20 @@ def billing_customers(platform_id: Optional[str] = Query(None),
         "scope": {"platform_id": platform_id, "all_brands": platform_id is None},
         # The MRR of what is on screen, and how much of it could be priced.
         # Reported together so a total is never read as complete when it is not.
-        "visible_mrr_cents": sum(priced) if priced else None,
+        # Plans and add-ons are also reported apart, because "what tier are
+        # they on" and "what do they pay us" are different questions.
+        "visible_mrr_cents": (sum(priced) + addons) if priced else None,
+        "visible_plan_mrr_cents": sum(priced) if priced else None,
+        "visible_addons_mrr_cents": addons,
         "visible_priced": len(priced),
         "visible_unpriced": len(matched) - len(priced),
         "explanation": (
             "Every figure is read from the local mirror the Stripe webhook "
             "maintains; nothing here calls Stripe. A null mrr_cents carries a "
             "reason and means the plan could not be priced - it never means "
-            "the customer pays nothing."
+            "the customer pays nothing. Recurring add-ons are included in the "
+            "visible total and reported separately; monthly add-ons only, "
+            "because no conversion has been decided for any other interval."
         ),
     }
 

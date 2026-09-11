@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { detectTheme, BRAND_CONFIG } from '../theme.js';
+// Add-ons and one-time services. Its own component because it is its own
+// commercial object: what the customer holds BESIDES their plan, kept visually
+// and numerically separate from it for the same reason the engine keeps them
+// separate — a blended total is how somebody loses track of what they pay for.
+import CatalogSection from './CatalogSection';
 
 // THE SUPPORT ADDRESS BELONGS TO WHICHEVER BRAND THE CUSTOMER IS ON.
 //
@@ -267,7 +272,10 @@ export default function Billing() {
         + 'This was a one-time charge; it does not start a subscription.'
       : part === 'subscription'
         ? '✅ Subscription started! Your plan is now live.'
-        : '✅ Payment received. Thank you.';
+        : part === 'purchase'
+          ? '✅ Payment received. Thank you — your purchase is confirmed below. '
+            + 'This was a one-time charge; it does not change your subscription.'
+          : '✅ Payment received. Thank you.';
 
   const load = useCallback(async () => {
     // Both reads, both allowed to fail independently. A subscription that will
@@ -713,6 +721,14 @@ export default function Billing() {
           )}
         </div>
       )}
+
+      {/* ── Add-ons and services ─────────────────────────────────────────
+          ABOVE the payment method and invoices, below the plan. That ordering
+          follows what the customer is being told: this is what you have and
+          what you could add, and those below are how you pay for it and what
+          you were charged. It renders nothing at all when the brand sells no
+          catalogue items, so a brand that only sells tiers sees no change. */}
+      <CatalogSection />
 
       {/* ── Payment method ───────────────────────────────────────────────── */}
       {(pm?.on_file || pm?.manageable) && (

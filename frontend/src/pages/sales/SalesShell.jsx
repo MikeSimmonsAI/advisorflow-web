@@ -44,6 +44,13 @@ const NAV = [
   // sees the demos on their deals and a manager sees the brand's — the same
   // list, narrowed by the same rule, rather than two screens.
   { to: '/sales/demos',        label: 'Demos to Build',   icon: '▣' },
+  // THE DEMO SUITE, REACHABLE AT LAST. It has existed and worked for as long
+  // as somebody knew to type /demo-suite into the address bar, which is not a
+  // way to ship a sales tool. `present_demo` is the server's own answer from
+  // the `demo_suite` capability grant — the same row the Suite's routes check
+  // — so this item and the door behind it cannot disagree.
+  { to: '/demo-suite',         label: 'Demo Suite',       icon: '▶',
+    permission: 'present_demo' },
   { to: '/sales/onboarding',   label: 'Sold / Onboarding', icon: '✓' },
   // A rep's OWN compensation, scoped by their token server-side. It belongs in
   // My Work rather than under the manager group: what you have earned is your
@@ -168,7 +175,10 @@ export default function SalesShell({ title, subtitle, actions, children }) {
   const managerNav = MANAGER_NAV.filter(i => ctx?.permissions?.[i.permission])
   // Team Availability moves into MY TEAM for a manager, so it is never drawn
   // twice.
-  const myWork = isManager ? NAV : [...NAV.slice(0, 3), ...REP_ONLY_NAV, ...NAV.slice(3)]
+  // MY WORK honours `permission` too, now that one of its items has one. An
+  // item WITHOUT a permission stays unconditional, exactly as before.
+  const myWork = (isManager ? NAV : [...NAV.slice(0, 3), ...REP_ONLY_NAV, ...NAV.slice(3)])
+    .filter(i => !i.permission || ctx?.permissions?.[i.permission])
 
   return (
     <div className="sw-scope">
