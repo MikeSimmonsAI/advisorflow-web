@@ -160,7 +160,7 @@ export default function GodUsers() {
               buried inside one brand's detail page, and a form nobody can find
               is why duplicate accounts get made. */}
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+            <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
               Users &amp; Identity
             </h1>
             <button className="gm-btn gm-primary"
@@ -168,7 +168,7 @@ export default function GodUsers() {
               + ADD PERSON
             </button>
           </div>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760 }}>
             One row per human. A person who holds platform authority, a
             brand-sales seat and a customer membership is one identity here with
             three contexts — never three accounts.
@@ -177,14 +177,14 @@ export default function GodUsers() {
 
         {err && (
           <div className="gm-card" style={{ padding: '12px 14px', marginBottom: 16,
-                                            borderColor: 'rgba(255,93,125,.35)', color: '#ff8299', fontSize: 11 }}>
+                                            borderColor: 'var(--gm-pill-red-bd)', color: 'var(--gm-red)', fontSize: 11 }}>
             {err}
           </div>
         )}
 
         {notice && (
           <div className="gm-card" style={{ padding: '12px 14px', marginBottom: 16,
-                                            borderColor: 'rgba(35,239,178,.3)', color: '#8fb6cf', fontSize: 11 }}>
+                                            borderColor: 'var(--gm-pill-teal-bd)', color: 'var(--gm-blue)', fontSize: 11 }}>
             {notice}
           </div>
         )}
@@ -194,8 +194,8 @@ export default function GodUsers() {
         {!loading && data && (
           <div className="gm-card" style={{
             padding: '12px 14px', marginBottom: 16, fontSize: 11,
-            borderColor: owners.length === 1 ? 'rgba(35,239,178,.25)' : 'rgba(255,93,125,.35)',
-            color: owners.length === 1 ? '#8fb6cf' : '#ff8299',
+            borderColor: owners.length === 1 ? 'var(--gm-pill-teal-bd)' : 'var(--gm-pill-red-bd)',
+            color: owners.length === 1 ? 'var(--gm-blue)' : 'var(--gm-red)',
           }}>
             {owners.length === 1
               ? <>Platform authority: <strong style={{ color: T.gold }}>{owners[0].full_name || owners[0].email}</strong> is

@@ -45,11 +45,11 @@ function when(value) {
 
 function Pill({ tone = 'muted', children }) {
   const colors = {
-    ok: ['#19d67c', 'rgba(25,214,124,.13)'],
-    warn: ['#f5a524', 'rgba(245,165,36,.13)'],
-    bad: ['#ff5c68', 'rgba(255,92,104,.13)'],
-    info: ['#3aa0ff', 'rgba(58,160,255,.13)'],
-    muted: ['#8fa3b8', 'rgba(143,163,184,.12)'],
+    ok: ['var(--gm-teal)', 'var(--gm-teal-wash)'],
+    warn: ['var(--gm-amber)', 'var(--gm-amber-wash)'],
+    bad: ['var(--gm-red)', 'var(--gm-red-wash)'],
+    info: ['var(--gm-blue)', 'var(--gm-blue-wash)'],
+    muted: ['var(--gm-blue)', 'var(--gm-blue-wash)'],
   }
   const [fg, bg] = colors[tone] || colors.muted
   return (
@@ -69,18 +69,18 @@ function Metric({ label, value, tone, onClick, hint }) {
       title={hint}
       className="gm-card"
       style={{
-        textAlign: 'left', padding: '13px 15px', border: '1px solid #1b2838',
-        background: '#0b1220', borderRadius: 10, cursor: onClick ? 'pointer' : 'default',
-        color: '#fff', minWidth: 130,
+        textAlign: 'left', padding: '13px 15px', border: '1px solid var(--gm-pill-blue-bd)',
+        background: 'var(--gm-pill-blue-bg)', borderRadius: 10, cursor: onClick ? 'pointer' : 'default',
+        color: 'var(--gm-head)', minWidth: 130,
       }}
     >
       <div style={{
         fontSize: 10.5, letterSpacing: '.09em', textTransform: 'uppercase',
-        color: '#758ba4', fontWeight: 700,
+        color: 'var(--gm-blue)', fontWeight: 700,
       }}>{label}</div>
       <div style={{
         fontSize: 25, fontWeight: 700, marginTop: 4, lineHeight: 1,
-        color: tone === 'bad' ? '#ff5c68' : tone === 'warn' ? '#f5a524' : '#fff',
+        color: tone === 'bad' ? 'var(--gm-red)' : tone === 'warn' ? 'var(--gm-amber)' : 'var(--gm-head)',
       }}>{value === null || value === undefined ? '—' : value}</div>
     </button>
   )
@@ -89,17 +89,17 @@ function Metric({ label, value, tone, onClick, hint }) {
 function Section({ title, subtitle, right, children }) {
   return (
     <div className="gm-card" style={{
-      border: '1px solid #1b2838', background: '#0b1220', borderRadius: 12,
+      border: '1px solid var(--gm-pill-blue-bd)', background: 'var(--gm-pill-blue-bg)', borderRadius: 12,
       marginBottom: 16, overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        gap: 12, padding: '13px 16px', borderBottom: '1px solid #1b2838',
+        gap: 12, padding: '13px 16px', borderBottom: '1px solid var(--gm-pill-blue-bd)',
       }}>
         <div>
-          <div style={{ color: '#fff', fontWeight: 700, fontSize: 13.5 }}>{title}</div>
+          <div style={{ color: 'var(--gm-head)', fontWeight: 700, fontSize: 13.5 }}>{title}</div>
           {subtitle && (
-            <div style={{ color: '#758ba4', fontSize: 12, marginTop: 2 }}>{subtitle}</div>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 2 }}>{subtitle}</div>
           )}
         </div>
         {right}
@@ -111,7 +111,7 @@ function Section({ title, subtitle, right, children }) {
 
 function Empty({ children }) {
   return (
-    <div style={{ padding: '26px 16px', color: '#758ba4', fontSize: 12.5 }}>
+    <div style={{ padding: '26px 16px', color: 'var(--gm-blue)', fontSize: 12.5 }}>
       {children}
     </div>
   )
@@ -144,14 +144,14 @@ export default function GodSupport() {
           <button className="gm-btn" style={{ marginBottom: 12 }}
                   onClick={() => navigate('/god')}>← COMMAND CENTER</button>
           <h1 style={{
-            margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em',
+            margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em',
             lineHeight: 1,
           }}>Support</h1>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 820 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 820 }}>
             Every brand&apos;s support queue, the platform&apos;s own diagnosis of
             what is wrong, what it repaired by itself, and what it wants you to
             decide. {overview && (
-              <strong style={{ color: '#9fb4c9' }}>
+              <strong style={{ color: 'var(--gm-blue)' }}>
                 Scope: {overview.scope.label}.
               </strong>
             )}
@@ -221,8 +221,8 @@ export default function GodSupport() {
                   className="gm-btn"
                   onClick={() => setTab(t.key)}
                   style={{
-                    borderColor: tab === t.key ? '#3aa0ff' : undefined,
-                    color: tab === t.key ? '#fff' : undefined,
+                    borderColor: tab === t.key ? 'var(--gm-blue)' : undefined,
+                    color: tab === t.key ? 'var(--gm-head)' : undefined,
                   }}
                 >{t.label}</button>
               ))}
@@ -351,7 +351,7 @@ function TicketDetail({ ticketId, onBack }) {
       >
         <div style={{
           display: 'flex', gap: 18, flexWrap: 'wrap', padding: '13px 16px',
-          borderBottom: '1px solid #1b2838',
+          borderBottom: '1px solid var(--gm-pill-blue-bd)',
         }}>
           <Fact label="Status" value={ticket.status_label} />
           <Fact label="Severity" value={ticket.severity_label} />
@@ -360,19 +360,19 @@ function TicketDetail({ ticketId, onBack }) {
           <Fact label="First response due" value={when(ticket.first_response_due_at)} />
           <Fact label="First response" value={when(ticket.first_response_at)} />
           <div>
-            <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+            <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                           letterSpacing: '.08em', textTransform: 'uppercase' }}>SLA</div>
             <Pill tone={SLA_TONE[ticket.sla.state]}>{ticket.sla.label}</Pill>
           </div>
         </div>
 
         {(ticket.ai_summary || ticket.ai_suspected_cause) && (
-          <div style={{ padding: '13px 16px', borderBottom: '1px solid #1b2838' }}>
-            <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+          <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--gm-pill-blue-bd)' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                           letterSpacing: '.08em', textTransform: 'uppercase' }}>
               Platform diagnosis
             </div>
-            <div style={{ color: '#cfe0f0', fontSize: 13, marginTop: 5 }}>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 13, marginTop: 5 }}>
               {ticket.ai_summary || 'No fault was detected in the checks that ran.'}
             </div>
             <div style={{ marginTop: 7, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -395,27 +395,27 @@ function TicketDetail({ ticketId, onBack }) {
         <div style={{ padding: '13px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {ticket.messages.map((m) => (
             <div key={m.id} style={{
-              border: '1px solid #1b2838', borderRadius: 9, padding: '9px 11px',
-              background: m.author_kind === 'customer' ? '#0e1726' : '#0a1018',
+              border: '1px solid var(--gm-pill-blue-bd)', borderRadius: 9, padding: '9px 11px',
+              background: m.author_kind === 'customer' ? 'var(--gm-pill-blue-bg)' : 'var(--gm-pill-blue-bg)',
             }}>
-              <div style={{ color: '#758ba4', fontSize: 11, marginBottom: 4 }}>
+              <div style={{ color: 'var(--gm-blue)', fontSize: 11, marginBottom: 4 }}>
                 {m.author} · {when(m.created_at)}
                 {m.is_first_response && ' · first response'}
               </div>
-              <div style={{ color: '#cfe0f0', fontSize: 13, whiteSpace: 'pre-wrap' }}>
+              <div style={{ color: 'var(--gm-blue)', fontSize: 13, whiteSpace: 'pre-wrap' }}>
                 {m.body}
               </div>
             </div>
           ))}
           {ticket.internal_notes.map((m) => (
             <div key={m.id} style={{
-              border: '1px dashed #3a2a12', borderRadius: 9, padding: '9px 11px',
-              background: '#16100a',
+              border: '1px dashed var(--gm-pill-amber-bd)', borderRadius: 9, padding: '9px 11px',
+              background: 'var(--gm-pill-amber-bg)',
             }}>
-              <div style={{ color: '#c79a4a', fontSize: 11, marginBottom: 4 }}>
+              <div style={{ color: 'var(--gm-amber)', fontSize: 11, marginBottom: 4 }}>
                 INTERNAL · {m.author} · {when(m.created_at)}
               </div>
-              <div style={{ color: '#e2cfae', fontSize: 13, whiteSpace: 'pre-wrap' }}>
+              <div style={{ color: 'var(--gm-amber)', fontSize: 13, whiteSpace: 'pre-wrap' }}>
                 {m.body}
               </div>
             </div>
@@ -434,7 +434,7 @@ function TicketDetail({ ticketId, onBack }) {
           />
           <div style={{ display: 'flex', gap: 8, alignItems: 'center',
                         marginTop: 8, flexWrap: 'wrap' }}>
-            <label style={{ color: '#9fb4c9', fontSize: 12, display: 'flex',
+            <label style={{ color: 'var(--gm-blue)', fontSize: 12, display: 'flex',
                             gap: 6, alignItems: 'center' }}>
               <input type="checkbox" checked={internal}
                      onChange={(e) => setInternal(e.target.checked)} />
@@ -488,7 +488,7 @@ function TicketDetail({ ticketId, onBack }) {
                     )}>RE-RUN DIAGNOSTICS</button>
           </div>
           {message && (
-            <div style={{ color: '#9fb4c9', fontSize: 12, marginTop: 8 }}>{message}</div>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 8 }}>{message}</div>
           )}
         </div>
       </Section>
@@ -523,7 +523,7 @@ function TicketDetail({ ticketId, onBack }) {
         <Section title="Evidence"
                  subtitle="The technical view. The customer sees a redacted version of the same run.">
           <pre style={{
-            margin: 0, padding: '13px 16px', color: '#9fb4c9', fontSize: 11.5,
+            margin: 0, padding: '13px 16px', color: 'var(--gm-blue)', fontSize: 11.5,
             whiteSpace: 'pre-wrap', maxHeight: 380, overflow: 'auto',
           }}>{JSON.stringify(ticket.diagnostic, null, 2)}</pre>
         </Section>
@@ -535,9 +535,9 @@ function TicketDetail({ ticketId, onBack }) {
 function Fact({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+      <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                     letterSpacing: '.08em', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ color: '#cfe0f0', fontSize: 13, marginTop: 3 }}>{value}</div>
+      <div style={{ color: 'var(--gm-blue)', fontSize: 13, marginTop: 3 }}>{value}</div>
     </div>
   )
 }
@@ -592,9 +592,9 @@ function IncidentsTab({ onChanged }) {
         <Empty>No open incidents. Nothing is affecting more than one customer.</Empty>
       )}
       {!error && rows && rows.map((i) => (
-        <div key={i.id} style={{ borderTop: '1px solid #1b2838', padding: '13px 16px' }}>
+        <div key={i.id} style={{ borderTop: '1px solid var(--gm-pill-blue-bd)', padding: '13px 16px' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontFamily: 'monospace', color: '#fff' }}>{i.incident_number}</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gm-head)' }}>{i.incident_number}</span>
             <Pill tone={i.status === 'suspected' ? 'warn' : 'info'}>{i.status}</Pill>
             <Pill tone="bad">{i.organizations_affected} organizations</Pill>
             {i.platforms_affected > 1 && <Pill tone="bad">{i.platforms_affected} brands</Pill>}
@@ -605,10 +605,10 @@ function IncidentsTab({ onChanged }) {
               {open === i.id ? 'HIDE' : 'DETAIL'}
             </button>
           </div>
-          <div style={{ color: '#cfe0f0', fontSize: 13.5, marginTop: 7 }}>{i.title}</div>
+          <div style={{ color: 'var(--gm-blue)', fontSize: 13.5, marginTop: 7 }}>{i.title}</div>
           {i.likely_root_cause && (
-            <div style={{ color: '#9fb4c9', fontSize: 12.5, marginTop: 5 }}>
-              <strong style={{ color: '#cfe0f0' }}>Likely root cause. </strong>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 12.5, marginTop: 5 }}>
+              <strong style={{ color: 'var(--gm-blue)' }}>Likely root cause. </strong>
               {i.likely_root_cause}
             </div>
           )}
@@ -623,7 +623,7 @@ function IncidentsTab({ onChanged }) {
               <Detail label="Evidence" value={JSON.stringify(i.evidence)} mono />
 
               <div>
-                <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+                <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                               letterSpacing: '.08em', textTransform: 'uppercase' }}>
                   What customers are told
                 </div>
@@ -672,10 +672,10 @@ function Detail({ label, value, mono }) {
   if (!value) return null
   return (
     <div>
-      <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+      <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                     letterSpacing: '.08em', textTransform: 'uppercase' }}>{label}</div>
       <div style={{
-        color: '#9fb4c9', fontSize: 12.5, marginTop: 3,
+        color: 'var(--gm-blue)', fontSize: 12.5, marginTop: 3,
         fontFamily: mono ? 'monospace' : undefined, wordBreak: 'break-word',
       }}>{value}</div>
     </div>
@@ -714,9 +714,9 @@ function RecurringTab() {
         <Empty>Nothing has recurred in this window.</Empty>
       )}
       {!error && data && data.signatures.map((s) => (
-        <div key={s.signature} style={{ borderTop: '1px solid #1b2838', padding: '12px 16px' }}>
+        <div key={s.signature} style={{ borderTop: '1px solid var(--gm-pill-blue-bd)', padding: '12px 16px' }}>
           <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontFamily: 'monospace', color: '#cfe0f0', fontSize: 12 }}>
+            <span style={{ fontFamily: 'monospace', color: 'var(--gm-blue)', fontSize: 12 }}>
               {s.signature}
             </span>
             {s.engineering_candidate && (
@@ -724,8 +724,8 @@ function RecurringTab() {
             )}
             {s.known_remediation_key && <Pill tone="ok">HAS A REPAIR</Pill>}
           </div>
-          <div style={{ color: '#9fb4c9', fontSize: 12.5, marginTop: 5 }}>{s.narrative}</div>
-          <div style={{ color: '#546b82', fontSize: 11.5, marginTop: 4 }}>
+          <div style={{ color: 'var(--gm-blue)', fontSize: 12.5, marginTop: 5 }}>{s.narrative}</div>
+          <div style={{ color: 'var(--gm-blue)', fontSize: 11.5, marginTop: 4 }}>
             First seen {when(s.first_seen_at)} · last seen {when(s.last_seen_at)}
           </div>
         </div>
@@ -809,7 +809,7 @@ function BriefTab() {
               />
             </div>
 
-            <div style={{ padding: '0 16px 14px', color: '#758ba4', fontSize: 12 }}>
+            <div style={{ padding: '0 16px 14px', color: 'var(--gm-blue)', fontSize: 12 }}>
               {brief.brief_date} · generated {when(brief.generated_at)} ·{' '}
               {brief.has_baseline
                 ? `compared against ${brief.trend.compared_to}`
@@ -823,16 +823,16 @@ function BriefTab() {
         <Section title="Recommended actions"
                  subtitle="Concrete next steps, in priority order.">
           {brief.recommended_actions.map((a, i) => (
-            <div key={i} style={{ borderTop: '1px solid #1b2838', padding: '12px 16px' }}>
+            <div key={i} style={{ borderTop: '1px solid var(--gm-pill-blue-bd)', padding: '12px 16px' }}>
               <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
                 <Pill tone={a.priority === 'high' ? 'bad' : 'warn'}>{a.priority}</Pill>
-                <span style={{ color: '#fff', fontSize: 13.5 }}>{a.action}</span>
+                <span style={{ color: 'var(--gm-head)', fontSize: 13.5 }}>{a.action}</span>
               </div>
-              <div style={{ color: '#9fb4c9', fontSize: 12.5, marginTop: 4 }}>
+              <div style={{ color: 'var(--gm-blue)', fontSize: 12.5, marginTop: 4 }}>
                 {a.reference} — {a.why}
               </div>
               {a.recommendation && (
-                <div style={{ color: '#758ba4', fontSize: 12, marginTop: 4 }}>
+                <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 4 }}>
                   {a.recommendation}
                 </div>
               )}
@@ -923,9 +923,9 @@ function FixerTab({ onChanged }) {
             />
           </div>
           {awaiting.map((r) => (
-            <div key={r.id} style={{ borderTop: '1px solid #1b2838', padding: '12px 16px' }}>
+            <div key={r.id} style={{ borderTop: '1px solid var(--gm-pill-blue-bd)', padding: '12px 16px' }}>
               <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontFamily: 'monospace', color: '#fff' }}>{r.action_key}</span>
+                <span style={{ fontFamily: 'monospace', color: 'var(--gm-head)' }}>{r.action_key}</span>
                 <Pill tone={RISK_TONE[r.risk_class]}>{r.risk_label}</Pill>
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
                   <button className="gm-btn" type="button" disabled={busy}
@@ -934,17 +934,17 @@ function FixerTab({ onChanged }) {
                           onClick={() => decide(r.id, false)}>REJECT</button>
                 </span>
               </div>
-              <div style={{ color: '#9fb4c9', fontSize: 12.5, marginTop: 5 }}>
+              <div style={{ color: 'var(--gm-blue)', fontSize: 12.5, marginTop: 5 }}>
                 {r.technical_explanation}
               </div>
               {r.diagnosis && (
-                <div style={{ color: '#758ba4', fontSize: 12, marginTop: 4 }}>
+                <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 4 }}>
                   Diagnosis: {r.diagnosis}
                 </div>
               )}
               {r.before_state && (
                 <pre style={{
-                  margin: '7px 0 0', color: '#546b82', fontSize: 11,
+                  margin: '7px 0 0', color: 'var(--gm-blue)', fontSize: 11,
                   whiteSpace: 'pre-wrap',
                 }}>{JSON.stringify(r.before_state)}</pre>
               )}
@@ -1157,7 +1157,7 @@ function ConfigTab() {
                 ['support_display_name', 'Support team name', 'EvoSys Pro Support'],
               ].map(([key, label, placeholder]) => (
                 <label key={key} style={{ display: 'flex', flexDirection: 'column',
-                                          gap: 5, color: '#9fb4c9', fontSize: 12 }}>
+                                          gap: 5, color: 'var(--gm-blue)', fontSize: 12 }}>
                   {label}
                   <input
                     className="gm-input"
@@ -1176,11 +1176,11 @@ function ConfigTab() {
 
           <Section title={`${config.platform.name} — support hours`}
                    subtitle={config.hours.text}>
-            <div style={{ padding: '13px 16px', color: '#9fb4c9', fontSize: 12.5 }}>
+            <div style={{ padding: '13px 16px', color: 'var(--gm-blue)', fontSize: 12.5 }}>
               Targets are measured in these hours, so a request raised at 16:45
               on a Friday starts its clock when support opens again.
               {config.hours.source === 'default' && (
-                <strong style={{ color: '#f5a524' }}>
+                <strong style={{ color: 'var(--gm-amber)' }}>
                   {' '}This brand has not set its own hours and is running on the
                   platform default.
                 </strong>
@@ -1222,7 +1222,7 @@ function PackageRow({ pkg, onSave, busy, queues }) {
   return (
     <tr>
       <td>{pkg.display_name}<br />
-        <span style={{ fontFamily: 'monospace', color: '#546b82', fontSize: 11 }}>
+        <span style={{ fontFamily: 'monospace', color: 'var(--gm-blue)', fontSize: 11 }}>
           {pkg.plan_key}
         </span>
       </td>

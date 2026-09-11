@@ -94,15 +94,15 @@ export default function GodTools({ onLaunch }) {
           onClick={() => onLaunch && onLaunch(t)}
           title={t.endpoint}
         >
-          <b style={{ display: 'block', fontSize: 13.5, color: '#eaf4ff', marginBottom: 7, fontWeight: 600 }}>
+          <b style={{ display: 'block', fontSize: 13.5, color: 'var(--gm-blue)', marginBottom: 7, fontWeight: 600 }}>
             {t.name}
           </b>
-          <small style={{ display: 'block', fontSize: 9.5, color: '#5e7796', lineHeight: 1.65 }}>
+          <small style={{ display: 'block', fontSize: 9.5, color: 'var(--gm-blue)', lineHeight: 1.65 }}>
             {t.desc}
           </small>
           <span style={{
             display: 'inline-block', marginTop: 13, fontSize: 8.5, letterSpacing: '.05em',
-            fontWeight: 800, color: t.gold ? T.gold : '#7cc0ff',
+            fontWeight: 800, color: t.gold ? T.gold : 'var(--gm-blue)',
           }}>{t.cta}</span>
         </button>
       ))}

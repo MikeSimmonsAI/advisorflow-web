@@ -19,7 +19,6 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 // records rather than by a constant in this file — see the BRANDS block below.
 import { api, getCurrentUser, logout } from '../api/client'
 import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
-import AppearanceToggle from '../components/AppearanceToggle'
 import GodStyles from './god/GodStyles'
 
 function Ico({ d, size = 16, children }) {
@@ -335,6 +334,19 @@ function useIsMobile() {
   return m
 }
 
+/** Initials from whatever the server actually gave us for this account.
+ *  Never a placeholder: if there is no name and no email, the chip renders the
+ *  one thing we do know, which is that somebody is signed in. */
+function initialsOf(user) {
+  const name = (user?.full_name || '').trim()
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean)
+    return ((parts[0]?.[0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
+  }
+  const email = (user?.email || '').trim()
+  return email ? email.slice(0, 2).toUpperCase() : '—'
+}
+
 export default function GodShell({ children, orgSession = null, onExitOrgSession }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -398,7 +410,12 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   }, [])
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#02050a', color: '#c8d6e5',
+    // `gm-shell` is not decoration. It is the element godTokens.css declares the
+    // whole God palette on, so every descendant - including the six screens that
+    // never render a `go-scope` wrapper - resolves --gm-* and --go-*. Removing
+    // this class takes the colours off the entire control plane.
+    <div className="gm-shell"
+         style={{ display: 'flex', height: '100vh', background: 'var(--gm-bg)', color: 'var(--gm-text)',
                   fontFamily: "'Inter', system-ui, sans-serif", fontSize: '13px', overflow: 'hidden' }}>
       <GodStyles />
 
@@ -407,39 +424,31 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           so the content is not competing with it for width. */}
       {isMobile && drawer ? (
         <div onClick={() => setDrawer(false)}
-             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 40 }} />
+             style={{ position: 'fixed', inset: 0, background: 'var(--gm-scrim)', zIndex: 40 }} />
       ) : null}
-      <aside style={{ width: railW, minWidth: railW, background: 'linear-gradient(180deg,rgba(3,9,17,.98),rgba(4,12,22,.98))',
-                      borderRight: '1px solid rgba(78,157,211,.17)', display: 'flex', flexDirection: 'column',
+      <aside style={{ width: railW, minWidth: railW, background: 'var(--gm-rail)',
+                      borderRight: '1px solid var(--gm-rail-line)', display: 'flex', flexDirection: 'column',
                       flexShrink: 0, transition: 'transform .18s ease, width .16s ease',
                       ...(isMobile ? {
                         position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 41,
                         transform: drawer ? 'none' : 'translateX(-100%)',
-                        boxShadow: drawer ? '0 0 40px rgba(0,0,0,.6)' : 'none',
+                        boxShadow: drawer ? 'var(--gm-shadow-rail)' : 'none',
                       } : {}) }}>
 
-        {/* Brand */}
-        <div style={{ padding: collapsed ? '18px 0 14px' : '20px 16px 16px',
-                      borderBottom: '1px solid rgba(78,157,211,.14)',
+        {/* ── Identity ──
+            The product name first and the mode second, which is the order the
+            approved design puts them in: this is AdvisorFlow, and God Mode is
+            the room you are standing in. The gold is the mode marker and it is
+            the only gold in the rail. */}
+        <div style={{ padding: collapsed ? '16px 0 14px' : '18px 16px 16px',
+                      borderBottom: '1px solid var(--gm-rail-line)',
                       display: 'flex', alignItems: 'center',
-                      justifyContent: collapsed ? 'center' : 'space-between', gap: 8 }}>
-          {collapsed ? (
-            <div title="AdvisorFlow God Mode" style={{
-              width: 34, height: 34, borderRadius: 10, display: 'grid', placeItems: 'center',
-              fontWeight: 800, letterSpacing: '-.04em', color: '#06111a', fontSize: 12,
-              background: 'linear-gradient(135deg,#6fd5ff,#23efb2)', boxShadow: '0 0 22px rgba(57,189,248,.20)',
-            }}>AF</div>
-          ) : (
+                      justifyContent: collapsed ? 'center' : 'flex-start', gap: 11 }}>
+          <div className="gm-brandmark" title="AdvisorFlow God Mode">AF</div>
+          {!collapsed && (
             <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#23efb2',
-                              boxShadow: '0 0 8px #23efb2', flexShrink: 0 }} />
-                <span style={{ color: '#39bdf8', fontSize: '11px', fontWeight: 700,
-                               letterSpacing: '0.14em', textTransform: 'uppercase' }}>GOD MODE</span>
-              </div>
-              <div style={{ color: '#4a6280', fontSize: '10px', letterSpacing: '0.06em' }}>
-                ADVISORFLOW PLATFORM
-              </div>
+              <div className="gm-wordmark">AdvisorFlow</div>
+              <div className="gm-wordmark-sub">GOD MODE</div>
             </div>
           )}
         </div>
@@ -449,8 +458,8 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           hidden={isMobile}
           title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          style={{ background: 'none', border: 'none', borderBottom: '1px solid rgba(78,157,211,.10)',
-            color: '#415b78', cursor: 'pointer', padding: '7px 0', display: 'flex',
+          style={{ background: 'none', border: 'none', borderBottom: '1px solid var(--gm-rail-line)',
+            color: 'var(--gm-ghost)', cursor: 'pointer', padding: '7px 0', display: 'flex',
             alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-end',
             paddingRight: collapsed ? 0 : 16, fontFamily: 'inherit' }}>
           <span style={{ display: 'inline-block', transform: collapsed ? 'none' : 'rotate(180deg)', transition: 'transform .16s ease' }}>
@@ -473,9 +482,11 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             return (
               <NavLink key={path} to={path} title={collapsed ? label : undefined}
                 className={`gm-nav-item ${active ? 'gm-active' : ''}`}
-                style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '10px 0' : '9px 14px' }}
+                style={collapsed
+                  ? { justifyContent: 'center', padding: '10px 0', margin: '1px 6px' }
+                  : undefined}
               >
-                <Ico d={ICONS[icon]} size={14} />
+                <Ico d={ICONS[icon]} size={16} />
                 {!collapsed && <span className="gm-nav-label">{label}</span>}
               </NavLink>
             )
@@ -486,13 +497,8 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             Internal links go in-place; every destination shows GodReturnBar to
             a god_admin so the trip is never one-way. The website opens in a new
             tab, which leaves this window sitting on God Mode. */}
-        <div style={{ borderTop: '1px solid rgba(78,157,211,.14)', padding: '8px 0', flexShrink: 0 }}>
-          {!collapsed && (
-            <div style={{ color: '#33506e', fontSize: 8.5, letterSpacing: '.16em',
-                          padding: '2px 14px 7px', fontWeight: 700 }}>
-              JUMP TO
-            </div>
-          )}
+        <div style={{ borderTop: '1px solid var(--gm-rail-line)', padding: '8px 0', flexShrink: 0 }}>
+          {!collapsed && <div className="gm-nav-head">JUMP TO</div>}
           {JUMP.map((item) => {
             const { label, path, icon, hint, action } = item
             // Customer App: dynamic — navigate to the selected workspace via the
@@ -547,13 +553,8 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             a slug would produce a dead link that looks like a broken product,
             and the whole section disappears when no brand has one. */}
         {brands.length > 0 && (
-          <div style={{ borderTop: '1px solid rgba(78,157,211,.14)', padding: '8px 0', flexShrink: 0 }}>
-            {!collapsed && (
-              <div style={{ color: '#33506e', fontSize: 8.5, letterSpacing: '.16em',
-                            padding: '2px 14px 7px', fontWeight: 700 }}>
-                BRANDS
-              </div>
-            )}
+          <div style={{ borderTop: '1px solid var(--gm-rail-line)', padding: '8px 0', flexShrink: 0 }}>
+            {!collapsed && <div className="gm-nav-head">BRANDS</div>}
             {brands.map(b => (
               <a key={b.id} href={b.website_url} target="_blank" rel="noopener noreferrer"
                 className="gm-nav-item gm-jump"
@@ -570,22 +571,29 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           </div>
         )}
 
-        {/* Footer — owner identity + role */}
-        <div style={{ padding: collapsed ? '12px 0' : '12px 16px', borderTop: '1px solid rgba(78,157,211,.14)',
-                      display: 'flex', flexDirection: 'column', alignItems: collapsed ? 'center' : 'stretch', gap: 9 }}>
-          {collapsed ? (
-            <span title={`${user?.email} · GOD ADMIN`} style={{ color: '#ffd968', fontSize: 15 }}>⚡</span>
-          ) : (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ color: '#ffd968', fontSize: 11 }}>⚡</span>
-                <span style={{ color: '#ffd968', fontSize: 9, fontWeight: 800, letterSpacing: '.12em' }}>GOD ADMIN</span>
-              </div>
-              <div style={{ color: '#3a5270', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {user?.full_name || user?.email}
-              </div>
-            </>
-          )}
+        {/* ── Rail footer ──
+            The mockup puts the OWNER's identity in the header and leaves the
+            rail footer to say what this place is. The two per-person actions
+            stay here because that is where they have always been and moving
+            them would cost the muscle memory for no gain.
+
+            THE APPEARANCE TOGGLE IS GONE. God Mode is permanently light as of
+            Sep 11 2026, so a light/dark control here would switch between one
+            state and itself — a control that does nothing is worse than no
+            control. It remains in tenant Settings, where it still means
+            something. */}
+        {!collapsed && (
+          <div className="gm-railcard">
+            <span style={{ fontSize: 15, lineHeight: 1 }} aria-hidden="true">👑</span>
+            <div style={{ minWidth: 0 }}>
+              <b>God Mode</b>
+              <span>AdvisorFlow Platform</span>
+            </div>
+          </div>
+        )}
+        <div style={{ padding: collapsed ? '10px 0 12px' : '4px 16px 14px',
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: collapsed ? 'center' : 'stretch', gap: 10 }}>
           {/* CHANGE MY OWN PASSWORD.
               The owner's account is the one account the reset action on
               /god/users-all deliberately will NOT act on - that screen refuses
@@ -593,36 +601,25 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               for your own credential anyway: it does not ask for the current
               password, so a borrowed unlocked browser would be enough. This
               goes to the ordinary self-service change, which requires the
-              current password first. Without this link the page existed but
-              nothing in God Mode led to it, so the owner had to know the URL.
-              A successful change signs every session for the account out, so
-              there is deliberately nowhere to come back to - the destination
-              afterwards is the sign-in screen. */}
+              current password first. A successful change signs every session
+              for the account out, so the destination afterwards is the sign-in
+              screen. */}
           <button
             onClick={() => navigate('/change-password')}
             title="Change your own password — asks for your current one first"
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none',
-              border: 'none', color: '#3a5270', cursor: 'pointer', fontSize: '12px', padding: 0,
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none',
+              border: 'none', color: 'var(--gm-dim)', cursor: 'pointer', fontSize: '12.5px', padding: 0,
               justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
           >
-            <Ico d={ICONS.settings} size={13} />
+            <Ico d={ICONS.settings} size={14} />
             {!collapsed && 'Change password'}
           </button>
-          {/* APPEARANCE. In the rail footer beside the other per-person
-              settings, because that is what it is — Mike's choice, not the
-              brand's. Hidden when the rail is collapsed rather than shrunk to
-              three ambiguous glyphs in a 62px column. */}
-          {!collapsed && (
-            <div style={{ paddingTop: 2 }}>
-              <AppearanceToggle compact />
-            </div>
-          )}
           <button onClick={handleLogout} title="Sign out"
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none',
-              border: 'none', color: '#3a5270', cursor: 'pointer', fontSize: '12px', padding: 0,
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none',
+              border: 'none', color: 'var(--gm-dim)', cursor: 'pointer', fontSize: '12.5px', padding: 0,
               justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
           >
-            <Ico d={ICONS.logout} size={13} />
+            <Ico d={ICONS.logout} size={14} />
             {!collapsed && 'Sign out'}
           </button>
         </div>
@@ -630,28 +627,66 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
 
       {/* ── Main area ── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        <header style={{ height: 44, background: '#06101d', borderBottom: '1px solid rgba(72,147,200,.18)',
-          display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16, flexShrink: 0 }}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        {/* ── Global header ──
+            Breadcrumb left, liveness and the authenticated identity right.
+
+            TWO THINGS FROM THE APPROVED DESIGN ARE DELIBERATELY NOT HERE, and
+            they are follow-ups rather than omissions:
+
+              GLOBAL SEARCH — there is no cross-entity search endpoint. A box
+              that searches nothing, or that only filters the current page while
+              promising "organizations, customers, or anything", would be a lie
+              told in a very prominent place. Each screen keeps its own real
+              search until a backend search exists.
+
+              NOTIFICATION BELL — the only notifications API in the product is
+              tenant-scoped (`GET /notifications/`). Rendering it here would
+              show the god account's own tenant notifications under a platform
+              badge, which is a different thing wearing the right shape. A
+              God-scoped notification source is the follow-up.
+
+            Neither was faked to make the header match the picture. */}
+        <header style={{ height: 56, background: 'var(--gm-topbar)', borderBottom: '1px solid var(--gm-topbar-line)',
+          display: 'flex', alignItems: 'center', padding: '0 22px', gap: 16, flexShrink: 0 }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             {isMobile ? (
               <button onClick={() => setDrawer(d => !d)} aria-label="Navigation"
-                      style={{ background: 'none', border: '1px solid rgba(78,157,211,.28)',
-                               borderRadius: 6, color: '#7fb2d8', cursor: 'pointer',
-                               padding: '4px 9px', fontSize: 14, lineHeight: 1,
-                               fontFamily: 'inherit', flexShrink: 0 }}>☰</button>
+                      className="gm-btn gm-sm" style={{ flexShrink: 0 }}>☰</button>
             ) : null}
-            {!isMobile ? <span style={{ color: '#2a4060', fontSize: '11px' }}>ADVISORFLOW</span> : null}
-            {!isMobile ? <span style={{ color: '#1a3050' }}>/</span> : null}
-            <span style={{ color: '#4a7090', fontSize: '11px', letterSpacing: '0.04em',
-                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {(current?.label || 'GOD MODE').toUpperCase()}
+            <span className="gm-crumb" style={{ minWidth: 0 }}>
+              {!isMobile ? <>AdvisorFlow <span style={{ color: 'var(--gm-ghost)' }}>/</span></> : null}
+              <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {current?.label || 'God Mode'}
+              </b>
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3a6080', fontSize: '11px' }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#23efb2', boxShadow: '0 0 6px #23efb2' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--gm-dim)', fontSize: '12px' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--gm-teal)' }} />
             LIVE
           </div>
-          <div style={{ color: '#2a4060', fontSize: '11px' }}><LiveClock /></div>
+          <div style={{ color: 'var(--gm-dim)', fontSize: '12px', fontVariantNumeric: 'tabular-nums' }}>
+            <LiveClock />
+          </div>
+          {/* The authenticated identity, from getCurrentUser(). The initials are
+              derived from the name the server gave us — not a stand-in. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 14,
+                        borderLeft: '1px solid var(--gm-topbar-line)', minWidth: 0 }}>
+            <span aria-hidden="true" style={{
+              width: 32, height: 32, borderRadius: '50%', flex: 'none', display: 'grid',
+              placeItems: 'center', background: 'var(--gm-pill-blue-bg)',
+              color: 'var(--gm-pill-blue-fg)', fontSize: 11.5, fontWeight: 750,
+              letterSpacing: '.02em',
+            }}>{initialsOf(user)}</span>
+            {!isMobile && (
+              <div style={{ minWidth: 0, lineHeight: 1.25 }}>
+                <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--gm-head)',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user?.full_name || user?.email || 'Signed in'}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--gm-gold)', fontWeight: 650 }}>God Admin</div>
+              </div>
+            )}
+          </div>
         </header>
 
         {/* ══════════════════════════════════════════════════════════════
@@ -679,20 +714,20 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             The customer state keeps the amber treatment precisely because it
             is the one where somebody else's records are about to change. */}
         <div style={{
-          background: onPlatformSurface ? 'rgba(47,182,255,0.07)' : 'rgba(245,185,66,0.1)',
+          background: onPlatformSurface ? 'var(--gm-blue-wash)' : 'var(--gm-amber-wash)',
           borderBottom: '1px solid ' + (onPlatformSurface
-            ? 'rgba(47,182,255,0.22)' : 'rgba(245,185,66,0.3)'),
+            ? 'var(--gm-pill-blue-bd)' : 'var(--gm-pill-gold-bd)'),
           padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12,
           flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%',
-            background: onPlatformSurface ? '#2fb6ff' : '#f5b942',
-            boxShadow: '0 0 8px ' + (onPlatformSurface ? '#2fb6ff' : '#f5b942') }} />
+            background: onPlatformSurface ? 'var(--gm-blue)' : 'var(--gm-amber)',
+            boxShadow: onPlatformSurface ? 'var(--gm-glow-blue)' : 'var(--gm-glow-amber)' }} />
           {onPlatformSurface ? (
             <>
-              <span style={{ color: '#2fb6ff', fontWeight: 700, fontSize: '11px',
+              <span style={{ color: 'var(--gm-blue)', fontWeight: 700, fontSize: '11px',
                              letterSpacing: '0.1em' }}>PLATFORM</span>
-              <span style={{ color: '#3a6a90', fontSize: '11px' }}>—</span>
-              <span style={{ color: '#5d90b4', fontSize: '11px' }}>
+              <span style={{ color: 'var(--gm-ghost)', fontSize: '11px' }}>—</span>
+              <span style={{ color: 'var(--gm-text)', fontSize: '11px' }}>
                 AdvisorFlow Platform · estate-wide, not scoped to a customer
               </span>
               <div style={{ flex: 1 }} />
@@ -702,8 +737,8 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
                 <button onClick={() => navigate('/god/customer-app')}
                   title={'Return to ' + orgSession.org_name + "'s workspace"}
                   style={{ display: 'flex', alignItems: 'center', gap: 6,
-                    background: 'rgba(47,182,255,0.12)', border: '1px solid rgba(47,182,255,0.32)',
-                    borderRadius: 3, color: '#7cc7f5', cursor: 'pointer', fontFamily: 'inherit',
+                    background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-pill-blue-bd)',
+                    borderRadius: 3, color: 'var(--gm-pill-blue-fg)', cursor: 'pointer', fontFamily: 'inherit',
                     fontSize: '11px', fontWeight: 600, padding: '3px 10px', maxWidth: 320,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   RESUME: {orgSession.org_name}
@@ -712,8 +747,8 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               {orgSession && (
                 <button onClick={onExitOrgSession}
                   title="Forget the remembered customer entirely"
-                  style={{ background: 'none', border: '1px solid rgba(120,150,175,0.28)',
-                    borderRadius: 3, color: '#6f8ba5', cursor: 'pointer', fontFamily: 'inherit',
+                  style={{ background: 'none', border: '1px solid var(--gm-btn-line)',
+                    borderRadius: 3, color: 'var(--gm-dim)', cursor: 'pointer', fontFamily: 'inherit',
                     fontSize: '11px', fontWeight: 600, padding: '3px 10px' }}>
                   CLEAR
                 </button>
@@ -721,17 +756,17 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             </>
           ) : orgSession ? (
             <>
-              <span style={{ color: '#f5b942', fontWeight: 700, fontSize: '11px',
+              <span style={{ color: 'var(--gm-amber)', fontWeight: 700, fontSize: '11px',
                              letterSpacing: '0.1em' }}>CUSTOMER WORKSPACE</span>
-              <span style={{ color: '#a88030', fontSize: '11px' }}>—</span>
-              <span style={{ color: '#c09040', fontSize: '11px' }}>
+              <span style={{ color: 'var(--gm-ghost)', fontSize: '11px' }}>—</span>
+              <span style={{ color: 'var(--gm-text)', fontSize: '11px' }}>
                 VIEWING AS: {orgSession.org_name}
               </span>
               <div style={{ flex: 1 }} />
               <button onClick={onExitOrgSession}
                 style={{ display: 'flex', alignItems: 'center', gap: 6,
-                  background: 'rgba(245,185,66,0.15)', border: '1px solid rgba(245,185,66,0.4)',
-                  borderRadius: 3, color: '#f5b942', cursor: 'pointer', fontFamily: 'inherit',
+                  background: 'var(--gm-pill-gold-bg)', border: '1px solid var(--gm-pill-gold-bd)',
+                  borderRadius: 3, color: 'var(--gm-pill-gold-fg)', cursor: 'pointer', fontFamily: 'inherit',
                   fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', padding: '3px 10px' }}
               >
                 <Ico d={ICONS.arrowLeft} size={12} />
@@ -741,7 +776,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           ) : null}
         </div>
 
-        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', background: '#02050a' }}>
+        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', background: 'var(--gm-bg)' }}>
           {children}
         </main>
       </div>

@@ -29,7 +29,7 @@
  * PERMISSIONS ARE THE SERVER'S. Hiding a button is a courtesy; every endpoint
  * above is behind require_god. Nothing in this file decides what Mike may do.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { T, fmt, healthColor, lastActivityLabel } from './godTheme'
 import { StatusBadge, orgStateBadge, NoSource } from './StatusBadge'
 
@@ -168,27 +168,38 @@ export default function OrgCommandTable({
 
   return (
     <div>
-      <div className="gm-filters">
-        <input
-          className="gm-input"
-          style={{ flex: '1 1 220px', maxWidth: 300 }}
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          placeholder="Search name, brand, slug or id…"
-        />
-        <div className="gm-seg">
+      {/* One filter bar on one surface: search, the state filters, the grouping
+          control and the count. `aria-pressed` carries the selected state to a
+          screen reader, so the filled blue pill is reinforcement rather than
+          the only signal. */}
+      <div className="gm-filterbar">
+        <label className="gm-search">
+          <SearchIcon />
+          <span className="gm-sr">Search organizations</span>
+          <input
+            className="gm-input"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Search name, brand, slug or id…"
+          />
+        </label>
+        <div className="gm-seg" role="group" aria-label="Filter by state">
           {STATE_FILTERS.map(s => (
-            <button key={s} className={state === s ? 'on' : ''} onClick={() => setState(s)}>
-              {s.toUpperCase()}
+            <button key={s} className={state === s ? 'on' : ''} aria-pressed={state === s}
+                    onClick={() => setState(s)}>
+              {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
             </button>
           ))}
         </div>
         <div className="gm-seg">
-          <button className={group ? 'on' : ''} onClick={() => setGroup(g => !g)}>
-            {group ? 'GROUPED BY BRAND' : 'FLAT LIST'}
+          <button className={group ? 'on' : ''} aria-pressed={group}
+                  title={group ? 'Grouped by brand — click for a flat list'
+                               : 'Flat list — click to group by brand'}
+                  onClick={() => setGroup(g => !g)}>
+            {group ? 'Grouped by Brand' : 'Flat list'}
           </button>
         </div>
-        <span style={{ color: T.dim, fontSize: 10, marginLeft: 'auto' }}>
+        <span className="gm-count" style={{ marginLeft: 'auto' }}>
           {loading ? 'loading…' : `${filtered.length} of ${rows.length}`}
         </span>
       </div>
@@ -235,6 +246,70 @@ export default function OrgCommandTable({
   )
 }
 
+function SearchIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.2-3.2" />
+    </svg>
+  )
+}
+
+function EnterIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+    </svg>
+  )
+}
+
+/**
+ * The row's overflow menu.
+ *
+ * A real <button> list rather than a styled <select>: every item is keyboard
+ * reachable, Escape closes, and a click anywhere else closes. The trigger
+ * carries an accessible name that includes the organization, because "⋯" forty
+ * times over is not a name.
+ */
+function RowMenu({ items, label }) {
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onDoc(e) { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false) }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <span className="gm-menuwrap" ref={wrap}>
+      <button className="gm-act gm-ghost" aria-haspopup="menu" aria-expanded={open}
+              aria-label={'More actions for ' + label}
+              onClick={() => setOpen(o => !o)}>…</button>
+      {open && (
+        <div className="gm-menu" role="menu">
+          {items.map((it, i) => it.sep
+            ? <div key={'s' + i} className="gm-menu-sep" />
+            : (
+              <button key={it.label} role="menuitem"
+                      className={it.danger ? 'gm-danger-item' : ''}
+                      onClick={() => { setOpen(false); it.onClick() }}>
+                {it.label}
+              </button>
+            ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 function RowGroup({ group, showHeader, onEnter, onSuspend, onGo, busyId }) {
   const [open, setOpen] = useState(true)
   return (
@@ -243,7 +318,7 @@ function RowGroup({ group, showHeader, onEnter, onSuspend, onGo, busyId }) {
         <tr className="gm-group">
           <td colSpan={12}>
             <button className="gm-groupbtn" onClick={() => setOpen(o => !o)}>
-              <span style={{ color: '#4d668a', fontSize: 9 }}>{open ? '▾' : '▸'}</span>
+              <span aria-hidden="true" style={{ color: 'var(--gm-blue)', fontSize: 11 }}>{open ? '▾' : '▸'}</span>
               {group.label}
               <StatusBadge tone={group.rows.length ? 'blue' : 'off'}>
                 {group.rows.length} ORG{group.rows.length === 1 ? '' : 'S'}
@@ -293,37 +368,33 @@ function Row({ r, onEnter, onSuspend, onGo, busy }) {
       <td>{implCell(impl)}</td>
       <td>{orgStateBadge(r._org)}</td>
       <td>
+        {/* ONE OBVIOUS PRIMARY, AND AN OVERFLOW FOR THE REST.
+            This cell used to carry up to seven equally weighted buttons, which
+            is how the action that matters — Enter — became impossible to find
+            at a glance in a table forty rows long. NOTHING WAS REMOVED: every
+            action is in the menu, each one still hidden when the row has no
+            target for it, and each still authorized by the server rather than
+            by this component. */}
         <div className="gm-acts">
           <button className="gm-act gm-primary" disabled={busy}
                   onClick={() => onEnter && onEnter(r._org)}
                   title="Assume this organization's context. Audited. Creates no membership.">
-            {busy ? '…' : 'ENTER'}
+            <EnterIcon />{busy ? '…' : 'Enter'}
           </button>
-          <button className="gm-act" onClick={() => onGo('/god/customers/' + r.id)}>
-            OPEN
-          </button>
-          <button className="gm-act" onClick={() => onGo('/god/customers/' + r.id + '?tab=people')}>
-            USERS
-          </button>
-          {impl ? (
-            <button className="gm-act" onClick={() => onGo('/god/implementations/' + impl.id)}>
-              IMPL
-            </button>
-          ) : null}
-          {impl && impl.opportunity_id ? (
-            <button className="gm-act"
-                    onClick={() => onGo('/sales/opportunities/' + impl.opportunity_id)}>
-              DEAL
-            </button>
-          ) : null}
-          <button className="gm-act"
-                  onClick={() => onGo('/god/audit?organization_id=' + r.id)}>
-            ACTIVITY
-          </button>
-          <button className={'gm-act ' + (r.is_active ? 'gm-danger' : '')}
-                  onClick={() => onSuspend && onSuspend(r._org, r.is_active ? 'suspend' : 'reactivate')}>
-            {r.is_active ? 'SUSPEND' : 'REACTIVATE'}
-          </button>
+          <RowMenu label={r.name} items={[
+            { label: 'Open customer', onClick: () => onGo('/god/customers/' + r.id) },
+            { label: 'Users', onClick: () => onGo('/god/customers/' + r.id + '?tab=people') },
+            impl && { label: 'Implementation', onClick: () => onGo('/god/implementations/' + impl.id) },
+            impl && impl.opportunity_id
+              && { label: 'Deal', onClick: () => onGo('/sales/opportunities/' + impl.opportunity_id) },
+            { label: 'Activity', onClick: () => onGo('/god/audit?organization_id=' + r.id) },
+            { sep: true },
+            {
+              label: r.is_active ? 'Suspend organization' : 'Reactivate organization',
+              danger: r.is_active,
+              onClick: () => onSuspend && onSuspend(r._org, r.is_active ? 'suspend' : 'reactivate'),
+            },
+          ].filter(Boolean)} />
         </div>
       </td>
     </tr>

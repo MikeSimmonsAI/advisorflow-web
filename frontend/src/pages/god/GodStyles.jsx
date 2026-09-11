@@ -1,354 +1,452 @@
 /**
- * GodStyles — injects the God Mode stylesheet once per app.
+ * GodStyles — the God Mode component sheet, injected once per app.
  *
- * Hover states, pseudo-elements and gradients cannot be expressed as React inline
- * styles, and the V2 design depends on all three. Everything class-based lives
- * here; one-off layout stays inline in the components.
+ * Class prefix is `gm-` so nothing here can collide with the tenant app's
+ * styles, and every colour is a `--gm-*` token from `godTokens.css`.
  *
- * Class prefix is `gm-` so nothing here can collide with the tenant app's styles.
+ * ───────────────────────────────────────────────────────────────────────────
+ * EVERY COLOUR IN THIS SHEET IS A TOKEN. THAT IS LOAD-BEARING.
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * This file used to carry about 120 literal hex values and 70 rgba() calls of
+ * near-black control-room palette. They are gone. Nothing here decides what
+ * colour anything is; it decides what ROLE each element plays. Adding a literal
+ * back re-breaks the design system for whatever it paints — put it in
+ * `godTokens.css` instead.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * WHAT THE SHAPES ARE NOW
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Built to the approved Organizations mockup: white surfaces on a soft cool
+ * canvas, 12px card radius, soft directional shadow, navy type, a premium blue
+ * primary and a restrained gold for God actions. Density is preserved — this is
+ * an operations platform, not a consumer dashboard — so rows stay compact and
+ * the table still carries twelve columns. What changed is that you can read it.
  */
 import { useEffect } from 'react'
 
 const CSS = `
 .gm-scope{
-  --gm-bg:#02050a;--gm-blue:#39bdf8;--gm-teal:#23efb2;--gm-amber:#ffc75a;
-  --gm-red:#ff5d7d;--gm-gold:#ffd968;--gm-line:rgba(88,169,225,.20);
-  color:#dceafb;font-size:13px;
+  color:var(--gm-text);font-size:13px;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   -webkit-font-smoothing:antialiased;position:relative;
-  background:
-    radial-gradient(circle at 18% -10%,rgba(57,189,248,.16),transparent 28%),
-    radial-gradient(circle at 98% 4%,rgba(169,107,255,.10),transparent 25%),
-    linear-gradient(180deg,#030711,#02050a 50%,#030711);
+  background:var(--gm-bg);
 }
 .gm-scope b,.gm-scope strong,.gm-scope .gm-n,.gm-scope td,.gm-scope th{
   font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1
 }
+/* The console grid overlay. Retained as an element so no page has to change,
+   but --gm-grid is transparent: the texture belonged to the rejected design. */
 .gm-grid-overlay{
   position:absolute;inset:0;pointer-events:none;z-index:0;
   background:
-    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+    linear-gradient(var(--gm-grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--gm-grid) 1px,transparent 1px);
   background-size:36px 36px;
-  -webkit-mask-image:linear-gradient(to bottom,black,transparent 85%);
-  mask-image:linear-gradient(to bottom,black,transparent 85%);
 }
+
+/* ── page furniture ────────────────────────────────────────────────────── */
+.gm-h1{margin:0;color:var(--gm-head);font-size:28px;font-weight:700;
+  letter-spacing:-.02em;line-height:1.15}
+.gm-lede{margin:7px 0 0;color:var(--gm-dim);font-size:13px;max-width:82ch;line-height:1.55}
+.gm-crumb{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--gm-dim)}
+.gm-crumb b{color:var(--gm-head);font-weight:600}
+.gm-pagehead{display:flex;justify-content:space-between;gap:20px;
+  align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
+
 .gm-card{
-  background:linear-gradient(145deg,rgba(13,30,49,.92),rgba(5,13,25,.96));
-  border:1px solid rgba(77,151,204,.22);border-radius:12px;
-  box-shadow:0 12px 28px rgba(0,0,0,.17),inset 0 1px rgba(255,255,255,.015);
+  background:var(--gm-card);
+  border:1px solid var(--gm-card-line);border-radius:var(--gm-radius);
+  box-shadow:var(--gm-shadow-card);
 }
-/* ── metric tile ───────────────────────────────────────────────────────── */
+
+/* ── metric tiles ──────────────────────────────────────────────────────────
+   The mockup's summary row: an icon chip, a large value, a quiet label. Every
+   one of them has to be fed by an authoritative count — a tile with no source
+   renders "—", never 0, because unknown is not zero. */
+.gm-metrics{display:grid;gap:12px;margin-bottom:16px;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
 .gm-metric{
-  min-height:118px;padding:18px;position:relative;overflow:hidden;
-  transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+  display:flex;align-items:center;gap:13px;
+  padding:16px 18px;position:relative;overflow:hidden;
+  transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease;
 }
-.gm-metric:after{
-  content:"";position:absolute;width:90px;height:90px;border-radius:50%;
-  right:-38px;top:-45px;
-  background:radial-gradient(circle,rgba(57,189,248,.10),transparent 70%);
+.gm-metric-ico{
+  width:38px;height:38px;border-radius:10px;flex:none;
+  display:grid;place-items:center;
+  background:var(--gm-pill-blue-bg);color:var(--gm-pill-blue-fg);
 }
-.gm-metric:before{
-  content:"";position:absolute;top:0;left:0;width:100%;height:3px;background:var(--gm-teal);
-}
-.gm-metric.gm-pend:before{background:#243a52}
-.gm-metric.gm-warn:before{background:var(--gm-amber)}
-.gm-metric.gm-crit:before{background:var(--gm-red)}
-.gm-metric.gm-click{cursor:pointer}
-.gm-metric.gm-click:hover{
-  transform:translateY(-3px);border-color:rgba(91,190,248,.42);
-  box-shadow:0 18px 38px rgba(0,0,0,.25);
-}
+.gm-metric-ico.ok{background:var(--gm-pill-teal-bg);color:var(--gm-pill-teal-fg)}
+.gm-metric-ico.warn{background:var(--gm-pill-gold-bg);color:var(--gm-pill-gold-fg)}
+.gm-metric-ico.bad{background:var(--gm-pill-red-bg);color:var(--gm-pill-red-fg)}
+.gm-metric-ico.off{background:var(--gm-pill-off-bg);color:var(--gm-pill-off-fg)}
+.gm-metric-v{display:block;font-size:22px;font-weight:700;color:var(--gm-head);line-height:1.1;
+  letter-spacing:-.02em}
+.gm-metric-k{display:block;font-size:12px;color:var(--gm-dim);margin-top:2px}
+.gm-metric.gm-click{cursor:pointer;text-align:left;font-family:inherit;width:100%}
+.gm-metric.gm-click:hover{border-color:var(--gm-card-line-hover);box-shadow:var(--gm-shadow-lift)}
+
 /* ── hierarchy rows ────────────────────────────────────────────────────── */
 .gm-row{
-  min-height:44px;border-bottom:1px solid rgba(42,92,132,.16);
+  min-height:44px;border-bottom:1px solid var(--gm-row-line);
   transition:background .16s ease,box-shadow .16s ease;
 }
 .gm-row.gm-click{cursor:pointer}
-.gm-row.gm-click:hover{
-  background:linear-gradient(90deg,rgba(25,72,108,.28),rgba(8,27,46,.18));
-  box-shadow:inset 3px 0 var(--gm-blue);
-}
-.gm-row.gm-lvl0{background:linear-gradient(90deg,rgba(47,182,255,.075),rgba(7,19,32,.94))}
-.gm-row.gm-lvl1{background:rgba(7,18,31,.74)}
-.gm-row.gm-lvl2{background:rgba(3,10,19,.82)}
-.gm-thead{background:#06101d}
-.gm-thead:hover{background:#06101d;box-shadow:none}
+.gm-row.gm-click:hover{background:var(--gm-row-hover);box-shadow:inset 3px 0 var(--gm-blue)}
+.gm-row.gm-lvl0{background:var(--gm-row-lvl0)}
+.gm-row.gm-lvl1{background:var(--gm-row-lvl1)}
+.gm-row.gm-lvl2{background:var(--gm-row-lvl2)}
+.gm-thead{background:var(--gm-thead)}
+.gm-thead:hover{background:var(--gm-thead);box-shadow:none}
+
 /* ── tool tiles ────────────────────────────────────────────────────────── */
 .gm-tool{
-  min-height:148px;padding:18px;border-radius:12px;position:relative;overflow:hidden;
+  min-height:148px;padding:18px;border-radius:var(--gm-radius);position:relative;overflow:hidden;
   text-align:left;font-family:inherit;color:inherit;width:100%;
-  background:linear-gradient(145deg,rgba(13,30,49,.92),rgba(5,13,25,.96));
-  border:1px solid rgba(77,151,204,.22);
+  background:var(--gm-card);
+  border:1px solid var(--gm-card-line);
+  box-shadow:var(--gm-shadow-card);
   transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
 }
 .gm-tool:before{
   content:"";position:absolute;left:0;top:0;width:4px;height:100%;
-  background:linear-gradient(180deg,var(--gm-blue),transparent);opacity:.55;
+  background:var(--gm-blue);opacity:.85;
 }
-.gm-tool.gm-gold:before{background:linear-gradient(180deg,var(--gm-gold),transparent)}
+.gm-tool.gm-gold:before{background:var(--gm-gold)}
 .gm-tool.gm-live{cursor:pointer}
-.gm-tool.gm-live:hover{transform:translateY(-4px);box-shadow:0 20px 40px rgba(0,0,0,.26);border-color:rgba(91,190,248,.42)}
-.gm-tool.gm-gold.gm-live:hover{border-color:rgba(255,217,104,.42)}
-.gm-tool.gm-disabled{cursor:not-allowed;opacity:.62}
+.gm-tool.gm-live:hover{transform:translateY(-2px);box-shadow:var(--gm-shadow-lift);border-color:var(--gm-card-line-hover)}
+.gm-tool.gm-gold.gm-live:hover{border-color:var(--gm-btn-gold-soft-line)}
+/* NOT opacity. A disabled tile at .62 opacity took its label with it, leaving
+   an unreadable ghost. The tile recedes by SURFACE and the label stays legible
+   — and "disabled" is announced as well as shown, so the state does not rest
+   on appearance alone. */
+.gm-tool.gm-disabled{cursor:not-allowed;background:var(--gm-panel-2);
+  border-style:dashed;color:var(--gm-dim);box-shadow:none}
+.gm-tool.gm-disabled:before{opacity:.35}
+
 /* ── exception rows ────────────────────────────────────────────────────── */
-.gm-ex{padding:14px 15px;border-bottom:1px solid rgba(42,92,132,.16);display:flex;gap:12px;align-items:center}
+.gm-ex{padding:14px 15px;border-bottom:1px solid var(--gm-row-line);display:flex;gap:12px;align-items:center}
 .gm-ex:last-child{border-bottom:0}
-.gm-ex:hover{background:rgba(16,44,68,.18)}
-/* ── buttons ───────────────────────────────────────────────────────────── */
+.gm-ex:hover{background:var(--gm-row-hover-flat)}
+
+/* ── buttons ───────────────────────────────────────────────────────────────
+   Three weights and they are never in doubt: filled blue is the primary,
+   filled gold is the God/admin action, white-with-a-border is everything else.
+   Disabled is a flat grey surface with readable grey ink. */
 .gm-btn{
-  background:#071827;border:1px solid #1c4969;color:#c8e9ff;border-radius:7px;
-  padding:7px 11px;font-size:10px;cursor:pointer;font-family:inherit;flex:none;
-  transition:background .14s ease,border-color .14s ease;
+  background:var(--gm-btn);border:1px solid var(--gm-btn-line);color:var(--gm-btn-fg);
+  border-radius:var(--gm-radius-sm);
+  padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;flex:none;
+  display:inline-flex;align-items:center;gap:7px;line-height:1.2;
+  transition:background .14s ease,border-color .14s ease,box-shadow .14s ease;
 }
-.gm-btn:hover{background:#0d2a44;border-color:#2f7db5}
-.gm-btn:disabled{opacity:.45;cursor:not-allowed}
-.gm-btn.gm-gold-btn{background:#1b1505;border-color:#5c4a15;color:var(--gm-gold)}
-.gm-btn.gm-gold-btn:hover{background:#2a2109;border-color:#8a6f20}
-/* ── nav rail ──────────────────────────────────────────────────────────── */
+.gm-btn:hover{background:var(--gm-btn-hover);border-color:var(--gm-btn-hover-line)}
+.gm-btn:disabled{cursor:not-allowed;background:var(--gm-btn-disabled);
+  color:var(--gm-btn-disabled-fg);border-color:var(--gm-btn-disabled-line)}
+.gm-btn.gm-primary-btn{background:var(--gm-btn-primary);border-color:var(--gm-btn-primary);
+  color:var(--gm-btn-primary-fg);box-shadow:var(--gm-shadow-card)}
+.gm-btn.gm-primary-btn:hover{background:var(--gm-btn-primary-hover);border-color:var(--gm-btn-primary-hover)}
+.gm-btn.gm-gold-btn{background:var(--gm-btn-gold);border-color:var(--gm-btn-gold-line);
+  color:var(--gm-btn-gold-fg);box-shadow:var(--gm-shadow-card)}
+.gm-btn.gm-gold-btn:hover{background:var(--gm-btn-gold-hover);border-color:var(--gm-btn-gold-hover)}
+.gm-btn.gm-sm{padding:6px 10px;font-size:11.5px}
+
+/* ── nav rail ──────────────────────────────────────────────────────────────
+   White rail, navy labels, and a selected state you cannot miss: a tinted pill
+   with a blue rule down its left edge, the label in blue and in weight. The
+   selection is carried by THREE things — fill, rule and weight — so it does not
+   depend on colour perception alone. */
 .gm-nav-item{
-  display:flex;align-items:center;gap:9px;padding:9px 14px;text-decoration:none;
-  font-size:12.5px;letter-spacing:.02em;border-left:2px solid transparent;
-  color:#5c7a96;transition:color .14s ease,background .14s ease;white-space:nowrap;
-  min-width:0;
+  display:flex;align-items:center;gap:11px;padding:8px 12px;text-decoration:none;
+  font-size:13.5px;letter-spacing:0;border-left:3px solid transparent;
+  border-radius:0 var(--gm-radius-sm) var(--gm-radius-sm) 0;
+  margin:1px 10px 1px 0;
+  color:var(--gm-text);transition:color .14s ease,background .14s ease;white-space:nowrap;
+  min-width:0;font-weight:500;
 }
-.gm-nav-item:hover{color:#8ab4cc;background:rgba(47,182,255,.03)}
-.gm-nav-item.gm-active{color:var(--gm-blue);background:rgba(47,182,255,.06);border-left-color:var(--gm-blue);font-weight:600}
-.gm-nav-item.gm-unbuilt{color:#3f556e}
-.gm-nav-item.gm-unbuilt:hover{color:#5c7a96;background:rgba(47,182,255,.02)}
-/* The label takes the room that is left and is the ONLY thing allowed to
-   shrink. Without min-width:0 a flex child refuses to go below its content
-   width, so the label pushed the NEEDS BUILD tag out of the rail instead of
-   ellipsising — which is what was clipping "Pipeline & Cadence" and
-   "Audit & Security". */
+.gm-nav-item:hover{color:var(--gm-head);background:var(--gm-panel-2)}
+.gm-nav-item.gm-active{
+  color:var(--gm-blue);background:var(--gm-pill-blue-bg);
+  border-left-color:var(--gm-blue);font-weight:650;
+}
+/* An unbuilt entry is quieter than a live one but still readable — it was
+   #3f556e on near-black, about 2.1:1. The NEEDS BUILD tag beside it is what
+   actually carries the distinction. */
+.gm-nav-item.gm-unbuilt{color:var(--gm-faint);font-weight:500}
+.gm-nav-item.gm-unbuilt:hover{color:var(--gm-head);background:var(--gm-panel-2)}
 .gm-nav-label{
   flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .gm-nav-tag{
-  margin-left:6px;font-size:7px;letter-spacing:.06em;color:#43607d;
-  border:1px solid #23394f;border-radius:3px;padding:1px 3px;flex:0 0 auto;
+  margin-left:6px;font-size:8px;letter-spacing:.06em;color:var(--gm-pill-off-fg);
+  background:var(--gm-pill-off-bg);
+  border:1px solid var(--gm-pill-off-bd);border-radius:4px;padding:1px 4px;flex:0 0 auto;
 }
-/* Jump-to links: the same row shape, dimmer, so they read as leaving God Mode
-   rather than as another God screen. */
-.gm-nav-item.gm-jump{color:#4a6482;font-size:12px}
-.gm-nav-item.gm-jump:hover{color:#8ab4cc;background:rgba(47,182,255,.04)}
-/* Rail section headings. Replaced the wall of NEEDS BUILD tags: the primary
-   nav now carries working modules only, and everything else lives under one
-   heading that says what it is. */
+.gm-nav-item.gm-jump{color:var(--gm-dim);font-size:13px}
+.gm-nav-item.gm-jump:hover{color:var(--gm-head);background:var(--gm-panel-2)}
 .gm-nav-head{
-  font-size:8.5px;letter-spacing:.16em;font-weight:800;color:#33506e;
-  padding:14px 14px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:10.5px;letter-spacing:.11em;font-weight:700;color:var(--gm-dim);
+  padding:16px 14px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-transform:uppercase;
 }
-.gm-nav-head.gm-next{color:#6a5a2c}
-.gm-nav-rule{height:1px;background:rgba(78,157,211,.12);margin:6px 12px}
+.gm-nav-head.gm-next{color:var(--gm-dim)}
+.gm-nav-rule{height:1px;background:var(--gm-rail-line);margin:8px 14px}
 
-/* ══ REDESIGN PRIMITIVES ═══════════════════════════════════════════════════
-   Added Aug 27 2026 for the approved God Mode Command Center redesign.
-   These EXTEND the sheet above — the tokens, card, row, tool and button rules
-   are unchanged and still the only ones. Nothing below introduces a second
-   palette; every colour is one of the six --gm-* variables at the top.
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* The rail's identity block and its footer card. */
+.gm-brandmark{
+  width:34px;height:34px;border-radius:9px;display:grid;place-items:center;flex:none;
+  background:var(--gm-btn-primary);color:var(--gm-btn-primary-fg);
+  font-weight:800;letter-spacing:-.04em;font-size:12px;box-shadow:var(--gm-logo-glow);
+}
+.gm-wordmark{font-size:16px;font-weight:750;color:var(--gm-head);letter-spacing:-.02em;line-height:1.1}
+.gm-wordmark-sub{font-size:9.5px;font-weight:700;letter-spacing:.16em;color:var(--gm-gold);margin-top:2px}
+.gm-railcard{
+  margin:10px;padding:12px 13px;border-radius:var(--gm-radius);
+  background:var(--gm-btn-gold-soft);border:1px solid var(--gm-btn-gold-soft-line);
+  display:flex;gap:10px;align-items:flex-start;
+}
+.gm-railcard b{display:block;font-size:13px;color:var(--gm-head);font-weight:700}
+.gm-railcard span{display:block;font-size:11px;color:var(--gm-dim);line-height:1.45}
 
 /* ── executive summary tiles ───────────────────────────────────────────── */
-.gm-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:9px;margin-bottom:16px}
+.gm-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;margin-bottom:16px}
 .gm-stat{
-  background:linear-gradient(180deg,rgba(12,24,41,.94),rgba(9,20,34,.96));
-  border:1px solid rgba(77,151,204,.22);border-radius:12px;padding:12px;
+  background:var(--gm-stat);
+  border:1px solid var(--gm-card-line);border-radius:var(--gm-radius);padding:14px;
   min-height:88px;text-align:left;font-family:inherit;color:inherit;width:100%;
-  display:flex;flex-direction:column;
+  display:flex;flex-direction:column;box-shadow:var(--gm-shadow-card);
   transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
 }
-.gm-stat.gm-warn{border-color:rgba(122,95,34,.62)}
-.gm-stat.gm-crit{border-color:rgba(114,49,66,.72)}
+.gm-stat.gm-warn{border-color:var(--gm-pill-gold-bd)}
+.gm-stat.gm-crit{border-color:var(--gm-pill-red-bd)}
 .gm-stat.gm-click{cursor:pointer}
-.gm-stat.gm-click:hover{transform:translateY(-2px);border-color:rgba(91,190,248,.44);box-shadow:0 14px 30px rgba(0,0,0,.24)}
-.gm-stat .gm-k{font-size:8px;letter-spacing:.13em;color:#6281a2;font-weight:800;margin-bottom:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gm-stat .gm-v{font-size:21px;font-weight:900;letter-spacing:-.03em;line-height:1;margin-bottom:4px;color:#eef8ff}
-.gm-stat .gm-s{font-size:8.5px;color:#587593;margin-top:auto;line-height:1.4}
+.gm-stat.gm-click:hover{transform:translateY(-2px);border-color:var(--gm-card-line-hover);box-shadow:var(--gm-shadow-lift)}
+.gm-stat .gm-k{font-size:9.5px;letter-spacing:.11em;color:var(--gm-dim);font-weight:700;margin-bottom:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase}
+.gm-stat .gm-v{font-size:22px;font-weight:750;letter-spacing:-.025em;line-height:1;margin-bottom:4px;color:var(--gm-head)}
+.gm-stat .gm-s{font-size:11px;color:var(--gm-dim);margin-top:auto;line-height:1.4}
 
 /* ── platform health tiles ─────────────────────────────────────────────── */
-.gm-healths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.gm-healths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .gm-health{
-  padding:12px;background:rgba(10,26,46,.72);border:1px solid rgba(27,58,90,.9);
-  border-radius:11px;text-align:left;font-family:inherit;color:inherit;width:100%;
+  padding:14px;background:var(--gm-health);border:1px solid var(--gm-health-line);
+  border-radius:var(--gm-radius);text-align:left;font-family:inherit;color:inherit;width:100%;
+  box-shadow:var(--gm-shadow-card);
   transition:border-color .16s ease,background .16s ease;
 }
 .gm-health.gm-click{cursor:pointer}
-.gm-health.gm-click:hover{border-color:rgba(91,190,248,.44);background:rgba(14,34,58,.82)}
+.gm-health.gm-click:hover{border-color:var(--gm-card-line-hover);background:var(--gm-health-hover)}
 .gm-health-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-.gm-health b{font-size:10.5px;color:#eaf4ff;font-weight:600}
-.gm-health p{margin:0;color:#68829f;font-size:9px;line-height:1.5}
+.gm-health b{font-size:12.5px;color:var(--gm-head);font-weight:650}
+.gm-health p{margin:0;color:var(--gm-dim);font-size:11.5px;line-height:1.5}
 .gm-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
-.gm-dot.ok{background:var(--gm-teal);box-shadow:0 0 10px rgba(35,239,178,.5)}
-.gm-dot.warn{background:var(--gm-amber);box-shadow:0 0 10px rgba(255,199,90,.4)}
-.gm-dot.bad{background:var(--gm-red);box-shadow:0 0 10px rgba(255,93,125,.5)}
-.gm-dot.off{background:#2b425c}
+.gm-dot.ok{background:var(--gm-teal)}
+.gm-dot.warn{background:var(--gm-amber)}
+.gm-dot.bad{background:var(--gm-red)}
+.gm-dot.off{background:var(--gm-pill-off-bd)}
 
-/* ── the shared severity vocabulary, God Mode's rendering of it ────────────
+/* ── the shared severity vocabulary ────────────────────────────────────────
    The five words come from app/services/severity.py and mean the same thing
-   here as they do on the Compensation Command Center. Two of them —
-   "can't check" and "nothing yet" — deliberately get NO colour: an unlit tile
-   is the honest rendering of a subsystem we cannot see, and colouring it green
-   is the exact green-for-silence mistake the endpoint exists to avoid.
-
-   A tile also carries a LEFT RULE in its severity's hue, so a grid of six
-   reads worst-first by eye without sorting. */
-.gm-sev{display:inline-block;border-radius:999px;padding:2px 8px;margin-bottom:7px;
-  font-size:7.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;
-  border:1px solid rgba(42,63,87,.9);background:rgba(12,23,39,.9);color:#5d7697}
-.gm-sev.sv-healthy{background:#0a2b22;border-color:#176f58;color:#44efbd}
-.gm-sev.sv-attention{background:#251e08;border-color:#70591d;color:#f4c652}
-.gm-sev.sv-action_required{background:#2a1017;border-color:#723142;color:#ff829b}
-.gm-sev.sv-unavailable{background:rgba(12,23,39,.9);border-color:#2a3f57;color:#6f8bab}
-.gm-sev.sv-no_data{background:transparent;border-style:dashed;border-color:#263c54;
-  color:#5d7697}
+   here as on the Compensation Command Center. Two of them — "can't check" and
+   "nothing yet" — deliberately get NO colour: an unlit tile is the honest
+   rendering of a subsystem we cannot see, and colouring it green is the exact
+   green-for-silence mistake the endpoint exists to avoid. The WORD is always
+   present beside the colour. */
+.gm-sev{display:inline-block;border-radius:999px;padding:2px 9px;margin-bottom:8px;
+  font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--gm-pill-off-bd);background:var(--gm-pill-off-bg);color:var(--gm-pill-off-fg)}
+.gm-sev.sv-healthy{background:var(--gm-pill-teal-bg);border-color:var(--gm-pill-teal-bd);color:var(--gm-pill-teal-fg)}
+.gm-sev.sv-attention{background:var(--gm-pill-gold-bg);border-color:var(--gm-pill-gold-bd);color:var(--gm-pill-gold-fg)}
+.gm-sev.sv-action_required{background:var(--gm-pill-red-bg);border-color:var(--gm-pill-red-bd);color:var(--gm-pill-red-fg)}
+.gm-sev.sv-unavailable{background:var(--gm-pill-off-bg);border-color:var(--gm-pill-off-bd);color:var(--gm-pill-off-fg)}
+.gm-sev.sv-no_data{background:transparent;border-style:dashed;border-color:var(--gm-pill-off-bd);
+  color:var(--gm-pill-off-fg)}
 
 .gm-health{border-left-width:3px;border-left-style:solid;
-  border-left-color:rgba(27,58,90,.9)}
-.gm-health.sv-healthy{border-left-color:rgba(23,111,88,.85)}
-.gm-health.sv-attention{border-left-color:rgba(112,89,29,.95)}
-.gm-health.sv-action_required{border-left-color:rgba(114,49,66,.95)}
-.gm-health.sv-unavailable{border-left-color:rgba(42,63,87,.9)}
-.gm-health.sv-no_data{border-left-color:rgba(30,46,64,.9)}
+  border-left-color:var(--gm-health-line)}
+.gm-health.sv-healthy{border-left-color:var(--gm-teal)}
+.gm-health.sv-attention{border-left-color:var(--gm-amber)}
+.gm-health.sv-action_required{border-left-color:var(--gm-red)}
+.gm-health.sv-unavailable{border-left-color:var(--gm-pill-off-bd)}
+.gm-health.sv-no_data{border-left-color:var(--gm-row-line-strong)}
 
-/* the one-line verdict, above the explanation */
-.gm-health p.gm-health-head{color:#a9c0d6;font-size:9.5px;font-weight:600;
-  margin-bottom:5px}
-/* WHAT WOULD HAVE TO CHANGE. Replaced the old raw "needs: <table name>" line.
-   The lead-in is dimmer than the answer so the eye lands on the outcome. */
-.gm-health p.gm-health-needs{margin-top:7px;color:#7d99b7;font-size:8.5px;
+.gm-health p.gm-health-head{color:var(--gm-text);font-size:12px;font-weight:600;margin-bottom:5px}
+.gm-health p.gm-health-needs{margin-top:7px;color:var(--gm-dim);font-size:11px;
   line-height:1.55;font-style:italic}
-.gm-health p.gm-health-needs span{color:#4a637f;font-style:normal}
+.gm-health p.gm-health-needs span{color:var(--gm-ghost);font-style:normal}
 /* The raw diagnostic when a check itself fell over. Quiet, last, monospace —
-   present for whoever needs it, never the sentence an owner reads. */
-.gm-health p.gm-health-tech{margin-top:6px;color:#41586f;font-size:8px;
+   present for whoever needs it, never the sentence an owner reads, and still
+   held at the readable floor: a diagnostic nobody can read is not one. */
+.gm-health p.gm-health-tech{margin-top:6px;color:var(--gm-ghost);font-size:10.5px;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   line-height:1.45;word-break:break-word}
 
 /* ── owner action queue ────────────────────────────────────────────────── */
-/* Capped and scrolled, not uncapped. Production opened with 21 items against a
-   six-tile health grid beside it, so the band ran a full screen taller than its
-   left column and left a dead void next to the list. The count in the section
-   label says how many there are; this keeps the first several readable without
-   the page paying for the twenty-first. */
 .gm-q{display:flex;flex-direction:column;max-height:560px;overflow-y:auto}
 .gm-q::-webkit-scrollbar{width:8px}
-.gm-q::-webkit-scrollbar-thumb{background:rgba(88,169,225,.22);border-radius:4px}
+.gm-q::-webkit-scrollbar-thumb{background:var(--gm-row-line-strong);border-radius:4px}
 .gm-q::-webkit-scrollbar-track{background:transparent}
 .gm-q-item{
   display:grid;grid-template-columns:9px 1fr auto;gap:12px;align-items:start;
-  padding:12px 14px;border-bottom:1px solid rgba(42,92,132,.16);
+  padding:12px 14px;border-bottom:1px solid var(--gm-row-line);
 }
 .gm-q-item:last-child{border-bottom:0}
-.gm-q-item:hover{background:rgba(16,44,68,.20)}
+.gm-q-item:hover{background:var(--gm-row-hover-flat)}
 .gm-q-item>i{width:9px;height:9px;border-radius:50%;margin-top:4px}
-.gm-q-title{display:block;font-size:11.5px;color:#f1f7ff;font-weight:600;margin-bottom:3px;line-height:1.35}
-.gm-q-detail{display:block;font-size:9.5px;color:#5e7796;line-height:1.55}
+.gm-q-title{display:block;font-size:13px;color:var(--gm-head);font-weight:600;margin-bottom:3px;line-height:1.35}
+.gm-q-detail{display:block;font-size:11.5px;color:var(--gm-dim);line-height:1.55}
 .gm-q-meta{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right;flex:none}
-.gm-q-sev{font-size:8px;font-weight:800;letter-spacing:.09em}
-.gm-q-age{font-size:8.5px;color:#4f6b88;white-space:nowrap}
+.gm-q-sev{font-size:10px;font-weight:700;letter-spacing:.07em}
+.gm-q-age{font-size:11px;color:var(--gm-ghost);white-space:nowrap}
 
-/* ── command table ─────────────────────────────────────────────────────── */
+/* ── command table ─────────────────────────────────────────────────────────
+   Dense on purpose. What changed is legibility: a light header band with real
+   letterspaced headings, hairline row rules, a hover state, and a grouping row
+   that is visually a band rather than another record. */
 .gm-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-table.gm-table{width:100%;border-collapse:collapse;font-size:10.5px;min-width:1020px}
+table.gm-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:1080px}
 table.gm-table th{
-  text-align:left;padding:10px;color:#6784a3;font-size:7.5px;letter-spacing:.11em;
-  font-weight:800;border-bottom:1px solid rgba(24,53,82,.9);background:#06101d;
+  text-align:left;padding:11px 12px;color:var(--gm-dim);font-size:10px;letter-spacing:.09em;
+  font-weight:700;text-transform:uppercase;
+  border-bottom:1px solid var(--gm-row-line-strong);background:var(--gm-thead);
   white-space:nowrap;position:sticky;top:0;z-index:2;
 }
-table.gm-table td{padding:10px;border-bottom:1px solid rgba(19,43,68,.86);vertical-align:middle;color:#c6d8ea}
-table.gm-table tbody tr:hover td{background:rgba(12,28,48,.75)}
+table.gm-table td{padding:11px 12px;border-bottom:1px solid var(--gm-row-line);vertical-align:middle;color:var(--gm-text)}
+table.gm-table tbody tr:hover td{background:var(--gm-row-hover-flat)}
 table.gm-table td.gm-num,table.gm-table th.gm-num{text-align:right;font-variant-numeric:tabular-nums}
-.gm-orgname{color:#eaf4ff;font-weight:600;font-size:11px}
-.gm-orgsub{color:#4f6b88;font-size:8.5px;margin-top:2px}
-.gm-group{background:linear-gradient(90deg,rgba(47,182,255,.075),rgba(7,19,32,.94))}
-.gm-group td{color:#dceafb;font-weight:600;font-size:10.5px;letter-spacing:.04em}
-.gm-groupbtn{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;display:flex;align-items:center;gap:8px}
+.gm-orgname{color:var(--gm-head);font-weight:650;font-size:13px}
+.gm-orgsub{color:var(--gm-dim);font-size:11px;margin-top:2px}
+.gm-group td{background:var(--gm-row-lvl0);color:var(--gm-blue);font-weight:700;font-size:13px;
+  letter-spacing:0;padding:9px 12px}
+table.gm-table tbody tr.gm-group:hover td{background:var(--gm-row-lvl0)}
+.gm-groupbtn{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;display:flex;align-items:center;gap:9px}
 
 /* ── pills ─────────────────────────────────────────────────────────────── */
-.gm-pill{display:inline-block;padding:3px 7px;border-radius:999px;font-size:7.5px;font-weight:800;letter-spacing:.04em;white-space:nowrap;border:1px solid transparent}
-.gm-pill.teal{background:#0a2b22;border-color:#176f58;color:#44efbd}
-.gm-pill.gold{background:#251e08;border-color:#70591d;color:#f4c652}
-.gm-pill.blue{background:#0b1a2a;border-color:#1b3c59;color:#7cc0ff}
-.gm-pill.red{background:#2a1017;border-color:#723142;color:#ff829b}
-.gm-pill.purple{background:#1d1638;border-color:#453177;color:#b79aff}
-.gm-pill.off{background:#0c1727;border-color:#2a3f57;color:#5d7697}
+.gm-pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;white-space:nowrap;border:1px solid transparent;text-transform:uppercase}
+.gm-pill.teal{background:var(--gm-pill-teal-bg);border-color:var(--gm-pill-teal-bd);color:var(--gm-pill-teal-fg)}
+.gm-pill.gold{background:var(--gm-pill-gold-bg);border-color:var(--gm-pill-gold-bd);color:var(--gm-pill-gold-fg)}
+.gm-pill.blue{background:var(--gm-pill-blue-bg);border-color:var(--gm-pill-blue-bd);color:var(--gm-pill-blue-fg)}
+.gm-pill.red{background:var(--gm-pill-red-bg);border-color:var(--gm-pill-red-bd);color:var(--gm-pill-red-fg)}
+.gm-pill.purple{background:var(--gm-pill-purple-bg);border-color:var(--gm-pill-purple-bd);color:var(--gm-pill-purple-fg)}
+.gm-pill.off{background:var(--gm-pill-off-bg);border-color:var(--gm-pill-off-bd);color:var(--gm-pill-off-fg)}
 
-/* ── row action buttons ────────────────────────────────────────────────── */
-.gm-acts{display:flex;gap:5px;flex-wrap:wrap}
+/* ── row actions ───────────────────────────────────────────────────────────
+   ONE obvious primary per row and an overflow for the rest. The row used to
+   carry seven equally weighted buttons, which made the one that matters —
+   Enter — impossible to find at a glance. Nothing was removed: every action is
+   in the menu, and the menu is a real <button> list, keyboard reachable. */
+.gm-acts{display:flex;gap:6px;align-items:center;justify-content:flex-end}
 .gm-act{
-  border:1px solid #244565;background:#0c1c30;color:#a9bfd5;border-radius:6px;
-  padding:4px 7px;font-size:8px;font-weight:700;letter-spacing:.05em;
-  cursor:pointer;font-family:inherit;white-space:nowrap;
+  border:1px solid var(--gm-btn-line);background:var(--gm-btn);color:var(--gm-btn-fg);border-radius:7px;
+  padding:6px 10px;font-size:11.5px;font-weight:600;letter-spacing:0;
+  cursor:pointer;font-family:inherit;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;
 }
-.gm-act:hover{color:#fff;border-color:#2e7eb8;background:#11273f}
-.gm-act:disabled{opacity:.45;cursor:not-allowed}
-.gm-act.gm-primary{background:rgba(47,182,255,.12);border-color:rgba(57,189,248,.5);color:#7cc0ff}
-.gm-act.gm-primary:hover{background:rgba(47,182,255,.2)}
-.gm-act.gm-danger{color:#ff829b;border-color:#5b2334}
-.gm-act.gm-danger:hover{background:#2a1017;border-color:#8d3a4f;color:#ffa3b6}
+.gm-act:hover{color:var(--gm-head);border-color:var(--gm-btn-hover-line);background:var(--gm-btn-hover)}
+.gm-act:disabled{cursor:not-allowed;background:var(--gm-btn-disabled);color:var(--gm-btn-disabled-fg);
+  border-color:var(--gm-btn-disabled-line)}
+.gm-act.gm-primary{background:var(--gm-btn-primary);border-color:var(--gm-btn-primary);color:var(--gm-btn-primary-fg)}
+.gm-act.gm-primary:hover{background:var(--gm-btn-primary-hover);border-color:var(--gm-btn-primary-hover);color:var(--gm-btn-primary-fg)}
+.gm-act.gm-danger{color:var(--gm-pill-red-fg);border-color:var(--gm-pill-red-bd);background:var(--gm-pill-red-bg)}
+.gm-act.gm-danger:hover{background:var(--gm-red-wash);border-color:var(--gm-red);color:var(--gm-red)}
+.gm-act.gm-ghost{border-color:transparent;background:none;color:var(--gm-dim);padding:6px 8px;font-size:15px;line-height:1}
+.gm-act.gm-ghost:hover{background:var(--gm-panel-2);color:var(--gm-head);border-color:var(--gm-card-line)}
+
+.gm-menuwrap{position:relative;display:inline-block}
+.gm-menu{
+  position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:190px;
+  background:var(--gm-panel);border:1px solid var(--gm-card-line);
+  border-radius:var(--gm-radius-sm);box-shadow:var(--gm-shadow-lift);padding:5px;
+}
+.gm-menu button{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  background:none;border:0;border-radius:6px;padding:8px 10px;cursor:pointer;
+  font-family:inherit;font-size:12.5px;font-weight:550;color:var(--gm-text);
+}
+.gm-menu button:hover{background:var(--gm-panel-2);color:var(--gm-head)}
+.gm-menu button.gm-danger-item{color:var(--gm-red)}
+.gm-menu button.gm-danger-item:hover{background:var(--gm-red-wash)}
+.gm-menu-sep{height:1px;background:var(--gm-card-line);margin:5px 4px}
 
 /* ── product status chips ──────────────────────────────────────────────── */
-.gm-modules{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.gm-modbox{padding:13px;border-radius:11px;border:1px solid rgba(27,57,88,.9);background:rgba(10,25,43,.7)}
-.gm-modbox h4{margin:0 0 9px;font-size:9px;letter-spacing:.15em;font-weight:800}
+.gm-modules{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.gm-modbox{padding:14px;border-radius:var(--gm-radius);border:1px solid var(--gm-card-line);background:var(--gm-panel);box-shadow:var(--gm-shadow-card)}
+.gm-modbox h4{margin:0 0 10px;font-size:10.5px;letter-spacing:.12em;font-weight:700;text-transform:uppercase}
 .gm-modbox h4.live{color:var(--gm-teal)}
 .gm-modbox h4.next{color:var(--gm-amber)}
 .gm-chips{display:flex;gap:6px;flex-wrap:wrap}
-.gm-chip{padding:5px 8px;border-radius:999px;font-size:8px;font-weight:700;border:1px solid #234665;color:#9cb5ce;background:none;font-family:inherit}
-.gm-chip.live{border-color:#1e5b4f;color:#35dcbc;background:#0c2e28;cursor:pointer}
-.gm-chip.live:hover{border-color:#2c8471;background:#0f3c33}
-.gm-chip.next{border-color:#55441d;color:#ffd15d;background:#241c0d;cursor:default}
+.gm-chip{padding:5px 10px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--gm-pill-off-bd);color:var(--gm-pill-off-fg);background:var(--gm-pill-off-bg);font-family:inherit}
+.gm-chip.live{border-color:var(--gm-pill-teal-bd);color:var(--gm-pill-teal-fg);background:var(--gm-pill-teal-bg);cursor:pointer}
+.gm-chip.live:hover{border-color:var(--gm-teal)}
+.gm-chip.next{border-color:var(--gm-pill-gold-bd);color:var(--gm-pill-gold-fg);background:var(--gm-pill-gold-bg);cursor:default}
 
-/* ── searching / filtering ─────────────────────────────────────────────── */
+/* ── search, filters, view toggle ──────────────────────────────────────────
+   The mockup's filter bar: one white card carrying a search field, a row of
+   filter pills, a grouping control and the result count. */
+.gm-filterbar{
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+  background:var(--gm-panel);border:1px solid var(--gm-card-line);
+  border-radius:var(--gm-radius);box-shadow:var(--gm-shadow-card);
+  padding:12px 14px;margin-bottom:14px;
+}
+.gm-search{position:relative;flex:1 1 260px;max-width:380px;display:flex;align-items:center}
+.gm-search svg{position:absolute;left:11px;color:var(--gm-dim);pointer-events:none}
+.gm-search .gm-input{width:100%;padding-left:34px}
 .gm-input{
-  background:#071827;border:1px solid #1c4969;color:#dceafb;border-radius:7px;
-  padding:7px 10px;font-size:11px;font-family:inherit;outline:none;min-width:0;
+  background:var(--gm-field);border:1px solid var(--gm-field-line);color:var(--gm-field-fg);
+  border-radius:var(--gm-radius-sm);
+  padding:9px 12px;font-size:13px;font-family:inherit;outline:none;min-width:0;
 }
-.gm-input:focus{border-color:#2f7db5;box-shadow:0 0 0 2px rgba(47,125,181,.18)}
-.gm-input::placeholder{color:#41607f}
-.gm-filters{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-.gm-seg{display:flex;gap:4px;flex-wrap:wrap}
+.gm-input:focus{border-color:var(--gm-field-line-focus);box-shadow:0 0 0 3px var(--gm-focus-halo)}
+.gm-input::placeholder{color:var(--gm-placeholder)}
+.gm-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.gm-seg{display:flex;gap:6px;flex-wrap:wrap}
 .gm-seg button{
-  background:transparent;border:1px solid #1c3a58;border-radius:7px;color:#5f7c9c;
-  cursor:pointer;font-size:8.5px;font-weight:700;letter-spacing:.06em;padding:5px 9px;font-family:inherit;
+  background:var(--gm-btn);border:1px solid var(--gm-btn-line);border-radius:999px;color:var(--gm-btn-fg);
+  cursor:pointer;font-size:12.5px;font-weight:600;letter-spacing:0;padding:7px 14px;font-family:inherit;
+  transition:background .14s ease,border-color .14s ease,color .14s ease;
 }
-.gm-seg button.on{background:rgba(47,182,255,.12);border-color:#2f7db5;color:#7cc0ff}
+.gm-seg button:hover{background:var(--gm-btn-hover);border-color:var(--gm-btn-hover-line)}
+/* The selected filter is a filled blue pill AND is marked aria-pressed, so the
+   state is exposed to assistive tech rather than being purely visual. */
+.gm-seg button.on{background:var(--gm-btn-primary);border-color:var(--gm-btn-primary);color:var(--gm-btn-primary-fg)}
+.gm-seg button.on:hover{background:var(--gm-btn-primary-hover);border-color:var(--gm-btn-primary-hover)}
+.gm-count{color:var(--gm-dim);font-size:12.5px;white-space:nowrap}
+/* Visible to a screen reader, not on screen. An icon-only search field still
+   needs a name. */
+.gm-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
 /* ── empty / loading ───────────────────────────────────────────────────── */
-.gm-empty{padding:26px;text-align:center;color:#496078;font-size:11px}
+.gm-empty{padding:34px 26px;text-align:center;color:var(--gm-dim);font-size:13px}
 
-/* ── keyboard ──────────────────────────────────────────────────────────────
-   God Mode is built almost entirely out of <button> — health tiles, stat
-   cards, table rows, jump links — and had no visible focus state anywhere, so
-   a keyboard user tabbing through it could not tell where they were on a page
-   whose controls suspend customers and settle payments. The default outline
-   was also being suppressed by the reset, so this is restoring a state the
-   browser would otherwise have given us. */
+/* ── keyboard ──────────────────────────────────────────────────────────── */
 .gm-scope :focus-visible,
 .gm-health:focus-visible,
-.gm-stat:focus-visible{outline:2px solid #5bbef8;outline-offset:2px;
+.gm-stat:focus-visible{outline:2px solid var(--gm-focus-ring);outline-offset:2px;
   border-radius:10px}
 
-/* Motion is decoration here — the lift on hover, the transitions on tiles.
-   Anyone who has asked their machine to stop moving things should not have to
-   ask twice. */
 @media(prefers-reduced-motion:reduce){
-  .gm-health,.gm-stat,.gm-stat.gm-click:hover{transition:none;transform:none}
+  .gm-health,.gm-stat,.gm-metric,.gm-tool,
+  .gm-stat.gm-click:hover,.gm-metric.gm-click:hover{transition:none;transform:none}
 }
 
-/* ── responsive ────────────────────────────────────────────────────────── */
+/* ── responsive ────────────────────────────────────────────────────────────
+   Desktop density is preserved; narrow widths reflow rather than lose anything.
+   No action is hidden at any width. */
 @media(max-width:1350px){
   .gm-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:1150px){
-  /* !important because the band sets its columns inline, where the two-column
-     shape is the default and this is the override. */
   .gm-band2{grid-template-columns:1fr!important}
 }
 @media(max-width:1000px){
   .gm-healths{grid-template-columns:1fr 1fr}
   .gm-modules{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .gm-h1{font-size:23px}
+  .gm-filterbar{padding:11px}
+  .gm-search{max-width:none;flex:1 1 100%}
 }
 @media(max-width:640px){
   .gm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}

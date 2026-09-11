@@ -55,11 +55,11 @@ async function downloadFile(orgId, f) {
 }
 
 const TONE = {
-  neutral:  { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
-  warning:  { bg: '#fffbeb', text: '#92400e', border: '#fcd34d' },
-  info:     { bg: '#eff6ff', text: '#1d4ed8', border: '#93c5fd' },
-  positive: { bg: '#f0fdf4', text: '#166534', border: '#86efac' },
-  danger:   { bg: '#fef2f2', text: '#b91c1c', border: '#fca5a5' },
+  neutral:  { bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-dim)', border: 'var(--gm-card-line)' },
+  warning:  { bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)' },
+  info:     { bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-blue)', border: 'var(--gm-blue)' },
+  positive: { bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)' },
+  danger:   { bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)' },
 }
 
 function Chip({ label, tone = 'neutral', title }) {
@@ -90,16 +90,16 @@ function Progress({ concept, done, total, pct }) {
                     alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
                        textTransform: 'uppercase',
-                       color: 'var(--god-muted, #6b7280)' }}>{c.label}</span>
+                       color: 'var(--god-muted, var(--gm-dim))' }}>{c.label}</span>
         <b style={{ fontSize: 12 }}>
           {total ? `${done}/${total}` : '—'} · {pct}%
         </b>
       </div>
       <div style={{ height: 6, borderRadius: 999,
-                    background: 'var(--god-border, #e5e7eb)', overflow: 'hidden' }}>
+                    background: 'var(--god-border, var(--gm-panel-2))', overflow: 'hidden' }}>
         <i style={{ display: 'block', height: '100%', width: Math.min(pct, 100) + '%',
-                    background: full ? '#22c55e'
-                      : concept === 'intake' ? '#3b82f6' : '#a855f7' }} />
+                    background: full ? 'var(--gm-teal)'
+                      : concept === 'intake' ? 'var(--gm-blue)' : 'var(--gm-purple)' }} />
       </div>
     </div>
   )
@@ -188,56 +188,56 @@ export default function GodLaunches() {
   }), [rows])
 
   const card = {
-    background: 'var(--god-card, #fff)',
-    border: '1px solid var(--god-border, #e5e7eb)',
+    background: 'var(--god-card, var(--gm-panel))',
+    border: '1px solid var(--god-border, var(--gm-card-line))',
     borderRadius: 12, padding: '18px 20px', marginBottom: 14,
   }
 
   const select = {
     fontSize: 12, padding: '6px 10px', borderRadius: 8,
-    border: '1px solid var(--god-border, #e5e7eb)',
-    background: 'var(--god-card, #fff)', color: 'var(--god-text, #1f2937)',
+    border: '1px solid var(--god-border, var(--gm-card-line))',
+    background: 'var(--god-card, var(--gm-panel))', color: 'var(--god-text, var(--gm-blue))',
   }
 
   return (
-    <div style={{ padding: '28px 32px', color: 'var(--god-text, #1f2937)' }}>
+    <div style={{ padding: '28px 32px', color: 'var(--god-text, var(--gm-blue))' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between',
                     alignItems: 'flex-start', marginBottom: 18, gap: 16,
                     flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Customer Launches</h1>
-          <p style={{ margin: '6px 0 0', color: 'var(--god-muted, #6b7280)', fontSize: 14 }}>
+          <p style={{ margin: '6px 0 0', color: 'var(--god-muted, var(--gm-dim))', fontSize: 14 }}>
             Onboarding intake and build progress for every customer, including
             the ones nobody has opened
           </p>
         </div>
         <button onClick={load} disabled={loading} style={{
           fontSize: 12, padding: '6px 14px', borderRadius: 8,
-          border: '1px solid var(--god-border, #e5e7eb)',
-          background: 'var(--god-card, #fff)', cursor: 'pointer',
-          color: 'var(--god-text, #1f2937)' }}>↻ Refresh</button>
+          border: '1px solid var(--god-border, var(--gm-card-line))',
+          background: 'var(--god-card, var(--gm-panel))', cursor: 'pointer',
+          color: 'var(--god-text, var(--gm-blue))' }}>↻ Refresh</button>
       </div>
 
       {/* THE TWO CONCEPTS, EXPLAINED ONCE, ABOVE EVERYTHING THAT USES THEM. */}
       <div style={{ ...card, display: 'flex', gap: 24, flexWrap: 'wrap',
-                    background: 'var(--god-card, #fbfdff)' }}>
+                    background: 'var(--god-card, var(--gm-pill-blue-bg))' }}>
         <div style={{ flex: '1 1 280px' }}>
           <b style={{ fontSize: 12 }}>{PROGRESS.intake.label}</b>
           <p style={{ margin: '4px 0 0', fontSize: 12,
-                      color: 'var(--god-muted, #6b7280)' }}>{PROGRESS.intake.meaning}</p>
+                      color: 'var(--god-muted, var(--gm-dim))' }}>{PROGRESS.intake.meaning}</p>
         </div>
         <div style={{ flex: '1 1 280px' }}>
           <b style={{ fontSize: 12 }}>{PROGRESS.implementation.label}</b>
           <p style={{ margin: '4px 0 0', fontSize: 12,
-                      color: 'var(--god-muted, #6b7280)' }}>
+                      color: 'var(--god-muted, var(--gm-dim))' }}>
             {PROGRESS.implementation.meaning}
           </p>
         </div>
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5',
-                      borderRadius: 8, padding: 16, color: '#dc2626',
+        <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-pill-red-bd)',
+                      borderRadius: 8, padding: 16, color: 'var(--gm-red)',
                       marginBottom: 16 }}>{error}</div>
       )}
 
@@ -247,9 +247,9 @@ export default function GodLaunches() {
           <button key={f.key} onClick={() => setFilter(f.key)} style={{
             fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 999,
             cursor: 'pointer',
-            border: '1px solid ' + (filter === f.key ? '#3b82f6' : 'var(--god-border, #e5e7eb)'),
-            background: filter === f.key ? '#3b82f6' : 'var(--god-card, #fff)',
-            color: filter === f.key ? '#fff' : 'var(--god-text, #1f2937)',
+            border: '1px solid ' + (filter === f.key ? 'var(--gm-blue)' : 'var(--god-border, #e5e7eb)'),
+            background: filter === f.key ? 'var(--gm-blue)' : 'var(--god-card, #fff)',
+            color: filter === f.key ? 'var(--gm-head)' : 'var(--god-text, #1f2937)',
           }}>{f.label} {counts[f.key] ?? 0}</button>
         ))}
         <span style={{ flex: 1 }} />
@@ -266,10 +266,10 @@ export default function GodLaunches() {
       </div>
 
       {loading ? (
-        <div style={card}><p style={{ color: '#9ca3af', fontSize: 13 }}>Loading…</p></div>
+        <div style={card}><p style={{ color: 'var(--gm-text)', fontSize: 13 }}>Loading…</p></div>
       ) : shown.length === 0 ? (
         <div style={card}>
-          <p style={{ color: '#9ca3af', fontSize: 13, margin: 0 }}>
+          <p style={{ color: 'var(--gm-text)', fontSize: 13, margin: 0 }}>
             {rows.length === 0
               ? 'No implementations yet. A launch appears here as soon as a deal becomes a customer.'
               : 'Nothing matches these filters. Everything else is under another filter, not missing.'}
@@ -295,7 +295,7 @@ export default function GodLaunches() {
                   <Chip label={st.label} tone={st.tone} />
                 </div>
                 <div style={{ marginTop: 5, fontSize: 12,
-                              color: 'var(--god-muted, #6b7280)' }}>
+                              color: 'var(--god-muted, var(--gm-dim))' }}>
                   {r.brand_name || 'No brand set'}
                   {' · '}Build status: {(r.implementation_status || 'unknown').replace(/_/g, ' ')}
                   {r.target_launch_date
@@ -303,7 +303,7 @@ export default function GodLaunches() {
                     : ' · No target date'}
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12,
-                              color: 'var(--god-muted, #6b7280)' }}>
+                              color: 'var(--god-muted, var(--gm-dim))' }}>
                   {r.file_count} file{r.file_count === 1 ? '' : 's'}
                   {r.submitted_at
                     ? ' · Submitted ' + new Date(r.submitted_at).toLocaleDateString()
@@ -323,9 +323,9 @@ export default function GodLaunches() {
                 <button onClick={() => (isOpen ? setDetail(null) : open(r.organization_id))}
                         style={{
                           fontSize: 12, padding: '7px 14px', borderRadius: 8,
-                          border: '1px solid var(--god-border, #e5e7eb)',
-                          background: 'var(--god-card, #fff)', cursor: 'pointer',
-                          color: 'var(--god-text, #1f2937)', fontWeight: 600 }}>
+                          border: '1px solid var(--god-border, var(--gm-card-line))',
+                          background: 'var(--god-card, var(--gm-panel))', cursor: 'pointer',
+                          color: 'var(--god-text, var(--gm-blue))', fontWeight: 600 }}>
                   {isOpen ? 'Close' : 'Review'}
                 </button>
               </div>
@@ -370,9 +370,9 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
   // past a form. The default tab is the question staff actually arrive with.
   const [tab, setTab] = useState('delivery')
 
-  if (detail.loading) return <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading…</p>
-  if (detail.error) return <p style={{ color: '#dc2626', fontSize: 13 }}>{detail.error}</p>
-  if (!schema) return <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading the form…</p>
+  if (detail.loading) return <p style={{ color: 'var(--gm-text)', fontSize: 13 }}>Loading…</p>
+  if (detail.error) return <p style={{ color: 'var(--gm-red)', fontSize: 13 }}>{detail.error}</p>
+  if (!schema) return <p style={{ color: 'var(--gm-text)', fontSize: 13 }}>Loading the form…</p>
 
   const sections = presentAllSteps(schema, detail.answers)
   const sub = detail.submission
@@ -380,17 +380,17 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
 
   return (
     <div style={{ marginTop: 16, paddingTop: 16,
-                  borderTop: '1px solid var(--god-border, #e5e7eb)' }}>
+                  borderTop: '1px solid var(--god-border, var(--gm-card-line))' }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap',
                     alignItems: 'center', marginBottom: 14 }}>
         {sub ? (
-          <span style={{ fontSize: 12, color: 'var(--god-muted, #6b7280)' }}>
+          <span style={{ fontSize: 12, color: 'var(--god-muted, var(--gm-dim))' }}>
             Signed by <b>{sub.signed_name || 'somebody'}</b>
             {sub.submitted_at
               ? ' on ' + new Date(sub.submitted_at).toLocaleString() : ''}
           </span>
         ) : (
-          <span style={{ fontSize: 12, color: 'var(--god-muted, #6b7280)' }}>
+          <span style={{ fontSize: 12, color: 'var(--god-muted, var(--gm-dim))' }}>
             Not submitted yet — this is a draft in progress.
           </span>
         )}
@@ -398,8 +398,8 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
         {sub && !sub.reviewed_at ? (
           <button onClick={onReviewed} disabled={busy} style={{
             fontSize: 12, padding: '7px 14px', borderRadius: 8,
-            border: '1px solid #86efac', background: '#f0fdf4',
-            color: '#166534', cursor: busy ? 'default' : 'pointer',
+            border: '1px solid var(--gm-teal)', background: 'var(--gm-pill-teal-bg)',
+            color: 'var(--gm-teal)', cursor: busy ? 'default' : 'pointer',
             fontWeight: 700, opacity: busy ? 0.6 : 1 }}>
             Mark reviewed — reopens editing for the customer
           </button>
@@ -414,9 +414,9 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
             <button key={key} onClick={() => setTab(key)} style={{
               fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 999,
               cursor: 'pointer',
-              border: '1px solid ' + (tab === key ? '#3b82f6' : 'var(--god-border, #e5e7eb)'),
-              background: tab === key ? '#3b82f6' : 'var(--god-card, #fff)',
-              color: tab === key ? '#fff' : 'var(--god-text, #1f2937)',
+              border: '1px solid ' + (tab === key ? 'var(--gm-blue)' : 'var(--god-border, #e5e7eb)'),
+              background: tab === key ? 'var(--gm-blue)' : 'var(--god-card, #fff)',
+              color: tab === key ? 'var(--gm-head)' : 'var(--god-text, #1f2937)',
             }}>{text}</button>
           ))}
       </div>
@@ -426,9 +426,9 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
       {tab === 'intake' ? (
         <>
       {detail.blockers?.length ? (
-        <div style={{ background: '#fffbeb', border: '1px solid #fcd34d',
+        <div style={{ background: 'var(--gm-pill-amber-bg)', border: '1px solid var(--gm-amber)',
                       borderRadius: 8, padding: 12, marginBottom: 14,
-                      fontSize: 12, color: '#92400e' }}>
+                      fontSize: 12, color: 'var(--gm-amber)' }}>
           <b>Still outstanding in the customer's intake</b>
           <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
             {detail.blockers.map((b, i) => (
@@ -444,11 +444,11 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
                         marginBottom: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
                            letterSpacing: '.06em',
-                           color: 'var(--god-muted, #6b7280)' }}>{s.label}</span>
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>{s.pct}%</span>
+                           color: 'var(--god-muted, var(--gm-dim))' }}>{s.label}</span>
+            <span style={{ fontSize: 11, color: 'var(--gm-text)' }}>{s.pct}%</span>
           </div>
           {s.rows.length === 0 ? (
-            <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+            <p style={{ fontSize: 12, color: 'var(--gm-text)', margin: 0 }}>
               Nothing answered in this section yet.
             </p>
           ) : (
@@ -458,12 +458,12 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
               {s.rows.map(row => (
                 <div key={row.key} style={{ gridColumn: row.long ? '1 / -1' : undefined }}>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em',
-                                textTransform: 'uppercase', color: '#9ca3af' }}>
+                                textTransform: 'uppercase', color: 'var(--gm-text)' }}>
                     {row.label}
                   </div>
                   <div style={{ fontSize: 13, marginTop: 2,
                                 whiteSpace: row.long ? 'pre-wrap' : 'normal',
-                                color: row.secure ? '#6b7280' : 'inherit',
+                                color: row.secure ? 'var(--gm-dim)' : 'inherit',
                                 fontStyle: row.secure ? 'italic' : 'normal' }}>
                     {row.value}
                   </div>
@@ -475,18 +475,18 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
       ))}
 
       {hasSecret ? (
-        <p style={{ fontSize: 11, color: '#9ca3af', margin: '0 0 14px' }}>
+        <p style={{ fontSize: 11, color: 'var(--gm-text)', margin: '0 0 14px' }}>
           {SECRET_NOTE}
         </p>
       ) : null}
 
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                    letterSpacing: '.06em', color: 'var(--god-muted, #6b7280)',
+                    letterSpacing: '.06em', color: 'var(--god-muted, var(--gm-dim))',
                     margin: '16px 0 6px' }}>
         Files ({detail.files?.length || 0})
       </div>
       {(detail.files || []).length === 0
-        ? <p style={{ fontSize: 12, color: '#9ca3af' }}>Nothing uploaded yet.</p>
+        ? <p style={{ fontSize: 12, color: 'var(--gm-text)' }}>Nothing uploaded yet.</p>
         : (detail.files || []).map(f => (
           <div key={f.id} style={{ fontSize: 12, marginBottom: 4 }}>
             {/* A plain href cannot work: the file lives on the API origin and
@@ -495,7 +495,7 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
             <a href="#" onClick={ev => { ev.preventDefault(); downloadFile(detail.orgId, f) }}>
               {f.filename}
             </a>
-            <span style={{ color: '#9ca3af' }}>
+            <span style={{ color: 'var(--gm-text)' }}>
               {' '}· {Math.round(f.file_size / 1024)} KB
               {f.label ? ' · ' + f.label : ''}
             </span>

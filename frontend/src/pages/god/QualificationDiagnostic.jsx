@@ -34,7 +34,7 @@ const FALLBACK_CHANNELS = ['email']
 function Row({ label, value, mono }) {
   return (
     <div style={{ display: 'flex', gap: 16, padding: '5px 0',
-                  borderBottom: '1px solid rgba(128,128,128,0.14)' }}>
+                  borderBottom: '1px solid var(--gm-card-line)' }}>
       <div style={{ minWidth: 210, opacity: 0.62, fontSize: 12.5 }}>{label}</div>
       <div style={{ fontSize: 13.5, fontFamily: mono ? MONO : 'inherit',
                     wordBreak: 'break-all' }}>
@@ -67,16 +67,16 @@ function Panel({ title, children }) {
  */
 function Card({ label, value, tone, hint }) {
   const colors = {
-    neutral: ['rgba(128,128,128,0.10)', 'inherit'],
-    good:    ['rgba(30,200,130,0.12)', '#1a9c6b'],
-    warn:    ['rgba(235,170,40,0.14)', '#b6830f'],
-    bad:     ['rgba(240,80,80,0.12)', '#d8434a'],
+    neutral: ['var(--gm-row-hover-flat)', 'inherit'],
+    good:    ['var(--gm-teal-wash)', 'var(--gm-teal)'],
+    warn:    ['var(--gm-amber-wash)', 'var(--gm-amber)'],
+    bad:     ['var(--gm-red-wash)', 'var(--gm-red)'],
   }[tone || 'neutral']
   const known = value !== null && value !== undefined
   return (
     <div style={{ flex: '1 1 150px', minWidth: 150, padding: '14px 16px',
                   borderRadius: 10, background: colors[0],
-                  border: '1px solid rgba(128,128,128,0.20)' }}>
+                  border: '1px solid var(--gm-card-line)' }}>
       <div style={{ fontSize: 10.5, letterSpacing: '0.08em',
                     textTransform: 'uppercase', opacity: 0.6 }}>{label}</div>
       <div style={{ fontSize: 30, fontWeight: 700, marginTop: 4, color: colors[1],
@@ -96,7 +96,7 @@ function Card({ label, value, tone, hint }) {
  * so plainly rather than showing a set of plausible-looking zeros.
  */
 function Reasons({ title, rows, tone }) {
-  const bar = { good: '#1a9c6b', warn: '#b6830f', bad: '#d8434a' }[tone] || '#888'
+  const bar = { good: 'var(--gm-teal)', warn: 'var(--gm-amber)', bad: 'var(--gm-red)' }[tone] || 'var(--gm-dim)'
   const total = (rows || []).reduce((n, r) => n + (r.count || 0), 0)
   return (
     <Panel title={title}>
@@ -107,7 +107,7 @@ function Reasons({ title, rows, tone }) {
       ) : rows.map(r => (
         <div key={r.code} style={{ display: 'flex', alignItems: 'center', gap: 12,
                                    padding: '7px 0',
-                                   borderBottom: '1px solid rgba(128,128,128,0.14)' }}>
+                                   borderBottom: '1px solid var(--gm-card-line)' }}>
           <div style={{ minWidth: 54, textAlign: 'right', fontWeight: 700,
                         fontSize: 14, color: bar,
                         fontVariantNumeric: 'tabular-nums' }}>
@@ -122,18 +122,18 @@ function Reasons({ title, rows, tone }) {
             <span style={{
               fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em',
               padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase',
-              background: r.kind === 'evidence' ? 'rgba(30,200,130,0.16)'
-                : r.kind === 'batch' ? 'rgba(235,170,40,0.18)'
-                : 'rgba(128,128,128,0.16)',
-              color: r.kind === 'evidence' ? '#1a9c6b'
-                : r.kind === 'batch' ? '#b6830f' : 'inherit',
+              background: r.kind === 'evidence' ? 'var(--gm-teal-wash)'
+                : r.kind === 'batch' ? 'var(--gm-amber-wash)'
+                : 'var(--gm-row-hover-flat)',
+              color: r.kind === 'evidence' ? 'var(--gm-teal)'
+                : r.kind === 'batch' ? 'var(--gm-amber)' : 'inherit',
             }}>
               {r.kind === 'batch' ? 'batch metadata' : r.kind}
             </span>
           )}
           <div style={{ fontSize: 11, opacity: 0.42, fontFamily: MONO }}>{r.code}</div>
           <div style={{ width: 90, height: 6, borderRadius: 3,
-                        background: 'rgba(128,128,128,0.16)', overflow: 'hidden' }}>
+                        background: 'var(--gm-row-hover-flat)', overflow: 'hidden' }}>
             <div style={{ width: total ? `${(r.count / total) * 100}%` : 0,
                           height: '100%', background: bar }} />
           </div>
@@ -163,15 +163,15 @@ function Reconciliation({ run }) {
     <div style={{
       marginTop: 18, padding: '14px 18px', borderRadius: 10,
       display: 'flex', alignItems: 'flex-start', gap: 12,
-      background: ok ? 'rgba(30,200,130,0.12)' : 'rgba(240,80,80,0.14)',
-      border: `1px solid ${ok ? 'rgba(30,200,130,0.4)' : 'rgba(240,80,80,0.55)'}`,
+      background: ok ? 'var(--gm-teal-wash)' : 'var(--gm-red-wash)',
+      border: `1px solid ${ok ? 'var(--gm-pill-teal-bd)' : 'var(--gm-red)'}`,
     }} role={ok ? undefined : 'alert'}>
       <div style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">
         {ok ? '✓' : '⚠'}
       </div>
       <div>
         <div style={{ fontWeight: 700, fontSize: ok ? 14 : 16,
-                      color: ok ? '#1a9c6b' : '#d8434a',
+                      color: ok ? 'var(--gm-teal)' : 'var(--gm-red)',
                       letterSpacing: ok ? 0 : '0.01em' }}>
           {ok ? 'AUTHORIZED POPULATION RECONCILED'
               : 'QUALIFICATION POPULATION DOES NOT MATCH AUTHORIZED SCOPE'}
@@ -222,11 +222,11 @@ function PriorityAudit({ audit }) {
         <div role={degenerate ? 'alert' : undefined}
              style={{ marginTop: 14, padding: '12px 16px', borderRadius: 10,
                       fontSize: 13.5, fontWeight: degenerate ? 600 : 400,
-                      background: degenerate ? 'rgba(240,80,80,0.14)'
-                        : thin ? 'rgba(235,170,40,0.14)' : 'rgba(30,200,130,0.12)',
-                      color: degenerate ? '#d8434a' : thin ? '#b6830f' : '#1a9c6b',
-                      border: `1px solid ${degenerate ? 'rgba(240,80,80,0.5)'
-                        : 'rgba(128,128,128,0.25)'}` }}>
+                      background: degenerate ? 'var(--gm-red-wash)'
+                        : thin ? 'var(--gm-amber-wash)' : 'var(--gm-teal-wash)',
+                      color: degenerate ? 'var(--gm-red)' : thin ? 'var(--gm-amber)' : 'var(--gm-teal)',
+                      border: `1px solid ${degenerate ? 'var(--gm-red)'
+                        : 'var(--gm-card-line)'}` }}>
           {audit.verdict}
         </div>
       )}
@@ -242,11 +242,11 @@ function PriorityAudit({ audit }) {
                              fontSize: 13,
                              fontVariantNumeric: 'tabular-nums' }}>{n}</span>
               <span style={{ flex: 1, height: 8, borderRadius: 4,
-                             background: 'rgba(128,128,128,0.16)' }}>
+                             background: 'var(--gm-row-hover-flat)' }}>
                 <span style={{ display: 'block', height: '100%', borderRadius: 4,
                                width: audit.scored_leads
                                  ? `${(n / audit.scored_leads) * 100}%` : 0,
-                               background: '#7a8ba0' }} />
+                               background: 'var(--gm-blue)' }} />
               </span>
             </div>
           ))}
@@ -323,7 +323,7 @@ function Provenance({ p }) {
         ? <div style={{ fontSize: 12, opacity: 0.5 }}>—</div>
         : rows(items).map((r, i) => (
             <div key={i} style={{ display: 'flex', gap: 10, padding: '3px 0',
-                                  borderBottom: '1px solid rgba(128,128,128,0.10)' }}>
+                                  borderBottom: '1px solid var(--gm-card-line)' }}>
               <span style={{ fontFamily: MONO, fontSize: 11.5, minWidth: 60,
                              textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                 {r.count}
@@ -361,7 +361,7 @@ function Provenance({ p }) {
         {['email', 'bulk_email', 'sms', 'voice'].map(k => {
           const v = perm[k] || {}
           return (
-            <div key={k} style={{ border: '1px solid rgba(128,128,128,0.22)',
+            <div key={k} style={{ border: '1px solid var(--gm-card-line)',
                                   borderRadius: 8, padding: '8px 12px', minWidth: 150 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>{k}</div>
               <div style={{ fontFamily: MONO, fontSize: 12, marginTop: 4 }}>
@@ -391,8 +391,8 @@ function Provenance({ p }) {
       {parkedOnly > 0 && (
         <div role="alert"
              style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8,
-                      border: '1px solid rgba(200,60,60,0.5)',
-                      background: 'rgba(200,60,60,0.10)', fontSize: 13 }}>
+                      border: '1px solid var(--gm-red)',
+                      background: 'var(--gm-pill-red-bg)', fontSize: 13 }}>
           <b>{parkedOnly}</b> lead{parkedOnly === 1 ? '' : 's'} carry an activity
           date in their imported data that never reached the record. Those leads
           are not untouched — the import parked the history. Do not read
@@ -414,9 +414,9 @@ function Run({ run, subject, channel }) {
   if (run.error) {
     return (
       <section style={{ marginTop: 26, padding: '14px 18px', borderRadius: 10,
-                        background: 'rgba(240,80,80,0.10)',
-                        border: '1px solid rgba(240,80,80,0.35)' }}>
-        <div style={{ fontWeight: 600, fontSize: 13.5, color: '#d8434a' }}>
+                        background: 'var(--gm-pill-red-bg)',
+                        border: '1px solid var(--gm-pill-red-bd)' }}>
+        <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--gm-red)' }}>
           {run.scenario} — this scenario could not be evaluated
         </div>
         <div style={{ fontSize: 12.5, opacity: 0.8, marginTop: 4, fontFamily: MONO }}>
@@ -432,7 +432,7 @@ function Run({ run, subject, channel }) {
   const pr = run.priority || {}
   return (
     <section style={{ marginTop: 30, paddingTop: 8,
-                      borderTop: '1px solid rgba(128,128,128,0.22)' }}>
+                      borderTop: '1px solid var(--gm-card-line)' }}>
       <h3 style={{ fontSize: 13, margin: '10px 0 2px' }}>{run.scenario}</h3>
 
       <Panel title="Subject and context">
@@ -492,7 +492,7 @@ function Run({ run, subject, channel }) {
             <div key={s.lead_id}
                  style={{ display: 'flex', alignItems: 'center', gap: 12,
                           padding: '6px 0',
-                          borderBottom: '1px solid rgba(128,128,128,0.14)' }}>
+                          borderBottom: '1px solid var(--gm-card-line)' }}>
               <span style={{ fontFamily: MONO, fontSize: 11.5, opacity: 0.6,
                              minWidth: 250 }}>{s.lead_id}</span>
               <span style={{ fontSize: 12, fontWeight: 700, minWidth: 130 }}>
@@ -628,12 +628,12 @@ export default function QualificationDiagnostic() {
           onChange={e => setIdent(e.target.value)}
           placeholder="exact email, or user id"
           style={{ flex: '1 1 280px', padding: '10px 12px', borderRadius: 8,
-                   fontSize: 14, border: '1px solid rgba(128,128,128,0.34)',
+                   fontSize: 14, border: '1px solid var(--gm-card-line)',
                    background: 'transparent', color: 'inherit' }}
         />
         <select value={channel} onChange={e => setChannel(e.target.value)}
                 style={{ padding: '10px 12px', borderRadius: 8, fontSize: 14,
-                         border: '1px solid rgba(128,128,128,0.34)',
+                         border: '1px solid var(--gm-card-line)',
                          background: 'transparent', color: 'inherit' }}>
           {offer.map(ch => (
             <option key={ch} value={ch}>
@@ -646,8 +646,8 @@ export default function QualificationDiagnostic() {
                 style={{ padding: '10px 18px', borderRadius: 8, fontSize: 14,
                          fontWeight: 600,
                          cursor: state === 'loading' ? 'default' : 'pointer',
-                         border: '1px solid rgba(128,128,128,0.34)',
-                         background: 'rgba(128,128,128,0.12)', color: 'inherit' }}>
+                         border: '1px solid var(--gm-card-line)',
+                         background: 'var(--gm-row-hover-flat)', color: 'inherit' }}>
           {state === 'loading' ? 'Running…' : 'Run Qualification'}
         </button>
         <label style={{ fontSize: 12.5, opacity: 0.7, display: 'flex',
@@ -660,8 +660,8 @@ export default function QualificationDiagnostic() {
 
       {!authoritative.includes(channel) && (
         <div style={{ marginTop: 12, padding: '9px 14px', borderRadius: 8,
-                      fontSize: 13, background: 'rgba(235,170,40,0.14)',
-                      color: '#b6830f' }}>
+                      fontSize: 13, background: 'var(--gm-pill-amber-bg)',
+                      color: 'var(--gm-amber)' }}>
           The engine is not yet authoritative for {channel.toUpperCase()}. These
           counts are a preview; that channel's existing guards remain the
           enforcement path until it is migrated and independently tested.
@@ -676,9 +676,9 @@ export default function QualificationDiagnostic() {
 
       {state === 'error' && problem && (
         <div role="alert" style={{ marginTop: 18, padding: '12px 16px',
-                      borderRadius: 8, background: 'rgba(240,80,80,0.12)',
-                      border: '1px solid rgba(240,80,80,0.4)' }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#d8434a' }}>
+                      borderRadius: 8, background: 'var(--gm-pill-red-bg)',
+                      border: '1px solid var(--gm-pill-red-bd)' }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--gm-red)' }}>
             {problem.title}
           </div>
           <div style={{ fontSize: 13, opacity: 0.85, marginTop: 3 }}>
@@ -689,7 +689,7 @@ export default function QualificationDiagnostic() {
 
       {state === 'ok' && r?.error && (
         <div style={{ marginTop: 18, padding: '12px 16px', borderRadius: 8,
-                      background: 'rgba(235,170,40,0.14)', color: '#b6830f',
+                      background: 'var(--gm-pill-amber-bg)', color: 'var(--gm-amber)',
                       fontSize: 13.5 }}>
           {r.error}
         </div>
@@ -697,7 +697,7 @@ export default function QualificationDiagnostic() {
 
       {state === 'ok' && !r?.error && runs.length === 0 && (
         <div style={{ marginTop: 18, padding: '12px 16px', borderRadius: 8,
-                      background: 'rgba(128,128,128,0.10)', fontSize: 13.5 }}>
+                      background: 'var(--gm-row-hover-flat)', fontSize: 13.5 }}>
           <strong>No scenario could be evaluated for this person.</strong>
           <div style={{ opacity: 0.75, marginTop: 3 }}>
             They hold no active customer workspace membership, so there is no
@@ -716,7 +716,7 @@ export default function QualificationDiagnostic() {
             Raw report
           </summary>
           <pre style={{ marginTop: 10, padding: 14, borderRadius: 8, fontSize: 11.5,
-                        overflowX: 'auto', background: 'rgba(128,128,128,0.10)' }}>
+                        overflowX: 'auto', background: 'var(--gm-row-hover-flat)' }}>
             {JSON.stringify(r, null, 2)}
           </pre>
         </details>

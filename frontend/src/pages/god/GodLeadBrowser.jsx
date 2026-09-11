@@ -11,15 +11,15 @@ const PAGE_SIZE = 50
 function Card({ children, style }) {
   return (
     <div style={{
-      background: 'var(--god-card, #fff)',
-      border: '1px solid var(--god-border, #e5e7eb)',
+      background: 'var(--god-card, var(--gm-panel))',
+      border: '1px solid var(--god-border, var(--gm-card-line))',
       borderRadius: 10, padding: '16px 20px', marginBottom: 16,
       ...style,
     }}>{children}</div>
   )
 }
 
-function Badge({ label, color = '#6b7280' }) {
+function Badge({ label, color = 'var(--gm-dim)' }) {
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 100,
@@ -30,8 +30,8 @@ function Badge({ label, color = '#6b7280' }) {
 }
 
 const STATUS_COLORS = {
-  active: '#22c55e', new: '#3b82f6', prospect: '#8b5cf6',
-  completed: '#6b7280', dnc: '#ef4444', inactive: '#9ca3af',
+  active: 'var(--gm-teal)', new: 'var(--gm-blue)', prospect: 'var(--gm-purple)',
+  completed: 'var(--gm-dim)', dnc: 'var(--gm-red)', inactive: 'var(--gm-text)',
 }
 
 export default function GodLeadBrowser() {
@@ -88,7 +88,7 @@ export default function GodLeadBrowser() {
   const style = {
     padding: '24px 32px', maxWidth: 1100,
     fontFamily: 'var(--god-font, system-ui, sans-serif)',
-    color: 'var(--god-text, #1f2937)',
+    color: 'var(--god-text, var(--gm-blue))',
   }
 
   return (
@@ -97,11 +97,11 @@ export default function GodLeadBrowser() {
                     alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Lead Browser</h1>
-          <p style={{ margin: '5px 0 0', color: '#6b7280', fontSize: 13 }}>
+          <p style={{ margin: '5px 0 0', color: 'var(--gm-dim)', fontSize: 13 }}>
             All leads across all organizations — god only
           </p>
         </div>
-        <div style={{ fontSize: 12, color: '#9ca3af', paddingTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--gm-text)', paddingTop: 6 }}>
           {total.toLocaleString()} total
         </div>
       </div>
@@ -110,47 +110,47 @@ export default function GodLeadBrowser() {
       <Card>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ flex: '2 1 200px' }}>
-            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>Search</div>
+            <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Search</div>
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Name, email, or phone…"
               style={{ width: '100%', fontSize: 13, padding: '6px 10px',
-                       border: '1px solid #e5e7eb', borderRadius: 6, boxSizing: 'border-box' }}
+                       border: '1px solid var(--gm-card-line)', borderRadius: 6, boxSizing: 'border-box' }}
             />
           </div>
           <div style={{ flex: '1 1 140px' }}>
-            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>Platform</div>
+            <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Platform</div>
             <select value={platformSlug} onChange={e => setPlatformSlug(e.target.value)}
                     style={{ width: '100%', fontSize: 13, padding: '6px 8px',
-                             border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                             border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
               <option value="">All platforms</option>
               {platforms.map(p => <option key={p.id} value={p.slug}>{p.name}</option>)}
             </select>
           </div>
           <div style={{ flex: '1 1 140px' }}>
-            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>Organization</div>
+            <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Organization</div>
             <select value={orgId} onChange={e => setOrgId(e.target.value)}
                     disabled={!platformSlug}
                     style={{ width: '100%', fontSize: 13, padding: '6px 8px',
-                             border: '1px solid #e5e7eb', borderRadius: 6,
+                             border: '1px solid var(--gm-card-line)', borderRadius: 6,
                              opacity: platformSlug ? 1 : 0.5 }}>
               <option value="">All orgs</option>
               {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
           <div style={{ flex: '1 1 120px' }}>
-            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>Status</div>
+            <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Status</div>
             <select value={status} onChange={e => setStatus(e.target.value)}
                     style={{ width: '100%', fontSize: 13, padding: '6px 8px',
-                             border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                             border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
               <option value="">All statuses</option>
               {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <button onClick={() => fetch(0)} disabled={loading}
                   style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6,
-                           border: '1px solid #e5e7eb', background: '#fff',
+                           border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)',
                            cursor: 'pointer', whiteSpace: 'nowrap' }}>
             ↻ Refresh
           </button>
@@ -158,16 +158,16 @@ export default function GodLeadBrowser() {
       </Card>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5',
-                      borderRadius: 8, padding: 14, color: '#dc2626', marginBottom: 16 }}>
+        <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-pill-red-bd)',
+                      borderRadius: 8, padding: 14, color: 'var(--gm-red)', marginBottom: 16 }}>
           {error}
         </div>
       )}
 
-      {loading && <div style={{ color: '#9ca3af', padding: '16px 0' }}>Loading…</div>}
+      {loading && <div style={{ color: 'var(--gm-text)', padding: '16px 0' }}>Loading…</div>}
 
       {!loading && leads.length === 0 && !error && (
-        <div style={{ color: '#9ca3af', padding: '24px 0', textAlign: 'center' }}>
+        <div style={{ color: 'var(--gm-text)', padding: '24px 0', textAlign: 'center' }}>
           No leads match the current filters.
         </div>
       )}
@@ -177,10 +177,10 @@ export default function GodLeadBrowser() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                <tr style={{ borderBottom: '1px solid var(--gm-card-line)' }}>
                   {['Name', 'Contact', 'Status', 'Tier', 'Source', 'Organization', 'Created'].map(h => (
                     <th key={h} style={{ textAlign: 'left', padding: '10px 14px',
-                                         fontSize: 11, fontWeight: 700, color: '#6b7280',
+                                         fontSize: 11, fontWeight: 700, color: 'var(--gm-dim)',
                                          textTransform: 'uppercase', letterSpacing: '.06em',
                                          whiteSpace: 'nowrap' }}>
                       {h}
@@ -191,34 +191,34 @@ export default function GodLeadBrowser() {
               <tbody>
                 {leads.map((lead, i) => (
                   <tr key={lead.id}
-                      style={{ borderBottom: '1px solid #f3f4f6',
-                               background: i % 2 === 0 ? 'transparent' : '#fafafa' }}>
+                      style={{ borderBottom: '1px solid var(--gm-card-line)',
+                               background: i % 2 === 0 ? 'transparent' : 'var(--gm-panel)' }}>
                     <td style={{ padding: '9px 14px', fontWeight: 500,
-                                  color: '#1f2937', whiteSpace: 'nowrap' }}>
-                      {lead.name || <span style={{ color: '#9ca3af' }}>—</span>}
+                                  color: 'var(--gm-blue)', whiteSpace: 'nowrap' }}>
+                      {lead.name || <span style={{ color: 'var(--gm-text)' }}>—</span>}
                     </td>
                     <td style={{ padding: '9px 14px' }}>
-                      <div style={{ color: '#374151', fontSize: 12 }}>{lead.email || '—'}</div>
-                      <div style={{ color: '#9ca3af', fontSize: 11 }}>{lead.phone || ''}</div>
+                      <div style={{ color: 'var(--gm-blue)', fontSize: 12 }}>{lead.email || '—'}</div>
+                      <div style={{ color: 'var(--gm-text)', fontSize: 11 }}>{lead.phone || ''}</div>
                     </td>
                     <td style={{ padding: '9px 14px' }}>
                       {lead.status
-                        ? <Badge label={lead.status} color={STATUS_COLORS[lead.status] || '#6b7280'} />
-                        : <span style={{ color: '#9ca3af' }}>—</span>}
+                        ? <Badge label={lead.status} color={STATUS_COLORS[lead.status] || 'var(--gm-dim)'} />
+                        : <span style={{ color: 'var(--gm-text)' }}>—</span>}
                     </td>
-                    <td style={{ padding: '9px 14px', color: '#6b7280' }}>
+                    <td style={{ padding: '9px 14px', color: 'var(--gm-dim)' }}>
                       {lead.tier || '—'}
                     </td>
-                    <td style={{ padding: '9px 14px', color: '#6b7280', maxWidth: 160,
+                    <td style={{ padding: '9px 14px', color: 'var(--gm-dim)', maxWidth: 160,
                                   overflow: 'hidden', textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap' }}>
                       {lead.source || '—'}
                     </td>
                     <td style={{ padding: '9px 14px', fontSize: 11,
-                                  color: '#6b7280', fontFamily: 'monospace' }}>
+                                  color: 'var(--gm-dim)', fontFamily: 'monospace' }}>
                       {lead.organization_id?.slice(0, 8) || '—'}
                     </td>
-                    <td style={{ padding: '9px 14px', fontSize: 11, color: '#9ca3af',
+                    <td style={{ padding: '9px 14px', fontSize: 11, color: 'var(--gm-text)',
                                   whiteSpace: 'nowrap' }}>
                       {lead.created_at
                         ? new Date(lead.created_at).toLocaleDateString()
@@ -234,15 +234,15 @@ export default function GodLeadBrowser() {
           {totalPages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'space-between',
                           alignItems: 'center', padding: '12px 16px',
-                          borderTop: '1px solid #e5e7eb' }}>
-              <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                          borderTop: '1px solid var(--gm-card-line)' }}>
+              <span style={{ fontSize: 12, color: 'var(--gm-text)' }}>
                 Page {page + 1} of {totalPages} ({total.toLocaleString()} total)
               </span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => fetch(skip - PAGE_SIZE)}
                         disabled={skip === 0 || loading}
                         style={{ fontSize: 12, padding: '5px 12px', borderRadius: 5,
-                                 border: '1px solid #e5e7eb', background: '#fff',
+                                 border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)',
                                  cursor: skip === 0 ? 'default' : 'pointer',
                                  opacity: skip === 0 ? 0.4 : 1 }}>
                   ← Prev
@@ -250,7 +250,7 @@ export default function GodLeadBrowser() {
                 <button onClick={() => fetch(skip + PAGE_SIZE)}
                         disabled={skip + PAGE_SIZE >= total || loading}
                         style={{ fontSize: 12, padding: '5px 12px', borderRadius: 5,
-                                 border: '1px solid #e5e7eb', background: '#fff',
+                                 border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)',
                                  cursor: skip + PAGE_SIZE >= total ? 'default' : 'pointer',
                                  opacity: skip + PAGE_SIZE >= total ? 0.4 : 1 }}>
                   Next →

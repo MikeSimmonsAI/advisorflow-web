@@ -1,0 +1,300 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   GOD MODE — THE CONTROL PLANE DESIGN SYSTEM
+   ═══════════════════════════════════════════════════════════════════════════
+
+   GOD MODE IS PERMANENTLY LIGHT. That is a product decision, made Sep 11 2026
+   against the approved Organizations mockup, and this file is where it is
+   enforced.
+
+   There is no dark variant here, no `[data-appearance="dark"]` block, and no
+   toggle. The near-black control room this replaces was rejected outright: the
+   owner runs this in an office, in daylight, and a platform console that has to
+   be squinted at is a broken console. If you are reading this because you want
+   to add a dark option back, that is a product conversation, not a CSS change.
+
+   ─────────────────────────────────────────────────────────────────────────
+   WHY A TOKEN FILE AT ALL — WHAT WAS ACTUALLY WRONG
+   ─────────────────────────────────────────────────────────────────────────
+
+   God Mode did not have one palette that happened to be dark. It had THREE
+   colour vocabularies and about nine hundred loose literals:
+
+     `--gm-*`   declared inside GodStyles.jsx, six names, dark values.
+     `--go-*`   declared inside GodOps.css, on `.go-scope` ONLY — and six
+                screens that use `go-` classes never render that class, so
+                every var() on them resolved to nothing. An unresolvable var()
+                invalidates its whole declaration, which is why the Create
+                Customer inputs had no border at all rather than a dark one.
+     `--god-*`  referenced 105 times across ten screens and DECLARED NOWHERE.
+                Every one fell through to a hard-coded light fallback, which is
+                why Launches, Maintenance, the Roadmap board and the drilldown
+                tables rendered as white islands inside the black shell.
+
+   Plus ~890 hex and rgba literals written as React inline styles, which no
+   stylesheet can override at any specificity — the reason the appearance
+   control could never have fixed this from the outside.
+
+   All three vocabularies now resolve HERE, and the literals are gone. One
+   palette, three names for it, and a page that cannot fall off it.
+
+   ─────────────────────────────────────────────────────────────────────────
+   THE BOUNDARY — THIS CANNOT REACH A CUSTOMER
+   ─────────────────────────────────────────────────────────────────────────
+
+   Every selector is anchored to `.gm-shell`, `.gm-scope` or `.go-scope`. Those
+   three classes exist only inside the God control plane. Nothing here reads or
+   writes `--brand-*`, `--signal-*`, `--bg-*` or `--text-*`, which are the
+   tenant and white-label tokens, so EvoSys Pro, BookaBoost, Harmony Hustle and
+   Atlantis keep their own branding, driven by the platform row exactly as
+   before. God Mode is the control plane; the customer applications are
+   configuration. That boundary is why this file is scoped rather than global.
+
+   ─────────────────────────────────────────────────────────────────────────
+   THE PALETTE, READ OFF THE APPROVED MOCKUP
+   ─────────────────────────────────────────────────────────────────────────
+
+   Bright but not blank. The canvas is a soft cool grey so white cards sit ABOVE
+   it and read as surfaces rather than as holes. Type is dark navy, not
+   grey-on-grey. Primary actions are a premium blue. Gold is reserved for God
+   and admin actions — creating an organization, entering one — and is never
+   used for body text. Depth is soft directional shadow, never glow.
+
+   TWO DELIBERATE DEPARTURES FROM THE MOCKUP, BOTH FOR CONTRAST:
+
+   1. The gold action button is filled a step deeper than the mockup's
+      (#8f6a10 rather than roughly #c49a2c). White on the mockup's gold is
+      about 2.6:1 — the most important button on the Organizations screen would
+      have shipped below the floor for readable text, which is the exact class
+      of problem this whole piece of work exists to end.
+   2. The primary blue is #1d63d1 rather than the slightly brighter blue in the
+      picture, so white on it clears 4.5:1 rather than landing near 4.0.
+
+   Both are within a shade of the target and neither changes the design
+   language. Everything else is the mockup's.
+
+   CONTRAST is a hard requirement here, not an aspiration: every text token
+   clears 4.5:1 on every surface it is allowed to sit on, and every control
+   boundary — input borders, focus rings — clears 3:1. `contrast_check.py` in
+   this branch reads these values out of this file and proves it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gm-shell,
+.gm-scope,
+.go-scope {
+  /* ── grounds ──────────────────────────────────────────────────────────── */
+  --gm-bg: #f7f9fc;
+  --gm-bg-image: none;
+  /* The console grid overlay is gone — it was the single most "developer
+     terminal" element on the page and it belongs to the design that was
+     rejected. The token stays, transparent, so the overlay element can remain
+     in the markup without painting anything. */
+  --gm-grid: transparent;
+  --gm-grid-fade: none;
+
+  /* ── shell furniture ──────────────────────────────────────────────────── */
+  --gm-rail: #ffffff;
+  --gm-rail-line: #e4e9f1;
+  --gm-topbar: #ffffff;
+  --gm-topbar-line: #e4e9f1;
+  --gm-scrim: rgba(15, 27, 45, .38);
+
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  --gm-card: #ffffff;
+  --gm-card-line: #e4e9f1;
+  --gm-card-line-hover: #a8c4e8;
+  --gm-panel: #ffffff;
+  --gm-panel-2: #f4f7fb;
+  --gm-panel-3: #e9eff7;
+  --gm-stat: #ffffff;
+  --gm-health: #ffffff;
+  --gm-health-hover: #f6f9fd;
+  --gm-health-line: #e4e9f1;
+  --gm-radius: 12px;
+  --gm-radius-sm: 8px;
+
+  /* ── rows and tables ──────────────────────────────────────────────────── */
+  --gm-row-line: #eef2f7;
+  --gm-row-line-strong: #dde4ee;
+  --gm-row-hover: #f6f9fe;
+  --gm-row-hover-flat: #f6f9fe;
+  /* The brand grouping row: a tinted band, distinctly not a data row. */
+  --gm-row-lvl0: #eff5fd;
+  --gm-row-lvl1: #ffffff;
+  --gm-row-lvl2: #fafbfe;
+  --gm-thead: #f7f9fc;
+
+  /* ── form controls ────────────────────────────────────────────────────────
+     The input border is the token Mike could not see. It is held at 3.7:1
+     against white on purpose: a field has to announce where it starts. */
+  --gm-field: #ffffff;
+  --gm-field-line: #7386a0;
+  --gm-field-line-focus: #1d63d1;
+  --gm-field-fg: #0f1b2d;
+  --gm-placeholder: #64748b;
+  --gm-focus-ring: #1d63d1;
+  --gm-focus-halo: rgba(29, 99, 209, .20);
+  --gm-caret: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5b70' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+
+  /* ── buttons ──────────────────────────────────────────────────────────────
+     A primary action is a filled premium blue and is never in doubt. A
+     secondary is white with a real border. A disabled control is a flat grey
+     surface with READABLE grey ink — dimmed, never faded out, because the
+     operator still has to be able to read what it is they cannot do. */
+  --gm-btn: #ffffff;
+  /* A secondary button's outline is a CONTROL BOUNDARY, so it is held at 3:1
+     rather than at the hairline weight the mockup draws. This is one shade
+     heavier than the picture and it is the difference between "there is a
+     button there" and "there might be a button there". */
+  --gm-btn-line: #8496b0;
+  --gm-btn-fg: #24374f;
+  --gm-btn-hover: #f2f7fd;
+  --gm-btn-hover-line: #1d63d1;
+  --gm-btn-primary: #1d63d1;
+  --gm-btn-primary-hover: #1a56b8;
+  --gm-btn-primary-fg: #ffffff;
+  --gm-btn-disabled: #eef1f6;
+  --gm-btn-disabled-fg: #5d6b7e;
+  --gm-btn-disabled-line: #d7dee8;
+  /* The God/admin action. Restrained gold: deep enough that white sits on it
+     at 4.6:1, warm enough that it still reads as gold beside the blue. */
+  --gm-btn-gold: #8f6a10;
+  --gm-btn-gold-hover: #7c5c0d;
+  --gm-btn-gold-fg: #ffffff;
+  --gm-btn-gold-line: #8f6a10;
+  --gm-btn-gold-soft: #fdf5e4;
+  --gm-btn-gold-soft-line: #e0c489;
+
+  /* ── text ─────────────────────────────────────────────────────────────────
+     head 16.9:1 · text 12.4:1 · dim 7.0:1 · ghost 5.6:1 on white. `faint` is
+     the dimmest ink in the system and is still real text at 5.2:1 — the old
+     rail's idle nav ink was #3f556e on near-black, about 2.1:1, which is what
+     "near-invisible menu items" meant. */
+  --gm-head: #0f1b2d;
+  --gm-text: #1f2f45;
+  --gm-dim: #4a5b70;
+  --gm-ghost: #55667c;
+  --gm-faint: #5a6b80;
+  --gm-ink-on-accent: #ffffff;
+
+  /* ── signal hues, chosen for a light ground ───────────────────────────── */
+  --gm-blue: #1d63d1;
+  --gm-blue2: #1a56b8;
+  --gm-teal: #067a55;
+  --gm-amber: #8a5d0a;
+  --gm-red: #c0203f;
+  --gm-purple: #6438bd;
+  --gm-gold: #7a5a0c;
+
+  --gm-blue-wash: rgba(29, 99, 209, .07);
+  --gm-blue-wash-2: rgba(29, 99, 209, .14);
+  --gm-teal-wash: rgba(6, 122, 85, .09);
+  --gm-amber-wash: rgba(138, 93, 10, .10);
+  --gm-red-wash: rgba(192, 32, 63, .08);
+  --gm-purple-wash: rgba(100, 56, 189, .08);
+
+  /* ── status pills ─────────────────────────────────────────────────────────
+     Pastel surface, matching rule, ink that carries the meaning. A badge never
+     signals by colour alone — the WORD inside it is the signal and the tint
+     reinforces it, which is what keeps these usable for anyone who cannot
+     separate the hues. */
+  --gm-pill-teal-bg: #e6f6ef;   --gm-pill-teal-bd: #a8ddc6;   --gm-pill-teal-fg: #05614a;
+  --gm-pill-gold-bg: #fdf4e0;   --gm-pill-gold-bd: #e0c489;   --gm-pill-gold-fg: #74560b;
+  --gm-pill-blue-bg: #e8f0fd;   --gm-pill-blue-bd: #b2cdf2;   --gm-pill-blue-fg: #14508f;
+  --gm-pill-red-bg:  #fdebef;   --gm-pill-red-bd:  #f0b9c4;   --gm-pill-red-fg:  #a41335;
+  --gm-pill-purple-bg: #f0eafc; --gm-pill-purple-bd: #cbb8ef; --gm-pill-purple-fg: #55309f;
+  --gm-pill-off-bg:  #f1f4f8;   --gm-pill-off-bd:  #d5dce6;   --gm-pill-off-fg:  #4a5b70;
+  /* AMBER IS THE SAME WARNING FAMILY AS GOLD and aliases it rather than being a
+     second warning colour. It is declared because it is USED: the tokenising
+     pass maps warning-hue literals onto these names, and an undeclared name
+     paints nothing at all — the badge would lose its fill AND its border, not
+     just its colour. */
+  --gm-pill-amber-bg: var(--gm-pill-gold-bg);
+  --gm-pill-amber-bd: var(--gm-pill-gold-bd);
+  --gm-pill-amber-fg: var(--gm-pill-gold-fg);
+
+  /* ── depth ────────────────────────────────────────────────────────────── */
+  --gm-shadow-card: 0 1px 2px rgba(15, 27, 45, .05), 0 1px 3px rgba(15, 27, 45, .04);
+  --gm-shadow-lift: 0 2px 6px rgba(15, 27, 45, .07), 0 10px 26px rgba(15, 27, 45, .10);
+  --gm-shadow-rail: 0 0 40px rgba(15, 27, 45, .16);
+  --gm-shadow-modal: 0 24px 60px rgba(15, 27, 45, .24);
+  /* Glow was the dark design's depth mechanism. It has no light equivalent —
+     on white it is a smudge — so these stay off rather than being translated. */
+  --gm-glow-teal: none;
+  --gm-glow-amber: none;
+  --gm-glow-red: none;
+  --gm-glow-blue: none;
+  --gm-logo-glow: 0 1px 3px rgba(15, 27, 45, .18);
+
+  /* ── the `go-` operations vocabulary, on the same palette ─────────────── */
+  --go-bg: var(--gm-bg);
+  --go-panel: var(--gm-panel);
+  --go-panel-2: var(--gm-panel-2);
+  --go-line: var(--gm-card-line);
+  --go-text: var(--gm-text);
+  --go-dim: var(--gm-dim);
+  --go-amber: var(--gm-amber);
+  --go-green: var(--gm-teal);
+  --go-blue: var(--gm-blue);
+  --go-red: var(--gm-red);
+  --go-purple: var(--gm-purple);
+  --go-card: var(--gm-panel);
+  --go-fg: var(--gm-head);
+  --go-muted: var(--gm-dim);
+  --go-field: var(--gm-field);
+  --go-field-line: var(--gm-field-line);
+  --go-hover: var(--gm-row-hover-flat);
+  --go-primary: var(--gm-btn-primary);
+  --go-on-primary: var(--gm-btn-primary-fg);
+  --go-shadow: var(--gm-shadow-card);
+  --go-scrim: var(--gm-scrim);
+
+  /* ── the `god-` vocabulary, which was never declared anywhere ──────────── */
+  --god-bg: var(--gm-bg);
+  --god-card: var(--gm-panel);
+  --god-surface: var(--gm-panel-2);
+  --god-border: var(--gm-card-line);
+  --god-text: var(--gm-text);
+  --god-muted: var(--gm-dim);
+  --god-dim: var(--gm-ghost);
+  --god-field: var(--gm-field);
+  --god-accent: var(--gm-blue);
+  --god-green: var(--gm-teal);
+  --god-red: var(--gm-red);
+  --god-font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Bare names a handful of God components reach for. Declared inside the God
+     scope only, so nothing outside it is affected. */
+  --text: var(--gm-text);
+  --text-muted: var(--gm-dim);
+  --border: var(--gm-card-line);
+
+  /* ── THE APPEARANCE OVERRIDE ──────────────────────────────────────────────
+     `appearance.js` still writes `data-appearance` on <html> for the TENANT
+     app, and somebody who wants a dark tenant UI is entitled to keep it. That
+     preference must not reach in here. `color-scheme: light` is what makes the
+     NATIVE widgets — the open <select> list, the date picker, the scrollbars —
+     render light regardless of what the document root says, and it is the one
+     line that stops a black dropdown opening over a white God form. */
+  color-scheme: light;
+}
+
+/* The shell paints the page. Set explicitly rather than inherited, so a screen
+   that paints no background of its own can never land on the tenant app's
+   ground — which, for anyone running the tenant UI dark, is black. */
+.gm-shell {
+  background: var(--gm-bg);
+  color: var(--gm-text);
+}
+
+/* Keyboard focus, everywhere in the control plane. God Mode is built almost
+   entirely out of <button> — health tiles, stat cards, table rows, jump links —
+   on screens that suspend customers and settle payments. Focus is never
+   invisible and never carried by hue alone: the ring has width as well as
+   colour. */
+.gm-shell :focus-visible,
+.gm-scope :focus-visible,
+.go-scope :focus-visible {
+  outline: 2px solid var(--gm-focus-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}

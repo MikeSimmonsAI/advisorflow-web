@@ -47,7 +47,7 @@ const SCOPE_SALES = 'brand_sales_org'
 const SCOPE_WORKSPACE = 'customer_org'
 
 const LABEL = {
-  fontSize: 10, letterSpacing: '.12em', color: '#6f86a0',
+  fontSize: 10, letterSpacing: '.12em', color: 'var(--gm-blue)',
   textTransform: 'uppercase', display: 'block', marginBottom: 6,
 }
 
@@ -70,15 +70,15 @@ function Already ({ lookup }) {
   ].filter(r => r.state !== 'revoked')
 
   return (
-    <div className="gm-card" style={{ marginBottom: 16, borderColor: 'rgba(120,190,255,.28)' }}>
+    <div className="gm-card" style={{ marginBottom: 16, borderColor: 'var(--gm-pill-blue-bd)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ color: '#fff', fontSize: 16 }}>{lookup.identity?.full_name || '—'}</div>
-        <div style={{ color: '#758ba4', fontSize: 12 }}>{lookup.email}</div>
+        <div style={{ color: 'var(--gm-head)', fontSize: 16 }}>{lookup.identity?.full_name || '—'}</div>
+        <div style={{ color: 'var(--gm-blue)', fontSize: 12 }}>{lookup.email}</div>
         <StatusBadge tone={lookup.identity?.is_active ? 'ok' : 'off'}>
           {lookup.identity?.is_active ? 'ACTIVE' : 'DEACTIVATED'}
         </StatusBadge>
       </div>
-      <p style={{ margin: '10px 0 0', color: '#8fa6bd', fontSize: 12, maxWidth: 820 }}>
+      <p style={{ margin: '10px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 820 }}>
         {lookup.note}
       </p>
       {(lookup.summary || []).length > 0 && (
@@ -98,7 +98,7 @@ function Already ({ lookup }) {
                     <div className="gm-orgsub">{r.where}</div>
                   </td>
                   <td><span className="gm-pill">{r.role_label || r.role}</span></td>
-                  <td style={{ color: '#8fa6bd' }}>{r.means || <NoSource>no description</NoSource>}</td>
+                  <td style={{ color: 'var(--gm-blue)' }}>{r.means || <NoSource>no description</NoSource>}</td>
                 </tr>
               ))}
             </tbody>
@@ -341,10 +341,10 @@ export default function GodAddPerson () {
                   onClick={() => navigate('/god/users-all')}>
             ← USERS &amp; IDENTITY
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+          <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
             {heading}
           </h1>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 780 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 780 }}>
             One person is one identity. Start with their email address: if they
             already have an account it is reused and the new access is added to
             it, so nobody ever ends up with two logins and half a history.
@@ -352,7 +352,7 @@ export default function GodAddPerson () {
         </div>
 
         {err && (
-          <div className="gm-card" style={{ borderColor: 'rgba(255,93,125,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-red-bd)', marginBottom: 16 }}>
             <div style={{ color: T.red, fontSize: 12 }}>{err}</div>
           </div>
         )}
@@ -365,16 +365,16 @@ export default function GodAddPerson () {
         {!loading && result && (
           <>
             <SectionLabel note="what now exists">DONE</SectionLabel>
-            <div className="gm-card" style={{ borderColor: 'rgba(74,222,128,.35)', marginBottom: 18 }}>
-              <div style={{ color: '#fff', fontSize: 16 }}>
+            <div className="gm-card" style={{ borderColor: 'var(--gm-pill-teal-bd)', marginBottom: 18 }}>
+              <div style={{ color: 'var(--gm-head)', fontSize: 16 }}>
                 {result.full_name || result.email}
               </div>
-              <div style={{ color: '#758ba4', fontSize: 12, marginTop: 4 }}>
+              <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 4 }}>
                 {result.email} · {result.created_identity
                   ? 'new identity created'
                   : 'existing identity reused — no second account was made'}
               </div>
-              <ul style={{ margin: '12px 0 0', paddingLeft: 18, color: '#8fa6bd', fontSize: 12 }}>
+              <ul style={{ margin: '12px 0 0', paddingLeft: 18, color: 'var(--gm-blue)', fontSize: 12 }}>
                 {(result.applied || []).length === 0 && (
                   <li>They already held everything that was asked for — nothing needed changing.</li>
                 )}
@@ -389,8 +389,8 @@ export default function GodAddPerson () {
                 </SectionLabel>
                 <div className="gm-card" style={{ marginBottom: 18 }}>
                   <div style={{
-                    background: 'rgba(10,18,28,.75)', border: '1px solid rgba(120,150,190,.22)',
-                    borderRadius: 6, padding: '10px 12px', color: '#cfe0f2',
+                    background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-pill-blue-bd)',
+                    borderRadius: 6, padding: '10px 12px', color: 'var(--gm-blue)',
                     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                     fontSize: 12, wordBreak: 'break-all',
                   }}>{result.activation.setup_url}</div>
@@ -408,8 +408,8 @@ export default function GodAddPerson () {
             )}
 
             {result.activation_error && (
-              <div className="gm-card" style={{ borderColor: 'rgba(255,196,84,.35)', marginBottom: 18 }}>
-                <div style={{ color: T.amber || '#ffc454', fontSize: 12 }}>
+              <div className="gm-card" style={{ borderColor: 'var(--gm-pill-amber-bd)', marginBottom: 18 }}>
+                <div style={{ color: T.amber || 'var(--gm-amber)', fontSize: 12 }}>
                   The access was granted, but the setup link could not be sent:
                   {' '}{result.activation_error} — send one from Manage Access.
                 </div>
@@ -453,8 +453,8 @@ export default function GodAddPerson () {
               </div>
 
               {lookup && !lookup.exists && (
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(120,150,190,.16)' }}>
-                  <div style={{ color: '#8fa6bd', fontSize: 12, marginBottom: 12 }}>
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--gm-pill-blue-bd)' }}>
+                  <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginBottom: 12 }}>
                     {lookup.note}
                   </div>
                   <Field label="Full name" width={320}
@@ -483,7 +483,7 @@ export default function GodAddPerson () {
                 <input type="checkbox" checked={wantSales} style={{ marginTop: 3 }}
                        onChange={e => { setWantSales(e.target.checked); resetPlan() }} />
                 <span>
-                  <span style={{ color: '#fff', fontSize: 14 }}>Brand sales &amp; back office</span>
+                  <span style={{ color: 'var(--gm-head)', fontSize: 14 }}>Brand sales &amp; back office</span>
                   <span style={{ display: 'block', color: T.dim, fontSize: 12, marginTop: 3 }}>
                     They sell for one of our brands. Grants a seat in that sales
                     organization — and nothing inside any customer's workspace.
@@ -493,7 +493,7 @@ export default function GodAddPerson () {
 
               {wantSales && (
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 16,
-                              paddingTop: 16, borderTop: '1px solid rgba(120,150,190,.16)' }}>
+                              paddingTop: 16, borderTop: '1px solid var(--gm-pill-blue-bd)' }}>
                   <Field label="Sales organization">
                     <select className="gm-input" value={brandId} style={{ width: '100%' }}
                             onChange={e => { setBrandId(e.target.value); resetPlan() }}>
@@ -538,7 +538,7 @@ export default function GodAddPerson () {
                 <input type="checkbox" checked={wantWorkspace} style={{ marginTop: 3 }}
                        onChange={e => { setWantWorkspace(e.target.checked); resetPlan() }} />
                 <span>
-                  <span style={{ color: '#fff', fontSize: 14 }}>Customer workspace</span>
+                  <span style={{ color: 'var(--gm-head)', fontSize: 14 }}>Customer workspace</span>
                   <span style={{ display: 'block', color: T.dim, fontSize: 12, marginTop: 3 }}>
                     They work inside one customer's account — their leads,
                     conversations and calendar. Nothing in the brand's own
@@ -549,7 +549,7 @@ export default function GodAddPerson () {
 
               {wantWorkspace && (
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 16,
-                              paddingTop: 16, borderTop: '1px solid rgba(120,150,190,.16)' }}>
+                              paddingTop: 16, borderTop: '1px solid var(--gm-pill-blue-bd)' }}>
                   <Field label="Workspace">
                     <select className="gm-input" value={wsId} style={{ width: '100%' }}
                             onChange={e => { setWsId(e.target.value); resetPlan() }}>
@@ -583,7 +583,7 @@ export default function GodAddPerson () {
                 <input type="checkbox" checked={sendLink} style={{ marginTop: 3 }}
                        onChange={e => { setSendLink(e.target.checked); resetPlan() }} />
                 <span>
-                  <span style={{ color: '#fff', fontSize: 14 }}>
+                  <span style={{ color: 'var(--gm-head)', fontSize: 14 }}>
                     Issue a one-time {lookup.exists && lookup.identity?.last_login_at
                       ? 'password reset link' : 'setup link'}
                   </span>
@@ -606,26 +606,26 @@ export default function GodAddPerson () {
             </SectionLabel>
 
             <div className="gm-card" style={{ marginBottom: 18 }}>
-              <ul style={{ margin: 0, paddingLeft: 18, color: '#8fa6bd', fontSize: 12.5 }}>
+              <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--gm-blue)', fontSize: 12.5 }}>
                 {localPlan.map((s, i) => <li key={i} style={{ marginBottom: 5 }}>{s}</li>)}
               </ul>
 
               {preview && !preview.local && (
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(120,150,190,.16)' }}>
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--gm-pill-blue-bd)' }}>
                   <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
                     <div>
                       <span style={LABEL}>Adding</span>
                       {(preview.adding || []).length === 0
                         ? <div style={{ color: T.dim, fontSize: 12 }}>Nothing.</div>
                         : (preview.adding || []).map((c, i) => (
-                          <div key={i} style={{ color: '#4ade80', fontSize: 12, marginBottom: 4 }}>+ {c.sentence}</div>))}
+                          <div key={i} style={{ color: 'var(--gm-teal)', fontSize: 12, marginBottom: 4 }}>+ {c.sentence}</div>))}
                     </div>
                     <div>
                       <span style={LABEL}>Changing</span>
                       {(preview.changing || []).length === 0
                         ? <div style={{ color: T.dim, fontSize: 12 }}>Nothing.</div>
                         : (preview.changing || []).map((c, i) => (
-                          <div key={i} style={{ color: '#ffc454', fontSize: 12, marginBottom: 4 }}>~ {c.sentence}</div>))}
+                          <div key={i} style={{ color: 'var(--gm-amber)', fontSize: 12, marginBottom: 4 }}>~ {c.sentence}</div>))}
                     </div>
                     <div>
                       <span style={LABEL}>Removing</span>
@@ -639,13 +639,13 @@ export default function GodAddPerson () {
                       {(preview.unchanged || []).length === 0
                         ? <div style={{ color: T.dim, fontSize: 12 }}>Nothing.</div>
                         : (preview.unchanged || []).map((c, i) => (
-                          <div key={i} style={{ color: '#8fa6bd', fontSize: 12, marginBottom: 4 }}>= {c.sentence}</div>))}
+                          <div key={i} style={{ color: 'var(--gm-blue)', fontSize: 12, marginBottom: 4 }}>= {c.sentence}</div>))}
                     </div>
                   </div>
 
                   <div style={{ marginTop: 16 }}>
                     <span style={LABEL}>Not affected</span>
-                    <ul style={{ margin: 0, paddingLeft: 18, color: '#8fa6bd', fontSize: 12 }}>
+                    <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--gm-blue)', fontSize: 12 }}>
                       {(preview.preserved || []).map((s, i) => <li key={i} style={{ marginBottom: 3 }}>{s}</li>)}
                     </ul>
                   </div>
@@ -654,7 +654,7 @@ export default function GodAddPerson () {
                     <div style={{ marginTop: 16 }}>
                       <span style={LABEL}>Worth knowing</span>
                       {(preview.warnings || []).map((w, i) => (
-                        <div key={i} style={{ color: '#ffc454', fontSize: 12, marginBottom: 4 }}>{w}</div>))}
+                        <div key={i} style={{ color: 'var(--gm-amber)', fontSize: 12, marginBottom: 4 }}>{w}</div>))}
                     </div>
                   )}
                 </div>
