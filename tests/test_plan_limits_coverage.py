@@ -54,6 +54,21 @@ EXEMPT = {
     # simulated message and book an appointment, and cannot conjure a person.
     "services/demo_environment.py": "Demo Suite seeder; writes only into is_demo tenants, which have no plan and no billable seats",
 
+    # THE AI OPERATIONS PROVING PROFILES. Same category as the demo seeder
+    # above, and the reason is the same one stated in its own module header:
+    # the organizations it writes into are synthetic by construction — their
+    # names and slugs carry the marker, they have no plan, no subscription
+    # and no Stripe customer, and their "advisor" is a login nobody can use.
+    # Counting an invented contact against a plan that does not exist would
+    # be arithmetic about nothing.
+    #
+    # It is NOT an exemption for the operations layer itself. Nothing else in
+    # services/ai_operations/ constructs a User or a Lead: the engine works
+    # records that already exist, and every send path through it re-checks
+    # `lead_capacity.is_held` via compliance_service.check_compliance_preflight
+    # before it reaches anybody.
+    "services/ai_operations/profiles.py": "synthetic proving profiles; writes only into clearly-marked synthetic organizations with no plan and no billable seats",
+
     # Brand-sales staff live at SCOPE_BRAND_SALES_ORG with organization_id
     # NULL. They are not seats in any customer's plan.
     "services/sales_staff.py": "brand sales-org staff; organization_id is NULL, not a customer seat",

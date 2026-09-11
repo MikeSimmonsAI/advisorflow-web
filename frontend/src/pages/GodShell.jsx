@@ -239,6 +239,20 @@ const NAV = [
   { label: 'Support',            path: '/god/support',               icon: 'message',
     hint: 'Every brand’s queue, what the platform repaired by itself, '
         + 'cross-brand incidents, and the daily brief' },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // AI WORKFORCE
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Its own group rather than an entry under DIAGNOSTICS or SUPPORT. What
+  // lives here is platform-level by construction — the dark-launch brakes,
+  // inbound with no tenant to show it to, and the synthetic proofs — and
+  // none of it is a fault report about one customer.
+  { group: 'AI WORKFORCE' },
+  { label: 'AI Operations',      path: '/god/ai-operations',         icon: 'activity',
+    hint: 'Dark-launch state, provider resolution per channel, one '
+        + 'customer’s supervisor read, unattributable inbound, and the '
+        + 'synthetic proofs' },
 ]
 
 function LiveClock() {

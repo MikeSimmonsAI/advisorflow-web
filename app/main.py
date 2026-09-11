@@ -164,6 +164,12 @@ from app.routers.god_support_router import router as god_support_router
 # Mobile device support: push registration and the upload capability probe.
 # Additive only — it adds routes under /me and changes none.
 from app.routers.device_router import router as device_router
+# AI Workforce Operations (T7) — the customer's operational console and the
+# God-only platform state. Read-and-control only: there is no route here that
+# makes an AI employee send anything, and every capability it exposes is
+# disabled by default (AI_OPERATIONS_ENABLED unset).
+from app.routers.ai_operations_router import god_router as ai_operations_god_router
+from app.routers.ai_operations_router import router as ai_operations_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -723,6 +729,20 @@ app.include_router(god_support_router)
 # Mobile device support (/me/devices, /me/uploads). Registered last, so its
 # routes cannot shadow anything and its absence cannot break anything.
 app.include_router(device_router)
+# AI Workforce Operations (T7).
+#
+# TWO ROUTERS, TWO AUTHORITIES, ONE ENGINE — the same shape as Support
+# Intelligence above. `/ai-operations` answers only for the caller's own
+# organization (no route on it accepts an organization id), and
+# `/god/ai-operations` extends God Mode with the three genuinely
+# platform-level things: the dark-launch state, inbound events that could not
+# be attributed to any tenant, and the synthetic proofs.
+#
+# Deliberately NOT behind require_feature(): these routes STOP AI work as
+# well as observe it, and a customer whose plan flag lapsed must not thereby
+# lose the ability to stop an AI employee that is already running.
+app.include_router(ai_operations_router)
+app.include_router(ai_operations_god_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

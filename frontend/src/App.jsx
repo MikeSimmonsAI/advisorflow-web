@@ -166,6 +166,10 @@ import RoadmapBoard from './pages/god/RoadmapBoard'
 import GodLaunches from './pages/god/GodLaunches'
 import HelpSupport from './pages/HelpSupport'
 import GodSupport from './pages/god/GodSupport'
+// AI OPERATIONS. The platform-level view of the AI workforce — the dark-launch
+// state, the supervisor read for one customer, inbound nobody could place, and
+// the synthetic proofs. Registered BEFORE the /god/* catch-all below.
+import GodAIOperations from './pages/god/GodAIOperations'
 import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
 // place. Registered BEFORE the /god/* catch-all below, or it would silently
@@ -1031,6 +1035,9 @@ export default function App() {
         {/* Support Intelligence. MUST stay above the /god/* catch-all below,
             or it silently renders the Command Center instead. */}
         <Route path="/god/support"               element={<GodRoute><GodModeLayout><GodSupport /></GodModeLayout></GodRoute>} />
+        {/* AI Operations. Same rule as Support above — it MUST sit above the
+            /god/* catch-all, or the console silently becomes Overview. */}
+        <Route path="/god/ai-operations"         element={<GodRoute><GodModeLayout><GodAIOperations /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

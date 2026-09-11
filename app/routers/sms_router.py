@@ -223,6 +223,27 @@ async def sms_status_callback(
         msg.error_message = str(ErrorMessage)[:500]
 
     db.commit()
+
+    # AI OPERATIONS (T7): the same receipt, applied to the AI's own record of
+    # the message. Additive and dark — `delivery_status` matches on the
+    # provider's message id and does nothing when no AI communication carries
+    # it, which is every message in this deployment today. Wrapped because a
+    # failure in an observability layer must never turn a delivered receipt
+    # into a 500 that Twilio then retries.
+    try:
+        from app.services.ai_operations import flags as _ai_flags
+        if _ai_flags.operations_enabled():
+            from app.services.ai_operations import inbound as _ai_inbound
+            _ai_inbound.delivery_status(db, provider="twilio",
+                                        provider_message_id=MessageSid,
+                                        status=MessageStatus,
+                                        error=ErrorMessage)
+            db.commit()
+    except Exception:                                       # noqa: BLE001
+        db.rollback()
+        logger.exception("ai operations: delivery status not applied for %s",
+                         MessageSid)
+
     logger.info("twilio status callback: message=%s status=%s state=%s error=%s",
                 msg.id, MessageStatus, msg.send_state, ErrorCode or "-")
     return _twiml_ack()
@@ -252,6 +273,31 @@ async def inbound_webhook(
     403 on any failure, before any of the above is reachable.
     """
     await guard_inbound(request, db)
+
+    # AI OPERATIONS (T7): route the reply to an AI conversation if one owns
+    # this contact. Placed AFTER the authentication guard and BEFORE the
+    # existing pipeline, because an opt-out has to stop the AI employee at
+    # the same instant it stops everything else — not one pass later.
+    #
+    # ADDITIVE AND DARK. It returns `no_ai_conversation` for every message in
+    # this deployment today, it creates nothing when it cannot place one, and
+    # it is skipped entirely while AI_OPERATIONS_ENABLED is unset. Wrapped
+    # because a forged-proof webhook path must not gain a new way to 500:
+    # Twilio retries a 500, and a retried inbound is a duplicated reply.
+    try:
+        from app.services.ai_operations import flags as _ai_flags
+        if _ai_flags.operations_enabled():
+            from app.services.ai_operations import inbound as _ai_inbound
+            _ai_inbound.route(db, provider="twilio",
+                              provider_event_id=MessageSid,
+                              channel="sms", from_address=From,
+                              to_address=To, body=Body)
+            db.commit()
+    except Exception:                                       # noqa: BLE001
+        db.rollback()
+        logger.exception("ai operations: inbound not routed for %s",
+                         MessageSid)
+
     from app.services.dedup_service import normalize_phone
     from app.services.cadence_service import stop_cadence_for_lead
     from app.services.reply_classification_service import classify_reply, contains_hard_stop_language
