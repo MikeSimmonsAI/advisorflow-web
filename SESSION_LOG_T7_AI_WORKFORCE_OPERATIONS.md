@@ -2,8 +2,23 @@
 
 **Branch:** `feat/ai-workforce-operations`  ·  **Worktree:** `C:\Dev\advisorflow-ai-operations`
 **Cut from:** `origin/main` @ `aababc6`
-**State on delivery:** built, proven synthetically, fully dark. No real outreach
-occurred and none is reachable without three deliberate environment changes.
+**State on delivery:** built, proven synthetically, merged, deployed, fully dark.
+No real outreach occurred and none is reachable without three deliberate
+environment changes.
+
+**Shipped:** `c5700e1` (T7) + `43dfebc` (a pre-existing deploy-gate fix found on
+the way), merged to `main` and live in production — `/health` reports
+`commit_short: 43dfebc`, and the console is in the deployed frontend bundle.
+
+| Check | Result |
+|---|---|
+| T7 suite | 82 passed |
+| Adversarial harness | 37 / 37 |
+| Full backend regression (merged with current main) | **3027 passed, 14 skipped, 0 failed** |
+| Deploy gates (`scripts/run_gates.py`) | 25 passed, 7 failed — all seven identical on a clean `origin/main` checkout, and one that was failing on main now passes |
+| Frontend build | clean, console present in the deployed bundle |
+| Production routes | `/ai-operations/*` and `/god/ai-operations/*` answer 401 unauthenticated; unknown paths 404 |
+| Real outreach | none — every switch below is unset in `render.yaml` |
 
 ---
 
@@ -197,7 +212,29 @@ nothing sending", PROOFS runs the lifecycles and the harness on demand.
 
 ---
 
-## 9. WHAT T7 DELIBERATELY DID NOT BUILD
+## 9. THE SEVEN GATE FAILURES THAT ARE NOT MINE
+
+`scripts/run_gates.py` reports 25 passed, 7 failed on this branch. The same
+suite was run against a clean checkout of `origin/main` in a throwaway
+worktree and produced **the identical seven**, so none of them is caused by
+T7 and none is fixed by it:
+
+`smoke_tenancy.py` · `smoke_sales_execution.py` (four encryption assertions) ·
+`smoke_checkpoint6.py` · `smoke_checkpoint6_frontend.py` ·
+`smoke_sales_workspace_complete.py` · `smoke_sales_staff.py` ·
+`probe_platform_boundary.py` (`NameError: name 'plan_limits' is not defined`
+— a defect in the probe itself)
+
+The eighth, `smoke_platform_frontend.py` (GATE 29), WAS failing on main and
+now passes: see commit `43dfebc`. Its comment stripper removes block comments
+before line comments, so two `//` lines that spelled a wildcard route out in
+full made it delete the whole `ProtectedRoute` body and report the context
+banner as missing from every tenant screen. The banner was always mounted;
+the gate was reading a hole.
+
+---
+
+## 10. WHAT T7 DELIBERATELY DID NOT BUILD
 
 T9's Workforce Intelligence dashboard and T10's Executive Command Center —
 `supervisor_feed.supervisor_payload()` is the contract they consume. A second
