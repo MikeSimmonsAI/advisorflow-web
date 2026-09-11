@@ -96,8 +96,17 @@ class _FakeStripe:
 def stripe(monkeypatch):
     fake = _FakeStripe()
     monkeypatch.setattr(catalog_purchase, "_stripe", lambda: fake)
-    monkeypatch.setattr(catalog_purchase, "_brand_base_url",
-                        lambda db, org: "https://app.example")
+    # WHERE THE CUSTOMER COMES BACK TO, now resolved by `stripe_return` rather
+    # than by a base string this module concatenated itself. The fake mirrors
+    # exactly what the real resolver produces — a branded origin, an
+    # allowlisted path, and `part` carried on BOTH the success and the cancel
+    # so the confirmation can say what was bought either way.
+    monkeypatch.setattr(
+        catalog_purchase, "_return_targets",
+        lambda db, org, part: {
+            "success_url": "https://app.example/billing?part=%s&success=1" % part,
+            "cancel_url": "https://app.example/billing?canceled=1&part=%s" % part,
+        })
     import app.routers.billing_router as br
     monkeypatch.setattr(br, "_get_or_create_customer", lambda org, db: "cus_1")
     monkeypatch.setattr(br, "_brand_display_name", lambda db, org: "EvoSys Pro")

@@ -582,7 +582,8 @@ def add_attachment(db: Session, ticket: SupportTicket, *, filename: str,
 
 def _notify(db: Session, ticket: SupportTicket, *, to_email: Optional[str],
             subject: str, body_html: str) -> bool:
-    """Send one support email through the EXISTING provider.
+    """Send one support email through the EXISTING provider, AS THIS TICKET'S
+    BRAND.
 
     `email_service.send_email_via_provider` is what every other outbound
     email in this platform goes through. A support mailer with its own SMTP
@@ -590,15 +591,53 @@ def _notify(db: Session, ticket: SupportTicket, *, to_email: Optional[str],
     reputation and a second thing to configure per brand — all to send the
     same kind of message.
 
+    ══════════════════════════════════════════════════════════════════════
+    THE WHITE-LABEL LEAK THIS LINE USED TO BE
+    ══════════════════════════════════════════════════════════════════════
+
+    This called `send_email_via_provider(to_email, subject, body_html)` with
+    NO `org=` argument. That function reads its from-address off whatever it
+    is handed, and with nothing handed to it falls through to the module-level
+    `FROM_EMAIL` — one value for a deployment serving three brands, defaulting
+    to `noreply@bookaboost.com`. So a ticket raised inside EvoSys Pro produced
+    an email that announced itself as BookaBoost. The BODY was already correct
+    (it reads the brand's name out of the ticket's own snapshot); it was the
+    ENVELOPE that belonged to somebody else, which is the half a customer's
+    mail client shows them first.
+
+    The fix is not a special case here. It is the same shape as every other
+    identity in this codebase: resolve the brand from authoritative context —
+    THIS ticket's platform — hand the resolved identity to the sender, and let
+    an unresolved brand REFUSE rather than be filled in by a default.
+
     NEVER FAILS THE CALLER. A ticket that exists and was not emailed about is
     recoverable; a ticket that was refused because a mail server was down is
-    a customer with nowhere to go.
+    a customer with nowhere to go. A brand that cannot be resolved is logged
+    as an error and sends nothing, which is visible on the God console and is
+    strictly better than reaching the customer under the wrong name.
     """
     if not to_email:
         return False
     try:
+        from app.services import support_branding
         from app.services.email_service import send_email_via_provider
-        result = send_email_via_provider(to_email, subject, body_html)
+
+        identity = support_branding.sending_identity_for_ticket(db, ticket)
+        if not identity.from_email:
+            log.error(
+                "support_tickets: refusing to email about ticket %s — no "
+                "support sender is configured for its brand (platform=%s). "
+                "Set the platform's support email; nothing was sent under "
+                "another brand's address.",
+                ticket.ticket_number, identity.platform_id)
+            return False
+
+        result = send_email_via_provider(to_email, subject, body_html,
+                                         org=identity)
+        if not (result and result.get("success")):
+            log.warning("support_tickets: notification for ticket %s was not "
+                        "sent: %s", ticket.ticket_number,
+                        (result or {}).get("error"))
         return bool(result and result.get("success"))
     except Exception:                                          # noqa: BLE001
         log.exception("support_tickets: notification email failed for ticket %s",
@@ -607,17 +646,52 @@ def _notify(db: Session, ticket: SupportTicket, *, to_email: Optional[str],
 
 
 def _email_shell(ticket: SupportTicket, headline: str, body: str,
-                 *, footer: Optional[str] = None) -> str:
-    brand = _brand_name(ticket)
+                 *, footer: Optional[str] = None,
+                 brand: Optional[Dict[str, Any]] = None) -> str:
+    """The customer-facing support email, wearing ONE brand's face.
+
+    `brand` is the resolved block from `support_branding`; when it is absent
+    the name still comes from the ticket's own snapshot, which is what a
+    transcript read a year later should say. Everything visual — the accent
+    rule, the logo, the link home, the footer address — is the brand's and is
+    OMITTED where the brand has not configured it. A missing logo renders as
+    no logo; it never falls back to another brand's, and it never falls back
+    to AdvisorFlow's.
+    """
+    name = (brand or {}).get("display_name") or _brand_name(ticket)
+    accent = (brand or {}).get("accent_color") or "#1c2430"
+    logo = (brand or {}).get("logo_url")
+    app_url = (brand or {}).get("app_base_url")
+    support_email = (brand or {}).get("support_email")
+
+    head = ""
+    if logo:
+        head = ('<img src="%s" alt="%s" style="max-height:34px;display:block;'
+                'margin:0 0 12px">' % (logo, name))
+
+    default_footer = "Reply to this request in your workspace under Help &amp; Support."
+    if app_url:
+        default_footer = (
+            'Reply to this request in your workspace under Help &amp; Support '
+            '— <a href="%s/help" style="color:%s">open %s</a>.'
+            % (str(app_url).rstrip("/"), accent, name))
+
+    tail = footer or default_footer
+    if support_email:
+        tail += (' <span style="color:#9aa7b5">You can also reply to this '
+                 'email; it reaches %s.</span>' % support_email)
+
     return (
         '<div style="font-family:Arial,Helvetica,sans-serif;color:#1c2430">'
+        '%s'
         '<p style="margin:0 0 4px;font-size:12px;color:#6b7a8c">%s &middot; %s</p>'
+        '<div style="height:3px;width:44px;background:%s;margin:0 0 12px"></div>'
         '<h2 style="margin:0 0 12px;font-size:18px">%s</h2>'
         '<p style="margin:0 0 12px;white-space:pre-wrap">%s</p>'
         '<p style="margin:16px 0 0;font-size:12px;color:#6b7a8c">%s</p>'
         '</div>'
-    ) % (brand, ticket.ticket_number, headline, (body or "").strip(),
-         footer or "Reply to this request in your workspace under Help &amp; Support.")
+    ) % (head, name, ticket.ticket_number, accent, headline,
+         (body or "").strip(), tail)
 
 
 def notify_new_ticket(db: Session, ticket: SupportTicket, *,
@@ -631,7 +705,11 @@ def notify_new_ticket(db: Session, ticket: SupportTicket, *,
     """
     entitlement = _entitlement_of(ticket)
     from app.services import support_branding
-    brand = support_branding.brand_for_org(db, org)
+    # THE TICKET'S OWN BRAND, not the org's. They agree in every normal case;
+    # where they do not, the ticket is the record of which product the
+    # customer was actually inside when they asked for help, and the
+    # organization row can have been moved between brands since.
+    brand = support_branding.brand_for_ticket(db, ticket)
 
     target = None
     if ticket.first_response_due_at is not None:
@@ -646,7 +724,7 @@ def notify_new_ticket(db: Session, ticket: SupportTicket, *,
             subject="[%s] We've got your request" % ticket.ticket_number,
             body_html=_email_shell(
                 ticket, "We've received your request",
-                "%s\n\n%s" % (ticket.subject, promise)))
+                "%s\n\n%s" % (ticket.subject, promise), brand=brand))
 
     # The brand's own support inbox. Not a hardcoded address anywhere: an
     # unconfigured brand simply gets no internal email, which is visible on
@@ -663,7 +741,7 @@ def notify_new_ticket(db: Session, ticket: SupportTicket, *,
                     % (ticket.subject, getattr(org, "name", "—"),
                        Queue.LABELS.get(ticket.queue, ticket.queue),
                        TicketCategory.LABELS.get(ticket.category, ticket.category)),
-                    footer="Open this in God Mode → Support."))
+                    footer="Open this in God Mode → Support.", brand=brand))
 
 
 def notify_ticket_update(db: Session, ticket: SupportTicket, *, headline: str,
@@ -679,9 +757,11 @@ def notify_ticket_update(db: Session, ticket: SupportTicket, *, headline: str,
         submitter = db.query(User).filter(User.id == ticket.submitted_by).first()
     to_email = (getattr(submitter, "notification_email", None)
                 or getattr(submitter, "email", None))
+    from app.services import support_branding
+    brand = support_branding.brand_for_ticket(db, ticket)
     _notify(db, ticket, to_email=to_email,
             subject="[%s] %s" % (ticket.ticket_number, headline),
-            body_html=_email_shell(ticket, headline, body))
+            body_html=_email_shell(ticket, headline, body, brand=brand))
 
 
 # ══════════════════════════════════════════════════════════════════════════

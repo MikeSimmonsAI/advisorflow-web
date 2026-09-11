@@ -197,6 +197,19 @@ def _plan_full(p: BrandBillingPlan) -> Dict[str, Any]:
         # able to tell them apart, so neither is coerced.
         "max_leads": p.max_leads,
         "max_users": p.max_users,
+        # THE REST OF THE CAPACITY, AS CONFIGURATION. These used to be
+        # sentences in `features` and could only be corrected by a deploy,
+        # which is how the live Change Plan screen came to advertise an AI
+        # Voice allowance that is now a separate add-on. NULL is NOT
+        # CONFIGURED and the customer card omits it — never zero, never a
+        # guess.
+        "max_locations": getattr(p, "max_locations", None),
+        "email_monthly_allowance": getattr(p, "email_monthly_allowance", None),
+        "sms_monthly_allowance": getattr(p, "sms_monthly_allowance", None),
+        # How long a committed term runs on this tier. Drives the customer's
+        # commitment label; unset reads "Term agreement" rather than a number.
+        "term_months": getattr(p, "term_months", None),
+        "capacity": billing_catalog.capacity_for(p),
         "features": billing_catalog.features_for(p),
         "is_purchasable": bool(p.is_purchasable),
         "is_active": bool(p.is_active),
@@ -425,6 +438,16 @@ class PlanIn(BaseModel):
     month_to_month_cents: Optional[int] = None
     max_leads: Optional[int] = None
     max_users: Optional[int] = None
+    # Capacity that used to live as prose in `features`. Writable here so a
+    # God admin changes what the customer's plan card says without a deploy —
+    # which is the whole remedy for the stale-package-card defect.
+    max_locations: Optional[int] = None
+    email_monthly_allowance: Optional[int] = None
+    sms_monthly_allowance: Optional[int] = None
+    # The committed term's length in months. NULL means the brand has not
+    # decided one, and the customer-facing label says "Term agreement"
+    # instead of inventing a number.
+    term_months: Optional[int] = None
     features: Optional[List[str]] = None
     is_purchasable: Optional[bool] = None
     is_active: Optional[bool] = None
@@ -527,6 +550,10 @@ def upsert_plan(platform_id: str, key: str, body: PlanIn,
         plan.max_leads = _validate_ceiling(data["max_leads"], "max_leads")
     if "max_users" in data:
         plan.max_users = _validate_ceiling(data["max_users"], "max_users")
+    for _field in ("max_locations", "email_monthly_allowance",
+                   "sms_monthly_allowance", "term_months"):
+        if _field in data:
+            setattr(plan, _field, _validate_ceiling(data[_field], _field))
     if "features" in data:
         features = data["features"]
         if features is None:

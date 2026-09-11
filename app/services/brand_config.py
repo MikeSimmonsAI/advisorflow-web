@@ -258,7 +258,16 @@ def config_for_host(db, host: Optional[str]) -> dict:
     for slug in FROZEN_BRAND_DEFAULTS:
         if slug in h:
             return config_for_slug(db, slug)
-    return config_for_slug(db, "bookaboost")
+
+    # A HOST THAT MATCHES NOTHING GETS NOBODY'S BRAND.
+    #
+    # This line used to read `config_for_slug(db, "bookaboost")`, which handed
+    # an unrecognised host BookaBoost's name, accent, website and support
+    # address — a real brand's identity, given away by a default, in the one
+    # module whose own docstring says "never guess". `UNKNOWN_BRAND` exists
+    # for exactly this case and says so: every value in it is neutral or None,
+    # and nothing in it impersonates a brand that does exist.
+    return config_for_slug(db, None)
 
 
 def favicon_data_uri(cfg: dict) -> str:

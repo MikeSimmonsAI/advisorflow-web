@@ -243,6 +243,11 @@ export default function Billing() {
   // old tick can never carry over onto a new decision.
   const [commitment, setCommitment] = useState('month_to_month');
   const [termAck, setTermAck] = useState(false);
+  // Where this customer may be returned to, resolved server-side. Null until
+  // loaded, and null forever if the brand has no domain configured — in which
+  // case the actions below simply do not render rather than linking somewhere
+  // made up.
+  const [returnTargets, setReturnTargets] = useState(null);
   const [searchParams] = useSearchParams();
 
   const success = searchParams.get('success') === '1';
@@ -277,14 +282,27 @@ export default function Billing() {
             + 'This was a one-time charge; it does not change your subscription.'
           : '✅ Payment received. Thank you.';
 
+  // WHETHER THEY HAVE JUST COME BACK FROM STRIPE'S BILLING PORTAL.
+  // `stripe_return.portal_return_url` puts this on the portal's return link,
+  // so the page can acknowledge the round trip instead of looking identical
+  // to a plain reload.
+  const returnedFromPortal = searchParams.get('returned') === 'portal';
+
   const load = useCallback(async () => {
     // Both reads, both allowed to fail independently. A subscription that will
     // not load must not hide the catalogue, and vice versa — a page that shows
     // nothing because one of two calls failed is a page nobody can act on.
-    const [subRes, planRes] = await Promise.allSettled([
+    //
+    // The third is the set of safe destinations this customer can be returned
+    // to, from the SAME resolver that builds the URLs handed to Stripe. It is
+    // what the "Back to billing" and "Open account" actions link to, so the
+    // button the customer sees and the URL Stripe was given cannot drift.
+    const [subRes, planRes, retRes] = await Promise.allSettled([
       api.get('/billing/subscription'),
       api.get('/billing/plans'),
+      api.get('/billing/return-targets'),
     ]);
+    setReturnTargets(retRes.status === 'fulfilled' ? retRes.value : null);
     setSub(subRes.status === 'fulfilled' ? subRes.value : null);
     if (planRes.status === 'fulfilled') {
       setCatalog(planRes.value);
@@ -539,6 +557,48 @@ export default function Billing() {
       {canceled && (
         <div style={{ background: '#f59e0b20', border: '1px solid #f59e0b', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#f59e0b' }}>
           Checkout canceled. No changes were made.
+        </div>
+      )}
+      {returnedFromPortal && (
+        <div style={{ background: '#2fb6ff14', border: '1px solid #2fb6ff44', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#8cc6e8', fontSize: 14 }}>
+          You're back from the secure billing portal. Anything you changed
+          there is reflected below.
+        </div>
+      )}
+
+      {/* ══ THE WAY BACK, ALWAYS ON THE PAGE ═══════════════════════════════
+          THE DEAD END THIS REMOVES. Stripe gives us a return hook on Checkout
+          (`success_url` / `cancel_url`) and on the Billing Portal
+          (`return_url`, rendered as one small link). It gives us NONE on the
+          hosted invoice and receipt pages — those are customisable only in
+          branding and public business information, and there is no
+          application-controlled "back to us" button to set. A customer who
+          followed a receipt link had nothing to click.
+
+          So the app owns the way back on its own side of every handoff:
+          these actions are always visible, they come from the server's own
+          allowlisted destinations, and invoice links below open in a NEW TAB
+          so this page — signed in, with their account on it — is still
+          sitting behind Stripe's. */}
+      {returnTargets?.resolved && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
+                      alignItems: 'center', marginBottom: '24px' }}>
+          <a href={returnTargets.surfaces.billing}
+             style={{ background: '#2a2a4a', color: '#fff', borderRadius: 8,
+                      padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                      textDecoration: 'none' }}>
+            ← Back to billing
+          </a>
+          <a href={returnTargets.surfaces.account}
+             style={{ background: 'transparent', color: '#8cc6e8',
+                      border: '1px solid #2a2a4a', borderRadius: 8,
+                      padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                      textDecoration: 'none' }}>
+            Open account
+          </a>
+          <span style={{ color: '#666', fontSize: 12 }}>
+            Payment pages are hosted by Stripe. These take you back here at any point.
+          </span>
         </div>
       )}
       {notice && (
@@ -988,12 +1048,20 @@ export default function Billing() {
                       from being read as "the" price — and showing the
                       alternative makes the trade visible instead of hidden
                       behind a toggle the customer may not have noticed. */}
+                  {/* THE COMMITMENT LABEL IS THE SERVER'S, NOT THIS FILE'S.
+                      `offer.label` comes from billing_catalog.commitment_label
+                      with the plan's own `term_months`, so a configured term
+                      reads "12-month agreement" and an unconfigured one reads
+                      "Term agreement". The "24-month price lock" this screen
+                      used to show came from neither — it was a sentence in a
+                      features list. COMMITMENT_LABEL below is only a fallback
+                      for a payload that predates the server label. */}
                   {interval === 'month' && priced && (
                     <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>
-                      {COMMITMENT_LABEL[commitment]}
+                      {(offer && offer.label) || COMMITMENT_LABEL[commitment]}
                       {otherOffer && otherOffer.monthly_cents !== null
                         && otherOffer.monthly_cents !== undefined && (
-                        <> · {COMMITMENT_LABEL[otherOffer.key]} is{' '}
+                        <> · {otherOffer.label || COMMITMENT_LABEL[otherOffer.key]} is{' '}
                           {money(otherOffer.monthly_cents, plan.currency)}/mo</>
                       )}
                     </div>
@@ -1001,10 +1069,64 @@ export default function Billing() {
                   {plan.description && (
                     <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>{plan.description}</div>
                   )}
+
+                  {/* ══ WHAT THE TIER INCLUDES ════════════════════════════
+                      EVERY LINE HERE IS CONFIGURATION, NOT COPY.
+
+                      This block used to be `plan.features` alone — a list of
+                      sentences somebody typed into the seed, rendered to a
+                      paying customer as fact. On the live screen it was
+                      advertising "Up to 2 users" (settled at 1), "AI voice
+                      300 min/mo" (AI Voice is a separate add-on now) and
+                      "Priority support + 24-month price lock" (no term was
+                      ever configured, and support is the support product's
+                      own entitlement). None of it could be corrected without
+                      a deploy.
+
+                      `capacity` is built server-side from the plan's own
+                      columns, so a God Mode edit changes this card on the
+                      next load. A dimension the brand has not configured is
+                      ABSENT rather than guessed — no "0 SMS", no invented
+                      "unlimited". `support` comes from the support
+                      entitlement authority, so the queue promised here is the
+                      queue the ticket actually joins. */}
                   <div style={{ marginBottom: '20px', marginTop: '12px' }}>
+                    {(plan.capacity || []).map(c => (
+                      <div key={c.key} style={{ fontSize: '13px', color: '#ccc',
+                                                marginBottom: '6px' }}>
+                        ✓ {c.unlimited
+                            ? `Unlimited ${c.label.toLowerCase()}`
+                            : `${c.value.toLocaleString()} ${c.label.toLowerCase()}${c.unit ? ' ' + c.unit : ''}`}
+                      </div>
+                    ))}
+
+                    {plan.support && (
+                      <div style={{ fontSize: '13px', color: '#ccc', marginBottom: '6px' }}>
+                        ✓ {plan.support.queue_label || plan.support.display_name}
+                        {plan.support.included_assistance_minutes
+                          ? ` · ${plan.support.included_assistance_minutes} min included assistance/mo`
+                          : ''}
+                      </div>
+                    )}
+
+                    {/* Qualitative statements a brand has chosen to make.
+                        Empty for EvoSys Pro by design — everything it used to
+                        claim here is now a column above. */}
                     {(plan.features || []).map(f => (
                       <div key={f} style={{ fontSize: '13px', color: '#ccc', marginBottom: '6px' }}>✓ {f}</div>
                     ))}
+
+                    {/* AN HONEST CONFIGURED-STATE MESSAGE, NEVER A FILLER
+                        FEATURE. A tier whose capacity nobody has set says so;
+                        it does not borrow another tier's list or invent one. */}
+                    {(plan.capacity || []).length === 0
+                      && (plan.features || []).length === 0 && (
+                      <div style={{ fontSize: '13px', color: '#888', marginBottom: '6px' }}>
+                        {plan.is_purchasable
+                          ? 'Capacity for this plan has not been configured yet.'
+                          : 'Capacity and pricing are agreed per customer.'}
+                      </div>
+                    )}
                   </div>
 
                   {/* A tier that is listed but not self-serve (Enterprise) gets
@@ -1036,6 +1158,17 @@ export default function Billing() {
       {/* ── Invoice history ──────────────────────────────────────────────── */}
       <div style={{ ...CARD }}>
         <div style={{ fontWeight: '700', fontSize: '16px', marginBottom: '12px' }}>Invoices</div>
+        {/* SAYING WHAT STRIPE ACTUALLY DOES, RATHER THAN PRETENDING.
+            A hosted invoice/receipt page carries our brand colour, logo and
+            public business details — and no return button we can set. Every
+            link below therefore opens in a new tab, and this line tells the
+            customer so BEFORE they click, which is the difference between a
+            new tab and a page they think they are trapped on. */}
+        {invoices.length > 0 && (
+          <div style={{ color: '#888', fontSize: 12, marginBottom: 10 }}>
+            Receipts open in a new tab on Stripe's secure page — this page stays open behind it.
+          </div>
+        )}
         {invoices.length === 0 ? (
           // No invoice yet is a fact, not a failure — and it is not a $0 row.
           <div style={{ color: '#888', fontSize: '13px' }}>
