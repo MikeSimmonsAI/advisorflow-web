@@ -92,6 +92,60 @@ def _diff(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict[str, Any]]
     return out
 
 
+def _read_schedule(sub: Dict[str, Any]) -> Dict[str, Any]:
+    """What Stripe still has BOOKED for this subscription, if anything.
+
+    A deferred plan change is a Subscription Schedule, and no webhook payload
+    this platform handles carries its phases. So the one question an operator
+    asks when a scheduled downgrade looks wrong — "is it still there?" — has
+    had no answer inside the product at all.
+
+    READ ONLY, AND NEVER FATAL. A schedule that cannot be retrieved reports
+    itself as unknown rather than as absent: "Stripe has no scheduled change"
+    and "we could not ask" are opposite facts, and rendering them the same is
+    how somebody concludes a customer's downgrade was lost when it was not.
+    """
+    import stripe
+
+    raw = sub.get("schedule")
+    schedule_id = raw.get("id") if isinstance(raw, dict) else raw
+    if not schedule_id:
+        return {"known": True, "has_schedule": False, "schedule_id": None,
+                "next_phase": None,
+                "explanation": "Stripe has no scheduled change for this "
+                               "subscription."}
+    try:
+        sched = stripe.SubscriptionSchedule.retrieve(schedule_id)
+    except Exception as exc:                             # pragma: no cover
+        log.warning("billing_resync: could not read schedule %s: %s",
+                    schedule_id, exc)
+        return {"known": False, "has_schedule": None,
+                "schedule_id": schedule_id, "next_phase": None,
+                "explanation": "Stripe named a schedule but would not return "
+                               "it, so what is booked is unknown - not absent."}
+
+    # The phase that has not started. `current_phase` names the one running, so
+    # anything starting later is what the customer is waiting for.
+    current_end = ((sched.get("current_phase") or {}).get("end_date"))
+    upcoming = None
+    for phase in (sched.get("phases") or []):
+        start = phase.get("start_date")
+        if current_end and start and start >= current_end:
+            prices = [((it.get("price") or {}).get("id")
+                       if isinstance(it.get("price"), dict) else it.get("price"))
+                      for it in (phase.get("items") or [])]
+            upcoming = {"starts_at": start,
+                        "price_ids": [p for p in prices if p]}
+            break
+
+    return {"known": True, "has_schedule": True, "schedule_id": schedule_id,
+            "status": sched.get("status"), "next_phase": upcoming,
+            "explanation": ("Stripe has a change booked for this subscription."
+                            if upcoming else
+                            "Stripe has a schedule on this subscription but no "
+                            "phase after the current one.")}
+
+
 def resync_subscription(db: Session, org: Organization,
                         dry_run: bool = False) -> Dict[str, Any]:
     """Refresh one organization's subscription mirror from Stripe.
@@ -136,6 +190,13 @@ def resync_subscription(db: Session, org: Organization,
     # two versions of the truth and no way to tell which a given row came from.
     billing_webhook.apply_subscription(db, org, sub)
 
+    # AND THE SCHEDULE, which no webhook payload carries. A deferred downgrade
+    # lives on a Subscription Schedule, and until now nothing on this platform
+    # could answer "does Stripe still have that change booked" — which is the
+    # question somebody asks precisely when they suspect it went missing.
+    # Answering it from the product beats answering it from a dashboard.
+    schedule = _read_schedule(sub)
+
     after = _snapshot(org)
     changed = _diff(before, after)
 
@@ -147,15 +208,39 @@ def resync_subscription(db: Session, org: Organization,
             setattr(org, field, value)
         db.rollback()
 
+    # DOES WHAT STRIPE HAS BOOKED MATCH WHAT THIS PLATFORM SHOWS? Reported
+    # rather than reconciled: restoring a pending marker from a schedule means
+    # deciding which plan and commitment that schedule's price represents, and
+    # a refresh that guessed would write a change nobody made. Saying the two
+    # disagree is enough to act on, and it is honest about which side is which.
+    _shows_pending = bool(getattr(org, "billing_pending_plan_key", None))
+    disagreement = None
+    if schedule.get("known"):
+        if schedule.get("next_phase") and not _shows_pending:
+            disagreement = (
+                "Stripe has a change booked for this subscription that this "
+                "platform is not showing. The customer is expecting it; the "
+                "screens are not. Re-record the change, or cancel it at "
+                "Stripe, rather than leaving the two disagreeing.")
+        elif _shows_pending and not schedule.get("has_schedule"):
+            disagreement = (
+                "This platform shows a pending change but Stripe has no "
+                "schedule for it, so nothing will happen on the date the "
+                "customer was given.")
+
     return {
         "organization_id": org.id,
         "stripe_subscription_id": sub_id,
         "dry_run": bool(dry_run),
         "changed": changed,
         "unchanged": not changed,
+        "schedule": schedule,
+        "shows_pending_locally": _shows_pending,
+        "disagreement": disagreement,
         "explanation": (
             "Read from Stripe and applied through the same function the "
             "webhook uses. Nothing was written TO Stripe. An empty change list "
-            "means the webhook mirror was already correct."
+            "means the webhook mirror was already correct. The schedule is "
+            "reported separately because no webhook carries it."
         ),
     }

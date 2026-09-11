@@ -154,6 +154,15 @@ import app.models.exec_workspace_models  # noqa: F401  (imported for side effect
 # this line makes every support table silently never appear, which the support
 # product would report as "no tickets" rather than as an error.
 import app.models.support_models  # noqa: F401  (imported for side effects)
+# OAuth authorization transactions (oauth_auth_transactions). Same Base, same
+# reason, and the consequence of dropping this line is a security one rather
+# than a cosmetic one: without the table, `oauth_state_service.issue_state`
+# raises on the first connect attempt and the Google/Microsoft flows stop
+# working entirely. That is loud, which is the right failure — the shape to
+# NEVER accept is anyone "fixing" it by reading the user id out of the raw
+# `state` again. Added to BOTH blocks in this file, per the merge-artifact
+# note above.
+import app.models.oauth_models  # noqa: F401  (imported for side effects)
 # AI Workforce (ai_employee_templates / ai_brand_offerings / ai_employees /
 # ai_employee_authorities / ai_work_items / ai_work_item_events /
 # ai_employee_runs / ai_tool_executions / ai_eligibility_results /
@@ -348,6 +357,10 @@ import app.models.training_models  # noqa: F401  (imported for side effects)
 # launch_intake_models comment above); an import added to only one copy looks
 # correct in a diff and half-works. Same tables, same reason as the first copy.
 import app.models.support_models  # noqa: F401  (imported for side effects)
+# OAuth authorization transactions — the SECOND copy of this line, same tables
+# and same reason as the first. See the note on that copy for what breaks if it
+# is dropped.
+import app.models.oauth_models  # noqa: F401  (imported for side effects)
 # AI Workforce — the SECOND copy of this line, for the same reason as the
 # support line above it. Same tables, same ownership, same consequence if it
 # is ever dropped from one block and not the other.
