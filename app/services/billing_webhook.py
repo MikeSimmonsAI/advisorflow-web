@@ -942,6 +942,21 @@ def _handle_subscription_deleted(db: Session, org: Organization, obj: dict) -> N
         log.info("billing_webhook: subscription ended for %s - closed %d "
                  "recurring add-on(s) that went with it", org.id, len(_ended))
 
+    # ══ AND SO DID ANY AI EMPLOYEES THOSE ADD-ONS ENTITLED ═══════════════
+    #
+    # An AI employee whose entitlement just lapsed must not keep working. This
+    # is the one direction commerce is allowed to push the workforce: stopping.
+    # `on_commercial_change` re-reads each deployment's position against T2 and
+    # SUSPENDS anything no longer entitled - it never starts anything, so a
+    # mistaken reconcile costs an operator a click and a missed one is caught
+    # again by the live gateway, which asks T2 on every single tool call.
+    #
+    # WRAPPED, because this is a webhook. An AI employee's bookkeeping must
+    # never be the reason a billing event fails to process.
+    from app.services.ai_deployment import commerce as _ai_commerce
+    _ai_commerce.on_commercial_change(
+        db, org.id, reason="the subscription behind it ended")
+
     # `plan` and `billing_plan_key` are deliberately LEFT AS THEY WERE. What
     # they bought is a historical fact, and entitlement decisions are made from
     # billing_status by a policy that is currently unset - not by silently

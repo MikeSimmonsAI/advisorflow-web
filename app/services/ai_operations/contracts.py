@@ -676,11 +676,30 @@ def request_work_item_state(db: Session, work_item_id: Optional[str], *,
     if not work_item_id or not T6_PRESENT:
         return False
     try:
-        if _wf_queue is not None and hasattr(_wf_queue, "transition"):
-            return bool(_wf_queue.transition(
-                db, work_item_id=work_item_id,
-                organization_id=organization_id, to_state=to_state,
-                reason=reason))
+        if _wf_queue is None or _wf_models is None:
+            return False
+        # THE ROW IS LOADED INSIDE THE TENANT FIRST, and T6's own API takes the
+        # row rather than an id. An earlier version of this call passed
+        # `work_item_id=` as a keyword, which T6's `transition` has never
+        # accepted - so every request from this layer raised TypeError, was
+        # swallowed by the except below, and returned False. The operations
+        # layer therefore could not move a work item at all, silently, and the
+        # only symptom was an info log nobody reads.
+        AIWorkItem = getattr(_wf_models, "AIWorkItem")
+        item = (db.query(AIWorkItem)
+                .filter(AIWorkItem.id == work_item_id,
+                        AIWorkItem.organization_id == organization_id)
+                .first())
+        if item is None:
+            return False
+        # `advance_to` rather than `transition`: it walks LEGAL EDGES and
+        # records every hop, which is what stops an action that already
+        # happened being reported as refused because the item was one state
+        # further back than the caller assumed. T6's own header explains the
+        # defect that reasoning came from.
+        _wf_queue.advance_to(db, item, to_state, reason=reason,
+                             actor_kind="ai_employee")
+        return True
     except Exception as exc:                                 # noqa: BLE001
         _log.info("ai_operations: work item transition refused (%s)", exc)
     return False

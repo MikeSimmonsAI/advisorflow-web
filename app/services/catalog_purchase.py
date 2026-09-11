@@ -335,7 +335,33 @@ def remove_recurring_addon(db: Session, org: Organization,
     purchase.canceled_at = datetime.utcnow()
     db.commit()
     db.refresh(purchase)
+    _reconcile_ai_workforce(db, org, "a recurring add-on was removed")
     return purchase
+
+
+def _reconcile_ai_workforce(db: Session, org: Organization,
+                            reason: str) -> None:
+    """Tell the AI workforce that this customer's entitlements moved.
+
+    AFTER THE COMMIT, DELIBERATELY. The commercial record is the authoritative
+    one and it is already safe on disk; what follows is the workforce layer
+    catching up with it. Running before the commit would make an AI employee's
+    bookkeeping able to roll back a removal the customer already saw succeed.
+
+    ONLY EVER STOPS SOMETHING. `on_commercial_change` suspends deployments that
+    are no longer entitled and never starts one, so the worst outcome of this
+    firing wrongly is an operator switching an employee back on.
+    """
+    try:
+        from app.services.ai_deployment import commerce as ai_commerce
+        result = ai_commerce.on_commercial_change(db, org.id, reason=reason)
+        if result.get("suspended"):
+            db.commit()
+            log.info("catalog_purchase: %s - suspended %d AI employee(s)",
+                     reason, result["suspended"])
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("catalog_purchase: AI workforce reconcile skipped (%s)",
+                    exc)
 
 
 def withdraw_pending(db: Session, org: Organization,
@@ -378,6 +404,7 @@ def withdraw_pending(db: Session, org: Organization,
     purchase.checkout_url = None          # the link is no longer a link
     db.commit()
     db.refresh(purchase)
+    _reconcile_ai_workforce(db, org, "an unpaid checkout was withdrawn")
     return purchase
 
 

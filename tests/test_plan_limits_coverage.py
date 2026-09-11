@@ -92,6 +92,28 @@ EXEMPT = {
     # before it reaches anybody.
     "services/ai_operations/profiles.py": "synthetic proving profiles; writes only into clearly-marked synthetic organizations with no plan and no billable seats",
 
+    # THE DEPLOYMENT PROOF'S WORLD. The same category as the three synthetic
+    # builders above, and stricter than two of them, so the reason is stated
+    # rather than inherited.
+    #
+    # `_org` OWNS the tenants it writes into: it looks them up by slugs this
+    # module builds from a fixed `t8-proof-` prefix, creates them when absent,
+    # and sets `is_demo=True` on creation. No caller can hand it an
+    # organization, so there is no argument that steers a synthetic population
+    # into a paying customer's tenant. Every lead carries a 555-01xx number in
+    # the reserved fiction block and an `example.invalid` address, so none of
+    # them is a person anybody can reach. The God route that runs it wraps the
+    # whole thing in a savepoint that is rolled back in a `finally`, so in the
+    # only place a production database ever sees these rows, they do not
+    # outlive the request.
+    #
+    # It is NOT an exemption for the deployment layer itself. Nothing else in
+    # services/ai_deployment/ constructs a User or a Lead - the layer hires,
+    # configures and retires AI employees against records that already exist,
+    # and `evaluation.py` builds its world by calling THIS module's helpers
+    # rather than growing a second set.
+    "services/ai_deployment/simulation.py": "synthetic deployment proof; writes only into is_demo tenants it creates itself, with unroutable addresses, inside a savepoint on the one path production runs it",
+
     # Brand-sales staff live at SCOPE_BRAND_SALES_ORG with organization_id
     # NULL. They are not seats in any customer's plan.
     "services/sales_staff.py": "brand sales-org staff; organization_id is NULL, not a customer seat",
@@ -301,3 +323,78 @@ def test_bypass_reasons_are_all_role_restricted_and_explained():
         assert spec.get("roles"), f"bypass {name!r} has no role restriction"
         assert all(r for r in spec["roles"]), f"bypass {name!r} has an empty role"
         assert spec.get("why"), f"bypass {name!r} has no stated reason"
+
+
+# ---------------------------------------------------------------------------
+# THE T8 EXEMPTION IS POLICED, NOT GRANTED
+# ---------------------------------------------------------------------------
+#
+# `services/ai_deployment/simulation.py` is exempted above on four stated
+# claims. An exemption whose claims nothing checks is a permission slip, so
+# each claim gets a test. If the proof ever starts writing into a tenant it did
+# not create, or reaching an address that resolves, the waiver fails with it.
+
+def test_the_deployment_proof_owns_every_tenant_it_writes_into():
+    """It looks organizations up by its own slug and flags them `is_demo`.
+
+    No parameter anywhere in it accepts an organization, so there is no
+    argument that steers a synthetic population into a paying customer.
+    """
+    import inspect
+    from app.services.ai_deployment import simulation
+
+    src = inspect.getsource(simulation._org)
+    assert "is_demo=True" in src
+    params = list(inspect.signature(simulation._org).parameters)
+    # (db, platform, slug, name) - a brand and a slug, never an organization.
+    assert "organization" not in params and "org" not in params
+    assert "organization_id" not in params
+
+
+def test_every_deployment_proof_slug_carries_the_synthetic_prefix():
+    from app.services.ai_deployment import simulation
+    assert simulation.SYNTHETIC_PREFIX == "t8-proof"
+    for spec in simulation.SCENARIOS.values():
+        assert spec["slug"] and "/" not in spec["slug"]
+
+
+def test_every_deployment_proof_contact_is_unreachable():
+    """555-01xx is the reserved fiction block; `.invalid` cannot resolve.
+
+    Read out of the source rather than out of a run, so this holds even if the
+    proof is never executed in this environment.
+    """
+    import inspect
+    import re
+    from app.services.ai_deployment import evaluation, simulation
+
+    for module in (simulation, evaluation):
+        src = inspect.getsource(module)
+        for phone in re.finditer(r'phone="(\d{11})"', src):
+            assert phone.group(1).startswith("155501"), phone.group(1)
+        for email in re.finditer(r'email="([^"]+@[^"]+)"', src):
+            assert email.group(1).endswith(".invalid"), email.group(1)
+
+
+def test_nothing_else_in_the_deployment_layer_creates_a_person():
+    """The exemption covers one file, and only because the rest need none.
+
+    The deployment layer hires, configures and retires AI employees against
+    records that already exist. A second file in it constructing a User or a
+    Lead would be a second creation path inheriting a waiver written for the
+    first.
+    """
+    import inspect
+    from app.services import ai_deployment
+
+    base = os.path.dirname(inspect.getfile(ai_deployment))
+    offenders = []
+    for name in sorted(os.listdir(base)):
+        if not name.endswith(".py") or name == "simulation.py":
+            continue
+        src = open(os.path.join(base, name), encoding="utf-8").read()
+        if CONSTRUCTS.search(src):
+            offenders.append(name)
+    assert not offenders, (
+        "these files construct a User or Lead and are not the exempted "
+        "proof: %s" % offenders)

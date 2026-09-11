@@ -58,6 +58,7 @@ const ICONS = {
   // here renders `d={undefined}`, i.e. an invisible glyph and a nav row that
   // looks half-drawn. Add the key here rather than reusing an unrelated one.
   cpu:       'M4 4h16v16H4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3',
+  package:   'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12',
 }
 
 /**
@@ -230,6 +231,15 @@ const NAV = [
     hint: 'Dark-launch state, provider resolution per channel, one '
         + 'customer’s supervisor read, unattributable inbound, and the '
         + 'synthetic proofs' },
+  // A THIRD ENTRY, AND AGAIN NOT THE SAME SCREEN. The two above answer what an
+  // employee may be and what it did. This one answers the commercial and
+  // deployment question: what each brand sells, to which packages, and where
+  // every customer's hired employee has got to. It is also the only one of the
+  // three that completes an activation, which is why it lives beside them
+  // rather than inside Billing.
+  { label: 'AI Deployment',    path: '/god/ai-deployment',     icon: 'package',
+    hint: 'Brand commercial terms, every customer’s deployment state, '
+        + 'readiness, activation, reconciliation and the orphan sweep' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SECURITY & PLATFORM
