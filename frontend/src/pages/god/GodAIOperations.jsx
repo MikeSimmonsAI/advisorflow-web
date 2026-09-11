@@ -62,11 +62,11 @@ function money(value) {
 
 function Pill({ tone = 'muted', children }) {
   const colors = {
-    ok: ['#19d67c', 'rgba(25,214,124,.13)'],
-    warn: ['#f5a524', 'rgba(245,165,36,.13)'],
-    bad: ['#ff5c68', 'rgba(255,92,104,.13)'],
-    info: ['#3aa0ff', 'rgba(58,160,255,.13)'],
-    muted: ['#8fa3b8', 'rgba(143,163,184,.12)'],
+    ok: ['var(--gm-teal)', 'var(--gm-teal-wash)'],
+    warn: ['var(--gm-amber)', 'var(--gm-amber-wash)'],
+    bad: ['var(--gm-red)', 'var(--gm-red-wash)'],
+    info: ['var(--gm-blue)', 'var(--gm-blue-wash)'],
+    muted: ['var(--gm-blue)', 'var(--gm-blue-wash)'],
   }
   const [fg, bg] = colors[tone] || colors.muted
   return (
@@ -86,18 +86,18 @@ function Metric({ label, value, tone, onClick, hint }) {
       title={hint}
       className="gm-card"
       style={{
-        textAlign: 'left', padding: '13px 15px', border: '1px solid #1b2838',
-        background: '#0b1220', borderRadius: 10, cursor: onClick ? 'pointer' : 'default',
-        color: '#fff', minWidth: 130,
+        textAlign: 'left', padding: '13px 15px', border: '1px solid var(--gm-pill-blue-bd)',
+        background: 'var(--gm-pill-blue-bg)', borderRadius: 10, cursor: onClick ? 'pointer' : 'default',
+        color: 'var(--gm-head)', minWidth: 130,
       }}
     >
       <div style={{
         fontSize: 10.5, letterSpacing: '.09em', textTransform: 'uppercase',
-        color: '#758ba4', fontWeight: 700,
+        color: 'var(--gm-blue)', fontWeight: 700,
       }}>{label}</div>
       <div style={{
         fontSize: 25, fontWeight: 700, marginTop: 4, lineHeight: 1,
-        color: tone === 'bad' ? '#ff5c68' : tone === 'warn' ? '#f5a524' : '#fff',
+        color: tone === 'bad' ? 'var(--gm-red)' : tone === 'warn' ? 'var(--gm-amber)' : 'var(--gm-head)',
       }}>{value === null || value === undefined ? '—' : value}</div>
     </button>
   )
@@ -106,17 +106,17 @@ function Metric({ label, value, tone, onClick, hint }) {
 function Section({ title, subtitle, right, children }) {
   return (
     <div className="gm-card" style={{
-      border: '1px solid #1b2838', background: '#0b1220', borderRadius: 12,
+      border: '1px solid var(--gm-pill-blue-bd)', background: 'var(--gm-pill-blue-bg)', borderRadius: 12,
       marginBottom: 16, overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        gap: 12, padding: '13px 16px', borderBottom: '1px solid #1b2838',
+        gap: 12, padding: '13px 16px', borderBottom: '1px solid var(--gm-pill-blue-bd)',
       }}>
         <div>
-          <div style={{ color: '#fff', fontWeight: 700, fontSize: 13.5 }}>{title}</div>
+          <div style={{ color: 'var(--gm-head)', fontWeight: 700, fontSize: 13.5 }}>{title}</div>
           {subtitle && (
-            <div style={{ color: '#758ba4', fontSize: 12, marginTop: 2 }}>{subtitle}</div>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 2 }}>{subtitle}</div>
           )}
         </div>
         {right}
@@ -128,7 +128,7 @@ function Section({ title, subtitle, right, children }) {
 
 function Empty({ children }) {
   return (
-    <div style={{ padding: '26px 16px', color: '#758ba4', fontSize: 12.5 }}>
+    <div style={{ padding: '26px 16px', color: 'var(--gm-blue)', fontSize: 12.5 }}>
       {children}
     </div>
   )
@@ -137,9 +137,9 @@ function Empty({ children }) {
 function Fact({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+      <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                     letterSpacing: '.08em', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ color: '#cfe0f0', fontSize: 13, marginTop: 3 }}>{value}</div>
+      <div style={{ color: 'var(--gm-blue)', fontSize: 13, marginTop: 3 }}>{value}</div>
     </div>
   )
 }
@@ -186,15 +186,15 @@ export default function GodAIOperations() {
           <button className="gm-btn" style={{ marginBottom: 12 }}
                   onClick={() => navigate('/god')}>← COMMAND CENTER</button>
           <h1 style={{
-            margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em',
+            margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em',
             lineHeight: 1,
           }}>AI Operations</h1>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 820 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 820 }}>
             The platform-level view of the AI workforce: which brakes are on,
             what each channel would resolve to, what one customer&apos;s
             employees are doing, the inbound nobody could place, and the
             synthetic proofs. {dark && (
-              <strong style={{ color: '#9fb4c9' }}>
+              <strong style={{ color: 'var(--gm-blue)' }}>
                 {dark.live_send_enabled
                   ? 'Live sending is enabled in this deployment.'
                   : 'Nothing reaches a real person in this deployment.'}
@@ -211,8 +211,8 @@ export default function GodAIOperations() {
               className="gm-btn"
               onClick={() => setTab(t.key)}
               style={{
-                borderColor: tab === t.key ? '#3aa0ff' : undefined,
-                color: tab === t.key ? '#fff' : undefined,
+                borderColor: tab === t.key ? 'var(--gm-blue)' : undefined,
+                color: tab === t.key ? 'var(--gm-head)' : undefined,
               }}
             >{t.label}</button>
           ))}
@@ -247,7 +247,7 @@ const CONTRACT_LABEL = {
 function Switch({ label, on, warnWhenOn, onLabel = 'ON', offLabel = 'OFF', note }) {
   return (
     <div style={{ minWidth: 190 }}>
-      <div style={{ fontSize: 10.5, color: '#758ba4', fontWeight: 700,
+      <div style={{ fontSize: 10.5, color: 'var(--gm-blue)', fontWeight: 700,
                     letterSpacing: '.08em', textTransform: 'uppercase' }}>{label}</div>
       <div style={{ marginTop: 5 }}>
         <Pill tone={on ? (warnWhenOn ? 'warn' : 'info') : 'ok'}>
@@ -255,7 +255,7 @@ function Switch({ label, on, warnWhenOn, onLabel = 'ON', offLabel = 'OFF', note 
         </Pill>
       </div>
       {note && (
-        <div style={{ color: '#546b82', fontSize: 11.5, marginTop: 5, maxWidth: 240 }}>
+        <div style={{ color: 'var(--gm-blue)', fontSize: 11.5, marginTop: 5, maxWidth: 240 }}>
           {note}
         </div>
       )}
@@ -284,7 +284,7 @@ function PlatformTab({ state, error }) {
       >
         <div style={{
           display: 'flex', gap: 20, flexWrap: 'wrap', padding: '14px 16px',
-          borderBottom: '1px solid #1b2838',
+          borderBottom: '1px solid var(--gm-pill-blue-bd)',
         }}>
           <Switch label="Operations enabled" on={!!dark.operations_enabled}
                   note="With this off, every operation refuses before any other question is asked." />
@@ -296,8 +296,8 @@ function PlatformTab({ state, error }) {
                   onLabel="ENGAGED" offLabel="NOT ENGAGED"
                   note="The environment-level brake, checked first, everywhere." />
         </div>
-        <div style={{ padding: '13px 16px', color: '#cfe0f0', fontSize: 13,
-                      borderBottom: '1px solid #1b2838' }}>
+        <div style={{ padding: '13px 16px', color: 'var(--gm-blue)', fontSize: 13,
+                      borderBottom: '1px solid var(--gm-pill-blue-bd)' }}>
           {dark.explanation || 'The deployment returned no explanation.'}
         </div>
         <Rows
@@ -364,7 +364,7 @@ function PlatformTab({ state, error }) {
           {(key) => (
             <tr key={key}>
               <td>{CONTRACT_LABEL[key] || key}<br />
-                <span style={{ fontFamily: 'monospace', color: '#546b82', fontSize: 11 }}>
+                <span style={{ fontFamily: 'monospace', color: 'var(--gm-blue)', fontSize: 11 }}>
                   {key}
                 </span>
               </td>
@@ -448,7 +448,7 @@ function SupervisorTab() {
           />
           <button className="gm-btn" type="submit" disabled={!orgId.trim()}>LOAD</button>
           {asked && (
-            <span style={{ color: '#546b82', fontSize: 11.5, fontFamily: 'monospace' }}>
+            <span style={{ color: 'var(--gm-blue)', fontSize: 11.5, fontFamily: 'monospace' }}>
               {asked}
             </span>
           )}
@@ -729,7 +729,7 @@ function ProofsTab() {
         title="Run a proof"
         subtitle="Both runs go through the real engine and the whole gate chain. What they prove is what the engine actually does, not what a fixture says it does."
       >
-        <div style={{ padding: '13px 16px 0', color: '#f5a524', fontSize: 12.5 }}>
+        <div style={{ padding: '13px 16px 0', color: 'var(--gm-amber)', fontSize: 12.5 }}>
           Running either of these creates clearly-marked synthetic
           organizations and invented contacts in this deployment. Nothing
           they do can reach a real person.
@@ -757,7 +757,7 @@ function ProofsTab() {
             {running === 'evaluate' ? 'RUNNING…' : 'RUN FULL EVALUATION'}
           </button>
           {busy && (
-            <span style={{ color: '#758ba4', fontSize: 12 }}>
+            <span style={{ color: 'var(--gm-blue)', fontSize: 12 }}>
               This takes a few seconds — the engine is running the whole chain.
             </span>
           )}
@@ -825,9 +825,9 @@ function Report({ report }) {
   const thread = report.thread
   const steps = report.steps || []
   return (
-    <div style={{ borderTop: '1px solid #1b2838', padding: '13px 16px' }}>
+    <div style={{ borderTop: '1px solid var(--gm-pill-blue-bd)', padding: '13px 16px' }}>
       <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontFamily: 'monospace', color: '#fff' }}>{report.scenario}</span>
+        <span style={{ fontFamily: 'monospace', color: 'var(--gm-head)' }}>{report.scenario}</span>
         <Pill tone="info">{report.profile}</Pill>
         {thread && <Pill>{fmt(thread.state)}</Pill>}
         {thread && thread.stop_reason && <Pill tone="warn">{thread.stop_reason}</Pill>}
@@ -845,7 +845,7 @@ function Report({ report }) {
           <Fact label="Human owner" value={fmt(thread.human_owner_user_id)} />
         </div>
       ) : (
-        <div style={{ color: '#758ba4', fontSize: 12.5, margin: '9px 0 4px' }}>
+        <div style={{ color: 'var(--gm-blue)', fontSize: 12.5, margin: '9px 0 4px' }}>
           The scenario opened no conversation, which is itself the outcome.
         </div>
       )}
@@ -868,14 +868,14 @@ function Report({ report }) {
                   ? <span style={{ fontFamily: 'monospace' }}>{s.denial_code}</span>
                   : '—'}
                 {s.denial_reason && (
-                  <div style={{ color: '#758ba4', fontSize: 11.5, marginTop: 3,
+                  <div style={{ color: 'var(--gm-blue)', fontSize: 11.5, marginTop: 3,
                                 maxWidth: 300 }}>{s.denial_reason}</div>
                 )}
               </td>
               <td>{fmt(s.channel)}</td>
               <td>{fmt(s.provider)}</td>
               <td>{fmt(s.communication_state)}</td>
-              <td style={{ maxWidth: 360, color: '#758ba4', fontSize: 11.5 }}>
+              <td style={{ maxWidth: 360, color: 'var(--gm-blue)', fontSize: 11.5 }}>
                 {Object.keys(s).filter((k) => STEP_KEYS.indexOf(k) === -1)
                   .map((k) => `${k}: ${fmt(s[k])}`).join(' · ') || '—'}
               </td>

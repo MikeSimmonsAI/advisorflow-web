@@ -23,7 +23,7 @@ import { T, fmt, lastActivityLabel, daysAgo } from './godTheme'
 
 const PSEUDO = 'org-god-platform'
 
-const SEV_COLOR = { critical: T.red, high: T.amber, medium: T.blue, info: '#5d7697' }
+const SEV_COLOR = { critical: T.red, high: T.amber, medium: T.blue, info: 'var(--gm-blue)' }
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, info: 3 }
 
 function ageLabel(iso) {

@@ -311,7 +311,7 @@ function CustomerCleanupPanel({ orgId }) {
     finally { setBusy(false) }
   }
 
-  const STATUS_COLOR = { succeeded: '#22c55e', failed: '#ef4444', previewed: '#9ca3af', superseded: '#d97706' }
+  const STATUS_COLOR = { succeeded: 'var(--gm-teal)', failed: 'var(--gm-red)', previewed: 'var(--gm-text)', superseded: 'var(--gm-amber)' }
 
   return (
     <Panel title="Test-data cleanup">
@@ -360,21 +360,21 @@ function CustomerCleanupPanel({ orgId }) {
             {/* Preview results */}
             {preview && !receipt && (
               <div style={{ marginTop: 14, padding: '12px 14px',
-                            border: '1px solid #fcd34d', borderRadius: 8,
-                            background: '#fffbeb' }}>
+                            border: '1px solid var(--gm-amber)', borderRadius: 8,
+                            background: 'var(--gm-pill-amber-bg)' }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
                   Preview: {preview.total_records} record{preview.total_records !== 1 ? 's' : ''} would be deleted
                 </div>
                 {(preview.categories || []).filter(c => c.count > 0).map(c => (
                   <div key={c.key} style={{ display: 'flex', gap: 10, fontSize: 12,
-                                            borderBottom: '1px solid #fde68a', padding: '4px 0' }}>
+                                            borderBottom: '1px solid var(--gm-amber)', padding: '4px 0' }}>
                     <span style={{ fontFamily: 'monospace', minWidth: 100 }}>{c.key}</span>
                     <span style={{ fontWeight: 700 }}>{c.count}</span>
-                    <span style={{ color: '#92400e' }}>{c.description}</span>
+                    <span style={{ color: 'var(--gm-amber)' }}>{c.description}</span>
                   </div>
                 ))}
                 {preview.total_records === 0 ? (
-                  <div style={{ fontSize: 12, color: '#92400e' }}>
+                  <div style={{ fontSize: 12, color: 'var(--gm-amber)' }}>
                     Nothing matches the selected rules for this customer.
                   </div>
                 ) : (
@@ -386,7 +386,7 @@ function CustomerCleanupPanel({ orgId }) {
                       <input value={typed} onChange={e => setTyped(e.target.value)}
                              placeholder="Type the phrase above"
                              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6,
-                                      border: '1px solid #fcd34d', flex: 1 }} />
+                                      border: '1px solid var(--gm-amber)', flex: 1 }} />
                       <button className="go-btn sm danger"
                               disabled={busy || typed !== preview.confirmation_phrase}
                               onClick={runExecute}>
@@ -401,12 +401,12 @@ function CustomerCleanupPanel({ orgId }) {
             {/* Receipt */}
             {receipt && (
               <div style={{ marginTop: 14, padding: '12px 14px',
-                            border: '1px solid #86efac', borderRadius: 8,
-                            background: '#f0fdf4' }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: '#166534', marginBottom: 4 }}>
+                            border: '1px solid var(--gm-teal)', borderRadius: 8,
+                            background: 'var(--gm-pill-teal-bg)' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--gm-teal)', marginBottom: 4 }}>
                   Done — {receipt.actual_total ?? 0} record{receipt.actual_total !== 1 ? 's' : ''} deleted
                 </div>
-                <div style={{ fontSize: 11, color: '#166534' }}>
+                <div style={{ fontSize: 11, color: 'var(--gm-teal)' }}>
                   Execution ID: <code>{receipt.execution_id}</code>
                 </div>
               </div>
@@ -425,7 +425,7 @@ function CustomerCleanupPanel({ orgId }) {
                     padding: '6px 0', borderBottom: '1px solid var(--go-line)',
                     fontSize: 12,
                   }}>
-                    <span style={{ fontWeight: 700, color: STATUS_COLOR[ex.status] || '#6b7280',
+                    <span style={{ fontWeight: 700, color: STATUS_COLOR[ex.status] || 'var(--gm-dim)',
                                    minWidth: 80 }}>{ex.status}</span>
                     <span style={{ color: 'var(--go-dim)' }}>
                       {ex.rules?.join(', ') || '—'}

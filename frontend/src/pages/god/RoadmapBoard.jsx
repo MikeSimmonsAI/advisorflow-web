@@ -107,15 +107,15 @@ const BOARD_STYLES = `
 
 // ── colour tokens per status ──────────────────────────────────────────────────
 const STATUS_META = {
-  COMPLETE:        { label: 'Complete',      bg: '#f0fdf4', text: '#166534', border: '#86efac', dbg: '#071a0e', dtxt: '#4ade80', dborder: '#166534' },
-  FINISH:          { label: 'Finish',        bg: '#fffbeb', text: '#92400e', border: '#fcd34d', dbg: '#1a1200', dtxt: '#fbbf24', dborder: '#6b4c00' },
-  CONSOLIDATE:     { label: 'Consolidate',   bg: '#fff7ed', text: '#9a3412', border: '#fdba74', dbg: '#1a0900', dtxt: '#fb923c', dborder: '#7c2d12' },
-  REMOVE:          { label: 'Remove',        bg: '#fdf4ff', text: '#6b21a8', border: '#d8b4fe', dbg: '#16022a', dtxt: '#c084fc', dborder: '#581c87' },
-  NOT_BUILT:       { label: 'Not built',     bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', dbg: '#03142e', dtxt: '#60a5fa', dborder: '#1e3a8a' },
-  POLICY_REQUIRED: { label: 'Policy needed', bg: '#fef9c3', text: '#713f12', border: '#fde68a', dbg: '#1a1500', dtxt: '#facc15', dborder: '#6b5100' },
-  BLOCKED:         { label: 'Blocked',       bg: '#fef2f2', text: '#991b1b', border: '#fca5a5', dbg: '#1a0505', dtxt: '#f87171', dborder: '#7f1d1d' },
+  COMPLETE:        { label: 'Complete',      bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)', dbg: 'var(--gm-pill-teal-bg)', dtxt: 'var(--gm-teal)', dborder: 'var(--gm-teal)' },
+  FINISH:          { label: 'Finish',        bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
+  CONSOLIDATE:     { label: 'Consolidate',   bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-red)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-red)' },
+  REMOVE:          { label: 'Remove',        bg: 'var(--gm-pill-purple-bg)', text: 'var(--gm-purple)', border: 'var(--gm-pill-purple-bd)', dbg: 'var(--gm-pill-purple-bg)', dtxt: 'var(--gm-purple)', dborder: 'var(--gm-purple)' },
+  NOT_BUILT:       { label: 'Not built',     bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-blue)', border: 'var(--gm-blue)', dbg: 'var(--gm-pill-blue-bg)', dtxt: 'var(--gm-blue)', dborder: 'var(--gm-blue)' },
+  POLICY_REQUIRED: { label: 'Policy needed', bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
+  BLOCKED:         { label: 'Blocked',       bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)', dbg: 'var(--gm-pill-red-bg)', dtxt: 'var(--gm-red)', dborder: 'var(--gm-red)' },
 }
-const PRIORITY_COLOR = { P0: '#dc2626', P1: '#f59e0b', P2: '#3b82f6', P3: '#9ca3af' }
+const PRIORITY_COLOR = { P0: 'var(--gm-red)', P1: 'var(--gm-amber)', P2: 'var(--gm-blue)', P3: 'var(--gm-text)' }
 
 const NEEDS_ACTION = new Set(['FINISH','CONSOLIDATE','REMOVE','NOT_BUILT','POLICY_REQUIRED','BLOCKED'])
 const FILTER_TABS = [
@@ -133,7 +133,7 @@ function useDark() {
 
 function StatusBadge({ status }) {
   const dark = useDark()
-  const m = STATUS_META[status] || { label: status, bg: '#f3f4f6', text: '#374151', border: '#d1d5db', dbg: '#1f2937', dtxt: '#9ca3af', dborder: '#374151' }
+  const m = STATUS_META[status] || { label: status, bg: 'var(--gm-panel)', text: 'var(--gm-blue)', border: 'var(--gm-card-line)', dbg: 'var(--gm-pill-blue-bg)', dtxt: 'var(--gm-text)', dborder: 'var(--gm-blue)' }
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 100,
@@ -170,7 +170,7 @@ function ItemRow({ item }) {
         <span className="rm-title">{item.title}</span>
         <div className="rm-row-meta">
           {item.decision_required && (
-            <span title="Decision required" style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700 }}>⚑</span>
+            <span title="Decision required" style={{ fontSize: 10, color: 'var(--gm-amber)', fontWeight: 700 }}>⚑</span>
           )}
           <span style={{ fontSize: 10, fontWeight: 700, color: PRIORITY_COLOR[item.priority] || 'var(--rm-faint)' }}>
             {item.priority}
@@ -279,7 +279,7 @@ export default function RoadmapBoard() {
       {/* Summary strip */}
       <div className="rm-summary">
         <div className="rm-summary-card">
-          <div className="rm-summary-n" style={{ color: '#22c55e' }}>{pct}%</div>
+          <div className="rm-summary-n" style={{ color: 'var(--gm-teal)' }}>{pct}%</div>
           <div className="rm-summary-l">Complete</div>
         </div>
         <div className="rm-summary-card">
@@ -287,11 +287,11 @@ export default function RoadmapBoard() {
           <div className="rm-summary-l">Need action</div>
         </div>
         <div className="rm-summary-card">
-          <div className="rm-summary-n" style={{ color: '#dc2626' }}>{totals.blocked}</div>
+          <div className="rm-summary-n" style={{ color: 'var(--gm-red)' }}>{totals.blocked}</div>
           <div className="rm-summary-l">Blocked</div>
         </div>
         <div className="rm-summary-card">
-          <div className="rm-summary-n" style={{ color: '#f59e0b' }}>{totals.decision}</div>
+          <div className="rm-summary-n" style={{ color: 'var(--gm-amber)' }}>{totals.decision}</div>
           <div className="rm-summary-l">Decisions needed</div>
         </div>
         <div className="rm-summary-card">

@@ -18,7 +18,7 @@ const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 function Row({ label, value, mono }) {
   return (
     <div style={{ display: 'flex', gap: 16, padding: '5px 0',
-                  borderBottom: '1px solid rgba(128,128,128,0.14)' }}>
+                  borderBottom: '1px solid var(--gm-card-line)' }}>
       <div style={{ minWidth: 210, opacity: 0.62, fontSize: 12.5 }}>{label}</div>
       <div style={{ fontSize: 13.5, fontFamily: mono ? MONO : 'inherit',
                     wordBreak: 'break-all' }}>
@@ -47,8 +47,8 @@ function Pill({ ok, children }) {
     <span style={{
       fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
       padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap',
-      background: ok ? 'rgba(30,200,130,0.16)' : 'rgba(240,80,80,0.18)',
-      color: ok ? '#1a9c6b' : '#d8434a',
+      background: ok ? 'var(--gm-teal-wash)' : 'var(--gm-red-wash)',
+      color: ok ? 'var(--gm-teal)' : 'var(--gm-red)',
     }}>{children}</span>
   )
 }
@@ -96,21 +96,21 @@ export default function UserAccessDiagnostic() {
           onChange={e => setIdent(e.target.value)}
           placeholder="exact email, or user id"
           style={{ flex: 1, padding: '10px 12px', borderRadius: 8, fontSize: 14,
-                   border: '1px solid rgba(128,128,128,0.34)',
+                   border: '1px solid var(--gm-card-line)',
                    background: 'transparent', color: 'inherit' }}
         />
         <button type="submit" disabled={busy || !ident.trim()}
                 style={{ padding: '10px 18px', borderRadius: 8, fontSize: 14,
                          fontWeight: 600, cursor: busy ? 'default' : 'pointer',
-                         border: '1px solid rgba(128,128,128,0.34)',
-                         background: 'rgba(128,128,128,0.12)', color: 'inherit' }}>
+                         border: '1px solid var(--gm-card-line)',
+                         background: 'var(--gm-row-hover-flat)', color: 'inherit' }}>
           {busy ? 'Running…' : 'Run Diagnostic'}
         </button>
       </form>
 
       {error && (
         <div style={{ marginTop: 16, padding: '10px 14px', borderRadius: 8,
-                      background: 'rgba(240,80,80,0.12)', color: '#d8434a',
+                      background: 'var(--gm-pill-red-bg)', color: 'var(--gm-red)',
                       fontSize: 13.5 }}>{error}</div>
       )}
 
@@ -121,8 +121,8 @@ export default function UserAccessDiagnostic() {
             {(r.findings || []).map((f, i) => (
               <div key={i} style={{ padding: '9px 12px', marginBottom: 6,
                                     borderRadius: 8, fontSize: 13.5,
-                                    background: 'rgba(128,128,128,0.10)',
-                                    borderLeft: '3px solid rgba(128,128,128,0.5)' }}>
+                                    background: 'var(--gm-row-hover-flat)',
+                                    borderLeft: '3px solid var(--gm-card-line)' }}>
                 {f}
               </div>
             ))}
@@ -145,7 +145,7 @@ export default function UserAccessDiagnostic() {
                 <div key={m.membership_id}
                      style={{ display: 'flex', alignItems: 'center', gap: 12,
                               padding: '8px 0',
-                              borderBottom: '1px solid rgba(128,128,128,0.14)' }}>
+                              borderBottom: '1px solid var(--gm-card-line)' }}>
                   <Pill ok={m.is_active}>{m.state}</Pill>
                   <span style={{ fontWeight: 600, fontSize: 13.5 }}>
                     {m.organization_name || '(organization missing)'}
@@ -166,7 +166,7 @@ export default function UserAccessDiagnostic() {
                 <div key={m.membership_id}
                      style={{ display: 'flex', alignItems: 'center', gap: 12,
                               padding: '8px 0',
-                              borderBottom: '1px solid rgba(128,128,128,0.14)' }}>
+                              borderBottom: '1px solid var(--gm-card-line)' }}>
                   <Pill ok={m.is_active}>{m.state}</Pill>
                   <span style={{ fontWeight: 600, fontSize: 13.5 }}>
                     {m.brand_sales_org_name || m.scope_type}
@@ -186,7 +186,7 @@ export default function UserAccessDiagnostic() {
             {r.workspace_scenarios.map((s, i) => (
               <div key={i} style={{ marginBottom: 14, padding: '12px 14px',
                                     borderRadius: 10,
-                                    border: '1px solid rgba(128,128,128,0.24)' }}>
+                                    border: '1px solid var(--gm-card-line)' }}>
                 <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 6 }}>
                   {s.scenario}
                 </div>
@@ -197,7 +197,7 @@ export default function UserAccessDiagnostic() {
                 <Row label="B · lead_scope" value={s.B_lead_scope_error || s.B_lead_scope_count} />
                 <Row label="Organization total" value={s.organization_total_leads} />
                 {s.divergence && (
-                  <div style={{ marginTop: 8, fontSize: 13, color: '#d8434a' }}>
+                  <div style={{ marginTop: 8, fontSize: 13, color: 'var(--gm-red)' }}>
                     {s.divergence}
                   </div>
                 )}
@@ -234,7 +234,7 @@ export default function UserAccessDiagnostic() {
               Raw report
             </summary>
             <pre style={{ marginTop: 10, padding: 14, borderRadius: 8, fontSize: 11.5,
-                          overflowX: 'auto', background: 'rgba(128,128,128,0.10)' }}>
+                          overflowX: 'auto', background: 'var(--gm-row-hover-flat)' }}>
               {JSON.stringify(r, null, 2)}
             </pre>
           </details>

@@ -92,7 +92,7 @@ function Picker () {
             ← COMMAND CENTER
           </button>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+            <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
               Manage Access
             </h1>
             {/* Somebody who is not in this list yet is the commonest reason to
@@ -101,7 +101,7 @@ function Picker () {
               + ADD PERSON
             </button>
           </div>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760 }}>
             Choose a person. Their whole footprint — brands, sales
             organizations, customer workspaces, executive portfolio, Demo Suite
             access and training — is on one screen, and correcting where they
@@ -110,7 +110,7 @@ function Picker () {
         </div>
 
         {err && (
-          <div className="gm-card" style={{ borderColor: 'rgba(255,93,125,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-red-bd)', marginBottom: 16 }}>
             <div style={{ color: T.red, fontSize: 12 }}>{err}</div>
           </div>
         )}
@@ -223,7 +223,7 @@ function PlanRow ({ op, onDrop }) {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
       border: '1px solid ' + T.line, borderRadius: 8, marginBottom: 8,
-      background: 'rgba(57,189,248,.05)',
+      background: 'var(--gm-pill-blue-bg)',
     }}>
       <span className="gm-pill blue" style={{ flexShrink: 0 }}>{op.label}</span>
       <span style={{ flex: 1, fontSize: 12, color: T.text }}>{op.describe}</span>
@@ -445,7 +445,7 @@ export default function GodAccess () {
             ← USERS &amp; IDENTITY
           </button>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+            <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
               {identity?.full_name || 'Manage Access'}
             </h1>
             {/* "They never got the link" is the commonest real request about
@@ -460,7 +460,7 @@ export default function GodAccess () {
               </button>
             )}
           </div>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760 }}>
             {identity?.email}
             {identity && ' · '}
             {identity && (identity.is_internal ? 'control-plane identity' : identity.home_organization_name)}
@@ -468,12 +468,12 @@ export default function GodAccess () {
         </div>
 
         {err && (
-          <div className="gm-card" style={{ borderColor: 'rgba(255,93,125,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-red-bd)', marginBottom: 16 }}>
             <div style={{ color: T.red, fontSize: 12 }}>{err}</div>
           </div>
         )}
         {notice && (
-          <div className="gm-card" style={{ borderColor: 'rgba(35,239,178,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-teal-bd)', marginBottom: 16 }}>
             <div style={{ color: T.teal, fontSize: 12 }}>✓ {notice}</div>
           </div>
         )}
@@ -482,13 +482,13 @@ export default function GodAccess () {
             what makes it safe to put on screen. No password is created,
             changed or shown by issuing one. */}
         {link && (
-          <div className="gm-card" style={{ borderColor: 'rgba(35,239,178,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-teal-bd)', marginBottom: 16 }}>
             <SectionLabel note="shown once — it cannot be shown again">
               {link.purpose === 'reset' ? 'PASSWORD RESET LINK' : 'SETUP LINK'}
             </SectionLabel>
             <div style={{
-              background: 'rgba(10,18,28,.75)', border: '1px solid rgba(120,150,190,.22)',
-              borderRadius: 6, padding: '10px 12px', color: '#cfe0f2',
+              background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-pill-blue-bd)',
+              borderRadius: 6, padding: '10px 12px', color: 'var(--gm-blue)',
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
               fontSize: 12, wordBreak: 'break-all',
             }}>{link.setup_url}</div>
@@ -771,7 +771,7 @@ export default function GodAccess () {
 
                   <div style={{
                     marginTop: 18, padding: 14, borderRadius: 10,
-                    border: '1px solid rgba(35,239,178,.28)', background: 'rgba(35,239,178,.05)',
+                    border: '1px solid var(--gm-pill-teal-bd)', background: 'var(--gm-pill-teal-bg)',
                   }}>
                     <div style={{ color: T.teal, fontSize: 11, marginBottom: 8 }}>NOT AFFECTED</div>
                     <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: T.text, lineHeight: 1.7 }}>
@@ -782,7 +782,7 @@ export default function GodAccess () {
                   {preview.warnings.length > 0 && (
                     <div style={{
                       marginTop: 12, padding: 14, borderRadius: 10,
-                      border: '1px solid rgba(255,199,90,.3)', background: 'rgba(255,199,90,.05)',
+                      border: '1px solid var(--gm-pill-amber-bd)', background: 'var(--gm-pill-amber-bg)',
                     }}>
                       <div style={{ color: T.amber, fontSize: 11, marginBottom: 8 }}>WORTH KNOWING</div>
                       {preview.warnings.map((w, i) => (

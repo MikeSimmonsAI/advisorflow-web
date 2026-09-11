@@ -22,14 +22,14 @@ const JOB_LABELS = {
 }
 
 const STATUS_COLORS = {
-  success:   { bg: '#f0fdf4', text: '#166534', border: '#86efac' },
-  error:     { bg: '#fef2f2', text: '#991b1b', border: '#fca5a5' },
-  running:   { bg: '#eff6ff', text: '#1d4ed8', border: '#93c5fd' },
-  never_run: { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
+  success:   { bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)' },
+  error:     { bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)' },
+  running:   { bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-blue)', border: 'var(--gm-blue)' },
+  never_run: { bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-dim)', border: 'var(--gm-card-line)' },
   // Not grey. "never_run" is a benign fact about a job; ledger_unavailable is
   // a broken ledger, and rendering the two the same shade is the exact
   // ambiguity this status was added to end.
-  ledger_unavailable: { bg: '#fef2f2', text: '#991b1b', border: '#fca5a5' },
+  ledger_unavailable: { bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)' },
 }
 
 function PulseCard({ jobName, info }) {
@@ -61,7 +61,7 @@ function PulseCard({ jobName, info }) {
         </div>
       )}
       {info?.error_summary && (
-        <div style={{ marginTop: 8, fontSize: 11, background: 'rgba(0,0,0,.05)',
+        <div style={{ marginTop: 8, fontSize: 11, background: 'var(--gm-row-hover-flat)',
                       borderRadius: 4, padding: '4px 6px', fontFamily: 'monospace',
                       color: colors.text, wordBreak: 'break-word' }}>
           {info.error_summary}
@@ -78,7 +78,7 @@ function HistoryRow({ run }) {
 
   return (
     <tr>
-      <td style={{ padding: '9px 12px', fontSize: 12, color: '#6b7280' }}>
+      <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--gm-dim)' }}>
         {run.id}
       </td>
       <td style={{ padding: '9px 12px', fontSize: 13, fontWeight: 500 }}>
@@ -90,13 +90,13 @@ function HistoryRow({ run }) {
           {s}
         </span>
       </td>
-      <td style={{ padding: '9px 12px', fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>
+      <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--gm-dim)', whiteSpace: 'nowrap' }}>
         {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
       </td>
-      <td style={{ padding: '9px 12px', fontSize: 12, color: '#6b7280', textAlign: 'right' }}>
+      <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--gm-dim)', textAlign: 'right' }}>
         {run.duration_ms != null ? `${run.duration_ms} ms` : '—'}
       </td>
-      <td style={{ padding: '9px 12px', fontSize: 11, color: '#9ca3af', fontFamily: 'monospace',
+      <td style={{ padding: '9px 12px', fontSize: 11, color: 'var(--gm-text)', fontFamily: 'monospace',
                    maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {run.error_summary || (run.metrics ? JSON.stringify(run.metrics) : '—')}
       </td>
@@ -144,12 +144,12 @@ export default function GodJobRuns() {
     padding: '24px 32px',
     maxWidth: 960,
     fontFamily: 'var(--god-font, system-ui, sans-serif)',
-    color: 'var(--god-text, #1f2937)',
+    color: 'var(--god-text, var(--gm-blue))',
   }
 
   const cardStyle = {
-    background: 'var(--god-card, #ffffff)',
-    border: '1px solid var(--god-border, #e5e7eb)',
+    background: 'var(--god-card, var(--gm-panel))',
+    border: '1px solid var(--god-border, var(--gm-card-line))',
     borderRadius: 10,
     padding: '20px 24px',
     marginBottom: 20,
@@ -169,23 +169,23 @@ export default function GodJobRuns() {
                     marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Background Jobs</h1>
-          <p style={{ margin: '6px 0 0', color: 'var(--god-muted, #6b7280)', fontSize: 14 }}>
+          <p style={{ margin: '6px 0 0', color: 'var(--god-muted, var(--gm-dim))', fontSize: 14 }}>
             Run history for cadence, AI conversation, and review request loops
           </p>
         </div>
         <button onClick={load} disabled={loading} style={{
           fontSize: 12, padding: '6px 14px', borderRadius: 6,
-          border: '1px solid var(--god-border, #e5e7eb)',
-          background: 'var(--god-card, #fff)', cursor: 'pointer',
-          color: 'var(--god-text, #1f2937)',
+          border: '1px solid var(--god-border, var(--gm-card-line))',
+          background: 'var(--god-card, var(--gm-panel))', cursor: 'pointer',
+          color: 'var(--god-text, var(--gm-blue))',
         }}>
           ↻ Refresh
         </button>
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8,
-                      padding: 16, color: '#dc2626', marginBottom: 20 }}>
+        <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-pill-red-bd)', borderRadius: 8,
+                      padding: 16, color: 'var(--gm-red)', marginBottom: 20 }}>
           {error}
         </div>
       )}
@@ -199,35 +199,35 @@ export default function GodJobRuns() {
         <div style={{
           ...cardStyle,
           marginBottom: 20,
-          borderColor: pulse.ledger.table_present ? 'var(--god-border, #e5e7eb)' : '#fca5a5',
-          background: pulse.ledger.table_present ? 'var(--god-card, #fff)' : '#fef2f2',
+          borderColor: pulse.ledger.table_present ? 'var(--god-border, #e5e7eb)' : 'var(--gm-red)',
+          background: pulse.ledger.table_present ? 'var(--god-card, #fff)' : 'var(--gm-red)',
         }}>
           {!pulse.ledger.table_present ? (
             <>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gm-red)' }}>
                 Job ledger unavailable — the cards below cannot be trusted
               </div>
-              <div style={{ fontSize: 12, color: '#991b1b', marginTop: 6 }}>
+              <div style={{ fontSize: 12, color: 'var(--gm-red)', marginTop: 6 }}>
                 The <code>job_runs</code> table could not be read, so no run can ever be
                 recorded and every job will read as “never run” regardless of whether it
                 is running. This is a database problem, not a job problem.
               </div>
               {pulse.ledger.error && (
                 <div style={{ fontSize: 11, fontFamily: 'monospace', marginTop: 8,
-                              color: '#7f1d1d', whiteSpace: 'pre-wrap' }}>
+                              color: 'var(--gm-red)', whiteSpace: 'pre-wrap' }}>
                   {pulse.ledger.error}
                 </div>
               )}
             </>
           ) : (
-            <div style={{ fontSize: 12, color: 'var(--god-muted, #6b7280)' }}>
+            <div style={{ fontSize: 12, color: 'var(--god-muted, var(--gm-dim))' }}>
               Ledger healthy — <strong>{pulse.ledger.total_rows}</strong>{' '}
               recorded run{pulse.ledger.total_rows === 1 ? '' : 's'}
               {pulse.ledger.newest_started_at
                 ? <> · most recent {new Date(pulse.ledger.newest_started_at).toLocaleString()}</>
                 : <> · no runs recorded yet</>}
               {pulse.ledger.total_rows === 0 && (
-                <div style={{ marginTop: 6, color: '#b45309' }}>
+                <div style={{ marginTop: 6, color: 'var(--gm-amber)' }}>
                   The table exists and is empty. The loops start 30–90s after the web
                   service boots, so an empty ledger means the service has not completed a
                   cycle since its last restart — or the loops are not running in the
@@ -235,7 +235,7 @@ export default function GodJobRuns() {
                 </div>
               )}
               {pulse.ledger.untracked_jobs?.length > 0 && (
-                <div style={{ marginTop: 6, color: '#b45309' }}>
+                <div style={{ marginTop: 6, color: 'var(--gm-amber)' }}>
                   Recording but not shown above: {pulse.ledger.untracked_jobs.join(', ')}
                 </div>
               )}
@@ -257,12 +257,12 @@ export default function GodJobRuns() {
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap',
                       alignItems: 'center' }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>Run History</span>
-          <span style={{ fontSize: 12, color: '#9ca3af', flex: 1 }}>
+          <span style={{ fontSize: 12, color: 'var(--gm-text)', flex: 1 }}>
             {loading ? 'loading…' : `${total} total`}
           </span>
           <select value={jobFilter} onChange={e => setJobFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6,
-                           border: '1px solid #e5e7eb', background: '#fff' }}>
+                           border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)' }}>
             <option value="">All jobs</option>
             {KNOWN_JOBS.map(j => (
               <option key={j} value={j}>{JOB_LABELS[j] || j}</option>
@@ -270,7 +270,7 @@ export default function GodJobRuns() {
           </select>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6,
-                           border: '1px solid #e5e7eb', background: '#fff' }}>
+                           border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)' }}>
             <option value="">All statuses</option>
             <option value="success">success</option>
             <option value="error">error</option>
@@ -281,11 +281,11 @@ export default function GodJobRuns() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+              <tr style={{ borderBottom: '2px solid var(--gm-card-line)' }}>
                 {['ID', 'Job', 'Status', 'Started', 'Duration', 'Details'].map(h => (
                   <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
                                        fontWeight: 700, textTransform: 'uppercase',
-                                       letterSpacing: '.06em', color: '#9ca3af' }}>
+                                       letterSpacing: '.06em', color: 'var(--gm-text)' }}>
                     {h}
                   </th>
                 ))}
@@ -296,7 +296,7 @@ export default function GodJobRuns() {
               {runs.length === 0 && !loading && (
                 <tr>
                   <td colSpan={6} style={{ padding: '24px 12px', textAlign: 'center',
-                                           color: '#9ca3af', fontSize: 13 }}>
+                                           color: 'var(--gm-text)', fontSize: 13 }}>
                     No runs recorded yet
                   </td>
                 </tr>
@@ -305,7 +305,7 @@ export default function GodJobRuns() {
           </table>
         </div>
         {refreshed && (
-          <div style={{ marginTop: 12, fontSize: 11, color: '#9ca3af' }}>
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--gm-text)' }}>
             As of {refreshed.toLocaleTimeString()}
           </div>
         )}

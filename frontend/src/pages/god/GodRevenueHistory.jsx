@@ -18,21 +18,21 @@ const fmt = cents =>
   : '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const STATUS_COLORS = {
-  paid:      '#22c55e',
-  open:      '#3b82f6',
-  past_due:  '#ef4444',
-  void:      '#9ca3af',
-  draft:     '#d1d5db',
-  uncollectible: '#f97316',
-  unknown:   '#6b7280',
+  paid:      'var(--gm-teal)',
+  open:      'var(--gm-blue)',
+  past_due:  'var(--gm-red)',
+  void:      'var(--gm-text)',
+  draft:     'var(--gm-text)',
+  uncollectible: 'var(--gm-amber)',
+  unknown:   'var(--gm-dim)',
 }
 
 function SectionHead({ children, sub }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                    letterSpacing: '.07em', color: '#6b7280' }}>{children}</div>
-      {sub && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{sub}</div>}
+                    letterSpacing: '.07em', color: 'var(--gm-dim)' }}>{children}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--gm-text)', marginTop: 2 }}>{sub}</div>}
     </div>
   )
 }
@@ -40,8 +40,8 @@ function SectionHead({ children, sub }) {
 function Card({ children, style }) {
   return (
     <div style={{
-      background: 'var(--god-card, #fff)',
-      border: '1px solid var(--god-border, #e5e7eb)',
+      background: 'var(--god-card, var(--gm-panel))',
+      border: '1px solid var(--god-border, var(--gm-card-line))',
       borderRadius: 10, padding: '20px 24px', marginBottom: 20,
       ...style,
     }}>
@@ -51,9 +51,9 @@ function Card({ children, style }) {
 }
 
 /** Simple SVG bar chart — no external lib. */
-function BarChart({ rows, valueKey, labelKey, color = '#3b82f6' }) {
+function BarChart({ rows, valueKey, labelKey, color = 'var(--gm-blue)' }) {
   if (!rows || rows.length === 0) return (
-    <div style={{ color: '#9ca3af', fontSize: 12, padding: '16px 0' }}>
+    <div style={{ color: 'var(--gm-text)', fontSize: 12, padding: '16px 0' }}>
       No payment records yet.
     </div>
   )
@@ -83,7 +83,7 @@ function BarChart({ rows, valueKey, labelKey, color = '#3b82f6' }) {
         })}
       </svg>
       {rows.length > 18 && (
-        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+        <div style={{ fontSize: 10, color: 'var(--gm-text)', marginTop: 4 }}>
           {rows[0]?.[labelKey]} — {rows[rows.length - 1]?.[labelKey]}
         </div>
       )}
@@ -94,21 +94,21 @@ function BarChart({ rows, valueKey, labelKey, color = '#3b82f6' }) {
 function UnavailableCard({ item }) {
   return (
     <div style={{
-      border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 18px',
-      marginBottom: 10, background: '#f9fafb',
+      border: '1px solid var(--gm-card-line)', borderRadius: 8, padding: '14px 18px',
+      marginBottom: 10, background: 'var(--gm-pill-blue-bg)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>
+        <span style={{ fontSize: 12, color: 'var(--gm-text)', fontWeight: 600 }}>
           {item.label}
         </span>
         <span style={{
           fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 100,
-          background: '#f3f4f6', color: '#6b7280', border: '1px solid #e5e7eb',
+          background: 'var(--gm-panel)', color: 'var(--gm-dim)', border: '1px solid var(--gm-card-line)',
         }}>
           UNAVAILABLE
         </span>
       </div>
-      <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.6 }}>
+      <div style={{ fontSize: 11, color: 'var(--gm-text)', lineHeight: 1.6 }}>
         {item.reason}
       </div>
     </div>
@@ -143,7 +143,7 @@ export default function GodRevenueHistory() {
   const page = {
     padding: '24px 32px', maxWidth: 960,
     fontFamily: 'var(--god-font, system-ui, sans-serif)',
-    color: 'var(--god-text, #1f2937)',
+    color: 'var(--god-text, var(--gm-blue))',
   }
 
   return (
@@ -153,7 +153,7 @@ export default function GodRevenueHistory() {
                     alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Revenue History</h1>
-          <p style={{ margin: '6px 0 0', color: '#6b7280', fontSize: 14 }}>
+          <p style={{ margin: '6px 0 0', color: 'var(--gm-dim)', fontSize: 14 }}>
             Real payment and invoice history — no manufactured trends
           </p>
         </div>
@@ -161,7 +161,7 @@ export default function GodRevenueHistory() {
           <select value={platformFilter}
                   onChange={e => setPlatformFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6,
-                           border: '1px solid #e5e7eb', background: '#fff' }}>
+                           border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)' }}>
             <option value="">All platforms</option>
             {platforms.map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
@@ -169,8 +169,8 @@ export default function GodRevenueHistory() {
           </select>
           <button onClick={() => load(platformFilter)} disabled={loading} style={{
             fontSize: 12, padding: '6px 14px', borderRadius: 6,
-            border: '1px solid var(--god-border, #e5e7eb)',
-            background: 'var(--god-card, #fff)', cursor: 'pointer',
+            border: '1px solid var(--god-border, var(--gm-card-line))',
+            background: 'var(--god-card, var(--gm-panel))', cursor: 'pointer',
           }}>
             ↻ Refresh
           </button>
@@ -178,14 +178,14 @@ export default function GodRevenueHistory() {
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5',
-                      borderRadius: 8, padding: 16, color: '#dc2626', marginBottom: 20 }}>
+        <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-pill-red-bd)',
+                      borderRadius: 8, padding: 16, color: 'var(--gm-red)', marginBottom: 20 }}>
           {error}
         </div>
       )}
 
       {loading && !data && (
-        <div style={{ color: '#9ca3af', padding: 24 }}>Loading…</div>
+        <div style={{ color: 'var(--gm-text)', padding: 24 }}>Loading…</div>
       )}
 
       {data && (
@@ -201,10 +201,10 @@ export default function GodRevenueHistory() {
                   : 'no payments yet' },
             ].map(({ label, value }) => (
               <div key={label} style={{
-                flex: '1 1 160px', border: '1px solid #e5e7eb', borderRadius: 10,
-                padding: '14px 18px', background: '#fff',
+                flex: '1 1 160px', border: '1px solid var(--gm-card-line)', borderRadius: 10,
+                padding: '14px 18px', background: 'var(--gm-panel)',
               }}>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>{label}</div>
+                <div style={{ fontSize: 11, color: 'var(--gm-text)', marginBottom: 6 }}>{label}</div>
                 <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
               </div>
             ))}
@@ -223,22 +223,22 @@ export default function GodRevenueHistory() {
           <Card>
             <SectionHead sub="From BillingInvoice.status">Invoice Status Breakdown</SectionHead>
             {data.invoice_status_breakdown.length === 0
-              ? <div style={{ color: '#9ca3af', fontSize: 12 }}>No invoices recorded yet.</div>
+              ? <div style={{ color: 'var(--gm-text)', fontSize: 12 }}>No invoices recorded yet.</div>
               : data.invoice_status_breakdown.map(row => {
-                  const color = STATUS_COLORS[row.status] || '#9ca3af'
+                  const color = STATUS_COLORS[row.status] || 'var(--gm-text)'
                   return (
                     <div key={row.status} style={{
                       display: 'flex', justifyContent: 'space-between',
                       alignItems: 'center', padding: '8px 0',
-                      borderBottom: '1px solid #f3f4f6',
+                      borderBottom: '1px solid var(--gm-card-line)',
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ width: 10, height: 10, borderRadius: '50%',
                                        background: color, display: 'inline-block' }} />
-                        <span style={{ fontSize: 13, color: '#1f2937' }}>{row.status}</span>
+                        <span style={{ fontSize: 13, color: 'var(--gm-blue)' }}>{row.status}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 20 }}>
-                        <span style={{ fontSize: 12, color: '#6b7280' }}>
+                        <span style={{ fontSize: 12, color: 'var(--gm-dim)' }}>
                           {row.count} invoice{row.count !== 1 ? 's' : ''}
                         </span>
                         <span style={{ fontSize: 13, fontWeight: 600, color }}>
@@ -255,20 +255,20 @@ export default function GodRevenueHistory() {
           <Card>
             <SectionHead sub="From BillingInvoice.billing_plan_key">Plan Breakdown</SectionHead>
             {data.plan_breakdown.length === 0
-              ? <div style={{ color: '#9ca3af', fontSize: 12 }}>No plan data yet.</div>
+              ? <div style={{ color: 'var(--gm-text)', fontSize: 12 }}>No plan data yet.</div>
               : data.plan_breakdown.map(row => (
                   <div key={row.plan_key} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '7px 0', borderBottom: '1px solid #f3f4f6',
+                    padding: '7px 0', borderBottom: '1px solid var(--gm-card-line)',
                   }}>
-                    <span style={{ fontSize: 13, fontFamily: 'monospace', color: '#1f2937' }}>
+                    <span style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--gm-blue)' }}>
                       {row.plan_key}
                     </span>
                     <div style={{ display: 'flex', gap: 20 }}>
-                      <span style={{ fontSize: 12, color: '#6b7280' }}>
+                      <span style={{ fontSize: 12, color: 'var(--gm-dim)' }}>
                         {row.invoice_count} invoice{row.invoice_count !== 1 ? 's' : ''}
                       </span>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: '#22c55e' }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gm-teal)' }}>
                         {fmt(row.collected_cents)}
                       </span>
                     </div>
@@ -286,7 +286,7 @@ export default function GodRevenueHistory() {
           </Card>
 
           {refreshed && (
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: 'var(--gm-text)', marginTop: 4 }}>
               As of {refreshed.toLocaleTimeString()}
             </div>
           )}

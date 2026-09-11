@@ -27,13 +27,13 @@ function Metric({ label, value, note, noteTone, tone = '', onClick, title }) {
       role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
     >
-      <label style={{ fontSize: 8, letterSpacing: '.14em', color: '#57739b', display: 'block', fontWeight: 700 }}>
+      <label style={{ fontSize: 8, letterSpacing: '.14em', color: 'var(--gm-blue)', display: 'block', fontWeight: 700 }}>
         {label}
       </label>
       {typeof value === 'string' || typeof value === 'number'
-        ? <strong style={{ display: 'block', fontSize: 30, letterSpacing: '-.045em', color: '#fff', marginTop: 10, lineHeight: 1 }}>{value}</strong>
+        ? <strong style={{ display: 'block', fontSize: 30, letterSpacing: '-.045em', color: 'var(--gm-head)', marginTop: 10, lineHeight: 1 }}>{value}</strong>
         : <span style={{ display: 'block', fontSize: 13, marginTop: 14, lineHeight: 1 }}>{value}</span>}
-      {note && <small style={{ display: 'block', fontSize: 9, marginTop: 8, color: noteTone || '#56708f' }}>{note}</small>}
+      {note && <small style={{ display: 'block', fontSize: 9, marginTop: 8, color: noteTone || 'var(--gm-blue)' }}>{note}</small>}
     </div>
   )
 }

@@ -77,7 +77,7 @@ export default function PlatformHealth({ data, loading, error, onGo }) {
   }
   if (error) {
     return (
-      <div className="gm-card gm-empty" style={{ color: '#ff8299' }}>
+      <div className="gm-card gm-empty" style={{ color: 'var(--gm-red)' }}>
         Platform health is unavailable: {error}
       </div>
     )
