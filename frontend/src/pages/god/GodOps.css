@@ -14,9 +14,10 @@
  * ───────────────────────────────────────────────────────────────────────────
  *
  * The `--go-*` block that used to open this file pinned eleven dark literals
- * onto `.go-scope`, and `color-scheme: dark` beside them. Those values now live
- * in `godTokens.css`, declared once for light and once for dark, and the names
- * are unchanged - every rule below still says `var(--go-panel)`.
+ * onto `.go-scope`, and `color-scheme: dark` beside them. God Mode is
+ * permanently light now, so those values live in `godTokens.css` as one
+ * palette. The NAMES are unchanged - every rule below still says
+ * `var(--go-panel)` - which is why moving the values cost no rule rewrites.
  *
  * TWO THINGS THAT WERE ACTUALLY BROKEN, not just dark:
  *
@@ -149,15 +150,20 @@
 
 /* ── buttons ─────────────────────────────────────────────────────────────── */
 
-.go-btn { background: var(--go-primary); color: var(--go-on-primary); border: none;
-          border-radius: 7px; padding: 8px 14px; font-size: 13px; font-weight: 650;
-          cursor: pointer; }
+.go-btn { background: var(--go-primary); color: var(--go-on-primary);
+          border: 1px solid var(--go-primary);
+          border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 650;
+          font-family: inherit; cursor: pointer; box-shadow: var(--gm-shadow-card); }
 .go-btn:hover { filter: brightness(1.1); }
 .go-btn:disabled { cursor: not-allowed; filter: none;
                    background: var(--go-panel-2); color: var(--go-dim);
                    border: 1px solid var(--go-line); }
-.go-btn.ghost { background: none; border: 1px solid var(--go-line); color: var(--go-text); }
-.go-btn.ghost:hover { border-color: var(--go-blue); }
+/* The secondary. Its border is a CONTROL boundary, not a divider, so it uses
+   the button token rather than the hairline one - at --go-line weight a white
+   button on a white card had no edge at all. */
+.go-btn.ghost { background: var(--gm-btn); border: 1px solid var(--gm-btn-line);
+                color: var(--gm-btn-fg); font-weight: 600; }
+.go-btn.ghost:hover { border-color: var(--gm-btn-hover-line); background: var(--gm-btn-hover); }
 .go-btn.go { background: var(--go-green); }
 .go-btn.danger { background: var(--go-red); color: var(--gm-ink-on-accent); }
 .go-btn.sm { padding: 5px 10px; font-size: 12px; }

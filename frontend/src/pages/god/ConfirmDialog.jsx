@@ -4,54 +4,90 @@
  * The Command Center and the Organizations screen both suspend organizations
  * and both enter tenants. Two dialogs meant two chances for one of them to stop
  * saying what the action actually does.
+ *
+ * THREE THINGS THIS GETS RIGHT THAT THE FIRST LIGHT PASS DID NOT:
+ *
+ *   A SCRIM IS NOT A TINT. The backdrop's job is to take the page behind it out
+ *   of play. The mechanical pass that moved this file onto tokens turned an
+ *   opaque dark overlay into a pale blue wash, which left the whole screen
+ *   looking washed rather than the dialog looking modal.
+ *
+ *   ONE PRIMARY. Cancel and Confirm were two outlined boxes of the same weight,
+ *   so the dialog asked a question and then gave two identical answers. The
+ *   confirm button is filled in the tone of what it is about to do; cancel is
+ *   the quiet one.
+ *
+ *   THE TONE COLOURS THE ACCENTS, NOT THE PROSE. Body copy is body copy.
+ *
+ * Escape cancels, and focus lands on the confirm button — a dialog a keyboard
+ * cannot dismiss is a trap on a screen that suspends customers.
  */
+import { useEffect, useRef } from 'react'
+
 export default function ConfirmDialog({
   tone = 'blue', eyebrow, title, body, confirmLabel,
   busy, onConfirm, onCancel,
 }) {
-  const line = tone === 'danger' ? 'var(--gm-pill-red-bd)'
+  const confirmRef = useRef(null)
+
+  useEffect(() => {
+    confirmRef.current?.focus()
+    function onKey(e) { if (e.key === 'Escape' && !busy) onCancel() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [busy, onCancel])
+
+  const accent = tone === 'danger' ? 'var(--gm-red)'
+    : tone === 'gold' ? 'var(--gm-gold)'
+    : 'var(--gm-blue)'
+  const fill = tone === 'danger' ? 'var(--gm-red)'
+    : tone === 'gold' ? 'var(--gm-btn-gold)'
+    : 'var(--gm-btn-primary)'
+  const rule = tone === 'danger' ? 'var(--gm-pill-red-bd)'
     : tone === 'gold' ? 'var(--gm-pill-gold-bd)'
     : 'var(--gm-pill-blue-bd)'
-  const fg = tone === 'danger' ? 'var(--gm-red)' : tone === 'gold' ? 'var(--gm-gold)' : 'var(--gm-blue)'
 
   return (
     <div
-      role="dialog" aria-modal="true"
-      onClick={onCancel}
+      onClick={() => { if (!busy) onCancel() }}
       style={{
-        position: 'fixed', inset: 0, background: 'var(--gm-pill-blue-bg)', zIndex: 400,
+        position: 'fixed', inset: 0, background: 'var(--gm-scrim)', zIndex: 400,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18,
       }}
     >
       <div
+        role="dialog" aria-modal="true" aria-label={title}
         className="gm-card"
         onClick={e => e.stopPropagation()}
-        style={{ borderColor: line, padding: 24, maxWidth: 440, width: '100%' }}
+        style={{ borderColor: rule, borderTop: '3px solid ' + accent,
+                 padding: 24, maxWidth: 460, width: '100%',
+                 boxShadow: 'var(--gm-shadow-modal)' }}
       >
-        <div style={{ color: fg, fontSize: 9, fontWeight: 800, letterSpacing: '.12em', marginBottom: 11 }}>
+        <div style={{ color: accent, fontSize: 10.5, fontWeight: 800, letterSpacing: '.1em', marginBottom: 10 }}>
           {eyebrow}
         </div>
-        <div style={{ color: 'var(--gm-blue)', fontSize: 15, fontWeight: 600, marginBottom: 9 }}>
+        <div style={{ color: 'var(--gm-head)', fontSize: 18, fontWeight: 700, marginBottom: 8,
+                      letterSpacing: '-.01em' }}>
           {title}
         </div>
-        <div style={{ color: 'var(--gm-blue)', fontSize: 11.5, lineHeight: 1.65, marginBottom: 20 }}>
+        <div style={{ color: 'var(--gm-dim)', fontSize: 13, lineHeight: 1.65, marginBottom: 20 }}>
           {body}
         </div>
-        <div style={{ display: 'flex', gap: 9 }}>
-          <button className="gm-btn" style={{ flex: 1, padding: '9px 0' }}
-                  onClick={onCancel} disabled={busy}>
-            CANCEL
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="gm-btn" onClick={onCancel} disabled={busy}>
+            Cancel
           </button>
           <button
+            ref={confirmRef}
             className="gm-btn"
             style={{
-              flex: 1, padding: '9px 0', color: fg, borderColor: line,
-              background: tone === 'danger' ? 'var(--gm-pill-red-bg)' : tone === 'gold' ? 'var(--gm-pill-amber-bg)' : 'var(--gm-pill-blue-bg)',
-              fontWeight: 800,
+              background: fill, borderColor: fill,
+              color: tone === 'gold' ? 'var(--gm-btn-gold-fg)' : 'var(--gm-btn-primary-fg)',
+              fontWeight: 700,
             }}
             onClick={onConfirm} disabled={busy}
           >
-            {busy ? 'WORKING…' : confirmLabel}
+            {busy ? 'Working…' : confirmLabel}
           </button>
         </div>
       </div>

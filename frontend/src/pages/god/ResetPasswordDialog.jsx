@@ -66,7 +66,7 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
       role="dialog" aria-modal="true" aria-label="Reset password"
       onClick={() => { if (!busy) onCancel() }}
       style={{
-        position: 'fixed', inset: 0, background: 'var(--gm-pill-blue-bg)', zIndex: 400,
+        position: 'fixed', inset: 0, background: 'var(--gm-scrim)', zIndex: 400,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18,
       }}
     >
@@ -79,20 +79,20 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
         <div style={{ color: 'var(--gm-gold)', fontSize: 9, fontWeight: 800, letterSpacing: '.12em', marginBottom: 11 }}>
           ⚿ RESET PASSWORD
         </div>
-        <div style={{ color: 'var(--gm-blue)', fontSize: 15, fontWeight: 600, marginBottom: 4 }}>
+        <div style={{ color: 'var(--gm-head)', fontSize: 17, fontWeight: 700, marginBottom: 4 }}>
           {user.full_name || user.email}
         </div>
-        <div style={{ color: 'var(--gm-blue)', fontSize: 11, marginBottom: 14 }}>{user.email}</div>
+        <div style={{ color: 'var(--gm-dim)', fontSize: 12.5, marginBottom: 14 }}>{user.email}</div>
 
-        <div style={{ color: 'var(--gm-blue)', fontSize: 11.5, lineHeight: 1.65, marginBottom: 18 }}>
+        <div style={{ color: 'var(--gm-dim)', fontSize: 13, lineHeight: 1.65, marginBottom: 18 }}>
           Sets this account&rsquo;s password immediately. It is never shown back to
           you and never written to the audit log &mdash; only the fact that you
           reset it. Any session this person currently has signed in is ended, so
           they will sign in again with what you set here.
         </div>
 
-        <label style={{ display: 'block', color: 'var(--gm-blue)', fontSize: 9.5, fontWeight: 800,
-                        letterSpacing: '.1em', marginBottom: 6 }}>
+        <label style={{ display: 'block', color: 'var(--gm-dim)', fontSize: 11, fontWeight: 700,
+                        letterSpacing: '.07em', marginBottom: 6 }}>
           NEW PASSWORD
         </label>
         <input
@@ -107,8 +107,8 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
           </div>
         )}
 
-        <label style={{ display: 'block', color: 'var(--gm-blue)', fontSize: 9.5, fontWeight: 800,
-                        letterSpacing: '.1em', marginBottom: 6 }}>
+        <label style={{ display: 'block', color: 'var(--gm-dim)', fontSize: 11, fontWeight: 700,
+                        letterSpacing: '.07em', marginBottom: 6 }}>
           CONFIRM NEW PASSWORD
         </label>
         <input
