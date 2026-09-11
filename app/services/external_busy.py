@@ -39,6 +39,10 @@ from app.models.calendar_models import (
 
 log = logging.getLogger(__name__)
 
+# The providers that have a calendar to read at all. The .ics fallback delivers
+# invitations and has nothing to query, which is why it is absent.
+PROVIDERS_READABLE = (PROVIDER_MICROSOFT, PROVIDER_GOOGLE)
+
 # How long a cached window is trusted before a search refreshes it. Short
 # enough that a meeting somebody accepted this morning is honoured; long
 # enough that paging through a week of availability is not a vendor DDoS.
@@ -133,6 +137,27 @@ def refresh_external_busy(db: Session, user, start_utc: datetime, end_utc: datet
         # No calendar to read. NOT an error — this is the normal state for
         # someone on the .ics fallback, and reporting it as a failure would
         # light up an alert for a user who has done nothing wrong.
+        #
+        # EXCEPT when they DID connect one and it has since gone bad. The
+        # resolver returns .ics for both "never connected" and "connected, but
+        # the grant is no longer usable", because `_live_connections` filters
+        # out a connection whose `calendar_scope_ok` has been cleared. Those two
+        # states need opposite messages: one is a normal choice, the other is a
+        # rep who needs to press Reconnect and currently has no way to know it.
+        #
+        # Found in the visual audit: a dead Outlook grant was reported as "no
+        # external calendar connected", which reads as "this person never set
+        # one up" and hides the one action that would fix it.
+        stale = (db.query(CalendarConnection)
+                 .filter(CalendarConnection.user_id == user.id,
+                         CalendarConnection.provider.in_(PROVIDERS_READABLE),
+                         CalendarConnection.connected_at.isnot(None))
+                 .first())
+        if stale is not None:
+            return {"provider": stale.provider, "refreshed": False,
+                    "reason": "reauth_required", "count": 0,
+                    "error": (stale.last_error or "")[:200] or None,
+                    "needs_reauth": True}
         return {"provider": key, "refreshed": False, "reason": "no_external_calendar",
                 "count": 0, "error": None}
 
@@ -147,6 +172,49 @@ def refresh_external_busy(db: Session, user, start_utc: datetime, end_utc: datet
             .first())
 
     provider = reg.get_provider(db, user, org=org, prefer=key)
+
+    # ── DID WE ACTUALLY GET THE CALENDAR WE ASKED FOR? ──────────────────────
+    #
+    # THE BUG THIS CLOSES, because it was silent and it pointed the wrong way.
+    #
+    # `resolve_provider_key` says "microsoft" whenever a live connection row
+    # exists. `get_provider` is allowed to FALL BACK to the .ics provider when
+    # that provider reports itself unready — a dead grant, a revoked consent, a
+    # missing vendor library. And `IcsEmailProvider.get_busy` correctly returns
+    # ([], None): "there is no external calendar to read", which is the truth
+    # for somebody who never connected one.
+    #
+    # Put together, those three correct behaviours produced a lie. A user whose
+    # Microsoft grant had died came back as a SUCCESSFUL read of an empty
+    # Outlook calendar, which then:
+    #
+    #   · deleted every busy block we had cached for them,
+    #   · stamped the connection healthy — last_sync_at bumped, failure_count
+    #     reset, calendar_scope_ok set — so `cache_is_fresh` suppressed the next
+    #     ten minutes of refreshes,
+    #   · and reported `external_checked: true` to the availability grid.
+    #
+    # The result is the one failure this whole subsystem exists to prevent:
+    # somebody shown as verified-free during a meeting nobody could see. So the
+    # fallback is caught HERE, where we still know which calendar was wanted,
+    # and reported as unreadable. The cache is left exactly as it was.
+    resolved = getattr(provider, "resolved_key", None)
+    if resolved != key:
+        if conn is not None:
+            conn.last_attempt_at = now_utc
+            conn.last_error = (
+                "The connected %s calendar could not be opened, so busy time "
+                "could not be read." % key)[:1000]
+            conn.last_error_at = now_utc
+            conn.failure_count = (conn.failure_count or 0) + 1
+            # Only the user can re-grant. Saying so is what lets the UI ask for
+            # a reconnect instead of showing a failure nobody can act on.
+            conn.calendar_scope_ok = False
+        return {"provider": key, "refreshed": False,
+                "reason": "provider_unavailable", "count": 0,
+                "error": "fell_back_to_%s" % (resolved or "none"),
+                "needs_reauth": True}
+
     intervals, err = provider.get_busy(start_utc, end_utc)
 
     if err is not None and not err.ok:
@@ -206,12 +274,21 @@ def refresh_external_busy(db: Session, user, start_utc: datetime, end_utc: datet
 
 def refresh_many(db: Session, users, start_utc: datetime, end_utc: datetime,
                  org=None, now_utc: Optional[datetime] = None,
-                 ttl_minutes: int = CACHE_TTL_MINUTES) -> dict:
+                 ttl_minutes: int = CACHE_TTL_MINUTES,
+                 force: bool = False) -> dict:
     """Refresh a whole participant set before a shared-availability search.
 
     One user's dead connection must not stop the others being refreshed, so
     each is independent and the report is per user. The search then runs
     against the cache regardless of what happened here.
+
+    CALL THIS BEFORE ANY AVAILABILITY ANSWER LEAVES THE BUILDING. The
+    availability engine reads the cache and nothing else, by design — which
+    means an unrefreshed cache does not make the engine slow, it makes it
+    WRONG, and wrong in the most expensive direction: it reports somebody as
+    free during a meeting it has not heard about yet. The engine cannot refresh
+    itself without becoming the vendor round-trip per keystroke that the split
+    exists to prevent, so the obligation sits with the caller.
     """
     report = {}
     for u in users:
@@ -220,9 +297,96 @@ def refresh_many(db: Session, users, start_utc: datetime, end_utc: datetime,
         try:
             report[u.id] = refresh_external_busy(db, u, start_utc, end_utc,
                                                  org=org, now_utc=now_utc,
-                                                 ttl_minutes=ttl_minutes)
+                                                 ttl_minutes=ttl_minutes,
+                                                 force=force)
         except Exception as e:
             log.exception("external busy refresh blew up for user %s", u.id)
             report[u.id] = {"provider": None, "refreshed": False,
                             "reason": "exception", "count": 0, "error": str(e)[:200]}
     return report
+
+
+# ── what a screen needs to say about the refresh, honestly ──────────────────
+
+# Reasons that are NORMAL and must never be dressed up as a problem. Someone
+# who has not connected a calendar has done nothing wrong, and a fresh cache is
+# a success, not an absence of one.
+BENIGN_REASONS = ("no_external_calendar", "cache_fresh")
+
+
+def visibility_from_report(report: dict) -> dict:
+    """Turn a per-user refresh report into one honest statement per user.
+
+    THE POINT: distinguish "this person's calendar was checked and they are
+    free" from "we could not see this person's calendar, so free is a guess".
+    Those look identical in an availability grid and mean opposite things, and
+    collapsing them is how a scheduler earns a reputation for double-booking.
+
+    `external_checked` is the field a UI should gate its confidence on.
+    """
+    out = {}
+    for uid, r in (report or {}).items():
+        reason = r.get("reason")
+        provider = r.get("provider")
+        has_external = provider in PROVIDERS_READABLE
+        failed = reason not in BENIGN_REASONS and reason is not None
+
+        if not has_external:
+            state, message = "not_connected", (
+                "No external calendar connected — outside conflicts cannot be checked.")
+        elif failed:
+            state = "reauth_required" if r.get("needs_reauth") else "degraded"
+            message = ("This calendar needs reconnecting, so outside conflicts "
+                       "could not be checked."
+                       if r.get("needs_reauth") else
+                       "The connected calendar could not be read just now, so "
+                       "outside conflicts may be missing.")
+        else:
+            state, message = "checked", None
+
+        out[uid] = {
+            "provider": provider,
+            "external_checked": state == "checked",
+            "state": state,
+            "message": message,
+            "refreshed": bool(r.get("refreshed")),
+            "reason": reason,
+            "busy_blocks": r.get("count") or 0,
+            "needs_reauth": bool(r.get("needs_reauth")),
+        }
+    return out
+
+
+def external_conflicts(db: Session, user_ids, starts_at: datetime,
+                       ends_at: datetime) -> list:
+    """Which of these people has an EXTERNAL commitment across this window.
+
+    Read from the cache, so the caller must have refreshed it first — see
+    `refresh_many`. Used as the final gate before a booking commits: the
+    internal `find_conflicts` check cannot see a meeting that lives only in
+    Outlook, so without this an appointment could be written on top of one.
+
+    Returns the INTERVAL and never a title. The colleague being double-booked
+    needs to know they are busy; the person booking them does not get to read
+    their calendar.
+    """
+    out = []
+    for uid in user_ids or []:
+        rows = (db.query(ExternalBusyBlock)
+                .filter(ExternalBusyBlock.user_id == uid,
+                        ExternalBusyBlock.starts_at < ends_at,
+                        ExternalBusyBlock.ends_at > starts_at)
+                .all())
+        for r in rows:
+            out.append({
+                "user_id": uid,
+                "provider": r.provider,
+                "starts_at": r.starts_at,
+                "ends_at": r.ends_at,
+                "is_all_day": bool(r.is_all_day),
+                # Stated rather than implied, so no serializer downstream is
+                # tempted to look for a title that was never stored.
+                "title": None,
+                "private": True,
+            })
+    return out

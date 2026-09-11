@@ -83,6 +83,37 @@ class BusyInterval:
     is_all_day: bool = False
 
 
+@dataclass
+class ExternalEventState:
+    """What a provider event looks like RIGHT NOW, for drift detection.
+
+    Read-only and deliberately narrow. It carries the time (the only field
+    whose divergence is a scheduling commitment), the provider's own version
+    marker, and whether the event still claims to belong to a specific
+    AdvisorFlow appointment — nothing else.
+
+    NOTE WHAT IS ABSENT: no attendee list, no body. A reconciliation pass runs
+    over every participant's calendar, so anything this class could hold is
+    something the reconciler would end up logging about people who never
+    consented to that. The same privacy rule that keeps `BusyInterval`
+    interval-only applies here, for the same reason.
+
+    `exists=False` is the DELETED case and is a normal answer, not an error.
+    """
+    exists: bool
+    starts_at: Optional[datetime] = None      # naive UTC
+    ends_at: Optional[datetime] = None        # naive UTC
+    etag: Optional[str] = None                # Graph changeKey / Google etag
+    is_cancelled: bool = False
+    # The appointment id the event itself claims, read back from wherever the
+    # provider was told to keep it. Lets the reconciler prove an event is ours
+    # before it writes — an id we merely stored is not proof, because a stale
+    # or mis-copied id could point at a stranger's event.
+    claimed_appointment_id: Optional[str] = None
+    subject: Optional[str] = None
+    location: Optional[str] = None
+
+
 class CalendarProvider:
     """Base class. Subclasses override; none of these ever raise."""
 
@@ -123,3 +154,25 @@ class CalendarProvider:
         than raising — a provider that cannot be read must degrade to 'we know
         of no external commitments', never to a broken availability search."""
         return [], SyncResult.failure("unimplemented", "get_busy not implemented")
+
+    def supports_read_back(self) -> bool:
+        """Can this provider be asked what one event currently says?
+
+        The .ics fallback cannot: it sends an email and has no calendar to
+        query. That is not a failure to work around — it means drift detection
+        genuinely does not apply to that delivery path, and the reconciler
+        skips it rather than inventing a conflict out of its own blindness.
+        """
+        return False
+
+    def get_event(self, external_event_id: str) -> Tuple[Optional["ExternalEventState"],
+                                                         Optional[SyncResult]]:
+        """Read ONE event back, for drift detection. Returns (state, error).
+
+        A missing event returns `ExternalEventState(exists=False)` with NO
+        error — deletion is information, not a fault, and returning it as a
+        failure would make "somebody deleted this" indistinguishable from
+        "Microsoft was down", which are opposite situations: one needs healing,
+        the other needs leaving alone until the provider comes back.
+        """
+        return None, SyncResult.failure("unimplemented", "get_event not implemented")

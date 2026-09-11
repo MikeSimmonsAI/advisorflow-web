@@ -100,6 +100,80 @@ ATTEND_ACCEPTED = "accepted"
 ATTEND_DECLINED = "declined"
 ATTEND_ATTENDED = "attended"
 ATTEND_NO_SHOW  = "no_show"
+ATTENDANCE_STATUSES = (ATTEND_UNKNOWN, ATTEND_ACCEPTED, ATTEND_DECLINED,
+                       ATTEND_ATTENDED, ATTEND_NO_SHOW)
+
+
+# ── OUTCOME — what actually happened, recorded by a human ────────────────────
+#
+# THE GAP THIS CLOSES. T9 Intelligence reported appointment completion as
+# UNKNOWN, and it was right to: `status` above only ever said what the calendar
+# intended, never what took place. "scheduled" on a meeting whose time has
+# passed is not evidence the meeting happened, and inferring completion from a
+# clock is how a pipeline quietly fills with deals nobody actually spoke to.
+#
+# So completion is recorded AT THE CALENDAR SOURCE by the person who was in the
+# room, and everything downstream reads that fact rather than guessing at it.
+# `status` stays the lifecycle; `outcome` is the verdict. They are separate
+# because "completed" and "completed, prospect wants a proposal" are different
+# pieces of information and collapsing them would lose the one that matters.
+
+OUTCOME_COMPLETED       = "completed"
+OUTCOME_NO_SHOW         = "no_show"
+OUTCOME_CANCELLED       = "cancelled"
+OUTCOME_RESCHEDULED     = "rescheduled"
+OUTCOME_FOLLOW_UP       = "follow_up_required"
+OUTCOME_PROPOSAL_NEEDED = "proposal_needed"
+OUTCOME_PROPOSAL_SENT   = "proposal_sent"
+OUTCOME_WON             = "won"
+OUTCOME_LOST            = "lost"
+APPOINTMENT_OUTCOMES = (
+    OUTCOME_COMPLETED, OUTCOME_NO_SHOW, OUTCOME_CANCELLED, OUTCOME_RESCHEDULED,
+    OUTCOME_FOLLOW_UP, OUTCOME_PROPOSAL_NEEDED, OUTCOME_PROPOSAL_SENT,
+    OUTCOME_WON, OUTCOME_LOST,
+)
+
+OUTCOME_LABELS = {
+    OUTCOME_COMPLETED:       "Completed",
+    OUTCOME_NO_SHOW:         "No-show",
+    OUTCOME_CANCELLED:       "Cancelled",
+    OUTCOME_RESCHEDULED:     "Rescheduled",
+    OUTCOME_FOLLOW_UP:       "Follow-up required",
+    OUTCOME_PROPOSAL_NEEDED: "Proposal needed",
+    OUTCOME_PROPOSAL_SENT:   "Proposal sent",
+    OUTCOME_WON:             "Won",
+    OUTCOME_LOST:            "Lost",
+}
+
+# Which outcomes mean the meeting TOOK PLACE. This is the single definition of
+# "it happened" that T9/T10 read, rather than each report inventing its own by
+# comparing a timestamp to now(). A rescheduled meeting is deliberately absent:
+# the meeting at THAT time did not occur.
+OUTCOMES_OCCURRED = (OUTCOME_COMPLETED, OUTCOME_FOLLOW_UP, OUTCOME_PROPOSAL_NEEDED,
+                     OUTCOME_PROPOSAL_SENT, OUTCOME_WON, OUTCOME_LOST)
+
+# Which outcomes mean it definitively did NOT take place.
+OUTCOMES_NOT_OCCURRED = (OUTCOME_NO_SHOW, OUTCOME_CANCELLED, OUTCOME_RESCHEDULED)
+
+# The appointment lifecycle status each outcome settles the row into, so the
+# two fields can never contradict each other. Recording "no_show" and leaving
+# `status` at "scheduled" would leave the meeting blocking calendars forever.
+OUTCOME_TO_STATUS = {
+    OUTCOME_COMPLETED:       APPT_COMPLETED,
+    OUTCOME_FOLLOW_UP:       APPT_COMPLETED,
+    OUTCOME_PROPOSAL_NEEDED: APPT_COMPLETED,
+    OUTCOME_PROPOSAL_SENT:   APPT_COMPLETED,
+    OUTCOME_WON:             APPT_COMPLETED,
+    OUTCOME_LOST:            APPT_COMPLETED,
+    OUTCOME_NO_SHOW:         APPT_NO_SHOW,
+    OUTCOME_CANCELLED:       APPT_CANCELLED,
+    OUTCOME_RESCHEDULED:     APPT_CANCELLED,
+}
+
+# Outcomes that only make sense when a deal is attached. Offering "Won" on an
+# internal pipeline review is how a vocabulary stops being trusted.
+OUTCOMES_REQUIRING_OPPORTUNITY = (OUTCOME_PROPOSAL_NEEDED, OUTCOME_PROPOSAL_SENT,
+                                  OUTCOME_WON, OUTCOME_LOST)
 
 BLOCK_RECURRING = "recurring"   # weekly, e.g. lunch
 BLOCK_TIME_OFF  = "time_off"    # a dated absence
@@ -318,6 +392,31 @@ class SalesAppointment(Base):
     previous_starts_at    = Column(DateTime, nullable=True)
     reschedule_reason     = Column(Text, nullable=True)
 
+    # ── OUTCOME — the authoritative record of what happened ─────────────────
+    #
+    # Written only by a human recording it, never by a clock. NULL is a real
+    # and important state: "this meeting's time has passed and nobody has said
+    # what happened yet", which is what the pending-outcome queue is built on.
+    # A NULL here must never be read as "completed" or as "no-show"; the whole
+    # point of these columns is that T9 no longer has to choose between two
+    # wrong inferences.
+    outcome             = Column(String, nullable=True)   # APPOINTMENT_OUTCOMES
+    outcome_notes       = Column(Text, nullable=True)
+    outcome_recorded_at = Column(DateTime, nullable=True)
+    outcome_recorded_by = Column(String, ForeignKey("users.id"), nullable=True)
+
+    # Denormalised from `outcome` through OUTCOMES_OCCURRED at the moment it is
+    # recorded. Exists so "did this meeting happen?" is one indexed boolean
+    # rather than a nine-value string every downstream report has to know how to
+    # interpret — and so adding a tenth outcome later cannot silently change
+    # what an existing report counted.
+    occurred     = Column(Boolean, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Set when an outcome produced a follow-up meeting, so the chain is
+    # traversable in both directions rather than inferred from timestamps.
+    followup_appointment_id = Column(String, nullable=True)
+
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -328,6 +427,11 @@ class SalesAppointment(Base):
         Index("ix_sales_appt_org_time", "brand_sales_org_id", "starts_at"),
         Index("ix_sales_appt_opportunity", "opportunity_id"),
         Index("ix_sales_appt_status_time", "status", "starts_at"),
+        # The pending-outcome queue: meetings in the past with no verdict yet.
+        # Indexed on the two columns that query actually filters on, because it
+        # runs on every load of the manager's calendar.
+        Index("ix_sales_appt_outcome_pending", "brand_sales_org_id", "outcome",
+              "starts_at"),
     )
 
 
@@ -382,10 +486,49 @@ class AppointmentParticipant(Base):
     sync_error         = Column(Text, nullable=True)   # message only, never a token
     ics_sent_at        = Column(DateTime, nullable=True)
 
+    # ── DRIFT DETECTION — what we last pushed, and what we last saw ─────────
+    #
+    # Without these, a provider-side edit is invisible. The old behaviour was
+    # asymmetric in a way that quietly lost information: a DELETED provider
+    # event was recreated on the next update (fine — EvoSys is authoritative),
+    # but a MOVED one was never noticed at all, so Outlook said Thursday, EvoSys
+    # said Tuesday, and both were confident.
+    #
+    # `pushed_*` is the state WE last wrote. A later read that disagrees with it
+    # is a genuine external edit rather than our own write echoing back, which
+    # is the distinction that makes reconciliation possible at all — comparing a
+    # provider event against the appointment's CURRENT time would flag our own
+    # in-flight reschedule as a conflict.
+    pushed_starts_at   = Column(DateTime, nullable=True)
+    pushed_ends_at     = Column(DateTime, nullable=True)
+    pushed_at          = Column(DateTime, nullable=True)
+    # Provider's own version marker (Graph changeKey / Google etag), so an
+    # unchanged event can be recognised without comparing every field.
+    external_etag      = Column(String, nullable=True)
+    external_last_seen_at = Column(DateTime, nullable=True)
+
+    # A conflict the system refuses to resolve on its own. Set when a provider
+    # event was changed outside EvoSys in a way that is not deterministically
+    # reconcilable, and cleared only when somebody decides. Deliberately NOT
+    # auto-healed: silently overwriting means whoever moved the meeting in
+    # Outlook had their change destroyed without being told.
+    sync_conflict        = Column(Boolean, default=False, nullable=False)
+    sync_conflict_kind   = Column(String, nullable=True)   # CONFLICT_KINDS
+    sync_conflict_detail = Column(Text, nullable=True)
+    sync_conflict_at     = Column(DateTime, nullable=True)
+    # What the provider said, kept so the review screen can show both sides
+    # rather than asking a human to go and look.
+    conflict_provider_starts_at = Column(DateTime, nullable=True)
+    conflict_provider_ends_at   = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
         UniqueConstraint("appointment_id", "user_id", name="uq_participant_appt_user"),
         Index("ix_appt_participant_user_time", "user_id", "busy_start_at", "busy_end_at"),
         Index("ix_appt_participant_appt", "appointment_id"),
+        # The conflict review queue. Partial-index semantics are not portable,
+        # so this is a plain composite — the column is false for almost every
+        # row, which keeps it small in practice.
+        Index("ix_appt_participant_conflict", "sync_conflict", "sync_conflict_at"),
     )

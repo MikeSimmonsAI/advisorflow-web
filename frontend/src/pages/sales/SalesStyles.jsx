@@ -833,6 +833,427 @@ const CSS = `
   .sw-tile.is-lead .sw-tile-value{font-size:30px}
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   CALENDAR + TEAM AVAILABILITY
+   The approved targets for /sales/calendar and /sales/team.
+
+   TWO SCREENS, ONE VOCABULARY, NO SHARED LAYOUT. Everything below is prefixed
+   cal- (Team Calendar) or av- (Team Availability), and the only thing they
+   share is the EVENT-TYPE PALETTE — because a customer meeting has to be the
+   same colour on both or the legend stops being a legend. Their layouts are
+   deliberately separate: one answers "what is booked", the other answers "who
+   is free", and merging them was explicitly out of scope.
+
+   EVERY COLOUR IS A TOKEN. Same rule the God sheet follows: no literals in the
+   components, so the two appearances stay in step and a future brand can be
+   repainted in one place. These sit on .sw-scope beside the workspace tokens
+   rather than in a second sheet, so a calendar rendered inside the workspace
+   cannot end up on a different palette from the page around it.
+
+   NO BACKTICKS ANYWHERE BELOW. This whole sheet is one JS template literal, so
+   a backtick in a comment ends the string and the build fails several hundred
+   lines later with a syntax error that points at prose. It cost one build to
+   learn; the rule is cheaper than rediscovering it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.sw-scope{
+  /* Event types. Each is a trio — wash, ink, accent — because a block needs a
+     readable label ON the wash, and the 3px accent rail is what makes the type
+     legible at the 20px height a 15-minute meeting gets. */
+  --cal-cust-bg:#fdeaec;   --cal-cust-fg:#9d2f3d;  --cal-cust-ac:#e05260;
+  --cal-intl-bg:#e9f1fe;   --cal-intl-fg:#1f4d86;  --cal-intl-ac:#3d7dd4;
+  --cal-call-bg:#e8f8f1;   --cal-call-fg:#1d6b4f;  --cal-call-ac:#2fa675;
+  --cal-fup-bg:#fff5e3;    --cal-fup-fg:#8a5a15;   --cal-fup-ac:#e0a13c;
+  --cal-blok-bg:#eef1f4;   --cal-blok-fg:#5b6b78;  --cal-blok-ac:#98a7b3;
+  --cal-pto-bg:#f2ecfd;    --cal-pto-fg:#553d96;   --cal-pto-ac:#8163d6;
+  --cal-demo-bg:#e7f6f4;   --cal-demo-fg:#14625a;  --cal-demo-ac:#1A9B8E;
+  /* External busy. Hatched rather than solid, and that is not decoration: it
+     is the one block whose CONTENT we deliberately do not know, and it must not
+     look like a block we could tell you about. */
+  --cal-ext-bg:#eceff2;    --cal-ext-fg:#66757f;   --cal-ext-ac:#a9b6c0;
+  --cal-ext-hatch:rgba(120,138,152,.16);
+  --cal-free-bg:rgba(47,166,117,.10);
+  --cal-free-ac:#43b184;
+  --cal-offhours:#f4f6f8;
+  --cal-line:#e6ebef;
+  --cal-line-soft:#f0f3f6;
+  --cal-now:#e05260;
+  /* Ink for anything painted ON the teal accent — the selected view segment,
+     the today pill, the selected mini-calendar day, the primary mobile action.
+     A token rather than a literal because the two appearances need DIFFERENT
+     ink on the same teal: near-white reads on light-mode teal, and the dark
+     sheet deliberately uses a deep green instead of inverting to white, the
+     same choice .sw-btn.sw-primary already makes. */
+  --cal-on-accent:#ffffff;
+}
+[data-appearance="dark"] .sw-scope:not(.gm-shell *){
+  --cal-cust-bg:#3a1a20;   --cal-cust-fg:#ff9dab;  --cal-cust-ac:#e05260;
+  --cal-intl-bg:#14263d;   --cal-intl-fg:#8fc0f5;  --cal-intl-ac:#3d7dd4;
+  --cal-call-bg:#0e2b22;   --cal-call-fg:#5fd9a9;  --cal-call-ac:#2fa675;
+  --cal-fup-bg:#2e2410;    --cal-fup-fg:#f0c674;   --cal-fup-ac:#e0a13c;
+  --cal-blok-bg:#1b2531;   --cal-blok-fg:#9db3c8;  --cal-blok-ac:#54697d;
+  --cal-pto-bg:#241c3d;    --cal-pto-fg:#b9a6f5;   --cal-pto-ac:#8163d6;
+  --cal-demo-bg:#0b2b28;   --cal-demo-fg:#54e3d0;  --cal-demo-ac:#1A9B8E;
+  --cal-ext-bg:#18222e;    --cal-ext-fg:#8496a5;   --cal-ext-ac:#3f5567;
+  --cal-ext-hatch:rgba(150,170,188,.13);
+  --cal-free-bg:rgba(67,177,132,.14);
+  --cal-free-ac:#43b184;
+  --cal-offhours:#0b1420;
+  --cal-line:#22364b;
+  --cal-line-soft:#182838;
+  --cal-now:#f08292;
+  --cal-on-accent:#04201c;
+}
+
+/* ── the control strip ─────────────────────────────────────────────────── */
+.cal-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cal-seg{display:inline-flex;border:1px solid var(--sw-line);border-radius:8px;
+  overflow:hidden;background:var(--sw-btn-bg)}
+.cal-seg button{border:0;background:none;padding:6px 13px;font-size:11px;
+  font-weight:700;color:var(--sw-ink2);cursor:pointer;
+  border-right:1px solid var(--sw-line2)}
+.cal-seg button:last-child{border-right:0}
+.cal-seg button:hover{background:var(--sw-surface3);color:var(--sw-ink)}
+.cal-seg button.is-on{background:var(--sw-teal);color:var(--cal-on-accent)}
+.cal-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding:11px 14px;border:1px solid var(--sw-line);border-radius:10px;
+  background:var(--sw-surface);box-shadow:var(--sw-shadow);margin-bottom:14px}
+.cal-filters .sw-select,.cal-filters .sw-input{height:32px;font-size:11px}
+.cal-toggle{display:inline-flex;align-items:center;gap:7px;font-size:11px;
+  font-weight:600;color:var(--sw-ink2);cursor:pointer;user-select:none}
+.cal-toggle input{margin:0;accent-color:var(--sw-teal);width:15px;height:15px}
+
+/* ── page shape: grid + rail ───────────────────────────────────────────── */
+.cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 332px;gap:14px;
+  align-items:start}
+.cal-rail{display:flex;flex-direction:column;gap:14px;position:sticky;top:0}
+
+/* ── the week / day time grid ──────────────────────────────────────────── */
+/* Rows are a CSS variable so the component can set one number and have the
+   gutter, the lines and the absolute block maths agree. Three separate
+   constants is how a grid ends up with events half a row out. */
+.cal-grid{--cal-h:46px;--cal-gutter:64px;overflow-x:auto;
+  border:1px solid var(--sw-line);border-radius:10px;background:var(--sw-surface);
+  box-shadow:var(--sw-shadow)}
+.cal-grid-in{display:grid;min-width:760px}
+.cal-head{display:grid;grid-template-columns:var(--cal-gutter) repeat(var(--cal-cols),minmax(96px,1fr));
+  position:sticky;top:0;z-index:3;background:var(--sw-surface2);
+  border-bottom:1px solid var(--sw-line)}
+.cal-head-c{padding:9px 8px;text-align:center;font-size:10px;font-weight:800;
+  color:var(--sw-ink2);border-left:1px solid var(--sw-line-soft)}
+.cal-head-c:first-child{border-left:0;font-size:9px;color:var(--sw-ink3);
+  text-align:left;display:flex;align-items:flex-end}
+.cal-head-c small{display:block;font-size:14px;font-weight:800;color:var(--sw-ink);
+  margin-top:2px}
+.cal-head-c.is-today small{color:var(--cal-on-accent);background:var(--sw-teal);
+  width:26px;height:26px;line-height:26px;border-radius:50%;margin:2px auto 0}
+.cal-body{display:grid;grid-template-columns:var(--cal-gutter) repeat(var(--cal-cols),minmax(96px,1fr));
+  position:relative}
+.cal-gut{border-right:1px solid var(--sw-line)}
+.cal-gut div{height:var(--cal-h);font-size:9px;color:var(--sw-ink3);
+  padding:2px 7px 0;text-align:right;border-bottom:1px solid var(--cal-line-soft)}
+.cal-col{position:relative;border-left:1px solid var(--cal-line-soft);
+  background-image:repeating-linear-gradient(to bottom,
+    transparent 0,transparent calc(var(--cal-h) - 1px),
+    var(--cal-line-soft) calc(var(--cal-h) - 1px),var(--cal-line-soft) var(--cal-h))}
+.cal-col.is-weekend{background-color:var(--cal-offhours)}
+/* Outside working hours. Drawn as a band rather than left blank, because blank
+   space in a calendar reads as bookable and this is the opposite of that. */
+.cal-off{position:absolute;left:0;right:0;background:var(--cal-offhours);
+  pointer-events:none}
+.cal-nowline{position:absolute;left:0;right:0;height:0;
+  border-top:2px solid var(--cal-now);z-index:2;pointer-events:none}
+.cal-nowline::before{content:'';position:absolute;left:-4px;top:-5px;width:8px;
+  height:8px;border-radius:50%;background:var(--cal-now)}
+
+/* ── an event block ────────────────────────────────────────────────────── */
+.cal-ev{position:absolute;left:3px;right:3px;border-radius:6px;
+  border-left:3px solid var(--cal-blok-ac);background:var(--cal-blok-bg);
+  color:var(--cal-blok-fg);padding:3px 6px;overflow:hidden;cursor:pointer;
+  font-size:10px;line-height:1.3;text-align:left;
+  transition:box-shadow .12s ease,transform .12s ease}
+.cal-ev:hover{box-shadow:var(--sw-shadow-lift);z-index:4}
+.cal-ev b{display:block;font-size:10px;font-weight:700;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.cal-ev span{display:block;font-size:9px;opacity:.85;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.cal-ev.t-customer{background:var(--cal-cust-bg);color:var(--cal-cust-fg);
+  border-left-color:var(--cal-cust-ac)}
+.cal-ev.t-internal{background:var(--cal-intl-bg);color:var(--cal-intl-fg);
+  border-left-color:var(--cal-intl-ac)}
+.cal-ev.t-call{background:var(--cal-call-bg);color:var(--cal-call-fg);
+  border-left-color:var(--cal-call-ac)}
+.cal-ev.t-followup{background:var(--cal-fup-bg);color:var(--cal-fup-fg);
+  border-left-color:var(--cal-fup-ac)}
+.cal-ev.t-demo{background:var(--cal-demo-bg);color:var(--cal-demo-fg);
+  border-left-color:var(--cal-demo-ac)}
+.cal-ev.t-blocked{background:var(--cal-blok-bg);color:var(--cal-blok-fg);
+  border-left-color:var(--cal-blok-ac)}
+.cal-ev.t-pto{background:var(--cal-pto-bg);color:var(--cal-pto-fg);
+  border-left-color:var(--cal-pto-ac)}
+.cal-ev.t-external{background:var(--cal-ext-bg);color:var(--cal-ext-fg);
+  border-left-color:var(--cal-ext-ac);cursor:default;
+  background-image:repeating-linear-gradient(135deg,
+    transparent 0,transparent 5px,var(--cal-ext-hatch) 5px,var(--cal-ext-hatch) 10px)}
+.cal-ev.is-unconfirmed{border-left-style:dashed}
+.cal-ev .cal-flag{position:absolute;top:2px;right:3px;font-size:9px;opacity:.9}
+
+/* ── month view ────────────────────────────────────────────────────────── */
+.cal-month{border:1px solid var(--sw-line);border-radius:10px;overflow:hidden;
+  background:var(--sw-surface);box-shadow:var(--sw-shadow)}
+.cal-month-h{display:grid;grid-template-columns:repeat(7,1fr);
+  background:var(--sw-surface2);border-bottom:1px solid var(--sw-line)}
+.cal-month-h span{padding:7px 8px;font-size:9px;font-weight:800;
+  color:var(--sw-ink3);text-align:center}
+.cal-month-b{display:grid;grid-template-columns:repeat(7,1fr)}
+.cal-cell{min-height:96px;border-left:1px solid var(--cal-line-soft);
+  border-bottom:1px solid var(--cal-line-soft);padding:5px 5px 7px}
+.cal-cell:nth-child(7n+1){border-left:0}
+.cal-cell.is-out{background:var(--cal-offhours)}
+.cal-cell-d{font-size:10px;font-weight:700;color:var(--sw-ink2);margin-bottom:4px}
+.cal-cell.is-today .cal-cell-d{background:var(--sw-teal);color:var(--cal-on-accent);
+  width:20px;height:20px;line-height:20px;border-radius:50%;text-align:center}
+.cal-pill{display:block;width:100%;text-align:left;border:0;cursor:pointer;
+  border-radius:4px;padding:2px 5px;margin-bottom:2px;font-size:9px;
+  font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:var(--cal-blok-bg);color:var(--cal-blok-fg)}
+.cal-pill.t-customer{background:var(--cal-cust-bg);color:var(--cal-cust-fg)}
+.cal-pill.t-internal{background:var(--cal-intl-bg);color:var(--cal-intl-fg)}
+.cal-pill.t-demo{background:var(--cal-demo-bg);color:var(--cal-demo-fg)}
+.cal-pill.t-external{background:var(--cal-ext-bg);color:var(--cal-ext-fg)}
+.cal-more{font-size:9px;font-weight:700;color:var(--sw-ink3);background:none;
+  border:0;padding:1px 5px;cursor:pointer}
+.cal-more:hover{color:var(--sw-teal-deep);text-decoration:underline}
+
+/* ── legend ────────────────────────────────────────────────────────────── */
+.cal-legend{display:flex;flex-wrap:wrap;gap:6px 18px;padding:11px 14px}
+.cal-legend span{display:inline-flex;align-items:center;gap:6px;font-size:10px;
+  color:var(--sw-ink2)}
+.cal-sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto;
+  border-left:3px solid var(--cal-blok-ac);background:var(--cal-blok-bg)}
+.cal-sw.t-customer{background:var(--cal-cust-bg);border-left-color:var(--cal-cust-ac)}
+.cal-sw.t-internal{background:var(--cal-intl-bg);border-left-color:var(--cal-intl-ac)}
+.cal-sw.t-call{background:var(--cal-call-bg);border-left-color:var(--cal-call-ac)}
+.cal-sw.t-followup{background:var(--cal-fup-bg);border-left-color:var(--cal-fup-ac)}
+.cal-sw.t-demo{background:var(--cal-demo-bg);border-left-color:var(--cal-demo-ac)}
+.cal-sw.t-pto{background:var(--cal-pto-bg);border-left-color:var(--cal-pto-ac)}
+.cal-sw.t-free{background:var(--cal-free-bg);border-left-color:var(--cal-free-ac)}
+.cal-sw.t-external{background:var(--cal-ext-bg);border-left-color:var(--cal-ext-ac);
+  background-image:repeating-linear-gradient(135deg,
+    transparent 0,transparent 4px,var(--cal-ext-hatch) 4px,var(--cal-ext-hatch) 8px)}
+
+/* ── the right rail ────────────────────────────────────────────────────── */
+.cal-mini{padding:4px 12px 12px}
+.cal-mini-h{display:flex;align-items:center;justify-content:space-between;
+  padding:6px 2px 8px}
+.cal-mini-h b{font-size:12px;font-weight:800}
+.cal-mini-h button{border:0;background:none;cursor:pointer;font-size:13px;
+  color:var(--sw-ink2);padding:2px 7px;border-radius:5px}
+.cal-mini-h button:hover{background:var(--sw-surface3);color:var(--sw-ink)}
+.cal-mini-g{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+.cal-mini-g span{font-size:8px;font-weight:800;color:var(--sw-ink4);
+  text-align:center;padding:3px 0}
+.cal-mini-g button{border:0;background:none;cursor:pointer;font-size:10px;
+  color:var(--sw-ink);padding:5px 0;border-radius:6px;position:relative}
+.cal-mini-g button:hover{background:var(--sw-surface3)}
+.cal-mini-g button.is-out{color:var(--sw-ink4)}
+.cal-mini-g button.is-sel{background:var(--sw-teal);color:var(--cal-on-accent);font-weight:800}
+.cal-mini-g button.is-today{font-weight:800;color:var(--sw-teal-deep)}
+.cal-mini-g button.is-sel.is-today{color:var(--cal-on-accent)}
+.cal-mini-g button.has-ev::after{content:'';position:absolute;bottom:2px;
+  left:50%;transform:translateX(-50%);width:3px;height:3px;border-radius:50%;
+  background:var(--sw-teal)}
+.cal-mini-g button.is-sel.has-ev::after{background:var(--cal-on-accent)}
+
+.cal-roster{display:flex;flex-direction:column}
+.cal-person{display:grid;grid-template-columns:auto 1fr auto;gap:9px;
+  align-items:center;padding:8px 14px;border-bottom:1px solid var(--sw-line2)}
+.cal-person:last-child{border-bottom:0}
+.cal-person input{margin:0;accent-color:var(--sw-teal);width:15px;height:15px}
+.cal-person .sw-avatar{width:27px;height:27px;font-size:10px}
+.cal-person-n{min-width:0}
+.cal-person-n b{display:block;font-size:11px;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-person-n small{display:flex;align-items:center;gap:5px;font-size:9px;
+  color:var(--sw-ink3);margin-top:1px}
+.cal-dot{width:6px;height:6px;border-radius:50%;background:var(--sw-green);
+  flex:0 0 auto}
+.cal-dot.is-busy{background:var(--sw-red)}
+.cal-dot.is-unknown{background:var(--sw-ink4)}
+
+.cal-integ{display:flex;flex-direction:column}
+.cal-int{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;
+  padding:9px 14px;border-bottom:1px solid var(--sw-line2)}
+.cal-int:last-child{border-bottom:0}
+.cal-int b{display:block;font-size:11px;font-weight:700}
+.cal-int small{display:block;font-size:9px;color:var(--sw-ink3);margin-top:2px;
+  line-height:1.45}
+.cal-qa{display:flex;flex-direction:column;gap:6px;padding:12px 14px}
+.cal-qa button{display:flex;align-items:center;gap:9px;width:100%;
+  text-align:left;font-size:11px;font-weight:600;padding:9px 11px;
+  border:1px solid var(--sw-line);border-radius:8px;background:var(--sw-btn-bg);
+  color:var(--sw-ink);cursor:pointer}
+.cal-qa button:hover{border-color:var(--sw-line-strong);background:var(--sw-surface3)}
+
+/* ── the bottom panels ─────────────────────────────────────────────────── */
+.cal-bottom{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;margin-top:14px}
+.cal-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;
+  align-items:center;padding:9px 14px;border-bottom:1px solid var(--sw-line2)}
+.cal-row:last-child{border-bottom:0}
+.cal-row-t{font-size:10px;font-weight:800;color:var(--sw-ink2);white-space:nowrap}
+.cal-row-m{min-width:0}
+.cal-row-m b{display:block;font-size:11px;font-weight:700;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.cal-row-m small{display:block;font-size:9px;color:var(--sw-ink3);margin-top:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-attn{display:grid;grid-template-columns:3px 1fr auto;gap:10px;
+  align-items:center;padding:9px 14px 9px 0;border-bottom:1px solid var(--sw-line2)}
+.cal-attn:last-child{border-bottom:0}
+.cal-attn-b{align-self:stretch;background:var(--sw-amber)}
+.cal-attn.k-sync .cal-attn-b,.cal-attn.k-conflict .cal-attn-b{background:var(--sw-red)}
+.cal-attn.k-outcome .cal-attn-b{background:var(--sw-blue)}
+
+/* ══ TEAM AVAILABILITY ════════════════════════════════════════════════ */
+.av-layout{display:grid;grid-template-columns:minmax(0,1fr) 344px;gap:14px;
+  align-items:start}
+.av-grid{--av-h:46px;--av-gutter:64px;overflow-x:auto}
+.av-grid-in{display:grid;
+  grid-template-columns:var(--av-gutter) repeat(var(--av-cols),minmax(150px,1fr))}
+.av-hc{padding:10px;font-size:10px;font-weight:800;
+  border-left:1px solid var(--sw-line-soft);
+  border-bottom:1px solid var(--sw-line);background:var(--sw-surface2)}
+.av-hc:first-child{border-left:0;font-size:9px;color:var(--sw-ink3)}
+.av-hc-who{display:flex;align-items:center;gap:8px}
+.av-hc-who .sw-avatar{width:27px;height:27px;font-size:10px}
+.av-hc-who b{display:block;font-size:11px}
+.av-hc-who small{display:flex;align-items:center;gap:5px;font-size:9px;
+  font-weight:400;color:var(--sw-ink3);margin-top:1px}
+.av-gut div{height:var(--av-h);font-size:9px;color:var(--sw-ink3);
+  padding:2px 7px 0;text-align:right;border-bottom:1px solid var(--cal-line-soft)}
+.av-col{position:relative;border-left:1px solid var(--cal-line-soft);
+  background-image:repeating-linear-gradient(to bottom,
+    transparent 0,transparent calc(var(--av-h) - 1px),
+    var(--cal-line-soft) calc(var(--av-h) - 1px),var(--cal-line-soft) var(--av-h))}
+.av-blk{position:absolute;left:4px;right:4px;border-radius:6px;padding:4px 7px;
+  font-size:10px;line-height:1.3;overflow:hidden;
+  border-left:3px solid var(--cal-blok-ac);background:var(--cal-blok-bg);
+  color:var(--cal-blok-fg)}
+.av-blk b{display:block;font-size:10px;font-weight:700;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.av-blk span{display:block;font-size:9px;opacity:.85}
+.av-blk.t-free{background:var(--cal-free-bg);border-left-color:var(--cal-free-ac);
+  color:var(--cal-call-fg);left:0;right:0;border-radius:0}
+.av-blk.t-customer{background:var(--cal-cust-bg);color:var(--cal-cust-fg);
+  border-left-color:var(--cal-cust-ac)}
+.av-blk.t-internal{background:var(--cal-intl-bg);color:var(--cal-intl-fg);
+  border-left-color:var(--cal-intl-ac)}
+.av-blk.t-blocked{background:var(--cal-blok-bg);color:var(--cal-blok-fg);
+  border-left-color:var(--cal-blok-ac)}
+.av-blk.t-pto{background:var(--cal-pto-bg);color:var(--cal-pto-fg);
+  border-left-color:var(--cal-pto-ac)}
+.av-blk.t-external{background:var(--cal-ext-bg);color:var(--cal-ext-fg);
+  border-left-color:var(--cal-ext-ac);
+  background-image:repeating-linear-gradient(135deg,
+    transparent 0,transparent 5px,var(--cal-ext-hatch) 5px,var(--cal-ext-hatch) 10px)}
+.av-off{position:absolute;left:0;right:0;background:var(--cal-offhours);
+  pointer-events:none}
+
+/* Find Team Time, as a panel rather than a modal — Image 4 puts it beside the
+   grid, and that is the right call: the answer is only trustworthy in the
+   context of the columns it came from, and a modal hides exactly that. */
+.av-find{display:flex;flex-direction:column}
+.av-find-b{padding:12px 14px;display:flex;flex-direction:column;gap:11px}
+.av-slots{display:flex;flex-direction:column}
+.av-slot{display:grid;grid-template-columns:auto 1fr auto;gap:10px;
+  align-items:center;width:100%;text-align:left;border:0;
+  border-bottom:1px solid var(--sw-line2);background:none;cursor:pointer;
+  padding:10px 14px;font:inherit}
+.av-slot:last-child{border-bottom:0}
+.av-slot:hover{background:var(--sw-surface3)}
+.av-slot:disabled{opacity:.55;cursor:default}
+.av-slot-r{width:15px;height:15px;border-radius:50%;
+  border:2px solid var(--sw-line-strong);flex:0 0 auto}
+.av-slot.is-sel .av-slot-r{border-color:var(--sw-teal);
+  box-shadow:inset 0 0 0 3px var(--sw-teal)}
+.av-slot-m b{display:block;font-size:11px;font-weight:700}
+.av-slot-m small{display:block;font-size:9px;color:var(--sw-ink3);margin-top:1px}
+.av-faces{display:flex;gap:-4px}
+.av-faces .sw-avatar{width:21px;height:21px;font-size:8px;margin-left:-5px;
+  border:2px solid var(--sw-surface)}
+.av-faces .sw-avatar:first-child{margin-left:0}
+
+/* A chip a person can be removed from. The × is a real button because
+   removing a required participant changes the whole answer, and it must be
+   reachable by keyboard. */
+.av-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 4px;
+  border:1px solid var(--sw-line);border-radius:20px;background:var(--sw-surface);
+  font-size:10px;font-weight:600}
+.av-chip .sw-avatar{width:19px;height:19px;font-size:8px}
+.av-chip button{border:0;background:none;cursor:pointer;color:var(--sw-ink3);
+  font-size:13px;line-height:1;padding:0 3px;border-radius:4px}
+.av-chip button:hover{color:var(--sw-red);background:var(--sw-bad-bg)}
+.av-chip.is-add{border-style:dashed;cursor:pointer;color:var(--sw-ink2);
+  padding:5px 11px}
+.av-chip.is-add:hover{border-color:var(--sw-teal);color:var(--sw-teal-deep)}
+
+/* ── an honesty banner, not a decoration ───────────────────────────────── */
+/* Rendered whenever somebody's outside calendar could not be read. The point
+   is that "free" and "we could not check" must never look the same, so this
+   sits above the grid rather than in a tooltip nobody opens. */
+.cal-unverified{display:flex;gap:9px;align-items:flex-start;padding:10px 13px;
+  border:1px solid var(--sw-warn-bd);background:var(--sw-warn-bg);
+  color:var(--sw-warn-fg);border-radius:9px;font-size:11px;line-height:1.5;
+  margin-bottom:12px}
+.cal-unverified b{font-weight:800}
+
+/* ── mobile: the field view ────────────────────────────────────────────── */
+/* NOT a second calendar engine. The same payload, rendered as the next
+   appointments with the actions a salesperson in a car actually needs. */
+.cal-mob{display:none}
+.cal-mob-card{border:1px solid var(--sw-line);border-radius:11px;
+  background:var(--sw-surface);box-shadow:var(--sw-shadow);padding:13px;
+  margin-bottom:11px}
+.cal-mob-when{display:flex;align-items:baseline;gap:8px;font-size:15px;
+  font-weight:800}
+.cal-mob-when small{font-size:10px;font-weight:600;color:var(--sw-ink3)}
+.cal-mob-card h4{margin:6px 0 2px;font-size:13px;font-weight:800}
+.cal-mob-card p{margin:0;font-size:11px;color:var(--sw-ink2);line-height:1.5}
+.cal-mob-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.cal-mob-act{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));
+  gap:7px;margin-top:11px}
+.cal-mob-act a,.cal-mob-act button{display:flex;align-items:center;
+  justify-content:center;gap:6px;padding:10px 8px;border-radius:8px;
+  border:1px solid var(--sw-line);background:var(--sw-btn-bg);color:var(--sw-ink);
+  font-size:11px;font-weight:700;text-decoration:none;cursor:pointer;
+  /* 44px min target — this is the one surface used one-handed, outdoors. */
+  min-height:44px}
+.cal-mob-act a:hover,.cal-mob-act button:hover{border-color:var(--sw-line-strong);
+  background:var(--sw-surface3)}
+.cal-mob-act .is-primary{background:var(--sw-teal);border-color:var(--sw-teal);
+  color:var(--cal-on-accent)}
+
+@media(max-width:1320px){
+  .cal-layout,.av-layout{grid-template-columns:1fr}
+  .cal-rail{position:static;
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .cal-bottom{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:880px){
+  .cal-bottom{grid-template-columns:1fr}
+  .cal-filters{gap:7px}
+  .cal-filters .sw-select{flex:1 1 140px}
+}
+@media(max-width:720px){
+  /* The grid is genuinely unusable at phone width — seven columns of 96px do
+     not fit, and pinch-zooming a calendar to find your 2pm is not a feature.
+     So the grid is replaced rather than squeezed, and Find Team Time still
+     works, because booking from the field is the whole point. */
+  .cal-desk{display:none}
+  .cal-mob{display:block}
+  .cal-rail{grid-template-columns:1fr}
+  .av-grid-in{grid-template-columns:var(--av-gutter) repeat(var(--av-cols),minmax(132px,1fr))}
+}
+
 `
 
 let injected = false

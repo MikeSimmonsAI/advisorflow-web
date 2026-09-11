@@ -26,7 +26,7 @@ from typing import List, Optional, Tuple
 import httpx
 
 from app.services.calendar_providers.base import (
-    CalendarProvider, EventPayload, SyncResult, BusyInterval,
+    CalendarProvider, EventPayload, SyncResult, BusyInterval, ExternalEventState,
 )
 
 log = logging.getLogger(__name__)
@@ -165,6 +165,74 @@ class MicrosoftCalendarProvider(CalendarProvider):
         if r.status_code in (200, 202, 204, 404):
             return SyncResult(ok=True, external_event_id=external_event_id)
         return self._classify(r)
+
+    def supports_read_back(self) -> bool:
+        return True
+
+    def get_event(self, external_event_id: str):
+        """Read one event back for drift detection.
+
+        `$select` is narrow on purpose: the reconciler needs the time, the
+        version marker and enough to prove ownership. Asking Graph for the
+        whole event would pull the attendee list and body of a meeting that may
+        have been edited by hand, into a code path that has no business holding
+        either.
+
+        A 404 is returned as `exists=False` with NO error. Graph gives the same
+        404 whether the user deleted the meeting or it never existed, and both
+        of those are "the copy is gone" — which is exactly the deterministic
+        case the reconciler can heal. A transport failure is returned as an
+        error instead, so a Microsoft outage is never mistaken for a deletion
+        and never triggers a recreate storm.
+        """
+        token, err = self._token()
+        if err:
+            return None, err
+        params = {"$select": "id,subject,start,end,isCancelled,changeKey,location,body"}
+        try:
+            r = httpx.get("%s/me/events/%s" % (GRAPH, external_event_id),
+                          headers=self._headers(token), params=params, timeout=TIMEOUT)
+        except Exception as e:
+            return None, SyncResult.failure("transport", e)
+
+        if r.status_code == 404:
+            return ExternalEventState(exists=False), None
+        if r.status_code != 200:
+            return None, self._classify(r)
+
+        try:
+            ev = r.json()
+        except Exception as e:
+            return None, SyncResult.failure("transport", e)
+
+        def _dt(node):
+            try:
+                return datetime.fromisoformat(str(node["dateTime"])[:19])
+            except Exception:
+                return None
+
+        # The reference line `_event_body` writes into the description. Read
+        # back rather than trusted from our own column, so an event whose id we
+        # hold but which is NOT ours can be recognised and left alone.
+        claimed = None
+        try:
+            content = ((ev.get("body") or {}).get("content") or "")
+            marker = "AdvisorFlow reference:"
+            if marker in content:
+                claimed = content.split(marker, 1)[1].strip().split()[0].strip()
+        except Exception:
+            claimed = None
+
+        return ExternalEventState(
+            exists=True,
+            starts_at=_dt(ev.get("start") or {}),
+            ends_at=_dt(ev.get("end") or {}),
+            etag=ev.get("changeKey"),
+            is_cancelled=bool(ev.get("isCancelled")),
+            claimed_appointment_id=claimed,
+            subject=ev.get("subject"),
+            location=((ev.get("location") or {}).get("displayName")),
+        ), None
 
     def get_busy(self, start_utc: datetime, end_utc: datetime):
         """Read busy periods via calendarView.
