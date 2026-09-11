@@ -64,6 +64,13 @@ import app.models.implementation_models  # noqa: F401  (imported for side effect
 # merge artifact); this import is added to BOTH blocks on purpose, because an
 # import added to only one copy looks correct in a diff and half-works.
 import app.models.launch_intake_models  # noqa: F401  (imported for side effects)
+# Launch Engine DELIVERY (implementation_integrations / _checks / _training /
+# _blockers / _approvals / launch_templates) - same Base, same reason, and the
+# consequence of dropping it is the worst on this list: with no tables, the
+# go-live gate reads every requirement as satisfied, because an empty checklist
+# is indistinguishable from a finished one - and a customer could be marked
+# Live with nothing verified. Added to BOTH blocks below, per the note above.
+import app.models.launch_delivery_models  # noqa: F401  (imported for side effects)
 # Staff/brand-sales access activation (staff_activations) - same Base, same
 # reason. A control-plane identity has organization_id = NULL, so it cannot
 # use the customer activation table, whose organization_id is NOT NULL.
@@ -200,6 +207,13 @@ import app.models.implementation_models  # noqa: F401  (imported for side effect
 # merge artifact); this import is added to BOTH blocks on purpose, because an
 # import added to only one copy looks correct in a diff and half-works.
 import app.models.launch_intake_models  # noqa: F401  (imported for side effects)
+# Launch Engine DELIVERY (implementation_integrations / _checks / _training /
+# _blockers / _approvals / launch_templates) - same Base, same reason, and the
+# consequence of dropping it is the worst on this list: with no tables, the
+# go-live gate reads every requirement as satisfied, because an empty checklist
+# is indistinguishable from a finished one - and a customer could be marked
+# Live with nothing verified. Added to BOTH blocks below, per the note above.
+import app.models.launch_delivery_models  # noqa: F401  (imported for side effects)
 # Staff/brand-sales access activation (staff_activations) - same Base, same
 # reason. A control-plane identity has organization_id = NULL, so it cannot
 # use the customer activation table, whose organization_id is NOT NULL.

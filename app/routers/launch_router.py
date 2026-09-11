@@ -475,6 +475,22 @@ def staff_list(db: Session = Depends(get_db),
     # implementation on the page.
     impl_completion = impl_svc.completion_for_many(db, [i.id for i in impls])
 
+    # OPEN BLOCKERS FOR EVERY LAUNCH, IN ONE QUERY.
+    # The list's job is to show what is stuck without being opened, and a
+    # per-row lookup on a screen whose whole purpose is to show all the rows is
+    # the N+1 this codebase has removed twice already.
+    from app.models.launch_delivery_models import (
+        BLOCKER_OPEN, BLOCKER_PARTY_LABELS, ImplementationBlocker,
+    )
+    open_blockers: Dict[str, List[Any]] = {}
+    if impls:
+        for b in (db.query(ImplementationBlocker)
+                  .filter(ImplementationBlocker.implementation_id.in_(
+                      [i.id for i in impls]),
+                      ImplementationBlocker.status == BLOCKER_OPEN)
+                  .order_by(ImplementationBlocker.opened_at).all()):
+            open_blockers.setdefault(b.implementation_id, []).append(b)
+
     # Brand names in one query too, so a list of fifty customers does not make
     # fifty platform lookups to print a label.
     plat_ids = {i.platform_id for i in impls if i.platform_id}
@@ -509,6 +525,11 @@ def staff_list(db: Session = Depends(get_db),
             blockers += ["Milestone blocked: %s" % m["label"] for m in c["blocked"]]
         if impl.status == "blocked":
             blockers.append(impl.blocker_note or "Implementation is blocked")
+        # The blocker ROWS, which carry whose move it is — the question a
+        # launch list is actually read to answer.
+        for b in open_blockers.get(impl.id, []):
+            blockers.append("%s: %s" % (
+                BLOCKER_PARTY_LABELS.get(b.party, b.party), b.title))
         if intake_state == "submitted":
             warnings.append("Intake submitted and waiting on review")
         if intake_state == "not_started":
@@ -619,3 +640,417 @@ def staff_review(organization_id: str, body: ReviewBody,
                   details={"submission_id": sub.id})
     db.commit()
     return {"reviewed_at": sub.reviewed_at.isoformat(), "id": sub.id}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DELIVERY — the implementation team's half, and the go-live gate
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# THE ACCESS RULE FROM THE TOP OF THIS FILE STILL HOLDS, UNCHANGED.
+#
+# Customer routes below take no organization id and no implementation id. They
+# take a ROW id at most, and every row is fetched through
+# `launch_delivery._one`, which filters on the implementation AND the
+# organization resolved from the session. A row id belonging to another
+# customer therefore resolves to nothing and 404s — it does not resolve to
+# their row and then get checked.
+#
+# WHAT A CUSTOMER MAY WRITE HERE, AND WHY ONLY THESE TWO THINGS.
+#
+#     approve a check that has passed
+#     acknowledge a training session that has been delivered
+#
+# Both are statements only the customer can make. Everything else on this
+# surface — status, verification, scheduling, blockers, the provider signature
+# — is the implementation team's to write, and a customer endpoint that could
+# write any of it would let a customer mark their own launch ready.
+
+from app.services import launch_delivery, launch_template   # noqa: E402
+from app.services import implementation_service as _impls    # noqa: E402
+
+
+def _impl_and_org(user: User, db: Session, request: Request):
+    org_id = _caller_org_id(user, db, request)
+    return _impl_for_org(db, org_id), org_id
+
+
+@router.get("/me/delivery")
+def my_delivery(request: Request,
+                db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)) -> dict:
+    """What the team is doing, what is stuck, and what the customer must do.
+
+    `customer_view` is BUILT from the customer's entitlements rather than
+    filtered down from the staff object — see its docstring. There is no
+    branch here that could leak an internal note, because none is fetched.
+    """
+    impl, _ = _impl_and_org(user, db, request)
+    return launch_delivery.customer_view(db, impl)
+
+
+@router.post("/me/checks/{check_id}/approve")
+def approve_my_check(check_id: str, request: Request,
+                     db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)) -> dict:
+    impl, _ = _impl_and_org(user, db, request)
+    try:
+        row = launch_delivery.customer_approve_check(db, impl, user.id, check_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"id": row.id, "label": row.label,
+            "customer_approved_at": row.customer_approved_at.isoformat()}
+
+
+@router.post("/me/training/{training_id}/acknowledge")
+def acknowledge_my_training(training_id: str, request: Request,
+                            db: Session = Depends(get_db),
+                            user: User = Depends(get_current_user)) -> dict:
+    impl, _ = _impl_and_org(user, db, request)
+    try:
+        row = launch_delivery.acknowledge_training(db, impl, user.id, training_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"id": row.id, "title": row.title,
+            "customer_acknowledged_at": row.customer_acknowledged_at.isoformat()}
+
+
+# ── staff delivery ──────────────────────────────────────────────────────────
+
+def _access_state(db: Session, impl: Implementation, org: Organization) -> dict:
+    """Can the customer actually get in? Status and counts, never a token.
+
+    The single most common way an onboarding stalls at zero is a beautiful
+    Launch Pad nobody has been invited to. The invitation machinery already
+    exists — `CustomerActivation`, and the resend/revoke endpoints in
+    god_ops_router — and what was missing was the answer to "has anybody sent
+    it" on the screen where somebody would think to ask.
+
+    The token is hashed and was shown once, to whoever created it. There is
+    nothing here that could return it, which is the same discipline the intake
+    applies to credentials.
+    """
+    from app.models.implementation_models import CustomerActivation
+    acts = (db.query(CustomerActivation)
+            .filter(CustomerActivation.implementation_id == impl.id)
+            .order_by(CustomerActivation.created_at.desc()).all())
+    active_users = (db.query(User)
+                    .filter(User.organization_id == org.id,
+                            User.is_active.is_(True)).count())
+    if any(a.status == "accepted" for a in acts):
+        state = "accepted"
+    elif any(a.status == "pending" for a in acts):
+        state = "invited"
+    elif active_users:
+        state = "users_exist"
+    else:
+        state = "not_invited"
+    return {
+        "state": state,
+        "active_users": active_users,
+        "invitations": [{
+            "id": a.id, "status": a.status, "send_count": a.send_count,
+            "last_sent_at": a.last_sent_at.isoformat() if a.last_sent_at else None,
+            "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+            "accepted_at": a.accepted_at.isoformat() if a.accepted_at else None,
+        } for a in acts],
+    }
+
+
+def _staff_impl(db: Session, actor: User, organization_id: str) -> Implementation:
+    """The implementation, with BOTH authority checks the platform already uses.
+
+    `load_org_in_scope` 404s on an org outside the actor's scope, so this
+    cannot be used to discover which customers exist. `assert_can_manage` is
+    the same authority the milestone and status endpoints apply — god, or the
+    assigned implementation owner. Selling a deal does not staff it, and
+    neither does observing it.
+    """
+    org = load_org_in_scope(db, actor, organization_id)
+    impl = _impl_for_org(db, org.id)
+    _impls.assert_can_manage(actor, impl, db)
+    return impl
+
+
+@god_router.get("/{organization_id}/delivery")
+def staff_delivery(organization_id: str,
+                   db: Session = Depends(get_db),
+                   actor: User = Depends(require_god)) -> dict:
+    """The implementation command centre for one customer.
+
+    SEEDS ON FIRST OPEN. A launch provisioned before the delivery programme
+    existed, or one whose brand has since added an integration, would
+    otherwise show an empty checklist — and an empty checklist reads as
+    "nothing left to do", which is the one thing this screen must never say by
+    accident. Seeding is idempotent and never touches a row somebody has
+    worked on, so doing it on a GET is safe; doing it only on a button is how
+    the screen is wrong until somebody presses the button.
+    """
+    org = load_org_in_scope(db, actor, organization_id)
+    impl = _impl_for_org(db, org.id)
+    try:
+        launch_delivery.seed(db, impl, actor.id)
+    except Exception:                                    # pragma: no cover
+        log.warning("seed on read failed for %s", impl.id, exc_info=True)
+        db.rollback()
+    out = launch_delivery.staff_view(db, impl)
+    out["implementation"] = {
+        "id": impl.id, "status": impl.status,
+        "owner_user_id": impl.owner_user_id,
+        "target_launch_date": impl.target_launch_date.isoformat()
+                              if impl.target_launch_date else None,
+        "launched_at": impl.launched_at.isoformat() if impl.launched_at else None,
+    }
+    out["organization_id"] = org.id
+    out["can_manage"] = _impls.can_manage(actor, impl, db)
+    out["access"] = _access_state(db, impl, org)
+    return out
+
+
+@god_router.get("/{organization_id}/readiness")
+def staff_readiness(organization_id: str,
+                    db: Session = Depends(get_db),
+                    actor: User = Depends(require_god)) -> dict:
+    org = load_org_in_scope(db, actor, organization_id)
+    impl = _impl_for_org(db, org.id)
+    return launch_delivery.readiness(db, impl)
+
+
+class IntegrationPatch(BaseModel):
+    status: Optional[str] = None
+    provider: Optional[str] = None
+    notes: Optional[str] = None
+    owner_party: Optional[str] = None
+    owner_user_id: Optional[str] = None
+    is_required: Optional[bool] = None
+
+
+class IntegrationNew(BaseModel):
+    key: str
+    label: str
+    provider: Optional[str] = None
+    is_required: bool = True
+
+
+@god_router.post("/{organization_id}/integrations")
+def staff_add_integration(organization_id: str, body: IntegrationNew,
+                          db: Session = Depends(get_db),
+                          actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.add_integration(
+            db, impl, actor.id, key=body.key, label=body.label,
+            provider=body.provider, is_required=body.is_required)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return launch_delivery.integration_public(row)
+
+
+@god_router.patch("/{organization_id}/integrations/{integration_id}")
+def staff_set_integration(organization_id: str, integration_id: str,
+                          body: IntegrationPatch,
+                          db: Session = Depends(get_db),
+                          actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.set_integration(
+            db, impl, actor.id, integration_id,
+            status=body.status, provider=body.provider, notes=body.notes,
+            owner_party=body.owner_party, owner_user_id=body.owner_user_id,
+            is_required=body.is_required)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return launch_delivery.integration_public(row)
+
+
+class CheckPatch(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    is_required: Optional[bool] = None
+
+
+@god_router.patch("/{organization_id}/checks/{check_id}")
+def staff_set_check(organization_id: str, check_id: str, body: CheckPatch,
+                    db: Session = Depends(get_db),
+                    actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.set_check(
+            db, impl, actor.id, check_id, status=body.status,
+            notes=body.notes, is_required=body.is_required)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return launch_delivery.check_public(row)
+
+
+class TrainingPatch(BaseModel):
+    scheduled_at: Optional[datetime] = None
+    owner_user_id: Optional[str] = None
+    attendees: Optional[List[Dict[str, Any]]] = None
+    completed: Optional[bool] = None
+    notes: Optional[str] = None
+    is_required: Optional[bool] = None
+
+
+@god_router.patch("/{organization_id}/training/{training_id}")
+def staff_set_training(organization_id: str, training_id: str,
+                       body: TrainingPatch,
+                       db: Session = Depends(get_db),
+                       actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.set_training(
+            db, impl, actor.id, training_id,
+            scheduled_at=body.scheduled_at, owner_user_id=body.owner_user_id,
+            attendees=body.attendees, completed=body.completed,
+            notes=body.notes, is_required=body.is_required)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return launch_delivery.training_public(row)
+
+
+class BlockerNew(BaseModel):
+    title: str
+    detail: Optional[str] = None
+    party: str = "provider"
+    owner_user_id: Optional[str] = None
+    customer_visible: bool = False
+    customer_action: Optional[str] = None
+
+
+class BlockerResolve(BaseModel):
+    resolution: Optional[str] = None
+
+
+@god_router.post("/{organization_id}/blockers")
+def staff_open_blocker(organization_id: str, body: BlockerNew,
+                       db: Session = Depends(get_db),
+                       actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.open_blocker(
+            db, impl, actor.id, title=body.title, detail=body.detail,
+            party=body.party, owner_user_id=body.owner_user_id,
+            customer_visible=body.customer_visible,
+            customer_action=body.customer_action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return launch_delivery.blocker_public(row)
+
+
+@god_router.post("/{organization_id}/blockers/{blocker_id}/resolve")
+def staff_resolve_blocker(organization_id: str, blocker_id: str,
+                          body: BlockerResolve,
+                          db: Session = Depends(get_db),
+                          actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.resolve_blocker(db, impl, actor.id, blocker_id,
+                                              body.resolution)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    return launch_delivery.blocker_public(row)
+
+
+class ApprovalBody(BaseModel):
+    given_name: Optional[str] = None
+    note: Optional[str] = None
+
+
+@god_router.post("/{organization_id}/approvals/{kind}")
+def staff_set_approval(organization_id: str, kind: str, body: ApprovalBody,
+                       db: Session = Depends(get_db),
+                       actor: User = Depends(require_god)) -> dict:
+    """Record a go-live signature.
+
+    BOTH signatures are recorded by staff, including the customer's, and that
+    is honest rather than lax: the customer's approval usually arrives in an
+    email or on a call, and pretending it was clicked here would be a worse
+    record than one that says who entered it and when. `given_name` is the
+    person who gave it; `given_by` is the account that wrote it down. They are
+    different fields because they are different people.
+    """
+    impl = _staff_impl(db, actor, organization_id)
+    try:
+        row = launch_delivery.set_approval(db, impl, actor.id, kind,
+                                           given_name=body.given_name,
+                                           note=body.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return launch_delivery.approval_public(row)
+
+
+@god_router.delete("/{organization_id}/approvals/{kind}")
+def staff_clear_approval(organization_id: str, kind: str,
+                         db: Session = Depends(get_db),
+                         actor: User = Depends(require_god)) -> dict:
+    impl = _staff_impl(db, actor, organization_id)
+    launch_delivery.clear_approval(db, impl, actor.id, kind)
+    return {"cleared": kind}
+
+
+# ── per-brand template ──────────────────────────────────────────────────────
+#
+# Its own router rather than another path under /god/launch, because every
+# route there is addressed by a CUSTOMER organization id and this one is
+# addressed by a BRAND. Sharing the prefix would mean a path segment that is
+# sometimes a customer and sometimes a brand, which is exactly the kind of
+# ambiguity an authorization check gets wrong.
+
+template_router = APIRouter(prefix="/god/launch-templates",
+                            tags=["Launch Engine - Staff"])
+
+
+class TemplateBody(BaseModel):
+    name: Optional[str] = None
+    config: Dict[str, Any] = {}
+
+
+@template_router.get("/{platform_id}")
+def get_template(platform_id: str,
+                 db: Session = Depends(get_db),
+                 actor: User = Depends(require_god)) -> dict:
+    from app.models.launch_delivery_models import LaunchTemplate
+    plat = db.query(Platform).filter(Platform.id == platform_id).first()
+    if plat is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    row = (db.query(LaunchTemplate)
+           .filter(LaunchTemplate.platform_id == platform_id).first())
+    return {
+        "platform_id": platform_id,
+        "brand_name": plat.name,
+        # What the brand actually saved, so an editor shows their answer.
+        "config": (row.config if row is not None else None),
+        # What their launches actually run, default merged in.
+        "resolved": launch_template.resolve(db, platform_id),
+        "golive_keys": list(launch_template.GOLIVE_KEYS),
+        "golive_labels": launch_template.GOLIVE_LABELS,
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+    }
+
+
+@template_router.put("/{platform_id}")
+def put_template(platform_id: str, body: TemplateBody,
+                 db: Session = Depends(get_db),
+                 actor: User = Depends(require_god)) -> dict:
+    plat = db.query(Platform).filter(Platform.id == platform_id).first()
+    if plat is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    launch_template.save(db, platform_id, body.config or {}, actor.id, body.name)
+    try:
+        log_action(db, None, actor.id, action="launch_template_saved",
+                   target_type="platform", target_id=platform_id,
+                   platform_id=platform_id,
+                   details={"sections": sorted((body.config or {}).keys())})
+    except Exception:                                    # pragma: no cover
+        log.warning("template audit failed for %s", platform_id, exc_info=True)
+    return get_template(platform_id, db, actor)

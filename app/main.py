@@ -103,6 +103,9 @@ from app.routers.launch_router import router as launch_router
 # Deal → billing: the join between what was sold and what gets charged.
 from app.routers.deal_billing_router import router as deal_billing_router
 from app.routers.launch_router import god_router as launch_god_router
+# Per-brand launch programme. Addressed by BRAND, not by customer, which is
+# why it is its own router rather than another path under /god/launch.
+from app.routers.launch_router import template_router as launch_template_router
 from app.routers.email_tracking_router import router as email_tracking_router
 from app.routers.billing_router import router as billing_router
 from app.routers.lead_scraper_router import router as lead_scraper_router
@@ -598,6 +601,7 @@ app.include_router(launch_router)             # /launch  — customer, session-s
 # per-record opportunity check inside the router.
 app.include_router(deal_billing_router)       # /sales/opportunities/{id}/billing
 app.include_router(launch_god_router)         # /god/launch — staff, god_admin only
+app.include_router(launch_template_router)    # /god/launch-templates/{brand}
 app.include_router(email_tracking_router)
 # Stripe billing: /billing/plans is public; subscription/checkout/portal are
 # org_admin+ (each org manages its own card); /billing/all is god_admin only.

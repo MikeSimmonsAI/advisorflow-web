@@ -56,6 +56,10 @@ from app.services.sales_access import is_god, is_sales_manager
 from app.services import package_pricing as _pp
 from app.routers.audit_log_router import log_action
 
+import logging
+
+log = logging.getLogger("provisioning")
+
 
 # ── milestone templates ─────────────────────────────────────────────────────
 #
@@ -566,4 +570,24 @@ def provision_customer(
 
     db.commit()
     db.refresh(impl)
+
+    # ── the delivery programme ──
+    #
+    # AFTER the commit, deliberately. Seeding the brand's integrations, checks
+    # and training sessions is a convenience: a launch with none of them is a
+    # launch somebody has to build a checklist for by hand, which is a bad
+    # afternoon, while a provisioning that ROLLED BACK because a template row
+    # was malformed is a customer who does not exist. The two failures are not
+    # comparable, so they do not share a transaction.
+    #
+    # It is idempotent, so the staff surface calls it again on first open and
+    # a launch provisioned before this existed picks its programme up then.
+    try:
+        from app.services import launch_delivery
+        launch_delivery.seed(db, impl, actor.id)
+    except Exception:                                    # pragma: no cover
+        log.warning("launch programme seeding failed for %s", impl.id,
+                    exc_info=True)
+        db.rollback()
+
     return impl, True
