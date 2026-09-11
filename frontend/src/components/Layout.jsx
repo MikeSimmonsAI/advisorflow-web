@@ -77,6 +77,14 @@ const NAV_GROUPS = [
       // by the server, and a key this platform has never heard of would hide
       // the screen for everyone.
       { to: '/ai-workforce', label: 'My AI Workforce', icon: 'package', adminOnly: true },
+      // T9 — MANAGING the workforce rather than hiring it. NOT adminOnly and
+      // NO featureKey, for the reason the two lines above give twice over: an
+      // empty command centre is a real answer for a customer who has hired
+      // nobody, and the person who has to clear a handoff or decide a review
+      // is often not an org admin. Everything behind it is scoped to the
+      // caller's own workspace by the route signatures, and every write is
+      // additionally gated by require_not_observation on the server.
+      { to: '/ai-workforce-command', label: 'Workforce Command', icon: 'activity' },
       { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
       { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
       // NO featureKey. `proposals` is not a key in app/services/entitlements.py,

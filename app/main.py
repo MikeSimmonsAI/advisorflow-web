@@ -216,6 +216,12 @@ from app.routers.ai_operations_router import router as ai_operations_router
 # than any customer's own configuration.
 from app.routers.ai_deployment_router import router as ai_deployment_router
 from app.routers.god_ai_deployment_router import router as god_ai_deployment_router
+from app.routers.workforce_intelligence_router import (
+    brand_router as ai_workforce_intelligence_brand_router)
+from app.routers.workforce_intelligence_router import (
+    god_router as ai_workforce_intelligence_god_router)
+from app.routers.workforce_intelligence_router import (
+    router as ai_workforce_intelligence_router)
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -809,6 +815,14 @@ app.include_router(ai_operations_god_router)
 # ability to stop one that is already running.
 app.include_router(ai_deployment_router)
 app.include_router(god_ai_deployment_router)
+# T9 - AI Workforce Command: the management, intelligence, quality and
+# exception layer above T6/T7/T8. It reads their authoritative records and
+# produces authorized intelligence; every consequential change it offers is
+# delegated back to the layer that owns it. Three routers, three authorities:
+# the customer's own workspace, a white-label brand's customers, and God Mode.
+app.include_router(ai_workforce_intelligence_router)
+app.include_router(ai_workforce_intelligence_brand_router)
+app.include_router(ai_workforce_intelligence_god_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

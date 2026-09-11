@@ -203,6 +203,18 @@ import app.models.workforce_models  # noqa: F401  (imported for side effects)
 # one entitlement. Added to BOTH blocks in this file, per the merge-artifact
 # note above.
 import app.models.ai_deployment_models  # noqa: F401  (side effects)
+# AI Workforce INTELLIGENCE (T9) - the management, quality and exception layer
+# above T6/T7/T8 (ai_intelligence_read_models / ai_attention_items /
+# ai_supervisor_findings / ai_review_decisions / ai_reconciliation_findings /
+# ai_management_actions / ai_intelligence_runs). Same Base, same reason.
+#
+# Dropping this line has its own specific consequence: with no
+# `ai_attention_items` table the Needs Attention queue reads as EMPTY rather
+# than as broken, and an empty attention queue is indistinguishable from a
+# workforce with nothing wrong. A quiet wrong answer instead of a loud one -
+# the same failure shape the qualification_rules note above records. Added to
+# BOTH blocks in this file, per the merge-artifact note above.
+import app.models.workforce_intelligence_models  # noqa: F401  (side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -395,3 +407,15 @@ import app.models.workforce_models  # noqa: F401  (imported for side effects)
 # reason as the first. Without it there is no unique index behind idempotent
 # provisioning, and a retried hire creates a second AI employee.
 import app.models.ai_deployment_models  # noqa: F401  (side effects)
+# AI Workforce INTELLIGENCE (T9) - the management, quality and exception layer
+# above T6/T7/T8 (ai_intelligence_read_models / ai_attention_items /
+# ai_supervisor_findings / ai_review_decisions / ai_reconciliation_findings /
+# ai_management_actions / ai_intelligence_runs). Same Base, same reason.
+#
+# Dropping this line has its own specific consequence: with no
+# `ai_attention_items` table the Needs Attention queue reads as EMPTY rather
+# than as broken, and an empty attention queue is indistinguishable from a
+# workforce with nothing wrong. A quiet wrong answer instead of a loud one -
+# the same failure shape the qualification_rules note above records. Added to
+# BOTH blocks in this file, per the merge-artifact note above.
+import app.models.workforce_intelligence_models  # noqa: F401  (side effects)
