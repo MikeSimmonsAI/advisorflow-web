@@ -86,6 +86,112 @@ def get_or_404(db: Session, implementation_id: str) -> Implementation:
     return impl
 
 
+def for_organization(db: Session, organization_id: str) -> Optional[Implementation]:
+    return (db.query(Implementation)
+            .filter(Implementation.organization_id == organization_id)
+            .first())
+
+
+# ── starting a launch for a customer who already exists ─────────────────────
+
+def start_for_organization(db: Session, org: Organization, actor: User, *,
+                           reason: Optional[str] = None,
+                           commit: bool = True) -> Dict[str, Any]:
+    """Give an existing customer a launch record. Idempotent.
+
+    WHY THIS EXISTS
+    ===============
+    `provisioning.provision` is the Won → Customer crossing, and it was the
+    only thing in the platform that could create an Implementation. Every
+    customer who arrived another way — provisioned directly by an operator,
+    migrated from before the pipeline — therefore had no launch record and
+    could not be given one, which meant they never appeared in Customer
+    Launches and could not be onboarded at all. This is the other door into
+    the same room.
+
+    WHAT IT CREATES, AND WHAT IT DELIBERATELY DOES NOT
+    ==================================================
+    It creates ONE Implementation and its milestone checklist, all pending.
+    That is the whole of it.
+
+    It does NOT create or invite a user, send anything to anybody, configure or
+    charge billing, create an opportunity to satisfy the foreign key (see the
+    Implementation docstring — a synthetic deal is a fake sale in the pipeline),
+    seed sample data, or mark a single milestone done. A launch record is the
+    statement that onboarding may now begin; a launch record that arrives with
+    progress already on it is a lie told to the person reading the percentage.
+
+    IDEMPOTENT, AND SILENT ABOUT IT
+    ===============================
+    A customer who already has one gets theirs back untouched, with
+    `created: False`. Re-running this must never reset a customer who is
+    halfway through onboarding, so nothing below writes to an existing row.
+    """
+    from app.services.provisioning import milestone_template
+
+    existing = for_organization(db, org.id)
+    if existing is not None:
+        return {"implementation": existing, "created": False}
+
+    now = datetime.utcnow()
+    impl = Implementation(
+        # No opportunity: this customer did not come from a deal, and that is
+        # recorded as the absence it is rather than invented.
+        opportunity_id=None,
+        organization_id=org.id,
+        # The brand that owns the customer, taken from the customer's own row —
+        # never guessed, never defaulted to whichever brand is first.
+        platform_id=org.platform_id,
+        status=IMPL_NOT_STARTED,
+        # NOT the actor. Selling, provisioning and implementing are different
+        # jobs; auto-assigning whoever clicked makes them accountable for a
+        # delivery they may not be staffed to do.
+        owner_user_id=None,
+        # Billing INTENT, unset. This customer's commercial arrangement is
+        # whatever it is — possibly a custom agreement with no package at all —
+        # and copying a package's figures here would state terms nobody agreed.
+        billing_status="not_configured",
+        last_activity_at=now,
+        created_at=now,
+        created_by=actor.id,
+    )
+    db.add(impl)
+    db.flush()
+
+    # The SAME checklist the Won path seeds, from the same function, so a
+    # customer's onboarding does not depend on which door they came through.
+    # No package, so it is the core template.
+    for i, m in enumerate(milestone_template(None)):
+        db.add(ImplementationMilestone(
+            implementation_id=impl.id,
+            key=m["key"], label=m["label"],
+            description=m.get("description"),
+            position=i,
+            is_required=bool(m.get("required")),
+            status=MILESTONE_PENDING,
+            created_at=now,
+        ))
+
+    log_action(
+        db, org.id, actor.id,
+        action="implementation_started_for_existing_customer",
+        target_type="implementation", target_id=impl.id,
+        platform_id=org.platform_id,
+        after={"status": impl.status, "from_opportunity": False},
+        details={"reason": reason or None,
+                 # Said explicitly in the record, because the next person to
+                 # read this audit entry will want to know what it did NOT do.
+                 "users_created": 0, "invitations_sent": 0,
+                 "billing_configured": False, "data_seeded": False},
+        note=reason or None,
+        commit=False,
+    )
+    if commit:
+        db.commit()
+        db.refresh(impl)
+    return {"implementation": impl, "created": True}
+
+
 # ── milestones ──────────────────────────────────────────────────────────────
 
 def milestones(db: Session, impl: Implementation) -> List[ImplementationMilestone]:

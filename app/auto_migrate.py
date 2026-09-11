@@ -1106,6 +1106,15 @@ NULLABILITY_TO_RELAX = [
     # Brand-sales staff and some global/god users have no customer tenant at all.
     # See User.organization_id and claude/SALES_WORKSPACE_ARCHITECTURE.md.
     ("users", "organization_id"),
+    # A CUSTOMER WHO DID NOT COME FROM A DEAL STILL HAS A LAUNCH.
+    # This column being NOT NULL meant the only way to hold a launch record was
+    # to have been converted from a Won opportunity, so every operator-created
+    # and every migrated customer was permanently invisible to the Launch
+    # Engine — not listed, not onboardable, not previewable. The alternative to
+    # relaxing it is inventing an opportunity to satisfy the key, which puts a
+    # fake sale in the pipeline and in the Won metrics. See the Implementation
+    # docstring. Uniqueness is unaffected: SQL unique indexes permit many NULLs.
+    ("implementations", "opportunity_id"),
     # Custom-deal pricing. Pricing is negotiated on the DEAL, frequently before
     # any proposal document exists - a rep agrees a rate on a call and the
     # paperwork follows. Requiring a proposal to ask a question about a price
