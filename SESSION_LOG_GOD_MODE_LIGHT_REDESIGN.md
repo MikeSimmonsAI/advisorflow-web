@@ -181,13 +181,25 @@ stays anchored inside the God scope.
 `--gm-pill-amber-*` family that would have shipped badges with **no fill and no
 border**, and a token regex that read only the first declaration per line.
 
+A later sweep added a thirteenth check — **no God file may read a tenant
+token** — after `/god/workspaces` turned out to be painting from `--bg-panel`,
+`--text-primary` and `--border-subtle`. That screen contained **no colour
+literal at all**; every value was already a variable, it was just the wrong one,
+so the literal check passed on it the whole time.
+
 | Gate | Result |
 |---|---|
-| `godTheme.test.mjs` | 12 / 12 |
+| `godTheme.test.mjs` | 13 / 13 |
 | `workspaceGuard.test.mjs` | 46 checks, 27,648 lifecycles |
 | Contrast gate | 63 pairs, 0 below target |
 | Frontend build | clean |
-| Backend regression | see below |
+| Backend regression | 3,373 passed · 14 skipped · 1 realigned (below) |
+
+**The one backend failure was a test asserting the rejected design.**
+`test_context_boundaries.py` required the light/dark control to be present in
+the God shell. That was correct until this week. It inverts for the God shell,
+is unchanged everywhere else, and a second check was added beside it: God Mode
+must not consult the appearance preference at all.
 
 ---
 
@@ -225,12 +237,44 @@ actions stay visible, nothing hidden).
 - The organization column had no width floor and wrapped long names to three
   lines. It has one; the table scrolls sideways instead.
 
+### Then measured, rather than looked at
+
+A script walked **36 God routes** and read the computed background of every
+element inside the shell. Four more things were dark, and two of them were never
+in a God file:
+
+- **Two unscoped rules in `index.css`** — `select { color-scheme: dark }` and
+  `select option { background: var(--bg-panel) }`. A bare type selector beats
+  inheritance, so `color-scheme: light` on `.gm-shell` never reached the selects
+  inside it; and `--bg-panel` is a tenant token God Mode deliberately does not
+  declare, so **nine God screens opened a near-black dropdown over a light
+  page**. No amount of tokenising God Mode's own files could have fixed this.
+  `.gm-shell select` and `.gm-shell option` out-rank a bare type and settle it.
+- **The Roadmap board kept a private dark palette** — its own
+  `[data-appearance="dark"]` block, a `prefers-color-scheme` fallback, *and* a
+  `useDark()` helper picking the dark half of every badge. All three were firing
+  and putting #131c2b cards on the **Command Center**.
+- **The Compensation Command Center rendered as a 36-element dark island** — it
+  is the Sales Workspace embedded at `/god/compensation`, keyed off the same
+  tenant attribute. Its dark rules are now excluded inside `.gm-shell`;
+  standalone at `/sales/*` it is unchanged.
+- **`/god/workspaces` painted from the tenant palette** — see the test note
+  above.
+
+**Final sweep: 36 routes, 14,428 elements measured, 0 dark surfaces.** The only
+two elements the threshold still flags are a purple progress fill at 0% width
+and a red status dot — both empty, both intentional solid accents, both above
+3:1 against the page.
+
 ---
 
 ## FOLLOW-UPS
 
 1. Cross-entity search endpoint, to make the mockup's global search real.
 2. A God-scoped notification source, to make the header bell real.
-3. `RoadmapBoard` still carries its own `--rm-*` block with a dark branch. It is
-   correct in light (it reads the now-declared `--god-*` names), but it is the
-   last surface with a private palette and should fold into the shared tokens.
+3. `index.css` still carries the two unscoped `select` rules. God Mode now
+   out-ranks them, but they reach every surface in the product and should be
+   scoped at source rather than out-specified from three places.
+4. The Sales Workspace's dark branch is excluded inside the God shell by
+   selector. If more surfaces get embedded in the control plane, that exclusion
+   wants to become one rule they all share rather than a `:not()` per sheet.
