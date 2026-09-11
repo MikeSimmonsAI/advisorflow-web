@@ -9,6 +9,9 @@ import os
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, BookingLink
+from app.models.oauth_models import FLOW_SETUP, PROVIDER_GOOGLE
+from app.services import oauth_state_service
+from app.services.oauth_state_service import OAuthStateError
 from app.services.platform_utils import get_brand_name
 from app.services.calendar_service import (
     get_authorization_url, handle_oauth_callback,
@@ -27,10 +30,21 @@ FRONTEND_SETUP_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "
 
 
 @router.get("/connect")
-def connect_google_calendar(current_user: User = Depends(get_current_user)):
-    """Returns the URL the advisor should visit to grant Google Calendar access."""
+def connect_google_calendar(request: Request,
+                            current_user: User = Depends(get_current_user),
+                            db: Session = Depends(get_db)):
+    """Returns the URL the advisor should visit to grant Google Calendar access.
+
+    The advisor's identity is bound to a server-side authorization transaction
+    HERE, where it is proved by their session. What goes to Google is an opaque
+    handle. It used to be `current_user.id` in plain text, which the callback
+    read back and trusted — see `app/services/oauth_state_service.py`.
+    """
+    state = oauth_state_service.issue_state(
+        db, provider=PROVIDER_GOOGLE, subject=current_user,
+        client_ip=(request.client.host if request.client else None))
     try:
-        url = get_authorization_url(current_user.id)
+        url = get_authorization_url(state)
     except RuntimeError as e:
         logger.error("Google Calendar OAuth URL error for user %s: %s", current_user.id, e)
         raise HTTPException(status_code=500, detail="Google Calendar integration is not configured. Contact support.")
@@ -40,27 +54,50 @@ def connect_google_calendar(current_user: User = Depends(get_current_user)):
 @router.get("/oauth/callback")
 def oauth_callback(
     request: Request,
-    state: str = Query(...),  # the advisor's user_id, passed through by Google
+    state: str = Query(...),  # opaque handle to the authorization transaction
     code: str = Query(None),
     error: str = Query(None),
     db: Session = Depends(get_db),
 ):
     """
     Google redirects here after the advisor grants (or denies) access.
-    `state` carries the advisor's user_id from the original /calendar/connect
-    call. No auth dependency on this route - it's hit directly by Google's
-    redirect, not by an authenticated frontend call - `state` is what ties
-    it back to the right advisor, and the OAuth `code` itself is the proof
-    of consent.
 
-    On success, stores the encrypted refresh token on the advisor's User
-    record (via handle_oauth_callback) and redirects back to the Settings
-    page so the advisor sees a clear confirmation in the UI, rather than
-    a bare JSON response on a page they didn't navigate to themselves.
+    THIS ROUTE HAS NO AUTH DEPENDENCY AND CANNOT HAVE ONE — it is entered by
+    Google's redirect, not by an authenticated frontend call. So the question
+    "whose integration is this" has to have been answered BEFORE the browser
+    ever left, and it was: `/calendar/connect` (or `/setup/google-connect`,
+    holding a verified setup token) wrote a transaction row naming the advisor,
+    and `state` is nothing but a single-use handle to it.
+
+    WHAT THIS REPLACES, AND WHY. `state` used to BE the user id — optionally
+    with a "setup:" prefix — and this route stored the resulting refresh token
+    against whatever id came back. Confirmed exploitable: complete a real Google
+    consent with your own account, edit the id in the redirect, and the victim's
+    stored integration credential is replaced with a grant you control. Their
+    calendar writes and their outbound mail then run through your account.
+
+    Consuming the transaction is the FIRST thing done, before the code is
+    exchanged and before any redirect is chosen, so a replayed callback URL
+    loses on its second use no matter which branch it was headed for.
     """
-    # Detect the flow type early so error redirects also land on the right page.
-    is_setup_flow = isinstance(state, str) and state.startswith("setup:")
+    txn = None
+    try:
+        txn = oauth_state_service.consume_state(db, state,
+                                                provider=PROVIDER_GOOGLE)
+    except OAuthStateError as e:
+        # Deliberately indistinguishable from any other failure, and deliberately
+        # the DEFAULT redirect: a caller presenting a state we will not honour
+        # has not earned a hint about which check refused it, nor confirmation
+        # that the id named a setup flow.
+        logger.warning("Google OAuth callback refused an authorization state: %s", e)
+        return RedirectResponse(
+            url=f"{FRONTEND_SETTINGS_URL}?calendar_error=invalid_state")
+
+    # The flow — and therefore the page the advisor is sent back to — is read
+    # from the transaction, never from the shape of the state string.
+    is_setup_flow = (txn.flow == FLOW_SETUP)
     redirect_base = FRONTEND_SETUP_URL if is_setup_flow else FRONTEND_SETTINGS_URL
+    real_user_id = txn.user_id
 
     if error:
         # Advisor denied access or something went wrong on Google's side -
@@ -69,8 +106,6 @@ def oauth_callback(
 
     if not code:
         return RedirectResponse(url=f"{redirect_base}?calendar_error=missing_code")
-
-    real_user_id = state[6:] if is_setup_flow else state
 
     try:
         # Pass the full incoming URL (including ?code=...&state=...) to the

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import create_engine
-from sqlalchemy import text as _sa_text
+from sqlalchemy import create_engine, event
+from sqlalchemy import text as _sa_text  # noqa: F401  (kept for callers)
 from sqlalchemy.orm import sessionmaker, Session
 
 
@@ -108,20 +108,65 @@ REQUEST_STATEMENT_TIMEOUT_MS = int(
     os.environ.get("REQUEST_STATEMENT_TIMEOUT_MS", "30000"))
 
 
+def install_request_statement_timeout(db: Session, timeout_ms: int) -> None:
+    """Apply the request ceiling to every transaction THIS session opens.
+
+    ══ WHY `SET LOCAL`, AND WHY ON AN EVENT ═══════════════════════════════════
+
+    THE LEAK THIS REPLACES. The previous version ran
+
+        db.execute(text("SET statement_timeout = 30000"))
+
+    once, on a freshly-checked-out session. `SET` without `LOCAL` is a SESSION
+    setting on the PostgreSQL backend, and a SQLAlchemy pool hands the same
+    backend connection to whoever borrows it next. `pool_reset_on_return` issues
+    a ROLLBACK, which does not undo a plain `SET`. So after a request COMMITTED
+    and closed, the 30-second ceiling stayed on the connection and was inherited
+    by the next borrower — including `run_cadence_job`, `run_email_poller` and
+    `run_ai_conversation_job`, which build their sessions from `SessionLocal`
+    and were supposed to be exempt. Confirmed on real PostgreSQL: a background
+    query on a reused connection was cancelled by a timeout set by an HTTP
+    request that had already finished. (A rolled-back request did not leak,
+    which is why this hid for so long — the failing path was the SUCCESSFUL one.)
+
+    `SET LOCAL` is scoped to the enclosing transaction and is reverted by
+    PostgreSQL itself at COMMIT or ROLLBACK. There is nothing to clean up,
+    nothing to remember to clean up, and no way for it to reach the pool.
+
+    WHY AN `after_begin` LISTENER RATHER THAN ONE STATEMENT. Because `SET LOCAL`
+    dies with its transaction, applying it once would protect only the first
+    transaction of the request; anything after a `db.commit()` — which is most
+    write endpoints — would run with no ceiling at all. The listener re-applies
+    it at the start of every transaction this session opens, so the ceiling
+    holds for the whole request and still never outlives it.
+
+    WHY PER-SESSION AND NOT ON THE ENGINE. The distinction the original comment
+    drew is the right one and is preserved exactly: this is wired only by
+    `get_db`, the HTTP dependency. A background job's session is built from
+    `SessionLocal` directly, gets no listener, and therefore gets the database's
+    own default — which is the whole point of not putting a `statement_timeout`
+    on the engine.
+    """
+    @event.listens_for(db, "after_begin")
+    def _set_local_statement_timeout(session, transaction, connection):  # noqa: ARG001
+        try:
+            # SET does not accept bind parameters, so the value is inlined —
+            # safe because it went through int() at module load and can only be
+            # an integer by the time it gets here.
+            connection.exec_driver_sql(
+                "SET LOCAL statement_timeout = %d" % timeout_ms)
+        except Exception:                                   # noqa: BLE001
+            # Best effort. A database that will not accept a transaction
+            # setting has larger problems, and refusing to serve the request
+            # over it would turn a warning into an outage.
+            _log.debug("could not apply request statement_timeout",
+                       exc_info=True)
+
+
 def get_db():
     db = SessionLocal()
     if not _is_sqlite and REQUEST_STATEMENT_TIMEOUT_MS > 0:
-        try:
-            # SET does not accept bind parameters, so the value is inlined —
-            # safe because it went through int() above and can only be an
-            # integer by the time it gets here.
-            db.execute(_sa_text(
-                "SET statement_timeout = %d" % REQUEST_STATEMENT_TIMEOUT_MS))
-        except Exception:                                   # noqa: BLE001
-            # Best effort. A database that will not accept a session setting
-            # has larger problems, and refusing to serve the request over it
-            # would turn a warning into an outage.
-            _log.debug("could not apply request statement_timeout", exc_info=True)
+        install_request_statement_timeout(db, REQUEST_STATEMENT_TIMEOUT_MS)
     try:
         yield db
     finally:
@@ -170,6 +215,28 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
         request.state.auth_session = None
     except Exception:                       # pragma: no cover - defensive
         pass
+
+    # ── NO jti, NO SESSION, NO REQUEST ──────────────────────────────────────
+    #
+    # `if token_jti:` used to guard the whole block below, so a signed token
+    # that simply omitted the claim skipped session enforcement altogether and
+    # authenticated on its `sub` alone. That was not a hypothetical shape: the
+    # integration setup token minted by `setup_router` had exactly it, shared a
+    # signing key with this one, and therefore authenticated as its subject and
+    # kept working after every one of that user's sessions had been revoked.
+    #
+    # `auth_service.decode_access_token` now refuses anything without
+    # purpose="access", which closes that specific token. This is the second
+    # lock on the same door, and it is the one that states the actual rule:
+    # normal authenticated access REQUIRES a session, and a credential that
+    # cannot name one is not authenticated. Every token `create_access_token`
+    # has ever minted carries a jti, so nothing legitimate presents without one.
+    if not token_jti:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
+        )
+
     if token_jti:
         from app.services import session_service
         sess = session_service.find_by_jti(db, token_jti)

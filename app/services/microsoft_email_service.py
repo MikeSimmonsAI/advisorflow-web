@@ -66,12 +66,16 @@ AUTHORITY = "https://login.microsoftonline.com/common"
 SCOPES = "offline_access Mail.Send User.Read Calendars.ReadWrite"
 
 
-def get_microsoft_authorization_url(advisor_user_id: str) -> str:
+def get_microsoft_authorization_url(state: str) -> str:
     """
     Step 1 of OAuth: returns the URL the advisor visits to grant email
-    send permission. advisor_user_id is passed through as `state` so
-    the callback knows which advisor to attach the resulting token to -
-    same pattern as the existing Google Calendar flow.
+    send permission.
+
+    `state` IS NOT A USER ID. It used to be, and the callback trusted it. It is
+    now an opaque single-use handle minted by
+    `app/services/oauth_state_service.issue_state`; this function carries it to
+    Microsoft unchanged and interprets nothing. Same pattern, and the same
+    correction, as the Google Calendar flow.
     """
     if not MICROSOFT_CLIENT_ID:
         raise RuntimeError("MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET not configured.")
@@ -81,7 +85,7 @@ def get_microsoft_authorization_url(advisor_user_id: str) -> str:
         "redirect_uri": MICROSOFT_REDIRECT_URI,
         "response_mode": "query",
         "scope": SCOPES,
-        "state": advisor_user_id,
+        "state": state,
         "prompt": "consent",  # forces the consent screen every time, ensuring a refresh token is always re-issued
     }
     return f"{AUTHORITY}/oauth2/v2.0/authorize?{urlencode(params)}"

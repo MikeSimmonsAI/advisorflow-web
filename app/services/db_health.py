@@ -87,11 +87,21 @@ def inspect(engine, *, idle_txn_seconds: Optional[int] = None,
         return out
 
     try:
-        with engine.connect() as conn:
+        with engine.connect() as conn, conn.begin():
             # A health check must not become the thing that hangs. If the
             # database is so busy it cannot answer these in five seconds,
             # that IS the answer.
-            conn.execute(text("SET statement_timeout = '5s'"))
+            #
+            # `SET LOCAL`, inside an explicit transaction, for the same reason
+            # `app/deps.py` uses it: a plain `SET` is a SESSION setting that
+            # survives the `with` block and rides the pooled connection to
+            # whoever borrows it next. This check runs from the deploy preflight
+            # and from God diagnostics, both of which share the application's
+            # engine — a five-second ceiling leaking onto a connection a
+            # background job then picks up would cancel legitimate long work,
+            # which is precisely the pooled-connection contamination the request
+            # timeout fix exists to stop. PostgreSQL reverts this at COMMIT.
+            conn.execute(text("SET LOCAL statement_timeout = '5s'"))
             out["reachable"] = True
 
             # ── abandoned transactions ────────────────────────────────────
