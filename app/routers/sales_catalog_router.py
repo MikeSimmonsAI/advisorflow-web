@@ -264,6 +264,58 @@ def sell_to_customer(organization_id: str, body: SellRequest,
     return catalog_purchase.purchase_out(purchase)
 
 
+@router.post("/purchases/{purchase_id}/cancel")
+def cancel_purchase(purchase_id: str,
+                    user: User = Depends(require_sales_member),
+                    db: Session = Depends(get_db)):
+    """Take something off a customer's account. THE SHAPE DECIDES WHAT THAT IS.
+
+    An ACTIVE recurring add-on is removed from the subscription — one item,
+    never the subscription. An unpaid PENDING checkout is withdrawn and its
+    link expired at Stripe, because a quote taken back is not a quote a
+    customer can still pay three days later.
+
+    THIS EXISTS BECAUSE SELLING WAS ONE-WAY. A rep could attach an add-on to a
+    customer's subscription and nothing in this workspace could take it off
+    again; the only remove control lives on the customer's own Billing page,
+    which is no help at all for a customer whose account has no users yet — the
+    exact customer a rep sells to during onboarding. A sale a seller can make
+    and cannot unmake is a mistake with no correction.
+
+    A PAID purchase is refused here. Money that arrived is a refund
+    conversation, with its own authority, and flipping the row to cancelled
+    would hide it rather than settle it.
+    """
+    purchase = (db.query(CatalogPurchase)
+                .filter(CatalogPurchase.id == purchase_id).first())
+    if purchase is None:
+        raise HTTPException(status_code=404, detail="No such purchase.")
+
+    org = _customer(db, purchase.organization_id, user)
+
+    from app.models.purchase_models import PurchaseStatus
+    try:
+        if purchase.status == PurchaseStatus.PENDING:
+            out = catalog_purchase.withdraw_pending(db, org, purchase)
+            action = "sales.catalog_withdrawn"
+        else:
+            out = catalog_purchase.remove_recurring_addon(db, org, purchase)
+            action = "sales.catalog_removed"
+    except catalog_purchase.PurchaseRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    try:
+        log_action(db, org.id, user.id, action=action,
+                   target_type="catalog_purchase", target_id=purchase.id,
+                   details={"item": purchase.item_key,
+                            "kind": purchase.kind,
+                            "status": out.status})
+    except Exception:                                    # pragma: no cover
+        log.exception("sales_catalog: audit write failed")
+    db.commit()
+    return catalog_purchase.purchase_out(out)
+
+
 @router.post("/purchases/{purchase_id}/resend")
 def resend_checkout(purchase_id: str,
                     user: User = Depends(require_sales_member),

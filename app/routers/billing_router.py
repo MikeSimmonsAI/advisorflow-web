@@ -1038,11 +1038,17 @@ def purchase_catalog_item(req: PurchaseRequest,
 def remove_catalog_item(purchase_id: str,
                         current_user: User = Depends(_require_admin),
                         db: Session = Depends(get_db)):
-    """Take a recurring add-on off the subscription.
+    """Take a recurring add-on off the subscription, or withdraw an unpaid
+    checkout. THE PURCHASE'S STATE DECIDES WHICH.
 
     REMOVES ONE ITEM, NEVER THE SUBSCRIPTION. A customer dropping an add-on
     has not asked to stop being a customer, and the two are different Stripe
     calls so they cannot be confused.
+
+    AN UNPAID CHECKOUT IS WITHDRAWN, link expired at Stripe. A customer who
+    changed their mind before paying had, until now, no way to make the link
+    stop working — and a payment page nobody meant to leave open is a charge
+    waiting to surprise somebody.
     """
     org = db.query(Organization).filter(
         Organization.id == current_user.organization_id).first()
@@ -1062,13 +1068,18 @@ def remove_catalog_item(purchase_id: str,
     if purchase is None:
         raise HTTPException(status_code=404, detail="No such purchase.")
 
+    from app.models.purchase_models import PurchaseStatus
     try:
-        purchase = catalog_purchase.remove_recurring_addon(db, org, purchase)
+        if purchase.status == PurchaseStatus.PENDING:
+            purchase = catalog_purchase.withdraw_pending(db, org, purchase)
+        else:
+            purchase = catalog_purchase.remove_recurring_addon(db, org, purchase)
     except catalog_purchase.PurchaseRefused as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
     _audit(db, org, current_user, "billing.catalog_removed",
-           {"item": purchase.item_key, "purchase_id": purchase.id})
+           {"item": purchase.item_key, "purchase_id": purchase.id,
+            "status": purchase.status})
     db.commit()
     return catalog_purchase.purchase_out(purchase)
 
