@@ -14,6 +14,7 @@ VERDICTS
 
 Usage:  python scripts/_secret_audit.py [path ...]
 """
+import os
 import re
 import subprocess
 import sys
@@ -57,6 +58,35 @@ def _is_repeated_unit(body):
     return False
 
 
+# ── THE SCANNER'S OWN PROOF IS NOT A LEAK ──────────────────────────────────
+#
+# `tests/test_deploy_hygiene.py` has to contain one live-SHAPED sample, or it
+# cannot show this scanner catches anything. The repo-wide sweep below then
+# found that fabricated string and exited 1 — on a clean tree, every time —
+# and `deploy.bat` runs this file at line 50 AS A GATE, so the deploy script
+# refused to deploy over its own fixture.
+#
+# The test already drops the self-reference on its side (see the note in
+# `test_no_live_shaped_credential_is_tracked`). This is the same fix for the
+# COMMAND-LINE path, which that change does not touch: the test going green
+# while `python scripts/_secret_audit.py` still exits 1 is how a red gate
+# survives being fixed.
+#
+# Two paths, both of them this tool and the test that proves it. Detection is
+# untouched: a live-shaped key in any other tracked file is reported exactly
+# as before.
+_OWN_FILE = os.path.basename(__file__)
+SELF_FIXTURES = ("scripts/_secret_audit.py", "tests/test_deploy_hygiene.py")
+
+
+def is_self_fixture(path):
+    """True for this audit and for the test holding its live-shaped sample."""
+    norm = str(path).replace("\\", "/")
+    if norm.endswith("/" + _OWN_FILE) or norm == _OWN_FILE:
+        return True
+    return any(norm == p or norm.endswith("/" + p) for p in SELF_FIXTURES)
+
+
 def tracked_files():
     out = subprocess.run(["git", "ls-files"], capture_output=True, text=True)
     return [p for p in out.stdout.splitlines() if p.strip()]
@@ -84,6 +114,8 @@ def main(argv):
     paths = argv[1:] or tracked_files()
     findings = []
     for path in paths:
+        if is_self_fixture(path):
+            continue
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as fh:
                 for lineno, line in enumerate(fh, 1):

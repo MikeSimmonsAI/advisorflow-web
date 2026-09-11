@@ -196,3 +196,37 @@ def test_an_ordinary_identifier_is_not_a_resend_key():
 def test_a_real_looking_key_is_reported_as_live():
     """The scanner has to actually catch something, or it is decoration."""
     assert _verdict("render", "rnd_9Qx4Lm2ZbW7pKv3TjR8sHc1FyNdE") == "LIVE-SHAPED"
+
+
+
+# ── the COMMAND-LINE gate, which is the one deploy.bat actually runs ────────
+#
+# The sweep above going green is not the same fact as the gate going green.
+# `deploy.bat` line 50 runs `python scripts/_secret_audit.py`, whose exit code
+# decides whether a deploy happens — and that path kept reporting this file's
+# own fabricated sample and exiting 1 long after the test stopped doing so.
+# A test that passes while the gate it describes still blocks every deploy is
+# the worst of both.
+
+def test_the_audit_exits_clean_on_this_tree():
+    assert _secret_audit.main(["_secret_audit"]) == 0, (
+        "scripts/_secret_audit.py exits non-zero on a clean tree, so "
+        "deploy.bat's gate refuses every deploy.")
+
+
+def test_the_audit_exempts_only_itself_and_this_test():
+    """The exemption that fixes it must stay exactly two files wide."""
+    assert _secret_audit.is_self_fixture("scripts/_secret_audit.py")
+    assert _secret_audit.is_self_fixture("tests/test_deploy_hygiene.py")
+    assert _secret_audit.is_self_fixture("tests\\test_deploy_hygiene.py")
+    for other in ("app/main.py", "deploy.bat", "scripts/live_verify.py",
+                  "tests/test_billing_authorization.py", "render.yaml"):
+        assert not _secret_audit.is_self_fixture(other), other
+
+
+def test_a_live_shaped_key_in_an_ordinary_file_is_still_reported(tmp_path):
+    """The exemption is by PATH, so detection itself is untouched."""
+    p = tmp_path / "some_config.py"
+    p.write_text('RENDER_KEY = "rnd_9Qx4Lm2ZbW7pKv3TjR8sHc1FyNdE"\n',
+                 encoding="utf-8")
+    assert _secret_audit.main(["_secret_audit", str(p)]) == 1
