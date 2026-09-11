@@ -168,12 +168,29 @@ import HelpSupport from './pages/HelpSupport'
 import GodSupport from './pages/god/GodSupport'
 // AI OPERATIONS. The platform-level view of the AI workforce — the dark-launch
 // state, the supervisor read for one customer, inbound nobody could place, and
-// the synthetic proofs. Registered BEFORE the /god/* catch-all below.
+// the synthetic proofs. Registered BEFORE the God catch-all route below.
+//
+// THE WILDCARD IS SPELLED OUT IN WORDS ON PURPOSE. `scripts/
+// smoke_platform_frontend.py` strips block comments with a non-greedy
+// /* ... */ regex BEFORE it strips line comments, so a `//` line that
+// contains the two characters that open a block comment silently swallows
+// every line up to the next close — which deleted `<ContextBanner />` from
+// what that gate was reading and failed it. Inside a `{/* ... */}` block the
+// same characters are harmless, which is why the route comment below may
+// write the path out in full and this one may not.
 import GodAIOperations from './pages/god/GodAIOperations'
 import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
-// place. Registered BEFORE the /god/* catch-all below, or it would silently
+// place. Registered BEFORE the God catch-all route below, or it would silently
 // render the Command Center instead.
+//
+// THE WILDCARD USED TO BE SPELLED OUT HERE and it was breaking GATE 29. See
+// the note on the AI Operations import above: a `//` line containing the two
+// characters that open a block comment makes that gate's comment stripper
+// swallow everything up to the next close — in this case the entire
+// ProtectedRoute body, so `scripts/smoke_platform_frontend.py` could not see
+// `<ContextBanner />` and reported the banner as missing from every tenant
+// screen. The banner was always there; the gate was reading a hole.
 import GodAccess from './pages/god/GodAccess'
 // ADD A PERSON. The front door for seating somebody - email first, existing
 // identity reused, brand seat and/or customer workspace granted in one act.
