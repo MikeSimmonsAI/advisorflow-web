@@ -598,6 +598,19 @@ export default function OpportunityDetail() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { loadClosing() }, [loadClosing])
+
+  /* CAN THIS DEAL BE PRESENTED FROM, AND WITH WHAT? The server answers — it
+     knows the brand, the entitlement and the prospect's name, and a browser
+     working any of those out would be a browser deciding its own access. A
+     failure here leaves the button absent rather than breaking the page. */
+  const [demoLaunch, setDemoLaunch] = useState(null)
+  useEffect(() => {
+    let alive = true
+    api.get('/sales/opportunities/' + oppId + '/demo-launch')
+      .then(d => { if (alive) setDemoLaunch(d) })
+      .catch(() => { if (alive) setDemoLaunch(null) })
+    return () => { alive = false }
+  }, [oppId])
   // Checkpoint 6 §15 — what happened after Won. A coarse, read-only projection
   // assembled server-side; this component never sees tenant data and could not
   // display it if it wanted to. Failing quietly is right: an opportunity that
@@ -793,6 +806,24 @@ export default function OpportunityDetail() {
       actions={
         <>
           <button className="sw-btn" onClick={() => nav('/sales/pipeline')}>← Pipeline</button>
+          {/* RUN DEMO — the entry point that was missing. A salesperson should
+              never have to copy a demo URL, open God Mode or hunt through the
+              Suite to present the deal they are already looking at. The
+              opportunity already knows the brand, the prospect and the
+              presenter; the button carries the deal's id so the Suite can put
+              the prospect's name in the header and EXIT DEMO can come back
+              here. Absent, not disabled, when the server says this person
+              cannot present this brand. */}
+          {demoLaunch?.eligible ? (
+            <button className="sw-btn sw-primary"
+                    title={'Present ' + (demoLaunch.brand_name || 'the product')
+                           + ' to ' + (opp.company_name || 'this prospect')}
+                    onClick={() => nav('/demo-suite/' + demoLaunch.platform_id
+                                       + '?opportunity=' + encodeURIComponent(opp.id)
+                                       + '&mode=present')}>
+              Run demo
+            </button>
+          ) : null}
           <button className="sw-btn" onClick={() => { load(); loadClosing() }} disabled={loading}>
             Refresh
           </button>
