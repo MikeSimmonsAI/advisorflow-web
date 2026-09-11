@@ -344,3 +344,56 @@ existing `support_entitlements` resolution, read-only, for the plan card.
    Deploying the code alone changes no customer's plan row — the card will
    show the columns as they currently stand until the seed is applied.
 4. `frontend/dist` is not committed; Render builds the frontend from source.
+
+---
+
+## DEPLOYED AND LIVE-VERIFIED
+
+Merged to `main` as `292c08f` (fast-forward over T8's `8d15ce2`) and pushed;
+Render auto-deployed both services.
+
+**Backend** — `GET /health` reports
+`{"commit_short":"292c08f","branch":"main","environment":"production"}`.
+
+**The `/branding` leak is closed, live:**
+
+| Request | Before | After |
+|---|---|---|
+| `Origin: https://app.evosyspro.live` | `advisorflow` / "AdvisorFlow" / mike@simmonsstrong.com / #f59e0b | **`evosyspro` / "EvoSys Pro" / support@evosyspro.live / #087cff, `source: database`** |
+| `Origin: https://app.bookaboost.live` | `advisorflow` (same for every brand) | **`bookaboost` / "BookaBoost" / support@bookaboost.live / #c9973d, `source: database`** |
+| no Origin (the backend's own host) | `advisorflow` | `advisorflow` — unchanged, and no customer browser produces this |
+
+Both brands resolved `source: database`, which also confirms their platform
+rows are real and populated — so `stripe_return` resolves a branded host for
+both and the 409 refusal path is not live for either.
+
+**`GET /billing/return-targets`** unauthenticated → `401 Not authenticated`.
+It never hands a destination map to an anonymous caller.
+
+**Frontend** — `app.evosyspro.live` and `advisorflow-frontend.onrender.com`
+serve the same bundle (200). The served JavaScript carries this pass's
+strings: `return-targets`, "Back to billing", "Open account", `returned`,
+"Payment pages are hosted by Stripe", "You're back from the secure billing
+portal", "Capacity for this plan has not been configured yet", and the
+receipt "secure page" note — alongside T8's "My AI Workforce", confirming the
+deploy is current.
+
+### What was NOT verified live, and why
+
+- **A real Stripe TEST checkout / portal round trip.** No Stripe test
+  credentials or an authenticated session were available in this pass, and
+  the brief is explicit that only Stripe TEST may be used for this. The
+  return URLs Stripe receives are asserted at the route level instead (the
+  checkout test captures `stripe.checkout.Session.create` kwargs), and the
+  destinations they are built from are the ones the live `/branding`
+  resolution above proves exist.
+- **A real support email.** Deliberately not sent: the brief forbids sending
+  real support mail to customers to prove branding. The sender, reply-to and
+  the whole rendered body are asserted against a recorder in
+  `test_support_brand_isolation.py`, in both brand directions and in the
+  unresolved case.
+- **The settled capacity on production plan cards.** The columns ship empty
+  until a God admin previews and applies the EvoSys billing seed; see
+  operational note 3 above. Until then the cards render whatever those
+  columns currently hold — correctly, from configuration, with unconfigured
+  dimensions omitted.
