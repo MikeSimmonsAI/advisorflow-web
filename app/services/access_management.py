@@ -841,7 +841,8 @@ def preview(db: Session, target: User,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _grant_membership(db: Session, target: User, scope_type: str,
-                      scope_id: str, role: str, actor: User) -> str:
+                      scope_id: str, role: str, actor: User,
+                      reports_to_user_id: Optional[str] = None) -> str:
     """Create or reactivate ONE membership, through whichever module owns it.
 
     Nothing here writes a `Membership` for a customer workspace by hand:
@@ -881,11 +882,30 @@ def _grant_membership(db: Session, target: User, scope_type: str,
         db.flush()
         return "workspace_membership"
 
-    # Brand-sales and platform scopes. Idempotent on (user, scope) WITHOUT the
-    # role, for the same reason `grant_workspace_membership` is: the table's
-    # unique constraint includes `role`, so inserting blind would leave one
-    # person holding two live memberships in one scope the moment their role
-    # changed, and every reader would answer with whichever came back first.
+    if scope_type == SCOPE_BRAND_SALES_ORG:
+        # BRAND-SALES SEATS GO THROUGH `sales_staff`, WHICH ALREADY OWNS THEM.
+        #
+        # It is idempotent on (user, brand) without the role, refuses a
+        # reporting manager who does not actually manage that brand, refuses
+        # self-reporting, and audits the grant with a before/after. Writing the
+        # Membership row here instead would be a second implementation of all
+        # four, and the two would eventually disagree about which is right.
+        from app.services import sales_staff
+        bso = (db.query(BrandSalesOrg)
+               .filter(BrandSalesOrg.id == scope_id).first())
+        if bso is None:
+            raise HTTPException(status_code=400,
+                                detail="No sales organization with that id.")
+        sales_staff.grant_membership(db, target, bso, role, actor,
+                                     reports_to_user_id=reports_to_user_id)
+        db.flush()
+        return "sales_membership"
+
+    # The platform scope. Idempotent on (user, scope) WITHOUT the role, for the
+    # same reason `grant_workspace_membership` is: the table's unique
+    # constraint includes `role`, so inserting blind would leave one person
+    # holding two live memberships in one scope the moment their role changed,
+    # and every reader would answer with whichever came back first.
     existing = (db.query(Membership)
                 .filter(Membership.user_id == target.id,
                         Membership.scope_type == scope_type,
@@ -992,7 +1012,7 @@ def apply(db: Session, target: User, operations: List[Dict[str, Any]],
     before = footprint(db, target)
     applied: List[str] = []
 
-    adds: List[Tuple[str, str, str]] = []
+    adds: List[Tuple[str, str, str, Optional[str]]] = []
     removes: List[Tuple[str, str, Optional[str]]] = []
     tail: List[Dict[str, Any]] = []
 
@@ -1001,7 +1021,8 @@ def apply(db: Session, target: User, operations: List[Dict[str, Any]],
         if op in ("add_membership", "change_role"):
             st, sid = raw.get("scope_type"), raw.get("scope_id")
             _require_scope(db, st, sid)
-            adds.append((st, sid, _valid_role(st, raw.get("role"))))
+            adds.append((st, sid, _valid_role(st, raw.get("role")),
+                         raw.get("reports_to_user_id")))
         elif op == "remove_membership":
             st, sid = raw.get("scope_type"), raw.get("scope_id")
             _require_scope(db, st, sid)
@@ -1011,7 +1032,8 @@ def apply(db: Session, target: User, operations: List[Dict[str, Any]],
             _require_scope(db, src.get("scope_type"), src.get("scope_id"))
             _require_scope(db, dst.get("scope_type"), dst.get("scope_id"))
             adds.append((dst["scope_type"], dst["scope_id"],
-                         _valid_role(dst["scope_type"], dst.get("role"))))
+                         _valid_role(dst["scope_type"], dst.get("role")),
+                         dst.get("reports_to_user_id")))
             removes.append((src["scope_type"], src["scope_id"],
                             src.get("role")))
         else:
@@ -1019,12 +1041,13 @@ def apply(db: Session, target: User, operations: List[Dict[str, Any]],
 
     try:
         # 1. ADDITIONS
-        for st, sid, role in adds:
-            _grant_membership(db, target, st, sid, role, actor)
+        for st, sid, role, reports_to in adds:
+            _grant_membership(db, target, st, sid, role, actor,
+                              reports_to_user_id=reports_to)
             applied.append("added %s in %s" % (_label_role(role),
                                                _name_of(db, st, sid)))
         # 2. VERIFICATION
-        for st, sid, role in adds:
+        for st, sid, role, _reports_to in adds:
             _verify_membership(db, target, st, sid, role)
         # 3. REMOVALS
         for st, sid, role in removes:
@@ -1164,3 +1187,198 @@ def _digest(fp: Dict[str, Any]) -> Dict[str, Any]:
         "training": ["%s: %s" % (t["name"], t["status"])
                      for t in fp["training"] if t["is_active"]],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ADD A PERSON — the entry point that was missing
+#
+# THE DEFECT THIS CLOSES. There was already a perfectly good brand-sales
+# provisioning service (`sales_staff`) with identity reuse, manager validation
+# and audit — reachable from exactly one place: a panel inside
+# /god/brands/{id}. So "add a salesperson" existed and could not be found, and
+# there was nothing at all that could give ONE person a brand-sales seat AND a
+# customer workspace membership in a single deliberate act.
+#
+# This is that act. It is not a new provisioning engine:
+#
+#   identity lookup   → sales_staff.find_identity        (normalised email)
+#   identity create   → sales_staff.create_identity      (unknowable password,
+#                                                         organization_id NULL,
+#                                                         audited)
+#   brand-sales seat  → sales_staff.grant_membership     (via _grant_membership)
+#   workspace access  → workspace_access.grant_workspace_membership
+#   executive, demo,
+#   training          → the same operations Manage Access already applies
+#   invitation        → staff_activation.issue           (one-time link, shown
+#                                                         once, never a password)
+#
+# EMAIL FIRST, ALWAYS. `provision` looks the address up before it does anything
+# else and REUSES the person it finds. A second Dlo is not a worse version of
+# the right answer; it is a different human as far as every foreign key in this
+# database is concerned, and there is no way back from it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def identity_lookup(db: Session, email: str) -> Dict[str, Any]:
+    """Does this address already belong to somebody? Writes nothing.
+
+    UNSCOPED, deliberately. The brand-scoped version of this
+    (`/god/ops/brands/{id}/identity-lookup`) can only answer "is this person
+    already in THIS brand", which is the wrong question when the operator has
+    not chosen a brand yet — and the right question, "who is this person
+    already, anywhere", is what stops a duplicate being made.
+    """
+    from app.services import sales_staff
+
+    email = sales_staff.assert_email(email)
+    existing = sales_staff.find_identity(db, email)
+    if existing is None:
+        return {"exists": False, "email": email,
+                "note": "No account holds that address. Provisioning will "
+                        "create one identity and send a one-time setup link."}
+    fp = footprint(db, existing)
+    return {
+        "exists": True,
+        "email": email,
+        "user_id": existing.id,
+        "identity": fp["identity"],
+        "summary": fp["summary"],
+        # Everything they already hold, in every brand and every customer —
+        # because adding a seat to somebody who already sells for a different
+        # brand is a real decision and the person making it should see that
+        # fact now rather than discover it afterwards.
+        "brand_contexts": fp["brand_contexts"],
+        "back_office": fp["back_office"],
+        "workspaces": fp["workspaces"],
+        "demo": fp["demo"],
+        "training": fp["training"],
+        "note": ("This person already exists. Their identity will be reused and "
+                 "the access below added to it — nothing they already hold is "
+                 "removed, and no second account is created."),
+    }
+
+
+def sales_managers_for(db: Session, brand_sales_org_id: str) -> List[Dict[str, Any]]:
+    """Who a new salesperson could report to in this brand.
+
+    Only ACTIVE managers of THIS brand, because that is exactly what
+    `sales_staff.assert_manager_ok` will accept — a picker offering anybody
+    else is a picker whose choices get refused on submit.
+    """
+    rows = (db.query(Membership)
+            .filter(Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                    Membership.scope_id == brand_sales_org_id,
+                    Membership.role == ROLE_SALES_MANAGER,
+                    Membership.is_active.is_(True))
+            .all())
+    if not rows:
+        return []
+    users = {u.id: u for u in db.query(User).filter(
+        User.id.in_([r.user_id for r in rows])).all()}
+    return sorted(
+        [{"user_id": u.id, "name": u.full_name, "email": u.email}
+         for u in users.values()],
+        key=lambda x: (x["name"] or ""))
+
+
+def invite(db: Session, target: User, actor: User,
+           base_url: Optional[str] = None,
+           purpose: Optional[str] = None) -> Dict[str, Any]:
+    """Issue a one-time setup or reset link. Returned ONCE, never stored.
+
+    NO PASSWORD IS CREATED, CHANGED OR RETURNED by this, because no code path
+    in `staff_activation` ever holds one. The link is the only thing that comes
+    back and it is not recoverable — which is the property that makes it safe
+    to show on screen.
+    """
+    from app.models.staff_models import PURPOSE_SETUP, PURPOSE_RESET
+    from app.services import staff_activation
+
+    if not target.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="This account is deactivated. Reactivate it before sending "
+                   "a setup link — a link to an account that cannot sign in is "
+                   "a support ticket waiting to happen.")
+    # A person who has signed in before is being RESET, not set up. Saying so
+    # matters: the two produce different wording for the recipient.
+    resolved = purpose or (PURPOSE_SETUP if target.last_login_at is None
+                           else PURPOSE_RESET)
+    row, raw = staff_activation.issue(db, target, actor, purpose=resolved)
+    url = staff_activation.activation_url(base_url, raw)
+    db.commit()
+    log.info("AUDIT: activation link issued for %s by %s (%s)",
+             target.email, actor.email, resolved)
+    return {
+        "setup_url": url,
+        "purpose": resolved,
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        "prefix": row.token_prefix,
+        "warning": ("The link is shown once and is not recoverable. No password "
+                    "was created, changed or returned."),
+    }
+
+
+def provision(db: Session, *, email: str, full_name: Optional[str],
+              operations: List[Dict[str, Any]], actor: User,
+              send_setup_link: bool = True,
+              base_url: Optional[str] = None) -> Dict[str, Any]:
+    """Add a person: find or create the identity, then grant the access.
+
+    ONE HUMAN, ONE IDENTITY, and the lookup happens before anything is written.
+
+    The access itself goes through `apply` — the same preview-confirm-audit
+    pipeline every other change on this surface uses — so a person provisioned
+    here and a person corrected later took the same code path, produced the same
+    audit shape, and cannot disagree about what a role means.
+    """
+    from app.services import sales_staff
+
+    email = sales_staff.assert_email(email)
+    existing = sales_staff.find_identity(db, email)
+    created = False
+
+    if existing is None:
+        if not (full_name or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Nobody holds that address, so this creates a new "
+                       "identity — which needs a full name.")
+        target = sales_staff.create_identity(db, email, full_name, actor)
+        db.commit()
+        db.refresh(target)
+        created = True
+    else:
+        target = existing
+        if not target.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="%s already exists but is deactivated. Reactivate the "
+                       "account first — reactivating is a decision, and doing "
+                       "it silently as a side effect of adding access is how "
+                       "somebody gets back in without anybody noticing."
+                       % target.email)
+
+    result: Dict[str, Any] = {"created_identity": created,
+                              "user_id": target.id, "email": target.email,
+                              "full_name": target.full_name}
+    if operations:
+        applied = apply(db, target, operations, actor)
+        result["applied"] = applied["applied"]
+        result["footprint"] = applied["footprint"]
+    else:
+        result["applied"] = []
+        result["footprint"] = footprint(db, target)
+
+    if send_setup_link:
+        try:
+            result["activation"] = invite(db, target, actor, base_url=base_url)
+        except HTTPException as e:                       # pragma: no cover
+            # A link that could not be issued must not undo access that was.
+            result["activation"] = None
+            result["activation_error"] = str(e.detail)
+    else:
+        result["activation"] = None
+
+    # WHAT THEY CAN NOW REACH, said in the same words the person will see.
+    result["contexts"] = workspace_access.authorized_contexts(db, target)
+    return result

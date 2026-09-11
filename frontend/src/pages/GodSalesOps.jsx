@@ -52,9 +52,18 @@ export default function GodSalesOps() {
           <p>Every figure below is a live query. Brands, packages and customers
              are data — nothing on this screen is specific to any one brand.</p>
         </div>
-        <button className="go-btn ghost" onClick={() => nav('/god/implementations')}>
-          Implementations →
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {/* Hiring a salesperson is a sales-operations act, so it starts
+              here. The screen it opens is the same one Users & Identity
+              opens — one provisioning flow, not a second one per entry
+              point — with the brand seat pre-selected. */}
+          <button className="go-btn" onClick={() => nav('/god/access/new?context=sales')}>
+            + Add salesperson
+          </button>
+          <button className="go-btn ghost" onClick={() => nav('/god/implementations')}>
+            Implementations →
+          </button>
+        </div>
       </div>
 
       <div className="go-kpis">

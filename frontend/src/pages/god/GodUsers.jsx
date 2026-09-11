@@ -156,9 +156,18 @@ export default function GodUsers() {
           <button className="gm-btn" style={{ marginBottom: 12 }} onClick={() => navigate('/god')}>
             ← COMMAND CENTER
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
-            Users &amp; Identity
-          </h1>
+          {/* THE FRONT DOOR. Seating somebody used to mean finding the form
+              buried inside one brand's detail page, and a form nobody can find
+              is why duplicate accounts get made. */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+              Users &amp; Identity
+            </h1>
+            <button className="gm-btn gm-primary"
+                    onClick={() => navigate('/god/access/new')}>
+              + ADD PERSON
+            </button>
+          </div>
           <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
             One row per human. A person who holds platform authority, a
             brand-sales seat and a customer membership is one identity here with

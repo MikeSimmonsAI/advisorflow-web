@@ -163,6 +163,9 @@ import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // place. Registered BEFORE the /god/* catch-all below, or it would silently
 // render the Command Center instead.
 import GodAccess from './pages/god/GodAccess'
+// ADD A PERSON. The front door for seating somebody - email first, existing
+// identity reused, brand seat and/or customer workspace granted in one act.
+import GodAddPerson from './pages/god/GodAddPerson'
 import GodDemoSuite from './pages/god/GodDemoSuite'
 import GodTraining from './pages/god/GodTraining'
 // The PRESENTER's Demo Suite and the learner's Training. Both are ordinary
@@ -994,6 +997,9 @@ export default function App() {
             Command Center. `/god/access` with no id is the person picker;
             `/god/access/:userId` is one person's whole footprint. */}
         <Route path="/god/access"                element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
+        {/* ADD A PERSON — before `/god/access/:userId`, so "new" is never read
+            as somebody's user id. */}
+        <Route path="/god/access/new"            element={<GodRoute><GodModeLayout><GodAddPerson /></GodModeLayout></GodRoute>} />
         <Route path="/god/access/:userId"        element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
         <Route path="/god/demo-suite"            element={<GodRoute><GodModeLayout><GodDemoSuite /></GodModeLayout></GodRoute>} />
         <Route path="/god/training"              element={<GodRoute><GodModeLayout><GodTraining /></GodModeLayout></GodRoute>} />

@@ -53,6 +53,18 @@ class PlanIn(BaseModel):
     operations: List[Dict[str, Any]]
 
 
+class ProvisionIn(BaseModel):
+    email: str
+    full_name: Optional[str] = None
+    operations: List[Dict[str, Any]] = []
+    send_setup_link: bool = True
+    base_url: Optional[str] = None
+
+
+class InviteIn(BaseModel):
+    base_url: Optional[str] = None
+
+
 def _target(db: Session, user_id: str) -> User:
     """The person being administered.
 
@@ -78,6 +90,64 @@ def directory(db: Session = Depends(get_db),
     Manage Access screen should ever require reading a UUID.
     """
     return am.directory(db)
+
+
+@router.get("/identity-lookup")
+def identity_lookup(email: str = Query(...), db: Session = Depends(get_db),
+                    _god: User = Depends(require_god)):
+    """Who already holds this address — asked BEFORE anything is created.
+
+    UNSCOPED, unlike the brand-scoped lookup in god_ops. That one can only
+    answer "is this person already in THIS brand", which is the wrong question
+    before a brand has been chosen; the right one is "who is this person
+    already, anywhere", and it is the whole duplicate-prevention story.
+
+    Writes nothing.
+    """
+    return am.identity_lookup(db, email)
+
+
+@router.get("/sales-managers/{brand_sales_org_id}")
+def sales_managers(brand_sales_org_id: str, db: Session = Depends(get_db),
+                   _god: User = Depends(require_god)):
+    """Who a new salesperson may report to in this brand.
+
+    Only active managers of THIS brand, because that is exactly what the grant
+    will accept — a picker offering anybody else offers a choice that gets
+    refused on submit.
+    """
+    return {"managers": am.sales_managers_for(db, brand_sales_org_id)}
+
+
+@router.post("/provision")
+@limiter.limit(WRITE_LIMIT)
+def provision(request: Request, body: ProvisionIn,
+              db: Session = Depends(get_db),
+              god: User = Depends(require_god)):
+    """ADD A PERSON. Email first; an existing identity is reused, never cloned.
+
+    One entry point for both halves of the estate: a brand-sales seat, a
+    customer workspace membership, or both, on the same human, in one
+    deliberate act. The access is applied through the same preview-confirm-audit
+    pipeline every other change on this surface uses, and the one-time setup
+    link is returned once and is not recoverable.
+    """
+    return am.provision(db, email=body.email, full_name=body.full_name,
+                        operations=body.operations, actor=god,
+                        send_setup_link=body.send_setup_link,
+                        base_url=body.base_url)
+
+
+@router.post("/users/{user_id}/invite")
+@limiter.limit(WRITE_LIMIT)
+def invite(request: Request, user_id: str, body: InviteIn,
+           db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Send or re-send a one-time setup link. Never a password.
+
+    Separate from provisioning because the commonest real request is "they
+    never used the link" — which needs a new link and nothing else.
+    """
+    return am.invite(db, _target(db, user_id), god, base_url=body.base_url)
 
 
 @router.get("/users/{user_id}")

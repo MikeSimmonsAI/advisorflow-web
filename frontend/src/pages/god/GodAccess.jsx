@@ -91,9 +91,16 @@ function Picker () {
           <button className="gm-btn" style={{ marginBottom: 12 }} onClick={() => navigate('/god')}>
             ← COMMAND CENTER
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
-            Manage Access
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+              Manage Access
+            </h1>
+            {/* Somebody who is not in this list yet is the commonest reason to
+                arrive here, so the way to add them is on this screen. */}
+            <button className="gm-btn gm-primary" onClick={() => navigate('/god/access/new')}>
+              + ADD PERSON
+            </button>
+          </div>
           <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
             Choose a person. Their whole footprint — brands, sales
             organizations, customer workspaces, executive portfolio, Demo Suite
@@ -242,6 +249,8 @@ export default function GodAccess () {
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [link, setLink] = useState(null)          // a one-time setup/reset link
+  const [copied, setCopied] = useState(false)
 
   // Add-access builder state
   const [addScope, setAddScope] = useState(SCOPE_WORKSPACE)
@@ -376,6 +385,26 @@ export default function GodAccess () {
       { op: 'set_home_organization', organization_id: null })
   }
 
+  async function sendSetupLink () {
+    setBusy(true); setErr(''); setNotice(''); setLink(null)
+    try {
+      const out = await api.post('/god/access/users/' + userId + '/invite',
+        { base_url: window.location.origin })
+      setLink(out)
+    } catch (e) {
+      setErr(e?.message || 'A link could not be issued.')
+    } finally { setBusy(false) }
+  }
+
+  async function copyLink () {
+    if (!link) return
+    try {
+      await navigator.clipboard.writeText(link.setup_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2200)
+    } catch { setErr('Copying failed — select the link and copy it by hand.') }
+  }
+
   async function runPreview () {
     if (!plan.length) { setErr('Nothing to preview — build a change first.'); return }
     setBusy(true); setErr('')
@@ -415,9 +444,22 @@ export default function GodAccess () {
                   onClick={() => navigate('/god/users-all')}>
             ← USERS &amp; IDENTITY
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
-            {identity?.full_name || 'Manage Access'}
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+              {identity?.full_name || 'Manage Access'}
+            </h1>
+            {/* "They never got the link" is the commonest real request about
+                somebody who has already been provisioned, and it needs a new
+                link and nothing else — so it is one button, not a plan. */}
+            {identity && (
+              <button className="gm-btn" onClick={sendSetupLink}
+                      disabled={busy || !identity.is_active}
+                      title={identity.is_active ? ''
+                        : 'A deactivated account cannot sign in — reactivate it first.'}>
+                {busy ? '…' : (identity.last_login_at ? 'SEND RESET LINK' : 'SEND SETUP LINK')}
+              </button>
+            )}
+          </div>
           <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
             {identity?.email}
             {identity && ' · '}
@@ -433,6 +475,30 @@ export default function GodAccess () {
         {notice && (
           <div className="gm-card" style={{ borderColor: 'rgba(35,239,178,.35)', marginBottom: 16 }}>
             <div style={{ color: T.teal, fontSize: 12 }}>✓ {notice}</div>
+          </div>
+        )}
+
+        {/* The link is returned once and is not recoverable, which is exactly
+            what makes it safe to put on screen. No password is created,
+            changed or shown by issuing one. */}
+        {link && (
+          <div className="gm-card" style={{ borderColor: 'rgba(35,239,178,.35)', marginBottom: 16 }}>
+            <SectionLabel note="shown once — it cannot be shown again">
+              {link.purpose === 'reset' ? 'PASSWORD RESET LINK' : 'SETUP LINK'}
+            </SectionLabel>
+            <div style={{
+              background: 'rgba(10,18,28,.75)', border: '1px solid rgba(120,150,190,.22)',
+              borderRadius: 6, padding: '10px 12px', color: '#cfe0f2',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 12, wordBreak: 'break-all',
+            }}>{link.setup_url}</div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="gm-btn gm-primary" onClick={copyLink}>
+                {copied ? 'COPIED' : 'COPY LINK'}
+              </button>
+              <button className="gm-btn" onClick={() => setLink(null)}>DISMISS</button>
+              <span style={{ color: T.ghost, fontSize: 11 }}>{link.warning}</span>
+            </div>
           </div>
         )}
 
