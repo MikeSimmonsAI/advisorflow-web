@@ -448,6 +448,7 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
         # already known alone rather than blanking it, because "we stopped
         # recognising the price" is not evidence the customer changed terms.
         commitment = billing_catalog.commitment_for_price_id(resolved, price_id)
+        _prev_commitment = org.billing_commitment
         if commitment:
             if (org.billing_commitment
                     and org.billing_commitment != commitment):
@@ -483,12 +484,54 @@ def apply_subscription(db: Session, org: Organization, sub: dict) -> None:
         # A pending commitment is compared only when one was recorded, so a
         # pending change written before that column existed still lands the way
         # it always did.
+        #
+        # THE RULE, IN FULL, because three cases have to come out right:
+        #
+        #   THE SUBSCRIPTION ACTUALLY MOVED onto the pending target. The price
+        #   changed, and it changed to the thing that was pending. That IS the
+        #   change landing, whatever date was written down — a schedule that
+        #   fires a little early, or an operator who applies the change by
+        #   hand, must still clear the marker rather than leave the screens
+        #   announcing a change that already happened.
+        #
+        #   THE TARGET IS INDISTINGUISHABLE from where the customer already
+        #   was — a commitment-only change whose pending commitment was never
+        #   recorded. Nothing in the price can tell us whether it landed, so
+        #   the DATE decides, and a date in the future means it has not.
+        #
+        #   THE TARGET SIMPLY DOES NOT MATCH. Not landed; nothing to do.
+        #
+        # The middle case is the one that was wrong, and it was found live: a
+        # commitment-only downgrade booked for October was forgotten in
+        # September the moment an ADD-ON was attached. The resulting
+        # subscription.updated arrived on the unchanged plan, the pending tier
+        # matched (it never differed), and the pending commitment was NULL —
+        # precisely the case the NULL escape hatch was written to be kind to.
+        #
+        # `_pending_at` is compared only when it IS a datetime: a guard that
+        # threw on an unexpected value would turn one bad row into a failed
+        # webhook, and a failed webhook stops mirroring everything else too.
+        _pending_at = getattr(org, "billing_pending_effective_at", None)
+        _not_yet_due = bool(isinstance(_pending_at, datetime)
+                            and _pending_at > datetime.utcnow())
         _pending_commitment = getattr(org, "billing_pending_commitment", None)
         _commitment_landed = (_pending_commitment is None
                               or _pending_commitment == commitment)
+        _target_reached = (org.billing_pending_plan_key == resolved.key
+                           and _commitment_landed)
+        # Did anything actually MOVE on this event? If not, arriving at the
+        # target proves nothing — the customer was already there.
+        _moved = (previous != resolved.key
+                  or (commitment is not None and _prev_commitment != commitment))
+
+        if (org.billing_pending_plan_key and _target_reached
+                and not _moved and _not_yet_due):
+            log.info("billing_webhook: org %s has a change scheduled for %s "
+                     "and nothing about this subscription moved - leaving the "
+                     "pending markers alone", org.id, _pending_at)
         if (org.billing_pending_plan_key
-                and org.billing_pending_plan_key == resolved.key
-                and _commitment_landed):
+                and _target_reached
+                and (_moved or not _not_yet_due)):
             log.info("billing_webhook: scheduled change to %s (%s) is now in "
                      "effect for org %s (was %s)", resolved.key,
                      _pending_commitment or "same commitment", org.id, previous)
