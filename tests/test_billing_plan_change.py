@@ -576,8 +576,14 @@ def test_a_plan_change_acts_only_on_the_callers_own_organization(
     response = _change(client, _admin_headers(db_session, subscriber), "starter")
     assert response.status_code == 200, response.text
 
-    # The subscription read and scheduled was the caller's own.
-    processor.sub_retrieve.assert_called_once_with("sub_live_1")
+    # The subscription read and scheduled was the caller's own — EVERY read,
+    # not just the first. The scheduling path reads the subscription a second
+    # time to recover a schedule Stripe may already hold, and "only the
+    # caller's own subscription was touched" is the property that matters
+    # rather than how many times it was touched.
+    assert processor.sub_retrieve.call_count >= 1
+    for call in processor.sub_retrieve.call_args_list:
+        assert call.args[0] == "sub_live_1", call
     assert processor.schedules.create.call_args.kwargs["from_subscription"] == "sub_live_1"
 
     db_session.refresh(neighbour)

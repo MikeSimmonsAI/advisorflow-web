@@ -127,6 +127,37 @@ def schedule_change_at_period_end(subscription_id: str, *,
                      existing_schedule_id, exc)
             schedule = None
 
+    # ── AND IF WE HAVE NO ID, ASK THE SUBSCRIPTION ────────────────────────
+    #
+    # STRIPE KNOWS WHAT EXISTS THERE; OUR COLUMN ONLY REMEMBERS. When the two
+    # disagree, creating is the one move guaranteed to fail: Stripe refuses a
+    # second schedule on a subscription that already has one, and the customer
+    # gets "the payment processor would not schedule the plan change" for a
+    # button that should simply have worked.
+    #
+    # That is not hypothetical. A stored id can be lost — it was, by a webhook
+    # clearing the pending markers it should not have — and from then on the
+    # downgrade button was dead for that customer with no way to tell why.
+    # Reading `subscription.schedule` recovers the handle from the only place
+    # that cannot be wrong, and the change then MODIFIES the schedule Stripe
+    # already has, which is what "one schedule per subscription, ever" meant.
+    if schedule is None:
+        try:
+            sub = stripe.Subscription.retrieve(subscription_id)
+            found = sub.get("schedule")
+            found_id = found.get("id") if isinstance(found, dict) else found
+            if found_id:
+                candidate = stripe.SubscriptionSchedule.retrieve(found_id)
+                if candidate.get("status") not in ("released", "canceled"):
+                    log.info("billing_schedule: subscription %s already has "
+                             "schedule %s which was not recorded here - "
+                             "updating it rather than creating a second",
+                             subscription_id, found_id)
+                    schedule = candidate
+        except Exception as exc:
+            log.info("billing_schedule: could not check %s for an existing "
+                     "schedule (%s) - continuing", subscription_id, exc)
+
     try:
         if schedule is None:
             schedule = stripe.SubscriptionSchedule.create(
